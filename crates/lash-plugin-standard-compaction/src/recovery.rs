@@ -12,7 +12,7 @@ use super::*;
 //    plugin-origin marker that rides the overflow turn's own commit.
 // 2. The next turn's context-pressure hook (on restore included) re-derives
 //    the pending recovery from that durable marker plus the terminal records;
-//    hooks are best-effort and are never trusted across drives.
+//    hooks are best-effort and are never trusted across shifts.
 // 3. Recovery summarizes the whole committed history through one direct LLM
 //    completion on the session's own journal lane, with the oversized parts
 //    elided first so the summarizer request itself fits the window.
@@ -61,7 +61,7 @@ pub(crate) fn recovery_record_node(
 }
 
 /// Recovery state derived purely from committed history. Nothing else carries
-/// recovery across drives, so a crash, a restore, or a redelivered marker
+/// recovery across shifts, so a crash, a restore, or a redelivered marker
 /// cannot duplicate it: one still-open pending marker is at most one recovery,
 /// every attempt is settled by a terminal record, and the record order says
 /// how many attempts an open pending state already spent.

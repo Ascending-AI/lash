@@ -641,7 +641,7 @@ async fn completion_order_follows_the_delays_in_both_directions() {
 // always beat a process failure. `processes.await` is a leaf tool now and parks
 // on a Durable Wait the process terminal resolves, so both leaves are in one
 // batch and the recorded order is the order their completions arrived. These
-// cases drive that batch under every permutation of launch order and
+// cases shift that batch under every permutation of launch order and
 // completion order, because a single ordering is also produced by an
 // implementation that returns launch order, or its reverse, by luck.
 // ---------------------------------------------------------------------------
@@ -849,7 +849,7 @@ fn first_settled(replies: &crate::session::ToolBatchReplies) -> usize {
 
 /// The headline law: one batch, one recorded order, and the durable wait takes
 /// its place in it by when the process terminal fired — not by where it was
-/// written. Every permutation of written order and completion order is driven,
+/// written. Every permutation of written order and completion order is executed,
 /// so neither input order nor its reverse passes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_durable_wait_takes_its_place_in_the_one_recorded_order() {

@@ -151,19 +151,19 @@ impl SessionCommitStore for SqliteStore {
 
     async fn admit_session_state(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let fence = fence.clone();
         self.conn
             .write_flow(move |tx| {
                 let fleet = tx.fleet();
                 let outcome = (|| {
-                    require_drive_fence_conn(tx, &fence)?;
+                    require_shift_fence_conn(tx, &fence)?;
                     let version = read_session_state_version_conn(tx, fence.session(), fleet)?;
                     Ok(lash_core_execution::store::SessionStateAdmission {
                         session_id: fence.session().clone(),
                         version,
-                        drive_epoch: fence.epoch(),
+                        shift_epoch: fence.epoch(),
                     })
                 })();
                 Ok(match outcome {
@@ -177,7 +177,7 @@ impl SessionCommitStore for SqliteStore {
 
     async fn retain_admission_base(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let fence = fence.clone();
@@ -185,7 +185,7 @@ impl SessionCommitStore for SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 let outcome = (|| {
-                    require_drive_fence_conn(tx, &fence)?;
+                    require_shift_fence_conn(tx, &fence)?;
                     crate::session_meta::retain_admission_base_conn(
                         tx,
                         fence.session(),
@@ -203,7 +203,7 @@ impl SessionCommitStore for SqliteStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         follow_on_turn_id: &lash_core_execution::TurnId,
         recovering: &lash_core_execution::engine::BuildGeneration,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
@@ -392,18 +392,18 @@ impl SqliteStore {
                     }
                     // A successor's seal refuses the commit before anything
                     // is written (ADR 0105 §2). A commit already stored still
-                    // answers from its receipt below, since a drive that runs
-                    // several roots in one journal replays an earlier root's
-                    // commit after a later root's seal (FIG-4498).
-                    let superseded = super::drive_epoch::commit_fence_superseded_conn(tx, commit)?;
+                    // answers from its receipt below, since a shift that runs
+                    // several runs in one journal replays an earlier run's
+                    // commit after a later run's seal (FIG-4498).
+                    let superseded = super::shift_epoch::commit_fence_superseded_conn(tx, commit)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
                     planner.validate_node_derivation()?;
-                    // A root's commit settles its park (FIG-3586, FIG-3600
+                    // A run's commit settles its park (FIG-3586, FIG-3600
                     // S7), in the commit's transaction, whichever of its
-                    // physical turns committed; another root's commit
+                    // physical turns committed; another run's commit
                     // leaves it.
-                    if let Some(turn_id) = commit.settled_park_root()
+                    if let Some(turn_id) = commit.settled_park_run()
                         && superseded.is_none()
                     {
                         let released: Option<(String, i64)> = tx
@@ -660,18 +660,18 @@ impl SqliteStore {
                             .and_then(|meta| meta.pending_follow_on.clone()),
                     })?;
                     // The bound turn owns the head (FIG-4202): a write
-                    // outside every drive is refused while a root, an owed
+                    // outside every shift is refused while a run, an owed
                     // follow-on or an open command owns it. A replayed
                     // receipt above answered its first outcome already, and
                     // the plan's own refusals (a follow-on the commit would
                     // drop, a moved head) answer first.
                     if lash_core_execution::store::head_write_needs_ownership(
-                        commit.drive_fence.is_some(),
+                        commit.shift_fence.is_some(),
                         existing
                             .as_ref()
                             .is_some_and(|head| !head.is_created()),
                     ) {
-                        let facts = crate::session_roots::head_ownership_facts_conn(
+                        let facts = crate::session_runs::head_ownership_facts_conn(
                             tx,
                             &commit.session_id,
                             lash_core_execution::store::follow_on_owning_the_head(
@@ -816,10 +816,10 @@ impl SqliteStore {
                         super::ingress_settlement::settle_commit_ingress_conn(tx, commit, now)?;
                     let claim = lash_core_execution::ReferrerClaim::unguarded(lash_core_execution::ArtifactReferrer::Session(commit.session_id.clone())).map_err(|error| error.into_store_error("attachment session referrer"))?;
                     crate::attachments::acquire_attachment_refs_conn(tx, &claim, &commit.committed_attachment_ids, now)?;
-                    crate::session_roots::write_commit_root_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
+                    crate::session_runs::write_commit_run_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
                     // `until_gc` releases nothing here and reads no pin. The
                     // other policies release what this publication moved out
-                    // of their window, once the root's terminal names it.
+                    // of their window, once the run's terminal names it.
                     if retention.releases_at_commit() {
                         crate::revisions::release_unretained_conn(
                             tx,

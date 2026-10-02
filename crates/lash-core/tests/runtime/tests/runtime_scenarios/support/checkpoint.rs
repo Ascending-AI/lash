@@ -13,7 +13,7 @@ impl RuntimeScenarioContext {
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
         let mut commit = RuntimeCommit::persisted_state_for_test(&self.state);
-        commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
+        commit.shift_fence = Some(Box::new(self.owner_and_lease().1.clone()));
         commit.applied_commands = self.command_completion();
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
             commit = lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(

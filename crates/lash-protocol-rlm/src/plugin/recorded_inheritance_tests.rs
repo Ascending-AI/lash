@@ -15,7 +15,7 @@ use std::sync::atomic::Ordering;
 
 use lash_core::facade_support::{PluginHost, RuntimeHostConfig};
 use lash_core::plugin::PluginFactory;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::{
     CommitBudget, ProcessExecutionEnvSpec, QueuedWorkBatchingConfig, SessionCreationHead,
     SessionRelation, SessionStoreCreateRequest, TurnInput,
@@ -353,7 +353,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
 
 /// A child session created on a host whose RLM factory states other bounds
 /// and features than its parent recorded records the parent's behaviour, and
-/// its root runs under it on that host: its prompt offers `continue_as` and
+/// its run executes under it on that host: its prompt offers `continue_as` and
 /// its cell runs a loop the creating host's bound would stop.
 async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Double, name: &str) {
     let backend = double.lash_backend();
@@ -440,7 +440,7 @@ async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Doubl
             Box::pin(async move {
                 let mut runtime = open_runtime(&backend, store, redeploying_config(), &model).await;
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         TurnInput::text("loop it"),
                         lash_core::facade_support::TurnOptions::new(
                             tokio_util::sync::CancellationToken::new(),
@@ -458,12 +458,12 @@ async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Doubl
             attempt,
         )
         .await
-        .expect("the child's root runs on its creating host");
+        .expect("the child's run executes on its creating host");
     let turn = turn_rx
         .recv()
         .await
-        .expect("the handler ran the child's root")
-        .unwrap_or_else(|error| panic!("the child's root runs: {error:?}"));
+        .expect("the handler ran the child's run")
+        .unwrap_or_else(|error| panic!("the child's run executes: {error:?}"));
     let outcome = serde_json::to_string(&turn.outcome).expect("outcome JSON");
     assert!(
         !outcome.contains(LOST_FEATURES_ANSWER),

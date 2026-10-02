@@ -39,7 +39,7 @@ impl<'run> ScopedEffectController<'run> {
                 ScopedEffectController::owned(controller.for_scope(admitted.clone()), admitted)
             }
         }?;
-        // The same drive under another scope: one journal, one frontier.
+        // The same shift under another scope: one journal, one frontier.
         rescoped.frontier = self.frontier.clone();
         Ok(rescoped)
     }

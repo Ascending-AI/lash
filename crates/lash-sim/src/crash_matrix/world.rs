@@ -3,7 +3,7 @@
 //! deployment that runs on it.
 //!
 //! A deployment is a [`lash::LashCore`] built over the world's backend, the
-//! session driver it installs, and its recovery interval. The interval does
+//! `SessionShifts` it installs, and its recovery interval. The interval does
 //! not tick on wall time: [`CrashWorld::tick`] moves the engine's clock by
 //! one jittered `T` and runs the deployment's recovery pass, so a detection
 //! bound is measured in sim time. [`CrashWorld::kill`] ends the deployment
@@ -20,7 +20,7 @@ use lash_core::Backend;
 use lash_core::sync::MutexExt as _;
 
 use super::deployment::{
-    CrashProcessPort, CrashSessionFactory, CrashSessionWork, DriveLog, DriverProxy, HostFaults,
+    CrashProcessPort, CrashSessionFactory, CrashSessionWork, HostFaults, ShiftLog, ShiftsProxy,
     Trip,
 };
 use super::engine::{Engine, EngineHold, EngineInvocation, EngineKind};
@@ -109,7 +109,7 @@ pub struct CrashWorld {
     /// the one [`add_generation`](Self::add_generation) registered last.
     deploy: Mutex<Backend>,
     work: Arc<CrashSessionWork>,
-    proxy: Arc<DriverProxy>,
+    proxy: Arc<ShiftsProxy>,
     faults: Arc<HostFaults>,
     trip: Arc<Trip>,
     killing: Arc<AtomicBool>,
@@ -134,8 +134,8 @@ pub struct CrashWorld {
     /// How long the harness stalls before each tick, in milliseconds
     /// ([`stall_harness_before_each_tick`](Self::stall_harness_before_each_tick)).
     harness_stall_ms: std::sync::atomic::AtomicU64,
-    /// The drive requests the session work saw.
-    drives: Arc<DriveLog>,
+    /// The shift requests the session work saw.
+    shifts: Arc<ShiftLog>,
     /// The facts the host's own handlers recorded, for the global
     /// invariants.
     history: crate::invariants::HistoryRecorder,
@@ -214,13 +214,13 @@ impl CrashWorld {
         let clock: Arc<dyn lash_core::Clock> = engine.clock();
         let trip = Arc::new(Trip::new(clock));
         let faults = Arc::new(HostFaults::new(Arc::clone(&trip)));
-        let proxy = Arc::new(DriverProxy::with_faults(Arc::clone(&faults)));
-        let drives = Arc::new(DriveLog::default());
+        let proxy = Arc::new(ShiftsProxy::with_faults(Arc::clone(&faults)));
+        let shifts = Arc::new(ShiftLog::default());
         let work = Arc::new(CrashSessionWork::new(
             engine.explicit_reconcile_session_work(),
             Arc::clone(&proxy),
             Arc::clone(&faults),
-            Arc::clone(&drives),
+            Arc::clone(&shifts),
         ));
         let backend = layered(engine.lash_backend(), &work, &faults);
         let killing = Arc::new(AtomicBool::new(false));
@@ -229,7 +229,7 @@ impl CrashWorld {
             // there. Take it down before the replay starts, so the replay
             // waits for the restarted one.
             let trip: Weak<Trip> = Arc::downgrade(&trip);
-            let proxy: Weak<DriverProxy> = Arc::downgrade(&proxy);
+            let proxy: Weak<ShiftsProxy> = Arc::downgrade(&proxy);
             let killing = Arc::clone(&killing);
             let available = Arc::clone(&available);
             engine.on_crash(
@@ -270,16 +270,16 @@ impl CrashWorld {
             ticks_run: std::sync::atomic::AtomicUsize::new(0),
             quiesce_ms: std::sync::atomic::AtomicU64::new(2_000),
             harness_stall_ms: std::sync::atomic::AtomicU64::new(0),
-            drives,
+            shifts,
             history: crate::invariants::HistoryRecorder::default(),
         })
     }
 
-    /// The drive requests the deployments' session work saw: what waiters
+    /// The shift requests the deployments' session work saw: what waiters
     /// awaited and what the engine accepted as asks.
     #[must_use]
-    pub fn drives(&self) -> &DriveLog {
-        &self.drives
+    pub fn shifts(&self) -> &ShiftLog {
+        &self.shifts
     }
 
     /// The facts the host's own handlers recorded.
@@ -356,9 +356,9 @@ impl CrashWorld {
         self.engine.kill_and_await(id).await
     }
 
-    /// Hold the engine's drive of `session` ([`Engine::hold_session_drive`]).
-    pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> EngineHold {
-        self.engine.hold_session_drive(session).await
+    /// Hold the engine's shift of `session` ([`Engine::hold_session_shift`]).
+    pub async fn hold_session_shift(&self, session: &lash_core::SessionId) -> EngineHold {
+        self.engine.hold_session_shift(session).await
     }
 
     /// Hold every invocation of `service` ([`Engine::hold_service`]).
@@ -432,7 +432,7 @@ impl CrashWorld {
     }
 
     /// Bring up a fresh deployment: a new process with a new owner
-    /// incarnation, its core, its session driver and a fresh interval.
+    /// incarnation, its core, its `SessionShifts` and a fresh interval.
     pub async fn restart(&self) -> Result<(), String> {
         let incarnation = self.incarnations.fetch_add(1, Ordering::SeqCst) + 1;
         let owner = lash_core::LeaseOwnerIdentity::opaque(
@@ -540,7 +540,7 @@ impl CrashWorld {
 
     /// Drop `id`'s running attempt as a broken connection to the deployment
     /// does, and let the engine replay it at once: the deployment stays up
-    /// and every other attempt runs on, the roots the dropped one called
+    /// and every other attempt runs on, the runs the dropped one called
     /// included. Answers whether an attempt was running.
     pub fn drop_attempt(&self, id: &str) -> Result<bool, String> {
         let server = self.double()?.server();

@@ -609,7 +609,7 @@ pub(crate) fn workbench_rlm_prompt(mail_world: &mail::MailWorld) -> lash::rlm::R
     }
 }
 
-/// The prompt context a root should run under now: the connected accounts.
+/// The prompt context a run should run under now: the connected accounts.
 pub(crate) fn workbench_prompt_context(mail_world: &mail::MailWorld) -> Vec<String> {
     vec![connected_accounts_prompt(mail_world)]
 }

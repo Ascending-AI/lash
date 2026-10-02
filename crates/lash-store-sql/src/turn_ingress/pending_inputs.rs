@@ -9,7 +9,7 @@ pub const TABLE: &str = "pending_turn_inputs";
 /// backends and once more as a per-backend `PENDING_TURN_INPUT_COLUMNS`
 /// constant. It is one list now, and a column added to it reaches every reader.
 pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json,
-     state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+     state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
      terminal_at_ms, trace_cause_json";
 
 /// The columns written after allocation under the session's write authority.
@@ -25,22 +25,22 @@ pub const INSERT_COLUMNS: &str =
 pub const REPLAY_COLUMNS: &str = "input_id, submission_digest";
 
 /// The facts the settlement verdict
-/// [`require_admitted_to_root`](lash_core::store_backend_support::require_admitted_to_root)
+/// [`require_admitted_to_run`](lash_core::store_backend_support::require_admitted_to_run)
 /// consults, and nothing else.
 ///
 /// Narrow on purpose: this read runs once per settled input of every commit,
 /// and `input_json` and `ingress_json` are unbounded caller payloads that no
 /// part of the settlement decision looks at. Decoding them here would put the
 /// size of a user's submission on the commit path.
-pub const SETTLEMENT_COLUMNS: &str = "admitted_root, state";
+pub const SETTLEMENT_COLUMNS: &str = "admitted_run, state";
 
 crate::statements! {
     /// `pending_turn_inputs` statements both backends issue verbatim.
     ///
-    /// Every write that binds a row predicates it open (`admitted_root IS
+    /// Every write that binds a row predicates it open (`admitted_run IS
     /// NULL`), and every write that settles or releases a bound row
-    /// predicates it on the root that holds it, so a row is only ever
-    /// answered by the root that admitted it (FIG-3927).
+    /// predicates it on the run that holds it, so a row is only ever
+    /// answered by the run that admitted it (FIG-3927).
     pub struct PendingInputStatements @ "pending_turn_input" {
         /// Admit input `?2` of session `?3` at sequence `?1`, allocated from
         /// the session's shared counter under the session's write authority,
@@ -81,25 +81,25 @@ crate::statements! {
              WHERE input_id = ?1";
 
         select_by_id = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
                     terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
         /// The lifecycle state of input `?2` of session `?1`: what a fork
-        /// target naming an input no root is bound to answers from.
+        /// target naming an input no run is bound to answers from.
         select_state_by_id = "SELECT state FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
         /// The input session `?1` filed under source key `?2`.
         select_by_source_key = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
                     terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
         /// The lifecycle state and run spec of the input session `?1` filed
-        /// under source key `?2`: the input that started the root a steering
+        /// under source key `?2`: the input that started the run a steering
         /// input addresses (FIG-3838).
         select_run_spec_by_source_key = "SELECT state, run_spec_hash, terminal_at_ms
              FROM pending_turn_inputs
@@ -121,53 +121,53 @@ crate::statements! {
         earliest_next_turn_candidate_seq = "SELECT MIN(enqueue_seq) FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND ({{deferred_next_turn_turn_input_state(state)}}
                     OR ?2 IS NULL
                     OR {{ingress_turn_id(ingress_json)}} <> ?2)";
 
         /// Session `?1`'s undelivered inputs, open and admitted alike, with
-        /// the root that holds each admitted one.
+        /// the run that holds each admitted one.
         list_undelivered = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
                     terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s inputs a checkpoint accepted into a running root,
-        /// each bound to that root until its commit settles it or its
+        /// Session `?1`'s inputs a checkpoint accepted into a running run,
+        /// each bound to that run until its commit settles it or its
         /// terminal releases it: the rest of what the pending read lists
         /// beside [`list_undelivered`](Self::list_undelivered) (FIG-4044).
         list_accepted = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
                     terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{accepted_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s inputs root `?2` bound under step `?3`, in
+        /// Session `?1`'s inputs run `?2` bound under step `?3`, in
         /// `enqueue_seq` order: what a re-executed admission step reads back
         /// instead of choosing again (FIG-3927).
         select_admitted_by_step = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
-             WHERE session_id = ?1 AND admitted_root = ?2 AND admitted_by = ?3
+             WHERE session_id = ?1 AND admitted_run = ?2 AND admitted_by = ?3
              ORDER BY enqueue_seq ASC";
 
         /// Withdraw open input `?2` of session `?1` into state `?3` at `?4`.
         ///
-        /// Only an open row is withdrawn: a row a root admitted is that
-        /// root's to settle or release, so the host's cancel changes nothing
-        /// and answers the root instead.
+        /// Only an open row is withdrawn: a row a run admitted is that
+        /// run's to settle or release, so the host's cancel changes nothing
+        /// and answers the run instead.
         ///
-        /// A withdrawn row owes its session no drive, and nothing admits it
+        /// A withdrawn row owes its session no shift, and nothing admits it
         /// after, so the withdrawal settles the row's ingress obligation in
         /// the same write (ADR 0109 §3, FIG-4098): due, claimed by a relay
-        /// that asked for a drive, or stalled, it is delivered now, as an
+        /// that asked for a shift, or stalled, it is delivered now, as an
         /// admission would deliver it.
         cancel = "UPDATE pending_turn_inputs
              SET state = ?3,
@@ -182,23 +182,23 @@ crate::statements! {
                      THEN NULL ELSE obligation_stall_reason END,
                  obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN ?4 ELSE obligation_settled_at_ms END
-             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root IS NULL";
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_run IS NULL";
 
-        /// Admit open input `?2` of session `?1`, bound to root `?4` by step
+        /// Admit open input `?2` of session `?1`, bound to run `?4` by step
         /// `?5`, at `?6`: into state `?3`, or in its own state when `?3` is
         /// `NULL`, as a next-turn admission leaves it. The submitted delivery
         /// is never rewritten (ADR 0101 §5.1).
         ///
         /// The admission is the row's delivery, so it delivers the row's
         /// ingress obligation in the same write (ADR 0109 §3): due, claimed
-        /// by a relay that asked for a drive, or stalled, it is delivered now.
+        /// by a relay that asked for a shift, or stalled, it is delivered now.
         ///
         /// The open predicate is the write's backstop: the composition was
         /// read in the same transaction, so a row count other than one is a
         /// disagreement between the two, not a lost race.
         admit = "UPDATE pending_turn_inputs
              SET state = COALESCE(?3, state),
-                 admitted_root = ?4,
+                 admitted_run = ?4,
                  admitted_by = ?5,
                  obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN 'delivered' ELSE obligation_state END,
@@ -212,31 +212,31 @@ crate::statements! {
                      THEN ?6 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND input_id = ?2
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{undelivered_turn_input_state(state)}}";
 
         /// Settle input `?2` of session `?1` into the terminal state `?3`
-        /// under root `?4`, which must hold it, at `?5`: completed when the
-        /// root delivered it, cancelled when the root drops it. The binding
+        /// under run `?4`, which must hold it, at `?5`: completed when the
+        /// run delivered it, cancelled when the run drops it. The binding
         /// goes with the settlement; the tombstone keeps the submission.
         settle_admitted = "UPDATE pending_turn_inputs
              SET state = ?3,
                  terminal_at_ms = ?5,
-                 admitted_root = NULL,
+                 admitted_run = NULL,
                  admitted_by = NULL
-             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root = ?4";
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_run = ?4";
 
         /// Hand input `?2` of session `?1` back open at its own position,
-        /// under root `?3`, which must hold it.
+        /// under run `?3`, which must hold it.
         ///
         /// An accepted row is open again in the state its submitted delivery
         /// names; the delivery itself is never rewritten (ADR 0101 §5.1), and
         /// a row addressed to a turn that is over is next-turn input by rule.
-        /// A row handed back owes its session a drive again: a delivered
+        /// A row handed back owes its session a shift again: a delivered
         /// ingress obligation is due at once (ADR 0109 §3).
         release_admitted = "UPDATE pending_turn_inputs
              SET state = {{released_turn_input_state(state)}},
-                 admitted_root = NULL,
+                 admitted_run = NULL,
                  admitted_by = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
@@ -244,15 +244,15 @@ crate::statements! {
                      THEN 0 ELSE obligation_due_at_ms END,
                  obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
                      THEN NULL ELSE obligation_settled_at_ms END
-             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root = ?3";
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_run = ?3";
 
-        /// [`release_admitted`](Self::release_admitted) over every input root
-        /// `?2` of session `?1` still holds: the root's terminal write, after
+        /// [`release_admitted`](Self::release_admitted) over every input run
+        /// `?2` of session `?1` still holds: the run's terminal write, after
         /// the settlements its commit named (FIG-3927). No row stays bound to
-        /// a root that has terminal evidence.
-        release_root = "UPDATE pending_turn_inputs
+        /// a run that has terminal evidence.
+        release_run = "UPDATE pending_turn_inputs
              SET state = {{released_turn_input_state(state)}},
-                 admitted_root = NULL,
+                 admitted_run = NULL,
                  admitted_by = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
@@ -260,18 +260,18 @@ crate::statements! {
                      THEN 0 ELSE obligation_due_at_ms END,
                  obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
                      THEN NULL ELSE obligation_settled_at_ms END
-             WHERE session_id = ?1 AND admitted_root = ?2";
+             WHERE session_id = ?1 AND admitted_run = ?2";
 
         /// Reclaim session `?1`'s withdrawn inputs: cancelled before any
-        /// root took them. Every other settled input keeps its submission
+        /// run took them. Every other settled input keeps its submission
         /// digest and receipt until session deletion, alongside the terminal
-        /// evidence of the root that took it, so a retry under its id is
-        /// validated against its digest and answered from that root for the
-        /// root's whole retained life (FIG-3837).
+        /// evidence of the run that took it, so a retry under its id is
+        /// validated against its digest and answered from that run for the
+        /// run's whole retained life (FIG-3837).
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
                AND NOT EXISTS (
-                 SELECT 1 FROM session_root_inputs binding
+                 SELECT 1 FROM session_run_inputs binding
                  WHERE binding.session_id = pending_turn_inputs.session_id
                    AND binding.input_id = pending_turn_inputs.input_id
                )";
@@ -281,22 +281,22 @@ crate::statements! {
 }
 
 crate::statements! {
-    /// Statements for parked-root control and recovery.
-    pub struct PendingRootVerbStatements @ "pending_turn_input" {
-        /// Cancel input `?2` of session `?1`, bound to a root a cancel verb
+    /// Statements for parked-run control and recovery.
+    pub struct PendingRunVerbStatements @ "pending_turn_input" {
+        /// Cancel input `?2` of session `?1`, bound to a run a cancel verb
         /// ends, into its tombstone at `?3` with the cancelled state `?4`,
         /// letting go of any admission.
         cancel_input = "UPDATE pending_turn_inputs SET state = ?4,
-            terminal_at_ms = ?3, admitted_root = NULL, admitted_by = NULL
+            terminal_at_ms = ?3, admitted_run = NULL, admitted_by = NULL
             WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
 
-        /// Reopen input `?2` of session `?1`, bound to a root a fork verb
+        /// Reopen input `?2` of session `?1`, bound to a run a fork verb
         /// ends, letting go of any admission: open again in the state its
         /// submitted delivery names, which is never rewritten (ADR 0101
         /// §5.1).
         reopen_input = "UPDATE pending_turn_inputs
             SET state = {{released_turn_input_state(state)}},
-                admitted_root = NULL, admitted_by = NULL
+                admitted_run = NULL, admitted_by = NULL
             WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
     }
 }
@@ -308,7 +308,7 @@ pub const OBLIGATION_CLAIM_COLUMNS: &str =
 
 crate::statements! {
     /// `pending_turn_inputs` obligation statements (ADR 0109): an admitted
-    /// input owes its session a drive. Both backends issue them verbatim;
+    /// input owes its session a shift. Both backends issue them verbatim;
     /// every settling write compares the state and, while claimed, the claim
     /// token.
     pub struct PendingTurnInputObligationStatements @ "pending_turn_input" {

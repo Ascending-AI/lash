@@ -6,7 +6,7 @@ use lash_core::ToolProvider as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::StaticPluginFactory;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 
 const SEED: u64 = 0x5_f506;
@@ -607,7 +607,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
         .await
         .expect("park the enqueue-only open");
 
-    // The row is durable and undriven.
+    // The row is durable and unexecuted.
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
@@ -697,7 +697,7 @@ async fn preserve_persisted_open_survives_resident_reload() {
     assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 }
 
-/// `PreservePersisted` is a fence, not a claim: the engine's drive of a turn
+/// `PreservePersisted` is a fence, not a claim: the engine's shift of a turn
 /// on an enqueue-only open refuses before the turn executes, so the
 /// unreconciled surface is never executed against and
 /// `ToolSourcePolicy::Require` cannot be bypassed by opening enqueue-only.
@@ -717,7 +717,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("enqueue-only open under Require");
 
-    // Queue a row first, then try the queued-drive path: the refusal must not
+    // Queue a row first, then try the queued-shift path: the refusal must not
     // settle or drop the pending input.
     enqueue_only
         .enqueue_turn_input(
@@ -736,7 +736,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("open the turn's handler");
     let direct = enqueue_only
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("run me anyway"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -759,10 +759,10 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("park the enqueue-only open");
 
-    // The refused root answers the queued row it admitted (FIG-4018) and
+    // The refused run answers the queued row it admitted (FIG-4018) and
     // leaves the tool surface untouched. Under the default drain it admitted
     // that row alone (FIG-4457): the refused turn's own row stays queued for a
-    // later drive, never answered by another input's root.
+    // later shift, never answered by another input's run.
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
@@ -771,7 +771,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
             pending.as_slice(),
             [only] if format!("{only:?}").contains("run me anyway")
         ),
-        "the refused root answered its queued row; the refused turn's row waits: {pending:?}"
+        "the refused run answered its queued row; the refused turn's row waits: {pending:?}"
     );
     assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 }

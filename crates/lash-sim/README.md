@@ -1,6 +1,6 @@
 # lash-sim
 
-Seeded boundary simulation for Lash: an unpublished workspace crate that drives
+Seeded boundary simulation for Lash: an unpublished workspace crate that executes
 real runtime, protocol, provider, tool, process, and persistence contracts while
 a seed chooses modeled boundary delivery order. Tokio scheduling and other
 in-process interleavings remain uncontrolled, so this is not a deterministic
@@ -83,7 +83,7 @@ Expect `/tmp/lash-sim-sqlite-faults/sqlite-faults.json` to use
 `lash.sim.sqlite-substrate-faults.v2`. Its `composition_witness.plan` records
 the generated workload seed and ID, the two source boundary IDs, arm order,
 and the two-attempt policy. The workload seed chooses among the four ordered
-pairs of the two faults, so a small seed set drives different fault schedules
+pairs of the two faults, so a small seed set executes different fault schedules
 while replaying one seed keeps the same plan. The zero-arm control commits on
 its first attempt. Each single-arm control returns one injected storage failure
 and commits on retry. For the documented seed, the paired run's first attempt
@@ -156,12 +156,12 @@ bound, not a discovered runtime invariant violation.
   package is refused without mutation rather than reused or overwritten.
   Failing negative fixtures live under `crates/lash-sim/failure-fixtures/`.
 - The confidence gate declares sim lane artifacts under flat
-  `target/confidence/<worktree-slug>/<lane>/sim/` roots for default/broad/full,
-  sharded `target/confidence/<worktree-slug>/fast/<shard>/sim/` roots for the
+  `target/confidence/<worktree-slug>/<lane>/sim/` runs for default/broad/full,
+  sharded `target/confidence/<worktree-slug>/fast/<shard>/sim/` runs for the
   fast lane, and
-  `target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/` roots for sharded
+  `target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/` runs for sharded
   search-fleet runs, including env-gated Postgres conformance evidence when the
-  lane is enabled. CI overrides the root to the established unqualified
+  lane is enabled. CI overrides the run to the established unqualified
   `target/confidence/` artifact tree.
 
 ## Implemented DST substance
@@ -177,12 +177,12 @@ The deferred cross-backend suites run in their named service gates.
   (`sim.oracle.provider-turn-interleaving-depth.v1`).
 - Tool, durable-effect, and exec-code coverage pass through real turns that
   SUSPEND and RESUME: a generated suspend session runs a real
-  `session.send(...)` whose root the engine runs over the real `ScriptedLlmHttpTransport`, parks on a
+  `session.send(...)` whose run the engine executions over the real `ScriptedLlmHttpTransport`, parks on a
   tool/durable/exec await key, and is resumed only by a scheduler-delivered
   completion boundary (`sim.oracle.generated-suspend-resume.v1`). Both the
   tool-call exchange that suspends the turn and the post-resume exchange
   exercise real provider wire parsing.
-- A non-retryable provider FAILURE is driven through a LIVE turn: a malformed
+- A non-retryable provider FAILURE is executed through a LIVE turn: a malformed
   mid-stream SSE chunk is delivered to a parked turn via the
   scripted-transport gating, and
   `sim.oracle.live-provider-failure-terminalizes.v1` asserts the turn
@@ -227,7 +227,7 @@ The deferred cross-backend suites run in their named service gates.
 `src/invariants/` (FIG-4086) checks what every history must keep, whatever
 the scenario, seed or fault schedule. A `History` is a finished run: its
 ordered trace records and the final durable rows of every store it wrote,
-read after every session's drive has settled. One trait, `HistoryChecker`,
+read after every session's shift has settled. One trait, `HistoryChecker`,
 and one registry, `CHECKERS`, hold six checkers, one file each:
 
 | Invariant | Reads |
@@ -237,7 +237,7 @@ and one registry, `CHECKERS`, hold six checkers, one file each:
 | `obligations-settled-or-stalled` | every ADR 0109 obligation column family in every store database |
 | `artifact-reachable-or-collected` | artifact refs, referrer edges, fences and cleanup obligations |
 | `tool-call-identity` | tool-body runs and committed tool calls; keyed on today's call id, with the `ToolCallId` extension point on `CallIdentity` for FIG-4080 |
-| `input-settles-exactly-once` | `pending_turn_inputs`, `queued_work_batches`, `session_roots`, `session_root_inputs` |
+| `input-settles-exactly-once` | `pending_turn_inputs`, `queued_work_batches`, `session_runs`, `session_run_inputs` |
 
 Store rows are read raw through `lash_sqlite_store::testing::read_rows_for_testing`
 (the store's `testing` feature). Tool facts come from lash-sim's own tools
@@ -261,14 +261,14 @@ checker and proves each checker fails it.
 `tests/crash_point_matrix.rs` is the 1.0 durability gate (FIG-3849): one
 test per cell of {seam or ADR 0109 obligation kind} × {crash point}, each over
 `LASH_CRASH_MATRIX_SEEDS` seeds (default 3). A cell runs lash-restate's engine
-on the server double with one deployment — a `LashCore`, its session driver
+on the server double with one deployment — a `LashCore`, its `SessionShifts`
 and its recovery interval — and kills that deployment at the cell's crash
 point: after the producer's state commit, during the engine delivery, after
 the delivery before its settle, at a seeded journal step, or by losing the
 invocation outright. A fresh deployment comes up after a seeded outage and the
 recovery interval ticks on virtual time until the end-state invariants hold:
-every accepted input driven exactly once, every obligation settled or stalled
-typed, no orphaned child, no wedged session, every terminal root's scope
+every accepted input executed exactly once, every obligation settled or stalled
+typed, no orphaned child, no wedged session, every terminal run's scope
 closed, within the ADR 0109 §1.8 detection bound. The harness lives in
 `src/crash_matrix/`; its module docs say how an S8 slice activates the cells
 it owns. The binary is `dev-deferred`: the Buck2 tail runs it on main's
@@ -304,7 +304,7 @@ kiln gate lash <fork> -- just crash-matrix-restate-e2e
 `tests/chaos_soak.rs` is the release gate's soak (FIG-3873). It runs seeded
 epochs on the crash matrix's world. Each epoch opens sessions, including child
 sessions, and draws 200 steps from its seed. The workload steps are sends,
-batched sends, session commands, held roots that are cancelled or deleted
+batched sends, session commands, held runs that are cancelled or deleted
 (some with a child process), session deletes, and Lashlang processes with an
 engine waiter. The fault steps are deployment kills, first-attempt journal
 cuts, host crashes at the matrix's seam boundaries, and leader-lease loss.
@@ -328,7 +328,7 @@ and obligation state before bounded shutdown, then fails with its seed,
 violations and partial step trace. Host calls observe crashes since the last
 completed restart, including a crash that fired before admission. A crash
 during restart triggers another restart instead of being marked handled.
-While host work awaits a reply or a held root awaits recovery, the driver
+While host work awaits a reply or a held run awaits recovery, the driver
 advances to pending retries' due times. Backoff still spans virtual time,
 and the stores and server share that clock; waiting for the next plan tick
 would deadlock a call whose answer depends on a retry.

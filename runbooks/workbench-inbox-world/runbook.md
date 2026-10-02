@@ -4,7 +4,7 @@
 > apps)": tooling, gate discipline, screenshot evidence, real-token designation, and
 > boot/teardown ownership. This runbook only adds the scenario-specific parts.
 
-**Purpose.** Drive `examples/agent-workbench` end-to-end through its browser UI with a
+**Purpose.** Shift `examples/agent-workbench` end-to-end through its browser UI with a
 real model: a plain chat turn, a live mocked-inbox world
 (two accounts), the agent operating an inbox through its typed `inbox.<slug>` authority,
 and finally a **trigger-driven durable forwarding process** — register a concierge on

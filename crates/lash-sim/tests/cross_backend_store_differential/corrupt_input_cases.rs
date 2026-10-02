@@ -73,7 +73,7 @@ fn restore(target: CorruptTarget) -> StoreOperation {
     StoreOperation::RestoreCorruptRecord { target }
 }
 
-fn drive(method: SurfaceMethod) -> StoreOperation {
+fn shift(method: SurfaceMethod) -> StoreOperation {
     StoreOperation::DriveSurface { method }
 }
 
@@ -99,8 +99,8 @@ pub(super) fn corrupt_graph_node_case() -> GeneratedCase {
         operations: vec![
             seed_graph(),
             seed(CorruptTarget::GraphNodeJson),
-            drive(SurfaceMethod::LoadSession),
-            drive(SurfaceMethod::LoadKnownNode),
+            shift(SurfaceMethod::LoadSession),
+            shift(SurfaceMethod::LoadKnownNode),
             commit(
                 "append_over_corrupt_graph_node",
                 1,
@@ -115,7 +115,7 @@ pub(super) fn corrupt_graph_node_case() -> GeneratedCase {
 }
 
 /// A corrupt pending-turn-input row must refuse both its list paths and the
-/// root admission that binds it, with no residue.
+/// run admission that binds it, with no residue.
 pub(super) fn corrupt_pending_turn_input_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::CorruptPendingTurnInputRefusals,
@@ -127,9 +127,9 @@ pub(super) fn corrupt_pending_turn_input_case() -> GeneratedCase {
                 owner: "corrupt-input-owner",
             },
             seed(CorruptTarget::PendingTurnInputJson),
-            drive(SurfaceMethod::ListPendingTurnInputs),
-            drive(SurfaceMethod::ListTurnInputApplications),
-            drive(SurfaceMethod::AdmitRoot {
+            shift(SurfaceMethod::ListPendingTurnInputs),
+            shift(SurfaceMethod::ListTurnInputApplications),
+            shift(SurfaceMethod::AdmitRun {
                 lease: LeaseSlot::First,
             }),
             restore(CorruptTarget::PendingTurnInputJson),
@@ -138,7 +138,7 @@ pub(super) fn corrupt_pending_turn_input_case() -> GeneratedCase {
 }
 
 /// A corrupt queued-work payload must refuse every queued-work list path and
-/// the root admission that binds it, with no residue. The admission's head is
+/// the run admission that binds it, with no residue. The admission's head is
 /// read before the corruption is seeded.
 pub(super) fn corrupt_queued_work_case() -> GeneratedCase {
     GeneratedCase {
@@ -150,12 +150,12 @@ pub(super) fn corrupt_queued_work_case() -> GeneratedCase {
                 slot: LeaseSlot::First,
                 owner: "corrupt-queued-work-owner",
             },
-            drive(SurfaceMethod::ListPendingQueuedWork),
+            shift(SurfaceMethod::ListPendingQueuedWork),
             seed(CorruptTarget::QueuedWorkPayloadJson),
-            drive(SurfaceMethod::ListQueuedWork),
-            drive(SurfaceMethod::ListPendingQueuedWork),
-            drive(SurfaceMethod::PendingSessionWorkOrdering),
-            drive(SurfaceMethod::AdmitListedQueuedHead),
+            shift(SurfaceMethod::ListQueuedWork),
+            shift(SurfaceMethod::ListPendingQueuedWork),
+            shift(SurfaceMethod::PendingSessionWorkOrdering),
+            shift(SurfaceMethod::AdmitListedQueuedHead),
             restore(CorruptTarget::QueuedWorkPayloadJson),
         ],
     }
@@ -180,7 +180,7 @@ pub(super) fn corrupt_prior_checkpoint_case() -> GeneratedCase {
                 adopt_attachment: false,
             },
             seed(CorruptTarget::CheckpointManifestBlob),
-            drive(SurfaceMethod::LoadSession),
+            shift(SurfaceMethod::LoadSession),
             StoreOperation::Commit {
                 label: "replace_corrupt_prior_checkpoint_manifest",
                 expected_head_revision: 1,

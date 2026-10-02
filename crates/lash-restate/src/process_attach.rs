@@ -140,12 +140,9 @@ impl LashProcessAttach for LashProcessAttachImpl {
         }
         // The terminal lives on the stable root, whatever lane the process's
         // last segment ran under (FIG-3795).
-        let terminal = crate::process::await_terminal_on_stable_root(
-            &ctx,
-            &self.namespace,
-            process_id.clone(),
-        )
-        .call();
+        let terminal =
+            crate::process::await_terminal_on_stable_run(&ctx, &self.namespace, process_id.clone())
+                .call();
         let terminal_read = terminal
             .invocation_handle()
             .await?

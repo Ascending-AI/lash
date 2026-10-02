@@ -9,43 +9,43 @@
       },
       "placement": "boundary"
     },
-    "outcome": "The drive is sealed but its admission has not yet asked whether the head owes a follow-on, so no root is admitted. The successor seals the next drive and admits the unchanged durable ingress."
+    "outcome": "The shift is sealed but its admission has not yet asked whether the head owes a follow-on, so no run is admitted. The successor seals the next shift and admits the unchanged durable ingress."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "unfinished_root"
+          "kind": "unfinished_run"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "No root is admitted yet. The successor seals the next drive, finds no unfinished root and admits the unchanged durable ingress."
+    "outcome": "No run is admitted yet. The successor seals the next shift, finds no unfinished run and admits the unchanged durable ingress."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "admit_root"
+          "kind": "admit_run"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "No admission is recorded. The recovered drive admits the root on the unchanged durable ingress, fenced by the drive epoch, and the turn completes once."
+    "outcome": "No admission is recorded. The recovered shift admits the run on the unchanged durable ingress, fenced by the shift epoch, and the turn completes once."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "admit_root"
+          "kind": "admit_run"
         }
       },
       "placement": "inside_call"
     },
-    "outcome": "The admission committed before its outcome was journaled. The recovered drive's retry returns the recorded admission, never a wider prefix, and the turn completes once."
+    "outcome": "The admission committed before its outcome was journaled. The recovered shift's retry returns the recorded admission, never a wider prefix, and the turn completes once."
   },
   {
     "point": {
@@ -208,7 +208,7 @@
       },
       "placement": "inside_call"
     },
-    "outcome": "The checkpoint bound its rows to the root under its step; the successor reruns the step, reads the same rows back and replays the uncommitted effect."
+    "outcome": "The checkpoint bound its rows to the run under its step; the successor reruns the step, reads the same rows back and replays the uncommitted effect."
   },
   {
     "point": {
@@ -258,7 +258,7 @@
       },
       "placement": "inside_call"
     },
-    "outcome": "Any final checkpoint admission stays bound to the root and reads back on the rerun; no model or effect outcome was committed."
+    "outcome": "Any final checkpoint admission stays bound to the run and reads back on the rerun; no model or effect outcome was committed."
   },
   {
     "point": {
@@ -318,7 +318,7 @@
       },
       "placement": "boundary"
     },
-    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles the root's admitted rows with the recovered terminal turn."
+    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles the run's admitted rows with the recovered terminal turn."
   },
   {
     "point": {

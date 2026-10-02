@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use lash_core_execution::runtime::QueuedWorkBatchDraft;
 use lash_core_execution::store::{
-    AdmittedHead, CheckpointAdmissionRequest, IngressSettlement, PhysicalTurn, RootStore,
-    RootTerminalWrite, TurnCommitId,
+    AdmittedHead, CheckpointAdmissionRequest, IngressSettlement, PhysicalTurn, RunStore,
+    RunTerminalWrite, TurnCommitId,
 };
 use lash_core_execution::testing::TestClock;
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt as _;
 use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputReadStatus,
@@ -21,7 +21,7 @@ use lash_core_execution::{
 use lash_postgres_store::PostgresStorage;
 
 // Keep subsequent lines stable for machine-checked public API evidence anchors.
-// Shared test support now lives at the grouped integration-harness root.
+// Shared test support now lives at the grouped integration-harness run.
 use crate::support::{SharedDatabaseLock, database_url};
 
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
@@ -92,7 +92,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     // This is deliberately a lexical fence, not a behavioral test: ADR-0044
     // recognizes that an in-process test cannot skew `SystemTime::now()`.
     let clock_sensitive_regions = [
-        // Every admission path — root, checkpoint and the command run — and
+        // Every admission path — run, checkpoint and the command run — and
         // the free functions that compose and bind their rows, through the
         // end of the file.
         (
@@ -100,7 +100,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn follow_on_blocks_admission_tx(",
             "// end of admission.rs",
         ),
-        // A commit's settlement of the rows its root admitted runs inside the
+        // A commit's settlement of the rows its run admitted runs inside the
         // commit's transaction, on the same server clock.
         (
             RUNTIME_PERSISTENCE_INGRESS_SETTLEMENT_SOURCE,
@@ -248,16 +248,16 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         .expect("create skewed-clock session store");
     let store = factory;
     let fence = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &session,
             &LeaseOwnerIdentity::opaque("clock-contract-owner", "clock-contract-owner:i"),
             "queued-work-and-pending-input-admission-decisions-follow-the-postgres-clock-executor",
             60_000,
         )
         .await
-        .expect("seal session drive")
+        .expect("seal session shift")
         .acquired()
-        .expect("session drive sealed");
+        .expect("session shift sealed");
 
     let withdrawable = store
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
@@ -318,8 +318,8 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             .is_none(),
         "the fenced read admits the command before its applying commit"
     );
-    let (obligation, admitted_root, delivered_at): (String, Option<String>, i64) = sqlx::query_as(
-        "SELECT obligation_state, admitted_root, obligation_settled_at_ms
+    let (obligation, admitted_run, delivered_at): (String, Option<String>, i64) = sqlx::query_as(
+        "SELECT obligation_state, admitted_run, obligation_settled_at_ms
          FROM lash_queued_work_batches WHERE session_id = $1 AND batch_id = $2",
     )
     .bind(session.as_str())
@@ -328,10 +328,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     .await
     .expect("read the command admission after refused withdrawal");
     assert_eq!(obligation, "delivered");
-    assert_eq!(
-        admitted_root, None,
-        "command admission takes no root binding"
-    );
+    assert_eq!(admitted_run, None, "command admission takes no run binding");
     let delivered_at = u64::try_from(delivered_at).expect("nonnegative command delivery timestamp");
     assert!(
         (command_read_before..=db_now_ms(&storage).await).contains(&delivered_at),
@@ -346,7 +343,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
         vec![command.batch_id.as_str()],
-        "refused withdrawal leaves the admitted command available to its drive"
+        "refused withdrawal leaves the admitted command available to its shift"
     );
     assert!(
         store
@@ -364,7 +361,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         ))
     };
     let mut command_commit = RuntimeCommit::persisted_state_for_test(&state);
-    command_commit.drive_fence = Some(Box::new(fence.clone()));
+    command_commit.shift_fence = Some(Box::new(fence.clone()));
     command_commit.applied_commands = Some(lash_core_execution::runtime::QueuedWorkCompletion {
         session_id: session.clone(),
         batch_ids: vec![command.batch_id.clone()],
@@ -372,7 +369,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     let command_receipt = store
         .commit_runtime_state(command_commit)
         .await
-        .expect("apply the admitted command under its drive fence");
+        .expect("apply the admitted command under its shift fence");
     state.head_revision = command_receipt.head_revision;
     assert_eq!(
         store
@@ -385,17 +382,17 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         "the command and session head settle in the same commit"
     );
 
-    let root = TurnId::from("clock-contract-root");
-    let mut request = lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+    let run = TurnId::from("clock-contract-run");
+    let mut request = lash_core_execution::testing::store_fixtures::admit_run_request_for_test(
         &fence,
-        &root,
+        &run,
         AdmittedHead::Batch(batch.batch_id.clone()),
     );
     request.policy = lash_core_execution::testing::queued_work_admission_policy(1);
     let admission = store
-        .admit_root(&request)
+        .admit_run(&request)
         .await
-        .expect("the root admission must validate against PostgreSQL time")
+        .expect("the run admission must validate against PostgreSQL time")
         .expect("queued work is admissible despite a future-skewed client clock");
     assert_eq!(admission.batch_ids(), vec![batch.batch_id.clone()]);
     assert!(
@@ -407,11 +404,11 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         "an admitted batch stays hidden from the open queue"
     );
     // Input addressed to a turn is accepted only once that turn runs
-    // (ADR 0101 §5.1): the active input steers the admitted root.
+    // (ADR 0101 §5.1): the active input steers the admitted run.
     let active_input = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
             SessionId::fixture(&session_id),
-            TurnInputIngress::active_turn(root.clone(), TurnInputCheckpointBoundary::AfterWork),
+            TurnInputIngress::active_turn(run.clone(), TurnInputCheckpointBoundary::AfterWork),
             TurnInput::text("clock-contract active input"),
         ))
         .await
@@ -428,8 +425,8 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     let checkpoint = store
         .admit_at_checkpoint(&CheckpointAdmissionRequest {
             fence: fence.clone(),
-            root: root.clone(),
-            turn_id: root.clone(),
+            run: run.clone(),
+            turn_id: run.clone(),
             checkpoint: CheckpointKind::AfterWork,
             step: "clock-contract-checkpoint".to_string(),
             max_inputs: 1,
@@ -453,14 +450,14 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         vec![
             (
                 active_input.input_id.as_str(),
-                PendingTurnInputReadStatus::Admitted { root: root.clone() }
+                PendingTurnInputReadStatus::Admitted { run: run.clone() }
             ),
             (
                 next_input.input_id.as_str(),
                 PendingTurnInputReadStatus::Open
             ),
         ],
-        "an input a checkpoint admitted is listed admitted to its root until the root settles \
+        "an input a checkpoint admitted is listed admitted to its run until the run settles \
          it; the rest stay open"
     );
     assert_eq!(
@@ -469,7 +466,7 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
             .await
             .expect("read the admitted input by id against PostgreSQL time")
             .map(|read| read.status),
-        Some(PendingTurnInputReadStatus::Admitted { root: root.clone() }),
+        Some(PendingTurnInputReadStatus::Admitted { run: run.clone() }),
         "the admitted input reads by id as the list reads it"
     );
     let cancel = store
@@ -483,8 +480,8 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         .expect("cancel admitted input against PostgreSQL time");
     assert!(matches!(
         &cancel[0].outcome,
-        PendingTurnInputCancelOutcome::AlreadyAdmitted { input, root: admitted }
-            if input.input_id == active_input.input_id && *admitted == root
+        PendingTurnInputCancelOutcome::AlreadyAdmitted { input, run: admitted }
+            if input.input_id == active_input.input_id && *admitted == run
     ));
     let suffix = store
         .cancel_pending_turn_input_suffix(
@@ -506,9 +503,9 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         PendingTurnInputCancelOutcome::Cancelled(input) if input.input_id == next_input.input_id
     ));
 
-    // The root's final commit settles what it admitted and ends it, so the
-    // next root is admissible.
-    let mut settlement = IngressSettlement::new(root.clone());
+    // The run's final commit settles what it admitted and ends it, so the
+    // next run is admissible.
+    let mut settlement = IngressSettlement::new(run.clone());
     settlement
         .completed_batches
         .extend(admission.queued.as_ref().map(|queued| queued.completion()));
@@ -520,11 +517,11 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         &fence,
         settlement,
     );
-    commit.root_terminal = Some(Box::new(RootTerminalWrite {
-        commit: TurnCommitId::new(root.clone(), 0),
-        turn: PhysicalTurn::derive_turn_id(&root, 0),
-        root: root.clone(),
-        outcome: lash_core_execution::store::RootCommittedOutcome::Finished(
+    commit.run_terminal = Some(Box::new(RunTerminalWrite {
+        commit: TurnCommitId::new(run.clone(), 0),
+        turn: PhysicalTurn::derive_turn_id(&run, 0),
+        run: run.clone(),
+        outcome: lash_core_execution::store::RunCommittedOutcome::Finished(
             lash_core_execution::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -533,14 +530,14 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
     store
         .commit_runtime_state(commit)
         .await
-        .expect("the root's final commit must validate against PostgreSQL time");
+        .expect("the run's final commit must validate against PostgreSQL time");
     assert!(
         store
             .list_pending_turn_inputs(&session)
             .await
-            .expect("list pending inputs after the root settles")
+            .expect("list pending inputs after the run settles")
             .is_empty(),
-        "the root's commit completes the input it admitted at its checkpoint, which leaves \
+        "the run's commit completes the input it admitted at its checkpoint, which leaves \
          the pending read model"
     );
     assert_eq!(
@@ -562,10 +559,10 @@ async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_c
         .await
         .expect("enqueue final pending input under skewed client clock");
     let next = store
-        .admit_root(
-            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+        .admit_run(
+            &lash_core_execution::testing::store_fixtures::admit_run_request_for_test(
                 &fence,
-                &TurnId::from("clock-contract-next-root"),
+                &TurnId::from("clock-contract-next-run"),
                 AdmittedHead::Input(final_next_input.input_id.clone()),
             ),
         )

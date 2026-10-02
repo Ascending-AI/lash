@@ -183,7 +183,7 @@ impl TestBackend {
     }
 }
 
-/// Drive `future` to completion on a runtime of its own, from synchronous
+/// Shift `future` to completion on a runtime of its own, from synchronous
 /// fixture code that may already be inside a runtime.
 pub(crate) fn sync_await<T, F>(future: F) -> T
 where

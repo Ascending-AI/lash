@@ -30,7 +30,7 @@ pub struct RuntimeHostConfig {
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     /// Injected time source. Durable timestamps and timeout/backoff logic read
     /// this rather than the OS clock directly, so replay is reproducible and
-    /// tests can drive time. Defaults to [`SystemClock`](super::SystemClock).
+    /// tests can advance time. Defaults to [`SystemClock`](super::SystemClock).
     pub clock: Arc<dyn super::Clock>,
 }
 
@@ -49,7 +49,7 @@ pub struct RuntimeDurabilityConfig {
     /// start. Before rebinding it is an ephemeral facade with no boundary guard.
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-    /// The ledger every spending effect's usage run is admitted to and
+    /// The ledger every spending effect's usage meter is admitted to and
     /// settled in (ADR 0125): the backend's own.
     pub usage_accounting: Arc<dyn crate::UsageAccountingStore>,
 }
@@ -59,7 +59,7 @@ pub struct RuntimeProviderConfig {
     /// The host's models: the registry that mints a session's model binding
     /// and binds a recorded one to its transport.
     pub models: Arc<dyn crate::LlmProfiles>,
-    /// The run definitions this deployment registers (FIG-3838): a root
+    /// The run definitions this deployment registers (FIG-3838): a run
     /// whose spec names a definition resolves it here, by exact reference.
     pub run_definitions: crate::RunDefinitions,
 }
@@ -73,8 +73,8 @@ pub struct RuntimeControlConfig {
     /// Live restoration of captured provider routes for new trigger starts,
     /// shared by immediate delivery and recovery. Never journaled as wiring.
     pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
-    /// The termination policy a root records on its first execution. Terminal
-    /// assembly reads the root's record, never this field (FIG-4389).
+    /// The termination policy a run records on its first execution. Terminal
+    /// assembly reads the run's record, never this field (FIG-4389).
     pub termination: TerminationPolicy,
     /// How long a protocol-owned stream abort (a protocol boundary that ends
     /// the model's turn under ADR 0036's no-wire-stop rule) keeps draining the
@@ -91,7 +91,7 @@ pub struct RuntimeControlConfig {
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases,
     /// and durable effect-replay leases. Queued work and turn inputs are not
-    /// leased and carry no TTL: a root admits them under its drive fence and
+    /// leased and carry no TTL: a run admits them under its shift fence and
     /// holds them until its own commit settles them (FIG-3927). Defaults to
     /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
@@ -134,14 +134,14 @@ pub struct RuntimeControlConfig {
     /// deployment builds for it cannot reproduce them, so such a child waits
     /// for its live opener. Set by the embedder that opened the session.
     pub open_sources: crate::runtime::effect::UnrecordedSessionSources,
-    /// Where the drive reports a logical root's closed scope, after the
-    /// root's terminal evidence is durable (FIG-3607 item 7). Defaults to
+    /// Where the shift reports a logical run's closed scope, after the
+    /// run's terminal evidence is durable (FIG-3607 item 7). Defaults to
     /// [`NoScopeClose`](crate::engine::NoScopeClose); a host composition that
     /// owns lifetime scopes installs the process registry's
     /// [`RegistryScopeClose`](crate::runtime::process::RegistryScopeClose).
     ///
     /// A close reaches this sink only as the delivery of the `ScopeClose`
-    /// obligation the terminal transaction armed on the root's row, through
+    /// obligation the terminal transaction armed on the run's row, through
     /// the backend's ledger of that kind (ADR 0109 §3).
     pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
     /// The host's bound on one obligation delivery (ADR 0109 §1.8). This is
@@ -153,16 +153,16 @@ pub struct RuntimeControlConfig {
 }
 
 impl RuntimeControlConfig {
-    /// The [`RelayPolicy`](crate::runtime::drive::relay::RelayPolicy) every
+    /// The [`RelayPolicy`](crate::runtime::shift::relay::RelayPolicy) every
     /// obligation relay of this runtime runs under: the recovery pass's
     /// attempt budget on the kinds' shared retry shape. There is no second
     /// default — a `deliver_now` construction that skips it builds a relay
     /// at the 30 s kind default instead.
     #[must_use]
-    pub fn relay_policy(&self) -> crate::runtime::drive::relay::RelayPolicy {
-        crate::runtime::drive::relay::RelayPolicy {
+    pub fn relay_policy(&self) -> crate::runtime::shift::relay::RelayPolicy {
+        crate::runtime::shift::relay::RelayPolicy {
             attempt_budget_ms: self.recovery_pass.attempt_ms(),
-            ..crate::runtime::drive::relay::RelayPolicy::default()
+            ..crate::runtime::shift::relay::RelayPolicy::default()
         }
     }
 }
@@ -515,7 +515,7 @@ impl ProcessRuntimeHost {
 }
 
 /// A runtime's exhaustive work wiring. Process wiring owns both the registry
-/// and the port that drives its work.
+/// and the port that executes its work.
 #[derive(Clone)]
 pub enum RuntimeWork {
     SessionsOnly {

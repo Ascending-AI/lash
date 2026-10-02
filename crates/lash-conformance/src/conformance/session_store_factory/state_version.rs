@@ -1,4 +1,4 @@
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -56,7 +56,7 @@ pub(super) async fn session_state_version_admission_contract(
         .expect("stamp newer marker above an undecodable payload");
 
     let owner = crate::LeaseOwnerIdentity::opaque("state-admission-owner", "incarnation");
-    let no_lease = lash_core::store_backend_support::sealed_drive_fence(
+    let no_lease = lash_core::store_backend_support::sealed_shift_fence(
         request.session_id.clone(),
         1,
         crate::store::AdmissionId::new("not-a-live-admission"),
@@ -66,13 +66,13 @@ pub(super) async fn session_state_version_admission_contract(
         .await
         .expect_err("admission must validate the lease before consulting migration state");
     assert!(
-        matches!(ordering_error, crate::StoreError::StaleDriveFence { .. }),
+        matches!(ordering_error, crate::StoreError::StaleShiftFence { .. }),
         "lease validation must precede the marker gate: {ordering_error:?}"
     );
 
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &owner,
             "state-admission-executor",

@@ -1,10 +1,10 @@
 //! Control intents (S-6, S-7, S-9) and session deletion (S-21).
 //!
-//! A session runs one root that is held inside its model call, with a child
-//! registered to live `Until` the root. The host deletes the session from
+//! A session executes one run that is held inside its model call, with a child
+//! registered to live `Until` the run. The host deletes the session from
 //! inside a handler of its own, as a deployment's delete endpoint does:
 //! `LashCore::delete_session` writes the `CloseSession` intent (ending the
-//! root), releases the root's engine execution, closes the root's and the
+//! run), releases the run's engine execution, closes the run's and the
 //! session's scopes and acknowledges the intent, which arms the session's
 //! `SessionDelete` obligation; its delivery deletes the storage once the
 //! close's cleanup settled (ADR 0109 §4).
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lash_core::runtime::drive::relay::{RelayVerdict, deliver_now};
 use lash_core::runtime::session_delete::SessionDeleteRelay;
+use lash_core::runtime::shift::relay::{RelayVerdict, deliver_now};
 use lash_core::{ScopeId, SessionId, TurnId};
 
 use super::scope::register_until_child;
@@ -114,7 +114,7 @@ async fn await_held(held: &AtomicUsize) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while held.load(Ordering::SeqCst) == 0 {
         if tokio::time::Instant::now() > deadline {
-            return Err("the held root never reached its model call".to_owned());
+            return Err("the held run never reached its model call".to_owned());
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -245,8 +245,8 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
     crate::open_created_session(super::MODEL, &world.core()?, session.clone())
         .await
         .map_err(|error| format!("open `{session}`: {error}"))?;
-    let root = "held-0";
-    let scope = ScopeId::turn(session.clone(), TurnId::from(root));
+    let run = "held-0";
+    let scope = ScopeId::turn(session.clone(), TurnId::from(run));
     let child = register_until_child(&world, &session, &scope).await?;
     let mut expected = Expected {
         children: vec![ChildOf {
@@ -260,16 +260,16 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
     if seam == Seam::SessionDelete {
         expected.deleted_sessions.push(session.clone());
     }
-    send(&world, &session, root).await?;
+    send(&world, &session, run).await?;
     await_held(&held).await?;
     let origin_ms = match (seam, point) {
         (_, CrashPoint::AfterStateCommit) => {
-            world.faults().crash_once(HostSite::ReleaseRootBefore);
+            world.faults().crash_once(HostSite::ReleaseRunBefore);
             delete_session(&world, &session).await?;
             crash_and_restart(&world).await?
         }
         (Seam::ControlIntent, CrashPoint::DuringEngineDelivery) => {
-            world.faults().crash_once(HostSite::ReleaseRootAfter);
+            world.faults().crash_once(HostSite::ReleaseRunAfter);
             delete_session(&world, &session).await?;
             crash_and_restart(&world).await?
         }
@@ -282,7 +282,7 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
             world.faults().crash_once(HostSite::DeleteStorageBefore);
             delete_session(&world, &session).await?;
             // The verb's own attempt defers while the engine still runs the
-            // released root's work; the stage waits out that deferral and
+            // released run's work; the stage waits out that deferral and
             // makes the next attempt the host dies inside.
             tick_until_tripped(&world, &session).await?;
             crash_and_restart(&world).await?
@@ -292,17 +292,17 @@ async fn stage_session_end(seam: Seam, point: CrashPoint, seed: u64) -> Result<S
             // deletion. Arm the cut at the first failing release before
             // awaiting that handler, then let recovery exhaust the relay.
             world.faults().always_retryable_with_cut(
-                HostSite::ReleaseRootBefore,
-                "fault:release-root-retryable-forever",
+                HostSite::ReleaseRunBefore,
+                "fault:release-run-retryable-forever",
             );
             let at_ms = world.now_ms();
             delete_session(&world, &session).await?;
             // A release that fails on every attempt never ends the held
-            // root's execution, and the session's scope close follows the
+            // run's execution, and the session's scope close follows the
             // release inside the engine half: what the ceiling owes is the
             // typed stall, surfaced for an operator, never another attempt.
             // A stalled close arms no physical delete (ADR 0109 §4), so the
-            // input its root admitted stays admitted: the store types that
+            // input its run admitted stays admitted: the store types that
             // turn as held by the stalled close, and the ingress probe reads
             // it as a typed stall, not a lost turn.
             expected.closed_scopes.clear();
@@ -347,7 +347,7 @@ fn stalled_at_ceiling(session: SessionId) -> crate::crash_matrix::invariants::Cu
                 Ok(stalled) => stalled,
                 Err(error) => return vec![format!("list stalled control intents: {error}")],
             };
-            let ceiling = lash_core::runtime::drive::relay::RelayPolicy::default()
+            let ceiling = lash_core::runtime::shift::relay::RelayPolicy::default()
                 .attempt_ceiling
                 .get();
             let mut violations = Vec::new();

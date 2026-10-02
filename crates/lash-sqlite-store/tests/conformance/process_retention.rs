@@ -1,7 +1,7 @@
 use super::*;
 use lash_core_execution::ProcessRetention as _;
 
-/// Drive one process into `waiting` and assert the retention contract: live rows
+/// Execute one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
 async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegistry) {
     let process_id = registry

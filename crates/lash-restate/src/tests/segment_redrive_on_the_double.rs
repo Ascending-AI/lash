@@ -1,4 +1,4 @@
-//! FIG-3547's segment re-drive law on the in-process server double: the
+//! FIG-3547's segment redrive law on the in-process server double: the
 //! law's segments run in the endpoint's real `LashProcessWorkflow`, a crash
 //! fails the execution retryably so the double delivers it again over its
 //! journal, and a lost substrate is the invocation killed and purged, then

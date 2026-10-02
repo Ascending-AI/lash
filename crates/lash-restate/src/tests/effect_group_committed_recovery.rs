@@ -316,7 +316,7 @@ async fn drain_status(
 /// FIG-4454 retirement coverage: a generation whose lane holds a group with
 /// a committed child whose seat is owed is not drained, whoever opened the
 /// group — the group index's committed entry is the obligation of record, and
-/// a host-built opener has no root the store counts. Once the child seats,
+/// a host-built opener has no run the store counts. Once the child seats,
 /// the generation drains.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_generation_holds_its_drain_while_a_committed_group_child_owes_its_seat() {

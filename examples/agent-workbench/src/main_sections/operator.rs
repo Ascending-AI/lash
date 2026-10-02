@@ -255,8 +255,8 @@ pub(crate) async fn operator_redrive(
         .redrive(&request.target, request.park_id)
         .await?;
     Ok(Json(match result {
-        lash::RedriveAccepted::Root(result) => {
-            json!({"kind": "turn", "intent": result.intent, "applied": result.applied, "turn_id": result.root})
+        lash::RedriveAccepted::Run(result) => {
+            json!({"kind": "turn", "intent": result.intent, "applied": result.applied, "turn_id": result.run})
         }
         lash::RedriveAccepted::Process { process, park } => {
             json!({"kind": "process", "process_id": process, "park_id": park})
@@ -295,7 +295,7 @@ pub(crate) async fn operator_fork_park(
         .fork(&session_id, &turn_id, request.park_id)
         .await?;
     Ok(Json(
-        json!({"intent": result.intent, "cancelled": result.cancelled, "new_turn": result.new_root, "applied": result.applied}),
+        json!({"intent": result.intent, "cancelled": result.cancelled, "new_turn": result.new_run, "applied": result.applied}),
     ))
 }
 
@@ -402,10 +402,10 @@ pub(crate) async fn operator_usage_meters(
     Ok(Json(json!(
         state
             .core
-            .usage_run_page(
+            .usage_meter_page(
                 &lash::RuntimeOwner::Session(session_id),
-                lash::usage::UsageRunFilter::All,
-                page.cursor::<lash::usage::UsageRunCursor>()?.as_ref(),
+                lash::usage::UsageMeterFilter::All,
+                page.cursor::<lash::usage::UsageMeterCursor>()?.as_ref(),
                 page.limit()?
             )
             .await?

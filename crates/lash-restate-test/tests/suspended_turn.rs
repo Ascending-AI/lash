@@ -6,8 +6,8 @@
 //! it. A group tool child runs against its opener's live context, so a child
 //! attempt that starts while the turn is suspended has no opener to run
 //! against. The turn is waiting on that child's settlement and the child on a
-//! live turn: each law here sends a real tool turn, which the engine drives in
-//! its root's `LashTurn` workflow, puts it into that state and requires it to
+//! live turn: each law here sends a real tool turn, which the engine executes in
+//! its run's `LashTurn` workflow, puts it into that state and requires it to
 //! finish anyway.
 //!
 //! Before FIG-3712 a group tool child could only run against its opener's
@@ -32,7 +32,7 @@ use lash_restate_test::{RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE, T
 use serde_json::json;
 
 const SESSION: &str = "suspended-turn";
-const ROOT: &str = "turn-1";
+const RUN: &str = "turn-1";
 const DISPATCH: &str = "EffectGroupDispatch";
 const TOOL: &str = "gated_call";
 
@@ -264,7 +264,7 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
         .expect("open the session");
     let handle = session
         .send(lash::TurnInput::text("call the gated tool"))
-        .id(ROOT)
+        .id(RUN)
         .await
         .expect("accept the turn input");
     let run = tokio::spawn(handle.output());
@@ -321,7 +321,7 @@ impl Turn {
         (answer, Vec::new())
     }
 
-    /// Hold the turn's root workflow: its running attempt stops at its next
+    /// Hold the turn's run workflow: its running attempt stops at its next
     /// await, and no attempt of it starts until the hold is released, so the
     /// turn is live nowhere meanwhile.
     async fn hold_turn(&self) -> lash_restate_test::Hold {
@@ -331,16 +331,16 @@ impl Turn {
                 TURN_DRIVER_SERVICE,
                 &lash_restate::turn_workflow_key(
                     &lash_core::SessionId::from(SESSION),
-                    &lash::TurnId::from(ROOT),
+                    &lash::TurnId::from(RUN),
                 ),
             )
             .await
     }
 
-    /// Cancel the turn's root through its durable gate.
-    async fn cancel_root(&self) {
+    /// Cancel the turn's run through its durable gate.
+    async fn cancel_run(&self) {
         self.session
-            .cancel(lash::CancelTarget::Root(lash::TurnId::from(ROOT)))
+            .cancel(lash::CancelTarget::Run(lash::TurnId::from(RUN)))
             .reason("stop")
             .await
             .expect("the durable cancel is accepted");
@@ -382,7 +382,7 @@ impl Turn {
         view.status != "running" || view.blocked_on_server == Some(true)
     }
 
-    /// Waits until the turn's root workflow is parked: suspended, held, or
+    /// Waits until the turn's run workflow is parked: suspended, held, or
     /// its live attempt blocked on the server. Only a time advance or outside
     /// input can move it from there.
     async fn turn_parked(&self) {
@@ -439,11 +439,11 @@ impl Turn {
         }
     }
 
-    /// The commands the tool child's drive journaled, in order, from its
+    /// The commands the tool child's shift journaled, in order, from its
     /// read of its recorded environment on: what the child asked the engine
     /// to do. Each is its type and what it names and carries; the completion
     /// ids a command is numbered with are positions in the whole journal, so
-    /// they are left out, as is the group-admission prefix before the drive,
+    /// they are left out, as is the group-admission prefix before the shift,
     /// whose waits depend on when the child's dispatch overtook its opener's
     /// registration of the group, not on the context the child ran on.
     fn child_commands(&self, child: &str) -> Vec<(String, String, bytes::Bytes)> {
@@ -477,7 +477,7 @@ impl Turn {
             .collect()
     }
 
-    /// Waits until the turn's root workflow has been suspended.
+    /// Waits until the turn's run workflow has been suspended.
     async fn turn_suspended(&self) {
         loop {
             if self.backend.server().invocations().into_iter().any(|view| {
@@ -587,7 +587,7 @@ async fn a_batch_child_with_no_live_turn_records_its_events_for_the_turn() {
 /// deployment built, at the child's next durable wait.
 ///
 /// The tool's first attempt fails and asks for its retry an hour later, so
-/// the child sleeps durably. The turn's root workflow is held, so the turn is
+/// the child sleeps durably. The turn's run workflow is held, so the turn is
 /// not live anywhere, and the child is idled until it is suspended too. The
 /// turn is then cancelled through its durable gate only: the child resumes on
 /// a built context, whose token nothing local signals. Its retry sleep must
@@ -642,7 +642,7 @@ async fn a_durable_turn_cancel_reaches_a_rebuilt_child_at_its_next_wait() {
             .collect::<Vec<_>>()
     );
 
-    turn.cancel_root().await;
+    turn.cancel_run().await;
 
     // The turn is held, so only the child's rebuilt context can observe the
     // cancel: its retry sleep loses to the turn's durable gate. The gate's
@@ -672,11 +672,11 @@ async fn a_durable_turn_cancel_reaches_a_rebuilt_child_at_its_next_wait() {
 }
 
 /// A rebuilt child's tool gets a stop its turn's durable gate fires, as a
-/// live opener's children get the stop the opener's drive fires (FIG-3672
+/// live opener's children get the stop the opener's shift fires (FIG-3672
 /// P9): a tool body that waits on nothing durable still sees the cancel.
 ///
 /// The child's first attempt starts beside its live turn and is still inside
-/// the tool when the turn's root workflow is held, so the turn is live
+/// the tool when the turn's run workflow is held, so the turn is live
 /// nowhere; that attempt dies, and the attempt that replaces it runs on a
 /// built context. The turn is then cancelled through its durable gate only.
 /// The tool, waiting on its own gate, must see its token fire and answer
@@ -712,7 +712,7 @@ async fn a_rebuilt_childs_tool_sees_its_turns_durable_cancel_as_its_token() {
     .await
     .expect("the replacement attempt runs the tool on a built context");
 
-    turn.cancel_root().await;
+    turn.cancel_run().await;
     tokio::time::timeout(Duration::from_secs(20), async {
         while !turn.stopped.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -760,7 +760,7 @@ async fn a_leaf_child_records_the_same_commands_on_a_rebuilt_context_as_on_its_l
         live_commands
             .iter()
             .any(|(kind, name, _)| kind == "run" && name.ends_with(":attempt:1")),
-        "the live child's drive ran its tool: {live_commands:#?}"
+        "the live child's shift ran its tool: {live_commands:#?}"
     );
     assert_eq!(
         live_commands.len(),
@@ -785,8 +785,8 @@ async fn a_leaf_child_records_the_same_commands_on_a_rebuilt_context_as_on_its_l
 /// replays the journal the cancelled run left: it issues the commands that
 /// journal holds, never re-runs the attempt the cancel ended, and settles.
 ///
-/// Red before D20: the child raced its drive against a live ingress watch and
-/// dropped the drive mid-journal, leaving the attempt's run unrecorded; the
+/// Red before D20: the child raced its shift against a live ingress watch and
+/// dropped the shift mid-journal, leaving the attempt's run unrecorded; the
 /// redrive, which finds no recorded result for that run, ran the tool again
 /// before its own watch came back.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -846,7 +846,7 @@ async fn a_replayed_tool_child_issues_the_same_commands_as_its_journal() {
             .times(1),
     );
 
-    turn.cancel_root().await;
+    turn.cancel_run().await;
     tokio::time::timeout(Duration::from_secs(20), async {
         while !turn.dropped.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(5)).await;

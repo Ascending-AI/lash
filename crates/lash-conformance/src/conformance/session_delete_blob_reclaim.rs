@@ -352,7 +352,7 @@ pub async fn session_delete_preserves_admission_base_blobs<F>(backend: &str, mak
 where
     F: Fn() -> SessionDeleteBlobHandles,
 {
-    use lash_core::testing::RuntimeStoreTestDriveExt as _;
+    use lash_core::testing::RuntimeStoreTestShiftExt as _;
     for advance_source in [false, true] {
         let handles = make();
         let source = committed_checkpoint(
@@ -399,7 +399,7 @@ where
             leaf: base_window.window.leaf_node_id.clone(),
             checkpoint: base_window.checkpoint_ref,
         };
-        let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
             fork.store(),
             &fork_id,
             "session-delete-admission-base",
@@ -410,7 +410,7 @@ where
             .await
             .expect("retain admission base");
         fork.store()
-            .supersede_drive_epoch_for_test(&lease)
+            .supersede_shift_epoch_for_test(&lease)
             .await
             .expect("release base lease");
         advance_checkpoint(fork.store(), &fork_id, false).await;

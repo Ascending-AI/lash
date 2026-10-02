@@ -26,8 +26,8 @@ use lash_store_sql::process::processes::{
     ProcessObligationStatements, ProcessStartObligationStatements,
 };
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
-use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
+use lash_store_sql::session_runs::control_intents::ControlIntentObligationStatements;
+use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
 use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row};
@@ -38,8 +38,8 @@ use crate::process_sql::{
     ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
     ProcessStartObligationPostgresStatements,
 };
-use crate::session_roots::{
-    ControlIntentObligationPostgresStatements, SessionRootObligationPostgresStatements,
+use crate::session_runs::{
+    ControlIntentObligationPostgresStatements, SessionRunObligationPostgresStatements,
 };
 use crate::session_sql::SessionMetaObligationPostgresStatements;
 use crate::support::store_sqlx_error;
@@ -56,11 +56,11 @@ static INTENTS: LazyLock<
     shared: ControlIntentObligationStatements::render(Dialect::postgres()),
     locking: ControlIntentObligationPostgresStatements::render(Dialect::postgres()),
 });
-static ROOTS: LazyLock<
-    LedgerSql<SessionRootObligationStatements, SessionRootObligationPostgresStatements>,
+static RUNS: LazyLock<
+    LedgerSql<SessionRunObligationStatements, SessionRunObligationPostgresStatements>,
 > = LazyLock::new(|| LedgerSql {
-    shared: SessionRootObligationStatements::render(Dialect::postgres()),
-    locking: SessionRootObligationPostgresStatements::render(Dialect::postgres()),
+    shared: SessionRunObligationStatements::render(Dialect::postgres()),
+    locking: SessionRunObligationPostgresStatements::render(Dialect::postgres()),
 });
 static META: LazyLock<
     LedgerSql<SessionMetaObligationStatements, SessionMetaObligationPostgresStatements>,
@@ -105,8 +105,8 @@ fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str
             INTENTS.locking.obligation_select_due_locking.sql(),
         ),
         ObligationKind::ScopeClose => (
-            ROOTS.shared.obligation_sql(),
-            ROOTS.locking.obligation_select_due_locking.sql(),
+            RUNS.shared.obligation_sql(),
+            RUNS.locking.obligation_select_due_locking.sql(),
         ),
         ObligationKind::SessionDelete => (
             META.shared.obligation_sql(),

@@ -137,8 +137,8 @@ pub async fn run_backend_contention_report_against(
             passed,
             skipped,
             failed,
-            production_api: "DriveEpochStore::seal_drive_epoch and SessionCommitStore::commit_runtime_state through DeploymentStore handles",
-            semantics: "Competing drive seals from the same epoch admit one winner; session commits preserve idempotent retry and reject stale head revisions and changed retries.",
+            production_api: "ShiftEpochStore::seal_shift_epoch and SessionCommitStore::commit_runtime_state through DeploymentStore handles",
+            semantics: "Competing shift seals from the same epoch admit one winner; session commits preserve idempotent retry and reject stale head revisions and changed retries.",
         },
         report_path: report_path.clone(),
     };
@@ -163,7 +163,7 @@ async fn run_factory_contention_scenario(
     let store = create_store(Arc::clone(&factory), &session_id).await?;
     let reopened = open_store(Arc::clone(&factory), &session_id).await?;
     let mut operations = Vec::new();
-    operations.push(competing_drive_seals(&session_id, Arc::clone(&store), reopened).await?);
+    operations.push(competing_shift_seals(&session_id, Arc::clone(&store), reopened).await?);
 
     let store = open_store(Arc::clone(&factory), &session_id).await?;
     operations.push(final_commit_retry_and_conflict_are_fenced(&session_id, store).await?);
@@ -226,14 +226,14 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
     }
 }
 
-async fn competing_drive_seals(
+async fn competing_shift_seals(
     session_id: &SessionId,
     left_store: Arc<dyn RuntimeStore>,
     right_store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
-    use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
+    use lash_core::store::{AdmissionId, RunStartNonce, ShiftEpochSeal};
     let observed = left_store
-        .drive_epoch(session_id)
+        .shift_epoch(session_id)
         .await
         .map_err(|error| error.to_string())?;
     let barrier = Arc::new(Barrier::new(3));
@@ -245,11 +245,11 @@ async fn competing_drive_seals(
             let admission = AdmissionId::new(format!("backend-contention-{name}"));
             barrier.wait().await;
             store
-                .seal_drive_epoch(
+                .seal_shift_epoch(
                     &session,
                     &admission,
                     observed.epoch,
-                    &RootStartNonce::new(admission.as_str()),
+                    &RunStartNonce::new(admission.as_str()),
                     None,
                 )
                 .await
@@ -264,14 +264,14 @@ async fn competing_drive_seals(
             .map_err(|error| error.to_string())?
             .map_err(|error| error.to_string())?
         {
-            DriveEpochSeal::Sealed(_) => sealed += 1,
-            DriveEpochSeal::Superseded { .. } => superseded += 1,
-            DriveEpochSeal::ExecutionLost => {
-                return Err("drive seal unexpectedly lost execution".to_string());
+            ShiftEpochSeal::Sealed(_) => sealed += 1,
+            ShiftEpochSeal::Superseded { .. } => superseded += 1,
+            ShiftEpochSeal::ExecutionLost => {
+                return Err("shift seal unexpectedly lost execution".to_string());
             }
-            held @ DriveEpochSeal::HeldByAnotherExecutor { .. } => {
+            held @ ShiftEpochSeal::HeldByAnotherExecutor { .. } => {
                 return Err(format!(
-                    "a drive seal that names no root was refused {held:?}"
+                    "a shift seal that names no run was refused {held:?}"
                 ));
             }
         }
@@ -282,9 +282,9 @@ async fn competing_drive_seals(
         ));
     }
     Ok(BackendContentionOperation {
-        operation_id: "runtime-persistence.competing-drive-seals",
+        operation_id: "runtime-persistence.competing-shift-seals",
         status: "passed",
-        production_api: "DriveEpochStore::seal_drive_epoch",
+        production_api: "ShiftEpochStore::seal_shift_epoch",
         assertion: "two handles sealing different admissions from one observed epoch produce exactly one winner",
         evidence: json!({"sealed": sealed, "superseded": superseded}),
     })
@@ -435,7 +435,7 @@ mod tests {
         );
         assert!(report.report_path.exists());
         let body = std::fs::read_to_string(report.report_path).expect("report body");
-        assert!(body.contains("runtime-persistence.competing-drive-seals"));
+        assert!(body.contains("runtime-persistence.competing-shift-seals"));
         assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
     }

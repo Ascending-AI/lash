@@ -8,18 +8,18 @@ pub async fn refused_superseded_keeps_each_paid_call_once(tier: &UsageAccounting
     let error = world
         .run()
         .await
-        .expect_err("the advanced head refuses this root");
+        .expect_err("the advanced head refuses this run");
     assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitSuperseded);
     let terminal = tier
         .stores
         .session_store_factory()
-        .root_terminal(&world.session_id, &world.turn_id())
+        .run_terminal(&world.session_id, &world.turn_id())
         .await
         .expect("terminal")
-        .expect("refused root ended");
+        .expect("refused run ended");
     assert!(matches!(
         terminal.cause,
-        crate::store::RootTerminalCause::Refused {
+        crate::store::RunTerminalCause::Refused {
             code: crate::RuntimeErrorCode::StoreCommitSuperseded,
             ..
         }
@@ -45,27 +45,27 @@ async fn paid_unfinished(tier: &UsageAccountingTier, label: &str) -> World {
     world
 }
 
-/// The substrate's failed-run evidence ends a started root and keeps its spend.
+/// The substrate's failed-run evidence ends a started run and keeps its spend.
 pub async fn substrate_lost_keeps_each_paid_call_once(tier: &UsageAccountingTier) {
     let world = paid_unfinished(tier, "substrate-lost-spend").await;
-    let target = crate::engine::RootRef {
+    let target = crate::engine::RunRef {
         session: world.session_id.clone(),
-        root: world.turn_id(),
+        run: world.turn_id(),
     };
     let terminal = tier
         .stores
         .session_store_factory()
-        .end_lost_root(
+        .end_lost_run(
             &target,
-            crate::engine::RootRunLoss::FailedRun,
+            crate::engine::RunLoss::FailedRun,
             tier.stores.clock().timestamp_ms(),
         )
         .await
-        .expect("end lost root")
-        .expect("started root ends");
+        .expect("end lost run")
+        .expect("started run ends");
     assert!(matches!(
         terminal.cause,
-        crate::store::RootTerminalCause::SubstrateLost { .. }
+        crate::store::RunTerminalCause::SubstrateLost { .. }
     ));
     tier.effect_host
         .retire_usage_execution(&world.owner(), world.admitted().scope())
@@ -90,26 +90,26 @@ pub async fn operator_cancelled_parked_keeps_each_paid_call_once(tier: &UsageAcc
         .load_turn_park(&world.session_id)
         .await
         .expect("park read")
-        .expect("root parked");
+        .expect("run parked");
     let intent = factory
-        .open_root_intent(
-            &crate::store::RootIntentRequest {
+        .open_run_intent(
+            &crate::store::RunIntentRequest {
                 session_id: world.session_id.clone(),
-                root: world.turn_id(),
+                run: world.turn_id(),
                 park: park.park_id,
-                verb: crate::store::RootVerb::Cancel,
+                verb: crate::store::RunVerb::Cancel,
             },
             tier.stores.clock().timestamp_ms(),
         )
         .await
         .expect("operator cancellation accepted");
     let terminal = factory
-        .root_terminal(&world.session_id, &world.turn_id())
+        .run_terminal(&world.session_id, &world.turn_id())
         .await
         .expect("terminal")
-        .expect("cancelled root");
+        .expect("cancelled run");
     assert!(
-        matches!(terminal.cause, crate::store::RootTerminalCause::OperatorCancelled { intent: id } if id == intent.id)
+        matches!(terminal.cause, crate::store::RunTerminalCause::OperatorCancelled { intent: id } if id == intent.id)
     );
     tier.effect_host
         .retire_usage_execution(&world.owner(), world.admitted().scope())

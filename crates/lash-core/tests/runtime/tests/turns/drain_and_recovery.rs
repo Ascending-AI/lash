@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 fn sid(s: &str) -> SessionId {
     SessionId::fixture(s)
@@ -40,19 +40,19 @@ impl lash_core::store::RuntimeStoreDecorator for OneHeldAdmissionStore {
         self.inner.as_ref()
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &lash_core::store::AdmitRootRequest,
-    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
+        request: &lash_core::store::AdmitRunRequest,
+    ) -> Result<Option<lash_core::store::RunAdmission>, lash_core::StoreError> {
         if !self.held_once.swap(true, Ordering::SeqCst) {
             return Ok(None);
         }
-        lash_core::store::RootStore::admit_root(self.inner.as_ref(), request).await
+        lash_core::store::RunStore::admit_run(self.inner.as_ref(), request).await
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_admission() {
+pub(super) async fn a_later_admission_redecides_a_temporarily_held_run_admission() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
@@ -101,7 +101,7 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_admissio
                 let drain = runtime
                     .lock()
                     .await
-                    .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), scoped))
+                    .execute_next_queued_run(TurnOptions::new(CancellationToken::new(), scoped))
                     .await;
                 drains.lock_recover().push(drain);
             })
@@ -109,7 +109,7 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_admissio
     };
     double
         .run_in_handler(
-            AdmittedScope::turn(session.clone(), tid("held-root")),
+            AdmittedScope::turn(session.clone(), tid("held-run")),
             attempt,
         )
         .await
@@ -127,18 +127,18 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_admissio
     );
     let second = drains
         .remove(0)
-        .expect("a later admission can retry the root")
+        .expect("a later admission can retry the run")
         .expect("the released input runs");
     assert_eq!(second.assistant_output.safe_text, "answered after hold");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_roots() {
+pub(super) async fn an_in_process_shift_hands_off_after_a_bounded_number_of_runs() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
     let transport = TestProvider::builder()
-        .kind("bounded-drive")
+        .kind("bounded-shift")
         .complete(|_request| async {
             Ok::<_, LlmTransportError>(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
@@ -169,40 +169,40 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
     for index in 0..65 {
         enqueue_idle_turn_input(store.as_ref(), &session, &format!("question {index}")).await;
     }
-    let request = lash_core::engine::DriveRequest {
+    let request = lash_core::engine::ShiftRequest {
         session: session.clone(),
-        request: lash_core::engine::DriveRequestId::new("bounded-first"),
+        request: lash_core::engine::ShiftRequestId::new("bounded-first"),
         intended_lane: None,
     };
     let handler = open_turn(&double, session.clone(), tid("bounded-first")).await;
-    let first = Box::pin(lash_core::drive::drive_session(
+    let first = Box::pin(lash_core::shift::work_session(
         &mut runtime,
         &handler.scoped(),
         &request,
     ))
     .await
-    .expect("first drive runs to its bound");
+    .expect("first shift runs to its bound");
     handler.close().await.expect("close the scope's handler");
-    assert_eq!(first.ran.len(), lash_core::engine::MAX_ROOTS_PER_DRIVE);
+    assert_eq!(first.ran.len(), lash_core::engine::MAX_RUNS_PER_SHIFT);
     assert!(matches!(
         first.stop,
-        lash_core::engine::DriveStop::Yielded { .. }
+        lash_core::engine::ShiftStop::Yielded { .. }
     ));
-    let next = lash_core::engine::DriveRequest {
-        request: lash_core::engine::drive_continuation_request(&request),
+    let next = lash_core::engine::ShiftRequest {
+        request: lash_core::engine::shift_continuation_request(&request),
         ..request
     };
     let handler = open_turn(&double, session.clone(), tid("bounded-next")).await;
-    let last = Box::pin(lash_core::drive::drive_session(
+    let last = Box::pin(lash_core::shift::work_session(
         &mut runtime,
         &handler.scoped(),
         &next,
     ))
     .await
-    .expect("continuation runs the remaining root");
+    .expect("continuation runs the remaining run");
     handler.close().await.expect("close the scope's handler");
     assert_eq!(last.ran.len(), 1);
-    assert_eq!(last.stop, lash_core::engine::DriveStop::Idle);
+    assert_eq!(last.stop, lash_core::engine::ShiftStop::Idle);
 }
 
 const SEED: u64 = 0x5_f440;
@@ -290,7 +290,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     let turn_events = RecordingTurnEvents::default();
     let handler = open_turn(&double, sid("root"), tid("process-wake-turn")).await;
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_events(&sink)
@@ -413,7 +413,7 @@ impl lash_core::plugin::PluginOperation for TestEmitCommand {
 
 impl lash_core::plugin::PluginCommand for TestEmitCommand {}
 
-/// A host's plugin command is a session command (FIG-4202): the drive runs
+/// A host's plugin command is a session command (FIG-4202): the shift runs
 /// the plugin's code at the boundary and lands its output and its events in
 /// the one commit that settles it.
 #[tokio::test(flavor = "multi_thread")]
@@ -540,7 +540,7 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
     let turn_id = "child-lifecycle-turn";
     let handler = open_turn(&double, handle.session_id.clone(), TurnId::from(turn_id)).await;
     let assembled = child
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -682,7 +682,7 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
     assert_eq!(runtime.session_id(), "root");
     let handler = open_turn(&double, sid("root"), tid("ordinary-child-parent-turn")).await;
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "parent turn".to_string(),
@@ -847,7 +847,7 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
 
     let handler = open_turn(&double, sid("root"), tid("alias-normalize-turn")).await;
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -939,7 +939,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
 
     let handler = open_turn(&double, sid("root"), tid("unsupported-effort-turn")).await;
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1036,7 +1036,7 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
     let run_turn = async |runtime: &mut LashRuntime, turn_id: &TurnId| {
         let handler = open_turn(&double, sid("root"), turn_id.clone()).await;
         runtime
-            .drive_turn(
+            .execute_turn(
                 TurnInput {
                     items: vec![InputItem::Text {
                         text: "hello".to_string(),
@@ -1157,7 +1157,7 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
 
     let handler = open_turn(&double, sid("root"), tid("generation-disposition-turn")).await;
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1286,7 +1286,7 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
 
     let handler = open_turn(&double, sid("root"), tid("clamped-cap-turn")).await;
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1417,7 +1417,7 @@ pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
     let mut runtime = standard_runtime_with_transport(&backend, mock_provider(Vec::new())).await;
     let handler = open_turn(&double, sid("root"), "storeless-drain").await;
     let drain = runtime
-        .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .execute_next_queued_run(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("a storeless drain still answers");
     handler.close().await.expect("close the drain's handler");
@@ -1459,13 +1459,13 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
     assert_eq!(pending[0].batch_id, receipt.batch_id);
 }
 
-/// The drive path's test entry (FIG-3600): an idle session answers an empty
-/// claim, a drain runs one root whose admission takes the head input (the
-/// default drain gives each input its own root, FIG-4457), and a drain re-run
-/// under the same identity replays its recorded drive instead of admitting
+/// The shift path's test entry (FIG-3600): an idle session answers an empty
+/// claim, a drain executes one run whose admission takes the head input (the
+/// default drain gives each input its own run, FIG-4457), and a drain re-run
+/// under the same identity replays its recorded shift instead of admitting
 /// anything new; the next drain runs the next input.
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeated_drain() {
+pub(super) async fn the_shift_entry_executes_one_run_per_drain_and_replays_a_repeated_drain() {
     let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
     let answer = |text: &str| MockCall {
         stream_events: Vec::new(),
@@ -1486,16 +1486,16 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     let runtime = Arc::new(tokio::sync::Mutex::new(runtime));
     let session = sid("root");
 
-    let idle_handler = open_turn(&double, session.clone(), tid("drive-entry-idle")).await;
+    let idle_handler = open_turn(&double, session.clone(), tid("shift-entry-idle")).await;
     let idle = runtime
         .lock()
         .await
-        .drive_next_queued_root(TurnOptions::new(
+        .execute_next_queued_run(TurnOptions::new(
             CancellationToken::new(),
             idle_handler.scoped(),
         ))
         .await
-        .expect("an idle drive answers");
+        .expect("an idle shift answers");
     idle_handler
         .close()
         .await
@@ -1513,12 +1513,12 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     enqueue_idle_turn_input(store.as_ref(), &session, "second question").await;
 
     // On the double a repeated drain replays at invocation replay, not on a
-    // fresh sequential call: the first attempt drains and journals the root,
+    // fresh sequential call: the first attempt drains and journals the run,
     // the crash fails that attempt, and the redrive decodes its recorded
     // verdict instead of admitting the next input.
-    type DriveDrainSlot =
+    type ShiftDrainSlot =
         Result<lash_core::facade_support::QueuedTurnDrain<AssembledTurn>, lash_core::RuntimeError>;
-    let drains: Arc<Mutex<Vec<DriveDrainSlot>>> = Arc::new(Mutex::new(Vec::new()));
+    let drains: Arc<Mutex<Vec<ShiftDrainSlot>>> = Arc::new(Mutex::new(Vec::new()));
     let crashed = Arc::new(AtomicBool::new(false));
     let attempt: lash_restate_test::HandlerAttempt = {
         let runtime = Arc::clone(&runtime);
@@ -1532,18 +1532,18 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
                 let drain = runtime
                     .lock()
                     .await
-                    .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), scoped))
+                    .execute_next_queued_run(TurnOptions::new(CancellationToken::new(), scoped))
                     .await;
                 drains.lock_recover().push(drain);
                 if !crashed.swap(true, Ordering::SeqCst) {
-                    panic!("drive-entry worker crash after journaling");
+                    panic!("shift-entry worker crash after journaling");
                 }
             })
         })
     };
     double
         .run_crashed_then_redriven(
-            AdmittedScope::turn(session.clone(), tid("drive-entry-first")),
+            AdmittedScope::turn(session.clone(), tid("shift-entry-first")),
             Arc::clone(&attempt),
             attempt,
         )
@@ -1561,30 +1561,30 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
             drains.remove(0).expect("the replayed drain recorded"),
         )
     };
-    let first = first.expect("the first drain runs a root");
+    let first = first.expect("the first drain executes a run");
     assert_eq!(first.assistant_output.safe_text, "first answer");
     let repeated = repeated.expect("the repeated drain replays");
     assert_eq!(
         repeated.assistant_output.safe_text, "first answer",
-        "a repeated drain replays its recorded root, never the next input"
+        "a repeated drain replays its recorded run, never the next input"
     );
 
-    let handler = open_turn(&double, session.clone(), tid("drive-entry-second")).await;
+    let handler = open_turn(&double, session.clone(), tid("shift-entry-second")).await;
     let after = runtime
         .lock()
         .await
-        .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), handler.scoped()))
+        .execute_next_queued_run(TurnOptions::new(CancellationToken::new(), handler.scoped()))
         .await
         .expect("a later drain answers");
     handler.close().await.expect("close the scope's handler");
     assert_eq!(
         after
             .ran()
-            .expect("the later drain runs the second input's own root")
+            .expect("the later drain runs the second input's own run")
             .assistant_output
             .safe_text,
         "second answer",
-        "the first root's admission took the first input alone"
+        "the first run's admission took the first input alone"
     );
     assert_eq!(
         lash_core::store::TurnInputStore::list_turn_input_applications(store.as_ref(), &session)

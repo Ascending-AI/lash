@@ -42,8 +42,8 @@ mod tool_settlement;
 pub use tool_settlement::{
     TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_SETTLEMENT_VERSION, ToolAttemptCapture, ToolSettlement,
 };
-mod drive_outcome;
 mod outcome;
+mod shift_outcome;
 pub use lash_core_effect::await_event_identity;
 mod validation;
 

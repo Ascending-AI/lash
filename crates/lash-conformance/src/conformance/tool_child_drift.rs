@@ -25,7 +25,7 @@
 //! finishes.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -177,7 +177,7 @@ fn attempt(
         let answers = answers.clone();
         Box::pin(async move {
             let started = world.executions.load(Ordering::SeqCst);
-            let turn = drive(&world, shape, &session_id, &turn_id, &store, probe, scope).await;
+            let turn = shift(&world, shape, &session_id, &turn_id, &store, probe, scope).await;
             let end = crate::ConformanceTurnEnd::of(&turn);
             if let Some(answers) = answers {
                 let _ = answers.send((turn, started));
@@ -187,8 +187,8 @@ fn attempt(
     })
 }
 
-/// Drive the redelivered attempt's turn under its engine scope.
-async fn drive(
+/// Execute the redelivered attempt's turn under its engine scope.
+async fn shift(
     world: &World,
     shape: Shape,
     session_id: &SessionId,
@@ -201,7 +201,7 @@ async fn drive(
     let mut input = crate::TurnInput::text("call the probe");
     input.trace_turn_id = Some(turn_id.clone());
     runtime
-        .drive_turn(
+        .execute_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         )

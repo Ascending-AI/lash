@@ -37,8 +37,8 @@ pub use lash_sansio::VersionRange;
 ///     ),
 ///     roots(path = "crates/lash-restate/src/process_attach.rs", RestateProcessAttachRequest),
 ///     roots(
-///         path = "crates/lash-restate/src/session_driver.rs", RestateSessionDriveRequest,
-///         RestateTurnDriveRequest, RestateRootCloseRequest,
+///         path = "crates/lash-restate/src/session_shifts.rs", RestateSessionShiftRequest,
+///         RestateRunRequest, RestateRunCloseRequest,
 ///     ),
 ///     roots(path = "crates/lash-restate/src/object_state.rs", ObjectUpgradeResponse),
 ///     items(COMPAT_KEY),

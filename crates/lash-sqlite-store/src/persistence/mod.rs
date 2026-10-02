@@ -103,7 +103,7 @@ pub(crate) fn ensure_session_not_deleted_conn(
     }
 }
 
-/// One ancestry node whose complete indexed root check found no live child,
+/// One ancestry node whose complete indexed run check found no live child,
 /// session head, or anchor, under the severing transaction's writer lock.
 struct RetirableAncestryNode {
     node_id: String,
@@ -174,10 +174,10 @@ pub(crate) fn nearest_frame_node_id_conn(
 
 mod admission;
 pub(crate) use admission::{
-    admit_at_checkpoint_sqlite, admit_root_sqlite, open_session_command_run_sqlite,
+    admit_at_checkpoint_sqlite, admit_run_sqlite, open_session_command_run_sqlite,
 };
-mod drive_epoch;
-pub(crate) use drive_epoch::drive_epoch_conn;
+mod shift_epoch;
+pub(crate) use shift_epoch::shift_epoch_conn;
 mod ingress_settlement;
 mod maintenance;
 mod queued_work;

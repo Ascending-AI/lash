@@ -40,7 +40,7 @@ define_runtime_turn_phases!(
 /// Explicitly unstable, including its phase vocabulary. Callbacks can overlap
 /// across async work. See `docs/architecture/turn-phase-probe.md` for pairing,
 /// cancellation and naming rules. Production probes must be short and must
-/// not panic or drive a turn.
+/// not panic or execute a turn.
 #[doc(hidden)]
 pub trait RuntimeTurnPhaseProbe: Send + Sync {
     fn begin(&self, phase: RuntimeTurnPhase);

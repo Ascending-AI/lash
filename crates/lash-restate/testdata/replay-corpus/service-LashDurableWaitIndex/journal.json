@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashDurableWaitIndex",
   "service": "LashDurableWaitIndex",
-  "generation": "1654dff52a0a",
+  "generation": "b14bcd97a3f0",
   "handlers": {
     "group_child_membership": [
       [
@@ -103,7 +103,7 @@
         "OutputCommand"
       ]
     ],
-    "retire_root": [
+    "retire_run": [
       [
         "InputCommand",
         "GetLazyStateCommand",

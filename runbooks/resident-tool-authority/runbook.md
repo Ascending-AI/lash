@@ -158,7 +158,7 @@ zero tests, or any malformed record restores as ambient.
 
 | Claim | Gate | Verdict | Evidence |
 | --- | --- | --- | --- |
-| One pinned definition drives native and RLM projections and validation | drift witness passes with one resolver call | | `resident-tool-authority.log` |
+| One pinned definition executes native and RLM projections and validation | drift witness passes with one resolver call | | `resident-tool-authority.log` |
 | Missing contracts and routes fail before preparation | typed negative witnesses pass with zero prepare calls | | `resident-tool-authority.log` |
 | Duplicate effective identity is refused before contract lookup | duplicate witness passes with zero resolver calls | | `resident-tool-authority.log` |
 | Name curation precedes completeness checks | suppressed malformed nonmember witness passes | | `resident-tool-authority.log` |

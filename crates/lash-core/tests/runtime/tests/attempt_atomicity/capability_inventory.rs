@@ -31,7 +31,7 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.named_phase("attempt-capability-law");
     let _ = attempt.completion_key();
     let _ = attempt.intent_identity(0);
-    let _ = attempt.logical_root();
+    let _ = attempt.logical_run();
     let _ = attempt.tool_catalog();
     assert_eq!(
         attempt

@@ -521,7 +521,7 @@ async fn main() -> Result<()> {
             args.session_id.clone(),
         ))
         .context("build RLM smoke core")?;
-    // The engine's endpoint serves on the row's port: the server drives the
+    // The engine's endpoint serves on the row's port: the server executes the
     // turn in its handlers, and this host only sends (D5).
     let worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()

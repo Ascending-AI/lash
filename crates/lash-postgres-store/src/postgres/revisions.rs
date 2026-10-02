@@ -44,7 +44,7 @@ pub(crate) async fn record_revision_tx(
 ///
 /// A fork holds its source revision's row share-locked until its own head
 /// commits, so a release that raced one waits and then retires nothing the
-/// fork now roots.
+/// fork now runs.
 pub(crate) async fn release_unretained_tx(
     tx: &mut Tx<'_>,
     collecting: bool,
@@ -129,17 +129,17 @@ async fn resolve_tx(
     session_id: &SessionId,
     target: &Target,
 ) -> Result<TargetResolution, StoreError> {
-    let root = match target {
+    let run = match target {
         Target::Revision(revision) => {
             return Ok(TargetResolution::of_revision(
                 *revision,
                 head_revision_tx(tx, session_id).await?,
             ));
         }
-        Target::Turn(root) => root.clone(),
+        Target::Turn(run) => run.clone(),
         Target::Input(input) => {
-            match crate::session_roots::root_binding_conn(tx, session_id, input).await? {
-                Some(root) => root,
+            match crate::session_runs::run_binding_conn(tx, session_id, input).await? {
+                Some(run) => run,
                 None => {
                     let state: Option<String> = sqlx::query_scalar(
                         crate::turn_ingress::turn_ingress_sql()
@@ -157,8 +157,8 @@ async fn resolve_tx(
             }
         }
     };
-    let terminal = crate::session_roots::root_terminal_conn(tx, session_id, &root).await?;
-    Ok(TargetResolution::of_root(terminal.as_ref()))
+    let terminal = crate::session_runs::run_terminal_conn(tx, session_id, &run).await?;
+    Ok(TargetResolution::of_run(terminal.as_ref()))
 }
 
 /// One stored revision row.

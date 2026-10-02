@@ -136,7 +136,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     let hydrated = resident
         .execution_state_hydration()
         .expect("fresh execution-state staging recovers hydration")
-        .expect("fresh execution-state staging restores a root");
+        .expect("fresh execution-state staging restores a run");
     assert_eq!(&*hydrated.root, &recovered_root[..]);
     assert_eq!(
         hydrated.components.get(LEAF_A).map(|b| &b[..]),
@@ -196,7 +196,7 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
             state.execution_state_hydration(),
             Err(crate::StoreError::ExecutionStateBodiesReleased)
         ),
-        "a released root backed by a store refuses hydration instead of reading as no execution (FIG-2521)"
+        "a released run backed by a store refuses hydration instead of reading as no execution (FIG-2521)"
     );
 
     // The next turn changes the same logical value: its new leaf body is
@@ -286,20 +286,20 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
     assert!(!superseded.components.contains_key(leaf_key));
 
     // A frame switch clears the execution: nothing is kept and nothing is
-    // refused, because the session no longer holds a root at all.
+    // refused, because the session no longer holds a run at all.
     state.set_execution_state_snapshot(None);
     state.discard_runtime_snapshots_retaining_accepted_execution();
     assert_eq!(
         state
             .execution_state_hydration()
-            .expect("no root is not corrupt"),
+            .expect("no run is not corrupt"),
         None
     );
 }
 
 /// A store-backed release keeps nothing in process: hydrating the released
-/// root is a typed refusal, never "no execution", while a session that never
-/// held a root still hydrates to `None` (FIG-2521).
+/// run is a typed refusal, never "no execution", while a session that never
+/// held a run still hydrates to `None` (FIG-2521).
 #[test]
 fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
     let mut state = two_leaf_execution(b"root", "execution_state/blake3/aa", b"leaf");
@@ -310,7 +310,7 @@ fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
             state.execution_state_hydration(),
             Err(crate::StoreError::ExecutionStateBodiesReleased)
         ),
-        "the released root must refuse hydration"
+        "the released run must refuse hydration"
     );
     state.discard_runtime_snapshots();
     assert!(
@@ -336,7 +336,7 @@ fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
 
 /// Staging a restored capture over the resident set keeps every leaf the set
 /// already holds — durably or as a pending body — as unchanged bookkeeping,
-/// and stages only the leaves it never held; the root is always restaged
+/// and stages only the leaves it never held; the run is always restaged
 /// (FIG-2521).
 #[test]
 fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
@@ -748,7 +748,7 @@ fn config_revision_round_trips_through_the_persisted_head_config() {
     assert_eq!(restored.policy.model, config.model);
 }
 
-/// Install a root view that runs under `config`, resolved against the
+/// Install a run view that runs under `config`, resolved against the
 /// state's sticky config.
 fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessionConfig) {
     let mut run = crate::run_spec::ResolvedRun::snapshot(
@@ -757,49 +757,49 @@ fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessio
         crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
     );
     run.resolved = (*config != run.base).then(|| Box::new(config.clone()));
-    state.install_root_view(&run);
+    state.install_run_view(&run);
 }
 
-/// FIG-4646: uninstalling a root view restores the sticky config under it,
+/// FIG-4646: uninstalling a run view restores the sticky config under it,
 /// every fact of it, so nothing read from the state afterwards is the
-/// root's. A second view installed over the first keeps the session's
+/// run's. A second view installed over the first keeps the session's
 /// sticky config, not the first view's.
 #[test]
-fn taking_a_root_view_restores_the_sticky_config() {
+fn taking_a_run_view_restores_the_sticky_config() {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    state.session_id = SessionId::from("take-root-view-law");
+    state.session_id = SessionId::from("take-run-view-law");
     state.policy.model = Some(recorded_llm_profile("sticky-route"));
     state.config_revision = 3;
     let sticky = crate::store::persisted_session_config_from_state(&state);
-    assert!(state.take_root_view().is_none(), "no view is installed");
+    assert!(state.take_run_view().is_none(), "no view is installed");
 
     let mut first = sticky.clone();
-    first.model = Some(recorded_llm_profile("first-root-route"));
+    first.model = Some(recorded_llm_profile("first-run-route"));
     first.generation.seed = Some(7);
     first.tool_access = crate::SessionToolAccess::ambient()
-        .with_hidden_tools(["hidden-by-root-view"])
+        .with_hidden_tools(["hidden-by-run-view"])
         .expect("valid hidden tool");
     install_view(&mut state, &first);
     let mut second = sticky.clone();
-    second.model = Some(recorded_llm_profile("second-root-route"));
+    second.model = Some(recorded_llm_profile("second-run-route"));
     install_view(&mut state, &second);
     assert_eq!(
         crate::store::execution_session_config_from_state(&state),
         second
     );
     assert_eq!(
-        state.authority.root_view().map(|view| &view.sticky),
+        state.authority.run_view().map(|view| &view.sticky),
         Some(&sticky),
         "a view installed over another keeps the session's sticky config"
     );
 
-    let taken = state.take_root_view().expect("the installed view");
+    let taken = state.take_run_view().expect("the installed view");
     assert_eq!(taken.sticky, sticky);
     assert_eq!(taken.run.config(), &second);
-    assert!(state.authority.root_view().is_none());
+    assert!(state.authority.run_view().is_none());
     assert_eq!(
         crate::store::execution_session_config_from_state(&state),
         sticky,
@@ -811,10 +811,10 @@ fn taking_a_root_view_restores_the_sticky_config() {
     );
 }
 
-/// FIG-4529: an observer's view of a state under a recorded root view reads
-/// the sticky config, while the state's own policy stays the root's.
+/// FIG-4529: an observer's view of a state under a recorded run view reads
+/// the sticky config, while the state's own policy stays the run's.
 #[test]
-fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
+fn recorded_session_view_reads_the_sticky_config_under_a_run_view() {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
@@ -827,15 +827,18 @@ fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
             .policy()
             .model,
         sticky.model,
-        "without a root view the recorded view is the resident policy"
+        "without a run view the recorded view is the resident policy"
     );
 
     let mut root = crate::store::persisted_session_config_from_state(&state);
-    root.model = Some(recorded_llm_profile("root-route"));
+    root.model = Some(recorded_llm_profile("run-route"));
     root.generation.seed = Some(7);
     install_view(&mut state, &root);
 
-    assert_eq!(state.policy.model, root.model, "the root runs its own view");
+    assert_eq!(
+        state.policy.model, root.model,
+        "the run executes its own view"
+    );
     let recorded = crate::SessionReadView::recorded_from_runtime_state(&state);
     assert_eq!(recorded.policy().model, sticky.model);
     assert_eq!(recorded.policy().generation, sticky.generation);
@@ -846,22 +849,22 @@ fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
 }
 
 #[test]
-fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
+fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    state.session_id = SessionId::from("root-config-law");
+    state.session_id = SessionId::from("run-config-law");
     state.policy.model = Some(recorded_llm_profile("sticky-route"));
     let sticky = crate::store::persisted_session_config_from_state(&state);
-    let mut root = sticky.clone();
-    root.model = Some(recorded_llm_profile("root-route"));
-    root.autonomous = !sticky.autonomous;
+    let mut run = sticky.clone();
+    run.model = Some(recorded_llm_profile("run-route"));
+    run.autonomous = !sticky.autonomous;
 
-    install_view(&mut state, &root);
+    install_view(&mut state, &run);
     assert_eq!(
         crate::store::execution_session_config_from_state(&state),
-        root
+        run
     );
     let commit =
         crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
@@ -871,7 +874,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::store::FleetFormat::current(),
         )
-        .expect("root commit");
+        .expect("run commit");
     assert_eq!(commit.config, sticky);
     assert_eq!(
         commit.config.model,
@@ -900,7 +903,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::store::persisted_session_config_from_state(&state),
         sticky
     );
-    install_view(&mut state, &root);
+    install_view(&mut state, &run);
     assert_eq!(
         crate::store::persisted_session_config_from_state(&state),
         sticky
@@ -918,18 +921,18 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     assert_eq!(state.to_snapshot().policy.autonomous, sticky.autonomous);
 }
 
-/// A root's commit is identified by the view it ran under, never by the
+/// A run's commit is identified by the view it ran under, never by the
 /// head's sticky config it writes back: a redrive that replays a committed
-/// root after a config change moved the head builds the same identity, so
+/// run after a config change moved the head builds the same identity, so
 /// the store answers its receipt instead of refusing a conflict. The written
 /// config is still the head's.
 #[test]
-fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
+fn a_run_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    state.session_id = SessionId::from("root-config-identity");
+    state.session_id = SessionId::from("run-config-identity");
     state.policy.model = Some(recorded_llm_profile("first-route"));
     let first = crate::store::persisted_session_config_from_state(&state);
     let commit_under = |state: &RuntimeSessionState| {
@@ -940,10 +943,10 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::store::FleetFormat::current(),
         )
-        .expect("root commit")
+        .expect("run commit")
     };
 
-    // The first execution: the root's recorded view is the head's config.
+    // The first execution: the run's recorded view is the head's config.
     install_view(&mut state, &first);
     let original = commit_under(&state);
     assert_eq!(original.config, first);
@@ -952,12 +955,12 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
         "the view is the head's"
     );
 
-    // A config change lands on the head after the root committed; the
-    // redrive adopts that head, then replays the root's recorded view.
+    // A config change lands on the head after the run committed; the
+    // redrive adopts that head, then replays the run's recorded view.
     let mut changed = first.clone();
     changed.model = Some(recorded_llm_profile("second-route"));
     changed.config_revision += 1;
-    state.take_root_view();
+    state.take_run_view();
     adopt_session_config(&mut state, &changed);
     install_view(&mut state, &first);
     let replayed = commit_under(&state);
@@ -968,10 +971,10 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     assert_eq!(
         replayed.turn_commit_hash().expect("replay identity"),
         original.turn_commit_hash().expect("original identity"),
-        "the replay is the root's committed operation"
+        "the replay is the run's committed operation"
     );
 
-    // A root that ran under another view is another operation.
+    // A run that ran under another view is another operation.
     let mut other = first.clone();
     other.model = Some(recorded_llm_profile("other-route"));
     install_view(&mut state, &other);
@@ -1137,13 +1140,13 @@ fn capped_plugin_config(cap: u64) -> crate::PluginConfig {
     config
 }
 
-/// FIG-4379: a root runs under the configuration it was admitted under. A
-/// redrive installs the root's recorded `ResolvedRun` over a head a later
-/// config patch moved on, and the hook input and a process the root starts
+/// FIG-4379: a run executes under the configuration it was admitted under. A
+/// redrive installs the run's recorded `ResolvedRun` over a head a later
+/// config patch moved on, and the hook input and a process the run starts
 /// both carry the admitted configuration at its admitted revision, not the
 /// head's.
 #[test]
-fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
+fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
     use crate::session_state::facade_ops::RuntimeSessionStateFacadeOps as _;
 
     let policy =
@@ -1160,7 +1163,7 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
             &crate::provider::EmptyLlmProfiles,
             &crate::run_spec::NoRunOptionsOwner,
         )
-        .expect("resolve the root");
+        .expect("resolve the run");
 
     let mut head = admitted.clone();
     head.plugin_config = capped_plugin_config(20);
@@ -1170,16 +1173,16 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
     assert_eq!(
         state.admitted_plugin_config(),
         crate::AdmittedPluginConfig::new(capped_plugin_config(20), 5),
-        "outside a root the head's configuration is the installed one"
+        "outside a run the head's configuration is the installed one"
     );
 
-    state.install_root_view(&resolved);
+    state.install_run_view(&resolved);
     let expected = crate::AdmittedPluginConfig::new(capped_plugin_config(12), 4);
     assert_eq!(state.admitted_plugin_config(), expected);
     assert_eq!(
         state.process_execution_env_spec(&policy).plugin_config,
         expected,
-        "a process the root starts captures the root's admitted configuration"
+        "a process the run starts captures the run's admitted configuration"
     );
 }
 

@@ -363,7 +363,7 @@ async fn generic_lash_core_builder_requires_protocol_plugin() {
 /// The standard prompt is recorded config (FIG-4589): each session records
 /// the prompt its own spec states, the host's default spec for one and
 /// another spec for the other, and a prompt command replaces it for the
-/// roots after it.
+/// runs after it.
 #[tokio::test]
 async fn the_standard_prompt_comes_from_the_session_spec_and_its_command() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1315,7 +1315,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let session = core.session("busy").created().await.open().await?;
     // A live clone shares the underlying runtime handle, exactly as an in-flight
     // turn would: parking must refuse rather than silently flush a session that
-    // something else is still driving.
+    // something else is still executing.
     let live_clone = session.clone();
     let err = match Box::pin(session.park()).await {
         Ok(_) => panic!("park must not proceed while another handle is live"),

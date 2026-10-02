@@ -155,15 +155,15 @@ pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimeStore>) {
-    // The root whose running turn the suffix's active input addresses.
-    let fence = seal_drive_fence_for_test(
+    // The run whose running turn the suffix's active input addresses.
+    let fence = seal_shift_fence_for_test(
         &store,
         &SessionId::from("pending-bulk-cancel"),
         "suffix-cancel-owner",
     )
     .await;
-    let root = running_root(&store, &fence, &TurnId::from("suffix-active-turn")).await;
-    let root_head = root.input_ids()[0].clone();
+    let run = active_run(&store, &fence, &TurnId::from("suffix-active-turn")).await;
+    let run_head = run.input_ids()[0].clone();
     let first = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "bulk first")
@@ -217,7 +217,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
             .iter()
             .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
-        vec![root_head.as_str(), second.input_id.as_str()]
+        vec![run_head.as_str(), second.input_id.as_str()]
     );
 
     let suffix_anchor = store
@@ -280,9 +280,9 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     assert_eq!(outcomes.len(), 3);
     expect_cancelled_pending_input(outcomes[0].clone(), &suffix_anchor.input_id);
     match &outcomes[1] {
-        crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { input, root } => {
+        crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { input, run } => {
             assert_eq!(input.input_id, active_admitted.input_id);
-            assert_eq!(root.as_str(), "suffix-active-turn");
+            assert_eq!(run.as_str(), "suffix-active-turn");
         }
         other => panic!("expected already-admitted suffix outcome, got {other:?}"),
     }
@@ -337,18 +337,18 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
             .iter()
             .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
-        // The input the checkpoint accepted stays listed, bound to its root,
-        // until that root settles or releases it (FIG-4044).
+        // The input the checkpoint accepted stays listed, bound to its run,
+        // until that run settles or releases it (FIG-4044).
         vec![
-            root_head.as_str(),
+            run_head.as_str(),
             second.input_id.as_str(),
             active_admitted.input_id.as_str()
         ]
     );
 }
 
-/// A root's admission binds the next-turn prefix, a host cancel of a bound
-/// row answers `AlreadyAdmitted{root}`, reads name the root, a completion
+/// A run's admission binds the next-turn prefix, a host cancel of a bound
+/// row answers `AlreadyAdmitted{run}`, reads name the run, a completion
 /// under a superseded fence is refused and changes nothing, and the live
 /// fence's completion settles every row to a tombstone no admission takes.
 #[expect(
@@ -372,12 +372,12 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeSt
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session, "second next"))
         .await
         .expect("enqueue second next input");
-    let fence = seal_drive_fence_for_test(&store, &session, "turn-input-owner").await;
-    let root = "input-root";
-    let admission = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session, "turn-input-owner").await;
+    let run = "input-run";
+    let admission = admitted_run(
         &store,
         &fence,
-        root,
+        run,
         lash_core::store::AdmittedHead::Input(first.input_id.clone()),
     )
     .await;
@@ -385,7 +385,7 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeSt
         admission.input_ids(),
         vec![first.input_id.clone(), second.input_id.clone()]
     );
-    let admitted = admission.inputs.as_ref().expect("the root admits inputs");
+    let admitted = admission.inputs.as_ref().expect("the run admits inputs");
     assert!(
         admitted
             .inputs
@@ -402,12 +402,9 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeSt
         .await
         .expect("cancel an admitted input")
     {
-        crate::PendingTurnInputCancelOutcome::AlreadyAdmitted {
-            input,
-            root: holder,
-        } => {
+        crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { input, run: holder } => {
             assert_eq!(input.input_id, first.input_id);
-            assert_eq!(holder.as_str(), root);
+            assert_eq!(holder.as_str(), run);
         }
         other => panic!("an admitted input must not be cancellable, got {other:?}"),
     }
@@ -423,15 +420,15 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeSt
         vec![first.input_id.as_str(), second.input_id.as_str()]
     );
     let bound = crate::PendingTurnInputReadStatus::Admitted {
-        root: TurnId::from(root),
+        run: TurnId::from(run),
     };
     assert!(admitted_reads.iter().all(|read| read.status == bound));
 
-    let successor = seal_drive_fence_for_test(&store, &session, "turn-input-successor").await;
-    let err = try_end_root(&store, &fence, completing_admission(root, &admission))
+    let successor = seal_shift_fence_for_test(&store, &session, "turn-input-successor").await;
+    let err = try_end_run(&store, &fence, completing_admission(run, &admission))
         .await
         .expect_err("a completion under a superseded fence must fail");
-    assert!(matches!(err, StoreError::StaleDriveFence { .. }));
+    assert!(matches!(err, StoreError::StaleShiftFence { .. }));
     let reads_after_stale_completion = store
         .list_pending_turn_inputs(&session)
         .await
@@ -441,10 +438,10 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeSt
         reads_after_stale_completion
             .iter()
             .all(|read| read.status == bound),
-        "a refused completion must leave the rows bound to their root"
+        "a refused completion must leave the rows bound to their run"
     );
 
-    end_root(&store, &successor, completing_admission(root, &admission)).await;
+    end_run(&store, &successor, completing_admission(run, &admission)).await;
     assert!(
         store
             .list_pending_turn_inputs(&session)
@@ -477,10 +474,10 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeSt
         crate::TurnInputStateKind::Completed
     );
     assert!(
-        admit_root_for_test(
+        admit_run_for_test(
             &store,
             &successor,
-            &TurnId::from("after-completion-root"),
+            &TurnId::from("after-completion-run"),
             lash_core::store::AdmittedHead::Input(first.input_id.clone()),
         )
         .await
@@ -506,8 +503,8 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
     let session_id = SessionId::from(SESSION_ID);
     let turn = crate::TurnId::from(TURN_ID);
     let predecessor =
-        seal_drive_fence_for_test(&store, &session_id, "fig905-active-predecessor").await;
-    let root = running_root(&store, &predecessor, &turn).await;
+        seal_shift_fence_for_test(&store, &session_id, "fig905-active-predecessor").await;
+    let run = active_run(&store, &predecessor, &turn).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
@@ -518,7 +515,7 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
         .await
         .expect("enqueue active input");
 
-    let admit = |fence: lash_core::store::DriveFence| {
+    let admit = |fence: lash_core::store::ShiftFence| {
         let store = Arc::clone(&store);
         let turn = turn.clone();
         async move {
@@ -546,7 +543,7 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
         crate::TurnInputStateKind::Accepted
     );
 
-    let successor = seal_drive_fence_for_test(&store, &session_id, "fig905-active-successor").await;
+    let successor = seal_shift_fence_for_test(&store, &session_id, "fig905-active-successor").await;
     let rerun = admit(successor.clone()).await;
     assert!(
         rerun.queued.is_none(),
@@ -562,38 +559,38 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
         "the rerun reads back the rows its step bound"
     );
 
-    let settlement = completing_checkpoint(completing_admission(TURN_ID, &root), &rerun);
-    let stale_error = try_end_root(&store, &predecessor, settlement.clone())
+    let settlement = completing_checkpoint(completing_admission(TURN_ID, &run), &rerun);
+    let stale_error = try_end_run(&store, &predecessor, settlement.clone())
         .await
         .expect_err("the superseded predecessor's completion is refused");
-    assert!(matches!(stale_error, StoreError::StaleDriveFence { .. }));
-    end_root(&store, &successor, settlement).await;
+    assert!(matches!(stale_error, StoreError::StaleShiftFence { .. }));
+    end_run(&store, &successor, settlement).await;
 }
 
-/// FIG-1511, FIG-3927 §2.6: an input bound to a root stays bound across a
-/// drive supersession, and host cancellation refuses it. The root's terminal
+/// FIG-1511, FIG-3927 §2.6: an input bound to a run stays bound across a
+/// shift supersession, and host cancellation refuses it. The run's terminal
 /// releases it: an accepted active-turn input names a turn that is over, so
 /// it is re-deferred open, cancellable and vacuumed, and a settlement that
-/// still names it is refused because no root holds it.
+/// still names it is refused because no run holds it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_vacuumed(
+pub async fn accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_vacuumed(
     store: Arc<dyn RuntimeStore>,
 ) {
     const SESSION_ID: &str = "fig1511-orphaned-accepted";
     const TURN_ID: &str = "fig1511-orphaned-accepted:turn";
     let session_id = SessionId::from(SESSION_ID);
     let turn = TurnId::from(TURN_ID);
-    let fence = seal_drive_fence_for_test(&store, &session_id, "fig1511-accepted-owner").await;
-    let root = running_root(&store, &fence, &turn).await;
+    let fence = seal_shift_fence_for_test(&store, &session_id, "fig1511-accepted-owner").await;
+    let run = active_run(&store, &fence, &turn).await;
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
             &turn,
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "accepted before the drive was superseded",
+            "accepted before the shift was superseded",
         ))
         .await
         .expect("enqueue active input");
@@ -616,27 +613,27 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
         crate::TurnInputStateKind::Accepted
     );
 
-    let successor = seal_drive_fence_for_test(&store, &session_id, "fig1511-successor").await;
+    let successor = seal_shift_fence_for_test(&store, &session_id, "fig1511-successor").await;
     assert!(
         matches!(
             store
                 .cancel_pending_turn_input(&session_id, &input.input_id)
                 .await
                 .expect("cancel the bound input after supersession"),
-            crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { ref root, .. }
-                if *root == turn
+            crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { ref run, .. }
+                if *run == turn
         ),
-        "a drive supersession does not release a root's rows"
+        "a shift supersession does not release a run's rows"
     );
 
-    // The root ends settling its head but not the input: its terminal
+    // The run ends settling its head but not the input: its terminal
     // releases the input.
-    end_root(&store, &successor, completing_admission(TURN_ID, &root)).await;
+    end_run(&store, &successor, completing_admission(TURN_ID, &run)).await;
     assert_eq!(
         store
-            .root_of_input(&session_id, &input.input_id)
+            .run_of_input(&session_id, &input.input_id)
             .await
-            .expect("read the released input's root"),
+            .expect("read the released input's run"),
         None,
         "a released checkpoint input stays unbound"
     );
@@ -676,11 +673,11 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
         stale_error,
         StoreError::IngressRowNotAdmitted {
             session_id: ref refused_session_id,
-            ref root,
+            ref run,
             ref row,
-            admitted_root: None,
+            admitted_run: None,
         } if *refused_session_id == session_id
-            && *root == turn
+            && *run == turn
             && **row == lash_core::store::IngressRowId::Input(input.input_id.clone())
     ));
     let vacuum = store
@@ -712,8 +709,8 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     );
     let turn_id = "cancel-active-turn";
     let lease =
-        seal_drive_fence_for_test(&store, &SessionId::from("root"), "cancel-input-owner").await;
-    let root = running_root(&store, &lease, &TurnId::from(turn_id)).await;
+        seal_shift_fence_for_test(&store, &SessionId::from("root"), "cancel-input-owner").await;
+    let run = active_run(&store, &lease, &TurnId::from(turn_id)).await;
     let active_keep = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &SessionId::from("root"),
@@ -756,7 +753,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
         .expect("cancel next input");
     expect_cancelled_pending_input(cancelled_next, &next_cancel.input_id);
 
-    // The interrupted turn's final commit ends its root.
+    // The interrupted turn's final commit ends its run.
     store
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
@@ -767,7 +764,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
                 final_commit(
                     head_commit(&store, &SessionId::from("root")).await,
                     &lease,
-                    completing_admission(turn_id, &root),
+                    completing_admission(turn_id, &run),
                 ),
             )
             .await
@@ -807,10 +804,10 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
         .expect("cancel deferred input");
     expect_cancelled_pending_input(cancelled_deferred, &active_keep.input_id);
     assert!(
-        admit_root_for_test(
+        admit_run_for_test(
             &store,
             &lease,
-            &TurnId::from("after-cancel-root"),
+            &TurnId::from("after-cancel-run"),
             lash_core::store::AdmittedHead::Input(active_keep.input_id.clone()),
         )
         .await
@@ -834,9 +831,9 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     );
     let turn_id = "active-turn-1";
     let lease =
-        seal_drive_fence_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
-    let root = running_root(&store, &lease, &TurnId::from(turn_id)).await;
-    // Another turn the same root runs: its follow-on physical turn.
+        seal_shift_fence_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
+    let run = active_run(&store, &lease, &TurnId::from(turn_id)).await;
+    // Another turn the same run executes: its follow-on physical turn.
     let other_turn = lash_core::store::PhysicalTurn::derive_turn_id(&TurnId::from(turn_id), 1);
     let accepted = store
         .enqueue_pending_turn_input(
@@ -912,7 +909,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     ));
 
     // The interrupted turn's final commit completes what it accepted and
-    // ends its root.
+    // ends its run.
     store
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
@@ -924,7 +921,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
                     head_commit(&store, &SessionId::from("root")).await,
                     &lease,
                     {
-                        let mut settlement = completing_admission(turn_id, &root);
+                        let mut settlement = completing_admission(turn_id, &run);
                         settlement
                             .completed_inputs
                             .push(admitted_inputs.completion());
@@ -970,10 +967,10 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         );
     }
 
-    let next_admission = admitted_root(
+    let next_admission = admitted_run(
         &store,
         &lease,
-        "deferred-root",
+        "deferred-run",
         lash_core::store::AdmittedHead::Input(unaccepted.input_id.clone()),
     )
     .await;
@@ -984,12 +981,12 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
             before_completion.input_id.clone(),
             other_active.input_id.clone(),
         ],
-        "the next root admits every input its predecessor left, each once, in place"
+        "the next run admits every input its predecessor left, each once, in place"
     );
-    end_root(
+    end_run(
         &store,
         &lease,
-        completing_admission("deferred-root", &next_admission),
+        completing_admission("deferred-run", &next_admission),
     )
     .await;
     assert!(
@@ -1006,9 +1003,9 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 /// FIG-3927 §2.6).
 ///
 /// A turn that never reaches its commit - killed, aborted, or fenced - ends
-/// its root with a terminal, and the terminal write is the repair: every
-/// row still bound to the root is released. Every open active-turn input
-/// addressed to any of the root's physical turns then names a turn that is
+/// its run with a terminal, and the terminal write is the repair: every
+/// row still bound to the run is released. Every open active-turn input
+/// addressed to any of the run's physical turns then names a turn that is
 /// over, so it is next-turn input by rule at its own position, its submitted
 /// delivery unchanged (ADR 0101 §5.1). A terminal under a superseded fence
 /// writes nothing at all.
@@ -1018,28 +1015,28 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 )]
 pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("root");
-    let dead_root = TurnId::from("fig1573-dead-root");
-    let later_turn = lash_core::store::PhysicalTurn::derive_turn_id(&dead_root, 2);
+    let dead_run = TurnId::from("fig1573-dead-run");
+    let later_turn = lash_core::store::PhysicalTurn::derive_turn_id(&dead_run, 2);
     let head = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
             &session,
-            "the dead root's head",
+            "the dead run's head",
         ))
         .await
         .expect("enqueue the head");
-    let stale = seal_drive_fence_for_test(&store, &session, "fig1573-owner").await;
-    let admission = admitted_root(
+    let stale = seal_shift_fence_for_test(&store, &session, "fig1573-owner").await;
+    let admission = admitted_run(
         &store,
         &stale,
-        dead_root.as_str(),
+        dead_run.as_str(),
         lash_core::store::AdmittedHead::Input(head.input_id.clone()),
     )
     .await;
     assert_eq!(admission.input_ids(), vec![head.input_id.clone()]);
     let mut orphaned = Vec::new();
     for (turn, text) in [
-        (&dead_root, "pinned to the root's first turn"),
-        (&later_turn, "pinned to a later physical turn of the root"),
+        (&dead_run, "pinned to the run's first turn"),
+        (&later_turn, "pinned to a later physical turn of the run"),
     ] {
         orphaned.push(
             store
@@ -1050,18 +1047,18 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(store: Arc<d
                     text,
                 ))
                 .await
-                .expect("enqueue an input pinned to the dead root"),
+                .expect("enqueue an input pinned to the dead run"),
         );
     }
 
     // A superseded caller repairs nothing: its terminal is refused whole.
-    let successor = seal_drive_fence_for_test(&store, &session, "fig1573-successor").await;
-    let refusal = try_end_root(&store, &stale, IngressSettlement::new(dead_root.clone()))
+    let successor = seal_shift_fence_for_test(&store, &session, "fig1573-successor").await;
+    let refusal = try_end_run(&store, &stale, IngressSettlement::new(dead_run.clone()))
         .await
         .expect_err("a superseded fence must be refused inside the terminal write");
     assert!(
-        matches!(refusal, StoreError::StaleDriveFence { .. }),
-        "a superseded terminal must be refused by the drive fence: {refusal:?}"
+        matches!(refusal, StoreError::StaleShiftFence { .. }),
+        "a superseded terminal must be refused by the shift fence: {refusal:?}"
     );
     let untouched = store
         .list_pending_turn_inputs(&session)
@@ -1079,14 +1076,9 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(store: Arc<d
         );
     }
 
-    // The live fence's terminal releases the root's rows; the open input
+    // The live fence's terminal releases the run's rows; the open input
     // addressed to its turns is next-turn input by rule.
-    end_root(
-        &store,
-        &successor,
-        IngressSettlement::new(dead_root.clone()),
-    )
-    .await;
+    end_run(&store, &successor, IngressSettlement::new(dead_run.clone())).await;
     let pending = store
         .list_pending_turn_inputs(&session)
         .await
@@ -1110,10 +1102,10 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(store: Arc<d
     }
 
     // The repaired rows are next-turn work again, which is the whole point.
-    let next = admitted_root(
+    let next = admitted_run(
         &store,
         &successor,
-        "fig1573-next-root",
+        "fig1573-next-run",
         lash_core::store::AdmittedHead::Input(head.input_id.clone()),
     )
     .await;
@@ -1245,7 +1237,7 @@ fn assert_source_key_conflict(
 /// the row after admission (FIG-3544).
 ///
 /// Both Defer paths leave the row where it was submitted: the final commit
-/// of the turn the row named, and the root terminal that ends a later
+/// of the turn the row named, and the run terminal that ends a later
 /// physical turn the row named. Neither rewrites the row's delivery (ADR 0101
 /// §5.1), so a byte-identical `active_turn` retry after either, and after the
 /// deferred row later settles into a tombstone, returns the existing row
@@ -1267,8 +1259,8 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     let dead_turn =
         lash_core::store::PhysicalTurn::derive_turn_id(&TurnId::from(ended_turn), 1).to_string();
     let dead_turn = dead_turn.as_str();
-    let lease = seal_drive_fence_for_test(&store, &session_id, "fig3544-owner").await;
-    let root = running_root(&store, &lease, &TurnId::from(ended_turn)).await;
+    let lease = seal_shift_fence_for_test(&store, &session_id, "fig3544-owner").await;
+    let run = active_run(&store, &lease, &TurnId::from(ended_turn)).await;
     let commit_deferred = || {
         source_keyed_active_draft(
             ended_turn,
@@ -1281,7 +1273,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         source_keyed_active_draft(
             dead_turn,
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "deferred by its root's terminal",
+            "deferred by its run's terminal",
             "host:fig3544-repair-defer",
         )
     };
@@ -1292,10 +1284,10 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     let first_repair_deferred = store
         .enqueue_pending_turn_input(repair_deferred())
         .await
-        .expect("admit the input the root terminal defers");
+        .expect("admit the input the run terminal defers");
 
     // The turn's final commit defers its undelivered input and ends the
-    // root, whose later physical turn the other input names.
+    // run, whose later physical turn the other input names.
     store
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
@@ -1306,7 +1298,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
                 final_commit(
                     head_commit(&store, &session_id).await,
                     &lease,
-                    completing_admission(ended_turn, &root),
+                    completing_admission(ended_turn, &run),
                 ),
             )
             .await
@@ -1340,7 +1332,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         (
             repair_deferred(),
             &first_repair_deferred,
-            "root-terminal defer",
+            "run-terminal defer",
         ),
     ] {
         let replayed = store
@@ -1360,18 +1352,18 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     }
 
     // Settle both deferred rows into tombstones: replay still matches.
-    let next = admitted_root(
+    let next = admitted_run(
         &store,
         &lease,
-        "fig3544-next-root",
+        "fig3544-next-run",
         lash_core::store::AdmittedHead::Input(first_commit_deferred.input_id.clone()),
     )
     .await;
     assert_eq!(next.input_ids().len(), 2);
-    end_root(
+    end_run(
         &store,
         &lease,
-        completing_admission("fig3544-next-root", &next),
+        completing_admission("fig3544-next-run", &next),
     )
     .await;
     for (retry, first) in [
@@ -1406,8 +1398,8 @@ pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root");
     let turn = "fig3544-conflict-turn";
     let key = "host:fig3544-conflict";
-    let lease = seal_drive_fence_for_test(&store, &session_id, "fig3544-conflict-owner").await;
-    let root = running_root(&store, &lease, &TurnId::from(turn)).await;
+    let lease = seal_shift_fence_for_test(&store, &session_id, "fig3544-conflict-owner").await;
+    let run = active_run(&store, &lease, &TurnId::from(turn)).await;
     let original = || {
         source_keyed_active_draft(
             turn,
@@ -1462,8 +1454,8 @@ pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimeStore>) {
         );
     }
 
-    // The turn's root ends: the input pinned to it is next-turn input.
-    end_root(&store, &lease, completing_admission(turn, &root)).await;
+    // The turn's run ends: the input pinned to it is next-turn input.
+    end_run(&store, &lease, completing_admission(turn, &run)).await;
     assert_source_key_conflict(
         store
             .enqueue_pending_turn_input(

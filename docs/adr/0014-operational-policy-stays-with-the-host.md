@@ -10,7 +10,7 @@ The embedding host owns intake, drain order, deadlines, failover and treatment o
 
 - `LashSession::park(self)` flushes and returns a resumable `ParkedSession`; `LashCore::resume` reconstructs it. `close(self)` flushes and discards the handle. Both require sole runtime ownership and return `SessionStillInUse` while other live handles remain.
 - `Provider::close`, factory release through `LashCore::shutdown`, and `TraceSink::flush` expose resource release. Core shutdown resigns recovery leadership, then visits the protocol and common factories, continuing after errors and returning the first error. It does not choose a turn-drain policy.
-- Durable ingress and its delivery obligations remain inspectable and cancellable under ADRs 0101 and 0109. Execution belongs to the sealed drive fence. `revoke_durable_waits` cancels current session waits without deleting the session.
+- Durable ingress and its delivery obligations remain inspectable and cancellable under ADRs 0101 and 0109. Execution belongs to the sealed shift fence. `revoke_durable_waits` cancels current session waits without deleting the session.
 - Trigger registrations are durable truth. Hosts wanting workflow reconciliation compare registered state and explicitly update, delete or prune it. Compilation does not infer subscription removal.
 
 Restate's wait index distinguishes `cancel_all`, which cancels the current set and permits later registration, from `revoke_all`, which retains revocation and rejects future waits. Exact workflow addresses resolve promises; session-bearing scopes also participate in the session index.

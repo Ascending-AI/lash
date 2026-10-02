@@ -1,7 +1,7 @@
 //! The benchmark harness's own plugin stack.
 //!
 //! The harness composes only the plugins its scenarios exercise, so it does not
-//! inherit tool families it never drives.
+//! inherit tool families it never executes.
 
 use std::sync::Arc;
 

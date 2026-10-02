@@ -80,7 +80,7 @@ pub async fn a_host_layer_observes_its_group_childrens_effects<F, S>(
                 .expect("build the reference runtime");
                 seam.control.clear();
                 // The turn's own controller is the runner's, unlayered.
-                let drain = Box::pin(runtime.drive_one_admitted_queued_root(
+                let drain = Box::pin(runtime.execute_one_admitted_queued_run(
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scoped),
                 ))
                 .await;

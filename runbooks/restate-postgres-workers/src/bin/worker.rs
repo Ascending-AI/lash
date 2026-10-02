@@ -40,8 +40,8 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, FRAME_CRASH_SESSION_ID,
     HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, crash_exit_taken,
-    default_session_originator_id, driven_queued_roots, e2e_tokio_thread_stack_bytes,
-    ensure_e2e_schema, env, journaled_session, record_terminal_result, record_turn_activity,
+    default_session_originator_id, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
+    executed_queued_runs, journaled_session, record_terminal_result, record_turn_activity,
     record_worker_event, required_env, s3_store_from_env, turn_handler_error, turn_session_id,
 };
 
@@ -49,7 +49,7 @@ fn terminal_error(err: impl Display) -> TerminalError {
     TerminalError::new(err.to_string())
 }
 
-/// A settled root's output. A root that parked holds its work until an
+/// A settled run's output. A run that parked holds its work until an
 /// operator resolves the park, and an input withdrawn before it ran has no
 /// turn: neither is an answer this workflow can report, so each ends the
 /// invocation terminally with the status it answered.
@@ -161,7 +161,7 @@ impl AppState {
 
     /// `core` is the worker's one core, the one whose session driver the
     /// backend's engine runs: a session this handler opens is the resident a
-    /// drive landing on this worker borrows, so its turns stream here live.
+    /// shift landing on this worker borrows, so its turns stream here live.
     async fn run_turn_with_restate(
         &self,
         ctx: WorkflowContext<'_>,
@@ -220,12 +220,12 @@ impl AppState {
         Box::pin(self.main_turn(ctx, core, request)).await.map(Json)
     }
 
-    /// The kitchen-sink process's deferred wake. The engine drives a wake
-    /// the moment it is enqueued, under the queued run's own root, so this
-    /// awaits the engine's drive of it and reads the queued turn's result from
-    /// the session: the oldest driven queued root no other wake workflow
+    /// The kitchen-sink process's deferred wake. The engine executes a wake
+    /// the moment it is enqueued, under the queued run's own run, so this
+    /// awaits the engine's shift of it and reads the queued turn's result from
+    /// the session: the oldest executed queued run no other wake workflow
     /// claimed whose turn consumed the wake. A redelivered invocation finds
-    /// the root it claimed.
+    /// the run it claimed.
     async fn await_driven_wake(
         &self,
         ctx: &WorkflowContext<'_>,
@@ -238,19 +238,19 @@ impl AppState {
         while Instant::now() < deadline {
             let claimed: Vec<String> = sqlx::query_scalar(
                 "SELECT detail_json::jsonb ->> 'root' FROM lash_e2e_worker_events
-                 WHERE event_type = 'wake_root' AND workflow_id <> $1",
+                 WHERE event_type = 'wake_run' AND workflow_id <> $1",
             )
             .bind(&request.workflow_id)
             .fetch_all(pool)
             .await
             .map_err(terminal_error)?;
-            let roots = driven_queued_roots(pool, DEFAULT_SESSION_ID)
+            let runs = executed_queued_runs(pool, DEFAULT_SESSION_ID)
                 .await
                 .map_err(terminal_error)?;
-            for root in roots.into_iter().filter(|root| !claimed.contains(root)) {
+            for run in runs.into_iter().filter(|run| !claimed.contains(run)) {
                 let turn = settled_output(
                     session
-                        .root(lash::TurnId::parse(root.as_str()).map_err(terminal_error)?)
+                        .run(lash::TurnId::parse(run.as_str()).map_err(terminal_error)?)
                         .outcome_restate(ctx, RestateWait::new())
                         .await?,
                 )?;
@@ -264,7 +264,7 @@ impl AppState {
                 {
                     continue;
                 }
-                self.record(&request.workflow_id, "wake_root", json!({ "root": root }))
+                self.record(&request.workflow_id, "wake_run", json!({ "run": run }))
                     .await?;
                 return self
                     .finish_response(&request, final_value, turn.activities.len(), None, true)
@@ -273,7 +273,7 @@ impl AppState {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
         Err(terminal_error(format!(
-            "timed out waiting for the engine to drive the wake for `{}`",
+            "timed out waiting for the engine to execute the wake for `{}`",
             request.workflow_id
         ))
         .into())
@@ -305,7 +305,7 @@ impl AppState {
             Some(cursor_text.clone()),
         );
         let input = TurnInput::text(prompt_for_request(&request));
-        // The engine drives the turn under the workflow id; this handler
+        // The engine executes the turn under the workflow id; this handler
         // only journals the acceptance and waits in journaled probes, so a
         // replayed invocation neither submits twice nor runs the turn.
         let turn = settled_output(
@@ -405,7 +405,7 @@ impl AppState {
         let enqueue_session = session.clone();
         let enqueue_pool = self.witness.clone();
         let enqueue_workflow_id = request.workflow_id.clone();
-        // The second input lands while the first root runs its frame switch.
+        // The second input lands while the first run executes its frame switch.
         // A replayed invocation sends it again under the same id, which the
         // store answers with the first acceptance.
         let enqueue_second =
@@ -445,9 +445,9 @@ impl AppState {
             .final_value()
             .cloned()
             .ok_or_else(|| terminal_error("second queued turn produced no final value"))?;
-        // The input accepted mid-chain is not folded into the first root's
-        // follow-on turn: its own root answers the pending item, not the seed.
-        let second_own_root = second_value
+        // The input accepted mid-chain is not folded into the first run's
+        // follow-on turn: its own run answers the pending item, not the seed.
+        let second_own_run = second_value
             .get("pending_item")
             .and_then(serde_json::Value::as_bool)
             == Some(true)
@@ -469,7 +469,7 @@ impl AppState {
                 "seed_visible": first_value.get("seed_visible").cloned().unwrap_or_default(),
                 "follow_on": first_value.get("follow_on").cloned().unwrap_or_default(),
                 "first_completed": first_completed,
-                "second_own_root": second_own_root,
+                "second_own_run": second_own_run,
                 "second_completed": second_value.get("pending_item").cloned().unwrap_or_default(),
                 "queue_empty": queue_empty,
                 "inputs_empty": inputs_empty,
@@ -482,9 +482,9 @@ impl AppState {
     }
 
     /// The frame-switch turn killed before its switch commits and recovered
-    /// by Restate redelivery of the engine's drive: the original turn's
+    /// by Restate redelivery of the engine's shift: the original turn's
     /// `crash_once` tool exits whichever worker runs it, once, before the
-    /// turn's `continue_as`, and the redelivered drive replays what the
+    /// turn's `continue_as`, and the redelivered shift replays what the
     /// journal holds and runs on, so the provider sees each physical turn
     /// once. The kill after the switch commits is parked on FIG-3788: a
     /// queued frame-switch drain redriven after its commit diverges from its
@@ -617,8 +617,8 @@ impl AppState {
         wait_for_cancel_gate(self.storage.pool(), &request.workflow_id)
             .await
             .map_err(terminal_error)?;
-        // The root is mid-chain, in its follow-on turn: the cancel lands on
-        // the root's gate wherever the engine runs it.
+        // The run is mid-chain, in its follow-on turn: the cancel lands on
+        // the run's gate wherever the engine runs it.
         let receipt = original
             .cancel()
             .origin("scripted-e2e-worker")
@@ -845,7 +845,7 @@ async fn load_resources(
     let output = tokio::process::Command::new("python3")
         .args([
             "/opt/lash/loadtest_resources.py",
-            "--root",
+            "--run",
             &std::process::id().to_string(),
         ])
         .output()

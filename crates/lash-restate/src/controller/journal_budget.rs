@@ -133,9 +133,9 @@ fn maximal_usage_stamp() -> lash_core::EffectUsage {
             "s",
             "s".repeat(MEASURED_STAMP_OWNER_BYTES - 1),
         )),
-        run: lash_core::UsageRunId::mint(),
+        meter: lash_core::UsageMeterId::mint(),
         facts: Vec::new(),
-        accounting: lash_core::RunAccounting::FactsUnjournalable {
+        accounting: lash_core::MeterAccounting::FactsUnjournalable {
             dropped_facts: u32::MAX,
         },
     }

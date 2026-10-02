@@ -20,12 +20,12 @@
 //! | [`obligations_settled`] | every ADR 0109 obligation column family in every store database |
 //! | [`artifact_reachability`] | `artifact_refs`, `artifact_referrer_edges`, `referrer_fences` and `artifact_cleanup_obligations` |
 //! | [`tool_call_identity`] | tool-body runs ([`Fact::ToolExecuted`]) and the committed transcript's tool calls |
-//! | [`input_settlement`] | `pending_turn_inputs`, `queued_work_batches`, `session_roots` and `session_root_inputs` |
+//! | [`input_settlement`] | `pending_turn_inputs`, `queued_work_batches`, `session_runs` and `session_run_inputs` |
 //! | [`start_originator`] | the host's process starts, each with the originator it requested and the one the answered process carries ([`Fact::ProcessStartAnswered`]) |
 //! | [`frame_lineage`] | `graph_nodes` and `session_head` |
 //! | [`host_admission`] | typed host send outcomes, raw input rows and committed input/answer markers |
 //! | [`transcript_order`] | sequential Known host sends and their committed user-message positions |
-//! | [`redrive_resumes`] | the host's redrives, the intent acknowledgements and root resumes the deployment's store and engine answered ([`Fact::IntentAck`], [`Fact::Resume`]), and the turn park feed ([`ParkEventRow`]) |
+//! | [`redrive_resumes`] | the host's redrives, the intent acknowledgements and run resumes the deployment's store and engine answered ([`Fact::IntentAck`], [`Fact::Resume`]), and the turn park feed ([`ParkEventRow`]) |
 //!
 //! Store rows are read raw, through the SQLite store's test-only
 //! `read_rows_for_testing` (`lash-sqlite-store`, `testing` feature), the
@@ -80,7 +80,7 @@ use serde::Serialize;
 
 pub use redrive_resumes::ParkEventRow;
 pub use snapshot::{
-    ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RootRow, StoreSnapshot,
+    ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RunRow, StoreSnapshot,
     TranscriptCall, TranscriptSession, TranscriptToolOutput,
 };
 
@@ -242,7 +242,7 @@ pub enum HostOutcome {
 pub enum HostRefusalCode {
     Runtime(lash_core::RuntimeErrorCode),
     UnknownSession,
-    /// The store refused a redrive of a parked root.
+    /// The store refused a redrive of a parked run.
     Redrive(RedriveRefusal),
 }
 
@@ -277,32 +277,32 @@ pub enum Fact {
     HostOp {
         op: HostOp,
         session: String,
-        roots: Vec<String>,
+        runs: Vec<String>,
         outcome: HostOutcome,
     },
     Fault {
         kind: FaultKind,
         detail: String,
     },
-    /// The store acknowledged a control intent: its verb, and the root and
-    /// park a root verb names. `applied` when its engine half ran and was
+    /// The store acknowledged a control intent: its verb, and the run and
+    /// park a run verb names. `applied` when its engine half ran and was
     /// acknowledged under a held claim; not when the store settled a redrive
-    /// its root had already run past.
+    /// its run had already run past.
     IntentAck {
         intent: String,
         session: String,
         verb: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        root: Option<String>,
+        run: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         park: Option<u64>,
         applied: bool,
     },
-    /// The engine answered a root's resume; `held` when it resumed an
+    /// The engine answered a run's resume; `held` when it resumed an
     /// execution it held.
     Resume {
         session: String,
-        root: String,
+        run: String,
         held: bool,
     },
     /// A scheduler boundary the run delivered.
@@ -780,16 +780,16 @@ pub async fn check_engine(
     Ok(check(&history))
 }
 
-/// How long the end of a history waits for one session's drive to settle.
+/// How long the end of a history waits for one session's shift to settle.
 const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The end of a history on `engine`: every session's drive has settled,
-/// with the scope closes its roots owed. A send answers at its root's final
-/// commit, before the root's scope closes (FIG-3979), so a store read at
-/// that point sees a close still in flight. A drive that does not settle
+/// The end of a history on `engine`: every session's shift has settled,
+/// with the scope closes its runs owed. A send answers at its run's final
+/// commit, before the run's scope closes (FIG-3979), so a store read at
+/// that point sees a close still in flight. A shift that does not settle
 /// within [`SETTLE_LIMIT`] (a turn the scenario leaves parked) is judged as
 /// it stands.
-pub(crate) async fn settle_drives(
+pub(crate) async fn settle_shifts(
     engine: &lash_restate_test::RestateTestBackend,
 ) -> Result<(), String> {
     let sessions = lash_sqlite_store::testing::read_rows_for_testing(
@@ -802,19 +802,19 @@ pub(crate) async fn settle_drives(
             continue;
         };
         let session = lash_core::SessionId::fixture(session);
-        let _ = tokio::time::timeout(SETTLE_LIMIT, engine.settle_session_drive(&session)).await;
+        let _ = tokio::time::timeout(SETTLE_LIMIT, engine.settle_session_shift(&session)).await;
     }
     Ok(())
 }
 
-/// Settle every session's drive on each of `engines`, then capture every
+/// Settle every session's shift on each of `engines`, then capture every
 /// store they wrote, with transcripts, into `history`.
 pub async fn capture_engines<'a>(
     history: &mut History,
     engines: impl IntoIterator<Item = (String, &'a lash_restate_test::RestateTestBackend)>,
 ) -> Result<(), String> {
     for (label, engine) in engines {
-        settle_drives(engine).await?;
+        settle_shifts(engine).await?;
         let now_ms = engine.server().now_ms();
         history.now_ms = Some(history.now_ms.map_or(now_ms, |at| at.max(now_ms)));
         history

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// A scope a process may live until.
 ///
-/// An effect opener (a logical turn root, a session operation, one process)
+/// An effect opener (a logical turn run, a session operation, one process)
 /// or a session. A session is never an effect-group opener:
 /// it owns lifetimes, not effects.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
@@ -75,7 +75,7 @@ pub enum ScopeStorageError {
 }
 
 impl ScopeId {
-    /// The scope of one turn root.
+    /// The scope of one turn run.
     #[must_use]
     pub fn turn(session_id: impl Into<SessionId>, turn_id: impl Into<crate::TurnId>) -> Self {
         Self::Opener(EffectOpener::turn(session_id, turn_id))
@@ -122,7 +122,7 @@ impl ScopeId {
     /// inside no session (ADR 0094 ends it through its own parent).
     ///
     /// A session's close closes every scope inside it (FIG-3948): once a
-    /// session has closed it admits no root, so a turn id it never admitted
+    /// session has closed it admits no run, so a turn id it never admitted
     /// can no longer become one.
     #[must_use]
     pub fn enclosing_session(&self) -> Option<Self> {

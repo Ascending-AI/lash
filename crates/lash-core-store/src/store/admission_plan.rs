@@ -3,8 +3,8 @@
 //!
 //! A row of either admission table, `pending_turn_inputs` or
 //! `queued_work_batches`, is *admitted* when a write fenced by the session's
-//! current drive fence records the root that took it (`admitted_root`) and the
-//! recorded step that took it (`admitted_by`). Only that root's fenced commit
+//! current shift fence records the run that took it (`admitted_run`) and the
+//! recorded step that took it (`admitted_by`). Only that run's fenced commit
 //! or its terminal write settles or releases the row again, so a binding is
 //! never a token anyone can outrun: re-executing an admission reads the
 //! binding back instead of taking rows twice.
@@ -12,7 +12,7 @@
 //! This module holds what the backends must not decide on their own: what an
 //! admission takes ([`plan_next_turn_input_admission`],
 //! [`plan_checkpoint_input_admission`]), which rows a settlement
-//! may touch ([`require_admitted_to_root`]), where one composition of the
+//! may touch ([`require_admitted_to_run`]), where one composition of the
 //! turn lane stops ([`TurnLaneStop`]), and what a wake leaves behind when it
 //! leaves the queue ([`TerminalProcessWake`]).
 
@@ -22,10 +22,10 @@ use super::StoreError;
 use super::queued_work::{QueuedWorkClass, TurnLaneCandidate};
 use crate::{BatchId, InputId, SessionId, TurnId};
 
-/// The `admitted_by` value of the rows a root's own admission step binds
-/// ([`RootStore::admit_root`](super::RootStore::admit_root)). A checkpoint's
+/// The `admitted_by` value of the rows a run's own admission step binds
+/// ([`RunStore::admit_run`](super::RunStore::admit_run)). A checkpoint's
 /// admission records its step's replay key instead.
-pub const ROOT_ADMISSION_STEP: &str = "admit";
+pub const RUN_ADMISSION_STEP: &str = "admit";
 
 /// One row of either admission table.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -46,19 +46,19 @@ impl std::fmt::Display for IngressRowId {
     }
 }
 
-/// What one commit does with the rows its root admitted (FIG-3927, design
-/// §2.4). Keyed by the root: every row write is predicated on
-/// `admitted_root = root`, and a row the root does not hold refuses the whole
+/// What one commit does with the rows its run admitted (FIG-3927, design
+/// §2.4). Keyed by the run: every row write is predicated on
+/// `admitted_run = run`, and a row the run does not hold refuses the whole
 /// commit [`StoreError::IngressRowNotAdmitted`].
 ///
-/// A commit carrying a settlement must present its drive fence
-/// ([`RuntimeCommit::drive_fence`](super::RuntimeCommit::drive_fence)); the
+/// A commit carrying a settlement must present its shift fence
+/// ([`RuntimeCommit::shift_fence`](super::RuntimeCommit::shift_fence)); the
 /// store checks it in the commit's own transaction before anything is
 /// written.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngressSettlement {
-    /// The root whose admitted rows this commit settles.
-    pub root: TurnId,
+    /// The run whose admitted rows this commit settles.
+    pub run: TurnId,
     /// Inputs the committing turn delivered, with their application evidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub completed_inputs: Vec<crate::TurnInputCompletion>,
@@ -77,11 +77,11 @@ pub struct IngressSettlement {
 }
 
 impl IngressSettlement {
-    /// An empty settlement of `root`.
+    /// An empty settlement of `run`.
     #[must_use]
-    pub fn new(root: TurnId) -> Self {
+    pub fn new(run: TurnId) -> Self {
         Self {
-            root,
+            run,
             completed_inputs: Vec::new(),
             completed_batches: Vec::new(),
             released: Vec::new(),
@@ -169,12 +169,12 @@ impl IngressSettlement {
             });
         if let Some(row) = foreign_input.or(foreign_batch) {
             // A completion minted for another session names no row this
-            // session's root could hold.
+            // session's run could hold.
             return Err(StoreError::IngressRowNotAdmitted {
                 session_id: session_id.clone(),
-                root: self.root.clone(),
+                run: self.run.clone(),
                 row: Box::new(row),
-                admitted_root: None,
+                admitted_run: None,
             });
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -182,7 +182,7 @@ impl IngressSettlement {
             if !seen.insert(row.clone()) {
                 return Err(StoreError::IngressSettlementDuplicate {
                     session_id: session_id.clone(),
-                    root: self.root.clone(),
+                    run: self.run.clone(),
                     row: Box::new(row),
                 });
             }
@@ -191,33 +191,33 @@ impl IngressSettlement {
     }
 }
 
-/// The one verdict for "may this root's commit settle this row?"
+/// The one verdict for "may this run's commit settle this row?"
 /// (FIG-3927).
 ///
-/// `admitted_root` is the row's binding as the backend read it under its
+/// `admitted_run` is the row's binding as the backend read it under its
 /// commit authority, `None` when the row is open, and `observed` is `false`
-/// when no row holds the identity at all. Only a row bound to `root` may be
+/// when no row holds the identity at all. Only a row bound to `run` may be
 /// completed, released or dropped; anything else refuses the whole commit, so
-/// a row is never answered by a root that did not admit it.
-pub fn require_admitted_to_root(
+/// a row is never answered by a run that did not admit it.
+pub fn require_admitted_to_run(
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     row: &IngressRowId,
     observed: Option<Option<&str>>,
 ) -> Result<(), StoreError> {
     match observed {
-        Some(Some(admitted_root)) if admitted_root == root.as_str() => Ok(()),
+        Some(Some(admitted_run)) if admitted_run == run.as_str() => Ok(()),
         _ => Err(StoreError::IngressRowNotAdmitted {
             session_id: session_id.clone(),
-            root: root.clone(),
+            run: run.clone(),
             row: Box::new(row.clone()),
-            admitted_root: observed.flatten().map(TurnId::parse).transpose()?,
+            admitted_run: observed.flatten().map(TurnId::parse).transpose()?,
         }),
     }
 }
 
 /// The one verdict for "may the command lane settle this command row?"
-/// (design §2.7): the row still exists and no root admitted it. A concurrent
+/// (design §2.7): the row still exists and no run admitted it. A concurrent
 /// withdrawal refuses the applying commit whole, so no patch applies twice
 /// or over a withdrawn command.
 pub fn require_open_command(
@@ -251,15 +251,15 @@ pub fn turn_input_state_after_admission(
     }
 }
 
-/// Compose one idle root admission of next-turn host input over its
+/// Compose one idle run admission of next-turn host input over its
 /// candidate rows, in `enqueue_seq` order and at most `max_inputs` of them
 /// (FIG-3927): `None` when there are none.
 ///
 /// The composition never mixes run specs (FIG-3838): the prefix stops, never
 /// skips, at the first row whose spec differs from its head's. How much of
-/// that eligible prefix one root takes is the host's drain policy's decision,
+/// that eligible prefix one run takes is the host's drain policy's decision,
 /// as for queued turn work (ADR 0101 §5.2): the default takes the head alone,
-/// so each next-turn input is its own root and a cancel of one never reaches
+/// so each next-turn input is its own run and a cancel of one never reaches
 /// another (FIG-4457). A next-turn row keeps its own state when admitted.
 #[must_use]
 pub fn plan_next_turn_input_admission(
@@ -321,7 +321,7 @@ pub fn plan_next_turn_input_admission(
 /// physical turn `turn_id`, over its candidate rows in `enqueue_seq` order
 /// (FIG-3927): `None` when there are none.
 ///
-/// The input joins a running root whose shape is already recorded, and
+/// The input joins a running run whose shape is already recorded, and
 /// enqueue refused every differing explicit spec there. Each returned input
 /// is `accepted` into the running turn, the state the admission writes.
 #[must_use]
@@ -469,11 +469,11 @@ mod tests {
     #[test]
     fn only_the_admitting_root_settles_a_row() {
         let session = SessionId::from("s");
-        let root = TurnId::from("r");
-        assert!(require_admitted_to_root(&session, &root, &row("a"), Some(Some("r"))).is_ok());
+        let run = TurnId::from("r");
+        assert!(require_admitted_to_run(&session, &run, &row("a"), Some(Some("r"))).is_ok());
         for observed in [None, Some(None), Some(Some("other"))] {
             assert!(matches!(
-                require_admitted_to_root(&session, &root, &row("a"), observed),
+                require_admitted_to_run(&session, &run, &row("a"), observed),
                 Err(StoreError::IngressRowNotAdmitted { .. })
             ));
         }

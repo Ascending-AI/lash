@@ -28,7 +28,7 @@ use crate::runtime::process::{ObservedWorkItem, ProcessRecord, ProcessWorkObserv
 use crate::{PluginError, ProcessId};
 
 /// `ProcessWorkObserver::work_item_from_record`: the bounded record/event-tail
-/// retry the observation laws drive with a record read before a concurrent
+/// retry the observation laws shift with a record read before a concurrent
 /// write.
 pub async fn work_item_from_record(
     observer: &ProcessWorkObserver,
@@ -45,7 +45,7 @@ pub fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> crate::
 }
 
 /// `EffectControllerTaskRequest::into_future`: serves one proxied request
-/// against `controller`, the way the task that owns the proxy drives it; the
+/// against `controller`, the way the task that owns the proxy executes it; the
 /// queued-lane round-trip law is that task.
 pub async fn serve_effect_controller_task_request(
     request: crate::runtime::effect::executor::EffectControllerTaskRequest,
@@ -118,7 +118,7 @@ pub async fn validate_recorded_authorities(
 
 // `RuntimeExecutionContext`'s process-handle and process-await operations:
 // what a language runtime's process host calls on a context, which the
-// relocated handle, await and batch laws drive directly.
+// relocated handle, await and batch laws shift directly.
 
 pub async fn await_process_handle(
     context: &crate::RuntimeExecutionContext<'_>,

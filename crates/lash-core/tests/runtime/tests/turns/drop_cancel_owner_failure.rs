@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::store::{QueuedWorkStore as _, TurnInputStore as _};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f460;
@@ -73,7 +73,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("cancel before the owner loses its finish commit"),
                     lash_core::facade_support::TurnOptions::new(
                         CancellationToken::new(),
@@ -152,38 +152,38 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         script.calls(StoreOp::authorize_turn_cancel_closure),
         1,
         "the finish-time authorization fails once and nothing authorizes after it: \
-         the owner's end repairs nothing (FIG-3927 §2.6); the root's end applies the Drop"
+         the owner's end repairs nothing (FIG-3927 §2.6); the run's end applies the Drop"
     );
 
-    // The refused run ended its root before it returned (FIG-4018): the
-    // root's terminal is the refusal, and its write released the bound rows
+    // The refused execution ended its run before it returned (FIG-4018): the
+    // run's terminal is the refusal, and its write released the bound rows
     // and applied the request's Drop to the host input addressed to the
     // dead turn (FIG-3927 §2.4, §2.6). The engine's lost-run detector, which
     // ends only runs that recorded nothing, writes nothing over it.
-    let terminal = lash_core::store::RootStore::root_terminal(
+    let terminal = lash_core::store::RunStore::run_terminal(
         inner_store.as_ref(),
         &SessionId::from(SESSION_ID),
         &TurnId::from(TURN_ID),
     )
     .await
-    .expect("read the root's terminal")
-    .expect("the refused run ended its root");
+    .expect("read the run's terminal")
+    .expect("the refused execution ended its run");
     assert!(
         matches!(
             &terminal.cause,
-            lash_core::store::RootTerminalCause::Refused { code, .. }
+            lash_core::store::RunTerminalCause::Refused { code, .. }
                 if *code == lash_core::RuntimeErrorCode::RecordEncodingFailed
         ),
-        "the root's terminal is its refusal: {terminal:?}"
+        "the run's terminal is its refusal: {terminal:?}"
     );
     assert!(
-        lash_core::DeploymentStore::end_lost_root(
+        lash_core::DeploymentStore::end_lost_run(
             lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
-            &lash_core::engine::RootRef {
+            &lash_core::engine::RunRef {
                 session: SessionId::from(SESSION_ID),
-                root: TurnId::from(TURN_ID),
+                run: TurnId::from(TURN_ID),
             },
-            lash_core::engine::RootRunLoss::FailedRun,
+            lash_core::engine::RunLoss::FailedRun,
             0,
         )
         .await
@@ -211,7 +211,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             .expect("Drop request remains recorded");
     let affected = record
         .outcome
-        .expect("the root's end records its input decision")
+        .expect("the run's end records its input decision")
         .affected_inputs;
     assert!(affected.iter().any(|input| {
         input.input_id == undelivered.input_id

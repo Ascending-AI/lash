@@ -1,14 +1,14 @@
-//! A resident runtime replays its root exactly after the engine dropped an
+//! A resident runtime replays its run exactly after the engine dropped an
 //! attempt of it (FIG-3982).
 //!
 //! Restate stops polling a handler that suspends, so an attempt ends where it
 //! awaited and nothing after that await runs. A code cell stopped by the
 //! turn's cancel returns, then asks the cancel gate why through a journaled
 //! peek; a handler that suspends at that peek never settles the cell. The
-//! next attempt replays the root from its start on the same resident
+//! next attempt replays the run from its start on the same resident
 //! runtime, and must start the cell again exactly as its first execution
 //! did: a cell refused over the unsettled one skips the timer its first
-//! execution journaled, and the journal mismatch pauses the root.
+//! execution journaled, and the journal mismatch pauses the run.
 //!
 //! The law runs on the Restate double in its always-replay mode, where every
 //! await the journal cannot answer suspends the handler, as a server with a
@@ -19,10 +19,10 @@ use lash_restate_test::protocol::MessageType;
 
 const SEED: u64 = 0x3982_0001;
 const SESSION: &str = "redrive-residue";
-const ROOT: &str = "redrive-residue-root";
+const RUN: &str = "redrive-residue-run";
 
-/// Whether the root's `LashTurn` run has journaled its cell's timer.
-fn root_is_sleeping(double: &lash_restate_test::RestateTestBackend) -> bool {
+/// Whether the run's `LashTurn` run has journaled its cell's timer.
+fn run_is_sleeping(double: &lash_restate_test::RestateTestBackend) -> bool {
     let server = double.server();
     server
         .invocations()
@@ -39,7 +39,7 @@ fn root_is_sleeping(double: &lash_restate_test::RestateTestBackend) -> bool {
 
 /// A cell cancelled mid-sleep on a resident runtime, its handler suspending
 /// at every await: every redrive replays the cell's timer where the first
-/// execution journaled it, and the root commits its cancellation with no
+/// execution journaled it, and the run commits its cancellation with no
 /// attempt failed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()> {
@@ -73,24 +73,24 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
     let session = core.session(SESSION).created().await.open().await?;
     let handle = session
         .send(TurnInput::text("sleep until cancelled"))
-        .id(ROOT)
+        .id(RUN)
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        while !root_is_sleeping(&double) {
+        while !run_is_sleeping(&double) {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
     })
     .await
-    .expect("the root's cell journals its timer");
+    .expect("the run's cell journals its timer");
 
     let receipt = handle.cancel().origin("redrive-residue-law").await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Requested { root, .. } if root.as_str() == ROOT),
-        "the cancel reaches the sleeping root: {receipt:?}"
+        matches!(&receipt, crate::CancelReceipt::Requested { run, .. } if run.as_str() == RUN),
+        "the cancel reaches the sleeping run: {receipt:?}"
     );
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), handle.outcome())
         .await
-        .expect("the redriven root commits its cancellation")?;
+        .expect("the redriven run commits its cancellation")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -106,7 +106,7 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
         .collect::<Vec<_>>();
     assert!(
         failed.is_empty(),
-        "no attempt of the root failed: {failed:?}"
+        "no attempt of the run failed: {failed:?}"
     );
     Ok(())
 }

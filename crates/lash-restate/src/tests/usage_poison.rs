@@ -1,6 +1,6 @@
 //! A poisoned spending effect keeps what it spent (FIG-4236, ADR 0125):
-//! the poison substitutes only the recorded outcome, so the run's usage
-//! still rides the entry and its settlement is sent; and a run whose facts
+//! the poison substitutes only the recorded outcome, so the meter's usage
+//! still rides the entry and its settlement is sent; and a meter whose facts
 //! cannot fit beside the poison either keeps its stamp, so its settlement
 //! resolves it `unknown(facts_unjournalable)` rather than leaving it open.
 
@@ -9,7 +9,7 @@ use lash_core::core_internal::RuntimeEffectLocalRunner;
 
 const SESSION: &str = "usage-poison-session";
 
-/// A `Direct` body that makes one paid provider call under its usage run,
+/// A `Direct` body that makes one paid provider call under its usage meter,
 /// the way the session's direct completions do.
 struct PaidCall {
     provider: lash_core::provider::ProviderHandle,
@@ -25,7 +25,7 @@ impl RuntimeEffectLocalRunner for PaidCall {
     async fn execute(
         mut self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_run: Option<lash_core::UsageRun>,
+        usage_meter: Option<lash_core::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         let RuntimeEffectCommand::Direct {
             request,
@@ -35,15 +35,15 @@ impl RuntimeEffectLocalRunner for PaidCall {
             panic!("the paid-call body runs direct completions only");
         };
         let request = (*request).into_request(None, None);
-        let call = usage_run
-            .expect("a direct completion runs under its usage run")
+        let call = usage_meter
+            .expect("a direct completion runs under its usage meter")
             .call(
                 lash_core::RuntimeOwner::Session(SessionId::from(SESSION)),
                 usage_source,
                 request.model.key().clone(),
                 request.model.wire_model(),
             )
-            .expect("the run's one call");
+            .expect("the meter's one call");
         let completion = self
             .provider
             .complete(request, &call)
@@ -173,7 +173,7 @@ fn owner() -> lash_core::RuntimeOwner {
     lash_core::RuntimeOwner::Session(SessionId::from(SESSION))
 }
 
-/// E4: the poisoned entry keeps the run's facts, so the paid call is one
+/// E4: the poisoned entry keeps the meter's facts, so the paid call is one
 /// reported fact, settled, however often its settlement is delivered.
 #[tokio::test]
 async fn a_poisoned_model_call_keeps_its_usage() {
@@ -191,7 +191,7 @@ async fn a_poisoned_model_call_keeps_its_usage() {
         "the poisoned entry's settlement is sent once"
     );
     assert_eq!(sent[0].facts.len(), 1, "the poison kept the call's fact");
-    assert_eq!(sent[0].accounting, lash_core::RunAccounting::Complete);
+    assert_eq!(sent[0].accounting, lash_core::MeterAccounting::Complete);
     let owner_usage = usage
         .load_owner_usage(&owner())
         .await
@@ -214,10 +214,10 @@ async fn a_poisoned_model_call_keeps_its_usage() {
 }
 
 /// E4's companion: facts that cannot fit beside the poison are dropped, the
-/// stamp is kept, and the run resolves `unknown(facts_unjournalable)`:
-/// explicit, never an open run, never an invented fact.
+/// stamp is kept, and the meter resolves `unknown(facts_unjournalable)`:
+/// explicit, never an open meter, never an invented fact.
 #[tokio::test]
-async fn poisoned_usage_over_budget_becomes_an_unknown_run() {
+async fn poisoned_usage_over_budget_becomes_an_unknown_meter() {
     let (context, error, usage, invocations) =
         // The generation id rides the fact, so the fact alone outgrows the
         // budget while the envelope and a fact-less stamp still fit.
@@ -232,7 +232,7 @@ async fn poisoned_usage_over_budget_becomes_an_unknown_run() {
     assert!(sent[0].facts.is_empty(), "the facts were dropped");
     assert_eq!(
         sent[0].accounting,
-        lash_core::RunAccounting::FactsUnjournalable { dropped_facts: 1 }
+        lash_core::MeterAccounting::FactsUnjournalable { dropped_facts: 1 }
     );
     let owner_usage = usage
         .load_owner_usage(&owner())
@@ -241,7 +241,7 @@ async fn poisoned_usage_over_budget_becomes_an_unknown_run() {
     assert_eq!(owner_usage.completeness.open_runs, 0, "nothing is open");
     assert_eq!(
         owner_usage.completeness.unknown_runs, 1,
-        "the run is one explicit unknown"
+        "the meter is one explicit unknown"
     );
     assert!(owner_usage.rows.is_empty(), "no fact is invented");
 }

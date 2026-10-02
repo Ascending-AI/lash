@@ -1,5 +1,5 @@
 //! FIG-3802's laws over the guarded surface `lash-sqlite-store` owns: the
-//! stored blob envelope, driven through the production encoder and decoder.
+//! stored blob envelope, executed through the production encoder and decoder.
 
 use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 

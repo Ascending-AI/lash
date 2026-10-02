@@ -1,27 +1,27 @@
-//! Atomic accounting over the durable-core catalog. No session head or drive lease is involved.
+//! Atomic accounting over the durable-core catalog. No session head or shift lease is involved.
 use crate::support::store_sqlx_error;
 use crate::{PostgresStore, begin_guarded};
 use async_trait::async_trait;
 use lash_core_execution::RuntimeOwner;
 use lash_core_execution::UsageAccountingStore;
 use lash_core_execution::store_backend_support::{
-    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageRun,
-    decode_usage_completeness, usage_corrupt, usage_integer, usage_run_resolution_columns,
+    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageMeter,
+    decode_usage_completeness, usage_corrupt, usage_integer, usage_meter_resolution_columns,
     usage_unsigned,
 };
 use lash_core_execution::{
     OwnerUsage, UsageAdmissionError, UsageAppendError, UsageAppendReceipt, UsageCorrection,
     UsageFactBody, UsageFactConflict, UsageFactCursor, UsageFactIdentity, UsageFactKind,
-    UsageFactPage, UsageFactRecord, UsageOwnerRetired, UsageReporting, UsageRunAdmission,
-    UsageRunAdmitted, UsageRunCursor, UsageRunFilter, UsageRunId, UsageRunPage, UsageRunRecord,
-    UsageRunResolution, UsageSettleReceipt, UsageSettlement, usage_correction_payload_hash,
-    usage_fact_payload_hash, usage_owner_columns,
+    UsageFactPage, UsageFactRecord, UsageMeterAdmission, UsageMeterAdmitted, UsageMeterCursor,
+    UsageMeterFilter, UsageMeterId, UsageMeterPage, UsageMeterRecord, UsageMeterResolution,
+    UsageOwnerRetired, UsageReporting, UsageSettleReceipt, UsageSettlement,
+    usage_correction_payload_hash, usage_fact_payload_hash, usage_owner_columns,
 };
 use lash_core_execution::{StoreError, TokenUsage};
 use lash_store_sql::Dialect;
 use lash_store_sql::usage::{
-    usage_facts::UsageFactsStatements, usage_owner_retirements::UsageOwnerRetirementsStatements,
-    usage_runs::UsageRunsStatements,
+    usage_facts::UsageFactsStatements, usage_meters::UsageMetersStatements,
+    usage_owner_retirements::UsageOwnerRetirementsStatements,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
@@ -30,14 +30,14 @@ use std::sync::LazyLock;
 
 struct Statements {
     facts: UsageFactsStatements,
-    runs: UsageRunsStatements,
+    meters: UsageMetersStatements,
     owners: UsageOwnerRetirementsStatements,
     inserts: UsageInsertPostgresStatements,
 }
 lash_store_sql::statements! {
     pub(crate) struct UsageInsertPostgresStatements @ "usage_postgres" {
-        fact = "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, profile_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT ON CONSTRAINT uq_usage_facts_identity DO NOTHING RETURNING seq";
-        run = "INSERT INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, profile_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (owner_kind, owner_id, effect_key, run_id) DO NOTHING";
+        fact = "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, meter_id, llm_call_id, source, profile_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT ON CONSTRAINT uq_usage_facts_identity DO NOTHING RETURNING seq";
+        meter = "INSERT INTO usage_meters (owner_kind, owner_id, effect_key, meter_id, execution_scope_key, source, profile_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (owner_kind, owner_id, effect_key, meter_id) DO NOTHING";
         owner = "INSERT INTO usage_owner_retirements (owner_kind, owner_id, retired_at_ms) VALUES (?1, ?2, ?3) ON CONFLICT (owner_kind, owner_id) DO NOTHING";
         lock_owner = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 0))";
         lock_writer = "SELECT pg_advisory_xact_lock_shared(hashtextextended('lash:usage:retention', 0))";
@@ -53,14 +53,14 @@ pub(crate) async fn lock_retention(tx: &mut Transaction<'_, Postgres>) -> Result
 }
 static SQL: LazyLock<Statements> = LazyLock::new(|| Statements {
     facts: UsageFactsStatements::render(Dialect::postgres()),
-    runs: UsageRunsStatements::render(Dialect::postgres()),
+    meters: UsageMetersStatements::render(Dialect::postgres()),
     owners: UsageOwnerRetirementsStatements::render(Dialect::postgres()),
     inserts: UsageInsertPostgresStatements::render(Dialect::postgres()),
 });
 pub(crate) fn retention_sql() -> (&'static str, &'static str, &'static str) {
     (
         SQL.facts.delete_retired.sql(),
-        SQL.runs.delete_retired.sql(),
+        SQL.meters.delete_retired.sql(),
         SQL.owners.delete_retired.sql(),
     )
 }
@@ -79,7 +79,7 @@ fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
         provider_attempt: get!(5),
         fact_kind: get!(6),
         disposition: get!(7),
-        run_id: get!(8),
+        meter_id: get!(8),
         llm_call_id: get!(9),
         source: get!(10),
         profile_key: get!(11),
@@ -99,15 +99,15 @@ fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
     }
     .decode()
 }
-fn decode_run(row: &PgRow, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
+fn decode_meter(row: &PgRow, owner: &RuntimeOwner) -> Result<UsageMeterRecord, StoreError> {
     macro_rules! get {
         ($n:expr) => {
             row.try_get($n).map_err(store_sqlx_error)?
         };
     }
-    StoredUsageRun {
+    StoredUsageMeter {
         effect_key: get!(0),
-        run_id: get!(1),
+        meter_id: get!(1),
         execution_scope_key: get!(2),
         source: get!(3),
         profile_key: get!(4),
@@ -157,7 +157,7 @@ async fn insert_fact(
         .bind(i64::from(record.provider_attempt))
         .bind(record.body.kind().as_str())
         .bind(record.disposition().as_str())
-        .bind(record.run().map(UsageRunId::as_str))
+        .bind(record.meter().map(UsageMeterId::as_str))
         .bind(record.llm_call_id.0.as_str())
         .bind(&record.source)
         .bind(record.profile_key.as_str())
@@ -197,7 +197,7 @@ async fn insert_fact(
         })))
     }
 }
-async fn ensure_settlement_run(
+async fn ensure_settlement_meter(
     tx: &mut Transaction<'_, Postgres>,
     s: &UsageSettlement,
     state: &str,
@@ -205,11 +205,11 @@ async fn ensure_settlement_run(
     resolved: Option<i64>,
 ) -> Result<(), StoreError> {
     let (kind, id) = usage_owner_columns(&s.owner);
-    sqlx::query(SQL.inserts.run.sql())
+    sqlx::query(SQL.inserts.meter.sql())
         .bind(kind)
         .bind(id)
         .bind(s.effect.as_str())
-        .bind(s.run.as_str())
+        .bind(s.meter.as_str())
         .bind(Option::<&str>::None)
         .bind(Option::<&str>::None)
         .bind(Option::<&str>::None)
@@ -225,10 +225,10 @@ async fn ensure_settlement_run(
 }
 #[async_trait]
 impl UsageAccountingStore for PostgresStore {
-    async fn admit_usage_run(
+    async fn admit_usage_meter(
         &self,
-        a: &UsageRunAdmission,
-    ) -> Result<UsageRunAdmitted, UsageAdmissionError> {
+        a: &UsageMeterAdmission,
+    ) -> Result<UsageMeterAdmitted, UsageAdmissionError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         lock_owner(&mut tx, &a.owner).await?;
         let (kind, id) = usage_owner_columns(&a.owner);
@@ -244,11 +244,11 @@ impl UsageAccountingStore for PostgresStore {
                 retired_at_ms: usage_unsigned(retired)?,
             });
         }
-        let inserted = sqlx::query(SQL.inserts.run.sql())
+        let inserted = sqlx::query(SQL.inserts.meter.sql())
             .bind(kind)
             .bind(id)
             .bind(a.effect.as_str())
-            .bind(a.run.as_str())
+            .bind(a.meter.as_str())
             .bind(&a.execution_scope_key)
             .bind(&a.source)
             .bind(a.profile_key.as_str())
@@ -263,9 +263,9 @@ impl UsageAccountingStore for PostgresStore {
             .rows_affected();
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if inserted == 0 {
-            UsageRunAdmitted::AlreadyAdmitted
+            UsageMeterAdmitted::AlreadyAdmitted
         } else {
-            UsageRunAdmitted::Admitted
+            UsageMeterAdmitted::Admitted
         })
     }
     async fn settle_usage(
@@ -280,14 +280,14 @@ impl UsageAccountingStore for PostgresStore {
         let mut receipt = UsageSettleReceipt {
             inserted_facts: 0,
             duplicate_facts: 0,
-            run: s.accounting.resolution(),
+            meter: s.accounting.resolution(),
             superseded_runs: 0,
         };
         for fact in &s.facts {
             if insert_fact(
                 &mut tx,
-                &fact.record(&s.owner, &s.effect, &s.run, now_ms),
-                &usage_fact_payload_hash(fact, &s.run),
+                &fact.record(&s.owner, &s.effect, &s.meter, now_ms),
+                &usage_fact_payload_hash(fact, &s.meter),
             )
             .await?
             {
@@ -296,46 +296,46 @@ impl UsageAccountingStore for PostgresStore {
                 receipt.duplicate_facts += 1;
             }
         }
-        let (state, reason) = usage_run_resolution_columns(&receipt.run);
-        ensure_settlement_run(&mut tx, s, state, reason, Some(now)).await?;
-        sqlx::query(SQL.runs.resolve.sql())
+        let (state, reason) = usage_meter_resolution_columns(&receipt.meter);
+        ensure_settlement_meter(&mut tx, s, state, reason, Some(now)).await?;
+        sqlx::query(SQL.meters.resolve.sql())
             .bind(kind)
             .bind(id)
             .bind(s.effect.as_str())
-            .bind(s.run.as_str())
+            .bind(s.meter.as_str())
             .bind(state)
             .bind(reason)
             .bind(now)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-        let actual = decode_run(
-            &sqlx::query(SQL.runs.find.sql())
+        let actual = decode_meter(
+            &sqlx::query(SQL.meters.find.sql())
                 .bind(kind)
                 .bind(id)
                 .bind(s.effect.as_str())
-                .bind(s.run.as_str())
+                .bind(s.meter.as_str())
                 .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?,
             &s.owner,
         )?;
         if actual.state.is_settled() {
-            receipt.run = UsageRunResolution::Settled;
+            receipt.meter = UsageMeterResolution::Settled;
         }
         receipt.superseded_runs = u32::try_from(
-            sqlx::query(SQL.runs.supersede.sql())
+            sqlx::query(SQL.meters.supersede.sql())
                 .bind(kind)
                 .bind(id)
                 .bind(s.effect.as_str())
-                .bind(s.run.as_str())
+                .bind(s.meter.as_str())
                 .bind(now)
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected(),
         )
-        .map_err(|_| usage_corrupt("superseded run count exceeds u32"))?;
+        .map_err(|_| usage_corrupt("superseded meter count exceeds u32"))?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(receipt)
     }
@@ -354,12 +354,12 @@ impl UsageAccountingStore for PostgresStore {
         lock_owner(&mut tx, &s.owner).await?;
         let (kind, id) = usage_owner_columns(&s.owner);
         let now = usage_integer(now_ms)?;
-        for statement in [SQL.runs.insert_conflict.sql(), SQL.runs.conflict.sql()] {
+        for statement in [SQL.meters.insert_conflict.sql(), SQL.meters.conflict.sql()] {
             sqlx::query(statement)
                 .bind(kind)
                 .bind(id)
                 .bind(s.effect.as_str())
-                .bind(s.run.as_str())
+                .bind(s.meter.as_str())
                 .bind(i64::from(conflict.identity.call_ordinal))
                 .bind(i64::from(conflict.identity.provider_attempt))
                 .bind(conflict.identity.kind.as_str())
@@ -434,7 +434,7 @@ impl UsageAccountingStore for PostgresStore {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         lock_owner(&mut tx, owner).await?;
         let (kind, id) = usage_owner_columns(owner);
-        let count = sqlx::query(SQL.runs.retire_execution.sql())
+        let count = sqlx::query(SQL.meters.retire_execution.sql())
             .bind(kind)
             .bind(id)
             .bind(execution_scope_key)
@@ -468,7 +468,7 @@ impl UsageAccountingStore for PostgresStore {
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-        let count = sqlx::query(SQL.runs.retire_owner.sql())
+        let count = sqlx::query(SQL.meters.retire_owner.sql())
             .bind(kind)
             .bind(id)
             .bind(usage_integer(now_ms)?)
@@ -535,7 +535,7 @@ impl UsageAccountingStore for PostgresStore {
                 .decode()
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let counts = sqlx::query(SQL.runs.completeness.sql())
+        let counts = sqlx::query(SQL.meters.completeness.sql())
             .bind(kind)
             .bind(id)
             .fetch_one(&mut *tx)
@@ -597,43 +597,44 @@ impl UsageAccountingStore for PostgresStore {
         };
         Ok(UsageFactPage { facts, next })
     }
-    async fn load_usage_run_page(
+    async fn load_usage_meter_page(
         &self,
         owner: &RuntimeOwner,
-        filter: UsageRunFilter,
-        after: Option<&UsageRunCursor>,
+        filter: UsageMeterFilter,
+        after: Option<&UsageMeterCursor>,
         limit: NonZeroU32,
-    ) -> Result<UsageRunPage, StoreError> {
+    ) -> Result<UsageMeterPage, StoreError> {
         if let Some(cursor) = after {
             cursor.check_owner(owner)?;
         }
         let (kind, id) = usage_owner_columns(owner);
         let filter = match filter {
-            UsageRunFilter::Open => "open",
-            UsageRunFilter::Unresolved => "unresolved",
-            UsageRunFilter::All => "all",
+            UsageMeterFilter::Open => "open",
+            UsageMeterFilter::Unresolved => "unresolved",
+            UsageMeterFilter::All => "all",
         };
-        let mut runs = sqlx::query(SQL.runs.page.sql())
+        let mut meters = sqlx::query(SQL.meters.page.sql())
             .bind(kind)
             .bind(id)
             .bind(filter)
             .bind(after.map_or("", |c| c.after_effect().as_str()))
-            .bind(after.map_or("", |c| c.after_run().as_str()))
+            .bind(after.map_or("", |c| c.after_meter().as_str()))
             .bind(i64::from(limit.get()) + 1)
             .fetch_all(&self.pool)
             .await
             .map_err(store_sqlx_error)?
             .iter()
-            .map(|row| decode_run(row, owner))
+            .map(|row| decode_meter(row, owner))
             .collect::<Result<Vec<_>, _>>()?;
-        let more = runs.len() > limit.get() as usize;
-        runs.truncate(limit.get() as usize);
+        let more = meters.len() > limit.get() as usize;
+        meters.truncate(limit.get() as usize);
         let next = if more {
-            runs.last()
-                .map(|r| UsageRunCursor::new(owner.clone(), r.effect.clone(), r.run.clone()))
+            meters
+                .last()
+                .map(|r| UsageMeterCursor::new(owner.clone(), r.effect.clone(), r.meter.clone()))
         } else {
             None
         };
-        Ok(UsageRunPage { runs, next })
+        Ok(UsageMeterPage { meters, next })
     }
 }

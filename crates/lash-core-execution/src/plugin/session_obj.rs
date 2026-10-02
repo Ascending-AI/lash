@@ -190,7 +190,7 @@ pub(super) struct LiveSessionAuthority {
     pub(super) tool_access: SessionToolAccess,
     pub(super) subagent: Option<SubagentSessionContext>,
     /// The plugin configuration the session's hooks run under (FIG-4379):
-    /// the running root's admitted configuration, the head's outside a root,
+    /// the running run's admitted configuration, the head's outside a run,
     /// or a process's captured configuration.
     pub(super) plugin_config: super::AdmittedPluginConfig,
 }
@@ -416,13 +416,13 @@ impl PluginSession {
     }
 
     /// The plugin configuration this session's hooks run under: a running
-    /// root's admitted configuration and revision, taken from its recorded
+    /// run's admitted configuration and revision, taken from its recorded
     /// run (FIG-4379), never the session's current head.
     pub fn admitted_plugin_config(&self) -> super::AdmittedPluginConfig {
         self.authority.read_recover().plugin_config.clone()
     }
 
-    /// Publish the configuration view the runtime installed — a root's
+    /// Publish the configuration view the runtime installed — a run's
     /// recorded one, or the head's — to this session's hooks.
     pub fn publish_plugin_config(
         &self,

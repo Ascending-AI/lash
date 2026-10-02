@@ -56,7 +56,7 @@ kind, including the artifact referrer for cleanup.
 
 Every arm path obtains its id from `ObligationKey::id()`: the kind label
 followed by byte-length-prefixed key parts in key order. Delimiters and Unicode
-in a session, root or other key cannot alias another row. Re-arming the same
+in a session, run or other key cannot alias another row. Re-arming the same
 row retains this identity; claim tokens remain separate fencing identities.
 
 Unknown stored vocabulary returns `StoreError::Incompatible` with
@@ -119,8 +119,8 @@ attempts, 60-second claim TTL and 30-second attempt budget. Backoff doubles
 per attempt and starts at the attempt's start time. The host owns these
 policy values; the attempt budget must remain below the claim TTL.
 
-Evidence: `crates/lash-core/src/runtime/drive/relays.rs:148` and
-`crates/lash-core-execution/src/runtime/drive/relay.rs:55`, `:255`, `:338`, `:388`.
+Evidence: `crates/lash-core/src/runtime/shift/relays.rs:148` and
+`crates/lash-core-execution/src/runtime/shift/relay.rs:55`, `:255`, `:338`, `:388`.
 
 ### 1.5 Stalled surfacing
 
@@ -138,7 +138,7 @@ standing.
 
 Evidence: `crates/lash/src/core.rs:302`,
 `crates/lash/src/core/drain.rs:38`, and
-`crates/lash-core-execution/src/runtime/drive/relay.rs:243`.
+`crates/lash-core-execution/src/runtime/shift/relay.rs:243`.
 
 ### 1.6 Leader lease
 
@@ -174,7 +174,7 @@ park-feed compaction and opt-in evidence retention are leader duties.
 All duties remain idempotent when leader activity overlaps.
 
 Evidence: `crates/lash-core/src/runtime/recovery_lease.rs:151` and
-`crates/lash-core/src/runtime/drive/reconcile.rs`.
+`crates/lash-core/src/runtime/shift/reconcile.rs`.
 
 ### 1.8 Detection and delivery bounds
 
@@ -185,7 +185,7 @@ A busy kind is skipped until its pass finishes. Rows in one claimed page
 run together, rather than waiting behind each other's delivery budgets.
 Leader recovery arms run concurrently under an outer guard of `2W`, where
 `W` is the host's tick wait (default 1 second). Each Restate paused-work,
-lost-process and lost-root page shares one `W` deadline across its store
+lost-process and lost-run page shares one `W` deadline across its store
 read, queries, outcomes and durable writes. A slow repair cannot hold drain
 handover or the next interval tick beyond that guard.
 
@@ -201,8 +201,8 @@ latency within the tick budget. They are not a throughput guarantee under
 an unbounded incoming queue. Simulation varies scheduling to exercise loss,
 retry, stalled delivery and failover.
 
-Evidence: `crates/lash-core/src/runtime/drive/interval.rs:19`,
-`crates/lash-core/src/runtime/drive/lanes.rs`, and
+Evidence: `crates/lash-core/src/runtime/shift/interval.rs:19`,
+`crates/lash-core/src/runtime/shift/lanes.rs`, and
 `crates/lash-core-execution/src/engine/reconcile.rs:105`.
 
 ## 2. Rationale
@@ -226,9 +226,9 @@ records execution; it is not another ingress authority.
 
 | Kind | Owning ledger | Armed by | Delivered when |
 |---|---|---|---|
-| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | Accepted ingress | Root admission selects the row in its transaction |
+| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | Accepted ingress | Run admission selects the row in its transaction |
 | `ControlIntent` | `control_intents` | Recorded control verb | Its engine half and follow-on delivery complete |
-| `ScopeClose` | `session_roots` | Root terminal transaction | Its scope-close transaction |
+| `ScopeClose` | `session_runs` | Run terminal transaction | Its scope-close transaction |
 | `ParentEnd` | `parent_end_plans` | Recorded scope end | Each child's cancel is delivered or refused |
 | `SessionDelete` | `session_meta` | Close acknowledgement | Physical storage deletion completes |
 | `TriggerDelivery` | `trigger_deliveries` | Reservation insert | Binding records the process |
@@ -237,14 +237,14 @@ records execution; it is not another ingress authority.
 | `ArtifactCleanup` | `artifact_cleanup_obligations` | Referrer end or guarded staging | Referrer cleanup completes |
 
 Ingress composes the two tables' oldest due rows. Its id is
-`ingress:{item_id}` and its drive request is `{obligation_id}:{attempt}`.
-The engine accepting the ask holds the claim; root admission settles it
+`ingress:{item_id}` and its shift request is `{obligation_id}:{attempt}`.
+The engine accepting the ask holds the claim; run admission settles it
 regardless of the relay state. A child-session acceptance takes its row's
-claim in the acceptance transaction, because its acceptor's inline drive is
-the ask ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6). That claim only delays the relay's ask: once a root's
+claim in the acceptance transaction, because its acceptor's inline shift is
+the ask ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6). That claim only delays the relay's ask: once a run's
 admission is sealed, its recorded executor decides who runs it, whoever holds
 the claim. A waiter follows later claimed attempts if
-the earlier drive ends without admitting the item. An ingress retry uses a
+the earlier shift ends without admitting the item. An ingress retry uses a
 minted token and cannot send another ask while a prior claim remains held.
 
 Process start uses `process_start:{process_id}`. The producer's immediate
@@ -256,7 +256,7 @@ the obligation remains delivered; engine-owned lost-run recovery is
 [ADR 0110](0110-the-engine-owns-process-recovery.md) §2.
 
 Every process terminal arms publication. The storing segment can publish
-and settle in its own journal; the relay publishes through the process root's
+and settle in its own journal; the relay publishes through the process run's
 `complete_terminal`. A terminal process's paused segment can be killed after
 publication is delivered.
 
@@ -275,58 +275,58 @@ claimed; each store states that once, as the generated column
 `engine_half_owed`, and admission reads it. A permanent refusal writes the
 intent refused and stalls the obligation; attempts running out, a failing
 ledger call included, stall the obligation and leave the intent pending.
-Either way the stall unwedges admission, and the session is asked to drive
+Either way the stall unwedges admission, and the session is asked to work
 once it is durable. Explicit re-arm makes the intent owed again, returning a
-refused one to pending. Root scope close and parent-end cancellation
+refused one to pending. Run scope close and parent-end cancellation
 retain their own retry ownership, so a failing child does not keep a cancel
 or fork verb open. A refused child is recorded on its plan.
 
-Paused drives require a park and an explicit redrive, except a drive waiting
-for a redrive that then settles. A drive with no resumable root or deleted
-session is killed. Accepted ingress retains its obligation for a fresh drive.
-Engine-owned lost-run recovery also checks non-terminal session roots and
+Paused executes require a park and an explicit redrive, except a shift waiting
+for a redrive that then settles. A shift with no resumable run or deleted
+session is killed. Accepted ingress retains its obligation for a fresh shift.
+Engine-owned lost-run recovery also checks non-terminal session runs and
 ends failed runs with durable loss or cancellation evidence, settling their
-ingress and arming `ScopeClose` atomically. Lost-process and lost-root scans
+ingress and arming `ScopeClose` atomically. Lost-process and lost-run scans
 each inspect at most one page per tick, including healthy and failed rows,
 and retain separate cursors across ticks. Cursors advance before engine
 requests, so failed or timed-out items cannot pin a page; an exhausted
 catalog wraps and retries them.
 
-Evidence: `crates/lash-core/src/runtime/drive/relays.rs:148`,
+Evidence: `crates/lash-core/src/runtime/shift/relays.rs:148`,
 `crates/lash-core-execution/src/runtime/trigger_delivery.rs:50`,
 `crates/lash-sqlite-store/src/process_registry/registration.rs:117`,
 `crates/lash-restate/src/process/park_reconcile.rs:109`, and
 `crates/lash-core-execution/src/runtime/vocabulary.rs:493`.
 
-The same pass reads a root whose key Restate holds no run of on any
+The same pass reads a run whose key Restate holds no execution of on any
 generation lane. An admission delivers its input's ingress obligation in the
-same write, so no relay owns that input. The pass judges the root by the
-execution recorded for it (`RootExecutor`), which the store lists beside each
-open root. It never infers the executor from the root's name. The seal of the
-root's admission records the executor, the admission records it from then on,
-and every later admission of the root reads the record back unchanged.
+same write, so no relay owns that input. The pass judges the run by the
+execution recorded for it (`RunExecutor`), which the store lists beside each
+open run. It never infers the executor from the run's name. The seal of the
+run's admission records the executor, the admission records it from then on,
+and every later admission of the run reads the record back unchanged.
 
 - **Its own run.** Retention purged the run, or its journal store was lost.
-  The root has started, its effects may have run, and a fresh execution
+  The run has started, its effects may have run, and a fresh execution
   would run them again under an empty journal. It ends `SubstrateLost` in
-  the same transaction as a failed run's root.
-- **An acceptor's run.** A `SessionTurn` process's drive runs inline, in the
-  process's own run, every root it admits: its child turn's root, and any
-  root admitted ahead of that turn in a reused session. No lane ever holds a
+  the same transaction as a failed execution's run.
+- **An acceptor's run.** A `SessionTurn` process's shift runs inline, in the
+  process's own execution, every run it admits: its child turn's run, and any
+  run admitted ahead of that turn in a reused session. No lane ever holds a
   run of those keys. While the process's record is not terminal, the pass
-  leaves the root and its admitted input, and the lost-process pass owns the
-  process's run. A terminal process runs nothing more, so the root ends
+  leaves the run and its admitted input, and the lost-process pass owns the
+  process's run. A terminal process runs nothing more, so the run ends
   `SubstrateLost`. A failed registry read ends nothing.
-- **Another execution's drive.** An in-process drive holds no engine run
-  the pass can read, so absence proves nothing and the pass leaves the root.
-- **No recorded admission.** The root has started nothing. Its ingress
-  obligation still owes its input and drives it, so the pass never ends it.
+- **Another execution's shift.** An in-process shift holds no engine run
+  the pass can read, so absence proves nothing and the pass leaves the run.
+- **No recorded admission.** The run has started nothing. Its ingress
+  obligation still owes its input and executes it, so the pass never ends it.
   When the executor its seal recorded holds no run any more (its own run is
   gone, or its acceptor process is terminal), the pass releases that record,
-  so the drive the obligation asks for seals the root as its own.
+  so the shift the obligation asks for seals the run as its own.
 
 An acceptor under a parent turn's scope records no run the pass can read, so
-the pass leaves its root, admitted or only sealed.
+the pass leaves its run, admitted or only sealed.
 
 An admin read that fails proves nothing about any run and ends nothing.
 
@@ -342,15 +342,15 @@ pins before a host attempts a close again. It does not wait for effect-group
 pins. Every close still checks its refusals, since new work can race readiness.
 
 Delete records `CloseSession` and marks the session closing. New sends refuse
-as `SessionClosing`. The engine half stops its roots and closes its scopes.
+as `SessionClosing`. The engine half stops its runs and closes its scopes.
 Acknowledgement arms `SessionDelete` in the same transaction. Once the close
 commits, deletion bypasses pre-close pin checks and retains its recorded close.
 
-An answered root's terminal commit arms `ScopeClose`. On Restate, the root's
+An answered run's terminal commit arms `ScopeClose`. On Restate, the run's
 `run` returns and sends its separate shared `close` handler. The answer can
 therefore precede delivery of scope cleanup. That delivery records and applies
-parent-end plans and calls `LashDurableWaitIndex/<session>/retire_root` to
-retire the root's indexed waits. The session index serializes this call with
+parent-end plans and calls `LashDurableWaitIndex/<session>/retire_run` to
+retire the run's indexed waits. The session index serializes this call with
 its other exclusive handlers. A busy index can delay cleanup; an attempt that
 fails or exceeds its delivery budget leaves its obligation owed under §1.4.
 Replay alone is not a reason to retain the scope-close obligation after its
@@ -386,14 +386,14 @@ session pins can be retired with storage because the session cannot activate
 again. Pre-close checks run before the close's durable step, so a repeated
 delete honors the recorded close.
 
-A stalled close arms no physical delete. Its unfinished roots remain
+A stalled close arms no physical delete. Its unfinished runs remain
 accounted for as `held_by_stalled_close` until re-arm or deletion settles the
 work. Cleanup stalls use the same operator listing and re-arm as other kinds.
 
 Evidence: `crates/lash-core/src/runtime/session_close.rs`,
 `crates/lash-core/src/runtime/session_delete.rs`,
 `crates/lash/src/core/session_deletion.rs`,
-`crates/lash-restate/src/session_driver.rs`,
+`crates/lash-restate/src/session_shifts.rs`,
 `crates/lash-core-execution/src/runtime/process/scope_close.rs`, and
 `crates/lash-restate-test/tests/host_send_wait/session_delete.rs`.
 
@@ -403,33 +403,33 @@ Delayed delivery uses `obligation_due_at_ms`. Retry backoff is the relay's
 policy. Queued work carries no separate `available_at_ms` scheduling field.
 
 Evidence: `crates/lash-store-sql/src/turn_ingress/queued_batches.rs` and
-`crates/lash-core-execution/src/runtime/drive/relay.rs:215`.
+`crates/lash-core-execution/src/runtime/shift/relay.rs:215`.
 
 ## 6. Scope-close recovery
 
 A crash between terminal commit and scope close leaves durable terminal
-evidence and an owed root-row obligation. The recorded close step or the due
+evidence and an owed run-row obligation. The recorded close step or the due
 relay completes it. The close transaction delivers the row; replay finds
 it settled. A delivered close does not become new work on the next tick.
 ADR 0108 §5 owns the lifetime meaning of the close. A close that meets
 corrupt stored data is refused rather than retried (§9).
 
-Evidence: `crates/lash-sqlite-store/src/session_roots.rs:169` and
-`crates/lash-core/src/runtime/drive/scope_close.rs:85`.
+Evidence: `crates/lash-sqlite-store/src/session_runs.rs:169` and
+`crates/lash-core/src/runtime/shift/scope_close.rs:85`.
 
-## 7. Commands and adjacent writers present the drive fence
+## 7. Commands and adjacent writers present the shift fence
 
-The drive applies leading commands in a recorded step under its drive fence.
+The shift applies leading commands in a recorded step under its shift fence.
 The command lane takes no session binding. Applying the command run settles
 its rows in the commit; withdrawal of a selected command refuses the commit.
 A settlement waiter reads the outcome rather than draining commands.
 
-A writer beside the drive reads `current_drive_fence` and presents it on its
-commit. A later sealed admission refuses that write as `StaleDriveFence`.
+A writer beside the shift reads `current_shift_fence` and presents it on its
+commit. A later sealed admission refuses that write as `StaleShiftFence`.
 The writer does not raise the epoch to gain authority. [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
 owns command admission and ordering.
 
-Evidence: `crates/lash-core-store/src/store/drive_fence.rs:275` and
+Evidence: `crates/lash-core-store/src/store/shift_fence.rs:275` and
 `crates/lash-core/src/runtime/session_api.rs:1161`, `:1478`.
 
 ## 8. Executable evidence
@@ -448,31 +448,31 @@ checks core relay assembly. The session-delete finalizer is covered by
 
 ## 9. Corruption after a published answer is the session's fault
 
-A root's answer is published before its scope closes (§4) and before its
-drive's next admission reads the session. Corrupt stored data met by either
-step cannot fail that root, and no retry repairs it. The published answer
+A run's answer is published before its scope closes (§4) and before its
+shift's next admission reads the session. Corrupt stored data met by either
+step cannot fail that run, and no retry repairs it. The published answer
 stands and is never rewritten or retracted.
 
 The session owns the fault. Its `session_meta` row records one
 `SessionFault`: the typed code (`runtime_store_corrupt`), the message, the
-typed cause with its fields, what met it (`scope_close` of a root, or
-`drive_admission`) and when. A session already faulted keeps its first
+typed cause with its fields, what met it (`scope_close` of a run, or
+`shift_admission`) and when. A session already faulted keeps its first
 fault. The row lives and dies with the session.
 
 - **Scope close.** `ScopeCloseRelay` records the fault and refuses the
-  delivery, so the root's `ScopeClose` obligation stalls as `refused` on
+  delivery, so the run's `ScopeClose` obligation stalls as `refused` on
   that attempt under the same code (§1.4, §1.5). A fault that could not be
   recorded leaves the close owed for another attempt. Every other store
   error stays retryable.
-- **Drive admission.** The recorded `AdmitDrive` step records the fault
+- **Shift admission.** The recorded `AdmitShift` step records the fault
   before it answers the corruption as its terminal outcome. A fault that
   could not be recorded is the attempt's, and the engine runs the step
   again.
 
-While the fault stands the session admits nothing. `StoredDriveEpoch`
-carries it, admission refuses every drive with the fault's code and cause,
+While the fault stands the session admits nothing. `StoredShiftEpoch`
+carries it, admission refuses every shift with the fault's code and cause,
 and a send whose input is still open is answered with the same typed error
-from the store, whether or not a drive reached it. Accepted inputs stay
+from the store, whether or not a shift reached it. Accepted inputs stay
 accepted; their ingress obligations follow §1.4.
 
 `LashCore::session_faults` lists standing faults in session-id order.
@@ -482,8 +482,8 @@ the operator repaired the data. A stalled close is re-armed separately with
 again records the fault again.
 
 Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
-`crates/lash-core/src/runtime/drive/scope_close.rs`,
-`crates/lash-core/src/runtime/drive/admission.rs`,
+`crates/lash-core/src/runtime/shift/scope_close.rs`,
+`crates/lash-core/src/runtime/shift/admission.rs`,
 `crates/lash/src/send/resolve.rs` and
 `crates/lash/src/tests/store_faults.rs`.
 

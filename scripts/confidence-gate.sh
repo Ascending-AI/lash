@@ -1122,9 +1122,9 @@ run_state_machine_and_fault_matrix() {
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       a_stale_fence_writes_nothing
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      settlement_is_predicated_on_the_root
+      settlement_is_predicated_on_the_run
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      concurrent_admissions_bind_every_row_to_at_most_one_root
+      concurrent_admissions_bind_every_row_to_at_most_one_run
   fi
 
   if area_selected protocol; then

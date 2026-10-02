@@ -1,4 +1,4 @@
-//! Wire DTOs for driving a lash runtime across a process boundary.
+//! Wire DTOs for executing a lash runtime across a process boundary.
 //!
 //! Each domain module carries one slice of the protocol vocabulary
 //! ([`llm`], [`turn_input`], [`turn_result`], [`processes`], [`triggers`],
@@ -296,12 +296,12 @@ pub use usage_activity::*;
 // `process_id` is optional. A window-99 peer sends host-named ids and
 // incarnations this decoder refuses, so peers must adopt 100.
 // The same window also moves input onto `send()` (FIG-3600): `RemoteTurnRequest`
-// drops `idempotency_key` (`turn_id` is the send's id: the root and the
+// drops `idempotency_key` (`turn_id` is the send's id: the run and the
 // idempotency key at once), `RemoteTurnInput` drops its prompt field (a
 // per-turn prompt cannot cross durable acceptance), `RemoteTurnOutcome` drops
-// `queued` (no turn answers "queued" once the engine drives every accepted
+// `queued` (no turn answers "queued" once the engine executes every accepted
 // input), and `RemoteTurnStatus` becomes a tagged
-// `answered`/`failed`/`cancelled`/`parked` status that names a parked root's
+// `answered`/`failed`/`cancelled`/`parked` status that names a parked run's
 // park.
 // The same window also changes in place under the pre-1.0 version freeze
 // (FIG-3846): FIG-3607 PR-2 replaces ADR 0094's lifecycle policy with a

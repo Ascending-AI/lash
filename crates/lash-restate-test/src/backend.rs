@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core::testing::TestClock;
 use lash_core::{
-    AdmittedScope, ScopedEffectController, SessionDriver, SessionWorkEngine, StoreSet,
+    AdmittedScope, ScopedEffectController, SessionShifts, SessionWorkEngine, StoreSet,
 };
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
@@ -32,12 +32,12 @@ use crate::server::{
     StartError,
 };
 
-/// The Restate service that drives a session: lash-restate's `LashSession`
+/// The Restate service that works a session: lash-restate's `LashSession`
 /// object. A crash rule on it cuts the admission journal.
-pub const SESSION_DRIVER_SERVICE: &str = "LashSession";
+pub const SESSION_SHIFT_SERVICE: &str = "LashSession";
 
-/// The Restate service that runs one admitted root: lash-restate's `LashTurn`
-/// workflow. A crash rule on it cuts the root's journal.
+/// The Restate service that runs one admitted run: lash-restate's `LashTurn`
+/// workflow. A crash rule on it cuts the run's journal.
 pub const TURN_DRIVER_SERVICE: &str = "LashTurn";
 
 /// One handler execution's run of an attempt.
@@ -237,7 +237,7 @@ where
 }
 
 /// [`backend_with_store_set`], whose endpoint cuts every process segment
-/// and every root's invocation after `segment_effect_budget` effects, as
+/// and every run's invocation after `segment_effect_budget` effects, as
 /// [`backend_with_segment_budget`] does.
 pub async fn backend_with_store_set_and_segment_budget<StoreFuture>(
     seed: u64,
@@ -431,7 +431,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 
     /// Restart this backend's deployment, as a worker restart or a redeploy
     /// of the same build does under `restate-server`: the process is gone and
-    /// a new one — a new engine with its services, an empty session-driver
+    /// a new one — a new engine with its services, an empty `SessionShifts`
     /// slot and an empty process-worker slot — serves the same deployment
     /// over the same stores. Everything Restate keeps across a restart stays:
     /// the server with its journals, object state, promises and timers, the
@@ -471,7 +471,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 
     /// Register another build of this backend's services on the server: a
     /// second deployment of drain generation `generation` over the same
-    /// stores, effect host and session driver, under the opaque `label`.
+    /// stores, effect host and `SessionShifts`, under the opaque `label`.
     /// Each lash journal-bearing service is bound under its stable name and
     /// under `generation`'s lane (FIG-3795), so a new invocation of a stable
     /// name routes to the newest build, one of a generation lane only to a
@@ -511,7 +511,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 
     /// Register a build of drain generation `generation` that shares only
     /// this backend's stores: its engine has its own effect host, process
-    /// deployment and session driver, as a deployment of another build has
+    /// deployment and `SessionShifts`, as a deployment of another build has
     /// in its own process (FIG-4744). A core built over
     /// [`SeparateBuild::lash_backend`] installs its own plugins on it, so
     /// two builds whose plugin compositions differ serve one server: an
@@ -559,11 +559,11 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     }
 
     /// The engine's session work with its own reconcile schedule off: every
-    /// answer is `RestateSessionWork`'s, but installing a driver fills the
+    /// answer is `RestateSessionWork`'s, but installing a `SessionShifts` fills the
     /// slot without starting the wall-clock reconcile interval. A
     /// scenario that pins one interleaving per seed reconciles explicitly
-    /// through [`SessionDriver::reconcile`] (or
-    /// [`lash_core::drive::reconcile_once`]) when it wants a pass, so a
+    /// through [`SessionShifts::reconcile`] (or
+    /// [`lash_core::shift::reconcile_once`]) when it wants a pass, so a
     /// seed's grant order never turns on when wall time happens to run
     /// the interval's store reads.
     pub fn explicit_reconcile_session_work(&self) -> Arc<dyn SessionWorkEngine> {
@@ -627,21 +627,21 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
         RestateIngressClient::new(self.connection.clone())
     }
 
-    /// Drop the next execution of a session's drive handler (`LashSession`)
+    /// Drop the next execution of a session's shift handler (`LashSession`)
     /// at `point`, on its first attempt, and let the server replay it: the
-    /// crash cuts the drive's admission journal.
-    pub fn crash_session_drive(&self, point: CrashPoint) {
+    /// crash cuts the shift's admission journal.
+    pub fn crash_session_shift(&self, point: CrashPoint) {
         self.server.crash_on(
             CrashRule::new(point)
-                .service(self.service_name(SESSION_DRIVER_SERVICE))
+                .service(self.service_name(SESSION_SHIFT_SERVICE))
                 .within_attempts(1),
         );
     }
 
-    /// Drop the next execution of an admitted root's handler (`LashTurn`) at
+    /// Drop the next execution of an admitted run's handler (`LashTurn`) at
     /// `point`, on its first attempt, and let the server replay it: the crash
-    /// cuts the root's journal.
-    pub fn crash_turn_drive(&self, point: CrashPoint) {
+    /// cuts the run's journal.
+    pub fn crash_run_execution(&self, point: CrashPoint) {
         self.server.crash_on(
             CrashRule::new(point)
                 .service(self.service_name(TURN_DRIVER_SERVICE))
@@ -649,31 +649,31 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
         );
     }
 
-    /// Hold the engine's drive of `session`: its `LashSession` object runs
+    /// Hold the engine's shift of `session`: its `LashSession` object runs
     /// no attempt until the returned [`Hold`](crate::Hold) is released or
-    /// dropped. Inputs accepted meanwhile stay pending — no drive admits
-    /// them — while a root already admitted runs on in its own `LashTurn`
-    /// and settles. A drive running when the hold is taken stops at its next
+    /// dropped. Inputs accepted meanwhile stay pending — no shift admits
+    /// them — while a run already admitted runs on in its own `LashTurn`
+    /// and settles. A shift running when the hold is taken stops at its next
     /// step (the call it awaits, the next admission); an admission already
     /// under way completes first. A test asserting what is still pending
     /// holds the engine rather than draining the queue itself: the caller
-    /// never drives.
-    pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> crate::Hold {
+    /// never executes.
+    pub async fn hold_session_shift(&self, session: &lash_core::SessionId) -> crate::Hold {
         self.server
-            .hold(&self.service_name(SESSION_DRIVER_SERVICE), session.as_str())
+            .hold(&self.service_name(SESSION_SHIFT_SERVICE), session.as_str())
             .await
     }
 
-    /// Wait until the engine has no drive of `session` in flight: every
-    /// `LashSession` invocation for it has completed, with the roots it
-    /// awaited, and so has every scope close those roots owed. A send's
-    /// handle answers at its root's final commit, before the root's scope
-    /// closes (FIG-3979), and the root's scope closes on its `LashTurn`'s
-    /// `close` handler beside the drive's next admission (FIG-4035), so a
-    /// test that reads what the drive leaves behind, or sends the session's
-    /// next input from another core, settles the drive first: while a drive
-    /// runs it admits what the session is sent, on the driver it started on.
-    pub async fn settle_session_drive(&self, session: &lash_core::SessionId) {
+    /// Wait until the engine has no shift of `session` in flight: every
+    /// `LashSession` invocation for it has completed, with the runs it
+    /// awaited, and so has every scope close those runs owed. A send's
+    /// handle answers at its run's final commit, before the run's scope
+    /// closes (FIG-3979), and the run's scope closes on its `LashTurn`'s
+    /// `close` handler beside the shift's next admission (FIG-4035), so a
+    /// test that reads what the shift leaves behind, or sends the session's
+    /// next input from another core, settles the shift first: while a shift
+    /// runs it admits what the session is sent, on the `SessionShifts` it started on.
+    pub async fn settle_session_shift(&self, session: &lash_core::SessionId) {
         while self
             .session_work(session)
             .iter()
@@ -684,7 +684,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     }
 
     /// The engine invocation of `session` that is paused, if one is: a
-    /// drive, or a root it awaits, whose handler exhausted its attempts.
+    /// shift, or a run it awaits, whose handler exhausted its attempts.
     /// The server runs no further attempt of it until an operator resumes
     /// it, so a wait on the session's turn would not end; a harness reads
     /// this to report the pause and its last failure instead of waiting.
@@ -697,24 +697,24 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
             .find(|view| view.status == "paused")
     }
 
-    /// The engine's invocations for `session`: its `LashSession` drives and
-    /// the `LashTurn` roots and scope closes they awaited.
+    /// The engine's invocations for `session`: its `LashSession` shifts and
+    /// the `LashTurn` runs and scope closes they awaited.
     fn session_work(&self, session: &lash_core::SessionId) -> Vec<crate::InvocationView> {
-        let drives = format!(
+        let shifts = format!(
             "{}/{}/",
-            self.service_name(SESSION_DRIVER_SERVICE),
+            self.service_name(SESSION_SHIFT_SERVICE),
             session.as_str()
         );
-        // A `LashTurn` key is `{len}:{session}{root}`
+        // A `LashTurn` key is `{len}:{session}{run}`
         // (`lash_restate::turn_workflow_key`).
-        let roots = format!(
+        let runs = format!(
             "{}/{}:{}",
             self.service_name(TURN_DRIVER_SERVICE),
             session.as_str().len(),
             session.as_str()
         );
         let mut work = self.server.invocations();
-        work.retain(|view| view.target.starts_with(&drives) || view.target.starts_with(&roots));
+        work.retain(|view| view.target.starts_with(&shifts) || view.target.starts_with(&runs));
         work
     }
 
@@ -722,17 +722,17 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
         clippy::result_large_err,
         reason = "the ingress client's RestateHttpError is unboxed across its public API"
     )]
-    /// Attach to `request`'s drive of `session` on the engine and return how
-    /// it ended. The drive is the one the request's schedule sent, or, when
+    /// Attach to `request`'s shift of `session` on the engine and return how
+    /// it ended. The shift is the one the request's schedule sent, or, when
     /// none was sent, one this call starts under the same idempotency key.
-    pub async fn attach_drive(
+    pub async fn attach_shift(
         &self,
         session: &lash_core::SessionId,
-        request: lash_core::engine::DriveRequestId,
-    ) -> Result<lash_core::engine::DriveOutcome, lash_restate::SendDriveError> {
+        request: lash_core::engine::ShiftRequestId,
+    ) -> Result<lash_core::engine::ShiftOutcome, lash_restate::SendShiftError> {
         self.restate
             .session_work_engine()
-            .attach_drive(session, request)
+            .attach_shift(session, request)
             .await
     }
 
@@ -754,7 +754,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     /// turn. Returns once the handler completed.
     ///
     /// Interim turn entry: superseded by the engine's session work (the
-    /// `LashSession` drive of FIG-3664's S5), after which a turn enters its
+    /// `LashSession` shift of FIG-3664's S5), after which a turn enters its
     /// handler through the backend itself and this goes away.
     ///
     /// `attempt` runs on every execution of the handler — Restate re-runs a
@@ -873,12 +873,12 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 // ---------------------------------------------------------------------------
 
 /// [`RestateSessionWork`] minus the wall-clock reconcile interval a real
-/// deployment starts when a driver is installed (ADR 0104 O2). Every other
+/// deployment starts when a `SessionShifts` is installed (ADR 0104 O2). Every other
 /// answer is the engine's — sends, attaches, control and live-work reads
-/// included — but an installed driver only fills the
-/// [`lash_restate::RestateSessionDriverSlot`]: nothing ticks until the
-/// scenario reconciles through [`SessionDriver::reconcile`] itself, so a
-/// seeded run never meets a drive ask whose request id and landing point
+/// included — but an installed `SessionShifts` only fills the
+/// [`lash_restate::RestateSessionShiftsSlot`]: nothing ticks until the
+/// scenario reconciles through [`SessionShifts::reconcile`] itself, so a
+/// seeded run never meets a shift ask whose request id and landing point
 /// wall time picked.
 /// A build [`RestateTestBackend::add_separate_build`] registered: its own
 /// engine over the first build's stores.
@@ -936,36 +936,36 @@ impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
         self.inner.control()
     }
 
-    fn schedule_drive(
+    fn schedule_shift(
         &self,
         session: &lash_core::SessionId,
-        request: lash_core::engine::DriveRequestId,
+        request: lash_core::engine::ShiftRequestId,
     ) {
-        self.inner.schedule_drive(session, request);
+        self.inner.schedule_shift(session, request);
     }
 
-    async fn request_drive(
+    async fn request_shift(
         &self,
         session: &lash_core::SessionId,
-        request: lash_core::engine::DriveRequestId,
+        request: lash_core::engine::ShiftRequestId,
     ) -> Result<(), lash_core::engine::EngineRefusal> {
-        self.inner.request_drive(session, request).await
+        self.inner.request_shift(session, request).await
     }
 
-    /// The same get-or-init [`RestateSessionWork::install_session_driver`]
-    /// answers, without its spawned interval: the driver a core installs
-    /// serves every drive and answers [`SessionDriver::reconcile`] when a
+    /// The same get-or-init [`RestateSessionWork::install_session_shifts`]
+    /// answers, without its spawned interval: the `SessionShifts` a core installs
+    /// serves every shift and answers [`SessionShifts::reconcile`] when a
     /// scenario calls it, but no pass runs on wall time.
-    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        self.inner.driver_slot().install(driver)
+    fn install_session_shifts(&self, shifts: Arc<dyn SessionShifts>) -> Arc<dyn SessionShifts> {
+        self.inner.shifts_slot().install(shifts)
     }
 
-    async fn await_drive(
+    async fn await_shift(
         &self,
         session: &lash_core::SessionId,
-        request: &lash_core::engine::DriveRequestId,
-    ) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-        self.inner.await_drive(session, request).await
+        request: &lash_core::engine::ShiftRequestId,
+    ) -> Result<lash_core::engine::ShiftOutcome, lash_core::engine::ShiftAbort> {
+        self.inner.await_shift(session, request).await
     }
 }
 
@@ -1196,7 +1196,7 @@ impl Process {
                     .stamped(server.config().build_generation.clone())
                     .with_namespace(namespace.clone());
             match segment_effect_budget {
-                Some(budget) => config.with_root_effect_budget(budget),
+                Some(budget) => config.with_run_effect_budget(budget),
                 None => config,
             }
         }));

@@ -9,7 +9,7 @@
 //! Linking runs a `gather → journal → restore → link` pass around the
 //! synchronous [`lashlang::LinkedModule::link`]. The durable outcome masks any
 //! later ambient binding for the same call-path before a captured grant is
-//! restored and folded. A re-driven link therefore reuses its journaled
+//! restored and folded. A redriven link therefore reuses its journaled
 //! decision without calling the resolver again, while a new admitted link may
 //! observe a new ambient definition. The flat Tool Catalog is never mutated —
 //! resolution is link-scoped only.
@@ -906,7 +906,7 @@ mod tests {
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
         assert_eq!(harness.installed.lock_recover().len(), 1);
 
-        // Re-drive the same link with the recorded resolutions: the resolver is
+        // Redrive the same link with the recorded resolutions: the resolver is
         // never called again.
         compile_with_deferred_resolution(
             &lash_vm_client::service::Service::default(),

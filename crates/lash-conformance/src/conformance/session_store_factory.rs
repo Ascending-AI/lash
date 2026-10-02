@@ -8,7 +8,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuum_is_scoped_to_bound_session,
 };
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -17,7 +17,7 @@ mod admission;
 mod identity_claims;
 pub use identity_claims::*;
 mod lifecycle_states;
-pub use super::turn_park_feed::a_command_roots_end_unparks_it;
+pub use super::turn_park_feed::a_command_runs_end_unparks_it;
 pub use lifecycle_states::{
     a_closing_session_lists_as_closing_never_as_live, a_control_raise_answers_no_seal_as_sealed,
 };
@@ -225,7 +225,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
     let held = writer
         .store()
-        .seal_drive_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
+        .seal_shift_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
         .await
         .expect("claim live writer lease")
         .acquired()
@@ -274,13 +274,13 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
 
     let current = writer
-        .drive_epoch()
+        .shift_epoch()
         .await
-        .expect("reader leaves drive epoch available");
+        .expect("reader leaves shift epoch available");
     assert_eq!(current.epoch, held.epoch());
     writer
         .store()
-        .supersede_drive_epoch_for_test(&held)
+        .supersede_shift_epoch_for_test(&held)
         .await
         .expect("release live writer after inspection");
 
@@ -444,7 +444,7 @@ async fn session_store_factory_admissible_queued_work_peek(
         ))
         .await
         .expect("enqueue admission-fenced next-turn input");
-    let first_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
+    let first_lease = crate::testing::store_fixtures::seal_shift_fence_for_test(
         fenced_store.store(),
         &fenced_request.session_id,
         "peek-fence-first",
@@ -455,7 +455,7 @@ async fn session_store_factory_admissible_queued_work_peek(
         .await
         .expect("list the open wake")
         .remove(0);
-    let admission = crate::conformance::admitted_root(
+    let admission = crate::conformance::admitted_run(
         fenced_store.store(),
         &first_lease,
         "admissible-peek-root",
@@ -473,17 +473,17 @@ async fn session_store_factory_admissible_queued_work_peek(
 
     fenced_store
         .store()
-        .supersede_drive_epoch_for_test(&first_lease)
+        .supersede_shift_epoch_for_test(&first_lease)
         .await
-        .expect("supersede the first drive deterministically");
+        .expect("supersede the first shift deterministically");
     assert!(
         factory
             .has_admissible_queued_work(&fenced_request.session_id)
             .await
-            .expect("peek after the drive is superseded"),
+            .expect("peek after the shift is superseded"),
         "an unfinished root's rows stay visible to the conservative recovery peek"
     );
-    let successor_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
+    let successor_lease = crate::testing::store_fixtures::seal_shift_fence_for_test(
         fenced_store.store(),
         &fenced_request.session_id,
         "peek-fence-successor",
@@ -491,9 +491,9 @@ async fn session_store_factory_admissible_queued_work_peek(
     .await;
     assert!(
         successor_lease.epoch() > first_lease.epoch(),
-        "the successor's seal must advance the drive epoch"
+        "the successor's seal must advance the shift epoch"
     );
-    let resumed = crate::conformance::admitted_root(
+    let resumed = crate::conformance::admitted_run(
         fenced_store.store(),
         &successor_lease,
         "admissible-peek-root",
@@ -888,7 +888,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     assert_deleted_write(
         stale
             .store()
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
                 "session-store-factory-rejects-writes-after-delete-executor",
@@ -1721,7 +1721,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     );
     let initial_lease = created
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("delete-session-owner", "before-delete"),
             "session-store-factory-delete-removes-store-and-is-idempotent-executor",

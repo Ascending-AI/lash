@@ -3,7 +3,7 @@
 //! make: whether a response carries tool calls, whether a completed call's
 //! control is terminal, and where the max-turns budget lands.
 //!
-//! These drive the sans-io [`TurnMachine`] directly, so every step is bounded by
+//! These shift the sans-io [`TurnMachine`] directly, so every step is bounded by
 //! the responses the test hands back. A driver that loses its tool-call
 //! predicate stalls a live runtime; here it fails on the next assertion.
 
@@ -57,7 +57,7 @@ fn machine(max_turns: Option<usize>) -> TurnMachine {
         vec![Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text("m0.p0".to_string(), "drive".to_string(), None)].into(),
+            parts: vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)].into(),
             origin: None,
         }],
         Default::default(),
@@ -200,7 +200,7 @@ fn machine_with(driver: StandardDriver) -> TurnMachine {
         vec![Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text("m0.p0".to_string(), "drive".to_string(), None)].into(),
+            parts: vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)].into(),
             origin: None,
         }],
         Default::default(),

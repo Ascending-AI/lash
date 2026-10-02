@@ -62,9 +62,9 @@ pub const FENCED_WRITE_DISAGREEMENT_EVENT: &str = "fencing.backstop_disagreed_wi
 /// backstop predicate disagreed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FencedWrite {
-    /// An admission binding a row to its root (FIG-3927).
+    /// An admission binding a row to its run (FIG-3927).
     IngressAdmission,
-    /// A root's commit settling or releasing a row it admitted (FIG-3927).
+    /// A run's commit settling or releasing a row it admitted (FIG-3927).
     IngressSettlement,
     /// Session-head publication (`D4`).
     SessionHeadPublication,

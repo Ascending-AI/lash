@@ -346,7 +346,7 @@ pub(super) fn provider_turn_session_count(events: &[DeliveredBoundary]) -> usize
 }
 
 /// Make interleaving load-bearing: whenever a workload *declares* provider turns
-/// in at least two sessions, the scheduler must actually drive at least two of
+/// in at least two sessions, the scheduler must actually shift at least two of
 /// those turns concurrently. A multi-session workload that never interleaves is
 /// a real scheduling regression and fails this oracle.
 ///
@@ -400,7 +400,7 @@ pub fn provider_turn_interleaving_depth(
 /// failure path through the real provider: a mid-stream disconnect classifies
 /// as a retryable stream fault, response-start and chunk timeouts as retryable
 /// timeouts, and a 5xx as a retryable HTTP status carrying its status code.
-/// This proves the new mutation classes drive distinct, executable behaviors
+/// This proves the new mutation classes shift distinct, executable behaviors
 /// rather than collapsing into a single generic parser error. A workload that
 /// declared no transport mutation imposes no floor; one that declared them and
 /// delivered fewer fails, so a mutation-delivery break can no longer read as a

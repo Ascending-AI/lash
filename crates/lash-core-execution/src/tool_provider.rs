@@ -212,11 +212,11 @@ impl<'run> AttemptContext<'run> {
         &self.definition_engines
     }
 
-    /// The logical root this attempt runs under, read from the admitted
+    /// The logical run this attempt runs under, read from the admitted
     /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
-    pub fn logical_root(&self) -> Option<crate::TurnId> {
-        self.parent_scope.scope().logical_root()
+    pub fn logical_run(&self) -> Option<crate::TurnId> {
+        self.parent_scope.scope().logical_run()
     }
 
     /// The start context a child start declared by this attempt draws its

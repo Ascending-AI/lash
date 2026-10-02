@@ -208,7 +208,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Run one driver step over the synced environment and apply the
     /// actions it returns.
-    fn drive(
+    fn shift(
         &mut self,
         step: impl FnOnce(
             &dyn ProtocolDriverHandle<M>,
@@ -365,7 +365,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.start(work);
             return;
         }
-        self.drive(|driver, ctx| driver.prepare_protocol_iteration(ctx));
+        self.shift(|driver, ctx| driver.prepare_protocol_iteration(ctx));
     }
 
     /// Wait on the host to fulfil `work`. Its effect is delivered by
@@ -664,7 +664,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     checked_turn_usage_from_llm_usage(&llm_response.usage)?;
                 // Reclassify a zero-output `OutputLimit` as `ContextOverflow`
                 // when the prompt nearly filled the window, before the terminal
-                // reason drives the finish decision below.
+                // reason executes the finish decision below.
                 refine_terminal_reason_for_context_window(
                     &mut llm_response,
                     prompt_input_tokens,
@@ -679,7 +679,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     .config
                     .model_tool_calls
                     .response(self.protocol_iteration, id);
-                self.drive(|driver, ctx| {
+                self.shift(|driver, ctx| {
                     driver.handle_llm_success(
                         ctx,
                         request,
@@ -910,7 +910,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
 
-        self.drive(|driver, ctx| driver.handle_tool_results(ctx, completed));
+        self.shift(|driver, ctx| driver.handle_tool_results(ctx, completed));
     }
 
     fn handle_exec_result(
@@ -918,6 +918,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         driver_state: M::DriverState,
         result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) {
-        self.drive(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
+        self.shift(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
     }
 }

@@ -41,7 +41,7 @@ pub struct GenerationWork {
     pub parked_processes: u64,
     /// Parked turns whose parked checkpoint the generation wrote.
     pub parked_turns: u64,
-    /// Sessions whose admitted drive — the queued run its admission stamped
+    /// Sessions whose admitted shift — the queued run its admission stamped
     /// `admitted_generation` on (FIG-3795 S9) — has not settled: the turns
     /// the generation admitted that are still in flight (FIG-3884). A parked
     /// turn holds no pending run of its own here; it counts under
@@ -84,7 +84,7 @@ pub trait GenerationDrainStore: Send + Sync {
     ) -> Result<Vec<ProcessId>, StoreError>;
 
     /// The sessions holding a turn in flight that `generation` counts — an
-    /// unfinished root stamped with it — strictly after `after` in
+    /// unfinished run stamped with it — strictly after `after` in
     /// session-id order, at most `limit` (FIG-4739). The drain wakes each
     /// one's parked turn waits so the turn hands over.
     async fn sessions_in_flight(
@@ -102,7 +102,7 @@ pub trait GenerationDrainStore: Send + Sync {
 /// Lash counts the durable work pinned to the generation: live processes
 /// whose current segment it admitted — including one whose segment handed
 /// over to a successor that has not started yet — the parked processes and
-/// turns whose checkpoint it wrote, and the turns its drives admitted that
+/// turns whose checkpoint it wrote, and the turns its shifts admitted that
 /// have not settled (FIG-3884). The recovery leader wakes the live
 /// processes, each hands its open wait to a successor on the newest build,
 /// and the count runs down. A process parked because the newest build
@@ -110,8 +110,8 @@ pub trait GenerationDrainStore: Send + Sync {
 /// pass and runs there until it ends (FIG-4750). Other parked work does not
 /// move by itself: an operator redrives it on a build of the generation,
 /// cancels it, or forks it. Nor is a drain finished while a session is closing: its close ended
-/// its roots, but each root's turn-control waits stay registered with the
-/// engine, on whichever build ran the root, until the session's physical
+/// its runs, but each run's turn-control waits stay registered with the
+/// engine, on whichever build ran the run, until the session's physical
 /// delete revokes them (ADR 0109 §4).
 ///
 /// Stalled obligations are counted, but they do not hold the drain (ADR 0115
@@ -137,12 +137,12 @@ pub struct GenerationDrainStatus {
     pub parked_processes: u64,
     /// Parked turns whose parked checkpoint the generation wrote.
     pub parked_turns: u64,
-    /// Turns the generation's drives admitted that have not settled: the
+    /// Turns the generation's executes admitted that have not settled: the
     /// pending queued runs stamped `admitted_generation` (FIG-3795 S9,
     /// FIG-3884).
     pub in_flight_turns: u64,
     /// Sessions closing: their close committed and their physical delete,
-    /// which revokes the waits their roots registered with the engine, has
+    /// which revokes the waits their runs registered with the engine, has
     /// not run. Not per generation, as stalled obligations are not.
     pub closing_sessions: u64,
     /// Committed effect-group children whose group dispatches on the

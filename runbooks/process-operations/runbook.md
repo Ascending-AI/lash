@@ -180,7 +180,7 @@ redrive does not clear the named block.
 old-target wake, and creates the replacement target.
 
 **Action.** Retarget the subscription, inspect the audit event and old delivery, then append and
-drive a new wake. Also inspect the in-flight retarget race retained by the wake crash matrix.
+shift a new wake. Also inspect the in-flight retarget race retained by the wake crash matrix.
 
 **Expected observable evidence.** The old pending delivery is `discarded/retargeted`, the event
 tail contains `process.subscription_retargeted`, and the next wake is queued only for the new
@@ -243,8 +243,8 @@ token can settle after the new worker owns the claim.
 rewind vectors.
 
 **Action.** Deliver and settle the old incarnation's wake, complete and prune the process,
-re-register the same process id, append a new wake, and drive it. Separately seed the receiver
-floor above a restored sender and drive the forced rewind followed by a healthy later sequence.
+re-register the same process id, append a new wake, and execute it. Separately seed the receiver
+floor above a restored sender and execute the forced rewind followed by a healthy later sequence.
 
 **Expected observable evidence.** The re-registered process allocates a strictly greater wake
 sequence and reaches the receiver. The forced rewind is durably `discarded/sequence_rewound`,

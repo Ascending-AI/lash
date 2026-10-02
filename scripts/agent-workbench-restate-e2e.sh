@@ -179,7 +179,7 @@ companion_output="$artifact_dir/companion.log"
   a_stale_fence_writes_nothing \
   --test-threads=1) 2>&1 | tee "$companion_output"
 if ! grep -Fq 'test result: ok. 1 passed; 0 failed' "$companion_output"; then
-  echo 'companion gate: FAILED (expected one passing stale-drive-fence test)' >&2
+  echo 'companion gate: FAILED (expected one passing stale-shift-fence test)' >&2
   exit 1
 fi
 if grep -Fn 'panicked at' "$companion_output" >&2; then

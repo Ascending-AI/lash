@@ -1,4 +1,4 @@
-//! Host-owned selection of how much turn-lane work one root takes.
+//! Host-owned selection of how much turn-lane work one run takes.
 //!
 //! Lash owns the *laws* of a composition: of queued work, the queue head must
 //! be turn work, a delivery boundary must admit it, and only batchable turn
@@ -232,15 +232,15 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
 /// The two shipped drain shapes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum DrainMode {
-    /// One row per root, strict FIFO. The Lash default: each turn carries
+    /// One row per run, strict FIFO. The Lash default: each turn carries
     /// the prompt plus exactly one row, which either fits the model window or
     /// is irreducibly oversized and named as such, and each next-turn host
-    /// input is its own root.
+    /// input is its own run.
     #[default]
     OneAtATime,
-    /// Every eligible pending row in one root, strict FIFO, for large-window
+    /// Every eligible pending row in one run, strict FIFO, for large-window
     /// hosts that want throughput and accept the provider as the authority on
-    /// what fits. Host inputs that share a root share its answer and its
+    /// what fits. Host inputs that share a run share its answer and its
     /// cancellation.
     All,
 }

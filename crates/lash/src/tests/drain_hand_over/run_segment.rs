@@ -7,15 +7,15 @@
 //!
 //! - **hand-over**: the run's physical turn on N commits at the quiet point
 //!   before its second model call, owing the run's continuation, and N's
-//!   drive hands over. N+1 admits the continuation, which asks the model
+//!   shift hands over. N+1 admits the continuation, which asks the model
 //!   from the committed history: the tool is never called again, the model
 //!   is asked exactly twice, and the send that started the run on N is
 //!   answered by the turn N+1 ran.
 //!
 //! - **crash**: the hand-over law again, with one invocation dying once on
-//!   either side of a durable record of the hand-over: N's root before its
-//!   drain-mark read is recorded and after its boundary commit, N's drive
-//!   before it sends the drive on, and N+1's continuation before its first
+//!   either side of a durable record of the hand-over: N's run before its
+//!   drain-mark read is recorded and after its boundary commit, N's shift
+//!   before it sends the shift on, and N+1's continuation before its first
 //!   step and after its final commit. The run ends the same: the tool ran
 //!   once and the model was asked twice.
 //! - **counts**: N holds the run while its first invocation runs there, and
@@ -25,7 +25,7 @@
 //!   it there, and no continuation is owed.
 //! - **cancel after**: a cancel that lands after the hand-over reaches the
 //!   continuation on N+1 and ends the run.
-//! - **journal budget**: on one build whose root invocations end after one
+//! - **journal budget**: on one build whose run invocations end after one
 //!   effect, the run takes a boundary at every quiet point, and each
 //!   continuation is a new `LashTurn` invocation with a journal of its own.
 //!   Every tool call still runs once and the run's answer is the last
@@ -186,7 +186,7 @@ impl RunRoll {
             .open()
             .await?
             .send(TurnInput::text("look it up, then answer"))
-            .id("run-root")
+            .id("run-run")
             .await?;
         tokio::time::timeout(WEDGE, model.reached.notified())
             .await
@@ -222,10 +222,10 @@ impl RunRoll {
         self.handle.take().expect("the run's send handle")
     }
 
-    /// The builds the run's drives ran on.
+    /// The builds the run's executes ran on.
     async fn builds(&self) -> std::collections::BTreeSet<String> {
         self.engine
-            .drives(&self.session)
+            .shifts(&self.session)
             .await
             .into_iter()
             .filter_map(|row| row.pinned_deployment_id)
@@ -257,9 +257,9 @@ impl RunRoll {
             .into_iter()
             .find(|view| {
                 view.target
-                    .ends_with("follow-on:run-root:agent-frame:1#0/run")
+                    .ends_with("follow-on:run-run:agent-frame:1#0/run")
             })
-            .expect("the continuation's root invocation");
+            .expect("the continuation's run invocation");
         fn decision(value: &serde_json::Value) -> Option<&serde_json::Value> {
             match value {
                 serde_json::Value::Object(fields) => {
@@ -289,17 +289,17 @@ impl RunRoll {
         let store = lash_core::runtime::live_session_view(&self.core.store_factory, &self.session)
             .await?
             .expect("an opened session has a store");
-        let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
             store.store(),
             &self.session,
             "run-segment-plugins",
         )
         .await;
         let admitted = store
-            .admit_root(
-                &lash_core::testing::store_fixtures::admit_root_request_for_test(
+            .admit_run(
+                &lash_core::testing::store_fixtures::admit_run_request_for_test(
                     &fence,
-                    &lash_core::TurnId::from("run-root"),
+                    &lash_core::TurnId::from("run-run"),
                     lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
                 ),
             )
@@ -349,19 +349,19 @@ impl RunRoll {
 /// durable record the hand-over writes.
 #[derive(Clone, Copy, Debug)]
 enum Crash {
-    /// N's root dies with its drain-mark read unrecorded, before its
+    /// N's run dies with its drain-mark read unrecorded, before its
     /// boundary commit: its replay reads the mark again.
-    OldRootBeforeItsDrainMarkIsRecorded,
-    /// N's root dies after its boundary commit, with its outcome unrecorded:
+    OldRunBeforeItsDrainMarkIsRecorded,
+    /// N's run dies after its boundary commit, with its outcome unrecorded:
     /// its replay ends at the boundary its journal recorded and answers the
     /// commit's receipt.
-    OldRootAfterItsBoundaryCommit,
-    /// N's drive dies after the admission that recorded the drain and before
-    /// it sends the rest of the drive on.
+    OldRunAfterItsBoundaryCommit,
+    /// N's shift dies after the admission that recorded the drain and before
+    /// it sends the rest of the shift on.
     OldDriveBeforeItHandsOver,
-    /// N+1's continuation root dies before its first step is recorded.
+    /// N+1's continuation run dies before its first step is recorded.
     ContinuationBeforeItsFirstStep,
-    /// N+1's continuation root dies after its final commit, with its outcome
+    /// N+1's continuation run dies after its final commit, with its outcome
     /// unrecorded.
     ContinuationAfterItsCommit,
 }
@@ -370,38 +370,38 @@ impl Crash {
     fn rule(self, session: &str) -> lash_restate_test::CrashRule {
         use lash_restate_test::protocol::MessageType;
         use lash_restate_test::{CrashPoint, CrashRule, TURN_DRIVER_SERVICE};
-        let root_run = |point, key: &str| {
+        let run_execution = |point, key: &str| {
             CrashRule::new(point)
                 .service(TURN_DRIVER_SERVICE)
                 .handler("run")
                 .key_ending(key)
         };
-        // The continuation's recovery root, at the recovery count its drive
+        // The continuation's recovery run, at the recovery count its shift
         // admission recorded.
-        let continuation = "follow-on:run-root:agent-frame:1#0";
+        let continuation = "follow-on:run-run:agent-frame:1#0";
         match self {
-            Self::OldRootBeforeItsDrainMarkIsRecorded => root_run(
+            Self::OldRunBeforeItsDrainMarkIsRecorded => run_execution(
                 CrashPoint::BeforeRunResultEnding {
-                    suffix: "drain-mark:run-root:1".to_owned(),
+                    suffix: "drain-mark:run-run:1".to_owned(),
                 },
-                "run-root",
+                "run-run",
             ),
-            Self::OldRootAfterItsBoundaryCommit => root_run(
+            Self::OldRunAfterItsBoundaryCommit => run_execution(
                 CrashPoint::BeforeFrame {
                     ty: MessageType::OutputCommand,
                 },
-                "run-root",
+                "run-run",
             ),
             Self::OldDriveBeforeItHandsOver => CrashRule::new(CrashPoint::BeforeFrame {
                 ty: MessageType::OneWayCallCommand,
             })
-            .service(SESSION_DRIVER_SERVICE)
-            .handler("drive")
+            .service(SESSION_SHIFT_SERVICE)
+            .handler("shift")
             .key(session),
             Self::ContinuationBeforeItsFirstStep => {
-                root_run(CrashPoint::BeforeRunResult { name: None }, continuation)
+                run_execution(CrashPoint::BeforeRunResult { name: None }, continuation)
             }
-            Self::ContinuationAfterItsCommit => root_run(
+            Self::ContinuationAfterItsCommit => run_execution(
                 CrashPoint::BeforeFrame {
                     ty: MessageType::OutputCommand,
                 },
@@ -460,7 +460,7 @@ async fn a_run_on_a_draining_build_goes_on_in_a_new_invocation(
     assert_eq!(
         roll.builds().await.len(),
         2,
-        "the run's drive moved to the newest build"
+        "the run's shift moved to the newest build"
     );
     if crash.is_some() {
         assert_eq!(crashes.get(), 1, "the invocation died once");
@@ -538,8 +538,8 @@ async fn a_cancel_before_the_boundary_ends_the_run_on_the_draining_build(
         .origin("run-segment-law")
         .await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Requested { root, .. } if root.as_str() == "run-root"),
-        "the cancel reaches the running root: {receipt:?}"
+        matches!(&receipt, crate::CancelReceipt::Requested { run, .. } if run.as_str() == "run-run"),
+        "the cancel reaches the running run: {receipt:?}"
     );
     roll.model.release.notify_one();
     let outcome = tokio::time::timeout(WEDGE, roll.sent().outcome())
@@ -566,7 +566,7 @@ async fn a_cancel_after_the_hand_over_reaches_the_continuation(storage: Storage)
     assert_eq!(
         roll.builds().await.len(),
         2,
-        "the run's drive moved to the newest build"
+        "the run's shift moved to the newest build"
     );
     let receipt = roll
         .handle
@@ -576,23 +576,23 @@ async fn a_cancel_after_the_hand_over_reaches_the_continuation(storage: Storage)
         .origin("run-segment-law")
         .await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Requested { root, .. } if root.as_str() == "run-root"),
-        "the cancel reaches the running root: {receipt:?}"
+        matches!(&receipt, crate::CancelReceipt::Requested { run, .. } if run.as_str() == "run-run"),
+        "the cancel reaches the running run: {receipt:?}"
     );
     let outcome = tokio::time::timeout(WEDGE, roll.sent().outcome())
         .await
         .expect("the cancelled run answers")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
-        outcome.root().map(lash_core::TurnId::as_str),
-        Some("run-root")
+        outcome.run().map(lash_core::TurnId::as_str),
+        Some("run-run")
     );
     assert_eq!(roll.executed.load(Ordering::SeqCst), 1, "the tool ran once");
     assert_eq!(roll.model.requests.lock_recover().len(), 2);
     roll.assert_ended().await
 }
 
-/// The double over `storage` with one build, whose root invocations end
+/// The double over `storage` with one build, whose run invocations end
 /// after `budget` effects.
 async fn budget_world(storage: Storage, budget: u64) -> World {
     let (opening, keep) = prepare(storage).await;
@@ -622,7 +622,7 @@ async fn budget_world(storage: Storage, budget: u64) -> World {
 /// One `LashTurn` run of the law's session, as the engine's
 /// `sys_invocation` reports it.
 #[derive(Debug, serde::Deserialize)]
-struct RootRunRow {
+struct RunRunRow {
     target_service_key: Option<String>,
 }
 
@@ -644,7 +644,7 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Stor
         WEDGE,
         handle
             .send(TurnInput::text("look it up three times, then answer"))
-            .id("run-root")
+            .id("run-run")
             .output(),
     )
     .await
@@ -675,20 +675,20 @@ async fn a_run_past_its_journal_budget_goes_on_in_a_new_invocation(storage: Stor
         unreachable!("the law runs on the double");
     };
     let runs = lash_restate::RestateAdminClient::new(double.connection())
-        .query_json::<RootRunRow>(
+        .query_json::<RunRunRow>(
             "SELECT target_service_key FROM sys_invocation \
              WHERE target_service_name = 'LashTurn' AND target_handler_name = 'run'",
         )
         .await
         .expect("sys_invocation query");
-    let roots: std::collections::BTreeSet<_> = runs
+    let runs: std::collections::BTreeSet<_> = runs
         .iter()
         .filter_map(|row| row.target_service_key.clone())
         .collect();
     assert_eq!(
-        roots.len(),
+        runs.len(),
         TOOL_ROUNDS + 1,
-        "the run went on in a new invocation at every quiet point: {roots:?}"
+        "the run went on in a new invocation at every quiet point: {runs:?}"
     );
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
         .await?
@@ -722,7 +722,7 @@ async fn a_runs_turn_budget_counts_across_its_boundaries(storage: Storage) -> Re
         WEDGE,
         handle
             .send(TurnInput::text("look it up three times, then answer"))
-            .id("run-root")
+            .id("run-run")
             .output(),
     )
     .await
@@ -789,20 +789,20 @@ drain_hand_over_laws! {
     run_hands_over_sqlite_file: hands_over, Storage::SqliteFile, None;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     run_hands_over_postgres: hands_over, Storage::Postgres, None;
-    run_crash_old_root_before_drain_mark_sqlite_memory:
-        hands_over, Storage::SqliteMemory, Some(Crash::OldRootBeforeItsDrainMarkIsRecorded);
-    run_crash_old_root_before_drain_mark_sqlite_file:
-        hands_over, Storage::SqliteFile, Some(Crash::OldRootBeforeItsDrainMarkIsRecorded);
+    run_crash_old_run_before_drain_mark_sqlite_memory:
+        hands_over, Storage::SqliteMemory, Some(Crash::OldRunBeforeItsDrainMarkIsRecorded);
+    run_crash_old_run_before_drain_mark_sqlite_file:
+        hands_over, Storage::SqliteFile, Some(Crash::OldRunBeforeItsDrainMarkIsRecorded);
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    run_crash_old_root_before_drain_mark_postgres:
-        hands_over, Storage::Postgres, Some(Crash::OldRootBeforeItsDrainMarkIsRecorded);
-    run_crash_old_root_after_boundary_commit_sqlite_memory:
-        hands_over, Storage::SqliteMemory, Some(Crash::OldRootAfterItsBoundaryCommit);
-    run_crash_old_root_after_boundary_commit_sqlite_file:
-        hands_over, Storage::SqliteFile, Some(Crash::OldRootAfterItsBoundaryCommit);
+    run_crash_old_run_before_drain_mark_postgres:
+        hands_over, Storage::Postgres, Some(Crash::OldRunBeforeItsDrainMarkIsRecorded);
+    run_crash_old_run_after_boundary_commit_sqlite_memory:
+        hands_over, Storage::SqliteMemory, Some(Crash::OldRunAfterItsBoundaryCommit);
+    run_crash_old_run_after_boundary_commit_sqlite_file:
+        hands_over, Storage::SqliteFile, Some(Crash::OldRunAfterItsBoundaryCommit);
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    run_crash_old_root_after_boundary_commit_postgres:
-        hands_over, Storage::Postgres, Some(Crash::OldRootAfterItsBoundaryCommit);
+    run_crash_old_run_after_boundary_commit_postgres:
+        hands_over, Storage::Postgres, Some(Crash::OldRunAfterItsBoundaryCommit);
     run_crash_old_drive_before_hand_over_sqlite_memory:
         hands_over, Storage::SqliteMemory, Some(Crash::OldDriveBeforeItHandsOver);
     run_crash_old_drive_before_hand_over_sqlite_file:

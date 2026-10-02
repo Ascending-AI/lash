@@ -3,7 +3,7 @@ use super::*;
 pub const LIVE_PROVIDER_FAILURE_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.live-provider-failure-terminalizes.v1");
 
-/// Observed facts from driving a non-retryable provider failure through a LIVE
+/// Observed facts from executing a non-retryable provider failure through a LIVE
 /// runtime turn (a real `session.send().output()` whose scripted-transport events
 /// are released by a real `BoundaryScheduler`, not an isolated
 /// `provider.complete()`). The fault arrives AFTER one or more valid prose

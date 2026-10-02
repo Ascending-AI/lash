@@ -144,7 +144,7 @@ struct MutationScriptSpec {
     expected_status: Option<u16>,
     /// When set, the real provider failure classifier must report this
     /// `ProviderFailureKind` (e.g. `Stream`, `Timeout`, `Http`), proving the
-    /// mutation class drives a distinct, named failure path and not just a
+    /// mutation class executes a distinct, named failure path and not just a
     /// generic parse error.
     expected_kind: Option<&'static str>,
     /// When set, the classified failure's `retryable` flag must match, so a

@@ -3,7 +3,7 @@
 //!
 //! Each ledger's table module declares its own obligation statements — the
 //! same operations over its own table and key — and implements
-//! [`ObligationStatementSet`], so a backend drives every ledger through one
+//! [`ObligationStatementSet`], so a backend executes every ledger through one
 //! generic implementation that reads the statements it needs from
 //! [`ObligationSql`]. The key columns always come last in a claim's and a
 //! stalled listing's projection, in the table's key order.

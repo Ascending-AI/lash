@@ -124,7 +124,7 @@ pub(crate) enum StreamItem {
 }
 
 /// Why a sent turn produced no answer to persist: the send or its follow
-/// failed, or the input's root did not answer (FIG-3837: a host maps all four
+/// failed, or the input's run did not answer (FIG-3837: a host maps all four
 /// outcome statuses, never only `output()?`).
 #[derive(Debug)]
 pub(crate) struct TurnRefusal {
@@ -150,8 +150,8 @@ impl TurnRefusal {
     }
 }
 
-/// An answered root's output, or why the turn has none: a failed root, a
-/// cancelled or withdrawn input, or a root parked until an operator resolves
+/// An answered run's output, or why the turn has none: a failed run, a
+/// cancelled or withdrawn input, or a run parked until an operator resolves
 /// its park.
 pub(crate) fn answered_output(outcome: lash::SendOutcome) -> Result<TurnOutput, TurnRefusal> {
     let refusal = |message: String| TurnRefusal {
@@ -448,7 +448,7 @@ pub(crate) async fn send_message(
         .await?;
 
     // One path in every durability mode: the chat's session takes the input
-    // through `send()`, and the session's engine drives the turn -- in process
+    // through `send()`, and the session's engine executes the turn -- in process
     // for the local store, in a Restate handler for the Restate deployment.
     let turn_profile = llm_profile_choice_for_chat_selection(&llm_profile_selection);
     let session = state.open_session(&chat_id, turn_profile).await?;

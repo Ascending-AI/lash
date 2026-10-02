@@ -21,20 +21,20 @@ pre-1.0 version freeze applies to durable shapes.
 
 `RuntimeStore` is a blanket alias composing `FleetFormatStore`,
 `AttachmentReferrers`, `SessionCatalogStore`, `SessionCommitStore`,
-`SessionHistoryStore`, `TurnInputStore`, `QueuedWorkStore`, `DriveEpochStore`,
-`RootStore` and `StoreMaintenance`. Backends implement the component traits.
+`SessionHistoryStore`, `TurnInputStore`, `QueuedWorkStore`, `ShiftEpochStore`,
+`RunStore` and `StoreMaintenance`. Backends implement the component traits.
 A session-scoped operation takes the session id or a request that carries
 it. Catalog-wide operations state their scope.
 
 Backend operations are required. Provided methods compose required
 primitives, such as head reads or input admission; they do not invent
 unsupported, empty or oldest-version backend answers. The operation list
-generates decorators and the session view's forwarders. Drive authority is a
-`DriveFence`; the drive owns turn execution.
+generates decorators and the session view's forwarders. Shift authority is a
+`ShiftFence`; the shift owns turn execution.
 
 Evidence: `crates/lash-core-store/src/store/mod.rs:1063`, `:1790`,
 `crates/lash-core-store/src/store/runtime_store_decorator.rs`, and
-`crates/lash-core-store/src/store/drive_fence.rs:249`.
+`crates/lash-core-store/src/store/shift_fence.rs:249`.
 
 #### 1.1 `SessionCatalogStore`
 
@@ -60,7 +60,7 @@ Evidence: `crates/lash-core-store/src/store/catalog.rs:18`,
 This segment owns head commits, checkpoint hydration, metadata, parks and
 turn-commit idempotency. Its atomic commit also settles the admitted ingress
 and applied commands it names. Every session read takes a session id;
-a mutation's request carries its session identity or drive fence.
+a mutation's request carries its session identity or shift fence.
 History reads belong to §1.3.
 
 Evidence: `crates/lash-core-store/src/store/mod.rs:1040`.
@@ -104,7 +104,7 @@ Evidence: `crates/lash-core-store/src/store/error.rs` and
 `DeploymentStore` composes `RuntimeStore`, `AttachmentRootSet` and
 `ControlIntentStore`. It requires effect-host binding, artifact-frame
 retention checks, unsettled-turn accounting, park listing and feeds,
-non-terminal-root paging and lost-root completion, control-intent listing,
+non-terminal-run paging and lost-run completion, control-intent listing,
 cancel-scope retirement and evidence reclamation. It has no
 `bind_artifact_stores` operation.
 
@@ -216,7 +216,7 @@ reads bounded headers, accounts for stored `body_bytes`, and fetches bodies
 only for the accepted prefix. It does not load full bodies and truncate them
 afterward. A first row exceeding the byte limit returns
 `HistoryNodeTooLarge` with its required size. A resumable page is nonempty.
-`HistoryStop` is `Root`, `NodeBudget` or `ByteBudget`; only a budget stop
+`HistoryStop` is `Run`, `NodeBudget` or `ByteBudget`; only a budget stop
 has a continuation cursor.
 
 Cursors carry the session, pinned leaf, lineage stamp and next node and
@@ -228,7 +228,7 @@ returns `HistoryAnchorUnavailable`, with `Tombstoned` or `NotReadable`.
 Head movement that makes the anchor unreachable can also refuse the read.
 
 `Head` without a head row is `SessionNotFound`. A head without a leaf
-returns an empty root page. A deleted session is `SessionDeleted`.
+returns an empty run page. A deleted session is `SessionDeleted`.
 A one-node budget at `Node(id)` provides a single-node read through the same
 membership and size checks.
 
@@ -443,6 +443,6 @@ checked parent edges preserve ancestry authority.
 ## Model usage accounting
 
 Usage totals and ledger reads (§8) belong to `UsageAccountingStore`, by owner,
-over the `usage_facts`, `usage_runs` and `usage_owner_retirements` tables.
+over the `usage_facts`, `usage_meters` and `usage_owner_retirements` tables.
 `RuntimeSessionState`, `SessionSnapshot` and `SessionWindowRead` carry no
 usage, and `SessionHistoryStore` reads none ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

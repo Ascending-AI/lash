@@ -63,7 +63,7 @@ durable billing evidence. Hosts own any supplementary live telemetry archive.
 
 ## Model usage accounting
 
-The facts a usage run delivers are projected from the attempt history of each
+The facts a usage meter delivers are projected from the attempt history of each
 call's sealed record, one per attempt the dispatch gate admitted. The recorded
 usage rides beside the effect's outcome in its journal entry, outside the
 outcome, so an `Err` outcome keeps its spend ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).

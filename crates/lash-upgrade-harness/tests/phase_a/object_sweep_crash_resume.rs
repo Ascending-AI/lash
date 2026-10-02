@@ -160,7 +160,7 @@ fn object_sweep_crash_resume() -> Result<()> {
     let turn = next.turn(&case, &session_next, "a turn N+1 answers")?;
     ensure!(
         turn.reply.as_deref() == Some(served_by(BuildLabel::Next, &next_generation).as_str()),
-        "N+1 did not drive its turn: {turn:?}"
+        "N+1 did not execute its turn: {turn:?}"
     );
 
     // Everything either build wrote is in N's format.

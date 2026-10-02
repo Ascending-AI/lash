@@ -141,8 +141,8 @@ pub async fn apply_parent_end_plan(
 }
 
 /// Record `parent`'s end and apply its plan: what closing a scope the
-/// registry does not end itself (a turn root) runs, inside the recorded
-/// root-close step after the root's terminal evidence (the scope-close
+/// registry does not end itself (a turn run) runs, inside the recorded
+/// run-close step after the run's terminal evidence (the scope-close
 /// sink's body when the host installs one that applies). Recording is
 /// idempotent and keeps the first `ended_at_ms`.
 pub async fn end_parent_scope(
@@ -155,21 +155,21 @@ pub async fn end_parent_scope(
     apply_parent_end_plan(registry, delivery, parent, now_ms).await
 }
 
-/// End the scopes of `roots`, which a session's close ended together:
-/// what closing a session runs for its roots, each exactly as its own root
+/// End the scopes of `runs`, which a session's close ended together:
+/// what closing a session runs for its runs, each exactly as its own run
 /// close would (the scope-close sink's `close_session_scope` body). The
 /// first failure stops the pass; every end already made is idempotent, so a
 /// retry of the close resumes it.
-pub async fn end_session_roots(
+pub async fn end_session_runs(
     registry: &dyn ProcessRegistry,
     delivery: &dyn ProcessWorkSubstrate,
     session: &crate::SessionId,
-    roots: &[crate::TurnId],
+    runs: &[crate::TurnId],
     now_ms: u64,
 ) -> Result<ParentEndApplication, PluginError> {
     let mut total = ParentEndApplication::default();
-    for root in roots {
-        let parent = ScopeId::turn(session.clone(), root.clone());
+    for run in runs {
+        let parent = ScopeId::turn(session.clone(), run.clone());
         let application = end_parent_scope(registry, delivery, &parent, now_ms).await?;
         total.delivered = total.delivered.saturating_add(application.delivered);
         total.planned |= application.planned;

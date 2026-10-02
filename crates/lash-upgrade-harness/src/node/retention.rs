@@ -31,7 +31,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
 };
-use lash_core::runtime::drive::relay::relay_due;
+use lash_core::runtime::shift::relay::relay_due;
 use lash_core::store::{ArtifactCleanupLedger, ObligationKind};
 use serde::{Deserialize, Serialize};
 

@@ -81,37 +81,37 @@ snapshot or an enumeration of every engine invocation. Finalize additionally
 checks retained deployments in §2. Parked work requires compatible replay or
 an operator control decision.
 
-A session drive's drain is bounded by one root per drive. Restate pins a
-`LashSession` drive invocation to the build that started it, and a drive
-admits one root after another, so a busy session would hold its pinned build
-for a whole backlog. Every admission after the root a drive started on
+A session shift's drain is bounded by one run per shift. Restate pins a
+`LashSession` shift invocation to the build that started it, and a shift
+admits one run after another, so a busy session would hold its pinned build
+for a whole backlog. Every admission after the run a shift started on
 therefore reads the drain mark of the build its invocation is pinned to,
-inside the recorded `AdmitDrive` step. Marked, with work pending, the step
+inside the recorded `AdmitShift` step. Marked, with work pending, the step
 admits nothing and records `AdmitVerdict::Draining` with that generation. The
-drive then sends the rest to its continuation request under the stable name,
-which the newest build serves, and stops `DriveStop::Draining`; a waiter
-follows the continuation. The root in flight always runs to its terminal
+shift then sends the rest to its continuation request under the stable name,
+which the newest build serves, and stops `ShiftStop::Draining`; a waiter
+follows the continuation. The run in flight always runs to its terminal
 commit on its build. A replay decodes the recorded verdict and hands over
-where the first execution did, whatever the mark says by then. A drive
-resumed on a generation's lane runs the root it was resumed for and hands
-over the same way, its lane continuations included. A drive's first admission
+where the first execution did, whatever the mark says by then. A shift
+resumed on a generation's lane executes the run it was resumed for and hands
+over the same way, its lane continuations included. A shift's first admission
 reads no mark: under the stable name a new invocation is already the newest
-build's, so a drain never passes work back and forth. The in-process drive
+build's, so a drain never passes work back and forth. The in-process shift
 loop is pinned to no build and reads none.
 
-A root is stamped with the generation of the build that admits it, the one
-serving the admission's drive invocation. The engine passes that generation
-to admission separately from the wire request. A drive request carries only
-its intended lane, with no generation suffix in its request id. So a root the
+A run is stamped with the generation of the build that admits it, the one
+serving the admission's shift invocation. The engine passes that generation
+to admission separately from the wire request. A shift request carries only
+its intended lane, with no generation suffix in its request id. So a run the
 newest build admits from a hand-over counts in that build's in-flight turns and
 parks
-under its generation, and the draining generation counts only the root still
+under its generation, and the draining generation counts only the run still
 running on its own build.
 
 Evidence: `crates/lash/src/formats.rs:594`,
-`crates/lash-core/src/runtime/drive/admission.rs:193`,
-`crates/lash-restate/src/session_driver.rs:1144`,
-`crates/lash-restate/src/session_driver/continuation.rs:9`,
+`crates/lash-core/src/runtime/shift/admission.rs:193`,
+`crates/lash-restate/src/session_shifts.rs:1144`,
+`crates/lash-restate/src/session_shifts/continuation.rs:9`,
 `crates/lash/src/tests/drain_hand_over.rs:1`,
 `crates/lash-core-store/src/store/state_version.rs:51`,
 `crates/lash-restate/src/services.rs:35`,
@@ -218,20 +218,20 @@ the engine; the facade includes them only when that engine is enabled.
 | Stored shape | Current compatibility mechanism |
 |---|---|
 | SQL schema and component stamps | Compatibility descriptors and explicit schema runners; PostgreSQL migrates before worker open, SQLite at store-set open. |
-| Session-state marker | Drive-fenced admission reads the marker and applies its fleet read window. |
+| Session-state marker | Shift-fenced admission reads the marker and applies its fleet read window. |
 | Mutable payloads | Surface read ranges, registered upcasters and `F`-selected writer versions. |
 | Immutable, hash-addressed history | Decode the admitted range and lift in memory without rewriting the stored bytes or identity preimage. |
 | Derived workflow graph and type facets | Their declared read ranges and projection policy. |
 | Content addresses and idempotency families | Preserve stored identity preimages; admit the declared family rather than re-derive an old identity with a new family. |
-| Effect, process, session-drive and group-dispatch journals | Drain generation, retained routes and generation sentinels. |
+| Effect, process, session-shift and group-dispatch journals | Drain generation, retained routes and generation sentinels. |
 | Turn checkpoints, VM continuations and process handovers | Their declared payload read range and the writer generation of in-flight work. |
 | Restate object values | Stored-value ranges, fleet-selected stamps and exclusive object upgrades. |
 | Live remote and Restate wire | Negotiated or declared wire read/write windows, separately from journal and stored-value versions. |
 | Release fixtures | Capture by release tag; synthetic-next supplies the current upgrade proof. |
 
-Session-state admission validates the `DriveFence` in the store transaction,
+Session-state admission validates the `ShiftFence` in the store transaction,
 reads the independent version marker, and returns the session id, version and
-drive epoch. It runs no per-session converter chain and advances no marker.
+shift epoch. It runs no per-session converter chain and advances no marker.
 Recovery also checks the marker before guarded payload decoding. Each record
 reader still enforces its own surface window, as specified by
 [ADR 0077](0077-session-state-migrates-totally-at-admission.md).

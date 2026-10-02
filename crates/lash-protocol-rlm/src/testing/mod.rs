@@ -110,7 +110,7 @@ impl DoubleProcesses {
             Arc::clone(self.backend.process_work().port()),
             Arc::new(lash_core::facade_support::SystemClock),
         );
-        lash_core::runtime::drive::relay::relay_due(
+        lash_core::runtime::shift::relay::relay_due(
             &relay,
             &lash_core::facade_support::SystemClock,
             std::num::NonZeroUsize::new(1024).expect("nonzero"),

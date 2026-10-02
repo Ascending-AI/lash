@@ -15,8 +15,8 @@ pub(crate) struct PendingTurnInputRow {
     state: lash_core_execution::TurnInputState,
     input_json: String,
     enqueued_at_ms: u64,
-    /// The root whose admission holds the row; `None` while it is open.
-    pub(crate) admitted_root: Option<String>,
+    /// The run whose admission holds the row; `None` while it is open.
+    pub(crate) admitted_run: Option<String>,
     run_spec_hash: Option<String>,
     trace_cause: lash_core_execution::TraceCause,
 }
@@ -44,7 +44,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
             "enqueued_at_ms",
             row.get("enqueued_at_ms"),
         )?,
-        admitted_root: row.get("admitted_root"),
+        admitted_run: row.get("admitted_run"),
         run_spec_hash: row.get("run_spec_hash"),
         trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
             "PendingTurnInput",
@@ -75,12 +75,12 @@ pub(crate) fn pending_turn_input_read_from_row(
     row: PgRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
     let row = pending_turn_input_row(row)?;
-    let admitted_root = row.admitted_root.clone();
+    let admitted_run = row.admitted_run.clone();
     let input = pending_turn_input_from_row(row)?;
-    Ok(match admitted_root {
-        Some(root) => lash_core_execution::PendingTurnInputRead::admitted(
+    Ok(match admitted_run {
+        Some(run) => lash_core_execution::PendingTurnInputRead::admitted(
             input,
-            lash_core_execution::TurnId::parse(root)?,
+            lash_core_execution::TurnId::parse(run)?,
         ),
         None => lash_core_execution::PendingTurnInputRead::open(input),
     })
@@ -186,14 +186,14 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
 
 /// Withdraw one locked row for the host at `now` (FIG-3927): an open row is
 /// cancelled, its ingress obligation settled in the same write (FIG-4098); a
-/// row a root admitted is that root's to settle or release, so the cancel
-/// changes nothing and answers the root that holds it.
+/// row a run admitted is that run's to settle or release, so the cancel
+/// changes nothing and answers the run that holds it.
 pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,
     now: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
-    let admitted_root = row.admitted_root.clone();
+    let admitted_run = row.admitted_run.clone();
     let mut input = pending_turn_input_from_row(row)?;
     match input.state.kind() {
         lash_core_execution::runtime::TurnInputStateKind::Cancelled => {
@@ -205,11 +205,11 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
-            if let Some(root) = admitted_root {
+            if let Some(run) = admitted_run {
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
-                        root: lash_core_execution::TurnId::parse(root)?,
+                        run: lash_core_execution::TurnId::parse(run)?,
                     },
                 );
             }

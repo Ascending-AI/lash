@@ -23,7 +23,7 @@
 //!    so it needs no edit; the facade's catalog law lists every core
 //!    command name and moves with it.
 //! 4. A reducer has no identity of its own: a queued transaction is resolved
-//!    by the build whose lane admits its command root. When an existing
+//!    by the build whose lane admits its command run. When an existing
 //!    reducer's behavior changes, bump `JOURNAL_LOGIC_EPOCH`, as for any
 //!    handler logic that moves without a format version, so the changed
 //!    build runs on its own lane. Adding a command changes no existing
@@ -215,7 +215,7 @@ impl ConfigCommand for SetGeneration {
     const NAME: &'static str = "set_generation";
 }
 
-/// The per-turn budget the session runs under from its next root.
+/// The per-turn budget the session runs under from its next run.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetTurnBudget {
@@ -228,9 +228,9 @@ impl ConfigCommand for SetTurnBudget {
     const NAME: &'static str = "set_turn_budget";
 }
 
-/// The tool-call limit the session runs under from its next root (FIG-4546):
+/// The tool-call limit the session runs under from its next run (FIG-4546):
 /// the total one cell may make, and the number a process may hold at once. A
-/// root already admitted keeps the limit it recorded, and so does a process
+/// run already admitted keeps the limit it recorded, and so does a process
 /// already started: work the journal accepted is never refused by a later
 /// change.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -245,7 +245,7 @@ impl ConfigCommand for SetMaxToolCalls {
     const NAME: &'static str = "set_max_tool_calls";
 }
 
-/// Whether the session's turns run autonomously from its next root. Every
+/// Whether the session's turns run autonomously from its next run. Every
 /// value is admissible.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -260,7 +260,7 @@ impl ConfigCommand for SetAutonomy {
 }
 
 /// The consecutive unproductive attempts the session allows from its next
-/// root. A zero bound does not decode, so it is refused at submit; every
+/// run. A zero bound does not decode, so it is refused at submit; every
 /// decodable value is admissible.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -274,7 +274,7 @@ impl ConfigCommand for SetNoProgressBudget {
     const NAME: &'static str = "set_no_progress_budget";
 }
 
-/// The charge-safety policy the session runs under from its next root. A
+/// The charge-safety policy the session runs under from its next run. A
 /// policy accepting more unsafe retries than
 /// [`ChargeSafetyPolicy::MAX_UNSAFE_RETRIES`](crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES)
 /// is refused.

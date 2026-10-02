@@ -1,7 +1,7 @@
 //! Session services behind the runtime's session-facing plugin surface.
 //!
 //! What lives here (ADR 0089): session initialisation (`session_init` — the
-//! `SessionCreateRequest` pipeline and the process-origin port that drives a
+//! `SessionCreateRequest` pipeline and the process-origin port that executes a
 //! recorded child's first turn), the process runners, direct completions, and
 //! current-session services (`current`, `graph`, `api`) that resolve only the
 //! runtime's own session id — a foreign id is an unknown-session error, never
@@ -74,7 +74,7 @@ pub(in crate::runtime) struct CurrentSession {
     /// Explicit lane context for services scoped to a running parent turn.
     /// `None` identifies a lane-less host/service call and selects the fresh
     /// acquisition path at the persistence call site.
-    held_drive_fence: Option<DriveFence>,
+    held_shift_fence: Option<ShiftFence>,
     resident_graph_head_stale: Arc<AtomicBool>,
 }
 
@@ -335,7 +335,7 @@ impl CurrentOwnerCapability {
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        held_drive_fence: Option<&DriveFence>,
+        held_shift_fence: Option<&ShiftFence>,
     ) -> Self {
         Self {
             owner: CurrentOwner::Session(Box::new(CurrentSession {
@@ -352,7 +352,7 @@ impl CurrentOwnerCapability {
                     }
                 },
                 store: runtime.services.store.clone(),
-                held_drive_fence: held_drive_fence.cloned(),
+                held_shift_fence: held_shift_fence.cloned(),
                 resident_graph_head_stale: Arc::clone(
                     runtime.resident_session.graph_head_stale_flag(),
                 ),
@@ -508,9 +508,9 @@ impl RuntimeSessionServices {
     /// [`Self::for_turn`].
     pub(super) fn new(
         runtime: &LashRuntime,
-        held_drive_fence: Option<&DriveFence>,
+        held_shift_fence: Option<&ShiftFence>,
     ) -> Result<Self, PluginOperationInvokeError> {
-        Self::with_scope(runtime, None, held_drive_fence)
+        Self::with_scope(runtime, None, held_shift_fence)
     }
 
     /// The services a process runtime runs its body through, keyed by the
@@ -556,16 +556,16 @@ impl RuntimeSessionServices {
     /// committed once by the turn.
     pub(super) fn for_turn(
         runtime: &LashRuntime,
-        held_drive_fence: Option<&DriveFence>,
+        held_shift_fence: Option<&ShiftFence>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Self, PluginOperationInvokeError> {
-        Self::with_scope(runtime, Some(turn_graph_appends), held_drive_fence)
+        Self::with_scope(runtime, Some(turn_graph_appends), held_shift_fence)
     }
 
     fn with_scope(
         runtime: &LashRuntime,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        held_drive_fence: Option<&DriveFence>,
+        held_shift_fence: Option<&ShiftFence>,
     ) -> Result<Self, PluginOperationInvokeError> {
         let Some(session) = runtime.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -577,7 +577,7 @@ impl RuntimeSessionServices {
                 runtime,
                 Arc::clone(session.plugins()),
                 turn_graph_appends,
-                held_drive_fence,
+                held_shift_fence,
             ),
             processes: ProcessCapability::new(runtime),
             direct: DirectCompletionCapability,

@@ -7,7 +7,7 @@
 //! recorded outcome back — and differ for every other call, even when the
 //! model's provider hands two calls the same call id.
 //!
-//! Every law drives real turns through the tier's
+//! Every law executes real turns through the tier's
 //! [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): a fresh runtime
 //! over the tier's host and stores per execution, a scripted model and the
 //! probe tools below, which record the identity each attempt saw.
@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::ToolDefinitionBindingExt as _;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{SessionId, TurnId};
 
@@ -638,13 +638,13 @@ impl World {
     }
 
     /// One execution of `turn`: a fresh runtime over the tier's host and
-    /// stores, loading the session the earlier turns committed, driving the
+    /// stores, loading the session the earlier turns committed, executing the
     /// turn on the controller the tier lends it.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    pub(crate) async fn drive(
+    pub(crate) async fn shift(
         &self,
         turn: &ScriptedTurn,
         scope: crate::ScopedEffectController<'_>,
@@ -657,7 +657,7 @@ impl World {
         input.trace_turn_id = Some(turn.turn_id.clone());
         tokio::time::timeout(
             TURN_BUDGET,
-            runtime.drive_turn(
+            runtime.execute_turn(
                 input,
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             ),
@@ -780,7 +780,7 @@ impl World {
         (config, factories)
     }
 
-    /// An attempt that drives `turn` and hands its result to `report`.
+    /// An attempt that executes `turn` and hands its result to `report`.
     pub(crate) fn attempt(
         &self,
         turn: &ScriptedTurn,
@@ -795,9 +795,9 @@ impl World {
             let turn = turn.clone();
             let report = report.clone();
             Box::pin(async move {
-                let driven = world.drive(&turn, scope, None).await;
-                let end = crate::ConformanceTurnEnd::of(&driven);
-                let _ = report.send(driven);
+                let executed = world.shift(&turn, scope, None).await;
+                let end = crate::ConformanceTurnEnd::of(&executed);
+                let _ = report.send(executed);
                 end
             })
         })

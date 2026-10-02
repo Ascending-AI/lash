@@ -1,17 +1,17 @@
 //! One way in: [`LashSession::send`](crate::LashSession::send) accepts an
-//! input durably and asks the session's engine to drive it (FIG-3600).
+//! input durably and asks the session's engine to execute it (FIG-3600).
 //!
 //! The turn no longer runs in the caller's future. The caller holds a
 //! [`SendHandle`] and reads what happened from what was recorded: the input's
-//! root, then that root's terminal or its park. The engine is used only as a
-//! wake barrier and to surface a drive it refused.
+//! run, then that run's terminal or its park. The engine is used only as a
+//! wake barrier and to surface a shift it refused.
 //!
 //! Polling any one of a handle's [`events`](SendHandle::events),
 //! [`outcome`](SendHandle::outcome) or [`output`](SendHandle::output) is
 //! enough for the turn to complete, on every engine: on a core that runs no
-//! engine and drives in the caller's task, each of them drives. The handle
+//! engine and executes in the caller's task, each of them executes. The handle
 //! remembers its answer, so a later call answers the same outcome without
-//! driving again.
+//! executing again.
 
 mod batch;
 mod cancel;
@@ -51,7 +51,7 @@ use lash_core::store::{ParkId, ParkReason, StallReason};
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
-pub(crate) use mailbox::{deposit_settled_root, running};
+pub(crate) use mailbox::{deposit_settled_run, running};
 
 /// The session a send, a handle or a cancel is bound to.
 #[derive(Clone)]
@@ -100,11 +100,11 @@ impl SendContext {
         Ok(())
     }
 
-    /// [`refresh`](Self::refresh), unless the drive that deposited
+    /// [`refresh`](Self::refresh), unless the shift that deposited
     /// `settled` ran on the open session's own runtime: that runtime holds
-    /// the root's commit and published it with the deposit, and its drive
-    /// may still hold it while the root's scope closes (FIG-3979).
-    async fn refresh_unless_ran_on(&self, settled: Option<&mailbox::SettledRoot>) -> Result<()> {
+    /// the run's commit and published it with the deposit, and its shift
+    /// may still hold it while the run's scope closes (FIG-3979).
+    async fn refresh_unless_ran_on(&self, settled: Option<&mailbox::SettledRun>) -> Result<()> {
         if let (Some(runtime), Some(settled)) = (&self.live, settled)
             && settled.ran_on(runtime)
         {
@@ -113,13 +113,13 @@ impl SendContext {
         self.refresh().await
     }
 
-    /// [`refresh`](Self::refresh) for an answer read while `root`'s run may
-    /// still be under way in this process: a root parked for a stopped child
+    /// [`refresh`](Self::refresh) for an answer read while `run`'s run may
+    /// still be under way in this process: a run parked for a stopped child
     /// it waits on is answered while its run holds the open session's
     /// runtime (FIG-4618). That run keeps the runtime at the head it commits
     /// and publishes it when it returns, so the answer never waits for it.
     /// Any other holder of the runtime is brief, and is waited for.
-    async fn refresh_unless_held_by_run_of(&self, root: &TurnId) -> Result<()> {
+    async fn refresh_unless_held_by_run_of(&self, run: &TurnId) -> Result<()> {
         let Some(runtime) = &self.live else {
             return Ok(());
         };
@@ -130,7 +130,7 @@ impl SendContext {
                 if mailbox::may_deposit(
                     self.parts.work.store_binding(),
                     &self.parts.session_id,
-                    root,
+                    run,
                 ) =>
             {
                 return Ok(());
@@ -194,7 +194,7 @@ impl SendTarget {
     }
 
     /// The live replay position now: a cursor taken before an acceptance
-    /// sees everything the acceptance's drive publishes.
+    /// sees everything the acceptance's shift publishes.
     fn current_cursor(&self) -> lash_core::SessionCursor {
         match self {
             Self::Live(session) => {
@@ -213,9 +213,9 @@ impl SendTarget {
 
 /// Refuse a spec whose model selection cannot run before the input is
 /// accepted: a model key this host's models do not register, or reasoning
-/// the capability of the model the root would run refuses, judged as the
-/// root will judge it against the session's recorded config (FIG-4531).
-/// Nothing is recorded here: the root mints the key's binding once, when it
+/// the capability of the model the run would run refuses, judged as the
+/// run will judge it against the session's recorded config (FIG-4531).
+/// Nothing is recorded here: the run mints the key's binding once, when it
 /// records its shape. A spec that names neither keeps the session's recorded
 /// selection and is not judged.
 async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> Result<()> {
@@ -249,7 +249,7 @@ async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> R
                     Some(reasoning) => recorded.with_reasoning(reasoning),
                     None => recorded,
                 }),
-                // A session that records no model refuses the root when its
+                // A session that records no model refuses the run when its
                 // shape resolves.
                 (None, None) => None,
             }
@@ -272,13 +272,13 @@ async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> R
 
 /// Builder for one [`send`](crate::LashSession::send).
 ///
-/// Awaiting it commits the acceptance and asks the engine for a drive; it
+/// Awaiting it commits the acceptance and asks the engine for a shift; it
 /// yields a [`SendHandle`]. [`output`](Self::output) is the one-call form.
 ///
 /// The shape the input runs under is its [`RunSpec`]: the default is the
-/// session config as it stands when the input's root starts, after every
+/// session config as it stands when the input's run starts, after every
 /// config command queued ahead of that boundary. [`run`](Self::run) and the
-/// one-shot setters shape this input's root only; nothing they set reaches
+/// one-shot setters shape this input's run only; nothing they set reaches
 /// the session config. Inputs whose specs differ never share a turn.
 #[must_use = "a SendBuilder does nothing until awaited"]
 pub struct SendBuilder {
@@ -363,8 +363,8 @@ impl SendBuilder {
     }
 
     /// Pin this input in the transaction that accepts it: the state its
-    /// root commits is retained through every collection, from before the
-    /// root can start, until it is unpinned or the session is deleted.
+    /// run commits is retained through every collection, from before the
+    /// run can start, until it is unpinned or the session is deleted.
     /// [`Target::Input`](lash_core::Target::Input) of
     /// [`SendHandle::input_id`] names it afterwards, for
     /// [`fork_at`](crate::LashCore::fork_at) and
@@ -375,10 +375,10 @@ impl SendBuilder {
     }
 
     /// The host's id for this input. It is the idempotency key **and** the
-    /// root the input starts: it is stored verbatim as the row's source key,
-    /// so the input's root is `TurnId(id)`. Under the default drain every
-    /// next-turn input is its own root; a drain policy that takes several
-    /// inputs into one root runs them under the first one's root.
+    /// run the input starts: it is stored verbatim as the row's source key,
+    /// so the input's run is `TurnId(id)`. Under the default drain every
+    /// next-turn input is its own run; a drain policy that takes several
+    /// inputs into one run executes them under the first one's run.
     ///
     /// A retry validates the original submission digest, including after
     /// settlement. Identical content returns the original acceptance; changed
@@ -408,7 +408,7 @@ impl SendBuilder {
         self
     }
 
-    /// The model this input's root runs on, by the host's key. The root
+    /// The model this input's run executes on, by the host's key. The run
     /// mints the key's binding once, when it records its shape, and runs the
     /// session's reasoning unless [`reasoning`](Self::reasoning) is set too.
     /// A key the host's models do not register is refused before the input
@@ -418,23 +418,23 @@ impl SendBuilder {
         self
     }
 
-    /// The reasoning this input's root runs its model with.
+    /// The reasoning this input's run executes its model with.
     pub fn reasoning(mut self, reasoning: ReasoningSelection) -> Self {
         self.run_spec.overrides.reasoning = Some(reasoning);
         self
     }
 
-    /// The generation options this input's root runs with.
+    /// The generation options this input's run executes with.
     pub fn generation(mut self, generation: GenerationOptions) -> Self {
         self.run_spec.overrides.generation = Some(generation);
         self
     }
 
-    /// The options this input's root states for the session's protocol:
+    /// The options this input's run states for the session's protocol:
     /// the protocol owner's typed run options (`StandardRunOptions`,
     /// `RlmTurnOptions`), which that owner applies over the session's
     /// recorded namespace. Options the owner's type does not admit refuse
-    /// the root's shape. Setting them again replaces them.
+    /// the run's shape. Setting them again replaces them.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
         self.run_spec.overrides.protocol_turn_options = Some(options);
         self
@@ -445,13 +445,13 @@ impl SendBuilder {
         self.await?.output().await
     }
 
-    /// Accept, forward the root's live activity to `sink`, and answer its
+    /// Accept, forward the run's live activity to `sink`, and answer its
     /// [`SendHandle::outcome_into`].
     pub async fn outcome_into(self, sink: &dyn TurnActivitySink) -> Result<SendOutcome> {
         self.await?.outcome_into(sink).await
     }
 
-    /// Accept, forward the root's live activity to `sink`, then return the
+    /// Accept, forward the run's live activity to `sink`, then return the
     /// settled report ([`SendHandle::output_into`]).
     pub async fn output_into(self, sink: &dyn TurnActivitySink) -> Result<TurnReport> {
         self.await?.output_into(sink).await
@@ -471,9 +471,9 @@ impl SendBuilder {
         // and before the first await: nothing later changes the edge.
         let trace_cause = trace.into_cause(&target);
         let context = target.context().await?;
-        // The host id names the root; the drive runs the root's turns under
+        // The host id names the run; the shift executes the run's turns under
         // it, so the input carries no turn id of its own. An input sent
-        // without one gets a fresh id, so its row is keyed and its root named
+        // without one gets a fresh id, so its row is keyed and its run named
         // like any other.
         let host_id = id.or_else(|| input.trace_turn_id.take());
         input.trace_turn_id = None;
@@ -528,7 +528,7 @@ impl std::future::IntoFuture for SendBuilder {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SendOutcome {
     Settled {
-        root: TurnId,
+        run: TurnId,
         output: Box<TurnOutput>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
@@ -545,11 +545,11 @@ pub enum SendOutcome {
     },
 }
 
-/// How an input's root stands once it stopped moving.
+/// How an input's run stands once it stopped moving.
 ///
-/// Parked is not terminal: the root holds its work until an operator
+/// Parked is not terminal: the run holds its work until an operator
 /// redrives, cancels or forks it, and a host re-awaits it through
-/// [`LashSession::root`](crate::LashSession::root).
+/// [`LashSession::run`](crate::LashSession::run).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum TurnStatus {
@@ -558,7 +558,7 @@ pub enum TurnStatus {
     Cancelled,
     Parked(ParkedTurn),
     /// The input was accepted, but its delivery to the engine stalled (ADR
-    /// 0109 §3): no root took it, and none will until an operator re-arms
+    /// 0109 §3): no run took it, and none will until an operator re-arms
     /// its obligation. Not terminal: the input stays durable, and a host
     /// re-awaits it once re-armed.
     Stalled(StalledDelivery),
@@ -580,11 +580,11 @@ pub struct StalledDelivery {
     pub stalled_at_ms: u64,
 }
 
-/// A root that parked (ADR 0104 O3): durable and non-terminal.
+/// A run that parked (ADR 0104 O3): durable and non-terminal.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParkedTurn {
     pub session_id: SessionId,
-    pub root: TurnId,
+    pub run: TurnId,
     pub park_id: ParkId,
     pub reason: ParkReason,
     pub since_ms: u64,
@@ -601,10 +601,10 @@ impl SendOutcome {
         }
     }
 
-    pub fn root(&self) -> Option<&TurnId> {
+    pub fn run(&self) -> Option<&TurnId> {
         match self {
-            Self::Settled { root, .. } => Some(root),
-            Self::Parked { parked, .. } => Some(&parked.root),
+            Self::Settled { run, .. } => Some(run),
+            Self::Parked { parked, .. } => Some(&parked.run),
             Self::Stalled { .. } | Self::Withdrawn { .. } => None,
         }
     }
@@ -644,7 +644,7 @@ impl SendOutcome {
     }
 
     /// Converts the variant to its transport shape. A settled report names
-    /// the actual root that answered the input.
+    /// the actual run that answered the input.
     pub fn to_remote(
         &self,
         session_id: &SessionId,
@@ -655,11 +655,11 @@ impl SendOutcome {
         let input_id = input_id.to_string();
         let gaps = self.gaps().iter().cloned().map(Into::into).collect();
         match self {
-            Self::Settled { root, output, .. } => RemoteSendOutcome::Settled {
+            Self::Settled { run, output, .. } => RemoteSendOutcome::Settled {
                 report: Box::new(
                     output
                         .result
-                        .to_remote(&session_id, root, &output.activities),
+                        .to_remote(&session_id, run, &output.activities),
                 ),
                 session_id,
                 input_id,
@@ -669,7 +669,7 @@ impl SendOutcome {
                 session_id,
                 input_id,
                 parked: RemoteParkedTurn {
-                    root: parked.root.clone(),
+                    run: parked.run.clone(),
                     park_id: parked.park_id.feed_sequence(),
                     reason: lash_remote_protocol::RemoteTurnParkReason::from(&parked.reason),
                     since_ms: parked.since_ms,
@@ -718,7 +718,7 @@ pub(crate) fn status_of_outcome(outcome: &TurnOutcome) -> TurnStatus {
 }
 
 // ---------------------------------------------------------------------------
-// SendHandle and RootHandle
+// SendHandle and RunHandle
 // ---------------------------------------------------------------------------
 
 /// What every call on one handle shares: the answer once it is known.
@@ -809,7 +809,7 @@ fn spawn_events(
     }
 }
 
-/// An accepted input: follow its live activity, and read how its root
+/// An accepted input: follow its live activity, and read how its run
 /// answered.
 ///
 /// Dropping a handle stops nothing.
@@ -836,10 +836,10 @@ impl SendHandle {
         self.id.as_ref()
     }
 
-    /// Live activity of the root that applies this input, from the cursor
+    /// Live activity of the run that applies this input, from the cursor
     /// taken before acceptance. Each call subscribes afresh from that cursor.
-    /// It ends once the input's root settles or parks; draining it alone
-    /// drives the turn to its answer, which the handle then remembers.
+    /// It ends once the input's run settles or parks; draining it alone
+    /// executes the turn to its answer, which the handle then remembers.
     pub fn events(&self) -> TurnEvents {
         spawn_events(
             self.target.clone(),
@@ -849,7 +849,7 @@ impl SendHandle {
         )
     }
 
-    /// The input's root answer: resolves on a terminal **or** a park.
+    /// The input's run answer: resolves on a terminal **or** a park.
     pub async fn outcome(self) -> Result<SendOutcome> {
         settle(
             &self.target,
@@ -861,7 +861,7 @@ impl SendHandle {
         .await
     }
 
-    /// [`outcome`](Self::outcome) narrowed to a settled turn. A parked root,
+    /// [`outcome`](Self::outcome) narrowed to a settled turn. A parked run,
     /// or an input withdrawn before it ran, answers
     /// [`SendError::NotSettled`].
     pub async fn output(self) -> Result<TurnOutput> {
@@ -869,7 +869,7 @@ impl SendHandle {
         settled_output(input_id, self.outcome().await?)
     }
 
-    /// Forward the root's live activity to `sink` as it arrives, and answer
+    /// Forward the run's live activity to `sink` as it arrives, and answer
     /// [`outcome`](Self::outcome) with that activity collected in its
     /// output. The outcome's [`gaps`](SendOutcome::gaps) say where the
     /// forwarded activity is incomplete.
@@ -892,7 +892,7 @@ impl SendHandle {
     }
 
     /// Withdraw the input if it is still queued, or cooperatively cancel its
-    /// running root.
+    /// running run.
     pub fn cancel(&self) -> CancelBuilder {
         CancelBuilder::new(
             self.target.clone(),
@@ -900,10 +900,10 @@ impl SendHandle {
         )
     }
 
-    /// Pin this input: the state the root that applies it commits is
-    /// retained through every collection. It can be called before the root
+    /// Pin this input: the state the run that applies it commits is
+    /// retained through every collection. It can be called before the run
     /// starts, while it runs or after it ended, any number of times; it
-    /// never touches the turn. A merged or re-deferred input pins the root
+    /// never touches the turn. A merged or re-deferred input pins the run
     /// that actually applies it.
     pub async fn pin(&self) -> Result<()> {
         let context = self.target.context().await?;
@@ -915,50 +915,50 @@ impl SendHandle {
             .map_err(EmbedError::Store)
     }
 
-    /// The root this input is bound to, once a root has taken it: the root
-    /// that drives it, which under a merging drain or a steer is not the
+    /// The run this input is bound to, once a run has taken it: the run
+    /// that executes it, which under a merging drain or a steer is not the
     /// input's own. `None` until then, and for a withdrawn input.
-    pub async fn root(&self) -> Result<Option<TurnId>> {
+    pub async fn run(&self) -> Result<Option<TurnId>> {
         let context = self.target.context().await?;
         context
             .parts
             .store
-            .root_binding(&self.receipt.input_id)
+            .run_binding(&self.receipt.input_id)
             .await
             .map_err(EmbedError::Store)
     }
 }
 
-/// A logical root, re-awaited by id: after a restart, a park verb, or from a
+/// A logical run, re-awaited by id: after a restart, a park verb, or from a
 /// handle that only knows the host id.
-pub struct RootHandle {
+pub struct RunHandle {
     target: SendTarget,
-    root: TurnId,
+    run: TurnId,
     cursor: lash_core::SessionCursor,
     shared: Arc<HandleShared>,
 }
 
-impl RootHandle {
-    pub fn root(&self) -> &TurnId {
-        &self.root
+impl RunHandle {
+    pub fn run(&self) -> &TurnId {
+        &self.run
     }
 
-    /// Live activity of the root from the moment this handle was made; no
+    /// Live activity of the run from the moment this handle was made; no
     /// earlier activity is replayed.
     pub fn events(&self) -> TurnEvents {
         spawn_events(
             self.target.clone(),
-            Subject::Root(self.root.clone()),
+            Subject::Run(self.run.clone()),
             self.cursor.clone(),
             Arc::clone(&self.shared),
         )
     }
 
-    /// How the root answers. A root still parked answers Parked again.
+    /// How the run answers. A run still parked answers Parked again.
     pub async fn outcome(self) -> Result<SendOutcome> {
         settle(
             &self.target,
-            &Subject::Root(self.root.clone()),
+            &Subject::Run(self.run.clone()),
             &self.cursor,
             &self.shared,
             Tap::Quiet,
@@ -967,9 +967,9 @@ impl RootHandle {
     }
 
     pub async fn output(self) -> Result<TurnOutput> {
-        let root = self.root.clone();
+        let run = self.run.clone();
         let outcome = self.outcome().await?;
-        settled_output(InputId::from(&root), outcome)
+        settled_output(InputId::from(&run), outcome)
     }
 }
 
@@ -1004,12 +1004,12 @@ pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
     handle
 }
 
-/// A handle on `root`; its cursor is the observation's current position.
-pub(crate) fn root(target: SendTarget, root: TurnId) -> RootHandle {
+/// A handle on `run`; its cursor is the observation's current position.
+pub(crate) fn run(target: SendTarget, run: TurnId) -> RunHandle {
     let cursor = target.current_cursor();
-    RootHandle {
+    RunHandle {
         target,
-        root,
+        run,
         cursor,
         shared: Arc::new(HandleShared::pending()),
     }
@@ -1029,7 +1029,7 @@ pub(crate) fn settled_output(input_id: InputId, outcome: SendOutcome) -> Result<
 // TurnEvents
 // ---------------------------------------------------------------------------
 
-/// The live activity of one root, as it is published on the session's
+/// The live activity of one run, as it is published on the session's
 /// observation.
 pub struct TurnEvents {
     pub(crate) inner: Pin<Box<dyn Stream<Item = Result<TurnActivity>> + Send>>,
@@ -1056,11 +1056,11 @@ impl Stream for TurnEvents {
 /// What a [`cancel`](crate::LashSession::cancel) addresses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CancelTarget {
-    /// An accepted input: withdrawn while queued, or its root cancelled once
+    /// An accepted input: withdrawn while queued, or its run cancelled once
     /// running.
     Input(InputId),
-    /// A logical root.
-    Root(TurnId),
+    /// A logical run.
+    Run(TurnId),
 }
 
 /// Builder for one cancel (ADR 0039).
@@ -1080,7 +1080,7 @@ impl CancelBuilder {
         }
     }
 
-    /// The cancel request's id; defaults to `cancel:{input|root}:{id}`.
+    /// The cancel request's id; defaults to `cancel:{input|run}:{id}`.
     pub fn request_id(mut self, id: impl Into<String>) -> Self {
         self.request.request_id = Some(id.into());
         self
@@ -1129,16 +1129,16 @@ pub enum CancelReceipt {
     /// The input was still queued: its row is cancelled and no turn applied
     /// it. Its handle answers Cancelled with no output.
     Withdrawn(Box<PendingTurnInputCancelReceipt>),
-    /// The input's root is running: a durable cancel request was placed on
-    /// the root's cancellation gate.
+    /// The input's run is running: a durable cancel request was placed on
+    /// the run's cancellation gate.
     Requested {
-        root: TurnId,
+        run: TurnId,
         receipt: Box<TurnCancelReceipt>,
     },
-    /// The root already has a terminal (or the input was already applied and
+    /// The run already has a terminal (or the input was already applied and
     /// settled).
     AlreadySettled {
-        root: TurnId,
+        run: TurnId,
     },
     NotFound,
 }

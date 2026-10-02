@@ -1,14 +1,14 @@
 //! How the workbench starts a user turn and follows it to its settlement.
 //!
 //! A turn is never run here. The session's `send()` takes the input durably
-//! under the turn id, and the session's engine drives the root: lash's
+//! under the turn id, and the session's engine executes the run: lash's
 //! `LashSession` service, in a Restate handler. The workbench follows the
-//! root through its handle and turns its settled report into the product rows
+//! run through its handle and turns its settled report into the product rows
 //! the page shows, then releases the session's active-turn claim.
 //!
-//! The engine also starts roots nobody sent from here: a next-turn input, a
+//! The engine also starts runs nobody sent from here: a next-turn input, a
 //! process wake, a cron occurrence. A watch on each session this process
-//! serves follows those too, so every root's answer reaches the page.
+//! serves follows those too, so every run's answer reaches the page.
 
 use super::*;
 use futures_util::StreamExt as _;
@@ -29,41 +29,41 @@ pub(crate) struct UserTurnRequest {
     pub(crate) attachment_id: Option<String>,
 }
 
-/// How long a follower waits before it reads a root again after a read that
+/// How long a follower waits before it reads a run again after a read that
 /// failed retryably.
 const REFOLLOW_BACKOFF: Duration = Duration::from_millis(250);
 /// The longest a resumed follower waits between opens of a session a dead
 /// owner's lease still holds.
 const REFOLLOW_BACKOFF_CEILING: Duration = Duration::from_secs(2);
 
-/// The roots this process follows to settlement, and the sessions it watches
-/// for roots the engine starts on its own. A root is followed once: whoever
+/// The runs this process follows to settlement, and the sessions it watches
+/// for runs the engine starts on its own. A run is followed once: whoever
 /// claims it first follows it, and its follower lets it go.
 #[derive(Clone, Default)]
-pub(crate) struct RootFollows {
-    inner: Arc<Mutex<RootFollowsInner>>,
+pub(crate) struct RunFollows {
+    inner: Arc<Mutex<RunFollowsInner>>,
 }
 
 #[derive(Default)]
-struct RootFollowsInner {
-    roots: HashSet<(SessionId, TurnId)>,
+struct RunFollowsInner {
+    runs: HashSet<(SessionId, TurnId)>,
     watched: HashSet<SessionId>,
 }
 
-impl RootFollows {
-    /// Claim `root` for a follower; false when one already follows it.
-    fn claim(&self, session_id: &SessionId, root: &TurnId) -> bool {
+impl RunFollows {
+    /// Claim `run` for a follower; false when one already follows it.
+    fn claim(&self, session_id: &SessionId, run: &TurnId) -> bool {
         self.inner
             .lock_recover()
-            .roots
-            .insert((session_id.clone(), root.clone()))
+            .runs
+            .insert((session_id.clone(), run.clone()))
     }
 
-    fn release(&self, session_id: &SessionId, root: &TurnId) {
+    fn release(&self, session_id: &SessionId, run: &TurnId) {
         self.inner
             .lock_recover()
-            .roots
-            .remove(&(session_id.clone(), root.clone()));
+            .runs
+            .remove(&(session_id.clone(), run.clone()));
     }
 
     /// Start watching `session_id`; false when a watch already runs.
@@ -71,11 +71,11 @@ impl RootFollows {
         self.inner.lock_recover().watched.insert(session_id.clone())
     }
 
-    /// Whether a follower here still holds a root of `session_id`.
+    /// Whether a follower here still holds a run of `session_id`.
     pub(crate) fn follows_any(&self, session_id: &SessionId) -> bool {
         self.inner
             .lock_recover()
-            .roots
+            .runs
             .iter()
             .any(|(followed, _)| followed == session_id)
     }
@@ -85,21 +85,21 @@ impl RootFollows {
     }
 }
 
-/// Lets a claimed root go when its follower ends, however it ends.
-struct RootClaim {
-    follows: RootFollows,
+/// Lets a claimed run go when its follower ends, however it ends.
+struct RunClaim {
+    follows: RunFollows,
     session_id: SessionId,
-    root: TurnId,
+    run: TurnId,
 }
 
-impl Drop for RootClaim {
+impl Drop for RunClaim {
     fn drop(&mut self) {
-        self.follows.release(&self.session_id, &self.root);
+        self.follows.release(&self.session_id, &self.run);
     }
 }
 
-/// Accept `request`'s input under its turn id, then follow the root in the
-/// background. The returned task ends once the root is settled on the page.
+/// Accept `request`'s input under its turn id, then follow the run in the
+/// background. The returned task ends once the run is settled on the page.
 pub(crate) async fn start_user_turn(
     state: &AppState,
     request: UserTurnRequest,
@@ -111,15 +111,15 @@ pub(crate) async fn start_user_turn(
         .await
         .map_err(AppError::session_open)?;
     apply_llm_profile_selection_to_session(state, &session, turn_profile, "user_turn").await?;
-    watch_session_roots(state, &request.session_id).await;
-    // Claimed before the send, so the session's watch leaves this root to
+    watch_session_runs(state, &request.session_id).await;
+    // Claimed before the send, so the session's watch leaves this run to
     // the follower below.
     let follows = &state.active_turns.follows;
     follows.claim(&request.session_id, &request.turn_id);
-    let claim = RootClaim {
+    let claim = RunClaim {
         follows: follows.clone(),
         session_id: request.session_id.clone(),
-        root: request.turn_id.clone(),
+        run: request.turn_id.clone(),
     };
     let handle = session
         .send(input)
@@ -148,7 +148,7 @@ pub(crate) async fn start_user_turn(
 }
 
 /// Follow every claimed user turn this process found in its active-turn
-/// ledger at startup: a restarted host re-attaches to the roots its previous
+/// ledger at startup: a restarted host re-attaches to the runs its previous
 /// incarnation was following, and settles each once its engine does.
 pub(crate) async fn resume_turn_followers(state: &AppState) {
     for active_turn in state.active_turns.snapshot() {
@@ -156,7 +156,7 @@ pub(crate) async fn resume_turn_followers(state: &AppState) {
             session_id,
             turn_id,
         } = active_turn.address;
-        // A queued-kind claim names no root the engine runs: the queued-turn
+        // A queued-kind claim names no run the engine executions: the queued-turn
         // workflow that minted it is gone, so the claim is released.
         if active_turn.kind == crate::WorkbenchTurnKind::Queued {
             state.active_turns.remove(&session_id, &turn_id);
@@ -170,7 +170,7 @@ pub(crate) async fn resume_turn_followers(state: &AppState) {
     }
 }
 
-/// Open the session a claimed turn belongs to and follow its root. An open can
+/// Open the session a claimed turn belongs to and follow its run. An open can
 /// race another writer still holding the lane, so a contended open is retried;
 /// any other refusal leaves the claim for an operator.
 async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: TurnId) {
@@ -178,12 +178,12 @@ async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: T
     if !follows.claim(&session_id, &turn_id) {
         return;
     }
-    let claim = RootClaim {
+    let claim = RunClaim {
         follows: follows.clone(),
         session_id: session_id.clone(),
-        root: turn_id.clone(),
+        run: turn_id.clone(),
     };
-    watch_session_roots(&state, &session_id).await;
+    watch_session_runs(&state, &session_id).await;
     let mut backoff = REFOLLOW_BACKOFF;
     loop {
         match state.open_session(&session_id, "turn.resume_follow").await {
@@ -199,7 +199,7 @@ async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: T
                     claim,
                     FollowOrigin::UserTurn,
                     None,
-                    FollowFrom::Root,
+                    FollowFrom::Run,
                 ));
                 return;
             }
@@ -225,7 +225,7 @@ async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: T
     }
 }
 
-/// Who started a followed root: the page's send, or the engine on its own
+/// Who started a followed run: the page's send, or the engine on its own
 /// (a next-turn input, a wake, a cron occurrence). It names the follower's
 /// traces and the reason its cron resynchronisation reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -247,25 +247,25 @@ impl FollowOrigin {
 /// (the session briefly busy) before it gives up and leaves the claim.
 const SETTLE_RETRY_WINDOW: Duration = Duration::from_secs(120);
 
-/// Where a follower reads its root's settlement from.
+/// Where a follower reads its run's settlement from.
 enum FollowFrom {
     /// The accepting handle: its live activity streams to the page.
     Send(Box<lash::SendHandle>),
-    /// The root alone, read again after a restart or a retryable failure.
-    Root,
+    /// The run alone, read again after a restart or a retryable failure.
+    Run,
 }
 
 fn spawn_turn_follower(
     state: AppState,
     session: lash::LashSession,
-    claim: RootClaim,
+    claim: RunClaim,
     origin: FollowOrigin,
     model: Option<String>,
     from: FollowFrom,
 ) -> tokio::task::JoinHandle<TurnSettlement> {
     tokio::spawn(async move {
         let _claim = &claim;
-        let turn_id = claim.root.clone();
+        let turn_id = claim.run.clone();
         let session_id = session.session_id();
         let mut from = from;
         loop {
@@ -279,19 +279,19 @@ fn spawn_turn_follower(
             )))
             .catch_unwind()
             .await;
-            // A read that failed retryably leaves the root unsettled on the
+            // A read that failed retryably leaves the run unsettled on the
             // page: read it again rather than settle a turn still running.
             if matches!(
                 &followed,
                 Ok(Err(error)) if error.verdict == AppErrorVerdict::Retryable
             ) {
                 tokio::time::sleep(REFOLLOW_BACKOFF).await;
-                from = FollowFrom::Root;
+                from = FollowFrom::Run;
                 continue;
             }
             // The outcome is traced and published by the terminalization; a
             // follower has no caller left to hand an error to. A recorded
-            // root whose settlement meets a briefly busy session settles
+            // run whose settlement meets a briefly busy session settles
             // again rather than leave its claim held.
             let settled = match followed {
                 Ok(Ok(())) => settle_with_retry(&state, &session_id, &turn_id)
@@ -327,7 +327,7 @@ fn spawn_turn_follower(
     })
 }
 
-/// Settle a recorded root, retrying while the session is briefly busy.
+/// Settle a recorded run, retrying while the session is briefly busy.
 async fn settle_with_retry(
     state: &AppState,
     session_id: &SessionId,
@@ -357,7 +357,7 @@ async fn settle_with_retry(
     }
 }
 
-/// Read the root's settled report and publish it.
+/// Read the run's settled report and publish it.
 async fn follow_once(
     state: &AppState,
     session: &lash::LashSession,
@@ -374,11 +374,11 @@ async fn follow_once(
             };
             (*handle).outcome_into(&ui_events).await
         }
-        FollowFrom::Root => session.root(turn_id.clone()).outcome().await,
+        FollowFrom::Run => session.run(turn_id.clone()).outcome().await,
     }
     .map_err(AppError::runtime)?;
-    // Answered, Failed and Cancelled roots ran and settled: each has a report
-    // the page shows. A parked root, or an input withdrawn before it ran, has
+    // Answered, Failed and Cancelled runs ran and settled: each has a report
+    // the page shows. A parked run, or an input withdrawn before it ran, has
     // none.
     let output = match outcome {
         lash::SendOutcome::Settled { output, .. } => output.result,
@@ -407,21 +407,21 @@ async fn follow_once(
     .await
 }
 
-/// Watch `session_id` for roots the engine starts that no follower here
+/// Watch `session_id` for runs the engine starts that no follower here
 /// claimed, and follow each to settlement. One watch per session per process;
 /// it ends when the session can no longer be opened.
 ///
-/// The watch subscribes before this returns, so a root the engine starts once
+/// The watch subscribes before this returns, so a run the engine starts once
 /// the caller goes on — the send, wake or trigger it is about to admit — is one
 /// the watch sees. An open that fails here is retried by the watch itself.
-pub(crate) async fn watch_session_roots(state: &AppState, session_id: &SessionId) {
+pub(crate) async fn watch_session_runs(state: &AppState, session_id: &SessionId) {
     if !state.active_turns.follows.watch(session_id) {
         return;
     }
-    let subscribed = Box::pin(subscribe_session_roots(state, session_id))
+    let subscribed = Box::pin(subscribe_session_runs(state, session_id))
         .await
         .ok();
-    drop(tokio::spawn(run_session_root_watch(
+    drop(tokio::spawn(session_run_watch_task(
         state.clone(),
         session_id.clone(),
         subscribed,
@@ -429,26 +429,26 @@ pub(crate) async fn watch_session_roots(state: &AppState, session_id: &SessionId
 }
 
 /// A session opened for observation and its update stream from the current
-/// cursor: what a watch reads root starts from.
-type SessionRootSubscription = (
+/// cursor: what a watch reads run starts from.
+type SessionRunSubscription = (
     lash::LashSession,
     lash::recoverable_chat::RecoverableChatSubscription,
 );
 
-async fn subscribe_session_roots(
+async fn subscribe_session_runs(
     state: &AppState,
     session_id: &SessionId,
-) -> Result<SessionRootSubscription, lash::EmbedError> {
+) -> Result<SessionRunSubscription, lash::EmbedError> {
     let session = state.open_session_for_observation(session_id).await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     let updates = session.observe().subscribe_recoverable_chat(cursor);
     Ok((session, updates))
 }
 
-async fn run_session_root_watch(
+async fn session_run_watch_task(
     state: AppState,
     session_id: SessionId,
-    mut subscribed: Option<SessionRootSubscription>,
+    mut subscribed: Option<SessionRunSubscription>,
 ) {
     let follows = state.active_turns.follows.clone();
     loop {
@@ -473,14 +473,14 @@ const WATCH_IDLE_CHECK: Duration = Duration::from_secs(1);
 /// process a trigger started to deliver its wake.
 const WATCH_IDLE_CHECKS: u32 = 5;
 
-/// Follow each root the engine starts on `session_id` until the session has
-/// no work left: no followed root, no pending input, no queued work. Reads
+/// Follow each run the engine starts on `session_id` until the session has
+/// no work left: no followed run, no pending input, no queued work. Reads
 /// from `subscribed` when the caller already subscribed, and subscribes
 /// otherwise.
 async fn watch_until_idle(
     state: &AppState,
     session_id: &SessionId,
-    subscribed: Option<SessionRootSubscription>,
+    subscribed: Option<SessionRunSubscription>,
 ) {
     use lash::recoverable_chat::RecoverableChatUpdate;
 
@@ -489,7 +489,7 @@ async fn watch_until_idle(
     let (session, mut updates) = match subscribed {
         Some(subscribed) => subscribed,
         None => loop {
-            match subscribe_session_roots(state, session_id).await {
+            match subscribe_session_runs(state, session_id).await {
                 Ok(subscribed) => break subscribed,
                 Err(error) => {
                     if AppError::session_open(error).verdict != AppErrorVerdict::Retryable {
@@ -531,19 +531,19 @@ async fn watch_until_idle(
             continue;
         };
         idle_checks = 0;
-        let root = root_of_physical_turn(turn_id);
-        if !follows.claim(session_id, &root) {
+        let run = run_of_physical_turn(turn_id);
+        if !follows.claim(session_id, &run) {
             continue;
         }
-        let claim = RootClaim {
+        let claim = RunClaim {
             follows: follows.clone(),
             session_id: session_id.clone(),
-            root,
+            run,
         };
         state.trace_for_session(
             session_id,
-            "turn.follow_engine_root",
-            json!({ "turn_id": claim.root }),
+            "turn.follow_engine_run",
+            json!({ "turn_id": claim.run }),
         );
         drop(spawn_turn_follower(
             state.clone(),
@@ -551,36 +551,36 @@ async fn watch_until_idle(
             claim,
             FollowOrigin::QueuedTurn,
             None,
-            FollowFrom::Root,
+            FollowFrom::Run,
         ));
     }
 }
 
-/// Whether `session` has no work a watch could still see start: no root a
+/// Whether `session` has no work a watch could still see start: no run a
 /// follower here holds, no pending input, no queued work and no unfinished
-/// root.
-async fn session_is_idle(follows: &RootFollows, session: &lash::LashSession) -> bool {
+/// run.
+async fn session_is_idle(follows: &RunFollows, session: &lash::LashSession) -> bool {
     if follows.follows_any(&session.session_id()) {
         return false;
     }
     let durable = session.durable();
     matches!(durable.pending_turn_inputs().await, Ok(inputs) if inputs.is_empty())
         && matches!(durable.queued_work().await, Ok(batches) if batches.is_empty())
-        && matches!(durable.unfinished_root().await, Ok(None))
+        && matches!(durable.unfinished_run().await, Ok(None))
 }
 
-/// The root a physical turn belongs to: a root's later turns are
-/// `{root}:agent-frame:{n}`.
-fn root_of_physical_turn(turn_id: &TurnId) -> TurnId {
+/// The run a physical turn belongs to: a run's later turns are
+/// `{run}:agent-frame:{n}`.
+fn run_of_physical_turn(turn_id: &TurnId) -> TurnId {
     match turn_id.as_str().rsplit_once(":agent-frame:") {
-        Some((root, ordinal)) if ordinal.parse::<u64>().is_ok_and(|ordinal| ordinal > 0) => {
-            TurnId::parse(root).unwrap_or_else(|_| turn_id.clone())
+        Some((run, ordinal)) if ordinal.parse::<u64>().is_ok_and(|ordinal| ordinal > 0) => {
+            TurnId::parse(run).unwrap_or_else(|_| turn_id.clone())
         }
         _ => turn_id.clone(),
     }
 }
 
-/// A followed root that did not settle: it parked, holding its work until an
+/// A followed run that did not settle: it parked, holding its work until an
 /// operator resolves the park; its input's delivery stalled, holding the
 /// input until an operator re-arms it; or its input was withdrawn before any
 /// turn ran it.
@@ -593,13 +593,13 @@ fn unsettled_turn(status: &lash::TurnStatus) -> AppError {
             retirement: None,
         },
         // Not terminal (ADR 0109 §3): the input stays durable, and a re-armed
-        // delivery drives it. Like a park, the turn is neither settled nor
+        // delivery executes it. Like a park, the turn is neither settled nor
         // failed, and its invocation keeps its journal.
         lash::TurnStatus::Stalled(stalled) => AppError {
             status: axum::http::StatusCode::CONFLICT,
             message: format!(
                 "turn_stalled: input `{}` was never delivered to the engine ({:?} after {} \
-                 attempt(s)); an operator re-arm of its delivery drives it",
+                 attempt(s)); an operator re-arm of its delivery shifts it",
                 stalled.input_id.as_str(),
                 stalled.reason,
                 stalled.attempts

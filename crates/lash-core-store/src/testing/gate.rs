@@ -82,7 +82,7 @@ impl Gate {
         }
     }
 
-    /// Drive `work` until `count` arrivals reached the gate. Panics when
+    /// Shift `work` until `count` arrivals reached the gate. Panics when
     /// `work` finishes first, or when [`GATE_DEADLINE`] passes.
     pub async fn reached_by<T>(&self, work: &mut (impl Future<Output = T> + Unpin), count: usize) {
         tokio::select! {

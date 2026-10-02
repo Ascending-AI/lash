@@ -219,19 +219,19 @@ fi
 
 # Rule 4 scans every Rust tree that links lash: the crates, and the examples
 # and runbooks where a tree has them.
-rule4_roots=(crates)
+rule4_runs=(crates)
 for root in examples runbooks; do
-  [[ -d $root ]] && rule4_roots+=("$root")
+  [[ -d $root ]] && rule4_runs+=("$root")
 done
 
-capture_search "capability query" "$capability_forbidden" "$tmp_dir/rule4.hits" "${rule4_roots[@]}"
+capture_search "capability query" "$capability_forbidden" "$tmp_dir/rule4.hits" "${rule4_runs[@]}"
 if [[ -s "$tmp_dir/rule4.hits" ]]; then
   cat "$tmp_dir/rule4.hits" >&2
   echo "substrate boundary rule 4 failed: capability-query declaration, call, or field found" >&2
   failed=1
 fi
 
-capture_search "retired native tier" "$retired_type_forbidden" "$tmp_dir/rule4b.hits" "${rule4_roots[@]}"
+capture_search "retired native tier" "$retired_type_forbidden" "$tmp_dir/rule4b.hits" "${rule4_runs[@]}"
 if [[ -s "$tmp_dir/rule4b.hits" ]]; then
   cat "$tmp_dir/rule4b.hits" >&2
   echo "substrate boundary rule 4 failed: a retired native-tier or in-memory type name was found" >&2
@@ -243,7 +243,7 @@ fi
 # crate, its test crate, and deployments that are explicitly Restate may still
 # spell the retired identifiers.
 engine_id_forbidden='(^|[^[:alnum:]_])(restate_invocation_id|restate_process_execution)([^[:alnum:]_]|$)'
-capture_search "engine execution identifiers" "$engine_id_forbidden" "$tmp_dir/rule4c.raw" "${rule4_roots[@]}"
+capture_search "engine execution identifiers" "$engine_id_forbidden" "$tmp_dir/rule4c.raw" "${rule4_runs[@]}"
 : >"$tmp_dir/rule4c.hits"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
@@ -266,15 +266,15 @@ fi
 # `RuntimeErrorCode` variants and their wiring may not carry a `Restate*`
 # name. The check is scoped to the runtime_error* files so engine-owned
 # Restate types elsewhere stay legal.
-engine_error_roots=()
+engine_error_runs=()
 for path in crates/lash-core-store/src/runtime_error.rs \
   crates/lash-core-store/src/runtime_error_tests.rs \
   crates/lash-core-store/src/runtime_error; do
-  [[ -e $path ]] && engine_error_roots+=("$path")
+  [[ -e $path ]] && engine_error_runs+=("$path")
 done
-if [[ ${#engine_error_roots[@]} -gt 0 ]]; then
+if [[ ${#engine_error_runs[@]} -gt 0 ]]; then
   engine_error_forbidden='(^|[^[:alnum:]_])Restate[A-Z][A-Za-z]*'
-  capture_search "engine-named error codes" "$engine_error_forbidden" "$tmp_dir/rule4d.hits" "${engine_error_roots[@]}"
+  capture_search "engine-named error codes" "$engine_error_forbidden" "$tmp_dir/rule4d.hits" "${engine_error_runs[@]}"
   if [[ -s "$tmp_dir/rule4d.hits" ]]; then
     cat "$tmp_dir/rule4d.hits" >&2
     echo "substrate boundary rule 4 failed: a Restate-named RuntimeErrorCode variant was found" >&2
@@ -288,14 +288,14 @@ fi
 # it may not spell `Restate*` identifiers. The check is scoped to the format
 # table and preflight files so `lash::restate` and the engine crate keep
 # naming their own formats.
-engine_format_roots=()
+engine_format_runs=()
 for path in crates/lash/src/formats.rs crates/lash/src/preflight.rs \
   crates/lash/src/preflight; do
-  [[ -e $path ]] && engine_format_roots+=("$path")
+  [[ -e $path ]] && engine_format_runs+=("$path")
 done
-if [[ ${#engine_format_roots[@]} -gt 0 ]]; then
+if [[ ${#engine_format_runs[@]} -gt 0 ]]; then
   engine_format_forbidden='(^|[^[:alnum:]_])Restate[A-Z][A-Za-z]*'
-  capture_search "engine-named durable formats" "$engine_format_forbidden" "$tmp_dir/rule4e.hits" "${engine_format_roots[@]}"
+  capture_search "engine-named durable formats" "$engine_format_forbidden" "$tmp_dir/rule4e.hits" "${engine_format_runs[@]}"
   if [[ -s "$tmp_dir/rule4e.hits" ]]; then
     cat "$tmp_dir/rule4e.hits" >&2
     echo "substrate boundary rule 4 failed: a Restate-named durable-format identifier was found in the facade's format table or preflight" >&2
@@ -304,13 +304,13 @@ if [[ ${#engine_format_roots[@]} -gt 0 ]]; then
 fi
 
 # A pinned lash service (FIG-3795: the process workflow, the effect-group
-# dispatcher, the session object's drive and turn) is addressed only through a
+# dispatcher, the session object's shift and turn) is addressed only through a
 # `ServiceRoute`: the name a call targets is always a route — stable, or the
 # generation lane a recorded route names — never the name a generated typed
 # client bakes into the request target. Shared services keep their typed
 # clients until FIG-3803 epoch-names them.
 pinned_client_forbidden='(workflow_client|object_client|service_client)::[[:space:]]*<[[:space:]]*(LashProcessWorkflowClient|EffectGroupDispatchClient|LashSessionClient|LashTurnClient)'
-capture_search "pinned-service typed client" "$pinned_client_forbidden" "$tmp_dir/rule4f.raw" "${rule4_roots[@]}"
+capture_search "pinned-service typed client" "$pinned_client_forbidden" "$tmp_dir/rule4f.raw" "${rule4_runs[@]}"
 : >"$tmp_dir/rule4f.hits"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
@@ -328,21 +328,21 @@ if [[ -s "$tmp_dir/rule4f.hits" ]]; then
   failed=1
 fi
 
-# Rule 5 — drive determinism ratchet.
+# Rule 5 — shift determinism ratchet.
 #
 # The turn driver is workflow code: on replay it must re-issue exactly the
-# commands the journal recorded, so drive code may not reach facilities whose
+# commands the journal recorded, so shift code may not reach facilities whose
 # results depend on scheduling, the wall clock, process-global state or live
-# stores. The scanned modules are the drive path the FIG-3672 inventory walked:
+# stores. The scanned modules are the shift path the FIG-3672 inventory walked:
 #
 #   crates/lash-core/src/runtime/{turn_loop,turn_driver}/**, logical_turn.rs,
 #   turn_boundary*                       -- the loop around the driver
-#   crates/lash-core/src/runtime/drive{.rs,/**}
-#                                        -- the session drive and its admission
+#   crates/lash-core/src/runtime/shift{.rs,/**}
+#                                        -- the session shift and its admission
 #   crates/lash-core-execution/src/session{,.rs}, tool_dispatch{,.rs},
 #   runtime/effect/{tool_child_driver.rs,group*.rs}
 #                                        -- execution-side session and group
-#                                           child drive code
+#                                           child shift code
 #   crates/lash-protocol-rlm/src/{executor,projection}/**
 #                                        -- the code cell's host bridge
 #   crates/lashlang/src/**               -- the VM crate (the plan's V/ prefix)
@@ -350,7 +350,7 @@ fi
 #
 # The inventory's "R/ handler code outside ctx.run closures" is approximated by
 # a path filter on the Restate handler modules -- controller/, effect_group{.rs,/},
-# process/, durable_wait.rs and session_driver.rs -- because a line lint cannot tell handler code
+# process/, durable_wait.rs and session_shifts.rs -- because a line lint cannot tell handler code
 # from a ctx.run closure body. That over-catches legal recorded bodies; those
 # sites are simply allowlisted like the rest.
 #
@@ -362,20 +362,20 @@ fi
 # collections": FxHash maps use a fixed hasher and stay legal).
 #
 # The scan also names the seams that wrap those facilities so a call renamed
-# to the seam still flags (FIG-3902): drive_sync() (a hand-rolled block_on),
+# to the seam still flags (FIG-3902): shift_sync() (a hand-rolled block_on),
 # system_clock(), journaled_nonce() and restate_now_ms() (wall clock and OS
 # randomness), ProfileMark::now (a monotonic Instant::now), llm_stream_channel()
 # and LlmStreamEventRx (a Tokio mpsc), the task:: spawn/JoinHandle/AbortHandle/
 # JoinError re-exports, the SendBoxFuture/JournaledStepFuture boxed-future
 # aliases, and the cancel-watch seams retry_cancel_watch() (a Tokio sleep
 # ladder) and run_step_body_until_cancelled() (a Tokio select) (FIG-3904).
-# A before_llm_call invocation in the drive is forbidden unless it is inside
+# A before_llm_call invocation in the shift is forbidden unless it is inside
 # a recorded step body. The runner call is pinned for the same reason.
 # `dyn Future` whose `+ Send` bound spills onto a following line is caught by
 # the second alternative, which flags any `dyn Future` the line leaves
 # unterminated (no `;` or `+` after it).
 #
-# Every current hit is pinned in scripts/drive-determinism-allowlist.txt as
+# Every current hit is pinned in scripts/shift-determinism-allowlist.txt as
 # `path  |  <normalized line text>  |  <occurrence count>  # <tag>`,
 # where the text is the offending line trimmed with internal whitespace
 # collapsed. The tag's first word is the class: a FIG-3672 inventory id for a
@@ -385,15 +385,15 @@ fi
 # provably cannot affect replay (test-only code, observational reads); the
 # rest of the tag is the site's one-line reason. Entries key on the matched
 # text, not the line number, so an unrelated edit that shifts lines in a
-# drive file does not break the check; a hit fails when its (file, text) is
+# shift file does not break the check; a hit fails when its (file, text) is
 # unlisted or occurs more times than pinned, and a pinned entry that occurs
 # fewer times than listed is stale and fails, so later slices must delete or
 # decrement their lines. The ratchet test only lets the occurrence count of
 # non-RECORDED/non-BENIGN pins shrink.
 
-drive_paths=(
-  crates/lash-core/src/runtime/drive.rs
-  crates/lash-core/src/runtime/drive
+shift_paths=(
+  crates/lash-core/src/runtime/shift.rs
+  crates/lash-core/src/runtime/shift
   crates/lash-core/src/runtime/turn_loop
   crates/lash-core/src/runtime/turn_driver
   crates/lash-core/src/runtime/logical_turn.rs
@@ -413,43 +413,43 @@ drive_paths=(
   crates/lash-restate/src/effect_group.rs
   crates/lash-restate/src/process
   crates/lash-restate/src/durable_wait.rs
-  crates/lash-restate/src/session_driver.rs
+  crates/lash-restate/src/session_shifts.rs
 )
 
-drive_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|drive_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)|retry_cancel_watch[[:space:]]*\(|run_step_body_until_cancelled[[:space:]]*\('
-drive_forbidden="${drive_forbidden}|[.]before_llm_call[[:space:]]*\(|[.]run_before_llm_call[[:space:]]*\("
-drive_allowlist=scripts/drive-determinism-allowlist.txt
+shift_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|shift_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)|retry_cancel_watch[[:space:]]*\(|run_step_body_until_cancelled[[:space:]]*\('
+shift_forbidden="${shift_forbidden}|[.]before_llm_call[[:space:]]*\(|[.]run_before_llm_call[[:space:]]*\("
+shift_allowlist=scripts/shift-determinism-allowlist.txt
 
-# Rule 6 — drive store-call ratchet (FIG-3824).
+# Rule 6 — shift store-call ratchet (FIG-3824).
 #
-# A drive decision taken on live store state a replay cannot read back
+# A shift decision taken on live store state a replay cannot read back
 # diverges the journal. Store calls inside a recorded step's body are legal
 # (the step's output is what a replay reads), but a line lint cannot tell a
-# step body from the drive code around it, so every direct call to a
-# persistence-trait method in the session drive is pinned, tagged with where
+# step body from the shift code around it, so every direct call to a
+# persistence-trait method in the session shift is pinned, tagged with where
 # it runs: `RECORDED` for a call inside a recorded step's body, `FENCED` for
 # a stop-only revalidation documented in ADR 0105, or a ticket id for a call
-# the drive still makes outside any step. The scope is the session
-# drive only -- the kernel's drive modules and the Restate session driver:
+# the shift still makes outside any step. The scope is the session
+# shift only -- the kernel's shift modules and the Restate `SessionShifts`:
 #
-#   crates/lash-core/src/runtime/drive{.rs,/**}
-#   crates/lash-restate/src/session_driver.rs
+#   crates/lash-core/src/runtime/shift{.rs,/**}
+#   crates/lash-restate/src/session_shifts.rs
 #
 # The pattern names the methods of the traits `RuntimePersistence` composes
 # and the session store factory's opener, called as methods. It also names
 # the orphan-repair helper that wraps several persistence calls. Entries use the rule-5
-# format in scripts/drive-store-allowlist.txt. Its count file caps the
+# format in scripts/shift-store-allowlist.txt. Its count file caps the
 # occurrences made outside any recorded step (every tag but RECORDED), which
 # may only shrink; a new call inside a recorded step's body is pinned
 # RECORDED and raises no cap, because a replay reads its step's output.
-drive_store_paths=(
-  crates/lash-core/src/runtime/drive.rs
-  crates/lash-core/src/runtime/drive
-  crates/lash-restate/src/session_driver.rs
+shift_store_paths=(
+  crates/lash-core/src/runtime/shift.rs
+  crates/lash-core/src/runtime/shift
+  crates/lash-restate/src/session_shifts.rs
 )
-drive_store_methods='admit_and_bind_session|admit_at_checkpoint|admit_root|admit_session_state|authorize_turn_cancel_closure|cancel_pending_turn_input_suffix|cancel_pending_turn_inputs?|cancel_queued_work_batch|commit_runtime_state|committed_turn_exists|drive_epoch|enqueue_pending_turn_input|enqueue_queued_work(_with_outcome)?|get_session_execution_lease|list_open_queued_work|list_pending_turn_inputs|list_queued_work|list_turn_input_applications|load_pending_follow_on|load_session|load_session_at|load_session_head_meta|load_session_meta|load_turn_park|open_existing_store_by_id|open_session_command_run|pending_session_work_ordering|pending_turn_cancel_closure_pins|pending_turn_cancel_closures|queued_work_batch_completion|raise_pending_follow_on_attempts|read_session_state_version|reconcile_turn_cancel_winner|record_turn_cancel_request|record_turn_park|release_session_execution_lease|renew_session_execution_lease|retain_admission_base|settle_observer_intents|seal_drive_epoch|try_claim_session_execution_lease(_with_token)?|turn_cancel_request(_intent)?|turn_is_committed|unfinished_root|validate_turn_cancellation_binding'
-drive_store_forbidden="\\.(${drive_store_methods})[[:space:]]*(::<[^>]*>)?\\("
-drive_store_allowlist=scripts/drive-store-allowlist.txt
+shift_store_methods='admit_and_bind_session|admit_at_checkpoint|admit_run|admit_session_state|authorize_turn_cancel_closure|cancel_pending_turn_input_suffix|cancel_pending_turn_inputs?|cancel_queued_work_batch|commit_runtime_state|committed_turn_exists|shift_epoch|enqueue_pending_turn_input|enqueue_queued_work(_with_outcome)?|get_session_execution_lease|list_open_queued_work|list_pending_turn_inputs|list_queued_work|list_turn_input_applications|load_pending_follow_on|load_session|load_session_at|load_session_head_meta|load_session_meta|load_turn_park|open_existing_store_by_id|open_session_command_run|pending_session_work_ordering|pending_turn_cancel_closure_pins|pending_turn_cancel_closures|queued_work_batch_completion|raise_pending_follow_on_attempts|read_session_state_version|reconcile_turn_cancel_winner|record_turn_cancel_request|record_turn_park|release_session_execution_lease|renew_session_execution_lease|retain_admission_base|settle_observer_intents|seal_shift_epoch|try_claim_session_execution_lease(_with_token)?|turn_cancel_request(_intent)?|turn_is_committed|unfinished_run|validate_turn_cancellation_binding'
+shift_store_forbidden="\\.(${shift_store_methods})[[:space:]]*(::<[^>]*>)?\\("
+shift_store_allowlist=scripts/shift-store-allowlist.txt
 
 # Always grep -E, never ripgrep: the two engines disagree on these patterns,
 # and CI runners do not all carry ripgrep, so one engine keeps the allowlist
@@ -459,7 +459,7 @@ drive_store_allowlist=scripts/drive-store-allowlist.txt
 # whitespace run collapsed to one space, so edits that move or reindent the
 # line keep it pinned. The allowlist's `  |  ` and `  # ` separators use a
 # double space, which normalized text can never contain.
-drive_normalize() {
+shift_normalize() {
   local text=$1
   text="$(printf '%s' "$text" | tr -s '[:space:]' ' ')"
   text="${text# }"
@@ -471,7 +471,7 @@ drive_normalize() {
 #
 # Scans the paths that exist for <pattern> outside test code and checks every
 # hit against <allowlist> (and its `.count` cap, which the ratchet test
-# reads). With DRIVE_DETERMINISM_REGENERATE=1 it rewrites the allowlist from
+# reads). With SHIFT_DETERMINISM_REGENERATE=1 it rewrites the allowlist from
 # the tree instead, keeping each surviving entry's tag.
 ratchet_rule() {
   local rule=$1 what=$2 pattern=$3 allowlist=$4
@@ -480,7 +480,7 @@ ratchet_rule() {
   local raw="$tmp_dir/rule$rule.raw" hits="$tmp_dir/rule$rule.hits"
   local search_status=0 existing=() path entry body file line source key
   local allowed_file allowed_rest allowed_text allowed_count
-  # Scan only the paths that exist: a tree may predate a newer drive module,
+  # Scan only the paths that exist: a tree may predate a newer shift module,
   # and a missing path must not read as a failed search.
   for path in "$@"; do
     [[ -e $path ]] && existing+=("$path")
@@ -530,11 +530,11 @@ ratchet_rule() {
       continue
     fi
     printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$hits"
-    key="$file|$(drive_normalize "$source")"
+    key="$file|$(shift_normalize "$source")"
     seen[$key]=$(( ${seen[$key]:-0} + 1 ))
   done <"$raw"
 
-  if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
+  if [[ ${SHIFT_DETERMINISM_REGENERATE:-0} == 1 ]]; then
     # Rewrite the allowlist from the current tree, keeping each surviving
     # entry's tag; new keys are tagged UNMAPPED.
     local -A tags=()
@@ -579,12 +579,12 @@ ratchet_rule() {
   if [[ ${#bad[@]} -gt 0 ]]; then
     while IFS=: read -r file line source; do
       [[ -n "$file" ]] || continue
-      key="$file|$(drive_normalize "$source")"
+      key="$file|$(shift_normalize "$source")"
       if [[ -n ${bad[$key]+x} ]]; then
         printf '%s:%s:%s\n' "$file" "$line" "$source" >&2
       fi
     done <"$hits"
-    echo "substrate boundary rule $rule failed: $what found in drive code" >&2
+    echo "substrate boundary rule $rule failed: $what found in shift code" >&2
     echo "  (new sites belong behind a recorded step; if one is deliberate, pin it in $allowlist with its id)" >&2
     failed=1
   fi
@@ -600,9 +600,9 @@ ratchet_rule() {
   done
 }
 
-RATCHET_UNCAPPED_TAG='RECORDED|BENIGN' ratchet_rule 5 "nondeterministic facility" "$drive_forbidden" "$drive_allowlist" "${drive_paths[@]}"
-RATCHET_UNCAPPED_TAG=RECORDED ratchet_rule 6 "unpinned store call" "$drive_store_forbidden" "$drive_store_allowlist" "${drive_store_paths[@]}"
-if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
+RATCHET_UNCAPPED_TAG='RECORDED|BENIGN' ratchet_rule 5 "nondeterministic facility" "$shift_forbidden" "$shift_allowlist" "${shift_paths[@]}"
+RATCHET_UNCAPPED_TAG=RECORDED ratchet_rule 6 "unpinned store call" "$shift_store_forbidden" "$shift_store_allowlist" "${shift_store_paths[@]}"
+if [[ ${SHIFT_DETERMINISM_REGENERATE:-0} == 1 ]]; then
   exit 0
 fi
 

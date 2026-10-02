@@ -86,7 +86,7 @@ pub enum OwnerExitParent {
 }
 
 /// One question: does the head leaf reach the candidate through parent
-/// edges? Drive it with [`Self::verdict`] and [`Self::descend`]:
+/// edges? Shift it with [`Self::verdict`] and [`Self::descend`]:
 ///
 /// ```ignore
 /// let mut probe = HeadPathProbe::new(candidate, head_leaf);

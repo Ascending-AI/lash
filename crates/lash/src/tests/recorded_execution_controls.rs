@@ -1,6 +1,6 @@
 //! The turn budget, autonomy, no-progress budget and charge safety are
 //! recorded session config (FIG-4376): stated at creation and snapshotted per
-//! root in its recorded `ResolvedRun`. One engine runs sessions created with
+//! run in its recorded `ResolvedRun`. One engine runs sessions created with
 //! different budgets, and each keeps its own across the engine's reopen.
 
 use super::*;
@@ -107,8 +107,8 @@ fn stopped_at(turns: usize) -> (TurnOutcome, usize) {
 }
 
 /// Send `text` to `id` through its Durable Session: no host runtime is open,
-/// so the engine opens the session itself to drive the root.
-async fn engine_driven_turn(core: &LashCore, id: &str, text: &str) -> Result<crate::TurnOutput> {
+/// so the engine opens the session itself to execute the run.
+async fn engine_executed_turn(core: &LashCore, id: &str, text: &str) -> Result<crate::TurnOutput> {
     core.session(SessionId::fixture(id.to_string()))
         .durable()
         .await?
@@ -153,7 +153,7 @@ async fn each_session_runs_the_budget_it_was_created_with() -> Result<()> {
 }
 
 /// Both sessions keep their recorded budgets when the engine opens them
-/// itself: no host runtime is open, so every root below is driven on a
+/// itself: no host runtime is open, so every run below is executed on a
 /// runtime the engine opened from the store, under a core whose own default
 /// is neither session's budget.
 async fn budgets_survive_engine_reopen_on(config: lash_restate_test::ServerConfig) -> Result<()> {
@@ -168,7 +168,7 @@ async fn budgets_survive_engine_reopen_on(config: lash_restate_test::ServerConfi
     for round in ["first", "second"] {
         assert_eq!(
             shape(
-                &engine_driven_turn(&core, CHAT, &format!("{round} chat")).await?,
+                &engine_executed_turn(&core, CHAT, &format!("{round} chat")).await?,
                 &calls
             ),
             finished_after_all_tools(),
@@ -176,7 +176,7 @@ async fn budgets_survive_engine_reopen_on(config: lash_restate_test::ServerConfi
         );
         assert_eq!(
             shape(
-                &engine_driven_turn(&core, PULSAR, &format!("{round} pulsar")).await?,
+                &engine_executed_turn(&core, PULSAR, &format!("{round} pulsar")).await?,
                 &calls
             ),
             stopped_at(BOUNDED_TURNS),
@@ -191,8 +191,8 @@ async fn budgets_survive_engine_reopen() -> Result<()> {
     budgets_survive_engine_reopen_on(lash_restate_test::ServerConfig::default()).await
 }
 
-/// Every await suspends and every resumption replays the root from its
-/// journal: the replayed roots stop where they first did.
+/// Every await suspends and every resumption replays the run from its
+/// journal: the replayed runs stop where they first did.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn budgets_survive_engine_reopen_under_always_replay() -> Result<()> {
     budgets_survive_engine_reopen_on(lash_restate_test::ServerConfig::default().always_replay(true))
@@ -354,11 +354,11 @@ async fn created_session(id: &str) -> Result<(LashCore, crate::LashSession)> {
     Ok((core, session))
 }
 
-/// `SetTurnBudget` reaches the next root: a session created unbounded runs
-/// to the model's answer, and after the command its next root, on the open
+/// `SetTurnBudget` reaches the next run: a session created unbounded runs
+/// to the model's answer, and after the command its next run, on the open
 /// runtime and on the engine's own reopen, stops at the commanded budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_commanded_turn_budget_bounds_the_next_root() -> Result<()> {
+async fn a_commanded_turn_budget_bounds_the_next_run() -> Result<()> {
     const ID: &str = "commanded-turn-budget";
     let calls = Arc::new(AtomicUsize::new(0));
     let core = core_over(double_backend().await, looping_provider(&calls))?;
@@ -394,12 +394,12 @@ async fn a_commanded_turn_budget_bounds_the_next_root() -> Result<()> {
     assert_eq!(
         shape(&after, &calls),
         stopped_at(BOUNDED_TURNS),
-        "the open runtime's next root runs under the commanded budget"
+        "the open runtime's next run executes under the commanded budget"
     );
     drop(session);
     assert_eq!(
         shape(
-            &engine_driven_turn(&core, ID, "and once more").await?,
+            &engine_executed_turn(&core, ID, "and once more").await?,
             &calls
         ),
         stopped_at(BOUNDED_TURNS),
@@ -652,11 +652,11 @@ async fn set_charge_safety_above_the_retry_ceiling_is_refused() -> Result<()> {
     Ok(())
 }
 
-/// The budget figments records for a session (FIG-4376): its roots stop
+/// The budget figments records for a session (FIG-4376): its runs stop
 /// after exactly this many model calls.
 const RECORDED_TURNS: usize = 12;
-/// A model call count no bounded root here reaches: the model answers only
-/// after it, so a root that ignored its recorded budget ends answered, and
+/// A model call count no bounded run here reaches: the model answers only
+/// after it, so a run that ignored its recorded budget ends answered, and
 /// the law fails instead of hanging.
 const RUNAWAY_CALLS: usize = 100;
 
@@ -690,20 +690,20 @@ fn endless_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
 
 /// The line prefix the Restate suite runner reads as a completed step
 /// (`PROGRESS_MARKER` in `scripts/ci/restate_suite.py`): the live law is
-/// bounded per root, not by its four roots together, which a starved host's
+/// bounded per run, not by its four runs together, which a starved host's
 /// replay leg stretches.
 const PROGRESS_MARKER: &str = "[restate-suite progress] ";
 
-/// A session's recorded budget bounds its roots after the engine restarts
+/// A session's recorded budget bounds its runs after the engine restarts
 /// under a core whose own budget is unbounded (figments' re-pin at
-/// 257bef60f3 ran such a root past 500 model calls). One session is created
+/// 257bef60f3 ran such a run past 500 model calls). One session is created
 /// with the budget, the other is given it by `SetTurnBudget`; then the
 /// `first` deployment goes away, and `restart` brings up a new one over its
-/// stores, which opens both under an unbounded core. Each root, driven on the
+/// stores, which opens both under an unbounded core. Each run, executed on the
 /// engine's own reopen and on a host open, stops after exactly
 /// [`RECORDED_TURNS`] model calls, typed: the next call is never made.
 /// `prefix` names the law's sessions.
-async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
+async fn a_recorded_budget_bounds_every_run_after_an_engine_restart(
     first: lash_core::Backend,
     restart: impl AsyncFnOnce() -> lash_core::Backend,
     prefix: &str,
@@ -750,13 +750,13 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
     for id in [created.as_str(), commanded.as_str()] {
         assert_eq!(
             shape(
-                &engine_driven_turn(&unbounded, id, "look it all up").await?,
+                &engine_executed_turn(&unbounded, id, "look it all up").await?,
                 &calls
             ),
             stopped_at(RECORDED_TURNS),
             "{id}: the engine's reopen after the restart runs the recorded budget"
         );
-        eprintln!("{PROGRESS_MARKER}{id}: the engine-driven root stopped at its budget");
+        eprintln!("{PROGRESS_MARKER}{id}: the engine-driven run stopped at its budget");
         let opened = unbounded.session(SessionId::fixture(id)).open().await?;
         let output = opened
             .send(TurnInput::text("look it all up again"))
@@ -767,7 +767,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
             stopped_at(RECORDED_TURNS),
             "{id}: a host open under the unbounded core runs the recorded budget"
         );
-        eprintln!("{PROGRESS_MARKER}{id}: the host-opened root stopped at its budget");
+        eprintln!("{PROGRESS_MARKER}{id}: the host-opened run stopped at its budget");
     }
     Ok(unbounded)
 }
@@ -777,7 +777,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
 async fn after_a_restart_of_the_double(first: lash_restate_test::RestateTestBackend) -> Result<()> {
     let backend = first.lash_backend();
     let mut second = None;
-    a_recorded_budget_bounds_every_root_after_an_engine_restart(
+    a_recorded_budget_bounds_every_run_after_an_engine_restart(
         backend,
         async || {
             let double = redeploy(first).await;
@@ -792,7 +792,7 @@ async fn after_a_restart_of_the_double(first: lash_restate_test::RestateTestBack
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_sqlite() -> Result<()> {
+async fn a_recorded_budget_bounds_every_run_after_an_engine_restart_on_sqlite() -> Result<()> {
     let first = lash_restate_test::backend(0x4376_0002, lash_restate_test::ServerConfig::default())
         .await
         .expect("build the first deployment over SQLite");
@@ -801,7 +801,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_sqlite()
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_postgres() -> Result<()> {
+async fn a_recorded_budget_bounds_every_run_after_an_engine_restart_on_postgres() -> Result<()> {
     let Some((stores, _held)) = postgres_store_set().await else {
         return Ok(());
     };
@@ -815,17 +815,17 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart_on_postgres
     after_a_restart_of_the_double(first).await
 }
 
-/// The law on a live `restate-server` (the `recorded-roots` suite of
+/// The law on a live `restate-server` (the `recorded-runs` suite of
 /// `scripts/restate-suites.toml`): the restart replaces the deployment with a
 /// new engine and endpoint over its stores, registered with the same server.
 /// The server's state outlives a run, so each run names its own sessions.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by the recorded-roots suite"]
+#[ignore = "requires an isolated Restate server; run by the recorded-runs suite"]
 #[allow(
     clippy::disallowed_methods,
     reason = "the live law reads the suite's server and endpoint addresses"
 )]
-async fn live_a_recorded_budget_bounds_every_root_after_a_deployment_restart() -> Result<()> {
+async fn live_a_recorded_budget_bounds_every_run_after_a_deployment_restart() -> Result<()> {
     let env = |name: &str| {
         std::env::var(name).unwrap_or_else(|_| panic!("the live suite's environment sets {name}"))
     };
@@ -846,7 +846,7 @@ async fn live_a_recorded_budget_bounds_every_root_after_a_deployment_restart() -
         .await
         .expect("serve the first live deployment");
     let mut second = None;
-    let result = a_recorded_budget_bounds_every_root_after_an_engine_restart(
+    let result = a_recorded_budget_bounds_every_run_after_an_engine_restart(
         first.lash_backend(),
         async || {
             let rebuilt = first
@@ -909,12 +909,12 @@ fn fanning_provider(shown: &Arc<std::sync::Mutex<Vec<usize>>>) -> ProviderHandle
         .into_handle()
 }
 
-/// `SetMaxToolCalls` reaches the next root and no earlier one (FIG-4546): a
+/// `SetMaxToolCalls` reaches the next run and no earlier one (FIG-4546): a
 /// step of two calls runs under the limit the session was created with, and
 /// after the command the same step is refused, on the open runtime and on the
 /// engine's own reopen, with the refusal in the model's tool results.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_commanded_max_tool_calls_binds_the_next_root() -> Result<()> {
+async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
     const ID: &str = "commanded-max-tool-calls";
     let shown = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = core_over(double_backend().await, fanning_provider(&shown))?;
@@ -952,16 +952,16 @@ async fn a_commanded_max_tool_calls_binds_the_next_root() -> Result<()> {
         .output()
         .await?;
     drop(session);
-    engine_driven_turn(&core, ID, "and once more").await?;
+    engine_executed_turn(&core, ID, "and once more").await?;
 
     assert_eq!(
         *shown
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
-        // Each root's request carries the roots before it: none refused
-        // under the created limit, then both calls of each later root.
+        // Each run's request carries the runs before it: none refused
+        // under the created limit, then both calls of each later run.
         vec![0, 2, 4],
-        "the limit binds from the root after the command"
+        "the limit binds from the run after the command"
     );
     Ok(())
 }
@@ -1047,7 +1047,7 @@ async fn a_creation_without_max_tool_calls_is_refused() -> Result<()> {
 }
 
 /// A fork records the forked revision's recorded config in full (FIG-4594). The
-/// source is created from one spec and runs a root; the host then changes
+/// source is created from one spec and executes a run; the host then changes
 /// what it passes (another session is created from a different spec, on a
 /// second core over the same stores), and the fork made there records
 /// exactly the source's turn budget, generation and charge safety, with the
@@ -1072,7 +1072,7 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
     core.session(SOURCE)
         .create(crate::SessionCreation::root(stated))
         .await?;
-    engine_driven_turn(&core, SOURCE, "before the fork").await?;
+    engine_executed_turn(&core, SOURCE, "before the fork").await?;
     let source = recorded_config(&core, SOURCE).await?;
     assert_eq!(source.turn_budget, crate::TurnBudget::bounded(7));
     let point = core

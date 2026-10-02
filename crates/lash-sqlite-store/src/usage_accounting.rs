@@ -1,11 +1,11 @@
-//! Atomic accounting over the durable-core catalog. No session head or drive lease is involved.
+//! Atomic accounting over the durable-core catalog. No session head or shift lease is involved.
 use crate::conn::TxOutcome;
 use crate::schema_layout::Schema;
 use crate::{SqliteStore, sqlite_error};
 use async_trait::async_trait;
 use lash_core_execution::store_backend_support::{
-    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageRun,
-    decode_usage_completeness, usage_corrupt, usage_integer, usage_run_resolution_columns,
+    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageMeter,
+    decode_usage_completeness, usage_corrupt, usage_integer, usage_meter_resolution_columns,
     usage_unsigned,
 };
 use lash_core_execution::{StoreError, TokenUsage};
@@ -13,8 +13,8 @@ use lash_core_store::RuntimeOwner;
 use lash_core_store::store::usage_accounting::UsageAccountingStore;
 use lash_core_store::usage_accounting::*;
 use lash_store_sql::usage::{
-    usage_facts::UsageFactsStatements, usage_owner_retirements::UsageOwnerRetirementsStatements,
-    usage_runs::UsageRunsStatements,
+    usage_facts::UsageFactsStatements, usage_meters::UsageMetersStatements,
+    usage_owner_retirements::UsageOwnerRetirementsStatements,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use std::num::NonZeroU32;
@@ -22,27 +22,27 @@ use std::sync::LazyLock;
 
 struct Statements {
     facts: UsageFactsStatements,
-    runs: UsageRunsStatements,
+    meters: UsageMetersStatements,
     owners: UsageOwnerRetirementsStatements,
     inserts: UsageInsertStatements,
 }
 lash_store_sql::statements! {
     pub(crate) struct UsageInsertStatements @ "usage_sqlite" {
-        fact = "INSERT OR IGNORE INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, profile_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
-        run = "INSERT OR IGNORE INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, profile_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
+        fact = "INSERT OR IGNORE INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, meter_id, llm_call_id, source, profile_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
+        meter = "INSERT OR IGNORE INTO usage_meters (owner_kind, owner_id, effect_key, meter_id, execution_scope_key, source, profile_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
         owner = "INSERT OR IGNORE INTO usage_owner_retirements (owner_kind, owner_id, retired_at_ms) VALUES (?1, ?2, ?3)";
     }
 }
 static SQL: LazyLock<Statements> = LazyLock::new(|| Statements {
     facts: UsageFactsStatements::render(Schema::Main.dialect()),
-    runs: UsageRunsStatements::render(Schema::Main.dialect()),
+    meters: UsageMetersStatements::render(Schema::Main.dialect()),
     owners: UsageOwnerRetirementsStatements::render(Schema::Main.dialect()),
     inserts: UsageInsertStatements::render(Schema::Main.dialect()),
 });
 pub(crate) fn retention_sql() -> (&'static str, &'static str, &'static str) {
     (
         SQL.facts.delete_retired.sql(),
-        SQL.runs.delete_retired.sql(),
+        SQL.meters.delete_retired.sql(),
         SQL.owners.delete_retired.sql(),
     )
 }
@@ -61,7 +61,7 @@ fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
         provider_attempt: get!(5),
         fact_kind: get!(6),
         disposition: get!(7),
-        run_id: get!(8),
+        meter_id: get!(8),
         llm_call_id: get!(9),
         source: get!(10),
         profile_key: get!(11),
@@ -81,15 +81,15 @@ fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
     }
     .decode()
 }
-fn decode_run(row: &Row<'_>, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
+fn decode_meter(row: &Row<'_>, owner: &RuntimeOwner) -> Result<UsageMeterRecord, StoreError> {
     macro_rules! get {
         ($n:expr) => {
             row.get($n).map_err(sqlite_error)?
         };
     }
-    StoredUsageRun {
+    StoredUsageMeter {
         effect_key: get!(0),
-        run_id: get!(1),
+        meter_id: get!(1),
         execution_scope_key: get!(2),
         source: get!(3),
         profile_key: get!(4),
@@ -125,7 +125,7 @@ fn insert_fact(
                 i64::from(record.provider_attempt),
                 record.body.kind().as_str(),
                 record.disposition().as_str(),
-                record.run().map(UsageRunId::as_str),
+                record.meter().map(UsageMeterId::as_str),
                 record.llm_call_id.0.as_str(),
                 record.source,
                 record.profile_key.as_str(),
@@ -189,10 +189,10 @@ impl SqliteStore {
 }
 #[async_trait]
 impl UsageAccountingStore for SqliteStore {
-    async fn admit_usage_run(
+    async fn admit_usage_meter(
         &self,
-        admission: &UsageRunAdmission,
-    ) -> Result<UsageRunAdmitted, UsageAdmissionError> {
+        admission: &UsageMeterAdmission,
+    ) -> Result<UsageMeterAdmitted, UsageAdmissionError> {
         let a = admission.clone();
         self.usage_write(move |tx| {
             let (kind, id) = usage_owner_columns(&a.owner);
@@ -208,12 +208,12 @@ impl UsageAccountingStore for SqliteStore {
             }
             let inserted = tx
                 .execute(
-                    SQL.inserts.run.sql(),
+                    SQL.inserts.meter.sql(),
                     params![
                         kind,
                         id,
                         a.effect.as_str(),
-                        a.run.as_str(),
+                        a.meter.as_str(),
                         a.execution_scope_key,
                         a.source,
                         a.profile_key.as_str(),
@@ -226,9 +226,9 @@ impl UsageAccountingStore for SqliteStore {
                 )
                 .map_err(sqlite_error)?;
             Ok(if inserted == 0 {
-                UsageRunAdmitted::AlreadyAdmitted
+                UsageMeterAdmitted::AlreadyAdmitted
             } else {
-                UsageRunAdmitted::Admitted
+                UsageMeterAdmitted::Admitted
             })
         })
         .await
@@ -245,28 +245,28 @@ impl UsageAccountingStore for SqliteStore {
             let mut receipt = UsageSettleReceipt {
                 inserted_facts: 0,
                 duplicate_facts: 0,
-                run: s.accounting.resolution(),
+                meter: s.accounting.resolution(),
                 superseded_runs: 0,
             };
             for fact in &s.facts {
                 if insert_fact(
                     tx,
-                    &fact.record(&s.owner, &s.effect, &s.run, now_ms),
-                    &usage_fact_payload_hash(fact, &s.run),
+                    &fact.record(&s.owner, &s.effect, &s.meter, now_ms),
+                    &usage_fact_payload_hash(fact, &s.meter),
                 )? {
                     receipt.inserted_facts += 1;
                 } else {
                     receipt.duplicate_facts += 1;
                 }
             }
-            let (state, reason) = usage_run_resolution_columns(&receipt.run);
+            let (state, reason) = usage_meter_resolution_columns(&receipt.meter);
             tx.execute(
-                SQL.inserts.run.sql(),
+                SQL.inserts.meter.sql(),
                 params![
                     kind,
                     id,
                     s.effect.as_str(),
-                    s.run.as_str(),
+                    s.meter.as_str(),
                     Option::<&str>::None,
                     Option::<&str>::None,
                     Option::<&str>::None,
@@ -279,12 +279,12 @@ impl UsageAccountingStore for SqliteStore {
             )
             .map_err(sqlite_error)?;
             tx.execute(
-                SQL.runs.resolve.sql(),
+                SQL.meters.resolve.sql(),
                 params![
                     kind,
                     id,
                     s.effect.as_str(),
-                    s.run.as_str(),
+                    s.meter.as_str(),
                     state,
                     reason,
                     now
@@ -293,22 +293,22 @@ impl UsageAccountingStore for SqliteStore {
             .map_err(sqlite_error)?;
             let actual = tx
                 .query_row(
-                    SQL.runs.find.sql(),
-                    params![kind, id, s.effect.as_str(), s.run.as_str()],
-                    |row| Ok(decode_run(row, &s.owner)),
+                    SQL.meters.find.sql(),
+                    params![kind, id, s.effect.as_str(), s.meter.as_str()],
+                    |row| Ok(decode_meter(row, &s.owner)),
                 )
                 .map_err(sqlite_error)??;
             if actual.state.is_settled() {
-                receipt.run = UsageRunResolution::Settled;
+                receipt.meter = UsageMeterResolution::Settled;
             }
             receipt.superseded_runs = u32::try_from(
                 tx.execute(
-                    SQL.runs.supersede.sql(),
-                    params![kind, id, s.effect.as_str(), s.run.as_str(), now],
+                    SQL.meters.supersede.sql(),
+                    params![kind, id, s.effect.as_str(), s.meter.as_str(), now],
                 )
                 .map_err(sqlite_error)?,
             )
-            .map_err(|_| usage_corrupt("superseded run count exceeds u32"))?;
+            .map_err(|_| usage_corrupt("superseded meter count exceeds u32"))?;
             Ok(receipt)
         })
         .await
@@ -331,14 +331,14 @@ impl UsageAccountingStore for SqliteStore {
         self.usage_write(move |tx| {
             let (kind, id) = usage_owner_columns(&s.owner);
             let now = usage_integer(now_ms)?;
-            for statement in [SQL.runs.insert_conflict.sql(), SQL.runs.conflict.sql()] {
+            for statement in [SQL.meters.insert_conflict.sql(), SQL.meters.conflict.sql()] {
                 tx.execute(
                     statement,
                     params![
                         kind,
                         id,
                         s.effect.as_str(),
-                        s.run.as_str(),
+                        s.meter.as_str(),
                         i64::from(conflict.identity.call_ordinal),
                         i64::from(conflict.identity.provider_attempt),
                         conflict.identity.kind.as_str(),
@@ -425,7 +425,7 @@ impl UsageAccountingStore for SqliteStore {
             let (kind, id) = usage_owner_columns(&owner);
             let count = tx
                 .execute(
-                    SQL.runs.retire_execution.sql(),
+                    SQL.meters.retire_execution.sql(),
                     params![kind, id, scope, usage_integer(now_ms)?],
                 )
                 .map_err(sqlite_error)?;
@@ -453,7 +453,7 @@ impl UsageAccountingStore for SqliteStore {
             )?;
             let count = tx
                 .execute(
-                    SQL.runs.retire_owner.sql(),
+                    SQL.meters.retire_owner.sql(),
                     params![kind, id, usage_integer(now_ms)?],
                 )
                 .map_err(sqlite_error)?;
@@ -555,7 +555,7 @@ impl UsageAccountingStore for SqliteStore {
                         })
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let (open, oldest, unknown, conflicted): (i64, Option<i64>, i64, i64) = tx
-                        .query_row(SQL.runs.completeness.sql(), params![kind, id], |row| {
+                        .query_row(SQL.meters.completeness.sql(), params![kind, id], |row| {
                             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                         })
                         .map_err(sqlite_error)?;
@@ -624,52 +624,52 @@ impl UsageAccountingStore for SqliteStore {
             .await
             .map_err(sqlite_error)?
     }
-    async fn load_usage_run_page(
+    async fn load_usage_meter_page(
         &self,
         owner: &RuntimeOwner,
-        filter: UsageRunFilter,
-        after: Option<&UsageRunCursor>,
+        filter: UsageMeterFilter,
+        after: Option<&UsageMeterCursor>,
         limit: NonZeroU32,
-    ) -> Result<UsageRunPage, StoreError> {
+    ) -> Result<UsageMeterPage, StoreError> {
         if let Some(cursor) = after {
             cursor.check_owner(owner)?;
         }
         let owner = owner.clone();
         let after = after.cloned();
         let filter = match filter {
-            UsageRunFilter::Open => "open",
-            UsageRunFilter::Unresolved => "unresolved",
-            UsageRunFilter::All => "all",
+            UsageMeterFilter::Open => "open",
+            UsageMeterFilter::Unresolved => "unresolved",
+            UsageMeterFilter::All => "all",
         };
         self.read_connection()
             .read(move |tx| {
                 let (kind, id) = usage_owner_columns(&owner);
                 let records = tx
-                    .prepare_cached(SQL.runs.page.sql())?
+                    .prepare_cached(SQL.meters.page.sql())?
                     .query_map(
                         params![
                             kind,
                             id,
                             filter,
                             after.as_ref().map_or("", |c| c.after_effect().as_str()),
-                            after.as_ref().map_or("", |c| c.after_run().as_str()),
+                            after.as_ref().map_or("", |c| c.after_meter().as_str()),
                             i64::from(limit.get()) + 1
                         ],
-                        |row| Ok(decode_run(row, &owner)),
+                        |row| Ok(decode_meter(row, &owner)),
                     )?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                let page = || -> Result<UsageRunPage, StoreError> {
-                    let mut runs = records.into_iter().collect::<Result<Vec<_>, _>>()?;
-                    let more = runs.len() > limit.get() as usize;
-                    runs.truncate(limit.get() as usize);
+                let page = || -> Result<UsageMeterPage, StoreError> {
+                    let mut meters = records.into_iter().collect::<Result<Vec<_>, _>>()?;
+                    let more = meters.len() > limit.get() as usize;
+                    meters.truncate(limit.get() as usize);
                     let next = if more {
-                        runs.last().map(|run| {
-                            UsageRunCursor::new(owner, run.effect.clone(), run.run.clone())
+                        meters.last().map(|meter| {
+                            UsageMeterCursor::new(owner, meter.effect.clone(), meter.meter.clone())
                         })
                     } else {
                         None
                     };
-                    Ok(UsageRunPage { runs, next })
+                    Ok(UsageMeterPage { meters, next })
                 };
                 Ok(page())
             })

@@ -2,7 +2,7 @@
 //!
 //! [`RestateTestServer`] plays `restate-server` for a set of endpoints: its
 //! ingress and admin APIs are an in-process [`HttpTransport`], its invoker
-//! drives an endpoint's real `Endpoint::handle` with protocol streams, and
+//! executes an endpoint's real `Endpoint::handle` with protocol streams, and
 //! its partition processor keeps journals, keys, promises and timers in
 //! memory. Registration is a deployment list, not a singleton: each
 //! [`register`](RestateTestServer::register) adds a deployment with a fresh
@@ -1013,7 +1013,7 @@ impl RestateTestServer {
     }
 
     /// Move virtual time to `epoch_ms` (never backwards), firing every timer
-    /// due. A sim clock drives the server through this.
+    /// due. A sim clock executes the server through this.
     pub fn advance_to(&self, epoch_ms: u64) -> usize {
         self.shared.lock().advance_to(&self.shared, epoch_ms)
     }

@@ -1,14 +1,14 @@
 //! L-D1 through L-D4: the recorded session close and its retained tombstone.
 
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core::engine::{NoScopeClose, ScopeCloseSink};
 use lash_core::store::{
     AdmissionId, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    DriveEpochSeal, ObligationKind, ObligationState, RootStartNonce, RootTerminalCause,
-    RootTerminalKind, RootTerminalWrite, TurnCommitId, TurnParkWrite,
+    ObligationKind, ObligationState, RunStartNonce, RunTerminalCause, RunTerminalKind,
+    RunTerminalWrite, ShiftEpochSeal, TurnCommitId, TurnParkWrite,
 };
 use lash_core::{
     DeploymentStore, NoSessionWork, SessionAdministration, SessionDeleteContext,
@@ -41,7 +41,7 @@ impl CloseSink {
 
 #[async_trait::async_trait]
 impl ScopeCloseSink for CloseSink {
-    async fn close_root_scope(&self, _: &lash_core::store::RootTerminal) -> Result<(), StoreError> {
+    async fn close_run_scope(&self, _: &lash_core::store::RunTerminal) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -49,19 +49,19 @@ impl ScopeCloseSink for CloseSink {
         &self,
         session: &SessionId,
         intent: ControlIntentId,
-        roots: &[TurnId],
+        runs: &[TurnId],
     ) -> Result<(), StoreError> {
-        for root in roots {
-            let terminal = self.factory.root_terminal(session, root).await?;
+        for run in runs {
+            let terminal = self.factory.run_terminal(session, run).await?;
             assert!(matches!(
                 terminal,
-                Some(terminal) if terminal.cause == RootTerminalCause::SessionDeleted { intent }
+                Some(terminal) if terminal.cause == RunTerminalCause::SessionDeleted { intent }
             ));
         }
         self.calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push((intent, roots.to_vec()));
+            .push((intent, runs.to_vec()));
         if self
             .failures
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -91,9 +91,9 @@ pub(super) fn administration(
             work: Arc::new(NoSessionWork::new()),
             scopes: scopes.clone(),
             // The `ScopeClose` kind's relay over the law's stores (ADR 0109
-            // §3): the close's engine half gives each closed root's armed
+            // §3): the close's engine half gives each closed run's armed
             // obligation its immediate delivery here.
-            scope_close_obligations: Arc::new(lash_core::runtime::drive::ScopeCloseRelay::new(
+            scope_close_obligations: Arc::new(lash_core::runtime::shift::ScopeCloseRelay::new(
                 stores.obligation_ledger(crate::store::ObligationKind::ScopeClose),
                 stores.session_store_factory(),
                 scopes,
@@ -103,7 +103,7 @@ pub(super) fn administration(
             deletes: lash_core::session_delete::SessionDeleteStores::of_store_set(Arc::clone(
                 stores,
             )),
-            policy: lash_core::drive::relay::RelayPolicy::default(),
+            policy: lash_core::shift::relay::RelayPolicy::default(),
         },
     )
 }
@@ -114,13 +114,13 @@ pub(super) fn intent_relay(
     stores: &Arc<dyn StoreSet>,
     scopes: Arc<dyn ScopeCloseSink>,
     clock: Arc<dyn lash_core::Clock>,
-) -> lash_core::drive::ControlIntentRelay {
-    lash_core::drive::ControlIntentRelay::new(
+) -> lash_core::shift::ControlIntentRelay {
+    lash_core::shift::ControlIntentRelay::new(
         stores.obligation_ledger(ObligationKind::ControlIntent),
         stores.session_store_factory(),
         Arc::new(NoSessionWork::new()),
         Arc::clone(&scopes),
-        Arc::new(lash_core::runtime::drive::ScopeCloseRelay::new(
+        Arc::new(lash_core::runtime::shift::ScopeCloseRelay::new(
             stores.obligation_ledger(ObligationKind::ScopeClose),
             stores.session_store_factory(),
             scopes,
@@ -256,25 +256,25 @@ async fn close_until_crash(
         .await;
 }
 
-/// L-D1: the transaction ends active and parked roots before the scope owner
-/// runs, and the deleted session answers both roots from its tombstone.
+/// L-D1: the transaction ends active and parked runs before the scope owner
+/// runs, and the deleted session answers both runs from its tombstone.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
+pub async fn session_delete_closes_active_and_parked_runs_as_session_deleted(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn StoreSet>,
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
-    let (id, store) = session(&stores, prefix, "close-roots").await;
-    let active = TurnId::from("active-root");
-    let parked = TurnId::from("parked-root");
+    let (id, store) = session(&stores, prefix, "close-runs").await;
+    let active = TurnId::from("active-run");
+    let parked = TurnId::from("parked-run");
     store
-        .bind_root_inputs(&id, &active, &[])
+        .bind_run_inputs(&id, &active, &[])
         .await
-        .expect("record active root");
+        .expect("record active run");
     store
         .record_turn_park(&TurnParkWrite {
             session_id: id.clone(),
@@ -287,7 +287,7 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
             build_generation: None,
         })
         .await
-        .expect("record parked root");
+        .expect("record parked run");
     let factory = stores.session_store_factory();
     let sink = CloseSink::new(Arc::clone(&factory), 0);
     let admin = administration(host, &stores, sink.clone());
@@ -295,22 +295,22 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
     assert_eq!(
         intent.kind,
         ControlIntentKind::CloseSession {
-            roots: vec![active.clone(), parked.clone()]
+            runs: vec![active.clone(), parked.clone()]
         }
     );
     assert_eq!(
         sink.calls(),
         vec![(intent.id, vec![active.clone(), parked.clone()])]
     );
-    for root in [&active, &parked] {
+    for run in [&active, &parked] {
         let terminal = store
-            .root_terminal(&id, root)
+            .run_terminal(&id, run)
             .await
-            .expect("read live root")
+            .expect("read live run")
             .expect("close transaction wrote terminal evidence");
         assert_eq!(
             terminal.cause,
-            RootTerminalCause::SessionDeleted { intent: intent.id }
+            RunTerminalCause::SessionDeleted { intent: intent.id }
         );
     }
     assert!(
@@ -321,16 +321,16 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
             .is_none()
     );
     factory.delete_session(&id).await.expect("delete session");
-    for root in [active, parked] {
+    for run in [active, parked] {
         let terminal = factory
-            .root_terminal(&id, &root)
+            .run_terminal(&id, &run)
             .await
-            .expect("read deleted root")
-            .expect("deletion tombstone answers root");
-        assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
+            .expect("read deleted run")
+            .expect("deletion tombstone answers run");
+        assert_eq!(terminal.kind(), RunTerminalKind::Cancelled);
         assert_eq!(
             terminal.cause,
-            RootTerminalCause::SessionDeleted { intent: intent.id }
+            RunTerminalCause::SessionDeleted { intent: intent.id }
         );
     }
 }
@@ -343,7 +343,7 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
 )]
 pub(super) async fn pin_a_turn_cancel_closure(store: &dyn crate::RuntimeStore, id: &SessionId) {
     let lease = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             id,
             &crate::LeaseOwnerIdentity::opaque("close-law", "close-law:incarnation"),
             "close-law:executor",
@@ -424,7 +424,7 @@ pub async fn a_refused_deletion_closes_nothing(
     );
     assert!(sink.calls().is_empty());
     store
-        .bind_root_inputs(&id, &TurnId::from("still-open"), &[])
+        .bind_run_inputs(&id, &TurnId::from("still-open"), &[])
         .await
         .expect("refused close leaves the session writable");
 }
@@ -432,7 +432,7 @@ pub async fn a_refused_deletion_closes_nothing(
 /// L-D3: a retried deletion replays its recorded close and answers the same
 /// intent; an engine half that failed is retained on the intent, retryable,
 /// its obligation due again, and its relay still finishes it after the
-/// session is deleted; the intent then answers the deleted session's roots
+/// session is deleted; the intent then answers the deleted session's runs
 /// as its tombstone.
 #[expect(
     clippy::expect_used,
@@ -502,14 +502,14 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
     ));
     assert_eq!(sink.calls().len(), 3, "an acknowledged close runs nothing");
     let terminal = factory
-        .root_terminal(&id, &TurnId::from("any-root"))
+        .run_terminal(&id, &TurnId::from("any-run"))
         .await
         .expect("tombstone read")
         .expect("the deleted session answers from its tombstone");
-    assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
+    assert_eq!(terminal.kind(), RunTerminalKind::Cancelled);
     assert_eq!(
         terminal.cause,
-        RootTerminalCause::SessionDeleted { intent: first.id }
+        RunTerminalCause::SessionDeleted { intent: first.id }
     );
 }
 
@@ -519,7 +519,7 @@ pub async fn the_close_intent_is_idempotent_retained_on_failure_and_survives_del
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
+pub async fn a_run_commit_racing_a_close_is_refused_stale_fence(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn StoreSet>,
@@ -527,18 +527,18 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
 ) {
     let (id, store) = session(&stores, prefix, "close-fence").await;
     let fence = match store
-        .seal_drive_epoch(
+        .seal_shift_epoch(
             &id,
-            &AdmissionId::new("root#0"),
+            &AdmissionId::new("run#0"),
             0,
-            &RootStartNonce::new("root"),
+            &RunStartNonce::new("root"),
             None,
         )
         .await
-        .expect("seal root")
+        .expect("seal run")
     {
-        DriveEpochSeal::Sealed(fence) => fence,
-        other => panic!("root must seal: {other:?}"),
+        ShiftEpochSeal::Sealed(fence) => fence,
+        other => panic!("run must seal: {other:?}"),
     };
     let factory = stores.session_store_factory();
     let admin = administration(host, &stores, Arc::new(NoScopeClose));
@@ -549,8 +549,8 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
     ));
     state.session_id = id.clone();
     state.ensure_agent_frame_initialized();
-    let root = TurnId::from("racing-root");
-    let operation = crate::OperationId::turn(id.clone(), root.clone(), "final");
+    let run = TurnId::from("racing-run");
+    let operation = crate::OperationId::turn(id.clone(), run.clone(), "final");
     let mut graph = state.pending_graph_commit();
     graph
         .derive_node_ids(&id, &operation)
@@ -559,12 +559,12 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
         &state, graph, operation,
     )
     .expect("build racing commit");
-    commit.drive_fence = Some(Box::new(fence));
-    commit.root_terminal = Some(Box::new(RootTerminalWrite {
-        root: root.clone(),
-        turn: root.clone(),
-        commit: TurnCommitId::new(root.clone(), 0),
-        outcome: crate::store::RootCommittedOutcome::Finished(
+    commit.shift_fence = Some(Box::new(fence));
+    commit.run_terminal = Some(Box::new(RunTerminalWrite {
+        run: run.clone(),
+        turn: run.clone(),
+        commit: TurnCommitId::new(run.clone(), 0),
+        outcome: crate::store::RunCommittedOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -572,11 +572,11 @@ pub async fn a_root_commit_racing_a_close_is_refused_stale_fence(
     }));
     assert!(matches!(
         store.commit_runtime_state(commit).await,
-        Err(StoreError::StaleDriveFence { .. })
+        Err(StoreError::StaleShiftFence { .. })
     ));
     assert!(
         store
-            .root_terminal(&id, &root)
+            .run_terminal(&id, &run)
             .await
             .expect("terminal read")
             .is_none()
@@ -599,18 +599,18 @@ struct FailingFirstRegistryClose {
 
 #[async_trait::async_trait]
 impl ScopeCloseSink for FailingFirstRegistryClose {
-    async fn close_root_scope(
+    async fn close_run_scope(
         &self,
-        terminal: &lash_core::store::RootTerminal,
+        terminal: &lash_core::store::RunTerminal,
     ) -> Result<(), StoreError> {
-        self.registry.close_root_scope(terminal).await
+        self.registry.close_run_scope(terminal).await
     }
 
     async fn close_session_scope(
         &self,
         session: &SessionId,
         intent: ControlIntentId,
-        roots: &[TurnId],
+        runs: &[TurnId],
     ) -> Result<(), StoreError> {
         if self.fail_next.swap(false, Ordering::SeqCst) {
             return Err(StoreError::Backend(
@@ -618,7 +618,7 @@ impl ScopeCloseSink for FailingFirstRegistryClose {
             ));
         }
         self.registry
-            .close_session_scope(session, intent, roots)
+            .close_session_scope(session, intent, runs)
             .await
     }
 }
@@ -710,25 +710,25 @@ struct CrashingRegistryClose {
 
 #[async_trait::async_trait]
 impl ScopeCloseSink for CrashingRegistryClose {
-    async fn close_root_scope(
+    async fn close_run_scope(
         &self,
-        terminal: &lash_core::store::RootTerminal,
+        terminal: &lash_core::store::RunTerminal,
     ) -> Result<(), StoreError> {
-        self.registry.close_root_scope(terminal).await
+        self.registry.close_run_scope(terminal).await
     }
 
     async fn close_session_scope(
         &self,
         session: &SessionId,
         intent: ControlIntentId,
-        roots: &[TurnId],
+        runs: &[TurnId],
     ) -> Result<(), StoreError> {
         if self.armed.swap(false, Ordering::SeqCst) {
             self.crash.fire();
             std::future::pending::<()>().await;
         }
         self.registry
-            .close_session_scope(session, intent, roots)
+            .close_session_scope(session, intent, runs)
             .await
     }
 }
@@ -737,10 +737,10 @@ impl ScopeCloseSink for CrashingRegistryClose {
 /// and its acknowledgement leaves the intent open and durable, and recovery
 /// finishes the close. The intent then outlives the session and the
 /// deployment's evidence retention as the tombstone the deleted session's
-/// roots are answered from (ADR 0108 §5).
+/// runs are answered from (ADR 0108 §5).
 ///
 /// The crash lands inside the close's engine half: the store half already
-/// ended the session's roots and stopped it admitting, and the crashed
+/// ended the session's runs and stopped it admitting, and the crashed
 /// delivery's claim on the intent's obligation is left to lapse. The tier's
 /// recovery — the engine's redelivery of its `SessionDelete` handler, or a
 /// retried deletion in process — answers the same intent, and the
@@ -758,11 +758,11 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
     runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
 ) {
     let (id, store) = session(&stores, prefix, "close-crash").await;
-    let active = TurnId::from("close-crash-root");
+    let active = TurnId::from("close-crash-run");
     store
-        .bind_root_inputs(&id, &active, &[])
+        .bind_run_inputs(&id, &active, &[])
         .await
-        .expect("record the session's active root");
+        .expect("record the session's active run");
     let factory = stores.session_store_factory();
     let registry = stores.process_registry();
     let session_scope = lash_core::ScopeId::session(id.clone());
@@ -793,18 +793,18 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
     assert_eq!(
         open.kind,
         ControlIntentKind::CloseSession {
-            roots: vec![active.clone()]
+            runs: vec![active.clone()]
         }
     );
     assert_eq!(open.state, ControlIntentState::Pending);
     assert_eq!(
         store
-            .root_terminal(&id, &active)
+            .run_terminal(&id, &active)
             .await
-            .expect("read the closed root")
+            .expect("read the closed run")
             .map(|terminal| terminal.cause),
-        Some(RootTerminalCause::SessionDeleted { intent: open.id }),
-        "the store half ended the root before the crash"
+        Some(RunTerminalCause::SessionDeleted { intent: open.id }),
+        "the store half ended the run before the crash"
     );
     assert!(
         close_row(registry.as_ref(), &session_scope).await.is_none(),
@@ -818,9 +818,9 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
         recovered.id, open.id,
         "recovery answers the interrupted close"
     );
-    let policy = lash_core::drive::relay::RelayPolicy::default();
+    let policy = lash_core::shift::relay::RelayPolicy::default();
     let later: Arc<dyn lash_core::Clock> =
-        super::root_control::ShiftedClock::new(stores.clock(), policy.claim_ttl_ms + 10_000);
+        super::run_control::ShiftedClock::new(stores.clock(), policy.claim_ttl_ms + 10_000);
     let relay = intent_relay(
         &stores,
         Arc::new(crate::RegistryScopeClose::new(
@@ -829,7 +829,7 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
         )),
         Arc::clone(&later),
     );
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay,
         later.as_ref(),
         std::num::NonZeroUsize::new(64).expect("positive"),
@@ -881,16 +881,16 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
             .is_some(),
         "retention keeps the deletion tombstone"
     );
-    for root in [active, TurnId::from("close-crash-other-root")] {
+    for run in [active, TurnId::from("close-crash-other-run")] {
         let terminal = factory
-            .root_terminal(&id, &root)
+            .run_terminal(&id, &run)
             .await
-            .expect("read a deleted session's root")
-            .expect("the tombstone answers every root of the deleted session");
-        assert_eq!(terminal.kind(), RootTerminalKind::Cancelled);
+            .expect("read a deleted session's run")
+            .expect("the tombstone answers every run of the deleted session");
+        assert_eq!(terminal.kind(), RunTerminalKind::Cancelled);
         assert_eq!(
             terminal.cause,
-            RootTerminalCause::SessionDeleted { intent: open.id }
+            RunTerminalCause::SessionDeleted { intent: open.id }
         );
     }
 }

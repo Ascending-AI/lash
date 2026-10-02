@@ -14,14 +14,14 @@ use super::{tool_intent_sql, turn_ingress_sql};
 
 /// A catalog with this crate's real durable-core schema, in memory: the
 /// session schema and the fragments the durable core database carries beside
-/// it (the retention delete reads the root family's input bindings).
+/// it (the retention delete reads the run family's input bindings).
 fn catalog() -> Connection {
     let conn = Connection::open_in_memory().expect("in-memory database opens");
     conn.execute_batch(crate::schema::SCHEMA)
         .expect("session schema applies");
     for fragment in [
         crate::schema_fragments::SESSION_INGRESS_TABLE,
-        crate::schema_fragments::SESSION_ROOTS_TABLES,
+        crate::schema_fragments::SESSION_RUNS_TABLES,
     ] {
         conn.execute_batch(fragment)
             .expect("durable-core fragment applies");
@@ -73,7 +73,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.family.has_admissible_work.sql(),
         sql.family.pending_session_work_ordering.sql(),
         sql.family.turn_address_ended.sql(),
-        sql.family.root_ended.sql(),
+        sql.family.run_ended.sql(),
         sql.family_sqlite.checkpoint_work_pending_after_work.sql(),
         sql.family_sqlite
             .checkpoint_work_pending_before_completion
@@ -88,7 +88,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.admit.sql(),
         sql.pending_inputs.settle_admitted.sql(),
         sql.pending_inputs.release_admitted.sql(),
-        sql.pending_inputs.release_root.sql(),
+        sql.pending_inputs.release_run.sql(),
         sql.pending_inputs.delete_withdrawn.sql(),
         sql.pending_inputs.delete_by_session.sql(),
         sql.pending_inputs.insert_new.sql(),
@@ -119,7 +119,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.queued_batches.withdraw_open.sql(),
         sql.queued_batches.delete_tombstones.sql(),
         sql.queued_batches.release_admitted.sql(),
-        sql.queued_batches.release_root.sql(),
+        sql.queued_batches.release_run.sql(),
         sql.queued_batches.delete_by_session.sql(),
         sql.queued_batches_sqlite.insert_new.sql(),
         sql.queued_batches_sqlite.settlement_facts.sql(),
@@ -239,17 +239,17 @@ fn reopening_replaces_obsolete_ingress_indexes() {
     let conn = catalog();
     conn.execute_batch(
         "CREATE INDEX idx_queued_work_admitted
-             ON queued_work_batches(session_id, admitted_root);
+             ON queued_work_batches(session_id, admitted_run);
          CREATE INDEX idx_pending_turn_inputs_session
              ON pending_turn_inputs(session_id, state, enqueue_seq);
          CREATE INDEX idx_pending_turn_input_order
              ON pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
          CREATE INDEX idx_pending_turn_inputs_open
              ON pending_turn_inputs(session_id, state, enqueue_seq)
-             WHERE admitted_root IS NULL
+             WHERE admitted_run IS NULL
                AND state IN ('pending_active', 'deferred_next_turn');
          CREATE INDEX idx_pending_turn_inputs_admitted
-             ON pending_turn_inputs(session_id, admitted_root);",
+             ON pending_turn_inputs(session_id, admitted_run);",
     )
     .expect("install the previous index set");
     conn.execute_batch(crate::schema::SCHEMA)
@@ -281,7 +281,7 @@ fn reopening_replaces_obsolete_ingress_indexes() {
     for current in [
         "idx_queued_work_admission_order",
         "idx_pending_turn_inputs_open_state",
-        "idx_pending_turn_inputs_bound_root",
+        "idx_pending_turn_inputs_bound_run",
     ] {
         assert!(
             names.iter().any(|name| name == current),
@@ -291,20 +291,20 @@ fn reopening_replaces_obsolete_ingress_indexes() {
 }
 
 #[test]
-fn a_root_release_seeks_the_admission_index() {
-    // A root's terminal write releases every row it still holds; the
-    // `(session_id, admitted_root)` index is what keeps that one seek per
+fn a_run_release_seeks_the_admission_index() {
+    // A run's terminal write releases every row it still holds; the
+    // `(session_id, admitted_run)` index is what keeps that one seek per
     // table rather than a scan of the session's history.
     let conn = catalog();
     let sql = turn_ingress_sql();
     assert_uses(
         &conn,
-        &sql.pending_inputs.release_root,
-        "idx_pending_turn_inputs_bound_root",
+        &sql.pending_inputs.release_run,
+        "idx_pending_turn_inputs_bound_run",
     );
     assert_uses(
         &conn,
-        &sql.queued_batches.release_root,
+        &sql.queued_batches.release_run,
         "idx_queued_work_admission_order",
     );
 }
@@ -399,7 +399,7 @@ mod byte_identity {
     fn the_schema_still_declares_the_checks_the_release_statements_depend_on() {
         // Every release path clears both admission columns because these
         // CHECKs refuse a row that carries one without the other, and a
-        // settled row that still names a root. If either constraint were ever
+        // settled row that still names a run. If either constraint were ever
         // dropped, the spelling would stop being load-bearing and this test
         // would say so.
         let conn = catalog();

@@ -39,11 +39,11 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 mod observer;
-mod root_retirement;
+mod run_retirement;
 
 pub(crate) use self::observer::{WaitObserver, observe_durable_wait};
 
-use self::root_retirement::closed_root_cancel_prefix;
+use self::run_retirement::closed_run_cancel_prefix;
 use crate::compat::{Call, Reply};
 use crate::ingress::RestateAuthorityId;
 use crate::object_state::{
@@ -376,7 +376,7 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     /// Completion keys their owning group child's cancel decision closed, by
     /// the key's authority-free identity (`await_event_identity::derive_key_id`),
     /// so the group index that decides the child can name them (ADR 0099 §4,
-    /// W17). Turn fences include their root so CloseRootScope can retire
+    /// W17). Turn fences include their run so CloseRunScope can retire
     /// them; older unscoped ids remain readable. The set is absent from the
     /// encoding while empty.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
@@ -395,9 +395,9 @@ impl RestateDurableWaitIndexMetadata {
         let id = cancel_decided_id(scope, wait)?;
         Ok(self.cancel_decided.contains(&id)
             || scope.turn_id().is_some_and(|turn_id| {
-                let root = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
+                let run = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
                 self.cancel_decided
-                    .contains(&format!("{}{id}", closed_root_cancel_prefix(&root)))
+                    .contains(&format!("{}{id}", closed_run_cancel_prefix(&run)))
             }))
     }
 }
@@ -766,7 +766,7 @@ pub trait LashDurableWaitRegistry {
         call: Call<RestateDurableWaitIndexRequest>,
     ) -> HandlerResult<Reply<RestateDurableWaitRegistration>>;
     async fn settle(call: Call<RestateDurableWaitSettleRequest>) -> HandlerResult<Reply<()>>;
-    async fn retire_root(call: Call<RestateDurableWaitRootRequest>) -> HandlerResult<Reply<()>>;
+    async fn retire_run(call: Call<RestateDurableWaitRunRequest>) -> HandlerResult<Reply<()>>;
     async fn register_awakeable(
         call: Call<RestateDurableWaitAwakeableRequest>,
     ) -> HandlerResult<Reply<RestateDurableWaitRegistration>>;
@@ -1221,14 +1221,14 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         Ok(Reply::at(wire, response))
     }
 
-    async fn retire_root(
+    async fn retire_run(
         &self,
         ctx: ObjectContext<'_>,
-        call: Call<RestateDurableWaitRootRequest>,
+        call: Call<RestateDurableWaitRunRequest>,
     ) -> HandlerResult<Reply<()>> {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
-        root_retirement::retire_root(ctx, object, &self.namespace, request)
+        run_retirement::retire_run(ctx, object, &self.namespace, request)
             .await
             .map(|()| Reply::at(wire, ()))
     }
@@ -1342,7 +1342,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             return Ok(Reply::at(wire, ()));
         }
         if matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
-            // A late attach may register after CloseRootScope retired the root.
+            // A late attach may register after CloseRunScope retired the run.
             // Its workflow promise already owns the terminal; settling the
             // attach must not restore a session-lifetime index row.
             ctx.clear(&durable_wait_index_state_key(&address));
@@ -1535,7 +1535,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => resolution.clone(),
         };
         // A turn's terminal is published one-way after its commit, so it can
-        // land after CloseRootScope retired the root. Its workflow promise
+        // land after CloseRunScope retired the run. Its workflow promise
         // owns the terminal, as in `settle`; mirroring it would restore a
         // session-lifetime row (FIG-3978).
         if !matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
@@ -1585,8 +1585,8 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let id = cancel_decided_id(&request.scope, &request.wait)?;
         let id = if let Some(turn_id) = request.scope.turn_id() {
-            let root = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
-            format!("{}{id}", closed_root_cancel_prefix(&root))
+            let run = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
+            format!("{}{id}", closed_run_cancel_prefix(&run))
         } else {
             id
         };

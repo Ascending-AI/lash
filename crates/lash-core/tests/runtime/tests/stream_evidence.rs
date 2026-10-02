@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f501;
 
@@ -43,7 +43,7 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("observe a response without summary metadata"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -107,7 +107,7 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("reset response evidence"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -121,9 +121,9 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
     }));
 }
 
-/// Collects the host-visible `TurnEvent`s for one streamed turn driven by a
+/// Collects the host-visible `TurnEvent`s for one streamed turn executed by a
 /// scripted provider call.
-async fn drive_streamed_turn(
+async fn execute_streamed_turn(
     double: &lash_restate_test::RestateTestBackend,
     call: MockCall,
 ) -> (Vec<TurnActivity>, Vec<SessionStreamEvent>) {
@@ -139,8 +139,8 @@ async fn drive_streamed_turn(
         .await
         .expect("open the turn's handler");
     runtime
-        .drive_turn(
-            TurnInput::text("drive the scripted stream"),
+        .execute_turn(
+            TurnInput::text("shift the scripted stream"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_events(&events)
                 .with_turn_events(&activities),
@@ -198,7 +198,7 @@ fn block(id: &str) -> lash_core::llm::types::StreamBlockIdentity {
 #[tokio::test(flavor = "multi_thread")]
 async fn text_block_completion_seals_authoritative_correction() {
     let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
-    let (activities, _) = Box::pin(drive_streamed_turn(
+    let (activities, _) = Box::pin(execute_streamed_turn(
         &double,
         text_block_call(
             vec![
@@ -229,7 +229,7 @@ async fn text_block_completion_seals_authoritative_correction() {
 #[tokio::test(flavor = "multi_thread")]
 async fn text_block_completion_forwards_only_the_unseen_tail() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
-    let (activities, _) = Box::pin(drive_streamed_turn(
+    let (activities, _) = Box::pin(execute_streamed_turn(
         &double,
         text_block_call(
             vec![
@@ -260,7 +260,7 @@ async fn text_block_completion_forwards_only_the_unseen_tail() {
 #[tokio::test(flavor = "multi_thread")]
 async fn text_block_completion_without_deltas_publishes_full_text() {
     let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
-    let (activities, _) = Box::pin(drive_streamed_turn(
+    let (activities, _) = Box::pin(execute_streamed_turn(
         &double,
         text_block_call(
             vec![
@@ -287,7 +287,7 @@ async fn text_block_completion_without_deltas_publishes_full_text() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
     let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
-    let (activities, events) = Box::pin(drive_streamed_turn(
+    let (activities, events) = Box::pin(execute_streamed_turn(
         &double,
         MockCall {
             stream_events: vec![],
@@ -348,7 +348,7 @@ async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
-    let (activities, _) = Box::pin(drive_streamed_turn(
+    let (activities, _) = Box::pin(execute_streamed_turn(
         &double,
         MockCall {
             stream_events: vec![],
@@ -398,7 +398,7 @@ async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unstreamed_response_publishes_block_lifecycle_per_text_part() {
     let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
-    let (_, events) = Box::pin(drive_streamed_turn(
+    let (_, events) = Box::pin(execute_streamed_turn(
         &double,
         MockCall {
             stream_events: vec![],

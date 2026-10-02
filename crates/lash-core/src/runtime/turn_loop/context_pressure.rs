@@ -23,7 +23,7 @@
 //! from the session, the frame current at open, the turn and the hook. A hook
 //! is named by the plugin that registered it and its own id, so two plugins
 //! whose hooks share an id never share a record or frame namespace. A
-//! redriven turn replays the head its root was admitted on (ADR 0105 §2), so
+//! redriven turn replays the head its run was admitted on (ADR 0105 §2), so
 //! it decides again over the same base, reads the summarizer completion back
 //! from its journal, and meets the frame commit's receipt: it never opens a
 //! second frame or bills a second summary.
@@ -108,7 +108,7 @@ pub(super) struct ContextPressureStep<'a, 'run> {
     pub(super) trace_turn_id: &'a TurnId,
     pub(super) previous_prompt_usage: Option<crate::TokenUsage>,
     pub(super) scoped_effect_controller: &'a ScopedEffectController<'run>,
-    pub(super) drive_fence: Option<&'a DriveFence>,
+    pub(super) shift_fence: Option<&'a ShiftFence>,
 }
 
 impl LashRuntime {
@@ -121,7 +121,7 @@ impl LashRuntime {
             trace_turn_id,
             previous_prompt_usage,
             scoped_effect_controller,
-            drive_fence,
+            shift_fence,
         } = step;
         let session = self.session.as_ref().ok_or_else(|| {
             RuntimeError::new(
@@ -142,7 +142,7 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         );
         let manager = self
-            .runtime_session_services_for_turn(drive_fence, &reads)
+            .runtime_session_services_for_turn(shift_fence, &reads)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -242,7 +242,7 @@ impl LashRuntime {
                         task,
                         seed,
                         scoped_effect_controller.execution_scope(),
-                        drive_fence,
+                        shift_fence,
                     )
                     .await?;
                     return Ok(ContextPressureOutcome {
@@ -270,7 +270,7 @@ impl LashRuntime {
         task: String,
         seed: Vec<crate::SessionAppendNode>,
         committing: &crate::ExecutionScope,
-        drive_fence: Option<&DriveFence>,
+        shift_fence: Option<&ShiftFence>,
     ) -> Result<(), RuntimeError> {
         let opened = match self.open_context_pressure_frame(write, records, seed).await {
             Ok(opened) => opened,
@@ -281,7 +281,7 @@ impl LashRuntime {
         };
         let frame_node_id = opened.result.frame_node_id.clone();
         if let Err(error) = self
-            .persist_context_pressure_frame(write, opened, committing, drive_fence)
+            .persist_context_pressure_frame(write, opened, committing, shift_fence)
             .await
         {
             // Nothing of the frame is durable: drop it from resident state,
@@ -352,7 +352,7 @@ impl LashRuntime {
         write: &ContextPressureWrite<'_>,
         opened: crate::runtime::frame_open::OpenedFrame,
         committing: &crate::ExecutionScope,
-        drive_fence: Option<&DriveFence>,
+        shift_fence: Option<&ShiftFence>,
     ) -> Result<(), RuntimeError> {
         // A storeless runtime keeps the frame resident, as it keeps
         // everything else.
@@ -368,7 +368,7 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(super::runtime_error_from_store_commit)?;
-        commit.drive_fence = drive_fence.cloned().map(Box::new);
+        commit.shift_fence = shift_fence.cloned().map(Box::new);
         commit.frame_transition = super::turn_boundary::committed_frame_transition(
             &self.state,
             opened.ended,

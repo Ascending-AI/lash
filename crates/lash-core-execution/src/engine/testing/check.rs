@@ -18,17 +18,17 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use super::cx::{CxMode, DEFAULT_BODY_TIMEOUT, DriveJournal, LocalTestCx, RunFailure, RunRecord};
+use super::cx::{CxMode, DEFAULT_BODY_TIMEOUT, LocalTestCx, RunFailure, RunRecord, ShiftJournal};
 use super::schedule::{Schedule, derived_seed};
-use super::transcript::{DriveTranscript, TranscriptDivergence};
+use super::transcript::{ShiftTranscript, TranscriptDivergence};
 
 /// How a replay re-runs a fresh run's history.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReplayMode {
-    /// A new drive over the recorded history, on the worker that ran it fresh,
+    /// A new shift over the recorded history, on the worker that ran it fresh,
     /// with every recorded outcome delivered as soon as it is awaited.
     Cold,
-    /// A new drive over the recorded history, decoded from bytes on a worker
+    /// A new shift over the recorded history, decoded from bytes on a worker
     /// that shares no process-local state with the one that ran it fresh.
     SeparateWorker,
     /// A cold replay whose outcome delivery is held and reordered under
@@ -52,28 +52,28 @@ pub enum RunMode {
 #[derive(Clone, Debug)]
 pub struct EngineRun<H> {
     /// The fresh run's command stream and commit bytes.
-    pub transcript: DriveTranscript,
+    pub transcript: ShiftTranscript,
     /// What the engine recorded.
     pub history: H,
 }
 
 /// One engine's leg of the determinism check.
 ///
-/// The drive under test is the engine's to hold: an implementation is built
-/// over one drive and runs it on each call.
+/// The shift under test is the engine's to hold: an implementation is built
+/// over one shift and runs it on each call.
 pub trait DeterminismEngine {
     /// What the engine recorded on a fresh run.
     type History;
 
-    /// Run the drive fresh, with the engine's scheduling seeded by `seed`.
+    /// Run the shift fresh, with the engine's scheduling seeded by `seed`.
     fn fresh(&self, seed: u64) -> Result<EngineRun<Self::History>, RunFailure>;
 
-    /// Re-run the drive over `history` in `mode`.
+    /// Re-run the shift over `history` in `mode`.
     fn replay(
         &self,
         history: &Self::History,
         mode: ReplayMode,
-    ) -> Result<DriveTranscript, RunFailure>;
+    ) -> Result<ShiftTranscript, RunFailure>;
 }
 
 /// The check: one fresh run, then cold, separate-worker and perturbed
@@ -148,7 +148,7 @@ impl DeterminismCheck {
 #[derive(Clone, Debug)]
 pub struct DeterminismReport {
     /// The fresh run's transcript, which every replay reproduced.
-    pub transcript: DriveTranscript,
+    pub transcript: ShiftTranscript,
     /// The replays that reproduced it.
     pub replays: Vec<ReplayMode>,
 }
@@ -197,13 +197,13 @@ impl fmt::Display for DeterminismFailure {
 
 impl std::error::Error for DeterminismFailure {}
 
-/// A drive the local engine runs: given the worker's state and a context,
-/// the drive future. The future may be `!Send`.
-pub type LocalDrive<W> =
+/// A shift the local engine runs: given the worker's state and a context,
+/// the shift future. The future may be `!Send`.
+pub type LocalShift<W> =
     dyn for<'c> Fn(&'c W, &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> + Send + Sync;
 
 /// Builds one worker's process-local state: registries, caches, anything a
-/// drive reads that is not recorded. Each worker builds its own.
+/// shift reads that is not recorded. Each worker builds its own.
 pub type WorkerState<W> = dyn Fn() -> W + Send + Sync;
 
 /// The engine-free leg of the check over [`LocalTestCx`].
@@ -211,10 +211,10 @@ pub type WorkerState<W> = dyn Fn() -> W + Send + Sync;
 /// The fresh run, the cold replay and the perturbed replays run on one home
 /// worker thread, over one worker state. The separate-worker replay runs on a
 /// new thread over a new worker state, from the journal encoded to bytes, so a
-/// drive that reads process-local state it did not record diverges there.
+/// shift that reads process-local state it did not record diverges there.
 pub struct LocalEngine<W: 'static> {
     worker: Arc<WorkerState<W>>,
-    drive: Arc<LocalDrive<W>>,
+    shift: Arc<LocalShift<W>>,
     body_timeout: Duration,
     home: Result<Home, String>,
 }
@@ -231,8 +231,8 @@ struct Job {
 }
 
 impl<W: 'static> LocalEngine<W> {
-    /// An engine over `drive`, whose workers build their state with `worker`.
-    pub fn new<M, D>(worker: M, drive: D) -> Self
+    /// An engine over `shift`, whose workers build their state with `worker`.
+    pub fn new<M, D>(worker: M, shift: D) -> Self
     where
         M: Fn() -> W + Send + Sync + 'static,
         D: for<'c> Fn(&'c W, &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>>
@@ -240,11 +240,11 @@ impl<W: 'static> LocalEngine<W> {
             + Sync
             + 'static,
     {
-        Self::with_body_timeout(worker, drive, DEFAULT_BODY_TIMEOUT)
+        Self::with_body_timeout(worker, shift, DEFAULT_BODY_TIMEOUT)
     }
 
     /// As [`new`](Self::new), with an explicit operation-body timeout.
-    pub fn with_body_timeout<M, D>(worker: M, drive: D, body_timeout: Duration) -> Self
+    pub fn with_body_timeout<M, D>(worker: M, shift: D, body_timeout: Duration) -> Self
     where
         M: Fn() -> W + Send + Sync + 'static,
         D: for<'c> Fn(&'c W, &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>>
@@ -253,11 +253,11 @@ impl<W: 'static> LocalEngine<W> {
             + 'static,
     {
         let worker: Arc<WorkerState<W>> = Arc::new(worker);
-        let drive: Arc<LocalDrive<W>> = Arc::new(drive);
-        let home = spawn_home(Arc::clone(&worker), Arc::clone(&drive), body_timeout);
+        let shift: Arc<LocalShift<W>> = Arc::new(shift);
+        let home = spawn_home(Arc::clone(&worker), Arc::clone(&shift), body_timeout);
         Self {
             worker,
-            drive,
+            shift,
             body_timeout,
             home,
         }
@@ -282,17 +282,17 @@ impl<W: 'static> LocalEngine<W> {
 
     fn on_separate_worker(&self, journal: Vec<u8>) -> Result<RunRecord, RunFailure> {
         let worker = Arc::clone(&self.worker);
-        let drive = Arc::clone(&self.drive);
+        let shift = Arc::clone(&self.shift);
         let body_timeout = self.body_timeout;
         let thread = std::thread::Builder::new()
             .name("lash-determinism-separate-worker".to_string())
             .spawn(move || {
                 let runtime = body_runtime()?;
                 let state = worker();
-                let journal = DriveJournal::from_bytes(&journal)?;
+                let journal = ShiftJournal::from_bytes(&journal)?;
                 run_job(
                     &state,
-                    drive.as_ref(),
+                    shift.as_ref(),
                     &runtime,
                     body_timeout,
                     CxMode::Replay(Arc::new(journal)),
@@ -309,9 +309,9 @@ impl<W: 'static> LocalEngine<W> {
 }
 
 impl<W: 'static> DeterminismEngine for LocalEngine<W> {
-    type History = DriveJournal;
+    type History = ShiftJournal;
 
-    fn fresh(&self, seed: u64) -> Result<EngineRun<DriveJournal>, RunFailure> {
+    fn fresh(&self, seed: u64) -> Result<EngineRun<ShiftJournal>, RunFailure> {
         let record = self.on_home(CxMode::Fresh, Schedule::Perturbed { seed })?;
         Ok(EngineRun {
             transcript: record.transcript,
@@ -321,9 +321,9 @@ impl<W: 'static> DeterminismEngine for LocalEngine<W> {
 
     fn replay(
         &self,
-        history: &DriveJournal,
+        history: &ShiftJournal,
         mode: ReplayMode,
-    ) -> Result<DriveTranscript, RunFailure> {
+    ) -> Result<ShiftTranscript, RunFailure> {
         let record = match mode {
             ReplayMode::Cold => self.on_home(
                 CxMode::Replay(Arc::new(history.clone())),
@@ -352,7 +352,7 @@ impl<W: 'static> Drop for LocalEngine<W> {
 
 fn spawn_home<W: 'static>(
     worker: Arc<WorkerState<W>>,
-    drive: Arc<LocalDrive<W>>,
+    shift: Arc<LocalShift<W>>,
     body_timeout: Duration,
 ) -> Result<Home, String> {
     let (jobs, inbox) = mpsc::channel::<Job>();
@@ -365,7 +365,7 @@ fn spawn_home<W: 'static>(
                 let result = match &runtime {
                     Ok(runtime) => run_job(
                         &state,
-                        drive.as_ref(),
+                        shift.as_ref(),
                         runtime,
                         body_timeout,
                         job.mode,
@@ -385,14 +385,14 @@ fn spawn_home<W: 'static>(
 
 fn run_job<W>(
     state: &W,
-    drive: &LocalDrive<W>,
+    shift: &LocalShift<W>,
     runtime: &tokio::runtime::Runtime,
     body_timeout: Duration,
     mode: CxMode,
     schedule: Schedule,
 ) -> Result<RunRecord, RunFailure> {
     let cx = LocalTestCx::with_body_timeout(mode, schedule, runtime.handle().clone(), body_timeout);
-    cx.run(drive(state, &cx))
+    cx.run(shift(state, &cx))
 }
 
 /// The runtime operation bodies run on: the execution side of a worker.

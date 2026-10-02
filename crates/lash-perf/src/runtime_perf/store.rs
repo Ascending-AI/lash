@@ -251,13 +251,13 @@ impl RuntimeStoreDecorator for RuntimePerfStore {
         result
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &lash_core::store::AdmitRootRequest,
-    ) -> Result<Option<lash_core::store::RootAdmission>, StoreError> {
-        let observation = self.metrics.observe_call("admit_root");
+        request: &lash_core::store::AdmitRunRequest,
+    ) -> Result<Option<lash_core::store::RunAdmission>, StoreError> {
+        let observation = self.metrics.observe_call("admit_run");
         let started = observation.started_at;
-        let result = self.inner.admit_root(request).await;
+        let result = self.inner.admit_run(request).await;
         self.metrics
             .record_timing("admission_scan", started.elapsed());
         drop(observation);
@@ -277,17 +277,17 @@ impl RuntimeStoreDecorator for RuntimePerfStore {
         result
     }
 
-    async fn seal_drive_epoch(
+    async fn seal_shift_epoch(
         &self,
         session_id: &SessionId,
         admission: &lash_core::store::AdmissionId,
         observed_epoch: u64,
-        root_start: &lash_core::store::RootStartNonce,
-        hold: Option<&lash_core::store::RootHold>,
-    ) -> Result<lash_core::store::DriveEpochSeal, StoreError> {
-        let _observation = self.metrics.observe_call("seal_drive_epoch");
+        run_start: &lash_core::store::RunStartNonce,
+        hold: Option<&lash_core::store::RunHold>,
+    ) -> Result<lash_core::store::ShiftEpochSeal, StoreError> {
+        let _observation = self.metrics.observe_call("seal_shift_epoch");
         self.inner
-            .seal_drive_epoch(session_id, admission, observed_epoch, root_start, hold)
+            .seal_shift_epoch(session_id, admission, observed_epoch, run_start, hold)
             .await
     }
 }

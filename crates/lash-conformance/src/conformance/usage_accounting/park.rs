@@ -77,7 +77,7 @@ pub(super) fn attempt(
                 }),
             )
             .expect("layer the tier's real controller");
-            let result = world.drive(scope).await;
+            let result = world.shift(scope).await;
             let ending = crate::ConformanceTurnEnd::of(&result);
             let _ = report.send(result);
             ending
@@ -87,9 +87,9 @@ pub(super) fn attempt(
 
 /// E1: three paid model calls precede a fourth, non-spending journaled
 /// operation. A changed build reconstructs that fourth envelope differently;
-/// the root parks and is never restored or driven to finalization.
+/// the run parks and is never restored or executed to finalization.
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]
-pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_driving(
+pub async fn usage_of_a_run_parked_forever_before_finalization_is_read_without_executing(
     tier: &UsageAccountingTier,
 ) {
     let world = World::new(tier, "fourth-envelope-drift", Script::completed(4));
@@ -109,7 +109,7 @@ pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_
         .await
         .expect("head before park");
     let fence = store
-        .drive_epoch(&world.session_id)
+        .shift_epoch(&world.session_id)
         .await
         .expect("fence before park");
     tier.runner
@@ -117,7 +117,7 @@ pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_
         .await;
     let mut refused = None;
     while let Ok(result) = reports.try_recv() {
-        refused = Some(result.expect_err("the changed fourth envelope parks the root"));
+        refused = Some(result.expect_err("the changed fourth envelope parks the run"));
     }
     assert!(
         refused
@@ -129,7 +129,7 @@ pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_
         .load_turn_park(&world.session_id)
         .await
         .expect("read park")
-        .expect("root parked");
+        .expect("run parked");
     assert_eq!(park.turn_id, world.turn_id());
     assert!(matches!(
         park.reason,
@@ -156,14 +156,14 @@ pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_
     );
     assert_eq!(
         store
-            .drive_epoch(&world.session_id)
+            .shift_epoch(&world.session_id)
             .await
             .expect("fence after park"),
         fence
     );
 
     // This store handle is independent of every runtime constructed above.
-    // The read opens no runtime and lends no controller to the parked root.
+    // The read opens no runtime and lends no controller to the parked run.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let usage = loop {
         let usage = tier
@@ -183,7 +183,7 @@ pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_
     };
     assert_eq!(usage.completeness, crate::UsageCompleteness::default());
     assert_eq!(world.facts().await.len(), 3);
-    assert_each_returned_attempt_once(&world, 0, "parked fourth-envelope root").await;
+    assert_each_returned_attempt_once(&world, 0, "parked fourth-envelope run").await;
     assert_eq!(
         world.invocations(),
         3,
@@ -198,7 +198,7 @@ pub async fn usage_of_a_root_parked_forever_before_finalization_is_read_without_
     );
     assert_eq!(
         store
-            .drive_epoch(&world.session_id)
+            .shift_epoch(&world.session_id)
             .await
             .expect("fence after read"),
         fence

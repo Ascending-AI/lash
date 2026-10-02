@@ -8,7 +8,7 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "unfinished_root"
+      "kind": "unfinished_run"
     }
   },
   {
@@ -20,7 +20,7 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "admit_root"
+      "kind": "admit_run"
     }
   },
   {

@@ -4,7 +4,7 @@
 //! head's current frame on every head write.
 
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use pretty_assertions::assert_eq;
 
 const SESSION: &str = "follow-on";
@@ -157,7 +157,7 @@ pub async fn pending_follow_on_blocks_every_admission_but_its_own(store: Arc<dyn
         ))
         .await
         .expect("enqueue a session command");
-    let fence = seal_drive_fence_for_test(&store, &session(), "follow-on-owner").await;
+    let fence = seal_shift_fence_for_test(&store, &session(), "follow-on-owner").await;
     let input = store
         .list_pending_turn_inputs(&session())
         .await
@@ -165,18 +165,18 @@ pub async fn pending_follow_on_blocks_every_admission_but_its_own(store: Arc<dyn
         .remove(0)
         .input;
 
-    for (root, head) in [
+    for (run, head) in [
         (
-            "blocked-input-root",
+            "blocked-input-run",
             lash_core::store::AdmittedHead::Input(input.input_id.clone()),
         ),
         (
-            "blocked-wake-root",
+            "blocked-wake-run",
             lash_core::store::AdmittedHead::Batch(wake.batch_id.clone()),
         ),
     ] {
         assert!(
-            admit_root_for_test(&store, &fence, &TurnId::from(root), head)
+            admit_run_for_test(&store, &fence, &TurnId::from(run), head)
                 .await
                 .expect("an idle admission behind the follow-on")
                 .is_none(),
@@ -259,12 +259,12 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
         .expect_err("a side write may not drop the fact");
     assert!(matches!(error, StoreError::FollowOnPending { .. }));
     // The owed follow-on owns the head (FIG-4202): a side write outside
-    // every drive is refused even when it carries the fact, and one beside
-    // the drive, presenting its fence, commits.
+    // every shift is refused even when it carries the fact, and one beside
+    // the shift, presenting its fence, commits.
     let error = store
         .commit_runtime_state(commit_as(&state, operation.clone(), Some(owed.clone())))
         .await
-        .expect_err("a side write outside every drive is refused while the follow-on is owed");
+        .expect_err("a side write outside every shift is refused while the follow-on is owed");
     assert!(
         matches!(
             error,
@@ -275,13 +275,13 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
         ),
         "{error:?}"
     );
-    let fence = seal_drive_fence_for_test(&store, &session(), "follow-on-side-write").await;
-    let mut beside_the_drive = commit_as(&state, operation, Some(owed.clone()));
-    beside_the_drive.drive_fence = Some(Box::new(fence));
+    let fence = seal_shift_fence_for_test(&store, &session(), "follow-on-side-write").await;
+    let mut beside_the_shift = commit_as(&state, operation, Some(owed.clone()));
+    beside_the_shift.shift_fence = Some(Box::new(fence));
     store
-        .commit_runtime_state(beside_the_drive)
+        .commit_runtime_state(beside_the_shift)
         .await
-        .expect("a side write beside the drive carrying the fact unchanged commits");
+        .expect("a side write beside the shift carrying the fact unchanged commits");
     assert_eq!(
         loaded_conformance_state(&store, &session())
             .await
@@ -332,7 +332,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
 ) {
     let (state, owed) = commit_switch(&store).await;
     let revision = state.head_revision;
-    let lease = seal_drive_fence_for_test(&store, &session(), "recovering").await;
+    let lease = seal_shift_fence_for_test(&store, &session(), "recovering").await;
     for expected in 1..=2 {
         let raised = store
             .raise_pending_follow_on_attempts(
@@ -341,7 +341,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
                 &recovering_generation(),
             )
             .await
-            .expect("a recovering drive raises the count");
+            .expect("a recovering shift raises the count");
         assert_eq!(raised.attempts, expected);
         let head = store
             .load_session_head_meta(&SessionId::from("follow-on"))
@@ -362,7 +362,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
         Err(StoreError::FollowOnNotPending { .. })
     ));
     store
-        .supersede_drive_epoch_for_test(&lease)
+        .supersede_shift_epoch_for_test(&lease)
         .await
         .expect("release the recovering lane");
     assert!(
@@ -398,7 +398,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
         .commit_runtime_state(terminal_commit(&stale, FOLLOW_ON_TURN, None))
         .await
         .expect("the follow-on's terminal clears its fact");
-    let successor = seal_drive_fence_for_test(&store, &session(), "after").await;
+    let successor = seal_shift_fence_for_test(&store, &session(), "after").await;
     assert!(matches!(
         store
             .raise_pending_follow_on_attempts(

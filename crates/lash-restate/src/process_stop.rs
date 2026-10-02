@@ -3,13 +3,13 @@
 //! One responsibility: while a process segment's runner is live, fire the stop
 //! the segment lends its step bodies (tool attempts, model calls, the tool
 //! children a live opener lends it) once the segment's durable cancel promise
-//! resolves. The drive never reads this stop. A step body that observes it
+//! resolves. The shift never reads this stop. A step body that observes it
 //! records a cancelled outcome, and that recorded outcome is what reaches the
-//! drive; the drive's own observations of the cancellation are the recorded
+//! shift; the shift's own observations of the cancellation are the recorded
 //! races and peeks of the promise itself.
 //!
-//! This module sits outside the drive modules on purpose: its watch is a live
-//! ingress long-poll on a spawned task, which no drive code may await.
+//! This module sits outside the shift modules on purpose: its watch is a live
+//! ingress long-poll on a spawned task, which no shift code may await.
 
 use std::future::Future;
 use std::time::Duration;
@@ -34,7 +34,7 @@ pub(crate) struct ProcessStopDelivery {
 }
 
 impl ProcessStopDelivery {
-    /// No delivery: a segment driven without an ingress (a test) stops its
+    /// No delivery: a segment executed without an ingress (a test) stops its
     /// step bodies only through its recorded outcomes.
     pub(crate) fn none() -> Self {
         Self { watch: None }
@@ -136,7 +136,7 @@ impl ProcessStopDelivery {
 
     /// Run `runner` for as long as the watch holds. A watch fault ends the
     /// attempt with that fault; the runner's own end ends the watch.
-    pub(crate) async fn drive<T>(
+    pub(crate) async fn shift<T>(
         mut self,
         runner: impl Future<Output = T>,
     ) -> Result<T, HandlerError> {

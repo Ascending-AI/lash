@@ -281,7 +281,7 @@
           "type": "object"
         },
         {
-          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one drive request. It has no\nlogical root, and no logical turn runs under it.",
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request. It has no\nlogical root, and no logical turn runs under it.",
           "properties": {
             "operation_id": {
               "type": "string"

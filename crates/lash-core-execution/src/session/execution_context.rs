@@ -72,7 +72,7 @@ pub struct RuntimeExecutionContext<'run> {
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     pub(super) cancellation_token: Option<CancellationToken>,
     /// Whether `cancellation_token` is only a stop lent to this execution's
-    /// step bodies (a process drive's, FIG-3673): then no drive decision reads
+    /// step bodies (a process drive's, FIG-3673): then no shift decision reads
     /// it, and [`is_cancelled`](Self::is_cancelled) answers from recorded facts
     /// alone.
     token_is_lent_stop: bool,
@@ -189,7 +189,7 @@ pub struct RuntimeExecutionProcessEventContext {
 }
 
 /// Trace handle threaded into tool execution so per-tool trace events are
-/// emitted from the single shared seam, whichever protocol drives the turn.
+/// emitted from the single shared seam, whichever protocol executes the turn.
 ///
 /// `scope` is the scope the execution runs under, a turn's or a process's, and
 /// `scope_context` carries the matching record identity (session / turn /
@@ -246,7 +246,7 @@ impl RuntimeExecutionTracing {
         &self,
         controller: &crate::ScopedEffectController<'_>,
     ) -> crate::trace::TraceStanding {
-        self.runtime.drive(self.scope.clone(), controller)
+        self.runtime.shift(self.scope.clone(), controller)
     }
 
     /// Observes one lifecycle event of the call `call_id`, under the call's
@@ -762,7 +762,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Where code running in this execution stands when it observes: in the
     /// live step of the recorded body the execution runs in, or else with the
-    /// drive that issues this execution's steps. The handle is cloneable and
+    /// shift that issues this execution's steps. The handle is cloneable and
     /// may move into what the execution spawns; it carries the scope, the
     /// substrate attempt and the right to emit.
     pub fn trace_standing(&self) -> Option<crate::trace::TraceStanding> {
@@ -799,7 +799,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// Where the coordination of this execution's tool calls stands: with the
-    /// drive that issues their steps.
+    /// shift that issues their steps.
     fn coordination_standing(
         &self,
         tracing: &RuntimeExecutionTracing,
@@ -917,7 +917,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// The session's recorded tool-call limit, as this execution runs under
-    /// it: a root's snapshot for a turn, the recorded environment for a
+    /// it: a run's snapshot for a turn, the recorded environment for a
     /// process.
     pub(super) fn max_tool_calls(&self) -> crate::MaxToolCalls {
         self.execution_env_spec.policy.max_tool_calls
@@ -964,8 +964,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// A process drive's execution (FIG-3673): `stop` is lent to the step
-    /// bodies it runs, which record what it did to them, and is never a drive
-    /// input. The drive observes its process's cancellation only through
+    /// bodies it runs, which record what it did to them, and is never a shift
+    /// input. The shift observes its process's cancellation only through
     /// recorded outcomes, recorded wait races and
     /// [`process_cancel_checkpoint`](Self::process_cancel_checkpoint).
     pub fn with_lent_process_stop(mut self, stop: CancellationToken) -> Self {
@@ -1124,7 +1124,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Says whether the turn this context executes for may end at a segment
     /// boundary inside the execution (FIG-4739): its engine moves turns off a
-    /// draining build, and the turn has a drive to recover its continuation.
+    /// draining build, and the turn has a shift to recover its continuation.
     /// Only such an execution marks a wait transferable.
     pub fn with_turn_hand_over(mut self, hands_over: bool) -> Self {
         self.turn_hands_over = hands_over;

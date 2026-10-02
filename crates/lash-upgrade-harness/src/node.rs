@@ -546,7 +546,7 @@ fn recovery_lease() -> lash::RecoveryLeaseConfig {
 
 /// The core every node builds: the scripted provider over `backend`, and
 /// the Lashlang process engine over the store's artifacts. A host never
-/// calls the provider; the node that drives a turn does, and records and
+/// calls the provider; the node that executes a turn does, and records and
 /// holds each call as `observed` asks.
 fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCore> {
     let build = BuildLabel::current();

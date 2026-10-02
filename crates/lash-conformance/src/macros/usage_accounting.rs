@@ -17,7 +17,7 @@ macro_rules! usage_accounting_engine_tests {
     };
     ($(#[$meta:meta])* $tier:block; teardown $teardown:expr) => {
         $crate::usage_accounting_engine_tests!(@catalogue [$(#[$meta])*] $tier; $teardown; [
-            usage_of_a_root_parked_forever_before_finalization_is_read_without_driving,
+            usage_of_a_run_parked_forever_before_finalization_is_read_without_executing,
             each_paid_attempt_counts_once_under_any_boundary_grouping_and_replay,
             usage_crash_p1_committed_completed,
             usage_crash_p1_committed_cancelled,

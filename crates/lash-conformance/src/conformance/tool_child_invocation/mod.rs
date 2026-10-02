@@ -1071,7 +1071,7 @@ fn register_opener_on(
 ///
 /// A landing is keyed by the intent's recorded identity (its derived process
 /// id or its replay key), never by the call that carried it. An engine that
-/// replays its drive — Restate re-runs a handler from the top of its journal
+/// replays its shift — Restate re-runs a handler from the top of its journal
 /// whenever it resumes one — calls the process service again for every intent
 /// the drain already landed, under the same identity, and the effect boundary
 /// answers that call with the recorded outcome. The repeat is the same
@@ -1638,7 +1638,7 @@ fn install_child_host(
 /// will be lent, installing the tool-child host if it is not installed yet.
 ///
 /// The returned guard is the registration's whole lifetime: dropping it is the
-/// "this worker's opener is gone" edge the recovery phase drives. The
+/// "this worker's opener is gone" edge the recovery phase executes. The
 /// event-channel forwarder is bounded by the registration, exactly as the turn
 /// path's is.
 fn register_opener(

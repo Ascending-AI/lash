@@ -96,7 +96,7 @@ pub(crate) fn process_segment_workflow_key(process_id: &ProcessId, segment_ordin
 /// root `LashProcessWorkflow/<pid>`, whose terminal promise outlives every
 /// segment's lane (FIG-3795). A segment running under a generation lane
 /// still completes the terminal there.
-pub(crate) fn await_terminal_on_stable_root<'ctx, C>(
+pub(crate) fn await_terminal_on_stable_run<'ctx, C>(
     ctx: &C,
     namespace: &crate::RestateNamespace,
     process_id: ProcessId,
@@ -412,7 +412,7 @@ impl RestateProcessCancelRequest {
 #[async_trait::async_trait]
 pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
     /// Run one admitted segment. `started` is the proof that the segment's
-    /// start marker committed (FIG-3588); a runner cannot be driven without it.
+    /// start marker committed (FIG-3588); a runner cannot be executed without it.
     #[allow(clippy::too_many_arguments)]
     async fn run_process_segment(
         &self,
@@ -446,7 +446,7 @@ pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
         Ok(None)
     }
 
-    /// Ask the child turn a `SessionTurn` process drives to stop now, as a
+    /// Ask the child turn a `SessionTurn` process executes to stop now, as a
     /// durable request on the turn's gate (FIG-3673). A runner whose
     /// processes drive no child turn answers `Ok`.
     async fn stop_child_turn(

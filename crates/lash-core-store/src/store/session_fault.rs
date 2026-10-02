@@ -1,12 +1,12 @@
 //! A session's durable fault (ADR 0109 §9): corrupt stored data the engine
 //! met where no sender is left to answer.
 //!
-//! A root's answer is published before its scope closes and before its
-//! drive's next admission reads the session. Stored data that either one
-//! finds corrupt cannot fail that root, whose answer stands, and no retry
+//! A run's answer is published before its scope closes and before its
+//! shift's next admission reads the session. Stored data that either one
+//! finds corrupt cannot fail that run, whose answer stands, and no retry
 //! repairs it. The fault is recorded on the session's `session_meta` row
 //! instead, with the typed code and cause the read failed with. While it
-//! stands the session admits nothing and every drive is refused with it.
+//! stands the session admits nothing and every shift is refused with it.
 //! Only an operator clears it.
 
 use serde::{Deserialize, Serialize};
@@ -17,10 +17,10 @@ use crate::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionId, TurnId
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "origin", rename_all = "snake_case")]
 pub enum SessionFaultOrigin {
-    /// The owed scope close of `root`, whose `ScopeClose` obligation stalled
+    /// The owed scope close of `run`, whose `ScopeClose` obligation stalled
     /// as refused with the same code.
-    ScopeClose { root: TurnId },
-    /// A drive's admission.
+    ScopeClose { run: TurnId },
+    /// A shift's admission.
     DriveAdmission,
 }
 
@@ -48,7 +48,7 @@ impl SessionFaultRecord {
         }
     }
 
-    /// The error every drive of the faulted session is refused with: the
+    /// The error every shift of the faulted session is refused with: the
     /// recorded code, message and cause.
     #[must_use]
     pub fn runtime_error(&self) -> RuntimeError {
@@ -110,7 +110,7 @@ impl SessionFault {
         })
     }
 
-    /// [`Self::from_stored`] for the two nullable columns of a drive-epoch
+    /// [`Self::from_stored`] for the two nullable columns of a shift-epoch
     /// read: both set, or neither.
     ///
     /// # Errors
@@ -147,7 +147,7 @@ mod tests {
         .runtime_error();
         let record = SessionFaultRecord::new(
             SessionFaultOrigin::ScopeClose {
-                root: TurnId::from("root-1"),
+                run: TurnId::from("run-1"),
             },
             &error,
         );
@@ -156,7 +156,7 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&stored).expect("stored JSON"),
             serde_json::json!({
                 "origin": "scope_close",
-                "root": "root-1",
+                "run": "run-1",
                 "code": "runtime_store_corrupt",
                 "message": "stored SessionMeta data is corrupt: unreadable",
                 "cause": {

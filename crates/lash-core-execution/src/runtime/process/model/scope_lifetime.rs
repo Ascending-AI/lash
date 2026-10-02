@@ -510,7 +510,7 @@ mod tests {
     }
 
     fn turn_admitted() -> crate::AdmittedScope {
-        crate::AdmittedScope::turn(SessionId::from("s"), crate::TurnId::from("root"))
+        crate::AdmittedScope::turn(SessionId::from("s"), crate::TurnId::from("run"))
     }
 
     /// A turn's context starts at its root, ends at its session, and holds
@@ -518,10 +518,10 @@ mod tests {
     #[test]
     fn a_turn_start_context_ends_at_its_session() {
         let cx = StartCx::materialize(&turn_admitted(), None).expect("a turn is an opener");
-        assert_eq!(cx.starter().id(), &turn_scope_root());
+        assert_eq!(cx.starter().id(), &turn_scope_run());
         assert_eq!(
             cx.ancestry().scopes(),
-            &[turn_scope_root(), ScopeId::session("s")]
+            &[turn_scope_run(), ScopeId::session("s")]
         );
         assert_eq!(cx.session_capability(), Some(SessionId::from("s")));
         assert_eq!(
@@ -533,12 +533,12 @@ mod tests {
         );
         assert_eq!(
             lifetime::starter(&cx).decision().scope(),
-            Some(&turn_scope_root())
+            Some(&turn_scope_run())
         );
     }
 
-    fn turn_scope_root() -> ScopeId {
-        ScopeId::turn(SessionId::from("s"), crate::TurnId::from("root"))
+    fn turn_scope_run() -> ScopeId {
+        ScopeId::turn(SessionId::from("s"), crate::TurnId::from("run"))
     }
 
     /// A process body's context is its lineage; a standalone process has no
@@ -578,7 +578,7 @@ mod tests {
             cx.ancestry().scopes(),
             &[
                 ScopeId::process(process),
-                turn_scope_root(),
+                turn_scope_run(),
                 ScopeId::session("s")
             ]
         );
@@ -603,7 +603,7 @@ mod tests {
             &[
                 ScopeId::process(process),
                 ScopeId::Session(own),
-                turn_scope_root(),
+                turn_scope_run(),
                 ScopeId::session("s")
             ]
         );

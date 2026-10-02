@@ -29,7 +29,7 @@ impl AppState {
     /// The durable head this attach needs is the same one `/api/state` reads
     /// without a lease, so it is read the same way and handed to
     /// [`lash::SessionBuilder::observe_with_state`], which admits nothing,
-    /// claims nothing, and is never a runtime the session's drives run on.
+    /// claims nothing, and is never a runtime the session's shifts run on.
     /// Observing never creates (FIG-4112): a session the catalog does not
     /// hold is `UnknownSession`, and no row is written (FIG-3144, FIG-3151).
     pub(crate) async fn open_session_for_observation(

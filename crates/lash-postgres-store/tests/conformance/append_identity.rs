@@ -6,7 +6,7 @@ lash_conformance::append_receipt_identity_corruption_tests!({
     reset(storage.pool()).await;
     storage.store().admit_session(&lash_core_execution::testing::store_fixtures::root_session_request(
         &SessionId::from("root"),
-    )).await.expect("admit corrupt-receipt root");
+    )).await.expect("admit corrupt-receipt run");
     let pool = storage.pool().clone();
     (
         _database_fixture,

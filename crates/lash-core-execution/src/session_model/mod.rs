@@ -270,7 +270,7 @@ impl SessionSpec {
         }
     }
 
-    /// The policy a root records from this spec alone: its stated fields
+    /// The policy a run records from this spec alone: its stated fields
     /// over the neutral [`SessionPolicy::new`] of its turn budget and
     /// tool-call limit, its key minted through `models` now. A spec that
     /// states no model, no turn budget or no tool-call limit (an
@@ -499,7 +499,7 @@ pub enum SpecResolveError {
 /// The receiving half of [`llm_stream_channel`]: the provider's stream events
 /// arriving at the journaled step body that forwards each one into the
 /// journal. Declared here so the channel's mechanism is named at the seam
-/// instead of inside scanned drive code (FIG-3672).
+/// instead of inside scanned shift code (FIG-3672).
 pub type LlmStreamEventRx = tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>;
 
 /// Open the provider stream-event pipe [`transport_stream_events`] consumes:

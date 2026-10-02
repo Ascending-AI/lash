@@ -64,7 +64,7 @@ Adjacent non-`Value` churn on the same schema pipeline (kept separate from the
 tree numbers): `lashlang::json_schema::SchemaImporter` produces ~62/95/129 MB of
 `format!`/`String` and `TypeExpr` allocations in large/warm/cold, and
 `lash_typescript::signatures::render_schema_type` another ~31/52/73 MB of
-signature strings — both driven by the same per-build/per-cell reconstruction.
+signature strings — both executed by the same per-build/per-cell reconstruction.
 
 ### Site 1 — schema documents per catalog build: dominant, and not only per build
 

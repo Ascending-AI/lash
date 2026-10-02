@@ -112,7 +112,7 @@ pub struct AssembledTurn {
     pub failure_evidence: Vec<TurnFailureEvidence>,
     #[serde(default)]
     pub errors: Vec<TurnIssue>,
-    /// Durable admission identity of the input this turn was driven from.
+    /// Durable admission identity of the input this turn was executed from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_input_acceptance: Option<TurnInputAcceptanceReceipt>,
     /// Undelivered active-turn inputs repaired under this turn's cancellation policy.
@@ -123,7 +123,7 @@ pub struct AssembledTurn {
     pub turn_cancel_input_outcome: crate::TurnCancelInputOutcome,
 }
 
-/// Result of driving one logical host turn through any AgentFrame switches.
+/// Result of executing one logical host turn through any AgentFrame switches.
 ///
 /// A frame switch is an internal runtime continuation, similar to compaction
 /// from a host's perspective. Callers that need a final answer inspect
@@ -131,7 +131,7 @@ pub struct AssembledTurn {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AgentFrameRun {
     pub turns: Vec<AssembledTurn>,
-    /// Durable admission identity committed before this run was driven.
+    /// Durable admission identity committed before this run was executed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance: Option<TurnInputAcceptanceReceipt>,
 }
@@ -465,28 +465,28 @@ pub trait DeploymentStore:
         through: crate::store::ParkFeedCursor,
     ) -> Result<(), crate::StoreError>;
 
-    /// Open logical roots in `(session, root)` order, after `after`, each
+    /// Open logical runs in `(session, run)` order, after `after`, each
     /// with the executor its recorded admission names (FIG-4403). Recovery
     /// checks the execution that runs each in bounded pages; it never guesses
     /// liveness from a missing terminal row alone.
-    async fn non_terminal_roots_page(
+    async fn non_terminal_runs_page(
         &self,
-        after: Option<&crate::engine::RootRef>,
+        after: Option<&crate::engine::RunRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::engine::OpenRoot>, crate::StoreError>;
+    ) -> Result<Vec<crate::engine::OpenRun>, crate::StoreError>;
 
-    /// End an open root `SubstrateLost` on the engine's evidence `loss` that
-    /// its execution is gone ([`RootRunLoss`](crate::engine::RootRunLoss)).
-    /// The write settles the root's ingress and arms scope close
-    /// atomically. An already terminal or deleted root is a no-op, and so is
-    /// a root with no run on the engine that never recorded its admission:
-    /// it started nothing, and its ingress obligation still drives it.
-    async fn end_lost_root(
+    /// End an open run `SubstrateLost` on the engine's evidence `loss` that
+    /// its execution is gone ([`RunLoss`](crate::engine::RunLoss)).
+    /// The write settles the run's ingress and arms scope close
+    /// atomically. An already terminal or deleted run is a no-op, and so is
+    /// a run with no execution on the engine that never recorded its admission:
+    /// it started nothing, and its ingress obligation still executes it.
+    async fn end_lost_run(
         &self,
-        target: &crate::engine::RootRef,
-        loss: crate::engine::RootRunLoss,
+        target: &crate::engine::RunRef,
+        loss: crate::engine::RunLoss,
         at_ms: u64,
-    ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError>;
+    ) -> Result<Option<crate::store::RunTerminal>, crate::StoreError>;
 
     /// Retained intents, including permanent engine refusals, in ID order.
     async fn list_control_intents(
@@ -598,9 +598,9 @@ pub async fn admit_session_state_generation(
 /// tool drifted and it would run live, or its replay diverged — and returns
 /// it. The child runs in its own invocation on an engine whose opener cannot
 /// learn of a refusal that settles nothing, so the child writes the park its
-/// opener would have: keyed by the opener's logical root (D2 §1.3), a turn
-/// scope's root, in the root's own session. A
-/// refusal that parks nothing, a scope with no root, and a session the
+/// opener would have: keyed by the opener's logical run (D2 §1.3), a turn
+/// scope's run, in the run's own session. A
+/// refusal that parks nothing, a scope with no run, and a session the
 /// catalog does not hold live answer `None`.
 pub async fn park_turn_of_refused_group_child(
     store: &dyn crate::store::RuntimeStore,
@@ -611,16 +611,16 @@ pub async fn park_turn_of_refused_group_child(
     let Some(reason) = crate::store::ParkReason::of_error(refusal) else {
         return Ok(None);
     };
-    let (session_id, root) = match (scope, scope.logical_root()) {
-        (crate::ExecutionScope::Turn { session_id, .. }, Some(root)) => (session_id, root),
+    let (session_id, run) = match (scope, scope.logical_run()) {
+        (crate::ExecutionScope::Turn { session_id, .. }, Some(run)) => (session_id, run),
         _ => return Ok(None),
     };
     if !session_is_live(store, session_id).await? {
         return Ok(None);
     }
-    let park = super::record_root_park(
+    let park = super::record_run_park(
         store,
-        &crate::store::TurnParkWrite::refusal(session_id.clone(), root, reason, at_ms),
+        &crate::store::TurnParkWrite::refusal(session_id.clone(), run, reason, at_ms),
     )
     .await?;
     crate::operational_metrics::record_work_parked(
@@ -638,9 +638,9 @@ pub async fn park_turn_of_refused_group_child(
 ///
 /// The gate refuses before any effect, so a redrive meets `refusal` before it
 /// issues its first command. A turn the refused session holds in flight for
-/// `scope` — the admitted, unfinished root a driver-run turn scope names; for
+/// `scope` — the admitted, unfinished run an engine-executed turn scope names; for
 /// a direct turn scope, the open input row the turn's journaled acceptance
-/// wrote (its id is provisioned from the acceptance address) — was driven by
+/// wrote (its id is provisioned from the acceptance address) — was executed by
 /// an earlier execution, whose journal already holds commands the refused
 /// redrive cannot replay. Its handler must not return, or fail terminally,
 /// where that journal holds its next command: the turn parks, typed
@@ -663,9 +663,9 @@ pub async fn park_turn_refused_by_generation(
         return Ok(None);
     };
     let in_flight = if store
-        .unfinished_root(session_id)
+        .unfinished_run(session_id)
         .await?
-        .is_some_and(|unfinished| unfinished.root == *turn_id)
+        .is_some_and(|unfinished| unfinished.run == *turn_id)
     {
         true
     } else {
@@ -681,7 +681,7 @@ pub async fn park_turn_refused_by_generation(
     if !in_flight {
         return Ok(None);
     }
-    let park = super::record_root_park(
+    let park = super::record_run_park(
         store,
         &crate::store::TurnParkWrite::refusal(
             session_id.clone(),

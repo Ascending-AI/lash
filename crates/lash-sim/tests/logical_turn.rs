@@ -308,7 +308,7 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
             let first_provider_started_tx = Arc::clone(&first_provider_started_tx);
             let release_first_provider_rx = Arc::clone(&release_first_provider_rx);
             // Each exchange is scripted by the input it answers, not by call
-            // order: the engine drives every input as soon as it is accepted.
+            // order: the engine executes every input as soon as it is accepted.
             move |request| {
                 let provider_call = Arc::clone(&provider_call);
                 let completions = Arc::clone(&completions);
@@ -337,8 +337,8 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
         })
         .build()
         .into_handle();
-    // The law holds the engine's drive while a root runs; the hold reaches
-    // the running drive at its next step, which needs a server whose attempts
+    // The law holds the engine's shift while a run executes; the hold reaches
+    // the running shift at its next step, which needs a server whose attempts
     // run concurrently.
     let engine = lash_sim::backend::SimEngine::new(0x5eed_7010)
         .await
@@ -425,13 +425,13 @@ async fn admitted_switch_is_seeded_atomic_ordered_and_exactly_once() {
         }])
         .is_passed()
     );
-    // Hold the engine's drive before the root goes on: the root runs its
-    // follow-on to its answer, and the held drive admits nothing after it, so
-    // the unrelated input is still pending once the root has settled.
-    let hold = engine.hold_session_drive(&session).await;
+    // Hold the engine's shift before the run goes on: the run executes its
+    // follow-on to its answer, and the held shift admits nothing after it, so
+    // the unrelated input is still pending once the run has settled.
+    let hold = engine.hold_session_shift(&session).await;
     pause.resume();
 
-    let first_output = first.output().await.expect("the first root settles");
+    let first_output = first.output().await.expect("the first run settles");
     assert_eq!(
         first_output.assistant_message(),
         Some("seeded follow-on complete")
@@ -628,7 +628,7 @@ async fn admissions_settle_for_finish_cancel_error_and_chain_bound() {
     cancelled
         .cancel()
         .await
-        .expect("cancel the running input's root");
+        .expect("cancel the running input's run");
     let cancelled = cancelled.output().await.expect("cancel input runs");
     assert_global_invariants(&cancel_engine, "admissions-settle-cancel").await;
     drop(cancel_engine);

@@ -7,7 +7,7 @@ use lash_core::ArtifactReferrer;
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
 };
-use lash_core::runtime::drive::relay::{RelayVerdict, deliver_now};
+use lash_core::runtime::shift::relay::{RelayVerdict, deliver_now};
 use lash_core::testing::runtime_helpers::{LayeredBackend, LayeredStores};
 use lash_core::testing::{ProcessRegistryFaults, RegistrationHoldPoint, TestClock};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};

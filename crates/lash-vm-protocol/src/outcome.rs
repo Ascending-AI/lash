@@ -231,7 +231,7 @@ pub enum PoolFault {
 }
 
 /// A parent, its worker or the pool between them broke the protocol. A fresh
-/// worker may keep it, so the owning invocation is re-driven.
+/// worker may keep it, so the owning invocation is redriven.
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolBreach {
@@ -292,7 +292,7 @@ impl std::fmt::Display for RunInput {
 }
 
 /// The run's own inputs are refused. They are the same on every attempt, so
-/// re-driving the invocation refuses them again: the refusal is terminal.
+/// redriving the invocation refuses them again: the refusal is terminal.
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunRefusal {
@@ -379,7 +379,7 @@ pub enum InfrastructureOutcome {
 }
 
 impl InfrastructureOutcome {
-    /// Whether re-driving the owning invocation can succeed. A refusal of the
+    /// Whether redriving the owning invocation can succeed. A refusal of the
     /// run's inputs and a limit the run itself exhausted fail the same way on
     /// every attempt; a host's deadline or budget does not
     /// ([`WorkerLimit::is_host_verdict`]).

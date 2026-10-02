@@ -4,7 +4,7 @@
 > the artifact bundles of two deterministic companions: `just e2e-rolling`
 > (Phase A, local processes) and `just e2e-rolling-cluster` (Phase B, the
 > multi-node cluster under load). The companions run every command; the judge
-> reads their bundles and never drives a process, Docker, kind or Restate
+> reads their bundles and never executes a process, Docker, kind or Restate
 > itself.
 
 **Purpose.** Prove, before the 1.0 cut, that a 1.0 node can serve as an N-1:
@@ -56,7 +56,7 @@ VM protocol. The node binaries are:
 operator build's declared ranges.
 The nodes write their build labels and generations to ready files.
 The operator and scripted node builds enable different Lash features, so the
-ready-file generations drive routing and drain calls. The N and synthetic N+1 `lashctl` variants are Buck2 targets. `lashctl version`
+ready-file generations shift routing and drain calls. The N and synthetic N+1 `lashctl` variants are Buck2 targets. `lashctl version`
 reports the CLI build; the fleet generation comes from each node's ready file.
 
 ## What the run does
@@ -98,8 +98,8 @@ generation again, and finalize runs before the roll's turn:
 | N probes the store | refused `reader_floor_above` (floor 2) |
 
 SQLite is a single-host embedded store. Each transition waits until the
-engine holds no open invocation in the case's namespace (a root's scope
-close outlives its session's drive) and the generation has drained, then
+engine holds no open invocation in the case's namespace (a run's scope
+close outlives its session's shift) and the generation has drained, then
 stops and reaps the serving node before its replacement opens the same
 directory:
 
@@ -311,7 +311,7 @@ The judge answers each item from the bundle and cites the file:
    case, and every `status` is `Answered`.
 3. **Routing.** In each record where `expected_driver` is set, the reply names
    that build and its `G`. In the PostgreSQL half roll, record which build
-   drove each host's turn. Either is correct, but a host N turn driven by N+1 shows that
+   drove each host's turn. Either is correct, but a host N turn executed by N+1 shows that
    the newest deployment took new invocations.
 4. **Fresh URIs.** Across the `ready-*.json` of one case, every `uri` is
    distinct, and each `generation` matches its build's.

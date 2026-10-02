@@ -89,19 +89,19 @@ lash_conformance::attachment_adoption_tests!({
     )
 });
 
-/// Fresh, empty attachment byte stores for the root-set laws, each a
-/// filesystem store in its own directory under `root`: PostgreSQL keeps no
+/// Fresh, empty attachment byte stores for the run-set laws, each a
+/// filesystem store in its own directory under `run`: PostgreSQL keeps no
 /// attachment bytes of its own.
-/// `commit` as `root`'s final commit under `fence`: it completes every row
-/// the root admitted and writes the root's terminal.
-fn finishing_root(
+/// `commit` as `run`'s final commit under `fence`: it completes every row
+/// the run admitted and writes the run's terminal.
+fn finishing_run(
     commit: lash_core_execution::RuntimeCommit,
-    fence: &lash_core_execution::store::DriveFence,
-    root: &str,
-    admission: &lash_core_execution::store::RootAdmission,
+    fence: &lash_core_execution::store::ShiftFence,
+    run: &str,
+    admission: &lash_core_execution::store::RunAdmission,
 ) -> lash_core_execution::RuntimeCommit {
-    let root = lash_core_execution::TurnId::fixture(root);
-    let mut settlement = lash_core_execution::store::IngressSettlement::new(root.clone());
+    let run = lash_core_execution::TurnId::fixture(run);
+    let mut settlement = lash_core_execution::store::IngressSettlement::new(run.clone());
     settlement
         .completed_batches
         .extend(admission.queued.as_ref().map(|queued| queued.completion()));
@@ -111,11 +111,11 @@ fn finishing_root(
     let mut commit = lash_core_execution::testing::store_fixtures::settling_commit_for_test(
         commit, fence, settlement,
     );
-    commit.root_terminal = Some(Box::new(lash_core_execution::store::RootTerminalWrite {
-        commit: lash_core_execution::store::TurnCommitId::new(root.clone(), 0),
-        turn: lash_core_execution::store::PhysicalTurn::derive_turn_id(&root, 0),
-        root,
-        outcome: lash_core_execution::store::RootCommittedOutcome::Finished(
+    commit.run_terminal = Some(Box::new(lash_core_execution::store::RunTerminalWrite {
+        commit: lash_core_execution::store::TurnCommitId::new(run.clone(), 0),
+        turn: lash_core_execution::store::PhysicalTurn::derive_turn_id(&run, 0),
+        run,
+        outcome: lash_core_execution::store::RunCommittedOutcome::Finished(
             lash_core_execution::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -160,7 +160,7 @@ use lash_conformance::{
     ReopenableProcessRegistry, ReopenableRuntimeStore, ReopenableTriggerStore,
 };
 use lash_core_execution::compat::CompatRefusal;
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt as _;
 use lash_core_execution::{
     AttachmentReferrers as _, DeploymentStore, ProcessExecutionEnvStore, ProcessRegistry,
     QueuedWorkStore as _, RuntimeStore, SessionCatalogStore as _, SessionCommitStore as _,
@@ -203,7 +203,7 @@ lash_conformance::lineage_tests!({
 fn sync_await<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,
 ) -> T {
-    // Drive the future on the CURRENT (multi-thread) test runtime rather than a
+    // Execute the future on the CURRENT (multi-thread) test runtime rather than a
     // throwaway one. The sqlx pool's connections are bound to this runtime's
     // reactor; polling them from a different runtime wedges the connection (it
     // never returns to the pool), which starves the pool and surfaces as
@@ -264,7 +264,7 @@ fn handler_attempt(
 }
 
 /// `ConformanceTurnRunner` over [`RestateTestBackend::run_in_handler`]: every
-/// turn a law drives runs inside a handler of the double's deployment, on the
+/// turn a law executes runs inside a handler of the double's deployment, on the
 /// handler-scoped controller a Restate tier actually lends its turns, instead
 /// of on a host scoped from the calling task.
 ///
@@ -381,7 +381,7 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
         // queued its next attempt of this scope, and the double's retry
         // replays the journal the killed attempt left into that attempt. A
         // fresh invocation would start an empty journal instead, which the
-        // drive's seal answers as a lost substrate (ADR 0105 L-S8), not as
+        // shift's seal answers as a lost substrate (ADR 0105 L-S8), not as
         // the recovery of a crashed turn.
         let key = open_turn_key(&admitted);
         assert!(
@@ -798,7 +798,7 @@ lash_conformance::append_receipt_rewrite_tests!({
             )),
         )
         .await
-        .expect("admit old-format receipt root");
+        .expect("admit old-format receipt run");
     let pool = storage.pool().clone();
     (
         _database_fixture,
@@ -1156,20 +1156,20 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue original wake");
     let owner = lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
     let lease = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "wake-executor-1",
             60_000,
         )
         .await
-        .expect("seal target drive")
+        .expect("seal target shift")
         .acquired()
-        .expect("drive sealed");
-    let admission = lash_core_execution::testing::store_fixtures::admit_root_for_test(
+        .expect("shift sealed");
+    let admission = lash_core_execution::testing::store_fixtures::admit_run_for_test(
         &store,
         &lease,
-        &lash_core_execution::TurnId::from("wake-source-root"),
+        &lash_core_execution::TurnId::from("wake-source-run"),
         lash_core_execution::store::AdmittedHead::Batch(first.batch_id.clone()),
     )
     .await
@@ -1244,10 +1244,10 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             )
         };
         completion_store
-            .commit_runtime_state(finishing_root(
+            .commit_runtime_state(finishing_run(
                 lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
                 &lease,
-                "wake-source-root",
+                "wake-source-run",
                 &admission,
             ))
             .await
@@ -1362,7 +1362,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let second_owner =
         lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &SessionId::from(session_id),
             &second_owner,
             "wake-executor-2",
@@ -1372,10 +1372,10 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("claim target for second sequence")
         .acquired()
         .expect("second-sequence target lease");
-    let second_admission = lash_core_execution::testing::store_fixtures::admit_root_for_test(
+    let second_admission = lash_core_execution::testing::store_fixtures::admit_run_for_test(
         &store,
         &second_lease,
-        &lash_core_execution::TurnId::from("wake-source-second-root"),
+        &lash_core_execution::TurnId::from("wake-source-second-run"),
         lash_core_execution::store::AdmittedHead::Batch(second.batch_id.clone()),
     )
     .await
@@ -1400,10 +1400,10 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     .expect("persisted target state")
     .state;
     store
-        .commit_runtime_state(finishing_root(
+        .commit_runtime_state(finishing_run(
             lash_core_execution::RuntimeCommit::persisted_state_for_test(&state),
             &second_lease,
-            "wake-source-second-root",
+            "wake-source-second-run",
             &second_admission,
         ))
         .await
@@ -1540,7 +1540,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let owner =
         lash_core_execution::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let _lease = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &owner,
             "clock-executor",
@@ -1937,8 +1937,8 @@ lash_conformance::retention_tests!({
     (database_fixture, Arc::new(storage.session_store_factory()))
 });
 
-// FIG-3607 contract 4 (FIG-4489): every logical turn a drive runs, a
-// recovered follow-on's included, is owned by `Turn(logical root)`, on the
+// FIG-3607 contract 4 (FIG-4489): every logical turn a shift runs, a
+// recovered follow-on's included, is owned by `Turn(logical run)`, on the
 // Restate double over PostgreSQL stores.
 struct OwnershipDatabaseEvidence {
     database: IsolatedDatabase,
@@ -1986,9 +1986,9 @@ mod driver_turn_ownership {
 }
 
 // The ownership law where every await suspends and every resumption replays
-// the handler's journal from its start (FIG-4514): a root replayed after its
+// the handler's journal from its start (FIG-4514): a run replayed after its
 // terminal-checkpoint follow-on committed names that follow-on's effects as
-// its first execution did, so the drive ends.
+// its first execution did, so the shift ends.
 mod driver_turn_ownership_under_replay {
     use super::*;
     lash_conformance::driver_turn_ownership_tests!({
@@ -2016,80 +2016,80 @@ mod driver_turn_ownership_under_replay {
     });
 }
 
-mod root_control {
+mod run_control {
     use super::*;
-    lash_conformance::drive_admission_tests!(@laws [] {
+    lash_conformance::shift_admission_tests!(@laws [] {
         let Some((lock, storage)) = storage().await else { return; };
         reset(storage.pool()).await;
-        // Drive-admission turns run inside the engine's handlers: the double
+        // Shift-admission turns run inside the engine's handlers: the double
         // lends each attempt the handler-scoped controller a Restate tier
         // runs it on, over this test's PostgreSQL stores.
         let ((attachments, double), stores, host, runner) =
             double_law_backend(&storage).await;
-        ((lock, storage, attachments, double), "pg-root-control", host, stores, runner)
+        ((lock, storage, attachments, double), "pg-run-control", host, stores, runner)
     }; [
-    (a_terminal_root_never_reparks, "s7b-0"),
-    (one_unfinished_root_per_session, "root-one-unfinished"),
-    (admission_delivers_every_row_it_binds, "root-admission-delivers"),
-    (a_root_admission_is_idempotent_across_new_rows_and_fences, "root-admission-idempotent"),
-    (a_root_admission_survives_a_worker_crash_without_widening, "drive-admission-commit-crash"),
-    (a_diverged_root_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore, "s7b-15"),
-    (an_exhausted_root_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence, "s7b-13"),
-    (a_parked_roots_fence_stays_current_until_a_verb, "s7b-14"),
+    (a_terminal_run_never_reparks, "s7b-0"),
+    (one_unfinished_run_per_session, "run-one-unfinished"),
+    (admission_delivers_every_row_it_binds, "run-admission-delivers"),
+    (a_run_admission_is_idempotent_across_new_rows_and_fences, "run-admission-idempotent"),
+    (a_run_admission_survives_a_worker_crash_without_widening, "shift-admission-commit-crash"),
+    (a_diverged_run_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore, "s7b-15"),
+    (an_exhausted_run_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence, "s7b-13"),
+    (a_parked_runs_fence_stays_current_until_a_verb, "s7b-14"),
 
-    (sends_behind_a_parked_root_commit_but_are_not_admitted, "s7b-8"),
+    (sends_behind_a_parked_run_commit_but_are_not_admitted, "s7b-8"),
     (redrive_under_a_restored_build_completes_once_and_clears_the_park, "s7b-9"),
     (a_stale_redrive_is_fenced_by_a_later_cancel, "s7b-10"),
-    (root_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked, "s7b-11"),
-    (a_joined_inputs_turn_scope_closes_with_its_admitting_root, "drive-joined-scope-close"),
-    (a_root_crashed_at_its_report_handover_still_closes_its_scope, "s7b-11b"),
-    (cancel_fork_and_close_raise_the_drive_epoch_and_redrive_does_not, "s7b-12"),
+    (run_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked, "s7b-11"),
+    (a_joined_inputs_turn_scope_closes_with_its_admitting_run, "shift-joined-scope-close"),
+    (a_run_crashed_at_its_report_handover_still_closes_its_scope, "s7b-11b"),
+    (cancel_fork_and_close_raise_the_shift_epoch_and_redrive_does_not, "s7b-12"),
 
-    (cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
-    (no_row_stays_bound_after_a_roots_verb_close_or_lost_end, "root-verb-unbinds"),
-    (a_refused_root_ends_once_and_its_next_input_admits_a_new_root, "refused-root-end"),
-    (a_root_with_no_engine_run_ends_only_once_it_started, "lost-root-no-run"),
-    (an_obsolete_executor_never_ends_its_successors_root, "obsolete-executor"),
+    (cancel_of_a_parked_run_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
+    (no_row_stays_bound_after_a_runs_verb_close_or_lost_end, "run-verb-unbinds"),
+    (a_refused_run_ends_once_and_its_next_input_admits_a_new_run, "refused-run-end"),
+    (a_run_with_no_engine_execution_ends_only_once_it_started, "lost-run-no-run"),
+    (an_obsolete_executor_never_ends_its_successors_run, "obsolete-executor"),
     (inconsistent_divergence_still_parks_on_a_lower_revision, "inconsistent-lower-revision"),
     (inconsistent_divergence_still_parks_on_another_leaf, "inconsistent-other-leaf"),
     (inconsistent_divergence_still_parks_on_another_checkpoint, "inconsistent-other-checkpoint"),
-    (fork_releases_the_old_owner_before_the_new_root_drives_in_original_order_on_a_fresh_journal, "s7b-2"),
+    (fork_releases_the_old_owner_before_the_new_run_executes_in_original_order_on_a_fresh_journal, "s7b-2"),
     (verbs_are_park_id_cas, "s7b-3"),
     (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),
-    (cancel_or_fork_of_a_redriving_root_is_refused, "s7b-5"),
+    (cancel_or_fork_of_a_redriving_run_is_refused, "s7b-5"),
     (an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it, "s7b-6"),
     (engine_refusals_are_retained_and_listed, "s7b-7"),
-    (a_root_parked_on_a_later_physical_turn_is_cleared_by_its_commit, "s7b-16"),
-    (a_redrive_the_root_ran_past_is_never_applied_again, "s7b-17"),
-    (a_stale_paused_listing_never_reparks_a_resumed_root, "s7b-18"),
-    (a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settled_redrive, "s7b-18b"),
+    (a_run_parked_on_a_later_physical_turn_is_cleared_by_its_commit, "s7b-16"),
+    (a_redrive_the_run_ran_past_is_never_applied_again, "s7b-17"),
+    (a_stale_paused_listing_never_reparks_a_resumed_run, "s7b-18"),
+    (a_stopped_child_parks_its_run_once_and_reparks_only_after_a_settled_redrive, "s7b-18b"),
     (a_delayed_child_reconcile_never_settles_a_redrive_admitted_since_its_probe, "s7b-18c"),
-    (concurrent_first_child_reconciles_park_their_root_once, "s7b-18d"),
+    (concurrent_first_child_reconciles_park_their_run_once, "s7b-18d"),
     (every_order_of_two_child_reconciles_and_a_redrive_counts_one_refusal_and_keeps_the_redrive_open, "s7b-18e"),
-    (a_parked_session_is_asked_to_drive_only_through_its_ingress_obligation, "s7b-19"),
+    (a_parked_session_is_asked_to_work_only_through_its_ingress_obligation, "s7b-19"),
     (a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_settles, "l2-1"),
     (every_order_of_a_send_and_a_redrives_settle_admits_nothing_ahead_of_the_redrive, "l2-1b"),
     (a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_admitted, "l2-2"),
-    (a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork, "s8c-1"),
+    (a_failing_child_cancel_never_wedges_its_runs_cancel_or_fork, "s8c-1"),
     (a_delivery_whose_claim_was_retaken_never_settles_its_intent, "s8c-2"),
     (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),
     (a_store_fault_in_an_intents_delivery_stalls_its_obligation_and_never_wedges_its_session, "f09-1"),
     (re_arming_a_refused_intent_makes_it_owed_again_and_its_delivery_completes_it, "f09-2"),
-    (a_refused_follow_on_drive_keeps_the_intents_obligation_due, "s8c-4"),
-    (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
-    (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
-    (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
-    (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
-    (a_root_recorded_under_one_executor_is_never_admitted_by_another, "drive-root-one-executor"),
-    (a_lost_acceptors_root_is_driven_once_by_the_sessions_drive, "drive-root-lost-acceptor"),
-    (admit_root_refuses_another_engine_held_executor, "root-admission-executor"),
+    (a_refused_follow_on_shift_keeps_the_intents_obligation_due, "s8c-4"),
+    (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "shift-idle-turn-lane-order"),
+    (a_command_enqueued_after_an_input_runs_admission_waits_for_the_next_boundary, "shift-command-after-admission"),
+    (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "shift-turn-lane-contiguous"),
+    (a_command_runs_redrive_replays_its_recorded_outcome, "shift-command-run-redrive"),
+    (a_run_recorded_under_one_executor_is_never_admitted_by_another, "shift-run-one-executor"),
+    (a_lost_acceptors_run_is_executed_once_by_the_sessions_shift, "shift-run-lost-acceptor"),
+    (admit_run_refuses_another_engine_held_executor, "run-admission-executor"),
     (first_admission_wins_without_changing_business_identity, "trace-first-writer"),
-    (a_refused_acceptor_adopts_the_outcome_its_roots_executor_recorded, "drive-root-acceptor-adopts"),
-    (no_order_of_a_roots_owner_and_another_admitter_supersedes_the_owners_fence, "drive-root-owner-fence"),
-    (a_parent_turn_acceptors_root_is_closed_to_a_later_drive, "drive-root-acceptor-recorded"),
+    (a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded, "shift-run-acceptor-adopts"),
+    (no_order_of_a_runs_owner_and_another_admitter_supersedes_the_owners_fence, "shift-run-owner-fence"),
+    (a_parent_turn_acceptors_run_is_closed_to_a_later_drive, "shift-run-acceptor-recorded"),
     ]);
 
-    lash_conformance::queued_input_roots_tests!({
+    lash_conformance::queued_input_runs_tests!({
         let Some((lock, storage)) = storage().await else {
             return;
         };
@@ -2097,14 +2097,14 @@ mod root_control {
         let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
         (
             (lock, storage, attachments, double),
-            "pg-queued-input-roots",
+            "pg-queued-input-runs",
             host,
             stores,
             runner,
         )
     });
 
-    lash_conformance::root_answers_its_rows_tests!({
+    lash_conformance::run_answers_its_rows_tests!({
         let Some((lock, storage)) = storage().await else {
             return;
         };
@@ -2112,7 +2112,7 @@ mod root_control {
         let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
         (
             (lock, storage, attachments, double),
-            "pg-root-rows",
+            "pg-run-rows",
             host,
             stores,
             runner,
@@ -2218,7 +2218,7 @@ mod vm_broker {
     use super::*;
     // FIG-4159: the worker-broker laws, each turn inside a handler of the
     // Restate double over this test's PostgreSQL stores; a lost worker fails
-    // the attempt and the double replays the invocation into the re-drive.
+    // the attempt and the double replays the invocation into the redrive.
     lash_conformance::vm_broker_tests!({
         let Some((lock, storage)) = storage().await else {
             return;

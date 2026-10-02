@@ -298,8 +298,8 @@ impl RuntimeTurnDriver<'_> {
             }
             Err(err) => {
                 // A failed checkpoint delivers nothing and starts no follow-on
-                // turn. What it admitted stays bound to the root, which never
-                // settles it as delivered: the root's terminal write hands it
+                // turn. What it admitted stays bound to the run, which never
+                // settles it as delivered: the run's terminal write hands it
                 // back open at its own position (FIG-3927 §2.4).
                 self.pending_checkpoint_turn_inputs = None;
                 drop(self.withheld_terminal_work.take_if_any());
@@ -559,7 +559,7 @@ impl RuntimeTurnDriver<'_> {
             Err(err) => {
                 let message = err.to_string();
                 // The observation-only duration is not read from the clock:
-                // the drive decides nothing from it, so it reports 0 rather
+                // the shift decides nothing from it, so it reports 0 rather
                 // than take a live timestamp (FIG-3672 P6b).
                 code_observations.observe(
                     event_tx,

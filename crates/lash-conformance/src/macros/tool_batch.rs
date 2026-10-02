@@ -7,7 +7,7 @@
 /// the tier's [`ConformanceTurnRunner`](crate::ConformanceTurnRunner). Every
 /// producer runs every law, so "this tier overlaps a tool group" is one
 /// statement per surface and not a family of look-alike tests. A
-/// handler-bound tier supplies a runner that drives each turn inside a live
+/// handler-bound tier supplies a runner that executes each turn inside a live
 /// handler.
 #[macro_export]
 macro_rules! tool_batch_parallelism_tests {

@@ -22,7 +22,7 @@ lashlang = ["lashlang/testing"]
 lashlang.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 # A batch issued from inside a process only reaches the leaves if something
-# drives the registry. The durable process worker is that something, and it is
+# executes the registry. The durable process worker is that something, and it is
 # the same one a deployment runs; the law stands one up for the producers that
 # need it (FIG-3400).
 lash-core-worker = { workspace = true, features = ["testing"] }

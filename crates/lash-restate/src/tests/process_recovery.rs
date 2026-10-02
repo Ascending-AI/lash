@@ -754,9 +754,9 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
         .await
         .expect("the redelivery replays its recorded prefix");
 
-    // The drive observed no cancellation before the crash: its timer won the
+    // The shift observed no cancellation before the crash: its timer won the
     // recorded race and its post-wake effect is journaled. A cancel landing in
-    // the redelivery gap is observed at the drive's next recorded wait,
+    // the redelivery gap is observed at the shift's next recorded wait,
     // checkpoint or end, never by pre-empting the replay of what the journal
     // already holds (FIG-3673).
     assert!(
@@ -835,7 +835,7 @@ pub(super) fn assert_lashlang_engine_record(
 
 /// Phase-B recovery: a TRIGGER-started process whose worker died mid-flight is
 /// left non-terminal in the durable registry; a subsequent worker reopening
-/// that registry must drive it to completion through its armed `ProcessStart`
+/// that registry must execute it to completion through its armed `ProcessStart`
 /// obligation — the same durable re-execution guarantee a turn-started
 /// process has (invariant 3).
 ///
@@ -941,7 +941,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
             .expect("list non-terminal after recovery")
             .records
             .is_empty(),
-        "recovery must drive the trigger-started process to terminal"
+        "recovery must execute the trigger-started process to terminal"
     );
 
     // Idempotent by process_id: the stored terminal is what a later await
@@ -1468,29 +1468,28 @@ pub(super) async fn segment_continuation_reuses_root_invocation_identity() {
         .await
         .expect("register a lash-executed process")
         .id;
-    let (root_authority, root_started) =
-        invocation_started(&segment_process_id, "root-invocation", 1);
+    let (run_authority, run_started) = invocation_started(&segment_process_id, "run-invocation", 1);
     registry
         .record_first_started_with_authority(
             &segment_process_id,
-            root_started.clone(),
-            &root_authority,
+            run_started.clone(),
+            &run_authority,
         )
         .await
         .expect("start root segment");
 
     // A later segment continues the root segment's execution: it writes its
-    // lifecycle facts under the root's execution id (FIG-3588 admission binds
+    // lifecycle facts under the run's execution id (FIG-3588 admission binds
     // it from the retained start).
     let successor_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
         segment_process_id.clone(),
-        "root-invocation",
+        "run-invocation",
     )
     .bind_attempt(1);
     let mut successor_started = successor_authority
         .invocation_started()
         .expect("bound successor");
-    successor_started.started_at_ms = root_started.started_at_ms;
+    successor_started.started_at_ms = run_started.started_at_ms;
     assert!(matches!(
         registry
             .record_first_started_with_authority(
@@ -1607,7 +1606,7 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     .await;
     assert_eq!(
         first,
-        lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+        lash_core::runtime::shift::relay::RelayVerdict::Delivered,
         "the armed start is admitted: {first:?}"
     );
     let repeat = deliver_process_start_now(
@@ -1620,7 +1619,7 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     .await;
     assert_eq!(
         repeat,
-        lash_core::runtime::drive::relay::RelayVerdict::NotDue,
+        lash_core::runtime::shift::relay::RelayVerdict::NotDue,
         "the settled start defers on the repeat scan: {repeat:?}"
     );
 
@@ -1749,7 +1748,7 @@ pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_canc
         .await;
         assert_eq!(
             verdict,
-            lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+            lash_core::runtime::shift::relay::RelayVerdict::Delivered,
             "the armed {label} start is admitted: {verdict:?}"
         );
     }
@@ -1767,7 +1766,7 @@ pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_canc
         .await;
         assert_eq!(
             verdict,
-            lash_core::runtime::drive::relay::RelayVerdict::NotDue,
+            lash_core::runtime::shift::relay::RelayVerdict::NotDue,
             "the settled {label} start defers on the repeat scan: {verdict:?}"
         );
     }

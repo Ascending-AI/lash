@@ -224,7 +224,7 @@ pub struct BotRuntime {
 /// of deadlocking against its own ghost. A bot restarted mid-conversation
 /// depends on this: without it, the channel session stays fenced to a process
 /// that is gone.
-pub fn drive_owner(incarnation: &str) -> LeaseOwnerIdentity {
+pub fn shift_owner(incarnation: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque("slack-clone-bot", incarnation)
 }
 
@@ -328,7 +328,7 @@ pub async fn build_core(
         .trace_level(TraceLevel::Extended)
         .plugin(Arc::clone(&mcp) as Arc<dyn lash::plugins::PluginFactory>);
     let core = builder
-        .build(drive_owner(&config.incarnation))
+        .build(shift_owner(&config.incarnation))
         .context("build slack-clone bot Lash core")?;
     Ok(BotRuntime {
         core,

@@ -1,35 +1,35 @@
-//! Recovery of the pending follow-on at the start of a drive (ADR 0101 §3,
+//! Recovery of the pending follow-on at the start of a shift (ADR 0101 §3,
 //! FIG-3542).
 //!
 //! A committed agent-frame switch owes its follow-on turn on the session
-//! head. When the drive that wrote it runs on, the logical run takes the
-//! follow-on inline and nothing here is involved. When that drive died
+//! head. When the shift that wrote it runs on, the logical run takes the
+//! follow-on inline and nothing here is involved. When that shift died
 //! between the switch commit and the follow-on's terminal commit, or the
-//! follow-on failed before its commit, the next drive recovers it here,
+//! follow-on failed before its commit, the next shift recovers it here,
 //! before it admits anything: every admission but the follow-on's own is
 //! blocked while it is owed anyway.
 //!
-//! The session drive's admission admits an owed follow-on as a root of its
-//! own, named by the recovery count it records. The root records its
-//! decision, and raises the count, in its `drive-follow-on` step
-//! (FIG-4361), then drives the recorded answer here. Nothing below is
+//! The session shift's admission admits an owed follow-on as a run of its
+//! own, named by the recovery count it records. The run records its
+//! decision, and raises the count, in its `shift-follow-on` step
+//! (FIG-4361), then executes the recorded answer here. Nothing below is
 //! engine-specific.
 
 use super::*;
 
 impl LashRuntime {
-    /// Drive a recovered follow-on, continuing its logical run from the
+    /// Execute a recovered follow-on, continuing its logical run from the
     /// recorded position.
     ///
-    /// It runs on `controller`, scoped to the turn of the logical root that
-    /// owed the follow-on. The drive answers the follow-on and nothing else;
+    /// It runs on `controller`, scoped to the turn of the logical run that
+    /// owed the follow-on. The shift answers the follow-on and nothing else;
     /// the next admission admits what is queued.
-    pub(in crate::runtime) async fn drive_recovered_follow_on(
+    pub(in crate::runtime) async fn execute_recovered_follow_on(
         &mut self,
         recovery: crate::store::FollowOnRecovery,
         controller: crate::ScopedEffectController<'_>,
-        sinks: &crate::runtime::drive::DriveSinks<'_>,
-        fence: DriveFence,
+        sinks: &crate::runtime::shift::ShiftSinks<'_>,
+        fence: ShiftFence,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let start = match recovery {
             crate::store::FollowOnRecovery::Run(owed) => LogicalTurnStart::Input(
@@ -40,7 +40,7 @@ impl LashRuntime {
             }
         };
         let run = self
-            .drive_logical_turn(
+            .execute_logical_turn(
                 start,
                 sinks.events,
                 sinks.turn_events,

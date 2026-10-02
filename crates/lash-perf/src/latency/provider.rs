@@ -9,7 +9,7 @@
 //! OpenAI-compatible SSE fixture.
 //!
 //! A provider call parks when its lane's [`LaneHold`] is armed — the `busy`
-//! case's way of keeping a root in flight behind the measured input.
+//! case's way of keeping a run in flight behind the measured input.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,7 +138,7 @@ pub(crate) fn latency_provider(
         .kind("latency-gate")
         .requires_streaming(true)
         .options(ProviderOptions {
-            // One attempt, no retry fuzz: the gate measures the drive path,
+            // One attempt, no retry fuzz: the gate measures the shift path,
             // not the reliability layer's backoff.
             reliability: lash_core::provider::ProviderReliability::disabled(),
             ..ProviderOptions::default()

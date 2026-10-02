@@ -765,9 +765,9 @@ pub(crate) async fn run_once_async_process_settlement(
 
 #[derive(Default)]
 struct DurableContentionCounters {
-    root_admission_attempts: std::sync::atomic::AtomicU64,
-    root_admission_refusals: std::sync::atomic::AtomicU64,
-    root_admissions: std::sync::atomic::AtomicU64,
+    run_admission_attempts: std::sync::atomic::AtomicU64,
+    run_admission_refusals: std::sync::atomic::AtomicU64,
+    run_admissions: std::sync::atomic::AtomicU64,
     epoch_probe_current: std::sync::atomic::AtomicU64,
     epoch_checks: std::sync::atomic::AtomicU64,
     resumes: std::sync::atomic::AtomicU64,
@@ -779,22 +779,22 @@ struct DurableContentionCounters {
 
 #[derive(Default)]
 struct DurableContentionSamples {
-    root_admission_wait_ms: Mutex<Vec<f64>>,
+    run_admission_wait_ms: Mutex<Vec<f64>>,
     service_ms: Mutex<Vec<f64>>,
     commit_admission_wait_ms: Mutex<Vec<f64>>,
     commit_admission_queue_depth: Mutex<Vec<f64>>,
 }
 
-async fn settle_durable_contention_root(
+async fn settle_durable_contention_run(
     store: &Arc<dyn lash_core::RuntimeStore>,
-    fence: &lash_core::store::DriveFence,
-    root: &lash_core::TurnId,
-    admission: &lash_core::store::RootAdmission,
+    fence: &lash_core::store::ShiftFence,
+    run: &lash_core::TurnId,
+    admission: &lash_core::store::RunAdmission,
     counters: &DurableContentionCounters,
     samples: &DurableContentionSamples,
 ) -> anyhow::Result<()> {
     let session_id = fence.session().clone();
-    let work_identity = root.as_str().to_string();
+    let work_identity = run.as_str().to_string();
     lash_core::facade_support::run_head_advancing_commit_attempt(
         session_id.clone(),
         work_identity,
@@ -818,8 +818,8 @@ async fn settle_durable_contention_root(
                         anyhow::anyhow!("durable contention session state disappeared")
                     })?;
                 let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-                commit.drive_fence = Some(Box::new(fence.clone()));
-                let commit = super::queued_work::finishing_perf_root(commit, root, admission);
+                commit.shift_fence = Some(Box::new(fence.clone()));
+                let commit = super::queued_work::finishing_perf_run(commit, run, admission);
                 match store.commit_runtime_state(commit).await {
                     Ok(_) => return Ok(()),
                     Err(lash_core::StoreError::Contended) => {
@@ -885,15 +885,15 @@ async fn run_durable_contention_worker(
     target_completions: u64,
     session_id: SessionId,
     store: Arc<dyn lash_core::RuntimeStore>,
-    session_fence: lash_core::store::DriveFence,
+    session_fence: lash_core::store::ShiftFence,
     counters: Arc<DurableContentionCounters>,
     samples: Arc<DurableContentionSamples>,
 ) -> anyhow::Result<()> {
-    let observed = store.drive_epoch(&session_id).await?;
+    let observed = store.shift_epoch(&session_id).await?;
     anyhow::ensure!(
         observed.epoch == session_fence.epoch()
             && observed.admission() == Some(session_fence.admission()),
-        "contention worker {worker} did not observe the controller drive epoch"
+        "contention worker {worker} did not observe the controller shift epoch"
     );
     counters
         .epoch_probe_current
@@ -905,16 +905,16 @@ async fn run_durable_contention_worker(
         .load(std::sync::atomic::Ordering::Acquire)
         < target_completions
     {
-        // The session admits one root at a time: workers race to admit the
-        // lane head, and a loser is refused until the winner's root ends.
+        // The session admits one run at a time: workers race to admit the
+        // lane head, and a loser is refused until the winner's run ends.
         let admission_started = Instant::now();
         let admission_deadline = admission_started + Duration::from_secs(60);
-        let (root, admission) = loop {
+        let (run, admission) = loop {
             counters
-                .root_admission_attempts
+                .run_admission_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             attempt += 1;
-            let root = lash_core::TurnId::fixture(format!("contention-root-{worker}-{attempt}"));
+            let run = lash_core::TurnId::fixture(format!("contention-run-{worker}-{attempt}"));
             let head = store
                 .list_open_queued_work(&session_id)
                 .await?
@@ -923,26 +923,26 @@ async fn run_durable_contention_worker(
             let admitted = match head {
                 Some(head) => {
                     let mut request =
-                        lash_core::testing::store_fixtures::admit_root_request_for_test(
+                        lash_core::testing::store_fixtures::admit_run_request_for_test(
                             &session_fence,
-                            &root,
+                            &run,
                             lash_core::store::AdmittedHead::Batch(head.batch_id),
                         );
                     request.policy = lash_core::testing::queued_work_admission_policy(1);
-                    match store.admit_root(&request).await {
+                    match store.admit_run(&request).await {
                         Ok(admission) => admission,
-                        Err(lash_core::StoreError::UnfinishedRootConflict { .. }) => None,
+                        Err(lash_core::StoreError::UnfinishedRunConflict { .. }) => None,
                         Err(error) => return Err(error.into()),
                     }
                 }
                 None => None,
             };
             if let Some(admission) = admitted {
-                break (root, admission);
+                break (run, admission);
             }
 
             counters
-                .root_admission_refusals
+                .run_admission_refusals
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if counters
                 .completions
@@ -958,15 +958,15 @@ async fn run_durable_contention_worker(
         };
         let admission_wait_ms = elapsed_ms(admission_started);
         let sequence = counters
-            .root_admissions
+            .run_admissions
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             + 1;
         let service_started = Instant::now();
         if sequence.is_multiple_of(3) {
-            let observed = store.drive_epoch(&session_id).await?;
+            let observed = store.shift_epoch(&session_id).await?;
             anyhow::ensure!(
                 observed.epoch == session_fence.epoch(),
-                "contention controller drive epoch changed during worker run"
+                "contention controller shift epoch changed during worker run"
             );
             counters
                 .epoch_checks
@@ -974,14 +974,14 @@ async fn run_durable_contention_worker(
         }
 
         if sequence.is_multiple_of(2) {
-            // A resumed drive reads back exactly the root's recorded admission.
-            let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+            // A resumed shift reads back exactly the run's recorded admission.
+            let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
                 &session_fence,
-                &root,
+                &run,
                 admission.head.clone(),
             );
             request.policy = lash_core::testing::queued_work_admission_policy(1);
-            let resumed = store.admit_root(&request).await?.ok_or_else(|| {
+            let resumed = store.admit_run(&request).await?.ok_or_else(|| {
                 anyhow::anyhow!("contention worker {worker} lost its recorded admission")
             })?;
             anyhow::ensure!(
@@ -993,10 +993,10 @@ async fn run_durable_contention_worker(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
-        settle_durable_contention_root(
+        settle_durable_contention_run(
             &store,
             &session_fence,
-            &root,
+            &run,
             &admission,
             &counters,
             &samples,
@@ -1006,7 +1006,7 @@ async fn run_durable_contention_worker(
             .completions
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         samples
-            .root_admission_wait_ms
+            .run_admission_wait_ms
             .lock_recover()
             .push(admission_wait_ms);
         samples
@@ -1046,7 +1046,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let session_id = runtime.session().session_id();
     let store = runtime.persistence();
     let store_metrics = runtime.store_metrics();
-    // The scenario drives the retained persistence handle directly. Close the
+    // The scenario executes the retained persistence handle directly. Close the
     // facade session before advancing the durable head so its resident cursor
     // cannot attempt a stale close-time commit after the contention window.
     runtime.close().await?;
@@ -1079,7 +1079,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
             .await?;
     }
-    let session_fence = seal_perf_drive(store.as_ref(), &session_id).await?;
+    let session_fence = seal_perf_shift(store.as_ref(), &session_id).await?;
     let seed_state_ms = elapsed_ms(seed_started);
     let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
     let after_seed_memory = process_memory_sample();
@@ -1116,12 +1116,12 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
-    let root_admission_wait_ms = samples.root_admission_wait_ms.lock_recover().clone();
+    let run_admission_wait_ms = samples.run_admission_wait_ms.lock_recover().clone();
     let service_ms = samples.service_ms.lock_recover().clone();
     let commit_admission_wait_ms = samples.commit_admission_wait_ms.lock_recover().clone();
     let commit_admission_queue_depth = samples.commit_admission_queue_depth.lock_recover().clone();
     let admission_summary =
-        crate::perf_support::metrics::percentile_summary(root_admission_wait_ms.clone());
+        crate::perf_support::metrics::percentile_summary(run_admission_wait_ms.clone());
     let service_summary = crate::perf_support::metrics::percentile_summary(service_ms.clone());
     let pool_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
     let completed = counters
@@ -1130,8 +1130,8 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let throughput = rate_per_second(completed, run_turn_ms);
     let metric_samples_ms = BTreeMap::from([
         (
-            "durable_contention.root_admission_wait_ms".to_string(),
-            root_admission_wait_ms,
+            "durable_contention.run_admission_wait_ms".to_string(),
+            run_admission_wait_ms,
         ),
         ("durable_contention.service_ms".to_string(), service_ms),
         ("durable_contention.pool_wait_ms".to_string(), pool_wait_ms),
@@ -1142,8 +1142,8 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     ]);
     let phase_profile = BTreeMap::from([
         (
-            "durable_contention.root_admission_wait".to_string(),
-            metric_phase(&metric_samples_ms["durable_contention.root_admission_wait_ms"]),
+            "durable_contention.run_admission_wait".to_string(),
+            metric_phase(&metric_samples_ms["durable_contention.run_admission_wait_ms"]),
         ),
         (
             "durable_contention.service".to_string(),
@@ -1177,11 +1177,11 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             scaled_rate(throughput),
         ),
         (
-            "durable_contention.root_admission_wait_p50_micros".to_string(),
+            "durable_contention.run_admission_wait_p50_micros".to_string(),
             millis_to_micros(admission_summary.p50),
         ),
         (
-            "durable_contention.root_admission_wait_p95_micros".to_string(),
+            "durable_contention.run_admission_wait_p95_micros".to_string(),
             millis_to_micros(admission_summary.p95),
         ),
         (
@@ -1193,21 +1193,21 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             millis_to_micros(service_summary.p95),
         ),
         (
-            "durable_contention.root_admission_attempts".to_string(),
+            "durable_contention.run_admission_attempts".to_string(),
             counters
-                .root_admission_attempts
+                .run_admission_attempts
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
-            "durable_contention.root_admission_refusals".to_string(),
+            "durable_contention.run_admission_refusals".to_string(),
             counters
-                .root_admission_refusals
+                .run_admission_refusals
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
-            "durable_contention.root_admissions".to_string(),
+            "durable_contention.run_admissions".to_string(),
             counters
-                .root_admissions
+                .run_admissions
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (

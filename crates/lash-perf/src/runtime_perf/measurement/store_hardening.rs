@@ -7,7 +7,7 @@ const HARDENING_PRUNE_BATCH: usize = 16;
 
 #[derive(Clone, Copy)]
 struct StoreHardeningPhaseNames {
-    seal_drive_epoch: &'static str,
+    seal_shift_epoch: &'static str,
     admit_queued_work: &'static str,
     complete_queued_work: &'static str,
     attachment_intent: &'static str,
@@ -21,7 +21,7 @@ struct StoreHardeningPhaseNames {
 }
 
 const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    seal_drive_epoch: "store_hardening.memory.seal_drive_epoch",
+    seal_shift_epoch: "store_hardening.memory.seal_shift_epoch",
     admit_queued_work: "store_hardening.memory.admit_queued_work",
     complete_queued_work: "store_hardening.memory.complete_queued_work",
     attachment_intent: "store_hardening.memory.attachment_intent",
@@ -35,7 +35,7 @@ const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 };
 
 const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    seal_drive_epoch: "store_hardening.sqlite.seal_drive_epoch",
+    seal_shift_epoch: "store_hardening.sqlite.seal_shift_epoch",
     admit_queued_work: "store_hardening.sqlite.admit_queued_work",
     complete_queued_work: "store_hardening.sqlite.complete_queued_work",
     attachment_intent: "store_hardening.sqlite.attachment_intent",
@@ -49,7 +49,7 @@ const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 };
 
 const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
-    seal_drive_epoch: "store_hardening.postgres.seal_drive_epoch",
+    seal_shift_epoch: "store_hardening.postgres.seal_shift_epoch",
     admit_queued_work: "store_hardening.postgres.admit_queued_work",
     complete_queued_work: "store_hardening.postgres.complete_queued_work",
     attachment_intent: "store_hardening.postgres.attachment_intent",
@@ -349,8 +349,8 @@ async fn measure_store_hardening_backend_turn(
     names: StoreHardeningPhaseNames,
 ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
     let mut phases = BTreeMap::new();
-    let (lease, phase) = measure_runtime_perf_async_phase(names.seal_drive_epoch, async {
-        seal_perf_drive(store.as_ref(), session_id).await
+    let (lease, phase) = measure_runtime_perf_async_phase(names.seal_shift_epoch, async {
+        seal_perf_shift(store.as_ref(), session_id).await
     })
     .await?;
     phases.insert(phase.0, phase.1);
@@ -366,16 +366,16 @@ async fn measure_store_hardening_backend_turn(
         ))
         .await?
         .batch_id;
-    let root = lash_core::TurnId::fixture(format!("hardening-root-{turn_index}"));
+    let run = lash_core::TurnId::fixture(format!("hardening-run-{turn_index}"));
     let (admission, phase) = measure_runtime_perf_async_phase(names.admit_queued_work, async {
-        let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+        let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
             &lease,
-            &root,
+            &run,
             lash_core::store::AdmittedHead::Batch(head.clone()),
         );
         request.policy = lash_core::testing::queued_work_admission_policy(1);
         store
-            .admit_root(&request)
+            .admit_run(&request)
             .await?
             .ok_or_else(|| anyhow::anyhow!("store-hardening expected a queued-work admission"))
     })
@@ -385,8 +385,8 @@ async fn measure_store_hardening_backend_turn(
     let mut state = load_store_hardening_state(store, session_id).await?;
     let (_, phase) = measure_runtime_perf_async_phase(names.complete_queued_work, async {
         let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.drive_fence = Some(Box::new(lease.clone()));
-        let commit = super::queued_work::finishing_perf_root(commit, &root, &admission);
+        commit.shift_fence = Some(Box::new(lease.clone()));
+        let commit = super::queued_work::finishing_perf_run(commit, &run, &admission);
         let result = store.commit_runtime_state(commit).await?;
         state.apply_persisted_commit_result(result);
         Ok::<(), anyhow::Error>(())

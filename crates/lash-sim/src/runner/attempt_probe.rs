@@ -24,7 +24,7 @@ use crate::runtime_providers::{ScriptedUsage, runtime_script_value_for_turn};
 const RETRIED_SESSION: &str = "sim-attempt-probe-retried";
 const EXHAUSTED_SESSION: &str = "sim-attempt-probe-exhausted";
 
-pub(super) async fn drive_attempt_usage_probe(
+pub(super) async fn execute_attempt_usage_probe(
     seed: u64,
 ) -> Result<Vec<SessionContent>, FixedScriptRunnerError> {
     let retried_failure = failing_attempt_script(seed, RETRIED_SESSION)?;
@@ -175,9 +175,9 @@ mod tests {
             .expect("world");
         drive_generated_workload(&mut world, &workload)
             .await
-            .expect("drive");
+            .expect("shift");
         let mut content = world.content_evidence().await.expect("content evidence");
-        content.extend(drive_attempt_usage_probe(5).await.expect("probe"));
+        content.extend(execute_attempt_usage_probe(5).await.expect("probe"));
         let verdict = crate::content_oracle::durable_content(&content);
         assert!(verdict.is_passed(), "{}", verdict.message);
 

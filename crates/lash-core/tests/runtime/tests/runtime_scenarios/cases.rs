@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_5c02;
 use proptest::prelude::*;
@@ -427,8 +427,8 @@ async fn runtime_scenario_observation_replay_keeps_original_turn_input() {
 
 #[tokio::test]
 async fn runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel() {
-    // The scenario's own root, so input may address its turn while it runs.
-    let turn_id = "runtime-scenario-root";
+    // The scenario's own run, so input may address its turn while it runs.
+    let turn_id = "runtime-scenario-run";
     RuntimeScenario::new(CHECKPOINT_REDRIVE_CANCEL.display_name)
         .session_id(SessionId::from(
             "runtime-scenario-checkpoint-redrive-cancel",
@@ -438,9 +438,9 @@ async fn runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel() {
         })
         .phase(
             RuntimeIngressPhase::new()
-                .enqueue_turn_input(RuntimeTurnInputIngress::StartScenarioRoot {
-                    alias: "root-head",
-                    text: "start the root the active input addresses",
+                .enqueue_turn_input(RuntimeTurnInputIngress::StartScenarioRun {
+                    alias: "run-head",
+                    text: "start the run the active input addresses",
                 })
                 .enqueue_turn_input(RuntimeTurnInputIngress::ActiveTurn {
                     alias: "active-keep",
@@ -468,7 +468,7 @@ async fn runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel() {
                 .cancel_turn_input_after_deferral("active-keep")
                 .expect_pending_after_deferral(vec![
                     RuntimePendingTurnInputExpectation {
-                        alias: "root-head",
+                        alias: "run-head",
                         ingress: RuntimePendingTurnInputIngressExpectation::AsSubmitted,
                     },
                     RuntimePendingTurnInputExpectation {
@@ -684,7 +684,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .await
         .expect("mint runtime-tier process-signal wait");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("run intent scenario"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -845,7 +845,7 @@ async fn publication_failure_preserves_committed_turn_and_exposes_gap() {
     let writer = handle.writer();
     let mut runtime = writer.lock().await;
     let result = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("answer once"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

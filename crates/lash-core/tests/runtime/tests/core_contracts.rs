@@ -117,7 +117,7 @@ fn runtime_named_phase_closes_the_named_probe_scope_on_drop() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plugin_dispatch_preserves_probe_names_pairing_and_uninstrumented_calls() {
     use lash_core::plugin::{PluginDeclaration, PluginSpec, StaticPluginFactory};
-    use lash_core::testing::TestTurnDrive as _;
+    use lash_core::testing::TestTurnExecution as _;
 
     let double = kernel_double(0x1252, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
@@ -166,12 +166,12 @@ async fn plugin_dispatch_preserves_probe_names_pairing_and_uninstrumented_calls(
             ))
             .await
             .expect("open a turn handler");
-        let turn = Box::pin(runtime.drive_turn(
+        let turn = Box::pin(runtime.execute_turn(
             TurnInput::text("exercise plugin dispatch"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         ))
         .await
-        .expect("drive the turn");
+        .expect("execute the turn");
         assert!(
             turn.errors
                 .iter()

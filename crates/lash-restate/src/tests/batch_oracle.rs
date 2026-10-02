@@ -70,12 +70,12 @@ impl ConformanceTurnRunner for MutatingRunner {
                     .execute(
                         "INSERT INTO usage_facts (
                     owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind,
-                    disposition, run_id, llm_call_id, source, profile_key, requested_model,
+                    disposition, meter_id, llm_call_id, source, profile_key, requested_model,
                     served_model, input_tokens, output_tokens, cache_read_input_tokens,
                     cache_write_input_tokens, reasoning_output_tokens, generation_id,
                     payload_hash, recorded_at_ms)
                     SELECT owner_kind, owner_id, effect_key || ':late-duplicate', call_ordinal,
-                    provider_attempt, fact_kind, disposition, run_id, llm_call_id, source,
+                    provider_attempt, fact_kind, disposition, meter_id, llm_call_id, source,
                     profile_key, requested_model, served_model, input_tokens, output_tokens,
                     cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens,
                     generation_id, payload_hash, recorded_at_ms
@@ -120,13 +120,13 @@ async fn rejects_late_mutation(mutation: LateMutation, expected: &str) {
     });
     let prefix = format!("cancel-oracle-{}", harness.run_nonce());
     let host = harness.endpoint_host();
-    let driving = runner.clone();
+    let executing = runner.clone();
     let law = tokio::spawn(async move {
         lash_conformance::registration_macro_support::batch_cancel_preserves_committed_drains(
             &prefix,
             host,
             Arc::new(stores),
-            driving,
+            executing,
             factories(),
         )
         .await;

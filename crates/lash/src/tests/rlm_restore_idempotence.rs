@@ -24,7 +24,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::HashMap;
@@ -181,9 +181,9 @@ fn snapshot_globals(
     state: &lash_core::plugin::HydratedExecutionState,
     name: &str,
 ) -> (Vec<String>, Option<String>) {
-    let root: RlmExecutionSnapshotRoot =
+    let run: RlmExecutionSnapshotRoot =
         rmp_serde::from_slice(&state.root).expect("decode the RLM snapshot root");
-    let fragments = root.globals.iter().map(|(global, persisted)| {
+    let fragments = run.globals.iter().map(|(global, persisted)| {
         let body = match persisted {
             RlmPersistedValueProbe::Inline { body } => body.as_slice(),
             RlmPersistedValueProbe::Leaf { component } => state
@@ -197,16 +197,16 @@ fn snapshot_globals(
     let mut reloaded = lashlang::VmInstance::pristine();
     reloaded
         .restore_durable_parts(
-            &root.state_header,
+            &run.state_header,
             fragments,
             lash_core::FleetFormat::current(),
         )
         .expect("reload the persisted globals");
-    let value = root
+    let value = run
         .globals
         .contains_key(name)
         .then(|| format!("{:?}", reloaded.state().globals().get(name)));
-    (root.globals.keys().cloned().collect(), value)
+    (run.globals.keys().cloned().collect(), value)
 }
 
 /// The execution root the durable head carries right now, if any.
@@ -385,7 +385,7 @@ async fn open_with_plugins(
     (runtime, plugins)
 }
 
-/// The system prompt the RLM plugin renders for the session's next root,
+/// The system prompt the RLM plugin renders for the session's next run,
 /// so a witness can check which binding names reach it.
 async fn projected_prompt(_runtime: &LashRuntime, plugins: &PluginSession) -> String {
     plugins
@@ -443,8 +443,8 @@ async fn open_turn_handler(
         .expect("open the turn handler")
 }
 
-/// Apply a host's append as the session's drive does (FIG-4202): a session
-/// command the runtime's own drive applies at the turn boundary, on the
+/// Apply a host's append as the session's shift does (FIG-4202): a session
+/// command the runtime's own shift applies at the turn boundary, on the
 /// session's engine.
 async fn host_append(
     runtime: &mut LashRuntime,
@@ -473,9 +473,9 @@ async fn host_append(
             TurnId::fixture(key.clone()),
         ))
         .await
-        .expect("open the append's drive handler");
+        .expect("open the append's shift handler");
     let drained = runtime
-        .drive_next_queued_root(lash_core::facade_support::TurnOptions::new(
+        .execute_next_queued_run(lash_core::facade_support::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             handler.scoped(),
         ))
@@ -483,7 +483,7 @@ async fn host_append(
     handler
         .close()
         .await
-        .expect("close the append's drive handler");
+        .expect("close the append's shift handler");
     drained?;
     match runtime.settle_session_command(receipt).await? {
         lash_core::runtime::SessionCommandSettlement::Applied {
@@ -497,14 +497,14 @@ async fn host_append(
     }
 }
 
-async fn drive(
+async fn shift(
     runtime: &mut LashRuntime,
     input: TurnInput,
     turn_id: &str,
 ) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
     let handler = open_turn_handler(runtime, &TurnId::fixture(turn_id)).await;
     let result = runtime
-        .drive_turn(
+        .execute_turn(
             input,
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -698,18 +698,18 @@ fn continue_as_response() -> String {
 }
 
 /// The switch committed its follow-on onto the session head, so the
-/// session's next drive recovers the owed follow-on (ADR 0101 §3, FIG-3542) on
+/// session's next shift recovers the owed follow-on (ADR 0101 §3, FIG-3542) on
 /// the reloaded resident state before it admits anything else.
 async fn run_owed_follow_on(
     runtime: &mut LashRuntime,
     label: &str,
-    drive: &str,
+    shift: &str,
 ) -> lash_core::facade_support::AssembledTurn {
-    let turn_id = TurnId::fixture(drive);
+    let turn_id = TurnId::fixture(shift);
     let handler = open_turn_handler(runtime, &turn_id).await;
     let result = runtime
-        .drive_next_root(
-            drive,
+        .execute_next_run(
+            shift,
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 handler.scoped(),
@@ -722,7 +722,7 @@ async fn run_owed_follow_on(
             panic!("{label}: resident reload on the same frame must succeed: {error:?}")
         })
         .and_then(lash_core::facade_support::AgentFrameRun::into_final_turn)
-        .unwrap_or_else(|| panic!("{label}: the drive answers the owed follow-on"))
+        .unwrap_or_else(|| panic!("{label}: the shift answers the owed follow-on"))
 }
 
 /// (a) A follow-on turn fails after an agent-frame switch; the next turn must
@@ -747,7 +747,7 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
     } = Box::pin(backend.seeded_session("follow-on", Arc::clone(&script))).await;
     let old_frame = runtime.export_persistence_state().current_frame_node_id;
 
-    let run = drive(&mut runtime, TurnInput::text("switch"), "fig2521-switch")
+    let run = shift(&mut runtime, TurnInput::text("switch"), "fig2521-switch")
         .await
         .expect("a follow-on failure is reported on the committed switch turn");
     assert!(
@@ -823,7 +823,7 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
         mut runtime, store, ..
     } = Box::pin(backend.seeded_session("follow-on-execution", Arc::clone(&script))).await;
 
-    let run = drive(
+    let run = shift(
         &mut runtime,
         TurnInput::text("switch"),
         "fig2521-switch-mutating",
@@ -918,7 +918,7 @@ async fn rlm_follow_on_failure_discards_the_uncommitted_execution_on_sqlite() {
 // ---------------------------------------------------------------------------
 
 async fn turn(runtime: &mut LashRuntime, id: &str) -> lash_core::facade_support::AssembledTurn {
-    drive(runtime, TurnInput::text(id), id)
+    shift(runtime, TurnInput::text(id), id)
         .await
         .unwrap_or_else(|error| panic!("turn `{id}`: {error:?}"))
 }
@@ -1339,7 +1339,7 @@ fn reassign_response() -> String {
 /// the after-turn hook refuses finalization, so the turn returns an error
 /// without a commit.
 async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
-    let rejected = drive(
+    let rejected = shift(
         runtime,
         TurnInput::text("reject-reassignment"),
         "reject-reassignment",
@@ -1555,7 +1555,7 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
                         let (mut runtime, _plugins) =
                             open_with_plugins(&backend, store, script, state, &plugins).await;
                         let result = runtime
-                            .drive_turn(
+                            .execute_turn(
                                 TurnInput::text("finish with the full tool payload"),
                                 lash_core::facade_support::TurnOptions::new(
                                     tokio_util::sync::CancellationToken::new(),
@@ -1575,7 +1575,7 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
             backend
                 ._double
                 .run_crashed_then_redriven(
-                    lash_core::AdmittedScope::turn(&id, TurnId::from("cold-terminal-root")),
+                    lash_core::AdmittedScope::turn(&id, TurnId::from("cold-terminal-run")),
                     Arc::clone(&attempt),
                     attempt,
                 )

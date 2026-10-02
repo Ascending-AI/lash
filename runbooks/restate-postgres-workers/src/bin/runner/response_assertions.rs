@@ -309,7 +309,7 @@ pub(super) fn assert_frame_switch_queued_response(response: &TurnResponse) -> Re
     );
     for field in [
         "first_completed",
-        "second_own_root",
+        "second_own_run",
         "second_completed",
         "queue_empty",
         "inputs_empty",

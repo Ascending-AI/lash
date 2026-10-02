@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
 use super::*;
-use crate::runtime::drive::relay::ObligationDelivery;
+use crate::runtime::shift::relay::ObligationDelivery;
 use crate::store::{
     ClaimToken, ClaimedObligation, ObligationId, ObligationKind, ObligationSettlement,
     ObligationStanding, SettleOutcome, StalledObligation, StoreError,

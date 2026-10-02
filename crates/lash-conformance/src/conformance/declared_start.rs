@@ -1,7 +1,7 @@
 //! ADR 0116 §7.3: a tool's `Pending` that declares its child start, and
 //! `spawn_agent` on that shape.
 //!
-//! Each law drives one parent turn whose model calls `spawn_agent` natively
+//! Each law executes one parent turn whose model calls `spawn_agent` natively
 //! (or, for the `Promise.all` width, from an RLM cell). The child is a
 //! `SessionTurn` process the tier's process worker runs; its model is the
 //! law's own script, so a law can hold a child mid-turn, count its steps and
@@ -14,7 +14,7 @@
 //! it recovers a crashed turn.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -947,7 +947,7 @@ impl World {
                 input.trace_turn_id = Some(world.turn_id.clone());
                 let intents = Arc::clone(&world.intents);
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         input,
                         crate::TurnOptions::new(world.cancel.clone(), scope)
                             .with_turn_events(intents.as_ref()),
@@ -1753,7 +1753,7 @@ pub async fn declared_start_cancel_at_the_claim_answer_delivers_the_start(tier: 
         .expect("read the child's start obligation")
         .expect("registration armed the child's start obligation");
     let elapsed_ms = clock.timestamp_ms().saturating_sub(began_ms);
-    let lapse_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    let lapse_ms = lash_core::shift::relay::RelayPolicy::default().claim_ttl_ms;
     assert!(
         elapsed_ms < lapse_ms,
         "the law ran inside one claim lapse ({elapsed_ms} ms of {lapse_ms} ms), so no relay \

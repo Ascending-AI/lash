@@ -497,7 +497,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
             .send(TurnInput::text("probe"))
             .output_into(&events)
             .await?;
-        settle_session_drive(&core, id).await;
+        settle_session_shift(&core, id).await;
         let hook_invoked = events.snapshot().await.into_iter().any(|event| {
             matches!(
                 event.event,

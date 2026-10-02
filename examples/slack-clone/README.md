@@ -493,7 +493,7 @@ A no-row exhaustion is distinct from a known, still-processing root. Boot recove
 handles `thread_root_not_available` with one zero-budget probe and does not start
 another long poll, avoiding a repeated 45s serial stall on every boot. Top-level
 unfinished rows are recovered before thread rows, so a root that was accepted
-before a crash gets its admission boundary before its replies are re-driven.
+before a crash gets its admission boundary before its replies are redriven.
 
 Fork isolation is directional in both cases and is asserted against the real
 store semantics:
@@ -617,7 +617,7 @@ finishes each one:
 | Crash point | Ledger stage | What recovery does |
 | --- | --- | --- |
 | Before any work | `accepted` | Folds an ambient message; for a mention, sends it and waits on its turn, then posts. |
-| **Mid-turn** | `accepted` | The restate-server kept the interrupted turn and re-drives it on this boot's endpoint, which replays the recorded steps and re-runs only the step the crash cut (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). An open that races the lane still being held defers and retries — transient contention, never terminalized. |
+| **Mid-turn** | `accepted` | The restate-server kept the interrupted turn and redrives it on this boot's endpoint, which replays the recorded steps and re-runs only the step the crash cut (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). An open that races the lane still being held defers and retries — transient contention, never terminalized. |
 | After the turn committed, before the reply text was recorded | `accepted` | Finds the input's committed application and reads the answer back out of the transcript (`ReplySource::Transcript`). |
 | After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
 | After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
@@ -630,7 +630,7 @@ the durable record:
 
 - **The input has a committed application.** A turn answered it, so the answer is
   in the transcript, or provably nowhere. Terminal.
-- **It has none yet.** The turn may still be re-driving on the engine after a
+- **It has none yet.** The turn may still be redriving on the engine after a
   previous boot died, or still running. The bot waits a bounded time on the
   handle's outcome and
   otherwise defers: nothing was consumed, so the work is **retryable**, and the
@@ -650,14 +650,14 @@ pins an invocation to the deployment it started on and retries it until that
 deployment answers again, so the bot serves its Restate endpoint on a stable
 address (`SLACK_CLONE_BOT_RESTATE_ENDPOINT_ADDR`, the platform port + 6 under
 `just slack-clone`) and registers it at every boot. The restarted bot's endpoint
-is the one the server re-drives the turn on, from its journal: the steps the dead
+is the one the server redrives the turn on, from its journal: the steps the dead
 boot recorded are replayed, and only the step the crash cut runs again. What the
-re-driven turn waits for is the session lane.
+redriven turn waits for is the session lane.
 
 The sealed drive epoch is what fences a stale boot. A drive's admission seals
 `epoch + 1` in the store, and every commit carries the epoch it was sealed
 under; a commit from a superseded epoch is refused. A new boot therefore never
-waits out its dead predecessor: the re-driven invocation opens the session
+waits out its dead predecessor: the redriven invocation opens the session
 under a fresh sealed epoch, and anything the dead boot still tries is refused.
 What a boot can still meet is a transient `Contended` — its open raced another
 writer's in-flight admission — and that resolves by retrying, not by waiting
@@ -930,6 +930,6 @@ Tracked for follow-up rather than half-built:
   [what the engine covers](#what-the-restate-engine-covers-precisely).
 - **A leased delivery outbox**, for a platform running more than one process.
 - **Shortening the recovery wait.** An interrupted mention is answered once the
-  restate-server re-drives the interrupted invocation on the restarted endpoint —
+  restate-server redrives the interrupted invocation on the restarted endpoint —
   there is no lease TTL to wait out. Faster resumption is an engine retry-cadence
   question, not a lash configuration.

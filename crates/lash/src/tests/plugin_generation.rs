@@ -9,14 +9,14 @@
 //! - Every Run's admission records the composition it was admitted under
 //!   (FIG-4747): the Run in flight at the roll records build N's revision of
 //!   the plugin, and each Run admitted after the bump records N+1's.
-//! - In-flight segments finish on the old build. A session's drive starts on
-//!   build N; while its first root is in its model call, build N+1 registers
+//! - In-flight segments finish on the old build. A session's shift starts on
+//!   build N; while its first run is in its model call, build N+1 registers
 //!   with the plugin's revision bumped, as a deployment of its own with its
-//!   own plugins, and N is marked draining. The root in flight finishes on N
-//!   under N's plugin; every root after it runs on N+1 under N+1's.
+//!   own plugins, and N is marked draining. The run in flight finishes on N
+//!   under N's plugin; every run after it runs on N+1 under N+1's.
 //! - A config owner's reducers are its plugin's behaviour (FIG-4791): builds
 //!   that differ only in them differ in `G`, and a config transaction is
-//!   resolved by the build whose lane admits its command root. One admitted
+//!   resolved by the build whose lane admits its command run. One admitted
 //!   on build N resolves there under N's reducers; one submitted through N
 //!   and still queued when N drains is admitted and resolved on N+1 under
 //!   N+1's. Neither parks.
@@ -31,7 +31,7 @@
 use super::drain_hand_over::{DrainLever, Model, Storage, open, prepare, provider};
 use super::*;
 
-use lash_core::engine::{BuildGeneration, DriveRequestId, DriveStop, GenerationUnbound};
+use lash_core::engine::{BuildGeneration, GenerationUnbound, ShiftRequestId, ShiftStop};
 use lash_core::plugin::{
     BehaviorRevision, FormatVersion, PluginDeclaration, PluginDeclarationError, PluginId,
 };
@@ -41,8 +41,8 @@ const SEED: u64 = 0x4744_91a3;
 /// The plugin whose revision the laws move.
 const PLUGIN: &str = "revisioned";
 
-/// The inputs the in-flight law's session holds: one root each.
-const ROOTS: usize = 3;
+/// The inputs the in-flight law's session holds: one run each.
+const RUNS: usize = 3;
 
 const WEDGE: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -267,16 +267,16 @@ async fn a_refused_declaration_builds_no_core_and_binds_no_generation() {
     }
 }
 
-/// One drive invocation of the law's session, as the engine's
+/// One shift invocation of the law's session, as the engine's
 /// `sys_invocation` reports it.
 #[derive(Debug, serde::Deserialize)]
-struct DriveRow {
+struct ShiftRow {
     idempotency_key: Option<String>,
     pinned_deployment_id: Option<String>,
 }
 
-/// A core of `plugins` over `backend` whose driver starts no wall-clock
-/// reconcile tick: the law's ask is the session's only drive.
+/// A core of `plugins` over `backend` whose `SessionShifts` starts no wall-clock
+/// reconcile tick: the law's ask is the session's only shift.
 fn deployed(
     backend: lash_core::Backend,
     work: Arc<dyn lash_core::SessionWorkEngine>,
@@ -330,7 +330,7 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
     let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
         .await?
         .expect("an opened session has a store");
-    for index in 0..ROOTS {
+    for index in 0..RUNS {
         store
             .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
                 session_id.clone(),
@@ -341,17 +341,17 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
             .expect("enqueue the input");
     }
 
-    // The drive starts on N, the only build, and its first root reaches its
+    // The shift starts on N, the only build, and its first run reaches its
     // model call.
     let port = old_core.substrate_slot.ports().await.queued;
-    let request = DriveRequestId::new("plugin-generation");
-    port.schedule_drive(&session_id, request.clone());
+    let request = ShiftRequestId::new("plugin-generation");
+    port.schedule_shift(&session_id, request.clone());
     tokio::time::timeout(WEDGE, model.reached.notified())
         .await
-        .expect("the drive's first root reaches its model call");
+        .expect("the shift's first run reaches its model call");
     assert!(
         ran.lock_recover().is_empty(),
-        "no turn has ended while the first root is in its model call"
+        "no turn has ended while the first run is in its model call"
     );
 
     // The roll: N+1 registers as a deployment of its own, with the plugin's
@@ -382,61 +382,61 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
     );
     model.release.notify_one();
 
-    let outcome = tokio::time::timeout(WEDGE, port.await_drive(&session_id, &request))
+    let outcome = tokio::time::timeout(WEDGE, port.await_shift(&session_id, &request))
         .await
-        .expect("the drive chain ends")
-        .expect("the drive is not refused");
-    assert_eq!(outcome.stop, DriveStop::Idle, "{outcome:?}");
-    assert_eq!(outcome.ran.len(), ROOTS, "{outcome:?}");
+        .expect("the shift chain ends")
+        .expect("the shift is not refused");
+    assert_eq!(outcome.stop, ShiftStop::Idle, "{outcome:?}");
+    assert_eq!(outcome.ran.len(), RUNS, "{outcome:?}");
 
-    // The root in flight at the roll finished under N's plugin; every root
+    // The run in flight at the roll finished under N's plugin; every run
     // after it ran under N+1's.
     assert_eq!(
         *ran.lock_recover(),
         [1, 2, 2],
-        "the in-flight root ended on the old build and the rest on the new"
+        "the in-flight run ended on the old build and the rest on the new"
     );
 
-    // N's leg is pinned to N's deployment; every other drive of the session
+    // N's leg is pinned to N's deployment; every other shift of the session
     // ran on N+1's.
-    let drives = lash_restate::RestateAdminClient::new(double.connection())
-        .query_json::<DriveRow>(&format!(
+    let shifts = lash_restate::RestateAdminClient::new(double.connection())
+        .query_json::<ShiftRow>(&format!(
             "SELECT idempotency_key, pinned_deployment_id FROM sys_invocation \
-             WHERE target_service_key = '{session_id}' AND target_handler_name = 'drive'"
+             WHERE target_service_key = '{session_id}' AND target_handler_name = 'shift'"
         ))
         .await
         .expect("sys_invocation query");
-    let (first, rest): (Vec<_>, Vec<_>) = drives
+    let (first, rest): (Vec<_>, Vec<_>) = shifts
         .iter()
         .partition(|row| row.idempotency_key.as_deref() == Some(request.as_str()));
-    assert_eq!(first.len(), 1, "the ask's own leg: {drives:?}");
+    assert_eq!(first.len(), 1, "the ask's own leg: {shifts:?}");
     assert!(
         !rest.is_empty(),
-        "the drive went on past build N: {drives:?}"
+        "the shift went on past build N: {shifts:?}"
     );
     let old_pin = first[0].pinned_deployment_id.clone();
     let next_pin = rest[0].pinned_deployment_id.clone();
-    assert!(old_pin.is_some() && next_pin.is_some(), "{drives:?}");
+    assert!(old_pin.is_some() && next_pin.is_some(), "{shifts:?}");
     assert_ne!(old_pin, next_pin, "the rest ran on another build");
     assert!(
         rest.iter().all(|row| row.pinned_deployment_id == next_pin),
-        "every leg after N's runs on the newest build: {drives:?}"
+        "every leg after N's runs on the newest build: {shifts:?}"
     );
 
     assert!(
         handle.durable().pending_turn_inputs().await?.is_empty(),
-        "the drive drained the session"
+        "the shift drained the session"
     );
     assert_eq!(
         handle.durable().turn_input_applications().await?.len(),
-        ROOTS,
+        RUNS,
         "every input was applied once"
     );
     // Each Run's admission recorded the composition it was admitted under
     // (FIG-4747): the Run in flight at the roll records N's revision of the
     // plugin, and the Runs admitted after the bump record N+1's. The store
-    // answers a root's recorded admission to any later admission of it.
-    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+    // answers a run's recorded admission to any later admission of it.
+    let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
         store.store(),
         &session_id,
         "plugin-generation",
@@ -445,10 +445,10 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
     let mut recorded = Vec::new();
     for ran in &outcome.ran {
         let admission = store
-            .admit_root(
-                &lash_core::testing::store_fixtures::admit_root_request_for_test(
+            .admit_run(
+                &lash_core::testing::store_fixtures::admit_run_request_for_test(
                     &fence,
-                    ran.root(),
+                    ran.run(),
                     lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
                 ),
             )
@@ -620,10 +620,10 @@ fn tallying(revision: u32) -> Arc<dyn PluginFactory> {
 
 /// FIG-4791: builds N and N+1 differ only in a config owner's reducers,
 /// which is a bump of its plugin's behaviour revision and so another `G`.
-/// A transaction whose command root N admits resolves on N under N's
+/// A transaction whose command run N admits resolves on N under N's
 /// reducers. One submitted through N and still queued when N+1 registers and
 /// N drains is admitted by N+1, resolves there under N+1's reducers and
-/// settles: no root of the session parks.
+/// settles: no run of the session parks.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_config_transaction_resolves_on_the_lane_that_admits_it() -> Result<()> {
     let old_generation = generation_of(vec![tallying(1)]).await;
@@ -667,7 +667,7 @@ async fn a_config_transaction_resolves_on_the_lane_that_admits_it() -> Result<()
     let port = old_core.substrate_slot.ports().await.queued;
     let config = handle.admin().config();
 
-    // Submit one `Count` through build N's ingress, drive the session once
+    // Submit one `Count` through build N's ingress, shift the session once
     // from N, and read how the transaction settled.
     let count = async |id: &str| -> Result<crate::config::ConfigTransactionOutcome> {
         let revision = config.revision().await?;
@@ -680,25 +680,25 @@ async fn a_config_transaction_resolves_on_the_lane_that_admits_it() -> Result<()
         else {
             panic!("a store-backed session queues its transaction");
         };
-        let request = DriveRequestId::new(id);
-        port.schedule_drive(&session_id, request.clone());
-        let outcome = tokio::time::timeout(WEDGE, port.await_drive(&session_id, &request))
+        let request = ShiftRequestId::new(id);
+        port.schedule_shift(&session_id, request.clone());
+        let outcome = tokio::time::timeout(WEDGE, port.await_shift(&session_id, &request))
             .await
-            .expect("the drive ends")
-            .expect("the drive is not refused");
-        assert_eq!(outcome.stop, DriveStop::Idle, "{id}: {outcome:?}");
+            .expect("the shift ends")
+            .expect("the shift is not refused");
+        assert_eq!(outcome.stop, ShiftStop::Idle, "{id}: {outcome:?}");
         assert_eq!(
             store.load_turn_park().await.expect("read the park"),
             None,
-            "{id}: the command root never parks"
+            "{id}: the command run never parks"
         );
         match config.settle(receipt).await? {
             crate::config::ConfigSettlement::Settled(outcome) => Ok(outcome),
-            unsettled => panic!("{id}: the drive settles the transaction: {unsettled:?}"),
+            unsettled => panic!("{id}: the shift settles the transaction: {unsettled:?}"),
         }
     };
 
-    // N is the only build: it admits the transaction's root and its
+    // N is the only build: it admits the transaction's run and its
     // reducers resolve it.
     assert_eq!(
         count("on-n").await?,
@@ -736,7 +736,7 @@ async fn a_config_transaction_resolves_on_the_lane_that_admits_it() -> Result<()
         "the law's mark is N's first"
     );
 
-    // N's ingress still takes the submission. N+1's lane admits its root, so
+    // N's ingress still takes the submission. N+1's lane admits its run, so
     // N+1's reducers resolve it, and it settles.
     assert_eq!(
         count("after-the-roll").await?,

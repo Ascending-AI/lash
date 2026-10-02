@@ -4,7 +4,7 @@
 //! One RLM turn runs a cell that calls `agents.spawn` once and finishes with
 //! the child's reply. The child session runs as a process on the tier's
 //! process worker. Every attempt but the redrive runs under the capability
-//! registry the turn was first driven with; the redrive runs under one that
+//! registry the turn was first executed with; the redrive runs under one that
 //! registers another capability, so `spawn_agent`'s input schema changed and
 //! the cell's `agents.spawn` binding drifted: the call is served only from
 //! the journal.
@@ -27,7 +27,7 @@
 //! with exactly one process started.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -51,7 +51,7 @@ fn child_cell() -> String {
 }
 
 /// The subagent plugin a tier registers `agents.spawn` with, under the
-/// capability registry the turn was first driven with and under one that
+/// capability registry the turn was first executed with and under one that
 /// changed `spawn_agent`'s input schema.
 #[derive(Clone)]
 pub struct SubagentFactories {
@@ -289,7 +289,7 @@ fn attempt(
             let mut input = crate::TurnInput::text("spawn the child");
             input.trace_turn_id = Some(turn_id);
             let turn = runtime
-                .drive_turn(
+                .execute_turn(
                     input,
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )
@@ -374,7 +374,7 @@ async fn start_marker_key(
     let probe_key = crate::DERIVED_START_KEYS
         .parse(&probe_key_text)
         .unwrap_or_else(|error| panic!("the marker's start key parses: {error}"));
-    // A cell's leaf call id is its `ToolCallId` under the turn's root at
+    // A cell's leaf call id is its `ToolCallId` under the turn's run at
     // `[code opener, cell, command]` (`LashlangHostIdentities::call_id`, ADR
     // 0117 §2), and the cell's execution key leads the marker's replay key:
     // find the execution and ordinal the probe's key was derived from, then

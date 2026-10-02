@@ -1,11 +1,11 @@
-//! `LocalTestCx` as a [`RuntimeEffectController`]: today's drive code, which
+//! `LocalTestCx` as a [`RuntimeEffectController`]: today's shift code, which
 //! issues its effects through a scoped controller, runs under the harness
 //! unchanged.
 //!
 //! Every `execute_effect` is one recorded operation keyed by the envelope's
 //! replay key, whose command bytes are the envelope's canonical form — the
 //! bytes an engine's replay fence compares — and whose body is the local
-//! executor the drive handed over.
+//! executor the shift handed over.
 
 use super::cx::LocalTestCx;
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
 const HARNESS: &str = "the local determinism test context";
 
 impl LocalTestCx {
-    /// A scoped controller over this context for `admitted`: hand it to drive
+    /// A scoped controller over this context for `admitted`: hand it to work
     /// code that issues effects through a controller.
     pub fn controller(
         &self,
@@ -30,7 +30,7 @@ impl LocalTestCx {
 }
 
 impl AwaitEventResolver for LocalTestCx {
-    /// A drive-test context mints no durable await-event keys.
+    /// A shift-test context mints no durable await-event keys.
     fn await_event_authority_binding_id(&self) -> Option<String> {
         None
     }

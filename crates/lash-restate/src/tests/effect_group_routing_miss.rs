@@ -435,12 +435,12 @@ pub(crate) fn before_seat(group_key: &str) {
     }
 }
 
-/// Drives held at their end, by group (FIG-4785): the child's drive has
+/// Shifts held at their end, by group (FIG-4785): the child's shift has
 /// returned on a live attempt, and nothing of its outcome is journaled yet.
 static SETTLE_HOLDS: LazyLock<Mutex<HashMap<String, SeatCut>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Hold a tool child between its drive and the first journal entry of its
+/// Hold a tool child between its shift and the first journal entry of its
 /// settlement, once.
 pub(crate) async fn before_settled(group_key: &str) {
     let hold = SETTLE_HOLDS.lock_recover().remove(group_key);
@@ -579,7 +579,7 @@ pub(super) async fn committed_deferred_child_seats_under_its_opener(target: Harn
     // Both children reach their end, and so does each group's run: nothing
     // is left retrying once the law is over.
     await_end(&harness, &committed, End::Settled).await;
-    // The cancel-decided child ends however its drive met the decision,
+    // The cancel-decided child ends however its shift met the decision,
     // which its own law pins; here it only has to end.
     for (group_key, handler) in [
         (&cancelled, "child"),

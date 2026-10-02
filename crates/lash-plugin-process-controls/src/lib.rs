@@ -30,7 +30,7 @@ pub use declarations::{
 
 /// Plugin factory for process-control tools.
 ///
-/// Declares its provider through a [`PluginSpec`] driven by
+/// Declares its provider through a [`PluginSpec`] executed by
 /// [`StaticPluginFactory`], so it does not hand-roll the `SessionPlugin` +
 /// `register` ceremony.
 ///

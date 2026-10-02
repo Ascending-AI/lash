@@ -1,17 +1,17 @@
-//! FIG-3748: a queued drive crashed after its first commit, with a second
-//! input queued behind it, replays the committed root and then runs the
+//! FIG-3748: a queued shift crashed after its first commit, with a second
+//! input queued behind it, replays the committed run and then runs the
 //! second input once.
 //!
-//! Two inputs are accepted before any drive runs, and each is its own root
-//! (the turn-input admission bound is one). The first drive commits the first
-//! root and its worker dies before the drive ended. The tier redrives it,
+//! Two inputs are accepted before any shift runs, and each is its own run
+//! (the turn-input admission bound is one). The first shift commits the first
+//! run and its worker dies before the shift ended. The tier redrives it,
 //! and the redrive replays its journal against a store that has moved on:
 //! the first input is consumed and the second is the queue's head. A redrive
 //! that re-decided from that live state would admit the second input where
-//! its journal holds the first root's calls (on Restate, a journal mismatch
-//! at the root's third call). The redrive must instead replay the recorded
-//! admission and the committed root, asking the model nothing and committing
-//! nothing again; the next drive then runs the second input exactly once.
+//! its journal holds the first run's calls (on Restate, a journal mismatch
+//! at the run's third call). The redrive must instead replay the recorded
+//! admission and the committed run, asking the model nothing and committing
+//! nothing again; the next shift then runs the second input exactly once.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,13 +22,13 @@ use pretty_assertions::assert_eq;
 use crate::admit;
 
 /// Panics as the first committed turn's delivery begins: its commit is
-/// durable and the drive has not ended.
+/// durable and the shift has not ended.
 struct PanicAfterFirstCommit;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAfterFirstCommit {
     fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
         if phase == lash_core::runtime::RuntimeTurnPhase::PostCommitDelivery {
-            panic!("injected crash after the first queued root's commit");
+            panic!("injected crash after the first queued run's commit");
         }
     }
 
@@ -65,16 +65,16 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
     .expect("build the queued after-commit redrive conformance runtime")
 }
 
-type DriveResultTx = tokio::sync::mpsc::UnboundedSender<
+type ShiftResultTx = tokio::sync::mpsc::UnboundedSender<
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>,
 >;
 
-/// One attempt at a drive: the crashing one panics after its first commit;
-/// every other sends back how its drive ended.
+/// One attempt at a shift: the crashing one panics after its first commit;
+/// every other sends back how its shift ended.
 fn attempt(
     parts: &RedriveParts,
     crash: bool,
-    result_tx: Option<DriveResultTx>,
+    result_tx: Option<ShiftResultTx>,
 ) -> crate::ConformanceTurnAttempt {
     let parts = parts.clone();
     Arc::new(move |scope| {
@@ -85,7 +85,7 @@ fn attempt(
             if crash {
                 runtime.set_turn_phase_probe(Arc::new(PanicAfterFirstCommit));
             }
-            let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+            let shift = Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scope,
             )))
@@ -93,23 +93,23 @@ fn attempt(
             let Some(result_tx) = result_tx else {
                 panic!(
                     "the crash probe did not fire after the first commit: {:?}",
-                    drive.map(crate::facade_support::QueuedTurnDrain::ran)
+                    shift.map(crate::facade_support::QueuedTurnDrain::ran)
                 );
             };
-            let end = crate::ConformanceTurnEnd::of(&drive);
-            let _ = result_tx.send(drive);
+            let end = crate::ConformanceTurnEnd::of(&shift);
+            let _ = result_tx.send(shift);
             end
         })
     })
 }
 
-/// A queued drive crashed after its first commit and redriven replays that
-/// root; the input queued behind it then runs once, in arrival order.
+/// A queued shift crashed after its first commit and redriven replays that
+/// run; the input queued behind it then runs once, in arrival order.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once(
+pub async fn a_queued_shift_redriven_after_its_first_commit_runs_the_next_input_once(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -167,7 +167,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         store: Arc::clone(&store),
     };
 
-    // The first drive crashes after its first commit and is redriven.
+    // The first shift crashes after its first commit and is redriven.
     let (first_tx, mut first_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
@@ -185,12 +185,12 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
     first_rx
         .recv()
         .await
-        .expect("the tier's runner ran the redriven drive")
+        .expect("the tier's runner ran the redriven shift")
         .unwrap_or_else(|error| panic!("the redrive after the first commit replays: {error:?}"));
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
-        "the redrive reads the first root's answer back and admits nothing it did not record"
+        "the redrive reads the first run's answer back and admits nothing it did not record"
     );
     let applied: Vec<_> = store
         .list_turn_input_applications(&session_id)
@@ -202,10 +202,10 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
     assert_eq!(
         applied,
         [accepted[0].clone()],
-        "only the first input is applied by the redriven drive"
+        "only the first input is applied by the redriven shift"
     );
 
-    // The next drive runs the second input once.
+    // The next shift runs the second input once.
     let (second_tx, mut second_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
@@ -218,14 +218,14 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         ),
     )
     .await
-    .expect("the second drive ends");
+    .expect("the second shift ends");
     let second = second_rx
         .recv()
         .await
-        .expect("the tier's runner ran the second drive")
-        .unwrap_or_else(|error| panic!("the second drive runs: {error:?}"))
+        .expect("the tier's runner ran the second shift")
+        .unwrap_or_else(|error| panic!("the second shift runs: {error:?}"))
         .ran()
-        .expect("the second drive runs the second input");
+        .expect("the second shift runs the second input");
     assert_eq!(second.assistant_output.safe_text, "answer 2");
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -252,17 +252,17 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         .load_session_head_meta(&session_id)
         .await
         .expect("read the head")
-        .expect("both roots committed");
+        .expect("both runs committed");
     assert!(
         head.head_revision > before,
-        "the roots committed: {} -> {}",
+        "the runs committed: {} -> {}",
         before,
         head.head_revision
     );
 }
 
-/// Register the queued after-commit redrive law (FIG-3748): a queued drive
-/// crashed after its first commit replays that root and the input queued
+/// Register the queued after-commit redrive law (FIG-3748): a queued shift
+/// crashed after its first commit replays that run and the input queued
 /// behind it runs once. The fixture hands back a guard, a prefix, the tier's
 /// effect host, the store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
@@ -270,7 +270,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
 macro_rules! queued_after_commit_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::queued_after_commit_redrive_tests!(@law [$(#[$attr])*] $fixture;
-            (a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once, "queued-after-commit-redrive"));
+            (a_queued_shift_redriven_after_its_first_commit_runs_the_next_input_once, "queued-after-commit-redrive"));
     };
     (@law [$(#[$attr:meta])*] $fixture:block; ($law:ident, $label:literal)) => {
         $(#[$attr])*

@@ -388,14 +388,14 @@ impl EffectHost for LayeredEffectHost {
         self.inner.retire_usage_execution(owner, scope).await
     }
 
-    async fn retire_closed_root_waits(
+    async fn retire_closed_run_waits(
         &self,
         session_id: &SessionId,
-        root: &crate::TurnId,
+        run: &crate::TurnId,
         committed_turn: Option<&crate::TurnId>,
     ) -> Result<(), RuntimeError> {
         self.inner
-            .retire_closed_root_waits(session_id, root, committed_turn)
+            .retire_closed_run_waits(session_id, run, committed_turn)
             .await
     }
 
@@ -435,7 +435,7 @@ impl EffectHost for LayeredEffectHost {
     }
 
     /// The inner host's routing first, then this host's layer: a child an
-    /// engine handler drives crosses every layer of the stack, innermost
+    /// engine handler executes crosses every layer of the stack, innermost
     /// first, as the controllers this host lends do.
     fn route_handler_child_controller<'run>(
         &self,

@@ -399,7 +399,7 @@ fn unstarted_delivery(
 struct ProcessStartWiring {
     ledger: Arc<dyn crate::store::ObligationLedger>,
     clock: Arc<dyn crate::Clock>,
-    policy: crate::runtime::drive::relay::RelayPolicy,
+    policy: crate::runtime::shift::relay::RelayPolicy,
 }
 
 #[derive(Clone)]
@@ -438,7 +438,7 @@ impl TriggerRouter {
         mut self,
         ledger: Arc<dyn crate::store::ObligationLedger>,
         clock: Arc<dyn crate::Clock>,
-        policy: crate::runtime::drive::relay::RelayPolicy,
+        policy: crate::runtime::shift::relay::RelayPolicy,
     ) -> Self {
         self.process_starts = Some(ProcessStartWiring {
             ledger,
@@ -476,13 +476,13 @@ impl TriggerRouter {
     /// `ToolIntentExecutionOutcome::Executed` result, and on a runtime-owned
     /// host there is no journal to replay it from, so the drain must recompute
     /// the identical value. [`Self::emit`] reports `Started` for every
-    /// delivery it started, on the first drive and every redrive alike.
+    /// delivery it started, on the first shift and every redrive alike.
     /// A redrive after retention reclaimed the occurrence has nothing to
     /// recompute it from: the store refuses the reclaimed identity, and the
     /// declaration fails with that typed refusal (FIG-4513).
     ///
     /// A delivery that did not start carries no such statement: its reason is a
-    /// live error string, and the next drive may well start it. Reporting that
+    /// live error string, and the next shift may well start it. Reporting that
     /// inside a successful outcome would both call a failure a success and put
     /// replay-varying bytes on the wire, so a failed start fails the whole
     /// declaration instead — the caller turns the error into the intent's own
@@ -490,9 +490,9 @@ impl TriggerRouter {
     /// process registry is the same case: nothing starts, so nothing is
     /// reported as started.
     ///
-    /// A host whose registry is present on one drive and absent on the next
+    /// A host whose registry is present on one shift and absent on the next
     /// changes from executing to refusing. That is a host configuration change
-    /// between drives, not a redrive divergence; the same host answers the same
+    /// between shifts, not a redrive divergence; the same host answers the same
     /// way every time.
     ///
     /// This is deliberately not a journaled wrapper around [`Self::emit`]:
@@ -1257,7 +1257,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for OccurrenceIn
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::IngestTriggerOccurrence { request } = envelope.command
         else {
@@ -1292,7 +1292,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for DeliveryBind
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
             return Err(wrong_command("trigger delivery bind", &envelope));
@@ -1325,7 +1325,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for BoundDeliver
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
             return Err(wrong_command("trigger delivery admission", &envelope));

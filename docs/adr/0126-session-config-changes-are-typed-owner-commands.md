@@ -72,7 +72,7 @@ records its parent's behaviour, not that of the host creating it (FIG-4527).
 No command changes it, and each owner refuses a candidate, a run override
 included, that changes its recorded behaviour. A plugin and its hooks run
 under the recorded behaviour, never under the opening deployment's factory
-configuration. A root's render is resolved over the recorded render, under
+configuration. A run's render is resolved over the recorded render, under
 the session's own render options.
 
 **Transactions.** A `ConfigTransaction` is an ordered list of
@@ -93,8 +93,8 @@ under the same id with other content is refused as `ChangedContent`.
 the transaction in one journaled `ResolveConfigTransaction` effect:
 
 1. If an owner's installed implementation differs from the recorded one, the
-   effect records nothing and the command root parks as `RetiredGeneration`
-   until a build that runs the recorded reducers drives it.
+   effect records nothing and the command run parks as `RetiredGeneration`
+   until a build that runs the recorded reducers executes it.
 2. If the config revision moved past the expected revision, the transaction
    resolves `Stale` without running a reducer.
 3. Otherwise the entries reduce in order over a private candidate. Every
@@ -112,7 +112,7 @@ the transaction in one journaled `ResolveConfigTransaction` effect:
 A recorded namespace its owner cannot read is not a refusal. The session
 recorded it from that owner's own typed value, so it is corrupt stored data:
 the resolution records no decision and fails as `StoredDataCorrupt`, and the
-same holds for a run override, a creation from a corrupt parent and a root's
+same holds for a run override, a creation from a corrupt parent and a run's
 render.
 
 A redrive replays the recorded resolution and never re-runs a reducer under
@@ -124,9 +124,9 @@ records the outcome as the command's settlement. A restatement advances the
 revision too. A stale or refused transaction publishes no config, and its
 outcome is still durable.
 
-**Pending while a root owns the head.** A transaction submitted while a root
-owns the session's head stays pending. It applies after that root releases
-the head and is first visible to the next root. A running root never sees
+**Pending while a run owns the head.** A transaction submitted while a run
+owns the session's head stays pending. It applies after that run releases
+the head and is first visible to the next run. A running run never sees
 config change under it.
 
 **Discovery and transport.** `SessionConfigAdmin::commands` returns a catalog

@@ -140,15 +140,15 @@ endpoints = ["CW"]
 shards = 1
 timeout_seconds = 600
 
-[suites.root-control]
+[suites.run-control]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
-filters = ["tests::root_control_witnesses::live_"]
+filters = ["tests::run_control_witnesses::live_"]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 240
 
-# Paused children of root-opened effect groups (FIG-4630): the laws let the
+# Paused children of run-opened effect groups (FIG-4630): the laws let the
 # engine exhaust a group child's retries. Restate's default policy pauses such
 # an invocation and keeps its journal; the shards' bounded policy kills it, so
 # this suite's servers keep the short schedule and restore the pause.
@@ -168,10 +168,10 @@ RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS = "pause"
 RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS = "8"
 RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS = "pause"
 
-[suites.session-driver]
-label = "//crates/lash-restate-test:session_driver__test"
+[suites.session-shifts]
+label = "//crates/lash-restate-test:session_shifts__test"
 cwd = "crates/lash-restate-test"
-filters = ["live_restate_drive_continuation_crash_redrives_one_successor"]
+filters = ["live_restate_shift_continuation_crash_redrives_one_successor"]
 endpoints = ["CW"]
 shards = 1
 timeout_seconds = 240
@@ -215,27 +215,27 @@ endpoints = ["PC"]
 shards = 1
 timeout_seconds = 180
 
-# What a root recorded decides its replay and its restart, on a live server:
+# What a run recorded decides its replay and its restart, on a live server:
 # the response-phase replay law (FIG-4390: a response hook added or removed
-# between a root's first attempt and its replay never changes the response it
+# between a run's first attempt and its replay never changes the response it
 # serves) and the recorded turn budget's restart law (FIG-4376: a deployment
-# restarted under an unbounded core still stops each root at its session's
+# restarted under an unbounded core still stops each run at its session's
 # recorded budget). One endpoint bind per shard: each law brings its
 # deployment up on it in turn.
-[suites.recorded-roots]
+[suites.recorded-runs]
 label = "//crates/lash:lash__unit_test"
 cwd = "crates/lash"
 filters = [
   "tests::response_phase_replay::live_",
-  "tests::recorded_execution_controls::live_a_recorded_budget_bounds_every_root_after_a_deployment_restart",
+  "tests::recorded_execution_controls::live_a_recorded_budget_bounds_every_run_after_a_deployment_restart",
   "tests::send_handle::pins::live_",
 ]
 endpoints = ["RR"]
 shards = 1
 timeout_seconds = 240
 
-# A session drive on a draining build hands over to the newest build after
-# its current root (FIG-4639): build N and build N+1 are two deployments over
+# A session shift on a draining build hands over to the newest build after
+# its current run (FIG-4639): build N and build N+1 are two deployments over
 # one store set, so two endpoint binds per shard. The PostgreSQL legs run
 # where the recipe provides a database.
 [suites.drain-hand-over]

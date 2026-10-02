@@ -7,12 +7,12 @@
 //! registered, every argument decoding) and enqueues it as
 //! [`SessionCommand::ApplyConfigTransaction`](crate::SessionCommand) under
 //! the caller's stable id. Nothing is judged against the session's config
-//! at ingress: submission completes while a root owns the head, and the
+//! at ingress: submission completes while a run owns the head, and the
 //! transaction waits.
 //!
-//! The drive's command lane applies it alone once no root owns the head
-//! (ADR 0101 §4), so a root that is running or parked when the transaction
-//! arrives finishes under the config it was admitted with, and the next root
+//! The shift's command lane applies it alone once no run owns the head
+//! (ADR 0101 §4), so a run that is running or parked when the transaction
+//! arrives finishes under the config it was admitted with, and the next run
 //! runs under the transaction's. Application is two steps:
 //!
 //! 1. One recorded step, `config-transaction` on the command's own queue
@@ -21,15 +21,15 @@
 //!    complete replacement with each command's output. Its first execution
 //!    runs this build's reducers: an owner's reducers are its plugin's
 //!    behaviour, which the build generation hashes (FIG-4791), so the lane
-//!    that admitted the command root is the one whose reducers decide it,
-//!    and a redrive of the root stays on that lane. A replay reads the
+//!    that admitted the command run is the one whose reducers decide it,
+//!    and a redrive of the run stays on that lane. A replay reads the
 //!    resolution back and never runs a reducer again.
 //! 2. One fenced commit publishes the recorded resolution, advances
 //!    `config_revision` exactly once when it applied, and settles the
 //!    command with its [`ConfigTransactionOutcome`]. A stale or refused
 //!    transaction publishes nothing and settles all the same.
 //!
-//! A storeless runtime has no lane and no drive: its `&mut self` serializes
+//! A storeless runtime has no lane and no shift: its `&mut self` serializes
 //! the transaction with every turn it runs, so it resolves and publishes
 //! directly ([`LashRuntime::apply_storeless_config_transaction`]).
 
@@ -107,8 +107,8 @@ impl LashRuntime {
 
     /// Submit `transaction` to the session's command lane under the caller's
     /// stable `id`, written against `expected_revision`, and return as soon
-    /// as it is durable: before it applies. The drive applies it once no
-    /// root owns the head; its outcome is read with
+    /// as it is durable: before it applies. The shift applies it once no
+    /// run owns the head; its outcome is read with
     /// [`Self::settle_session_command`].
     ///
     /// A resubmission under `id` while the first is retained answers the
@@ -155,7 +155,7 @@ impl LashRuntime {
     /// Resolve and publish `transaction` on a storeless runtime, written
     /// against `expected_revision`.
     ///
-    /// A storeless runtime has no drive and no durable head: its `&mut self`
+    /// A storeless runtime has no shift and no durable head: its `&mut self`
     /// serializes the transaction with every turn it runs. A store-backed
     /// runtime is refused: the bound turn owns its head, so its transactions
     /// go through [`Self::submit_config_transaction`].
@@ -177,8 +177,8 @@ impl LashRuntime {
         let previous = self.session_policy();
         let mut next = self.state.clone();
         // A transaction resolves over the sticky config and changes it,
-        // never the recorded view of the root this runtime ran last.
-        next.take_root_view();
+        // never the recorded view of the run this runtime ran last.
+        next.take_run_view();
         let base = crate::store::persisted_session_config_from_state(&next);
         let registry = self.config_registry()?;
         // A storeless runtime has no fleet record: each plugin writes its
@@ -208,11 +208,11 @@ impl LashRuntime {
     }
 
     /// Apply the config transaction the command run `completion` names,
-    /// under the command root's `drive_fence` (FIG-4379). `false` when the
+    /// under the command run's `shift_fence` (FIG-4379). `false` when the
     /// command was withdrawn since the lane was read: nothing was applied.
     ///
     /// The resolution is one recorded step on the command's own scope, the
-    /// session operation its batch names, rescoped from the root's controller: a
+    /// session operation its batch names, rescoped from the run's controller: a
     /// redrive of the unsettled command publishes the resolution its first
     /// execution recorded, and a replay of a settled one adopts the head its
     /// commit published without committing again.
@@ -220,8 +220,8 @@ impl LashRuntime {
         &mut self,
         transaction: crate::ConfigTransactionRecord,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
-        root_controller: &crate::ScopedEffectController<'_>,
+        shift_fence: &crate::store::ShiftFence,
+        run_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
         let [batch_id] = completion.batch_ids.as_slice() else {
             return Err(RuntimeError::new(
@@ -251,13 +251,13 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         self.adopt_committed_head().await?;
         // The head this runtime committed itself is not reloaded, so the
-        // recorded view of the root it ran last is still installed: the
+        // recorded view of the run it ran last is still installed: the
         // transaction resolves over the sticky config under it and
-        // publishes onto it, never the root's overrides.
-        self.uninstall_root_view()?;
+        // publishes onto it, never the run's overrides.
+        self.uninstall_run_view()?;
         let host = Arc::clone(&self.host.core.control.effect_host);
-        let controller = super::drive::step_controller(
-            root_controller,
+        let controller = super::shift::step_controller(
+            run_controller,
             host.as_ref(),
             crate::AdmittedScope::session_operation(
                 self.state.session_id.clone(),
@@ -284,7 +284,7 @@ impl LashRuntime {
         }
         let committed =
             Box::pin(
-                self.commit_host_command(&completion, drive_fence, None, None, |_, _| {
+                self.commit_host_command(&completion, shift_fence, None, None, |_, _| {
                     crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome }
                 }),
             )
@@ -399,7 +399,7 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ResolveConfigTransaction { transaction, .. } =
             &envelope.command

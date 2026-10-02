@@ -1,13 +1,13 @@
-//! FIG-4390: a root's response phase plan is recorded with its paid
+//! FIG-4390: a run's response phase plan is recorded with its paid
 //! completion, so adding or removing an assistant-response hook between a
-//! root's first attempt and its replay never changes the response the root
+//! run's first attempt and its replay never changes the response the run
 //! serves (ADR 0105 §1).
 //!
-//! Each law runs one root on the Restate server double. Its first attempt
+//! Each law executes one run on the Restate server double. Its first attempt
 //! journals the LLM call's phases and dies before the step after them; the
 //! core that ran it is dropped as it dies, and a second core over the same
-//! stores, with the other hook set, installs its session driver and replays
-//! the root:
+//! stores, with the other hook set, installs its `SessionShifts` and replays
+//! the run:
 //!
 //! - **removed**: the first core had a response hook, so the first attempt
 //!   journaled phase 2's derived response. The replay, with no hook
@@ -22,10 +22,10 @@
 //! `LASH_POSTGRES_DATABASE_URL` when selected with `--include-ignored`
 //! inside a PostgreSQL gate.
 //!
-//! The `live_*` laws run the same root on a live `restate-server`, over the
+//! The `live_*` laws run the same run on a live `restate-server`, over the
 //! live backend's SQLite memory store set: the first attempt's death is the
 //! deployment dying at the checkpoint's journal frame, and the deployment
-//! that comes back serves the second core. The `recorded-roots` suite
+//! that comes back serves the second core. The `recorded-runs` suite
 //! of `scripts/restate-suites.toml` runs them on its live and replay legs.
 
 use super::*;
@@ -44,7 +44,7 @@ enum Storage {
     Postgres,
 }
 
-/// How the hook set changes between the root's first attempt and its replay.
+/// How the hook set changes between the run's first attempt and its replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HookChange {
     /// The first attempt ran with a response hook; the replay has none.
@@ -58,7 +58,7 @@ impl HookChange {
         self == Self::Removed
     }
 
-    /// The response the root serves: what its first attempt recorded.
+    /// The response the run serves: what its first attempt recorded.
     fn served(self) -> &'static str {
         match self {
             Self::Removed => DERIVED,
@@ -66,7 +66,7 @@ impl HookChange {
         }
     }
 
-    /// The response the root must never serve.
+    /// The response the run must never serve.
     fn not_served(self) -> &'static str {
         match self {
             Self::Removed => RAW,
@@ -92,7 +92,7 @@ struct World {
     _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
 
-/// The engine a law's root runs on.
+/// The engine a law's run executes on.
 enum Engine {
     Double(lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>),
     Live(lash_restate_test::live::LiveRestateBackend),
@@ -108,7 +108,7 @@ struct Run {
 
 impl Engine {
     /// A live `restate-server` deployment over its own SQLite memory stores,
-    /// on the endpoint the `recorded-roots` suite binds.
+    /// on the endpoint the `recorded-runs` suite binds.
     #[allow(
         clippy::disallowed_methods,
         reason = "the live law reads the suite's server and endpoint addresses"
@@ -200,7 +200,7 @@ impl Engine {
     }
 
     /// Resume `run`, paused after it spent its retries: only the double's
-    /// replay can meet no driver, since a live deployment stays down until
+    /// replay can meet no `SessionShifts`, since a live deployment stays down until
     /// the second core is installed.
     fn resume(&self, run: &Run) {
         if let Self::Double(double) = self {
@@ -358,7 +358,7 @@ fn deriving_plugin(calls: &Arc<AtomicUsize>) -> StaticPluginFactory {
 
 /// A core over `engine` whose provider answers [`RAW`], counting its calls
 /// in `provider_calls`, with the deriving response hook installed when
-/// `with_hook`. Building it installs its session driver on the engine, once no other core holds that installation.
+/// `with_hook`. Building it installs its `SessionShifts` on the engine, once no other core holds that installation.
 fn core_over(
     engine: &Engine,
     with_hook: bool,
@@ -474,7 +474,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
             .open()
             .await?,
     );
-    let root = lash_core::TurnId::fixture(format!("{session}-root"));
+    let run = lash_core::TurnId::fixture(format!("{session}-run"));
     // The step after the LLM call's phases: the turn's completion
     // checkpoint, which both hook sets issue.
     engine.crash_on(
@@ -482,7 +482,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
             suffix: CHECKPOINT_SUFFIX.to_owned(),
         })
         .service(lash_restate_test::TURN_DRIVER_SERVICE)
-        .key(lash_restate::turn_workflow_key(&session_id, &root)),
+        .key(lash_restate::turn_workflow_key(&session_id, &run)),
     );
     let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
         .await?
@@ -494,12 +494,12 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
                 lash_core::TurnInputIngress::NextTurn,
                 TurnInput::text("answer me"),
             )
-            .with_source_key(root.as_str()),
+            .with_source_key(run.as_str()),
         )
         .await
         .expect("enqueue the input");
     let engine_port = core.substrate_slot.ports().await.queued;
-    // The first core leaves as its root's first attempt dies: the listener
+    // The first core leaves as its run's first attempt dies: the listener
     // runs before the engine starts the replay.
     let first = Arc::new(std::sync::Mutex::new(Some(core)));
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -523,9 +523,9 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
             dropped.store(drop_core.is_ok(), Ordering::SeqCst);
         }
     })));
-    engine_port.schedule_drive(
+    engine_port.schedule_shift(
         &session_id,
-        lash_core::engine::DriveRequestId::new("response-phase-replay"),
+        lash_core::engine::ShiftRequestId::new("response-phase-replay"),
     );
     drop(engine_port);
     let crashed = tokio::time::timeout(std::time::Duration::from_secs(90), async {
@@ -536,7 +536,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     .await;
     assert!(
         crashed.is_ok(),
-        "the root's first attempt dies: journals {:?}",
+        "the run's first attempt dies: journals {:?}",
         session_journals(&engine, &session_id).await,
     );
     let hook_calls_before_replay = hook_calls.load(Ordering::SeqCst);
@@ -548,24 +548,23 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     );
     engine.serve_the_replay().await;
 
-    let root_run =
-        async || {
-            engine.runs(&session_id).await.into_iter().find(|run| {
-                run.target.starts_with("LashTurn/") && run.target.contains(root.as_str())
-            })
-        };
+    let run_execution = async || {
+        engine.runs(&session_id).await.into_iter().find(|executed| {
+            executed.target.starts_with("LashTurn/") && executed.target.contains(run.as_str())
+        })
+    };
     let settled = tokio::time::timeout(std::time::Duration::from_secs(90), async {
         loop {
-            // A replay that found no driver installed may have spent its
+            // A replay that found no `SessionShifts` installed may have spent its
             // retries before the second core installed one.
-            for run in engine.runs(&session_id).await {
-                if run.status == "paused" {
-                    engine.resume(&run);
+            for executed in engine.runs(&session_id).await {
+                if executed.status == "paused" {
+                    engine.resume(&executed);
                 }
             }
-            if root_run()
+            if run_execution()
                 .await
-                .is_some_and(|run| run.status == "completed")
+                .is_some_and(|executed| executed.status == "completed")
                 && open_session_invocations(&engine, &session_id)
                     .await
                     .is_empty()
@@ -578,20 +577,23 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     .await;
     assert!(
         settled.is_ok(),
-        "the root and its drive finish: open {:?}, journals {:?}",
+        "the run and its shift finish: open {:?}, journals {:?}",
         open_session_invocations(&engine, &session_id).await,
         session_journals(&engine, &session_id).await,
     );
     assert!(crashes.get() >= 1, "the first attempt died");
-    let run = root_run().await.expect("the root's run is an invocation");
-    let outcome = engine.outcome(&run).await;
+    let executed = run_execution()
+        .await
+        .expect("the run's execution is an invocation");
+    let outcome = engine.outcome(&executed).await;
     let evidence = format!(
         "last failure {:?}, outcome {outcome:?}, journals {:?}",
-        run.last_failure,
+        executed.last_failure,
         session_journals(&engine, &session_id).await,
     );
     assert!(
-        !run.last_failure
+        !executed
+            .last_failure
             .as_deref()
             .is_some_and(|failure| failure.starts_with("570")),
         "the replay followed its journal: {evidence}"
@@ -603,10 +605,10 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     );
     assert!(
         matches!(&outcome, Some(Ok(value))
-            if value.contains("\"root_outcome\":\"committed\"")
+            if value.contains("\"run_outcome\":\"committed\"")
                 && value.contains(change.served())
                 && !value.contains(change.not_served())),
-        "the root commits the response its first attempt recorded, `{}`: {evidence}",
+        "the run commits the response its first attempt recorded, `{}`: {evidence}",
         change.served(),
     );
     assert_eq!(
@@ -619,7 +621,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
 }
 
 /// The suffix of the journal run of the turn's completion checkpoint, the
-/// effect after its LLM call's phases: `<session>:<root>:1:0:checkpoint:3`.
+/// effect after its LLM call's phases: `<session>:<run>:1:0:checkpoint:3`.
 const CHECKPOINT_SUFFIX: &str = ":checkpoint:3";
 
 macro_rules! response_phase_replay_laws {
@@ -654,13 +656,13 @@ response_phase_replay_laws! {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by the recorded-roots suite"]
+#[ignore = "requires an isolated Restate server; run by the recorded-runs suite"]
 async fn live_removed_hook() -> Result<()> {
     on_live_restate(HookChange::Removed).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by the recorded-roots suite"]
+#[ignore = "requires an isolated Restate server; run by the recorded-runs suite"]
 async fn live_added_hook() -> Result<()> {
     on_live_restate(HookChange::Added).await
 }

@@ -1,7 +1,7 @@
 //! The build-generation drain's in-flight-turn law (FIG-3884, FIG-3927 N8):
-//! a generation's drain work count is exactly its unfinished roots —
+//! a generation's drain work count is exactly its unfinished runs —
 //! input-headed and queued-headed alike, each admitted under the generation
-//! its drive stamped `admitted_generation` (FIG-3795 S9) — and the composed
+//! its shift stamped `admitted_generation` (FIG-3795 S9) — and the composed
 //! drain status cannot report drained while one stands.
 
 use crate::conformance::DeploymentViewExt as _;
@@ -29,26 +29,26 @@ fn generation(prefix: &str, alias: &str) -> crate::engine::BuildGeneration {
     crate::engine::BuildGeneration::from_digest(digest)
 }
 
-/// The turn-lane family an admitted root is headed by.
+/// The turn-lane family an admitted run is headed by.
 #[derive(Clone, Copy)]
 enum Head {
     Input,
     Batch,
 }
 
-/// An admitted root's live evidence: its session's store, the lease it was
+/// An admitted run's live evidence: its session's store, the lease it was
 /// admitted under, and the admission itself.
-struct AdmittedRoot {
+struct AdmittedRun {
     session_id: SessionId,
-    root: TurnId,
+    run: TurnId,
     store: Arc<dyn crate::store::RuntimeStore>,
-    lease: crate::store::DriveFence,
-    admission: crate::store::RootAdmission,
+    lease: crate::store::ShiftFence,
+    admission: crate::store::RunAdmission,
 }
 
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-impl AdmittedRoot {
-    /// Admit a root headed by one fresh row of `head` under `stamp` in a
+impl AdmittedRun {
+    /// Admit a run headed by one fresh row of `head` under `stamp` in a
     /// fresh session of the fixture.
     async fn admit(
         fixture: &GenerationDrainLawFixture,
@@ -100,16 +100,16 @@ impl AdmittedRoot {
                     .batch_id,
             ),
         };
-        let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
             store.store(),
             &session_id,
             &format!("{}-{name}", fixture.prefix),
         )
         .await;
         let admission = store
-            .admit_root(&crate::store::AdmitRootRequest {
+            .admit_run(&crate::store::AdmitRunRequest {
                 fence: lease.clone(),
-                root: TurnId::fixture(name),
+                run: TurnId::fixture(name),
                 head,
                 max_inputs: 64,
                 policy: lash_core::testing::queued_work_admission_policy(64),
@@ -122,24 +122,24 @@ impl AdmittedRoot {
                 turn_index: 1,
                 generation: None,
                 admitted_generation: stamp.clone(),
-                executor: crate::store::RootExecutor::Root,
+                executor: crate::store::RunExecutor::Run,
                 plugins: Default::default(),
                 trace_anchor: Default::default(),
             })
             .await
-            .expect("admit the root")
-            .expect("the root reaches its head");
+            .expect("admit the run")
+            .expect("the run reaches its head");
         Self {
             session_id,
-            root: TurnId::fixture(name),
+            run: TurnId::fixture(name),
             store: Arc::clone(store.store()),
             lease,
             admission,
         }
     }
 
-    /// Commit the root's first physical turn owing a follow-on: the rows the
-    /// root was admitted with settle, and the root stays unfinished.
+    /// Commit the run's first physical turn owing a follow-on: the rows the
+    /// run was admitted with settle, and the run stays unfinished.
     async fn owe_follow_on(&self) -> crate::store::PendingFollowOn {
         let mut state = crate::RuntimeSessionState {
             session_id: self.session_id.clone(),
@@ -151,19 +151,19 @@ impl AdmittedRoot {
         state.ensure_agent_frame_initialized();
         let owed = crate::store::PendingFollowOn {
             continuation: None,
-            follow_on_turn_id: lash_core::store::PhysicalTurn::derive_turn_id(&self.root, 1),
+            follow_on_turn_id: lash_core::store::PhysicalTurn::derive_turn_id(&self.run, 1),
             frame_id: state
                 .current_frame_node_id
                 .clone()
                 .expect("the initial frame is current"),
-            task: "run the rest of the root".to_owned(),
+            task: "run the rest of the run".to_owned(),
             resolved_run: crate::conformance::helpers::default_resolved_run(),
             chain_depth: 1,
             attempts: 0,
         };
         // A follow-on is written only by a turn's terminal commit.
         let operation =
-            crate::OperationId::turn(self.session_id.clone(), self.root.clone(), "final");
+            crate::OperationId::turn(self.session_id.clone(), self.run.clone(), "final");
         let mut graph = state.pending_graph_commit();
         graph
             .derive_node_ids(&state.session_id, &operation)
@@ -172,20 +172,20 @@ impl AdmittedRoot {
             &state, graph, operation,
         )
         .expect("build the commit");
-        commit.drive_fence = Some(Box::new(self.lease.clone()));
+        commit.shift_fence = Some(Box::new(self.lease.clone()));
         commit.pending_follow_on = Some(owed.clone());
         commit.ingress = Some(super::completing_admission(
-            self.root.as_str(),
+            self.run.as_str(),
             &self.admission,
         ));
         self.store
             .commit_runtime_state(commit)
             .await
-            .expect("the root's first turn commits owing its follow-on");
+            .expect("the run's first turn commits owing its follow-on");
         owed
     }
 
-    /// End the root with the commit of its first physical turn, which
+    /// End the run with the commit of its first physical turn, which
     /// settles the rows it was admitted with and writes its terminal.
     async fn end(&self) {
         let mut state = crate::RuntimeSessionState {
@@ -196,31 +196,31 @@ impl AdmittedRoot {
             ))
         };
         state.ensure_agent_frame_initialized();
-        let root = self.root.clone();
+        let run = self.run.clone();
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
-        commit.drive_fence = Some(Box::new(self.lease.clone()));
-        commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
-            commit: crate::store::TurnCommitId::new(root.clone(), 0),
-            turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-            root: root.clone(),
-            outcome: crate::store::RootCommittedOutcome::Finished(
+        commit.shift_fence = Some(Box::new(self.lease.clone()));
+        commit.run_terminal = Some(Box::new(crate::store::RunTerminalWrite {
+            commit: crate::store::TurnCommitId::new(run.clone(), 0),
+            turn: lash_core::store::PhysicalTurn::derive_turn_id(&run, 0),
+            run: run.clone(),
+            outcome: crate::store::RunCommittedOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: String::new(),
                 },
             ),
         }));
-        commit.ingress = Some(super::completing_admission(root.as_str(), &self.admission));
+        commit.ingress = Some(super::completing_admission(run.as_str(), &self.admission));
         self.store
             .commit_runtime_state(commit)
             .await
-            .expect("the root's final commit lands");
+            .expect("the run's final commit lands");
         assert_eq!(
             self.store
-                .unfinished_root(&self.session_id)
+                .unfinished_run(&self.session_id)
                 .await
-                .expect("read the unfinished root"),
+                .expect("read the unfinished run"),
             None,
-            "the final commit ends the root"
+            "the final commit ends the run"
         );
     }
 }
@@ -228,7 +228,7 @@ impl AdmittedRoot {
 /// N8: `a` admits the input-headed `ia` and the queued-headed `qa`, which
 /// stay unfinished, and `qb`, which ends before the read; `b` admits `qc`,
 /// which stays unfinished; `never` admits nothing. The in-flight count `a`
-/// reports is `ia` and `qa` — an ended root and another generation's root are
+/// reports is `ia` and `qa` — an ended run and another generation's run are
 /// not `a`'s in-flight turns — and `a`'s composed drain status holds until
 /// both end.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
@@ -240,10 +240,10 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
         generation(&fixture.prefix, "never-admitted"),
     );
 
-    let ia = AdmittedRoot::admit(&fixture, "ia", Head::Input, &a).await;
-    let qa = AdmittedRoot::admit(&fixture, "qa", Head::Batch, &a).await;
-    let qb = AdmittedRoot::admit(&fixture, "qb", Head::Batch, &a).await;
-    let qc = AdmittedRoot::admit(&fixture, "qc", Head::Batch, &b).await;
+    let ia = AdmittedRun::admit(&fixture, "ia", Head::Input, &a).await;
+    let qa = AdmittedRun::admit(&fixture, "qa", Head::Batch, &a).await;
+    let qb = AdmittedRun::admit(&fixture, "qb", Head::Batch, &a).await;
+    let qc = AdmittedRun::admit(&fixture, "qc", Head::Batch, &b).await;
     qb.end().await;
 
     for (stamp, expected) in [(&a, 2), (&b, 1), (&never, 0)] {
@@ -258,7 +258,7 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
 
     // The sessions holding those turns, which the drain asks to hand over
     // (FIG-4739): each generation's, in session order, paged; an ended
-    // root's session holds none.
+    // run's session holds none.
     let one = std::num::NonZeroUsize::MIN;
     let mut paged = Vec::new();
     loop {
@@ -312,14 +312,14 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
     assert!(held.draining_since_ms.is_some());
     assert!(
         !held.drained(),
-        "a's unfinished roots hold its drain open: {held:?}"
+        "a's unfinished runs hold its drain open: {held:?}"
     );
 
     ia.end().await;
     let queued_only = drain.generation_work(&a).await.expect("count the work");
     assert_eq!(
         queued_only.in_flight_turns, 1,
-        "a's queued-headed root is still in flight"
+        "a's queued-headed run is still in flight"
     );
     qa.end().await;
     let emptied = crate::store::generation_drain::GenerationDrainStatus::collect(
@@ -339,13 +339,13 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
     );
 }
 
-/// FIG-4739: a root whose turn committed owing a follow-on stays its
-/// admitting generation's in-flight turn until a drive recovers the
-/// follow-on; the recovery's raise moves the root to the generation of the
-/// build that recovers it, which holds the root until it ends. A root that
-/// owes nothing is not moved by another root's recovery.
+/// FIG-4739: a run whose turn committed owing a follow-on stays its
+/// admitting generation's in-flight turn until a shift recovers the
+/// follow-on; the recovery's raise moves the run to the generation of the
+/// build that recovers it, which holds the run until it ends. A run that
+/// owes nothing is not moved by another run's recovery.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
-pub async fn a_recovered_follow_on_moves_its_root_to_the_recovering_generation(
+pub async fn a_recovered_follow_on_moves_its_run_to_the_recovering_generation(
     fixture: GenerationDrainLawFixture,
 ) {
     let drain = fixture.stores.generation_drain();
@@ -364,16 +364,16 @@ pub async fn a_recovered_follow_on_moves_its_root_to_the_recovering_generation(
         }
     };
 
-    let handed = AdmittedRoot::admit(&fixture, "handed", Head::Input, &old).await;
-    let _staying = AdmittedRoot::admit(&fixture, "staying", Head::Input, &old).await;
+    let handed = AdmittedRun::admit(&fixture, "handed", Head::Input, &old).await;
+    let _staying = AdmittedRun::admit(&fixture, "staying", Head::Input, &old).await;
     let owed = handed.owe_follow_on().await;
     assert_eq!(
         (in_flight(old.clone()).await, in_flight(next.clone()).await),
         (2, 0),
-        "a follow-on no drive has recovered is still its admitting generation's"
+        "a follow-on no shift has recovered is still its admitting generation's"
     );
 
-    let recovering = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+    let recovering = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
         &handed.store,
         &handed.session_id,
         &format!("{}-handed-recovering", fixture.prefix),
@@ -383,21 +383,21 @@ pub async fn a_recovered_follow_on_moves_its_root_to_the_recovering_generation(
         .store
         .raise_pending_follow_on_attempts(&recovering, &owed.follow_on_turn_id, &next)
         .await
-        .expect("the recovering drive raises the count");
+        .expect("the recovering shift raises the count");
     assert_eq!(raised.attempts, 1);
     assert_eq!(
         (in_flight(old.clone()).await, in_flight(next.clone()).await),
         (1, 1),
-        "the recovering generation holds the root it recovers, and no other"
+        "the recovering generation holds the run it recovers, and no other"
     );
     assert_eq!(
         handed
             .store
-            .unfinished_root(&handed.session_id)
+            .unfinished_run(&handed.session_id)
             .await
-            .expect("read the unfinished root")
-            .map(|unfinished| unfinished.root),
-        Some(handed.root.clone()),
-        "the raise ends no root"
+            .expect("read the unfinished run")
+            .map(|unfinished| unfinished.run),
+        Some(handed.run.clone()),
+        "the raise ends no run"
     );
 }

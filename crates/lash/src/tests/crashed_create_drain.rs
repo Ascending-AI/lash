@@ -1,5 +1,5 @@
 //! FIG-4492's crash window: a session whose create died between its catalog
-//! row and its first head commit, then a drive that drains a queued command
+//! row and its first head commit, then a shift that drains a queued command
 //! (FIG-4553).
 //!
 //! The session manager's create admits the catalog row and commits the
@@ -8,17 +8,17 @@
 //! dies in between leaves a session no commit has written. Its admission
 //! records the creation's complete config with the row, in the catalog's
 //! transaction, so the session the engine opens runs exactly that config:
-//! a drive that drains a command queued for it commits a head that records
+//! a shift that drains a command queued for it commits a head that records
 //! it, and a later deployment opens that head.
 //!
 //! Each law has the real creator make its admission and never its commit:
 //! the create states more initial nodes than the core's commit budget
 //! admits, so its first commit is refused after the row is written. The law
-//! then queues a host append on the command lane and has the engine drive
+//! then queues a host append on the command lane and has the engine shift
 //! the session on the Restate server double.
 //!
 //! A catalog row with no head at all recorded no config. It is never opened
-//! with defaults: the host's open and the engine's drive are both refused
+//! with defaults: the host's open and the engine's shift are both refused
 //! with the typed creation-unrecorded refusal, and nothing is committed.
 //!
 //! Over SQLite memory, SQLite file and PostgreSQL. The PostgreSQL legs are
@@ -263,13 +263,13 @@ async fn queue_an_append(
         .batch_id
 }
 
-/// Ask the engine to drive `session`. No host runtime is open: the engine
+/// Ask the engine to work `session`. No host runtime is open: the engine
 /// opens the session itself.
-async fn schedule_a_drive(core: &LashCore, session: &str) {
+async fn schedule_a_shift(core: &LashCore, session: &str) {
     let engine_port = core.substrate_slot.ports().await.queued;
-    engine_port.schedule_drive(
+    engine_port.schedule_shift(
         &SessionId::fixture(session),
-        lash_core::engine::DriveRequestId::new("after-crashed-create"),
+        lash_core::engine::ShiftRequestId::new("after-crashed-create"),
     );
 }
 
@@ -283,7 +283,7 @@ struct Drained {
 }
 
 /// Queue an append of [`NOTE`] on `session`'s command lane, requiring
-/// `ancestor` when given, and have the engine drive the session until the
+/// `ancestor` when given, and have the engine work the session until the
 /// lane drains.
 async fn drain_an_append(
     core: &LashCore,
@@ -292,7 +292,7 @@ async fn drain_an_append(
     ancestor: Option<&str>,
 ) -> Result<Drained> {
     let command = queue_an_append(store, session, ancestor).await;
-    schedule_a_drive(core, session).await;
+    schedule_a_shift(core, session).await;
     let drained = tokio::time::timeout(std::time::Duration::from_secs(90), async {
         loop {
             match store.list_open_queued_work().await {
@@ -304,7 +304,7 @@ async fn drain_an_append(
     .await;
     assert!(
         drained.is_ok(),
-        "the drive drains the queued command: still open {:?}",
+        "the shift drains the queued command: still open {:?}",
         store.list_open_queued_work().await,
     );
 
@@ -360,7 +360,7 @@ impl Append {
     }
 }
 
-/// An append the store's ancestor check refuses, drained by the first drive
+/// An append the store's ancestor check refuses, drained by the first shift
 /// after a crashed create, settles `StaleBranch`. The head its settlement
 /// commits holds nothing of it and records the creation's config.
 async fn a_refused_append_drained_after_a_crashed_create_leaves_nothing_of_it(
@@ -394,7 +394,7 @@ async fn a_refused_append_drained_after_a_crashed_create_leaves_nothing_of_it(
     Ok(())
 }
 
-/// An accepted append drained by the first drive after a crashed create is
+/// An accepted append drained by the first shift after a crashed create is
 /// in the head its settlement commits exactly once, and that head records
 /// the creation's config.
 async fn an_append_drained_after_a_crashed_create_is_committed_once(
@@ -428,7 +428,7 @@ async fn an_append_drained_after_a_crashed_create_is_committed_once(
     Ok(())
 }
 
-/// The head a drive commits after a crashed create is one a new deployment
+/// The head a shift commits after a crashed create is one a new deployment
 /// opens: after the drain, a deployment restarted over the same stores runs
 /// a turn of the session, which the engine opens from that head.
 async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
@@ -473,7 +473,7 @@ async fn a_session_drained_after_a_crashed_create_reopens_on_a_new_deployment(
 
 /// A catalog row with no head recorded no config, and nothing opens it with
 /// defaults: the host's open is refused with the typed creation-unrecorded
-/// error, the engine's drive of a command queued for it is refused with the
+/// error, the engine's shift of a command queued for it is refused with the
 /// typed code, and neither commits a head.
 async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     storage: Storage,
@@ -497,7 +497,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     );
 
     queue_an_append(&store, ID, None).await;
-    schedule_a_drive(&core, ID).await;
+    schedule_a_shift(&core, ID).await;
     let code = lash_core::RuntimeErrorCode::SessionCreationUnrecorded.as_str();
     let refused = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
@@ -509,7 +509,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
             }
             assert!(
                 matches!(head_of(&store).await, Ok(None)),
-                "no drive commits a head for the row"
+                "no shift commits a head for the row"
             );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
@@ -517,12 +517,12 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     .await;
     assert!(
         refused.is_ok(),
-        "the engine's drive is refused as {code}: invocations {:?}",
+        "the engine's shift is refused as {code}: invocations {:?}",
         invocations(&double)
     );
     assert!(
         head_of(&store).await?.is_none(),
-        "the refused drive committed no head"
+        "the refused shift committed no head"
     );
     assert_eq!(
         store
@@ -537,7 +537,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
 }
 
 /// A send to a catalog row with no head ends: the sender's output answers
-/// the typed creation-unrecorded refusal of the drive that could not open
+/// the typed creation-unrecorded refusal of the shift that could not open
 /// the session, and never waits on a turn that cannot run.
 async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
     storage: Storage,

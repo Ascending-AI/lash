@@ -11,24 +11,24 @@ use lash_core_worker::DurableProcessWorkerConfig;
 use lash_sansio::SessionId;
 
 mod drain;
-pub(crate) mod held_drives;
+pub(crate) mod held_shifts;
 mod recovery;
 pub(crate) mod residents;
 mod runtime_host_config;
 mod session_deletion;
-pub(crate) mod session_driver;
+pub(crate) mod session_shifts;
 pub use session_deletion::SessionDeleteCompletion;
 mod tool_child_context;
 mod work_drivers;
 
 pub use drain::{DeploymentDrainStatus, GenerationDrainStatus};
-use session_driver::{CoreSessionDriver, CoreSessionDriverConfig};
+use session_shifts::{CoreSessionShifts, CoreSessionShiftsConfig};
 use work_drivers::{CoreWorkSetup, WakeDeliveryDriverSetup};
 pub(crate) use work_drivers::{CoreWorkSlot, ResolvedQueuedWork};
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
 pub struct LashCore {
-    pub(crate) drive_owner: lash_core::LeaseOwnerIdentity,
+    pub(crate) shift_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
@@ -55,17 +55,17 @@ pub struct LashCore {
     pub(crate) host_process_engines: lash_core::ProcessEngineRegistry,
     /// Shared across core clones so the work ports are resolved at most once.
     pub(crate) substrate_slot: Arc<CoreWorkSlot>,
-    /// The session driver this core installed on its backend's session-work
+    /// The `SessionShifts` this core installed on its backend's session-work
     /// engine (FIG-3600), as the engine returned it. The engine may hold it
-    /// weakly, so the core keeps it for its whole life, and no longer: a drive
-    /// still running on this core's driver after the core is dropped does not
+    /// weakly, so the core keeps it for its whole life, and no longer: a shift
+    /// still running on this core's `SessionShifts` after the core is dropped does not
     /// keep the install live (FIG-4017).
-    pub(crate) _session_driver: Arc<dyn lash_core::SessionDriver>,
-    /// The sessions this core has open in this process: the driver runs a
-    /// drive on the open session's runtime (FIG-3600 S5b).
+    pub(crate) _session_shifts: Arc<dyn lash_core::SessionShifts>,
+    /// The sessions this core has open in this process: the `SessionShifts` runs a
+    /// shift on the open session's runtime (FIG-3600 S5b).
     pub(crate) residents: Arc<residents::ResidentSessions>,
     /// This core's seat in the recovery leader election (ADR 0109 §1.6),
-    /// shared with its session driver.
+    /// shared with its `SessionShifts`.
     pub(crate) recovery: Arc<recovery::RecoverySlot>,
     /// The context a group tool child of this core's sessions runs under when
     /// its opener is not live where it runs (FIG-3712). The backend's
@@ -81,7 +81,7 @@ pub use lash_core::session_delete::{
 };
 
 /// What a core builds its [`SessionAdministration`](lash_core::SessionAdministration)
-/// from. Its session driver holds one, weakly bound to the core's substrate,
+/// from. Its `SessionShifts` holds one, weakly bound to the core's substrate,
 /// so the reconcile tick can deliver session deletes (ADR 0109 §4).
 #[derive(Clone)]
 pub(crate) struct AdministrationSource {
@@ -117,7 +117,7 @@ impl AdministrationSource {
                 work: queued,
                 scopes: Arc::clone(&resolved_env.core.control.scope_close),
                 scope_close_obligations: Arc::new(
-                    lash_core::runtime::drive::ScopeCloseRelay::over_backend(
+                    lash_core::runtime::shift::ScopeCloseRelay::over_backend(
                         resolved_env.core.backend(),
                         Arc::clone(&self.store_factory),
                         Arc::clone(&resolved_env.core.control.scope_close),
@@ -145,12 +145,12 @@ impl LashCore {
     }
 
     /// The ingress relay an acceptance through this core delivers with
-    /// (ADR 0109 §3): the backend's ingress ledger asking `work` for drives.
+    /// (ADR 0109 §3): the backend's ingress ledger asking `work` for shifts.
     pub(crate) fn ingress_relay(
         &self,
         work: &Arc<ResolvedQueuedWork>,
-    ) -> lash_core::drive::IngressRelay {
-        lash_core::drive::IngressRelay::over_backend(
+    ) -> lash_core::shift::IngressRelay {
+        lash_core::shift::IngressRelay::over_backend(
             &self.backend,
             Arc::clone(work) as Arc<dyn SessionWorkEngine>,
             Arc::clone(&self.env.core.clock),
@@ -168,7 +168,7 @@ impl LashCore {
     ///
     /// The builder takes deployment facts only: the backend, the plugins,
     /// the model registry, tracing and the like. A core keeps no session
-    /// defaults (FIG-4594): every root is created from the
+    /// defaults (FIG-4594): every run is created from the
     /// [`SessionSpec`](crate::SessionSpec) its creator states, and everything
     /// else lash creates derives from a record.
     pub fn builder(backend: Backend) -> LashCoreBuilder {
@@ -203,7 +203,7 @@ impl LashCore {
     /// shutdown, or retirement.
     ///
     /// Turns are counted as well as processes (FIG-3586): a parked turn, or a
-    /// turn whose admission a crashed driver still holds, is unfinished work, so
+    /// turn whose admission a crashed `SessionShifts` still holds, is unfinished work, so
     /// the deployment is not drained until none remains. A store that cannot
     /// count its turns refuses rather than report zero.
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
@@ -294,7 +294,7 @@ impl LashCore {
 
     /// What `generation` still holds (FIG-3799): whether it is marked
     /// draining, its live processes, the parked processes and turns its
-    /// checkpoints hold, the turns its drives admitted that have not settled
+    /// checkpoints hold, the turns its shifts admitted that have not settled
     /// (FIG-3884), the closing sessions every drain waits on, the committed
     /// effect-group children still owed a drain on its lane (FIG-4454), and
     /// the stalled obligations, which it counts but does not wait on
@@ -379,8 +379,8 @@ impl LashCore {
 
     /// The standing session faults after session `after`, in session-id
     /// order, at most `limit` (ADR 0109 §9): corrupt stored data the engine
-    /// met after a root's answer was published, at the root's owed scope
-    /// close or at its drive's next admission. Each carries the typed code
+    /// met after a run's answer was published, at the run's owed scope
+    /// close or at its shift's next admission. Each carries the typed code
     /// and cause the read failed with. A faulted session admits nothing:
     /// every send to it is answered with the fault until
     /// [`clear_session_fault`](Self::clear_session_fault).
@@ -394,7 +394,7 @@ impl LashCore {
 
     /// Clear `session_id`'s fault once its stored data is repaired (ADR 0109
     /// §9): the session admits again. Nothing clears a fault but this verb.
-    /// A fault a scope close recorded also left that root's `ScopeClose`
+    /// A fault a scope close recorded also left that run's `ScopeClose`
     /// obligation stalled, which [`rearm_obligation`](Self::rearm_obligation)
     /// makes due again. `false` when the session has no fault.
     pub async fn clear_session_fault(&self, session_id: &lash_core::SessionId) -> Result<bool> {
@@ -409,7 +409,7 @@ impl LashCore {
             work: Arc::clone(&self.substrate_slot),
             scopes: Arc::clone(&self.env.core.control.scope_close),
             scope_close_obligations: Arc::new(
-                lash_core::runtime::drive::ScopeCloseRelay::over_backend(
+                lash_core::runtime::shift::ScopeCloseRelay::over_backend(
                     &self.backend,
                     Arc::clone(&self.store_factory),
                     Arc::clone(&self.env.core.control.scope_close),
@@ -537,7 +537,7 @@ impl LashCore {
     ///
     /// Resume reloads the flushed state from the parked store (honoring this
     /// core's residency), reinstalls this core's plugin configuration and work
-    /// drivers, and returns a ready [`LashSession`]. The parked store instance
+    /// `SessionShifts` implementations, and returns a ready [`LashSession`]. The parked store instance
     /// is reused directly, so the transcript the session flushed at park time is
     /// visible again after resume.
     ///
@@ -548,7 +548,7 @@ impl LashCore {
         let ParkedSession { inner, binding } = parked;
         // Build the per-session env exactly like `SessionBuilder::open_resolved`:
         // a fresh plugin host with this core's factories, the shared work
-        // drivers, and the core provider resolver already carried on
+        // `SessionShifts` implementations, and the core provider resolver already carried on
         // `self.env`.
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
@@ -561,7 +561,7 @@ impl LashCore {
             self.process_lifecycle_available,
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let runtime = LashRuntime::resume(inner, &env, self.drive_owner.clone()).await?;
+        let runtime = LashRuntime::resume(inner, &env, self.shift_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
         let process_lifecycle_route = self.process_lifecycle_feed.register(&handle);
@@ -621,7 +621,7 @@ impl LashCore {
 
     /// Exact-turn cooperative control for this deployment's effect host.
     ///
-    /// The returned driver is independently usable from any session handle.
+    /// The returned `SessionShifts` is independently usable from any session handle.
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
     pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
@@ -635,9 +635,9 @@ impl LashCore {
     /// without writing graph nodes.
     ///
     /// The name of a state is `(session, head revision)`. A
-    /// [`Target::Input`](lash_core::Target::Input) names the root that
+    /// [`Target::Input`](lash_core::Target::Input) names the run that
     /// applied the input, a [`Target::Turn`](lash_core::Target::Turn) the
-    /// revision that root's terminal commit published, and a
+    /// revision that run's terminal commit published, and a
     /// [`Target::Revision`](lash_core::Target::Revision) the revision
     /// itself. A session that has never run a turn forks at its creation
     /// revision and records the config it was created with.
@@ -649,9 +649,9 @@ impl LashCore {
     /// typed `EmbedError::Store`, and Lash never substitutes another state:
     ///
     /// * [`StoreError::ForkTargetPending`](lash_core::StoreError::ForkTargetPending):
-    ///   the target's root has not finished;
+    ///   the target's run has not finished;
     /// * [`StoreError::ForkTargetUnavailable`](lash_core::StoreError::ForkTargetUnavailable):
-    ///   the root ended without a commit, or the input was withdrawn;
+    ///   the run ended without a commit, or the input was withdrawn;
     /// * [`StoreError::ForkTargetPruned`](lash_core::StoreError::ForkTargetPruned):
     ///   the revision was collected.
     ///
@@ -749,11 +749,11 @@ impl LashCore {
     /// before it: the session's `CloseSession` intent is recorded, the
     /// session is marked closing and refuses new sends with
     /// [`StoreError::SessionClosing`](lash_core::StoreError::SessionClosing),
-    /// and the intent's engine half releases the session's roots and closes
+    /// and the intent's engine half releases the session's runs and closes
     /// its scopes. Its acknowledgement arms the session's physical delete as
     /// an obligation, which this call attempts before it returns.
     ///
-    /// The physical delete waits for the close's cleanup — each root's scope
+    /// The physical delete waits for the close's cleanup — each run's scope
     /// close, each owned scope's parent-end plan, to be delivered. What this
     /// call could not finish is [`SessionDeletion::Closing`]: the session
     /// stays closed and the recovery relay retries the delete with backoff,
@@ -811,7 +811,7 @@ impl LashCore {
             runtime_host,
             self.substrate_slot.setup.process.clone(),
             Arc::clone(&self.substrate_slot.setup.session_work),
-            self.drive_owner.clone(),
+            self.shift_owner.clone(),
         ))
     }
 }
@@ -906,7 +906,7 @@ impl LashCoreBuilder {
     }
 
     /// Register a run definition a sent input's [`RunSpec`](crate::RunSpec)
-    /// may name by its exact [`DefinitionRef`](crate::DefinitionRef). A root
+    /// may name by its exact [`DefinitionRef`](crate::DefinitionRef). A run
     /// whose spec names a revision this deployment does not register retries
     /// and parks, and recovers once a deployment registers it; no other
     /// revision is ever used in its place.
@@ -1066,9 +1066,9 @@ impl LashCoreBuilder {
         self
     }
 
-    /// The termination policy each new root records when it first resolves.
-    /// A root assembles its terminal under the policy it recorded, so a
-    /// change here reaches only roots that start after it.
+    /// The termination policy each new run records when it first resolves.
+    /// A run assembles its terminal under the policy it recorded, so a
+    /// change here reaches only runs that start after it.
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
         self
@@ -1139,7 +1139,7 @@ impl LashCoreBuilder {
     ///
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.
-    pub fn build(mut self, drive_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
+    pub fn build(mut self, shift_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
         #[cfg(feature = "otel-trace")]
         if self.duplicate_telemetry {
             return Err(EmbedError::DuplicateTelemetry);
@@ -1234,10 +1234,10 @@ impl LashCoreBuilder {
         store_factory.bind_effect_host(&env.core.control.effect_host);
         let residents = Arc::new(residents::ResidentSessions::default());
         let session_work = backend.session_work();
-        let (session_driver, installed_driver) = Self::build_session_driver(
+        let (session_shifts, installed_shifts) = Self::build_session_shifts(
             &session_work,
             Arc::clone(&residents),
-            drive_owner.clone(),
+            shift_owner.clone(),
             env.clone(),
             protocol_factory.clone(),
             Arc::new(plugin_factories.clone()),
@@ -1246,11 +1246,11 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             self.recovery_lease.unwrap_or_default(),
         );
-        // The driver's reconcile tick runs every obligation kind's relay
+        // The `SessionShifts`'s reconcile tick runs every obligation kind's relay
         // (ADR 0109 §1.4): the backend's process wiring always supplies a
-        // process port, and the driver administers through the slot bound
+        // process port, and the `SessionShifts` administers through the slot bound
         // below.
-        lash_core::drive::RelaySupply {
+        lash_core::shift::RelaySupply {
             process_work: true,
             session_administration: true,
         }
@@ -1268,12 +1268,12 @@ impl LashCoreBuilder {
         };
 
         let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));
-        // The driver is built before the slot it reconciles through, so the
+        // The `SessionShifts` is built before the slot it reconciles through, so the
         // binding lands here: its recovery pass asks the resolved work port.
-        session_driver.bind_substrate_slot(Arc::downgrade(&substrate_slot));
+        session_shifts.bind_substrate_slot(Arc::downgrade(&substrate_slot));
         // The reconcile tick's session-delete relay administers through the
         // same source the core does (ADR 0109 §4).
-        session_driver.bind_administration(AdministrationSource {
+        session_shifts.bind_administration(AdministrationSource {
             slot: Arc::downgrade(&substrate_slot),
             env: env.clone(),
             store_factory: Arc::clone(&store_factory),
@@ -1295,10 +1295,10 @@ impl LashCoreBuilder {
                     }) as futures_util::future::BoxFuture<'static, _>
                 })
             },
-            drive_owner.clone(),
+            shift_owner.clone(),
         );
         Ok(LashCore {
-            drive_owner,
+            shift_owner,
             env,
             backend,
             build_generation,
@@ -1313,20 +1313,20 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             host_process_engines,
             substrate_slot,
-            _session_driver: installed_driver,
-            recovery: session_driver.recovery(),
+            _session_shifts: installed_shifts,
+            recovery: session_shifts.recovery(),
             residents,
             tool_child_context_source,
         })
     }
 
-    /// The core's session driver (FIG-3600), installed on the backend's
-    /// session-work engine. Returns the driver and the one the engine kept.
+    /// The core's `SessionShifts` (FIG-3600), installed on the backend's
+    /// session-work engine. Returns the `SessionShifts` and the one the engine kept.
     #[allow(clippy::too_many_arguments)]
-    fn build_session_driver(
+    fn build_session_shifts(
         session_work: &Arc<dyn SessionWorkEngine>,
         residents: Arc<residents::ResidentSessions>,
-        drive_owner: lash_core::LeaseOwnerIdentity,
+        shift_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
         plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
@@ -1334,13 +1334,13 @@ impl LashCoreBuilder {
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
-    ) -> (Arc<CoreSessionDriver>, Arc<dyn lash_core::SessionDriver>) {
-        let owner = drive_owner.clone();
+    ) -> (Arc<CoreSessionShifts>, Arc<dyn lash_core::SessionShifts>) {
+        let owner = shift_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
-        let driver = Arc::new(CoreSessionDriver::new(Arc::new(CoreSessionDriverConfig {
+        let shifts = Arc::new(CoreSessionShifts::new(Arc::new(CoreSessionShiftsConfig {
             recovery,
             residents,
-            drive_owner,
+            shift_owner,
             env,
             protocol_factory,
             plugin_factories,
@@ -1348,8 +1348,8 @@ impl LashCoreBuilder {
             live_replay_store,
             process_lifecycle_available,
         })));
-        let installed = install_session_driver(session_work, driver.clone(), &owner);
-        (driver, installed)
+        let installed = install_session_shifts(session_work, shifts.clone(), &owner);
+        (shifts, installed)
     }
 
     /// Bounds of the process observation hub: its per-process ring capacity
@@ -1421,7 +1421,7 @@ impl LashCore {
     /// The model usage of one owner (a session or a process), read from the
     /// deployment's usage ledger (ADR 0125).
     ///
-    /// Like [`Self::sessions`], it opens no session and drives nothing, so it
+    /// Like [`Self::sessions`], it opens no session and executes nothing, so it
     /// answers for a live, parked, refused, deleted-but-retained or
     /// pruned-but-retained owner alike.
     pub async fn owner_usage(
@@ -1450,18 +1450,18 @@ impl LashCore {
             .map_err(Into::into)
     }
 
-    /// One page of an owner's usage runs: the admitted dispatch liabilities,
+    /// One page of an owner's usage meters: the admitted dispatch liabilities,
     /// filtered by `filter`. `next` is `Some` only when more runs exist.
-    pub async fn usage_run_page(
+    pub async fn usage_meter_page(
         &self,
         owner: &lash_core::RuntimeOwner,
-        filter: lash_core::UsageRunFilter,
-        after: Option<&lash_core::UsageRunCursor>,
+        filter: lash_core::UsageMeterFilter,
+        after: Option<&lash_core::UsageMeterCursor>,
         limit: std::num::NonZeroU32,
-    ) -> Result<lash_core::UsageRunPage> {
+    ) -> Result<lash_core::UsageMeterPage> {
         self.backend
             .usage_accounting()
-            .load_usage_run_page(owner, filter, after, limit)
+            .load_usage_meter_page(owner, filter, after, limit)
             .await
             .map_err(Into::into)
     }
@@ -1501,26 +1501,26 @@ pub struct ForkRequest {
     pub observed_processes: Vec<lash_core::ProcessId>,
 }
 
-/// Install `driver` on `port` for the core that `owner` names, and return the
-/// driver the engine serves.
+/// Install `shifts` on `port` for the core that `owner` names, and return the
+/// `SessionShifts` the engine serves.
 ///
-/// One engine serves one driver (get-or-init), so a second core over the same
-/// backend does not drive its own sessions: its plugins, protocol and policy
+/// One engine serves one `SessionShifts` (get-or-init), so a second core over the same
+/// backend does not work its own sessions: its plugins, protocol and policy
 /// are not the ones that run them. That is reported, naming the core whose
-/// driver is ignored (#2290 review, LOW-14).
-fn install_session_driver(
+/// `SessionShifts` is ignored (#2290 review, LOW-14).
+fn install_session_shifts(
     port: &Arc<dyn lash_core::SessionWorkEngine>,
-    driver: Arc<dyn lash_core::SessionDriver>,
+    shifts: Arc<dyn lash_core::SessionShifts>,
     owner: &lash_core::LeaseOwnerIdentity,
-) -> Arc<dyn lash_core::SessionDriver> {
-    let installed = port.install_session_driver(Arc::clone(&driver));
-    if !installed.runs_on(driver.as_ref()) {
+) -> Arc<dyn lash_core::SessionShifts> {
+    let installed = port.install_session_shifts(Arc::clone(&shifts));
+    if !installed.runs_on(shifts.as_ref()) {
         tracing::warn!(
-            event = "session_driver.install_ignored",
+            event = "session_shifts.install_ignored",
             owner_id = %owner.owner_id,
             incarnation_id = %owner.incarnation_id,
-            "the backend's session-work engine already serves another core's session driver; \
-             this core's sessions are driven by that core's plugins, protocol and policy"
+            "the backend's session-work engine already serves another core's SessionShifts; \
+             this core's sessions are executed by that core's plugins, protocol and policy"
         );
     }
     installed

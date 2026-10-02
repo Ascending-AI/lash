@@ -132,7 +132,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
                 Arc::clone(&stores.continuations),
             )
             .with_retry_max_attempts(MAX_ATTEMPTS),
-            session_driver: crate::RestateSessionDriverSlot::new(),
+            session_shifts: crate::RestateSessionShiftsSlot::new(),
             build_generation: lash_core::engine::BuildGeneration::for_test("exhaustion-park"),
             namespace: crate::RestateNamespace::default(),
             fleet: crate::object_state::FleetView::default(),
@@ -166,7 +166,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     .await;
     assert_eq!(
         verdict,
-        lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+        lash_core::runtime::shift::relay::RelayVerdict::Delivered,
         "the armed start is delivered: {verdict:?}"
     );
     let target = format!("LashProcessWorkflow/{process_id}/run");
@@ -329,7 +329,7 @@ pub(super) async fn a_session_turn_started_process_parks_with_its_profile_key(
     .await;
     assert_eq!(
         verdict,
-        lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+        lash_core::runtime::shift::relay::RelayVerdict::Delivered,
         "the armed start is delivered: {verdict:?}"
     );
     let target = format!(

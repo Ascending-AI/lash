@@ -23,8 +23,8 @@ use crate::{
 pub(in crate::runtime) struct CompactionPromptInput {
     pub(in crate::runtime) session_id: crate::SessionId,
     pub(in crate::runtime) protocol_session: Arc<dyn crate::plugin::ProtocolSessionPlugin>,
-    /// The configuration the compaction runs under: the running root's
-    /// admitted one, or the head's for a command no root runs.
+    /// The configuration the compaction runs under: the running run's
+    /// admitted one, or the head's for a command no run executes.
     pub(in crate::runtime) plugin_config: crate::AdmittedPluginConfig,
     pub(in crate::runtime) subagent: Option<crate::SubagentSessionContext>,
 }
@@ -90,7 +90,7 @@ impl RuntimeEffectLocalRunner for RenderCompactionPromptRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::RenderCompactionPrompt { .. } = &envelope.command else {
             return Err(RuntimeEffectControllerError::new(

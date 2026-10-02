@@ -75,17 +75,17 @@ crate::statements! {
         ///
         /// * it is its session's head, the greatest revision recorded;
         /// * a pin resolves to it: a revision pin names it, a turn pin names
-        ///   a root whose terminal commit published it, or an input pin names
-        ///   an input bound to such a root;
+        ///   a run whose terminal commit published it, or an input pin names
+        ///   an input bound to such a run;
         /// * its session's retention policy covers it. `until_gc` covers
         ///   every revision until a host collection (`?1 = 1`) runs, and
         ///   nothing during one. `last_turns` covers the revisions the last
-        ///   `retention_last_turns` committed terminal roots published.
+        ///   `retention_last_turns` committed terminal runs published.
         ///   `head_only` covers nothing. A session with no metadata row is
         ///   `until_gc`.
         ///
         /// A pin whose target has not resolved retains nothing yet, and a
-        /// root that ended without a commit names no revision.
+        /// run that ended without a commit names no revision.
         prune_unretained = "DELETE FROM session_revisions AS revision
              WHERE revision.session_id = COALESCE(?2, revision.session_id)
                AND revision.head_revision < (
@@ -99,16 +99,16 @@ crate::statements! {
                          (pin.target_kind = 'revision'
                           AND pin.target_id = CAST(revision.head_revision AS TEXT))
                          OR (pin.target_kind = 'turn' AND EXISTS (
-                             SELECT 1 FROM session_roots AS ended
+                             SELECT 1 FROM session_runs AS ended
                              WHERE ended.session_id = pin.session_id
-                               AND ended.root = pin.target_id
+                               AND ended.run = pin.target_id
                                AND ended.terminal_head_revision = revision.head_revision
                          ))
                          OR (pin.target_kind = 'input' AND EXISTS (
-                             SELECT 1 FROM session_root_inputs AS bound
-                             JOIN session_roots AS ended
+                             SELECT 1 FROM session_run_inputs AS bound
+                             JOIN session_runs AS ended
                                ON ended.session_id = bound.session_id
-                              AND ended.root = bound.root
+                              AND ended.run = bound.run
                              WHERE bound.session_id = pin.session_id
                                AND bound.input_id = pin.target_id
                                AND ended.terminal_head_revision = revision.head_revision
@@ -125,11 +125,11 @@ crate::statements! {
                      AND (
                          (meta.retention_kind = 'until_gc' AND ?1 = 0)
                          OR (meta.retention_kind = 'last_turns' AND EXISTS (
-                             SELECT 1 FROM session_roots AS ended
+                             SELECT 1 FROM session_runs AS ended
                              WHERE ended.session_id = revision.session_id
                                AND ended.terminal_head_revision = revision.head_revision
                                AND (
-                                   SELECT COUNT(*) FROM session_roots AS newer
+                                   SELECT COUNT(*) FROM session_runs AS newer
                                    WHERE newer.session_id = ended.session_id
                                      AND newer.terminal_head_revision
                                          > ended.terminal_head_revision

@@ -79,11 +79,11 @@ macro_rules! turn_crash_admission_cells_tests {
             (admitted_turn_input_visibility_survives_worker_crash,
                 "held-turn-input-visibility"));
         $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (root_end_commit_crash_before_write_replays_once,
-                "turn-crash-root-end-before-write"));
+            (run_end_commit_crash_before_write_replays_once,
+                "turn-crash-run-end-before-write"));
         $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
-            (root_end_commit_crash_after_write_replays_once,
-                "turn-crash-root-end-after-write"));
+            (run_end_commit_crash_after_write_replays_once,
+                "turn-crash-run-end-after-write"));
     };
 }
 

@@ -927,9 +927,9 @@ impl RestateAdminClient {
 
     /// Kill an invocation: it stops for good, with no compensation and no
     /// further attempt, and the kill propagates to the calls it is waiting
-    /// on. The release half of an operator's cancel or fork of a parked root
-    /// ([`SessionControlEngine::release_root`](lash_core::engine::SessionControlEngine::release_root)),
-    /// run after the store recorded the root's end; never proof of a lash
+    /// on. The release half of an operator's cancel or fork of a parked run
+    /// ([`SessionControlEngine::release_run`](lash_core::engine::SessionControlEngine::release_run)),
+    /// run after the store recorded the run's end; never proof of a lash
     /// outcome (ADR 0104 O4).
     pub async fn kill_invocation(
         &self,
@@ -1079,19 +1079,19 @@ impl RestateAdminClient {
         .await
     }
 
-    /// The paused `LashSession/{session}` drives, on every lane of the
+    /// The paused `LashSession/{session}` shifts, on every lane of the
     /// service (FIG-3795): at most one per lane in practice, since the object
-    /// runs one drive at a time and a paused one holds it.
-    pub(crate) async fn paused_session_drives(
+    /// runs one shift at a time and a paused one holds it.
+    pub(crate) async fn paused_session_shifts(
         &self,
         namespace: &crate::RestateNamespace,
         session: &str,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
         let session = sql_string_literal(session);
         let paused = RestateInvocationLifecycle::Paused.sql_literal();
-        let drives = namespace.service_lanes_sql(crate::LashService::SessionDriver);
+        let shifts = namespace.service_lanes_sql(crate::LashService::SessionShifts);
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {drives} AND target_handler_name = 'drive' AND target_service_key = {session} ORDER BY id"
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = {paused} AND {shifts} AND target_handler_name = 'shift' AND target_service_key = {session} ORDER BY id"
         ))
         .await
     }
@@ -1103,17 +1103,17 @@ impl RestateAdminClient {
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
         let after = sql_string_literal(after.unwrap_or(""));
-        // Every lane of each pinned service (FIG-3795): a drive, root or
+        // Every lane of each pinned service (FIG-3795): a shift, run or
         // segment pinned to a generation lane pauses there, not under the
         // stable name.
-        let drives = namespace.service_lanes_sql(crate::LashService::SessionDriver);
-        let roots = namespace.service_lanes_sql(crate::LashService::TurnDriver);
+        let shifts = namespace.service_lanes_sql(crate::LashService::SessionShifts);
+        let runs = namespace.service_lanes_sql(crate::LashService::TurnDriver);
         let segments = namespace.service_lanes_sql(crate::LashService::ProcessWorkflow);
         // Preparation, children and retirement run outside their opener's
         // invocation, so every dispatcher handler can hold its park.
         let groups = namespace.service_lanes_sql(crate::LashService::EffectGroupDispatch);
         self.query_json(&format!(
-            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({drives} AND target_handler_name = 'drive') OR (({roots} OR {segments}) AND target_handler_name = 'run') OR ({groups} AND target_handler_name IN ('run', 'child', 'retire'))) ORDER BY id LIMIT {}", limit.get()
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND (({shifts} AND target_handler_name = 'shift') OR (({runs} OR {segments}) AND target_handler_name = 'run') OR ({groups} AND target_handler_name IN ('run', 'child', 'retire'))) ORDER BY id LIMIT {}", limit.get()
         )).await
     }
 
@@ -1162,26 +1162,26 @@ impl RestateAdminClient {
         .await
     }
 
-    /// Run status for the open logical roots in this page. The store supplies
-    /// the keys, so retained engine history cannot displace a root still
+    /// Run status for the open logical runs in this page. The store supplies
+    /// the keys, so retained engine history cannot displace a run still
     /// awaiting its terminal. All lanes are returned to protect a live run
     /// from a failed run under another generation's service name.
-    pub(crate) async fn root_runs(
+    pub(crate) async fn run_executions(
         &self,
         namespace: &crate::RestateNamespace,
-        root_keys: &[String],
+        run_keys: &[String],
     ) -> Result<Vec<RestateInvocationStatus>, RestateHttpError> {
-        if root_keys.is_empty() {
+        if run_keys.is_empty() {
             return Ok(Vec::new());
         }
-        let roots = namespace.service_lanes_sql(crate::LashService::TurnDriver);
-        let keys = root_keys
+        let runs = namespace.service_lanes_sql(crate::LashService::TurnDriver);
+        let keys = run_keys
             .iter()
             .map(|key| sql_string_literal(key))
             .collect::<Vec<_>>()
             .join(", ");
         self.query_json(&format!(
-            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {roots} AND target_handler_name = 'run' AND target_service_key IN ({keys})"
+            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE {runs} AND target_handler_name = 'run' AND target_service_key IN ({keys})"
         ))
         .await
     }

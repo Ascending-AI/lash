@@ -7,7 +7,7 @@
 //! creation and at every model change. Execution later binds the recorded
 //! value to a live [`ProviderHandle`] ([`LlmProfiles::bind`]), which serves
 //! the recorded contract or refuses typed. Nothing re-reads the catalog to
-//! decide how a recorded session or root runs.
+//! decide how a recorded session or run executes.
 
 use std::collections::BTreeMap;
 
@@ -56,7 +56,7 @@ pub trait LlmProfiles: Send + Sync {
 
     /// Mint the binding `key` names now. Called when a selection is adopted:
     /// at session creation, at a model patch (even one naming the current
-    /// key), and when a root resolves an explicit per-run key. Never called
+    /// key), and when a run resolves an explicit per-run key. Never called
     /// for a value that is already recorded.
     fn snapshot(&self, key: &LlmProfileKey) -> Result<RecordedLlmProfile, LlmProfileUnavailable>;
 
@@ -69,7 +69,7 @@ pub trait LlmProfiles: Send + Sync {
     /// limits, capability and request defaults every request of the session
     /// is built from. It records nothing about the transport, so `bind`
     /// answers whichever transport the key is registered with on this
-    /// worker, of whatever provider kind, and a session that is mid-root
+    /// worker, of whatever provider kind, and a session that is mid-run
     /// continues on it. Registering a recorded key with a transport is the
     /// host's statement that the transport serves the recorded contract
     /// (instruction role, cache-control dialect, reasoning encoding): lash

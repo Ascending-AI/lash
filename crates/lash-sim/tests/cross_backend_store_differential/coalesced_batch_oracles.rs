@@ -236,22 +236,22 @@ const BATCH_ORACLE_FIXTURES: &[BatchOracleFixture] = &[
     },
 ];
 
-/// The root the admission-gap oracle interrupts and redrives.
-const ADMISSION_GAP_ROOT: &str = "admission-gap-root";
+/// The run the admission-gap oracle interrupts and redrives.
+const ADMISSION_GAP_RUN: &str = "admission-gap-run";
 
-/// Admit `root` headed by the session's first open turn-work batch, composed
+/// Admit `run` headed by the session's first open turn-work batch, composed
 /// under `max_rows` and the explicit host drain policy; `None` once no turn work is open.
 #[expect(
     clippy::expect_used,
     reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
 )]
-async fn admit_oracle_root(
+async fn admit_oracle_run(
     store: &Arc<dyn RuntimeStore>,
-    fence: &lash_core::store::DriveFence,
-    root: &str,
+    fence: &lash_core::store::ShiftFence,
+    run: &str,
     max_rows: usize,
     drain_policy: OracleDrainPolicy,
-) -> Option<lash_core::store::RootAdmission> {
+) -> Option<lash_core::store::RunAdmission> {
     let head = store
         .list_open_queued_work(fence.session())
         .await
@@ -259,24 +259,24 @@ async fn admit_oracle_root(
         .into_iter()
         .filter(|batch| batch.work_class() == lash_core::store::QueuedWorkClass::TurnWork)
         .min_by_key(|batch| batch.enqueue_seq)?;
-    let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+    let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
         fence,
-        &lash_core::TurnId::fixture(root),
+        &lash_core::TurnId::fixture(run),
         lash_core::store::AdmittedHead::Batch(head.batch_id),
     );
     request.policy = lash_core::testing::queued_work_admission_policy(max_rows);
     request.policy.drain_policy = Arc::new(drain_policy);
     Some(
         store
-            .admit_root(&request)
+            .admit_run(&request)
             .await
-            .expect("admit literal-oracle root")
+            .expect("admit literal-oracle run")
             .expect("literal-oracle admission reaches its head"),
     )
 }
 
-/// The literal row ids a root admission took, in admission order.
-fn admitted_row_ids(admission: &lash_core::store::RootAdmission) -> Vec<String> {
+/// The literal row ids a run admission took, in admission order.
+fn admitted_row_ids(admission: &lash_core::store::RunAdmission) -> Vec<String> {
     admission
         .queued
         .iter()
@@ -284,20 +284,20 @@ fn admitted_row_ids(admission: &lash_core::store::RootAdmission) -> Vec<String> 
         .collect()
 }
 
-/// End `root` completing every row `admission` took, so the session's next
-/// root may be admitted.
+/// End `run` completing every row `admission` took, so the session's next
+/// run may be admitted.
 #[expect(
     clippy::expect_used,
     reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
 )]
-async fn end_oracle_root(
+async fn end_oracle_run(
     store: &Arc<dyn RuntimeStore>,
-    fence: &lash_core::store::DriveFence,
-    root: &str,
-    admission: &lash_core::store::RootAdmission,
+    fence: &lash_core::store::ShiftFence,
+    run: &str,
+    admission: &lash_core::store::RunAdmission,
 ) {
-    let root = lash_core::TurnId::fixture(root);
-    let mut settlement = lash_core::store::IngressSettlement::new(root.clone());
+    let run = lash_core::TurnId::fixture(run);
+    let mut settlement = lash_core::store::IngressSettlement::new(run.clone());
     if let Some(queued) = &admission.queued {
         settlement.completed_batches.push(queued.completion());
     }
@@ -318,19 +318,19 @@ async fn end_oracle_root(
         fence,
         settlement,
     );
-    let turn = lash_core::store::PhysicalTurn::derive_turn_id(&root, 0);
-    // Each root's end is its own commit identity: the root's physical turn,
-    // as a driven root's final commit is stamped.
+    let turn = lash_core::store::PhysicalTurn::derive_turn_id(&run, 0);
+    // Each run's end is its own commit identity: the run's physical turn,
+    // as a executed run's final commit is stamped.
     commit.turn_commit = RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
         fence.session().clone(),
         turn.clone(),
         "literal-oracle-end",
     ));
-    commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
-        commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
+    commit.run_terminal = Some(Box::new(lash_core::store::RunTerminalWrite {
+        commit: lash_core::store::TurnCommitId::new(run.clone(), 0),
         turn,
-        root,
-        outcome: lash_core::store::RootCommittedOutcome::Finished(
+        run,
+        outcome: lash_core::store::RunCommittedOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -339,7 +339,7 @@ async fn end_oracle_root(
     store
         .commit_runtime_state(commit)
         .await
-        .expect("end literal-oracle root");
+        .expect("end literal-oracle run");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -401,26 +401,26 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                     format!("literal-oracle-{}:incarnation", runner.name),
                 );
                 let fence = store
-                    .seal_drive_epoch_for_test(
+                    .seal_shift_epoch_for_test(
                         &runner.session_id,
                         &owner,
                         "coalesced-batch-oracle-executor",
                         SESSION_LEASE_TTL_MS,
                     )
                     .await
-                    .expect("seal literal-oracle drive")
+                    .expect("seal literal-oracle shift")
                     .acquired()
-                    .expect("literal-oracle drive is free");
+                    .expect("literal-oracle shift is free");
                 let mut observed = Vec::new();
                 for index in 0.. {
-                    let root = format!("literal-oracle-root-{index}");
+                    let run = format!("literal-oracle-run-{index}");
                     let Some(admission) =
-                        admit_oracle_root(&store, &fence, &root, fixture.max_rows, policy).await
+                        admit_oracle_run(&store, &fence, &run, fixture.max_rows, policy).await
                     else {
                         break;
                     };
                     observed.push(admitted_row_ids(&admission));
-                    end_oracle_root(&store, &fence, &root, &admission).await;
+                    end_oracle_run(&store, &fence, &run, &admission).await;
                 }
                 assert_eq!(
                     observed,
@@ -443,9 +443,9 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                     baseline = Some(observed);
                 }
                 store
-                    .supersede_drive_epoch_for_test(&fence)
+                    .supersede_shift_epoch_for_test(&fence)
                     .await
-                    .expect("release literal-oracle drive");
+                    .expect("release literal-oracle shift");
                 runner.close_reopened_postgres_pool().await;
             }
         }
@@ -506,20 +506,20 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             format!("admission-gap-a-{}:incarnation", runner.name),
         );
         let fence = store
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &runner.session_id,
                 &owner,
                 "coalesced-batch-oracle-executor",
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("seal first admission-gap drive")
+            .expect("seal first admission-gap shift")
             .acquired()
-            .expect("first admission-gap drive is free");
-        let admission = admit_oracle_root(
+            .expect("first admission-gap shift is free");
+        let admission = admit_oracle_run(
             &store,
             &fence,
-            ADMISSION_GAP_ROOT,
+            ADMISSION_GAP_RUN,
             64,
             OracleDrainPolicy::All,
         )
@@ -532,9 +532,9 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             runner.name
         );
         store
-            .supersede_drive_epoch_for_test(&fence)
+            .supersede_shift_epoch_for_test(&fence)
             .await
-            .expect("supersede first admission-gap drive");
+            .expect("supersede first admission-gap shift");
         // The gap row arrives only after the interrupted admission exists, so
         // a redrive must answer the admission's own members, never a
         // re-merge.
@@ -553,26 +553,26 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             format!("admission-gap-b-{}:incarnation", runner.name),
         );
         let fence = store
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &runner.session_id,
                 &owner,
                 "coalesced-batch-oracle-executor",
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("seal successor admission-gap drive")
+            .expect("seal successor admission-gap shift")
             .acquired()
-            .expect("successor admission-gap drive is free");
-        let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+            .expect("successor admission-gap shift is free");
+        let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
             &fence,
-            &lash_core::TurnId::from(ADMISSION_GAP_ROOT),
+            &lash_core::TurnId::from(ADMISSION_GAP_RUN),
             lash_core::store::AdmittedHead::Batch(lash_core::BatchId::from("unused-on-replay")),
         );
         request.policy = lash_core::testing::queued_work_admission_policy(64);
         let redriven = store
-            .admit_root(&request)
+            .admit_run(&request)
             .await
-            .expect("redrive admission-gap root")
+            .expect("redrive admission-gap run")
             .expect("the recorded admission-gap admission answers the redrive");
         assert_eq!(
             admitted_row_ids(&redriven),
@@ -580,11 +580,11 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             "{} backend did not recover the literal admission identity",
             runner.name
         );
-        end_oracle_root(&store, &fence, ADMISSION_GAP_ROOT, &redriven).await;
-        let later = admit_oracle_root(
+        end_oracle_run(&store, &fence, ADMISSION_GAP_RUN, &redriven).await;
+        let later = admit_oracle_run(
             &store,
             &fence,
-            "admission-gap-later-root",
+            "admission-gap-later-run",
             64,
             OracleDrainPolicy::All,
         )
@@ -597,9 +597,9 @@ async fn interrupted_admission_identity_stands_over_a_later_row() {
             runner.name
         );
         store
-            .supersede_drive_epoch_for_test(&fence)
+            .supersede_shift_epoch_for_test(&fence)
             .await
-            .expect("release successor admission-gap drive");
+            .expect("release successor admission-gap shift");
         runner.close_reopened_postgres_pool().await;
     }
 

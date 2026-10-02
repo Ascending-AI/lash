@@ -63,7 +63,7 @@ Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:127`,
 ### Journaled prompt and binding set
 
 The execution-environment sync returns the prompt environment and tool catalog
-as a recorded outcome. The drive installs that outcome on the live pass and
+as a recorded outcome. The shift installs that outcome on the live pass and
 on replay. The live registry supplies executors; it does not replace the
 recorded definitions used by the turn.
 
@@ -110,7 +110,7 @@ Evidence: `crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:97
 
 ### Executable generation at admission
 
-A turn's root admission records the executor's executable generation and
+A turn's run admission records the executor's executable generation and
 checks it before turn effects. The Lashlang cell generation hashes semantic
 identity, bytecode generation, instruction accounting and cell-journal grammar.
 An incompatible recorded generation refuses as `retired_generation` and parks
@@ -125,7 +125,7 @@ and grammar stamps do not imply a compatibility reader for arbitrary builds.
 release boundary.
 
 Evidence: `crates/lash-lashlang-runtime/src/replay_run.rs:82`,
-`crates/lash-core/src/runtime/drive/root.rs:457`,
+`crates/lash-core/src/runtime/shift/run.rs:457`,
 `crates/lash-core/src/runtime/turn_loop/generation_fence.rs:1`.
 
 ### Laws
@@ -159,4 +159,4 @@ fresh dispatch. Observation ids and measured durations can differ between
 attempts and cannot decide committed state. A mismatched generation, envelope
 or binding parks rather than silently accepting a different execution. A
 park requires compatible code or tool restoration, or an operator control
-intent under the root's durable control contract.
+intent under the run's durable control contract.

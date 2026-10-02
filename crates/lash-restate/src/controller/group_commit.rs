@@ -117,8 +117,8 @@ where
 
 /// A tool child's commit that found the point holding a final that is not a
 /// tool terminal: one only an invocation that never drove the child commits,
-/// which exists only once the driving invocation is gone. The committed final
-/// wins, so this drive's own final is refused rather than drained over it.
+/// which exists only once the executing invocation is gone. The committed final
+/// wins, so this shift's own final is refused rather than drained over it.
 pub(crate) fn committed_final_is_not_a_tool_terminal(
     group_key: &str,
     replay_key: &str,
@@ -128,7 +128,7 @@ pub(crate) fn committed_final_is_not_a_tool_terminal(
     group_shape_error(format!(
         "effect group {group_key} child `{replay_key}` drove to a tool terminal, but \
          the §4 point already holds its final at rank {rank} ({committed:?}), \
-         committed by an invocation that did not drive it"
+         committed by an invocation that did not shift it"
     ))
 }
 

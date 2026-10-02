@@ -293,7 +293,7 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
             "DELETE FROM lash_session_head WHERE session_id = $1",
             "DELETE FROM lash_graph_nodes WHERE session_id = $1",
             "DELETE FROM lash_usage_facts WHERE owner_kind = 'session' AND owner_id = $1",
-            "DELETE FROM lash_usage_runs WHERE owner_kind = 'session' AND owner_id = $1",
+            "DELETE FROM lash_usage_meters WHERE owner_kind = 'session' AND owner_id = $1",
             "DELETE FROM lash_usage_owner_retirements WHERE owner_kind = 'session' AND owner_id = $1",
             "DELETE FROM lash_session_meta WHERE session_id = $1",
             "DELETE FROM lash_runtime_turn_commits WHERE session_id = $1",
@@ -460,7 +460,7 @@ pub fn e2e_backend(
     ))
 }
 
-/// The Restate admin API the harness's processes reach: parked-root verbs
+/// The Restate admin API the harness's processes reach: parked-run verbs
 /// and park recovery run through it.
 pub fn restate_admin_url() -> String {
     env("RESTATE_ADMIN_URL", "http://restate:9070")
@@ -1419,20 +1419,20 @@ async fn record_tool_attempt(
     Ok(count)
 }
 
-/// The engine's queued roots on `session_id`, oldest first. The engine drives
+/// The engine's queued runs on `session_id`, oldest first. The engine executes
 /// queued work, a process wake among it, the moment it is enqueued, under the
-/// queued run's `drive-run:` root; each committed turn's key names its root.
-pub async fn driven_queued_roots(pool: &PgPool, session_id: &str) -> Result<Vec<String>> {
+/// queued run's `shift-run:` run; each committed turn's key names its run.
+pub async fn executed_queued_runs(pool: &PgPool, session_id: &str) -> Result<Vec<String>> {
     let keys: Vec<String> = sqlx::query_scalar(
         "SELECT turn_id FROM lash_runtime_turn_commits
-         WHERE session_id = $1 AND turn_id LIKE '%drive-run:%'
+         WHERE session_id = $1 AND turn_id LIKE '%shift-run:%'
          ORDER BY committed_at_ms, turn_id",
     )
     .bind(session_id)
     .fetch_all(pool)
     .await
-    .with_context(|| format!("list the queued roots driven on `{session_id}`"))?;
-    let mut roots = Vec::new();
+    .with_context(|| format!("list the queued runs executed on `{session_id}`"))?;
+    let mut runs = Vec::new();
     for key in keys {
         let Ok(key) = serde_json::from_str::<serde_json::Value>(&key) else {
             continue;
@@ -1444,14 +1444,14 @@ pub async fn driven_queued_roots(pool: &PgPool, session_id: &str) -> Result<Vec<
         let Some(turn) = scope["turn_id"].as_str() else {
             continue;
         };
-        if turn.starts_with("drive-run:")
+        if turn.starts_with("shift-run:")
             && !turn.contains(":agent-frame:")
-            && !roots.iter().any(|root| root == turn)
+            && !runs.iter().any(|run| run == turn)
         {
-            roots.push(turn.to_string());
+            runs.push(turn.to_string());
         }
     }
-    Ok(roots)
+    Ok(runs)
 }
 
 /// Whether the one crash exit keyed by `marker` (a workflow id) was taken.

@@ -86,7 +86,7 @@ mod tests {
 
         async fn retain_admission_base(
             &self,
-            _fence: &super::super::DriveFence,
+            _fence: &super::super::ShiftFence,
             _base: &super::super::SessionHeadRef,
         ) -> Result<(), StoreError> {
             Ok(())
@@ -145,7 +145,7 @@ mod tests {
 
         async fn raise_pending_follow_on_attempts(
             &self,
-            fence: &super::super::DriveFence,
+            fence: &super::super::ShiftFence,
             follow_on_turn_id: &crate::TurnId,
             _recovering: &crate::build_generation::BuildGeneration,
         ) -> Result<super::super::PendingFollowOn, StoreError> {

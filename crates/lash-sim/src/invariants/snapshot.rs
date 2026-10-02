@@ -62,7 +62,7 @@ pub struct InputRow {
     /// The input's state; a queued batch's terminal cause once it is a
     /// tombstone, and none while it is open.
     pub state: Option<String>,
-    pub admitted_root: Option<String>,
+    pub admitted_run: Option<String>,
     pub obligation_state: Option<String>,
 }
 
@@ -70,33 +70,33 @@ impl InputRow {
     #[must_use]
     pub fn render(&self) -> String {
         format!(
-            "{} {}/{}: state={} admitted_root={} obligation={}",
+            "{} {}/{}: state={} admitted_run={} obligation={}",
             self.table,
             self.session,
             self.id,
             self.state.as_deref().unwrap_or("-"),
-            self.admitted_root.as_deref().unwrap_or("NULL"),
+            self.admitted_run.as_deref().unwrap_or("NULL"),
             self.obligation_state.as_deref().unwrap_or("NULL"),
         )
     }
 }
 
-/// One logical root of a session (`session_roots`).
+/// One logical run of a session (`session_runs`).
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct RootRow {
+pub struct RunRow {
     pub session: String,
-    pub root: String,
+    pub run: String,
     pub admitted: bool,
     pub terminal_kind: Option<String>,
 }
 
-impl RootRow {
+impl RunRow {
     #[must_use]
     pub fn render(&self) -> String {
         format!(
-            "session_roots {}/{}: admitted={} terminal={}",
+            "session_runs {}/{}: admitted={} terminal={}",
             self.session,
-            self.root,
+            self.run,
             self.admitted,
             self.terminal_kind.as_deref().unwrap_or("NULL")
         )
@@ -182,9 +182,9 @@ pub struct StoreSnapshot {
     pub label: String,
     pub obligations: Vec<ObligationRow>,
     pub inputs: Vec<InputRow>,
-    pub roots: Vec<RootRow>,
-    /// `(session, input, root)` of every `session_root_inputs` binding.
-    pub root_inputs: Vec<(String, String, String)>,
+    pub runs: Vec<RunRow>,
+    /// `(session, input, run)` of every `session_run_inputs` binding.
+    pub run_inputs: Vec<(String, String, String)>,
     pub artifacts: Vec<ArtifactRow>,
     /// `(referrer_kind, referrer_id)` of every ended referrer's fence.
     pub fences: BTreeSet<(String, String)>,
@@ -250,7 +250,7 @@ impl StoreSnapshot {
         for row in read(
             stores,
             core,
-            "SELECT session_id, input_id, state, admitted_root, obligation_state \
+            "SELECT session_id, input_id, state, admitted_run, obligation_state \
              FROM pending_turn_inputs ORDER BY session_id, enqueue_seq",
         )? {
             snapshot.inputs.push(InputRow {
@@ -258,14 +258,14 @@ impl StoreSnapshot {
                 session: required(&row, "session_id"),
                 id: required(&row, "input_id"),
                 state: text(&row, "state"),
-                admitted_root: text(&row, "admitted_root"),
+                admitted_run: text(&row, "admitted_run"),
                 obligation_state: text(&row, "obligation_state"),
             });
         }
         for row in read(
             stores,
             core,
-            "SELECT session_id, batch_id, terminal_cause, admitted_root, obligation_state \
+            "SELECT session_id, batch_id, terminal_cause, admitted_run, obligation_state \
              FROM queued_work_batches ORDER BY session_id, enqueue_seq",
         )? {
             snapshot.inputs.push(InputRow {
@@ -273,19 +273,19 @@ impl StoreSnapshot {
                 session: required(&row, "session_id"),
                 id: required(&row, "batch_id"),
                 state: text(&row, "terminal_cause"),
-                admitted_root: text(&row, "admitted_root"),
+                admitted_run: text(&row, "admitted_run"),
                 obligation_state: text(&row, "obligation_state"),
             });
         }
         for row in read(
             stores,
             core,
-            "SELECT session_id, root, admission_json IS NOT NULL AS admitted, terminal_kind \
-             FROM session_roots ORDER BY session_id, root",
+            "SELECT session_id, run, admission_json IS NOT NULL AS admitted, terminal_kind \
+             FROM session_runs ORDER BY session_id, run",
         )? {
-            snapshot.roots.push(RootRow {
+            snapshot.runs.push(RunRow {
                 session: required(&row, "session_id"),
-                root: required(&row, "root"),
+                run: required(&row, "run"),
                 admitted: text(&row, "admitted").as_deref() == Some("1"),
                 terminal_kind: text(&row, "terminal_kind"),
             });
@@ -293,13 +293,13 @@ impl StoreSnapshot {
         for row in read(
             stores,
             core,
-            "SELECT session_id, input_id, root FROM session_root_inputs \
+            "SELECT session_id, input_id, run FROM session_run_inputs \
              ORDER BY session_id, input_id",
         )? {
-            snapshot.root_inputs.push((
+            snapshot.run_inputs.push((
                 required(&row, "session_id"),
                 required(&row, "input_id"),
-                required(&row, "root"),
+                required(&row, "run"),
             ));
         }
         for row in read(

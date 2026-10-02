@@ -1,12 +1,12 @@
 //! A deployment opened over existing stores under another Restate authority
 //! answers its senders (FIG-4597).
 //!
-//! A session's first root records the cancellation binding of the authority
+//! A session's first run records the cancellation binding of the authority
 //! it ran under. A deployment that later runs over the same stores under
 //! another authority presents another binding, and the store refuses it on
-//! every attempt: `TurnCancelBindingMismatch`. The refusal is the root's
-//! recorded answer, so the root ends with it and its sender reads the typed
-//! cause. Retried as an attempt fault, the root paused after its attempt
+//! every attempt: `TurnCancelBindingMismatch`. The refusal is the run's
+//! recorded answer, so the run ends with it and its sender reads the typed
+//! cause. Retried as an attempt fault, the run paused after its attempt
 //! budget and its sender waited on it forever.
 
 use super::*;
@@ -14,8 +14,8 @@ use super::*;
 const SEED: u64 = 0x4597_0001;
 const OTHER_SEED: u64 = 0x4597_0002;
 
-/// How long a root the deployment can never run may take to answer its
-/// sender. The bound turns a sender left waiting on a paused root into a
+/// How long a run the deployment can never run may take to answer its
+/// sender. The bound turns a sender left waiting on a paused run into a
 /// failure.
 const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -25,10 +25,10 @@ fn core_over(double: &lash_restate_test::RestateTestBackend) -> Result<LashCore>
         .build(crate::testing::runtime_lease_owner())
 }
 
-/// A session runs a root under one authority. Another deployment then opens
+/// A session executes a run under one authority. Another deployment then opens
 /// the same stores under another authority, and each send to the session is
 /// answered, within a bound, with the typed binding mismatch naming both
-/// authorities. No root is left paused.
+/// authorities. No run is left paused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() -> Result<()> {
     const ID: &str = "wrong-authority-redeploy";
@@ -43,7 +43,7 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
             .output()
             .await?;
         first
-            .settle_session_drive(&lash_core::SessionId::from(ID))
+            .settle_session_shift(&lash_core::SessionId::from(ID))
             .await;
     }
     let stores = Arc::clone(first.engine_stores());
@@ -56,8 +56,8 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
     .await
     .expect("another deployment over the same stores");
     let core = core_over(&second)?;
-    // Twice: the refusal ends the root it met, so the next send is a new
-    // root that is refused the same way rather than one queued behind it.
+    // Twice: the refusal ends the run it met, so the next send is a new
+    // run that is refused the same way rather than one queued behind it.
     for send in ["the first send", "the second send"] {
         let answer = tokio::time::timeout(ANSWERS_WITHIN, async {
             core.session(ID)
@@ -70,7 +70,7 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
         .await;
         let Ok(answer) = answer else {
             panic!(
-                "{send}: a root refused for its session's cancellation binding answers its \
+                "{send}: a run refused for its session's cancellation binding answers its \
                  sender: none in {ANSWERS_WITHIN:?}, invocations {:?}",
                 invocations(&second)
             );
@@ -110,14 +110,14 @@ async fn a_send_under_another_authority_is_answered_with_the_binding_mismatch() 
         .collect::<Vec<_>>();
     assert!(
         paused.is_empty(),
-        "no refused root is left paused: {paused:?}"
+        "no refused run is left paused: {paused:?}"
     );
     Ok(())
 }
 
-mod permanent_root_admission {
+mod permanent_run_admission {
     use super::*;
-    use lash_core::store::{AdmitRootRequest, DriveFence, RootAdmission, RuntimeStoreDecorator};
+    use lash_core::store::{AdmitRunRequest, RunAdmission, RuntimeStoreDecorator, ShiftFence};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,7 +159,7 @@ mod permanent_root_admission {
         async fn validate_turn_cancellation_binding(
             &self,
             session_id: &SessionId,
-            fence: &DriveFence,
+            fence: &ShiftFence,
             binding_id: &str,
             admitted_scope: &lash_core::ExecutionScope,
         ) -> std::result::Result<(), StoreError> {
@@ -181,12 +181,12 @@ mod permanent_root_admission {
                 .await
         }
 
-        async fn admit_root(
+        async fn admit_run(
             &self,
-            request: &AdmitRootRequest,
-        ) -> std::result::Result<Option<RootAdmission>, StoreError> {
+            request: &AdmitRunRequest,
+        ) -> std::result::Result<Option<RunAdmission>, StoreError> {
             self.check(Call::Admission)?;
-            self.inner.admit_root(request).await
+            self.inner.admit_run(request).await
         }
     }
 
@@ -223,7 +223,7 @@ mod permanent_root_admission {
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())
             .expect("the core over the fenced admission store");
-        const ID: &str = "permanent-root-admission";
+        const ID: &str = "permanent-run-admission";
         create_catalog_session(&core, ID)
             .await
             .expect("create the session");
@@ -240,7 +240,7 @@ mod permanent_root_admission {
         let answer = tokio::time::timeout(
             ANSWERS_WITHIN,
             durable
-                .send(TurnInput::text("a permanently refused root"))
+                .send(TurnInput::text("a permanently refused run"))
                 .output(),
         )
         .await
@@ -279,28 +279,28 @@ mod permanent_root_admission {
         assert!(error.is_terminal() && !error.is_retryable());
         tokio::time::timeout(
             ANSWERS_WITHIN,
-            double.settle_session_drive(&SessionId::from(ID)),
+            double.settle_session_shift(&SessionId::from(ID)),
         )
         .await
-        .expect("the refused root and its drive finish");
+        .expect("the refused run and its shift finish");
         assert_eq!(
             store.refusals.load(Ordering::SeqCst),
             1,
             "the permanent refusal is never retried"
         );
         let server = double.server();
-        let roots: Vec<_> = server
+        let runs: Vec<_> = server
             .invocations()
             .into_iter()
             .filter(|view| view.target.starts_with("LashTurn") && view.target.ends_with("/run"))
             .collect();
-        assert_eq!(roots.len(), 1, "one refused root: {roots:?}");
-        let root = &roots[0];
-        assert_eq!(root.retry_count, 0, "{root:?}");
-        assert_ne!(root.status, "paused");
+        assert_eq!(runs.len(), 1, "one refused run: {runs:?}");
+        let run = &runs[0];
+        assert_eq!(run.retry_count, 0, "{run:?}");
+        assert_ne!(run.status, "paused");
         let recorded: Vec<serde_json::Value> = server
-            .journal(&root.id)
-            .expect("the root's retained journal")
+            .journal(&run.id)
+            .expect("the run's retained journal")
             .iter()
             .filter_map(|entry| entry.run_completion()?.ok())
             .filter_map(|bytes| serde_json::from_slice(&bytes).ok())

@@ -107,7 +107,7 @@ pub trait SessionStateService: Send + Sync {
 /// ordinary session's initial head and returns its handle. There is no close
 /// verb — lash never deletes sessions — and no turn verb: a session runs by
 /// opening it through the ordinary open path, and a process's
-/// `SessionTurn` input is initialized and driven inside the process run.
+/// `SessionTurn` input is initialized and executed inside the process run.
 #[async_trait::async_trait]
 pub trait SessionLifecycleService: Send + Sync {
     async fn create_session(

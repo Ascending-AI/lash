@@ -1,6 +1,6 @@
 //! `lash-perf` — developer-only synthetic runtime benchmark binary.
 //!
-//! Driven by `scripts/profile_runtime.py` and
+//! Executed by `scripts/profile_runtime.py` and
 //! `scripts/profile_runtime_stack.py`.
 //! It runs provider-free runtime scenarios against in-process fixtures and
 //! writes a structured JSON report.
@@ -208,7 +208,7 @@ enum Command {
         dhat_frames: Option<usize>,
     },
 
-    /// The cross-worker child a latency case drives: serves lash's Restate
+    /// The cross-worker child a latency case executes: serves lash's Restate
     /// services over the shared store directory. Not run by hand; `latency`
     /// spawns it.
     LatencyWorker {

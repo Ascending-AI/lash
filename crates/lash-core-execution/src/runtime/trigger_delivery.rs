@@ -9,7 +9,7 @@
 //! Nothing re-emits the occurrence: a replayed emit would only find the
 //! reservation already held.
 
-use crate::runtime::drive::relay::{
+use crate::runtime::shift::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
 };
 use crate::store::{ObligationKey, ObligationKind, ObligationLedger};

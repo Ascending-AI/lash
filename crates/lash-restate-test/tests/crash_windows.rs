@@ -23,11 +23,11 @@
 //!   again: the restarted deployment's reconcile tick takes the reservation's
 //!   `TriggerDelivery` obligation and starts exactly one process, bound to
 //!   the delivery, which runs to its terminal once.
-//! * **The recovery pass inside a process's drive (FIG-4378, FIG-4403).** A
-//!   `SessionTurn` process runs its child root, and every root its drive
+//! * **The recovery pass inside a process's shift (FIG-4378, FIG-4403).** A
+//!   `SessionTurn` process runs its child run, and every run its shift
 //!   admits ahead of it in a reused session, in its own run, never as a
-//!   `LashTurn` run. The lost-root pass runs while such a root holds its
-//!   model call, keeps the root and its admitted input, and the root
+//!   `LashTurn` run. The lost-run pass runs while such a run holds its
+//!   model call, keeps the run and its admitted input, and the run
 //!   commits.
 
 #![expect(
@@ -1478,17 +1478,17 @@ async fn group_close_and_retirement_crash_matrix(engine: Engine) {
             1,
             "the recorded presentation never re-executes"
         );
-        let terminal = lash_core::store::RootStore::root_terminal(
+        let terminal = lash_core::store::RunStore::run_terminal(
             engine.stores().session_store_factory().as_ref(),
             &lash_core::SessionId::fixture(session_id),
             &lash_core::TurnId::fixture(turn_id),
         )
         .await
-        .expect("read root accounting after retirement")
-        .expect("the root committed");
+        .expect("read run accounting after retirement")
+        .expect("the run committed");
         assert!(matches!(
             terminal.cause,
-            lash_core::store::RootTerminalCause::Committed { .. }
+            lash_core::store::RunTerminalCause::Committed { .. }
         ));
     }
     engine.finish().await;
@@ -1593,7 +1593,7 @@ async fn cell_parity(
         BOUND,
         session
             .send(lash::TurnInput::text("two isolated cells"))
-            .id("cell-parity-root")
+            .id("cell-parity-run")
             .output(),
     )
     .await
@@ -1699,10 +1699,10 @@ async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
 
 #[path = "crash_windows/attachment_delivery.rs"]
 mod attachment_delivery;
-#[path = "crash_windows/process_root_recovery.rs"]
-mod process_root_recovery;
-#[path = "crash_windows/superseded_child_root.rs"]
-mod superseded_child_root;
+#[path = "crash_windows/process_run_recovery.rs"]
+mod process_run_recovery;
+#[path = "crash_windows/superseded_child_run.rs"]
+mod superseded_child_run;
 #[path = "crash_windows/superseded_fence_commit.rs"]
 mod superseded_fence_commit;
 

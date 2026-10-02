@@ -1,7 +1,7 @@
 //! The invocation chains an effect group's seats and admission cost
 //! (FIG-4308, ADR 0099 §5 as amended).
 //!
-//! A root with a parallel 4-tool batch spent most of its live-server time in
+//! A run with a parallel 4-tool batch spent most of its live-server time in
 //! Restate invocations issued one after another. Two chains dominated. Every
 //! rank seated behind the previous one: the rank was allocated at the seat,
 //! so a child's drain and its seat both waited at the §5 barrier for the last
@@ -11,7 +11,7 @@
 //! every child's own admission queues on.
 //!
 //! These laws read the journals a real width-4 tool batch leaves on the server
-//! double, driven by the endpoint's own turn runner:
+//! double, executed by the endpoint's own turn runner:
 //!
 //! - a seated rank waits on no sibling: no child of an intent-free batch reads
 //!   the §5 barrier or parks on a drained wake, each commits once, and after
@@ -30,7 +30,7 @@ use lash_restate_test::protocol::generated::CallCommandMessage;
 
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
-/// The batch width the ticket's root runs.
+/// The batch width the ticket's run executes.
 pub(super) const WIDTH: usize = 4;
 
 /// The most calls a child issues strictly after its §4 commit, through its

@@ -11,7 +11,7 @@ use lash_core::FleetFormat;
 use crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMATS;
 use crate::effect_group::{EFFECT_GROUP_PAYLOAD_FAMILY, EFFECT_GROUP_STATE_FORMATS};
 use crate::object_state::{FORMAT_FIELD, StampedValue, StoredValueFormats, decode_stamped_bytes};
-use crate::session_driver::TURN_OUTCOME_FORMATS;
+use crate::session_shifts::TURN_OUTCOME_FORMATS;
 
 const OWNER: &str = "lash-restate";
 

@@ -2,7 +2,7 @@
 //!
 //! A provider attempt may be billed the moment it leaves the process, so the
 //! obligation to account for it has to exist before it does. The gate is
-//! where that obligation is taken: the durable kernel's usage run admits
+//! where that obligation is taken: the durable kernel's usage meter admits
 //! itself to storage on its first attempt, and a refusal dispatches nothing.
 
 use super::support::*;

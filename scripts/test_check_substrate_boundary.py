@@ -10,10 +10,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/check-substrate-boundary.sh"
-ALLOWLIST = ROOT / "scripts/drive-determinism-allowlist.txt"
-COUNT = ROOT / "scripts/drive-determinism-allowlist.count"
-STORE_ALLOWLIST = ROOT / "scripts/drive-store-allowlist.txt"
-STORE_COUNT = ROOT / "scripts/drive-store-allowlist.count"
+ALLOWLIST = ROOT / "scripts/shift-determinism-allowlist.txt"
+COUNT = ROOT / "scripts/shift-determinism-allowlist.count"
+STORE_ALLOWLIST = ROOT / "scripts/shift-store-allowlist.txt"
+STORE_COUNT = ROOT / "scripts/shift-store-allowlist.count"
 
 ENTRY_SEPARATOR = "  |  "
 
@@ -59,7 +59,7 @@ FIXTURE_FILES = [
     "crates/lash-restate/src/effect_group.rs",
     "crates/lash-restate/src/durable_wait.rs",
 ]
-FIXTURE_DRIVE_FILE = "crates/lash-core/src/runtime/logical_turn.rs"
+FIXTURE_SHIFT_FILE = "crates/lash-core/src/runtime/logical_turn.rs"
 FIXTURE_HIT_LINE = "    tokio::spawn(worker());"
 FIXTURE_ENGINE_ID_FILE = "crates/lash-core/src/runtime/turn_loop/engine_ids.rs"
 FIXTURE_ENGINE_ID_LINE = "    let _ = context.restate_invocation_id();"
@@ -67,12 +67,12 @@ FIXTURE_ENGINE_ERROR_FILE = "crates/lash-core-store/src/runtime_error.rs"
 FIXTURE_ENGINE_ERROR_LINE = "    RestateProcessAwait,"
 FIXTURE_ENGINE_FORMAT_FILE = "crates/lash/src/formats.rs"
 FIXTURE_ENGINE_FORMAT_LINE = "    RestateDurableWaitRequest,"
-FIXTURE_STORE_FILE = "crates/lash-core/src/runtime/drive.rs"
+FIXTURE_STORE_FILE = "crates/lash-core/src/runtime/shift.rs"
 FIXTURE_STORE_LINE = "    let open = store.list_pending_turn_inputs(session).await?;"
 FIXTURE_STORE_TEXT = "let open = store.list_pending_turn_inputs(session).await?;"
 
 
-class DriveDeterminismRatchetTests(unittest.TestCase):
+class ShiftDeterminismRatchetTests(unittest.TestCase):
     def run_check(self, cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["bash", str(cwd / "scripts" / SCRIPT.name)],
@@ -85,7 +85,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def build_fixture(
         self,
         root: Path,
-        drive_lines: list[str],
+        shift_lines: list[str],
         allowlist_entries: list[str],
         store_entries: list[str] | None = None,
     ) -> None:
@@ -100,9 +100,9 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             path = root / file
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
-        (root / FIXTURE_DRIVE_FILE).write_text("\n".join(drive_lines) + "\n")
+        (root / FIXTURE_SHIFT_FILE).write_text("\n".join(shift_lines) + "\n")
 
-    def test_drive_determinism_rule_passes_on_the_tree(self) -> None:
+    def test_shift_determinism_rule_passes_on_the_tree(self) -> None:
         result = subprocess.run(
             ["bash", str(SCRIPT)],
             cwd=ROOT,
@@ -139,7 +139,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
 
     def test_store_allowlist_only_shrinks(self) -> None:
         # The store-call rule pins every direct persistence call in the
-        # session drive the same way. Its count file caps the calls made
+        # session shift the same way. Its count file caps the calls made
         # outside any recorded step (every tag but RECORDED): those may only
         # shrink, while a call inside a recorded step's body is pinned
         # RECORDED and raises no cap.
@@ -160,13 +160,13 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
         cap = int(STORE_COUNT.read_text().strip())
         self.assertLessEqual(unrecorded, cap)
 
-    def test_unpinned_store_call_in_the_drive_fails(self) -> None:
+    def test_unpinned_store_call_in_the_shift_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             hit = root / FIXTURE_STORE_FILE
             hit.parent.mkdir(parents=True, exist_ok=True)
-            hit.write_text("async fn drive() {\n" + FIXTURE_STORE_LINE + "\n}\n")
+            hit.write_text("async fn shift() {\n" + FIXTURE_STORE_LINE + "\n}\n")
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 6 failed", result.stderr)
@@ -176,20 +176,20 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["async fn drive() {", "self.before_llm_call(machine, request).await;", "}"],
+                ["async fn shift() {", "self.before_llm_call(machine, request).await;", "}"],
                 [],
             )
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 5 failed", result.stderr)
 
-    def test_unpinned_checkpoint_admission_in_the_drive_fails(self) -> None:
+    def test_unpinned_checkpoint_admission_in_the_shift_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {}"], [])
+            self.build_fixture(root, ["fn shift() {}"], [])
             hit = root / FIXTURE_STORE_FILE
             hit.write_text(
-                "async fn drive() {\n"
+                "async fn shift() {\n"
                 "store.admit_at_checkpoint(&request);\n"
                 "}\n"
             )
@@ -197,18 +197,18 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 6 failed", result.stderr)
 
-    def test_pinned_store_call_in_the_drive_passes(self) -> None:
+    def test_pinned_store_call_in_the_shift_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["fn drive() {", "}"],
+                ["fn shift() {", "}"],
                 [],
                 [f"{FIXTURE_STORE_FILE}{ENTRY_SEPARATOR}{FIXTURE_STORE_TEXT}{ENTRY_SEPARATOR}1  # FIG-3824"],
             )
             hit = root / FIXTURE_STORE_FILE
             hit.parent.mkdir(parents=True, exist_ok=True)
-            hit.write_text("async fn drive() {\n" + FIXTURE_STORE_LINE + "\n}\n")
+            hit.write_text("async fn shift() {\n" + FIXTURE_STORE_LINE + "\n}\n")
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -217,7 +217,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["fn drive() {", "}"],
+                ["fn shift() {", "}"],
                 [],
                 [f"{FIXTURE_STORE_FILE}{ENTRY_SEPARATOR}{FIXTURE_STORE_TEXT}{ENTRY_SEPARATOR}1  # FIG-3824"],
             )
@@ -230,14 +230,14 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["fn drive() {", FIXTURE_HIT_LINE, "}"],
+                ["fn shift() {", FIXTURE_HIT_LINE, "}"],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
                 ],
             )
-            drive_file = root / FIXTURE_DRIVE_FILE
-            drive_file.write_text("\n\n\n" + drive_file.read_text())
+            shift_file = root / FIXTURE_SHIFT_FILE
+            shift_file.write_text("\n\n\n" + shift_file.read_text())
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -246,9 +246,9 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["fn drive() {", FIXTURE_HIT_LINE, "    let _id = Uuid::new_v4();", "}"],
+                ["fn shift() {", FIXTURE_HIT_LINE, "    let _id = Uuid::new_v4();", "}"],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
                 ],
             )
@@ -261,9 +261,9 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["fn drive() {", FIXTURE_HIT_LINE, FIXTURE_HIT_LINE, "}"],
+                ["fn shift() {", FIXTURE_HIT_LINE, FIXTURE_HIT_LINE, "}"],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
                 ],
             )
@@ -274,7 +274,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_identifier_in_a_kernel_crate_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             (root / FIXTURE_ENGINE_ID_FILE).write_text(FIXTURE_ENGINE_ID_LINE + "\n")
             result = self.run_check(root)
         self.assertNotEqual(result.returncode, 0)
@@ -283,7 +283,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_identifier_in_the_engine_crate_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             hit = root / "crates/lash-restate/src/controller/engine_ids.rs"
             hit.write_text(FIXTURE_ENGINE_ID_LINE + "\n")
             result = self.run_check(root)
@@ -292,7 +292,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_error_variant_in_runtime_error_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             hit = root / FIXTURE_ENGINE_ERROR_FILE
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("pub enum RuntimeErrorCode {\n" + FIXTURE_ENGINE_ERROR_LINE + "\n}\n")
@@ -303,7 +303,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_type_outside_runtime_error_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             hit = root / "crates/lash-core-store/src/other.rs"
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("pub struct RestateBackend;\n")
@@ -313,7 +313,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_format_in_the_format_table_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             (root / FIXTURE_ENGINE_FORMAT_FILE).write_text(
                 "pub enum DurableFormat {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n"
             )
@@ -324,7 +324,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_format_in_preflight_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             hit = root / "crates/lash/src/preflight/report.rs"
             hit.parent.mkdir(parents=True, exist_ok=True)
             hit.write_text("    format: DurableFormat::RestateProcessJournal,\n")
@@ -335,17 +335,17 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
     def test_engine_named_format_in_the_engine_module_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.build_fixture(root, ["fn drive() {", "}"], [])
+            self.build_fixture(root, ["fn shift() {", "}"], [])
             hit = root / "crates/lash/src/restate.rs"
             hit.write_text("pub enum EngineFormats {\n" + FIXTURE_ENGINE_FORMAT_LINE + "\n}\n")
             result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_new_rule5_patterns_each_flag_a_synthetic_offender(self) -> None:
-        # Every seam name added to the drive_forbidden scan (FIG-3902) must
+        # Every seam name added to the shift_forbidden scan (FIG-3902) must
         # flag a line that reaches a forbidden facility through it.
         offenders = [
-            "        let out = lash_sansio::future::drive_sync(work());",
+            "        let out = lash_sansio::future::shift_sync(work());",
             "            futures_util::select_biased! {",
             "            futures::select! {",
             "        let now = crate::system_clock().timestamp_ms();",
@@ -367,7 +367,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             with self.subTest(line=line):
                 with tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
-                    self.build_fixture(root, ["fn drive() {", line, "}"], [])
+                    self.build_fixture(root, ["fn shift() {", line, "}"], [])
                     result = self.run_check(root)
                 self.assertNotEqual(result.returncode, 0, line)
                 self.assertIn("rule 5 failed", result.stderr)
@@ -376,7 +376,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
         # A `dyn Future` whose `+ Send` bound spills onto following lines must
         # flag just like the single-line spelling.
         lines = [
-            "fn drive<'a>() -> std::pin::Pin<",
+            "fn shift<'a>() -> std::pin::Pin<",
             "    std::boxed::Box<",
             "        dyn Future<Output = Result<(), Error>>",
             "            + Send",
@@ -399,9 +399,9 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             hit = "        let now = crate::system_clock().timestamp_ms();"
             self.build_fixture(
                 root,
-                ["fn drive() {", hit, "}"],
+                ["fn shift() {", hit, "}"],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"let now = crate::system_clock().timestamp_ms();{ENTRY_SEPARATOR}"
                     "1  # RECORDED inside a journaled step"
                 ],
@@ -415,9 +415,9 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             hit = "        let mark = ProfileMark::now();"
             self.build_fixture(
                 root,
-                ["fn drive() {", hit, "}"],
+                ["fn shift() {", hit, "}"],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"let mark = ProfileMark::now();{ENTRY_SEPARATOR}"
                     "1  # BENIGN observational only"
                 ],
@@ -433,17 +433,17 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             self.build_fixture(
                 root,
                 [
-                    "fn drive() {",
+                    "fn shift() {",
                     FIXTURE_HIT_LINE,
                     "        let now = crate::system_clock().timestamp_ms();",
                     "        let mark = ProfileMark::now();",
                     "}",
                 ],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"let now = crate::system_clock().timestamp_ms();{ENTRY_SEPARATOR}"
                     "1  # RECORDED inside a journaled step",
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"let mark = ProfileMark::now();{ENTRY_SEPARATOR}"
                     "1  # BENIGN observational only",
                 ],
@@ -454,7 +454,7 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
                 check=False,
-                env={**os.environ, "DRIVE_DETERMINISM_REGENERATE": "1"},
+                env={**os.environ, "SHIFT_DETERMINISM_REGENERATE": "1"},
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             count = (root / "scripts" / COUNT.name).read_text().strip()
@@ -465,9 +465,9 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
             root = Path(tmp)
             self.build_fixture(
                 root,
-                ["fn drive() {", "}"],
+                ["fn shift() {", "}"],
                 [
-                    f"{FIXTURE_DRIVE_FILE}{ENTRY_SEPARATOR}"
+                    f"{FIXTURE_SHIFT_FILE}{ENTRY_SEPARATOR}"
                     f"tokio::spawn(worker());{ENTRY_SEPARATOR}1  # UNMAPPED"
                 ],
             )

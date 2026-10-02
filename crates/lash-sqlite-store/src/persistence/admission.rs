@@ -1,8 +1,8 @@
 //! Admission (FIG-3927): the fenced writes that bind open rows of both
-//! admission tables to a root, and the bindless read of the command lane.
+//! admission tables to a run, and the bindless read of the command lane.
 //!
 //! Every admission runs in one `BEGIN IMMEDIATE` write transaction: it checks
-//! the drive fence, reads back what an earlier execution of the same step
+//! the shift fence, reads back what an earlier execution of the same step
 //! already bound, and otherwise composes from open rows and binds them, each
 //! write predicated on the row still being open.
 
@@ -10,7 +10,7 @@ use super::*;
 use lash_core_execution::store::queued_work::TurnWorkPrefix;
 use lash_core_execution::store::{
     AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest, FollowOnAdmission,
-    ROOT_ADMISSION_STEP, RootAdmission, TurnLaneStop,
+    RUN_ADMISSION_STEP, RunAdmission, TurnLaneStop,
 };
 
 /// Lower a transaction body's outcome into the write flow's commit decision:
@@ -39,19 +39,19 @@ pub(super) fn follow_on_blocks_admission_conn(
     .is_some())
 }
 
-/// Admit the root's turn-lane run and record it with its rows, bindings and
-/// base, in one transaction ([`RootSqliteStore::admit_root`]).
+/// Admit the run's turn-lane run and record it with its rows, bindings and
+/// base, in one transaction ([`RunSqliteStore::admit_run`]).
 ///
 /// A recorded admission is returned unchanged, whatever fence or incarnation
 /// asks: a re-execution of the step reads back what it chose and never
 /// widens (FIG-3840). An executor the recorded one excludes is refused
 /// instead (FIG-4765).
 ///
-/// [`RootSqliteStore::admit_root`]: lash_core_execution::store::RootSqliteStore::admit_root
-pub(crate) async fn admit_root_sqlite(
+/// [`RunSqliteStore::admit_run`]: lash_core_execution::store::RunSqliteStore::admit_run
+pub(crate) async fn admit_run_sqlite(
     store: &crate::SqliteStore,
-    request: &lash_core_execution::store::AdmitRootRequest,
-) -> Result<Option<RootAdmission>, StoreError> {
+    request: &lash_core_execution::store::AdmitRunRequest,
+) -> Result<Option<RunAdmission>, StoreError> {
     let request = request.clone();
     let now = store.clock.timestamp_ms();
     store
@@ -60,24 +60,24 @@ pub(crate) async fn admit_root_sqlite(
             let fleet = tx.fleet();
             flow((|| {
                 let session_id = request.session_id();
-                super::drive_epoch::require_fence_conn(tx, session_id, &request.fence)?;
-                let roots = crate::session_roots::session_roots_sql();
+                super::shift_epoch::require_fence_conn(tx, session_id, &request.fence)?;
+                let runs = crate::session_runs::session_runs_sql();
                 let existing: Option<Option<String>> = tx
                     .query_row(
-                        roots.roots.select_admission.sql(),
-                        params![session_id.as_str(), request.root.as_str()],
+                        runs.runs.select_admission.sql(),
+                        params![session_id.as_str(), request.run.as_str()],
                         |row| row.get(0),
                     )
                     .optional()
                     .map_err(sqlite_error)?;
                 if let Some(Some(json)) = existing {
-                    let admission = crate::session_roots::decode_root_admission(&json)?;
-                    // The recorded executor decides who runs the root
+                    let admission = crate::session_runs::decode_run_admission(&json)?;
+                    // The recorded executor decides who executes the run
                     // (FIG-4765).
                     if admission.executor.excludes(&request.executor) {
-                        return Err(StoreError::RootHeldByAnotherExecutor {
+                        return Err(StoreError::RunHeldByAnotherExecutor {
                             session_id: session_id.clone(),
-                            root: request.root.clone(),
+                            run: request.run.clone(),
                             recorded: Box::new(admission.executor),
                             admitting: Box::new(request.executor.clone()),
                         });
@@ -87,12 +87,11 @@ pub(crate) async fn admit_root_sqlite(
                 if follow_on_blocks_admission_conn(tx, session_id, FollowOnAdmission::Idle)? {
                     return Ok(TxOutcome::Commit(None));
                 }
-                if let Some(unfinished) =
-                    crate::session_roots::unfinished_root_conn(tx, session_id)?
+                if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, session_id)?
                 {
-                    return Err(StoreError::UnfinishedRootConflict {
+                    return Err(StoreError::UnfinishedRunConflict {
                         session_id: session_id.clone(),
-                        root: unfinished.root,
+                        run: unfinished.run,
                     });
                 }
                 let (inputs, queued) = match &request.head {
@@ -110,13 +109,7 @@ pub(crate) async fn admit_root_sqlite(
                         if !inputs.inputs.iter().any(|input| input.input_id == *head) {
                             return Ok(TxOutcome::Commit(None));
                         }
-                        bind_turn_inputs_conn(
-                            tx,
-                            now,
-                            &request.root,
-                            ROOT_ADMISSION_STEP,
-                            &inputs,
-                        )?;
+                        bind_turn_inputs_conn(tx, now, &request.run, RUN_ADMISSION_STEP, &inputs)?;
                         (Some(Box::new(inputs)), None)
                     }
                     AdmittedHead::Batch(head) => {
@@ -135,8 +128,8 @@ pub(crate) async fn admit_root_sqlite(
                             tx,
                             now,
                             session_id,
-                            &request.root,
-                            ROOT_ADMISSION_STEP,
+                            &request.run,
+                            RUN_ADMISSION_STEP,
                             &batches,
                         )?;
                         (
@@ -155,15 +148,15 @@ pub(crate) async fn admit_root_sqlite(
                     session_id,
                     base.checkpoint.as_ref(),
                 )?;
-                let trace = RootAdmission::trace_scope_of(
+                let trace = RunAdmission::trace_scope_of(
                     session_id,
-                    &request.root,
+                    &request.run,
                     inputs.as_deref(),
                     queued.as_deref(),
                     request.trace_anchor.clone(),
                     now,
                 );
-                let admission = RootAdmission {
+                let admission = RunAdmission {
                     head: request.head.clone(),
                     inputs,
                     queued,
@@ -175,19 +168,19 @@ pub(crate) async fn admit_root_sqlite(
                     trace: Some(trace),
                     recorded_by_this_call: true,
                 };
-                crate::session_roots::bind_root_inputs_conn(
+                crate::session_runs::bind_run_inputs_conn(
                     tx,
                     session_id,
-                    &request.root,
+                    &request.run,
                     &admission.input_ids(),
                 )?;
                 let json = encode_json(&admission)?;
                 let changed = crate::conn::cached_execute(
                     tx,
-                    roots.roots.write_admission.sql(),
+                    runs.runs.write_admission.sql(),
                     params![
                         session_id.as_str(),
-                        request.root.as_str(),
+                        request.run.as_str(),
                         json,
                         request.admitted_generation.as_str()
                     ],
@@ -195,7 +188,7 @@ pub(crate) async fn admit_root_sqlite(
                 .map_err(sqlite_error)?;
                 if changed != 1 {
                     return Err(StoreError::Backend(
-                        "root admission was already recorded".into(),
+                        "run admission was already recorded".into(),
                     ));
                 }
                 Ok(TxOutcome::Commit(Some(admission)))
@@ -205,15 +198,15 @@ pub(crate) async fn admit_root_sqlite(
         .map_err(sqlite_error)?
 }
 
-/// Admit the checkpoint work of `request`'s root, keyed by its step
-/// ([`RootSqliteStore::admit_at_checkpoint`]).
+/// Admit the checkpoint work of `request`'s run, keyed by its step
+/// ([`RunSqliteStore::admit_at_checkpoint`]).
 ///
 /// A read-only probe answers the common empty checkpoint without a write
 /// transaction. It refuses a stale fence first, whatever the caps and
 /// whatever is pending (FIG-3927 N4), and it also reports rows the step
 /// already bound, so a re-executed step always reaches the read-back.
 ///
-/// [`RootSqliteStore::admit_at_checkpoint`]: lash_core_execution::store::RootSqliteStore::admit_at_checkpoint
+/// [`RunSqliteStore::admit_at_checkpoint`]: lash_core_execution::store::RunSqliteStore::admit_at_checkpoint
 pub(crate) async fn admit_at_checkpoint_sqlite(
     store: &crate::SqliteStore,
     request: &CheckpointAdmissionRequest,
@@ -236,7 +229,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
         .write_flow(move |tx| {
             flow((|| {
                 let session_id = request.session_id();
-                super::drive_epoch::require_fence_conn(tx, session_id, &request.fence)?;
+                super::shift_epoch::require_fence_conn(tx, session_id, &request.fence)?;
                 let mode = lash_core_execution::TurnInputAdmissionMode::ActiveTurn {
                     turn_id: request.turn_id.clone(),
                     checkpoint: request.checkpoint,
@@ -244,7 +237,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
                 let recorded = read_step_admission_conn(
                     tx,
                     session_id,
-                    &request.root,
+                    &request.run,
                     &request.step,
                     mode.clone(),
                 )?;
@@ -272,7 +265,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
                     )?
                 };
                 if let Some(inputs) = inputs.as_ref() {
-                    bind_turn_inputs_conn(tx, now, &request.root, &request.step, inputs)?;
+                    bind_turn_inputs_conn(tx, now, &request.run, &request.step, inputs)?;
                 }
                 let batches = compose_turn_lane_batches_conn(
                     tx,
@@ -282,7 +275,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
                     Some(&request.turn_id),
                     &request.policy,
                 )?;
-                bind_batches_conn(tx, now, session_id, &request.root, &request.step, &batches)?;
+                bind_batches_conn(tx, now, session_id, &request.run, &request.step, &batches)?;
                 let queued = (!batches.is_empty()).then(|| {
                     lash_core_execution::runtime::AdmittedQueuedWork {
                         session_id: session_id.clone(),
@@ -296,14 +289,14 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
         .map_err(sqlite_error)?
 }
 
-/// The leading open session-command run the drive applies next (ADR 0101
+/// The leading open session-command run the shift applies next (ADR 0101
 /// §4, FIG-3927 §2.7), with each row's ingress obligation acknowledged
 /// delivered in the same fenced write. The command lane takes no admission:
 /// the commit that applies the run settles it, predicated on each row still
 /// being open.
 pub(crate) async fn open_session_command_run_sqlite(
     store: &crate::SqliteStore,
-    fence: &lash_core_execution::store::DriveFence,
+    fence: &lash_core_execution::store::ShiftFence,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let fence = fence.clone();
     let now = store.clock.timestamp_ms();
@@ -312,7 +305,7 @@ pub(crate) async fn open_session_command_run_sqlite(
         .write_flow(move |tx| {
             flow((|| {
                 let session_id = fence.session();
-                super::drive_epoch::require_fence_conn(tx, session_id, &fence)?;
+                super::shift_epoch::require_fence_conn(tx, session_id, &fence)?;
                 if follow_on_blocks_admission_conn(tx, session_id, FollowOnAdmission::Idle)? {
                     return Ok(TxOutcome::Commit(Vec::new()));
                 }
@@ -363,14 +356,14 @@ async fn checkpoint_work_pending_sqlite(
     let fence = request.fence.clone();
     let session_id = request.session_id().clone();
     let turn_id = request.turn_id.clone();
-    let root = request.root.clone();
+    let run = request.run.clone();
     let step = request.step.clone();
     let checkpoint = request.checkpoint;
     let max_inputs = request.max_inputs;
     let max_batches = request.policy.max_rows;
     conn.call(move |conn| {
         let outcome: Result<bool, StoreError> = (|| {
-            super::drive_epoch::require_fence_conn(conn, &session_id, &fence)?;
+            super::shift_epoch::require_fence_conn(conn, &session_id, &fence)?;
             let family = &crate::turn_ingress::turn_ingress_sql().family_sqlite;
             // One statement per checkpoint, chosen exhaustively: the admitted
             // minimum-boundary set is what the checkpoint decides, and an
@@ -391,7 +384,7 @@ async fn checkpoint_work_pending_sqlite(
                         turn_id.as_str(),
                         i64::try_from(max_inputs).unwrap_or(i64::MAX),
                         i64::try_from(max_batches).unwrap_or(i64::MAX),
-                        root.as_str(),
+                        run.as_str(),
                         step.as_str(),
                     ],
                     |row| row.get(0),
@@ -405,12 +398,12 @@ async fn checkpoint_work_pending_sqlite(
     .map_err(sqlite_error)?
 }
 
-/// What `root` already bound under `step`, both families in `enqueue_seq`
+/// What `run` already bound under `step`, both families in `enqueue_seq`
 /// order: a re-executed admission step answers exactly this.
 fn read_step_admission_conn(
     tx: &Connection,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     step: &str,
     mode: lash_core_execution::TurnInputAdmissionMode,
 ) -> Result<CheckpointAdmission, StoreError> {
@@ -421,7 +414,7 @@ fn read_step_admission_conn(
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
-                params![session_id.as_str(), root.as_str(), step],
+                params![session_id.as_str(), run.as_str(), step],
                 pending_turn_input_row_from_sql,
             )
             .map_err(sqlite_error)?;
@@ -433,7 +426,7 @@ fn read_step_admission_conn(
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
-                params![session_id.as_str(), root.as_str(), step],
+                params![session_id.as_str(), run.as_str(), step],
                 queued_batch_row_from_sql,
             )
             .map_err(sqlite_error)?;
@@ -458,7 +451,7 @@ fn read_step_admission_conn(
     })
 }
 
-/// The open next-turn inputs a root's admission takes, up to `max_inputs`,
+/// The open next-turn inputs a run's admission takes, up to `max_inputs`,
 /// composed by the shared rule under the host's drain `policy`.
 fn compose_next_turn_inputs_conn(
     tx: &Connection,
@@ -540,12 +533,12 @@ fn compose_active_turn_inputs_conn(
     ))
 }
 
-/// Bind every input of `admitted` to `root` under `step`, delivering each
+/// Bind every input of `admitted` to `run` under `step`, delivering each
 /// row's ingress obligation in the same write.
 fn bind_turn_inputs_conn(
     tx: &Connection,
     now: u64,
-    root: &TurnId,
+    run: &TurnId,
     step: &str,
     admitted: &lash_core_execution::AdmittedTurnInputs,
 ) -> Result<(), StoreError> {
@@ -560,7 +553,7 @@ fn bind_turn_inputs_conn(
                 admitted.session_id.as_str(),
                 input.input_id.as_str(),
                 state,
-                root.as_str(),
+                run.as_str(),
                 step,
                 i64::try_from(now).unwrap_or(i64::MAX),
             ],
@@ -579,13 +572,13 @@ fn bind_turn_inputs_conn(
     Ok(())
 }
 
-/// Bind every batch of `batches` to `root` under `step`, delivering each
+/// Bind every batch of `batches` to `run` under `step`, delivering each
 /// row's ingress obligation in the same write.
 fn bind_batches_conn(
     tx: &Connection,
     now: u64,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     step: &str,
     batches: &[QueuedWorkBatch],
 ) -> Result<(), StoreError> {
@@ -597,7 +590,7 @@ fn bind_batches_conn(
             params![
                 session_id.as_str(),
                 batch.batch_id.as_str(),
-                root.as_str(),
+                run.as_str(),
                 step,
                 i64::try_from(now).unwrap_or(i64::MAX),
             ],
@@ -632,8 +625,8 @@ fn compose_turn_lane_batches_conn(
     // The boundary is a closed two-variant choice, so it selects a named
     // statement rather than splicing a predicate: an optional boundary filter
     // cannot seek the `(session_id, enqueue_seq)` primary key cleanly, and
-    // this query is the admission path's hottest. An idle root's run is the
-    // turn lane's, which a command enqueued since the drive chose it never
+    // this query is the admission path's hottest. An idle run's execution is the
+    // turn lane's, which a command enqueued since the shift chose it never
     // holds back (ADR 0101 §4).
     let sql = &crate::turn_ingress::turn_ingress_sql().queued_batches_sqlite;
     let statement = match boundary {

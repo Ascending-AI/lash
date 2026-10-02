@@ -127,8 +127,8 @@ macro_rules! carries_session_field {
 
 carries_session_field! {
     RuntimeCommit => |request| &request.session_id;
-    DriveFence => |request| request.session();
-    AdmitRootRequest => |request| request.fence.session();
+    ShiftFence => |request| request.session();
+    AdmitRunRequest => |request| request.fence.session();
     CheckpointAdmissionRequest => |request| request.fence.session();
     crate::TurnAddress => |request| &request.session_id;
     crate::TurnCancelRequest => |request| &request.address.session_id;

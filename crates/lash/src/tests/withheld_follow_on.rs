@@ -66,7 +66,7 @@ async fn a_stopped_turn_runs_withheld_input_in_a_follow_on() -> Result<()> {
         })
         .build()
         .into_handle();
-    // The engine's session drive runs the root and its follow-on (D5).
+    // The engine's session shift executes the run and its follow-on (D5).
     let double = restate_double(0x0036_685d).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())

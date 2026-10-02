@@ -157,7 +157,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
             self.state.core.build_generation().clone(),
         );
         // The trigger's work reaches the session durably, and the session's
-        // engine drives it.
+        // engine executes it.
         run_button_trigger(self.state.clone(), request, &controller)
             .await
             .map_err(terminal_handler_error)?;
@@ -656,8 +656,8 @@ async fn run_button_trigger(
         "restate.button_trigger",
     )
     .await?;
-    // The wake it delivers is a root the engine starts on its own.
-    watch_session_roots(&state, &request.session_id).await;
+    // The wake it delivers is a run the engine starts on its own.
+    watch_session_runs(&state, &request.session_id).await;
     state.set_selected_llm_profile(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
@@ -711,8 +711,8 @@ async fn run_mail_received(
         "restate.mail_received",
     )
     .await?;
-    // The wake it delivers is a root the engine starts on its own.
-    watch_session_roots(&state, &request.session_id).await;
+    // The wake it delivers is a run the engine starts on its own.
+    watch_session_runs(&state, &request.session_id).await;
     state.set_selected_llm_profile(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(

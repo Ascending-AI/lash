@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use super::drive::relay::{
+use super::shift::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, plugin_delivery_error,
 };
 use crate::store::{

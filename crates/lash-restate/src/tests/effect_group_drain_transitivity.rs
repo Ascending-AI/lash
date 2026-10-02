@@ -5,7 +5,7 @@
 //! reads the barrier; an intent-free child that won its own commit seats
 //! without reading it, so a seat no longer certifies anything about the
 //! siblings below it. The index therefore names a drain every unseated
-//! committed sibling ranked below it, not only the last one. This law drives
+//! committed sibling ranked below it, not only the last one. This law executes
 //! the index's own protocol — `commit_child`, the barrier's `Drained` notice
 //! (FIG-4344), `record_settlement` and retirement — under seeded random
 //! interleavings and fails when a drain is released while a lower-ranked

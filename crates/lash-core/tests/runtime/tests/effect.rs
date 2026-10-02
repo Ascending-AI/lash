@@ -15,7 +15,7 @@ use lash_core::llm::types::{
 };
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 mod commit_pins;
 mod fig1127;
@@ -65,7 +65,7 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
     .await;
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -134,7 +134,7 @@ async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
     let large_marker = format!("large-turn-marker-{}", "x".repeat(16_384));
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text(large_marker.clone()),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -182,7 +182,7 @@ async fn controller_rejection_fails_turn_explicitly() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("hello"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -227,7 +227,7 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("hello"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -277,7 +277,7 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     let scoped_effect_controller =
         scoped_test_turn(&backend, &recorder, &TurnId::from("stable-scoped-turn"));
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
                 .with_events(&NoopEventSink),
@@ -392,7 +392,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         &TurnId::from("scoped-tool-direct"),
     );
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use direct tool"),
             TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
                 .with_events(&NoopEventSink),
@@ -667,7 +667,7 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
     let scoped_effect_controller =
         scoped_test_turn(&backend, &recorder, &TurnId::from("scoped-retry-sleep"));
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use retry tool"),
             TurnOptions::new(CancellationToken::new(), scoped_effect_controller)
                 .with_events(&NoopEventSink),
@@ -745,7 +745,7 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
     .await;
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "use the tool".to_string(),
@@ -847,7 +847,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     .expect("runtime");
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
@@ -920,7 +920,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
@@ -992,7 +992,7 @@ async fn a_recorded_sync_failure_fails_the_turn_under_its_causes_code() {
     .expect("runtime");
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run code".to_string(),
@@ -1112,7 +1112,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key
     }));
     // The recording double answers the direct effect itself: no provider was
-    // dispatched, so no usage run was admitted and nothing is accounted. Only
+    // dispatched, so no usage meter was admitted and nothing is accounted. Only
     // a dispatched call is spend (ADR 0125).
     let usage = settled_runtime_usage(&runtime).await;
     assert!(
@@ -1266,7 +1266,7 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
         "in-turn direct completion must not commit runtime state out-of-band"
     );
     // The recording double answers the direct effect itself: no provider was
-    // dispatched, so no usage run was admitted and nothing is accounted. Only
+    // dispatched, so no usage meter was admitted and nothing is accounted. Only
     // a dispatched call is spend (ADR 0125).
     let usage = settled_runtime_usage(&runtime).await;
     assert!(

@@ -5,9 +5,9 @@
 > teardown rules. This runbook adds only the shared-session multi-tab scenario.
 
 **Purpose.** Referee **fan-out**: what happens when *two* browser clients are attached to
-**one** session at the same time. Every other workbench runbook drives a single client.
-[`workbench-session-isolation`](../workbench-session-isolation/runbook.md) drives two
-clients that must **not** see each other's conversation; this one drives two clients that
+**one** session at the same time. Every other workbench runbook executes a single client.
+[`workbench-session-isolation`](../workbench-session-isolation/runbook.md) executes two
+clients that must **not** see each other's conversation; this one executes two clients that
 must see the **same** conversation, and proves that one unit of conversational work
 reaches every attached client **exactly once** and that both clients converge on an
 identical transcript.
@@ -69,7 +69,7 @@ truth.
    a mid-stream reload of B reproduced its event-row count exactly (6 → 6) from the
    replay, and its reasoning/code-block rows grew by the new turn — so do not assert that
    a reload loses furniture either. Record; do not gate.*
-3. **Both tabs must be scoped, and scoped to the same id.** Drive both at
+3. **Both tabs must be scoped, and scoped to the same id.** Shift both at
    `/?session_id=<S>` with the same `<S>`. Gate the rendered session id and
    `/api/state?session_id=<S>.settings.session_id` in **each** tab before sending
    anything. An unscoped tab reads the workbench's default session and voids the run.
@@ -349,8 +349,8 @@ if it does, that is the shared `turn_input` product event and is equally correct
 which happened rather than gating on it. Screenshot `04-queued-midturn-both.png`.
 
 Now let A's turn settle and **click nothing else**. The runtime drains the deferred input
-itself: the input was enqueued as pending `NextTurn` work, and once the active root
-settles, the session's engine drives the next root over it. The workbench submits
+itself: the input was enqueued as pending `NextTurn` work, and once the active run
+settles, the session's engine executes the next run over it. The workbench submits
 nothing. Gate that turn's
 `turn_completed`, then idle, then the settle gate. Require:
 
@@ -454,7 +454,7 @@ port-derived Restate container are gone.
 | Final browser queue admission | B's enabled **queue next** control produces a `next_turn` receipt; `active_turns` stays at 1; no second workflow; B's marker is pending; no optimistic user row appears | | `06-queue-path.json`, `06-queued-midturn-both.png` |
 | Final queued send answered | the browser-queued marker runs as exactly one drained turn: 1 committed user row + 1 assistant row in **both** tabs; nothing is lost | | `06-truth.json`, `06-after-queued-both.png` |
 | Final convergence | the two tabs agree exactly, and neither holds a row durable truth lacks | | `06-dom-vs-dom.json`, `06-after-queued-both.png` |
-| Companion admission/CAS coverage | direct busy-send admission, failed-turn retirement, typed head-CAS results, and drive epoch and head-CAS behavior are covered by the named deterministic tests, not this browser row | | source tests |
+| Companion admission/CAS coverage | direct busy-send admission, failed-turn retirement, typed head-CAS results, and shift epoch and head-CAS behavior are covered by the named deterministic tests, not this browser row | | source tests |
 | Three-layer cross-check | every conversation-changing step reconciles each tab's DOM vs the shared durable state vs the trace, pairwise | | all `*-truth.json` |
 | Divergence attribution | on any mismatch, both tabs' rows, the shared durable counts, and the dissenting tab are recorded | | `*-dom-vs-dom.json` |
 

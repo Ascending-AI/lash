@@ -5,12 +5,12 @@
 
 use super::*;
 
-use lash_core::drive::relay::{RelayPolicy, relay_due};
 use lash_core::session_delete::SessionDeleteRelay;
+use lash_core::shift::relay::{RelayPolicy, relay_due};
 use lash_core::store::{ObligationKind, ObligationSettlement, StallReason};
 
 const SESSION: &str = "delete-finalizer";
-const ROOT: &str = "delete-finalizer-root";
+const RUN: &str = "delete-finalizer-run";
 
 fn page() -> std::num::NonZeroUsize {
     std::num::NonZeroUsize::new(8).expect("non-zero page")
@@ -20,10 +20,10 @@ fn now_ms() -> u64 {
     lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock)
 }
 
-/// A core whose session `SESSION` ran root `ROOT` and whose root still owes
-/// its scope close: the root's terminal transaction armed it (ADR 0109 §3)
+/// A core whose session `SESSION` ran run `RUN` and whose run still owes
+/// its scope close: the run's terminal transaction armed it (ADR 0109 §3)
 /// and the close step's immediate delivery failed — the registry refused the
-/// root's parent-end record once — so the obligation is due for a retry.
+/// run's parent-end record once — so the obligation is due for a retry.
 ///
 /// The core runs on a Restate double whose virtual clock starts at the wall
 /// clock, so the relay passes below, timed off the wall clock, see the
@@ -35,7 +35,7 @@ async fn closing_fixture() -> Result<(LashCore, lash_core::store::ObligationId)>
 async fn closing_fixture_under(
     time: lash_restate_test::TimeMode,
 ) -> Result<(LashCore, lash_core::store::ObligationId)> {
-    let root_scope = lash_core::ScopeId::turn(SESSION, ROOT);
+    let run_scope = lash_core::ScopeId::turn(SESSION, RUN);
     let backend = double_backend_over_explicit_reconcile(
         lash_restate_test::ServerConfig {
             start_time_ms: now_ms(),
@@ -45,7 +45,7 @@ async fn closing_fixture_under(
         move |stores| {
             lash_core::testing::runtime_helpers::LayeredStores::over(stores)
                 .map_process_registry(|registry| {
-                    lash_core::fail_parent_end_once(registry, root_scope)
+                    lash_core::fail_parent_end_once(registry, run_scope)
                 })
                 .into_store_set()
         },
@@ -56,17 +56,17 @@ async fn closing_fixture_under(
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     session
-        .send(TurnInput::text("a root that ends before the delete"))
-        .id(ROOT)
+        .send(TurnInput::text("a run that ends before the delete"))
+        .id(RUN)
         .output()
         .await?;
     drop(session);
-    // The handle answered at the root's final commit; its close step runs
+    // The handle answered at the run's final commit; its close step runs
     // after (FIG-3979).
-    settle_session_drive(&core, SESSION).await;
+    settle_session_shift(&core, SESSION).await;
     let scope_close = lash_core::store::ObligationKey::ScopeClose {
         session_id: SESSION.into(),
-        root: ROOT.into(),
+        run: RUN.into(),
     }
     .id();
     assert_eq!(
@@ -75,7 +75,7 @@ async fn closing_fixture_under(
             .state(&scope_close)
             .await?,
         Some(lash_core::store::ObligationState::Due),
-        "the root's failed close left its scope close owed"
+        "the run's failed close left its scope close owed"
     );
     Ok((core, scope_close))
 }
@@ -108,7 +108,7 @@ async fn was_deleted(core: &LashCore) -> Result<bool> {
 
 /// The finalizer rule: the delete closes the session at once — it refuses
 /// sends typed — but its physical delete waits, retried by the relay, until
-/// the scope close its root still owes is delivered; then the next attempt
+/// the scope close its run still owes is delivered; then the next attempt
 /// deletes it.
 #[tokio::test]
 async fn the_physical_delete_waits_for_the_closes_cleanup() -> Result<()> {
@@ -256,7 +256,7 @@ async fn the_reconcile_tick_finishes_a_held_delete() -> Result<()> {
         crate::SessionDeletion::Closing(_)
     ));
     deliver_by_hand(&core, ObligationKind::ScopeClose, &scope_close).await;
-    let driver = Arc::clone(&core._session_driver);
+    let driver = Arc::clone(&core._session_shifts);
     driver
         .reconcile(&lash_core::engine::ReconcileCursor::default(), page())
         .await?;
@@ -432,12 +432,12 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     session
-        .send(TurnInput::text("a root that ends before the delete"))
-        .id(ROOT)
+        .send(TurnInput::text("a run that ends before the delete"))
+        .id(RUN)
         .output()
         .await?;
     drop(session);
-    settle_session_drive(&core, SESSION).await;
+    settle_session_shift(&core, SESSION).await;
 
     // The close intent's engine half ends the session's scope, whose
     // parent-end record the registry never answers: the immediate delivery

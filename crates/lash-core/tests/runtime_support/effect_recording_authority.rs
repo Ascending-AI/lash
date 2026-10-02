@@ -71,7 +71,7 @@ pub fn host_with_effect_recorder(
 }
 
 /// `layer`'s controller for `admitted` over `backend`'s effect host, for a test
-/// that drives the controller directly.
+/// that executes the controller directly.
 pub fn layered_controller(
     backend: &lash_core::Backend,
     layer: Arc<dyn lash_core::testing::EffectLayer>,

@@ -1,4 +1,4 @@
-//! The session harness the cell-conformance scenarios drive.
+//! The session harness the cell-conformance scenarios shift.
 //!
 //! One [`Session`] is one RLM session: a sequence of cells, each compiled on
 //! its own against the session's surviving execution state, exactly as the

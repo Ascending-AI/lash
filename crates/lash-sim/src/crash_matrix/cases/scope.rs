@@ -1,15 +1,15 @@
 //! Scope close (S-8) and parent-end plans (S-10, S-11).
 //!
-//! **Scope close.** One input's root runs with one or two children registered
-//! to live `Until` its scope. The root's terminal commit is followed by its
-//! recorded `CloseRootScope` step, whose close records the root's parent-end
+//! **Scope close.** One input's run executes with one or two children registered
+//! to live `Until` its scope. The run's terminal commit is followed by its
+//! recorded `CloseRunScope` step, whose close records the run's parent-end
 //! plan and delivers each child's cancel through the process-work port. The
 //! cells cut that step before it starts, inside its child delivery, after
-//! the delivery, before its result is journaled, and by losing the root's
+//! the delivery, before its result is journaled, and by losing the run's
 //! invocation outright.
 //!
 //! **Parent-end plans.** The plan's producer is the registry's scope-close
-//! sink closing a scope the host owns (a root that never ran, so no drive
+//! sink closing a scope the host owns (a run that never ran, so no shift
 //! closes it): it records the plan and applies it, delivering each `Until`
 //! child's cancel. The host dies inside that apply, and the plan's
 //! `ParentEnd` obligation (ADR 0109 §3), claimed by the recovery tick's due
@@ -55,23 +55,23 @@ pub(super) async fn register_until_child(
         .map_err(|error| format!("register a child of `{parent}`: {error}"))
 }
 
-/// Kill every invocation of `root`'s `LashTurn` workflow and wait until the
+/// Kill every invocation of `run`'s `LashTurn` workflow and wait until the
 /// attempts it stopped have ended.
-async fn lose_root_invocation(world: &CrashWorld, root: &str) -> Result<(), String> {
+async fn lose_run_invocation(world: &CrashWorld, run: &str) -> Result<(), String> {
     let lost: Vec<String> = world
         .invocations()
         .await
         .into_iter()
         .filter(|view| {
             view.target.starts_with(&format!("{TURN_DRIVER_SERVICE}/"))
-                && view.target.contains(root)
+                && view.target.contains(run)
                 && view.status != "completed"
         })
         .map(|view| view.id)
         .collect();
     if lost.is_empty() {
         return Err(format!(
-            "no live `{TURN_DRIVER_SERVICE}` invocation of `{root}`"
+            "no live `{TURN_DRIVER_SERVICE}` invocation of `{run}`"
         ));
     }
     for id in &lost {
@@ -95,12 +95,12 @@ pub(super) async fn stage_scope_close_claimed(
 async fn claim_scope_close_before_restart(
     world: &CrashWorld,
     session: &SessionId,
-    root: &str,
+    run: &str,
 ) -> Result<(), String> {
     world.kill().await;
     let id = lash_core::store::ObligationKey::ScopeClose {
         session_id: session.clone(),
-        root: TurnId::fixture(root),
+        run: TurnId::fixture(run),
     }
     .id();
     let ledger = world
@@ -144,19 +144,19 @@ async fn stage_scope_close_with_claim(
     let world = CrashWorld::new(seed, standard_core(), false).await?;
     world.restart().await?;
     let session = session_name(Seam::ScopeClose, seed);
-    let root = "in-0";
-    let scope = ScopeId::turn(session.clone(), TurnId::from(root));
+    let run = "in-0";
+    let scope = ScopeId::turn(session.clone(), TurnId::from(run));
     let child_count = 1 + world.draw(0..2) as usize;
     let mut expected = Expected {
         inputs: vec![AcceptedInput {
             session: session.clone(),
-            root: TurnId::from(root),
+            run: TurnId::from(run),
         }],
         closed_scopes: vec![scope.clone()],
         live_sessions: vec![session.clone()],
         ..Expected::default()
     };
-    // The session exists before its root's children are registered.
+    // The session exists before its run's children are registered.
     let core = world.core()?;
     crate::open_created_session(super::MODEL, &core, session.clone())
         .await
@@ -168,7 +168,7 @@ async fn stage_scope_close_with_claim(
             parent: scope.clone(),
         });
     }
-    let close_step = format!("lash:drive-close:{root}");
+    let close_step = format!("lash:shift-close:{run}");
     let notes = vec![format!("children={child_count}")];
     let origin_ms = match point {
         CrashPoint::AfterStateCommit => {
@@ -177,11 +177,11 @@ async fn stage_scope_close_with_claim(
                     .service(TURN_DRIVER_SERVICE)
                     .within_attempts(1),
             );
-            send(&world, &session, root).await?;
+            send(&world, &session, run).await?;
             if claim_before_restart {
                 let tripped = world.trip().wait(super::TRIP_WAIT).await;
                 if let Some(tripped) = tripped {
-                    claim_scope_close_before_restart(&world, &session, root).await?;
+                    claim_scope_close_before_restart(&world, &session, run).await?;
                     Some(tripped.at_ms)
                 } else {
                     None
@@ -192,12 +192,12 @@ async fn stage_scope_close_with_claim(
         }
         CrashPoint::DuringEngineDelivery => {
             world.faults().crash_once(HostSite::DeliverCancelBefore);
-            send(&world, &session, root).await?;
+            send(&world, &session, run).await?;
             crash_and_restart(&world).await?
         }
         CrashPoint::AfterDeliveryBeforeSettle => {
             world.faults().crash_once(HostSite::DeliverCancelAfter);
-            send(&world, &session, root).await?;
+            send(&world, &session, run).await?;
             crash_and_restart(&world).await?
         }
         CrashPoint::MidJournalStep => {
@@ -208,24 +208,24 @@ async fn stage_scope_close_with_claim(
                 .service(TURN_DRIVER_SERVICE)
                 .within_attempts(1),
             );
-            send(&world, &session, root).await?;
+            send(&world, &session, run).await?;
             crash_and_restart(&world).await?
         }
         CrashPoint::InvocationLost => {
-            // The root's terminal is committed and its close step is next;
-            // the deployment dies there and the engine loses the root's
+            // The run's terminal is committed and its close step is next;
+            // the deployment dies there and the engine loses the run's
             // invocation, so no replay closes the scope.
             world.crash_on(
                 CrashRule::new(EngineCut::BeforeRun { name: close_step })
                     .service(TURN_DRIVER_SERVICE)
                     .within_attempts(1),
             );
-            send(&world, &session, root).await?;
+            send(&world, &session, run).await?;
             match world.trip().wait(std::time::Duration::from_secs(20)).await {
                 Some(tripped) => {
-                    lose_root_invocation(&world, root).await?;
+                    lose_run_invocation(&world, run).await?;
                     if claim_before_restart {
-                        claim_scope_close_before_restart(&world, &session, root).await?;
+                        claim_scope_close_before_restart(&world, &session, run).await?;
                     } else {
                         world.crash_and_restart().await?;
                     }
@@ -255,7 +255,7 @@ pub(super) async fn obligation_at_restart(
     let session = session_name(Seam::ScopeClose, seed);
     let id = lash_core::store::ObligationKey::ScopeClose {
         session_id: session.clone(),
-        root: TurnId::from("in-0"),
+        run: TurnId::from("in-0"),
     }
     .id();
     world
@@ -278,19 +278,19 @@ fn producer_sink(world: &CrashWorld) -> Result<lash_core::RegistryScopeClose, St
     ))
 }
 
-/// The terminal a producer closes the host-owned root `root` with.
-fn host_root_terminal(
+/// The terminal a producer closes the host-owned run `run` with.
+fn host_run_terminal(
     world: &CrashWorld,
     session: &SessionId,
-    root: &str,
-) -> lash_core::store::RootTerminal {
-    lash_core::store::RootTerminal {
+    run: &str,
+) -> lash_core::store::RunTerminal {
+    lash_core::store::RunTerminal {
         session_id: session.clone(),
-        root: TurnId::fixture(root),
-        cause: lash_core::store::RootTerminalCause::Committed {
-            commit: lash_core::store::TurnCommitId::new(TurnId::fixture(root), 0),
-            turn: TurnId::fixture(root),
-            outcome: lash_core::store::RootCommittedOutcome::Finished(
+        run: TurnId::fixture(run),
+        cause: lash_core::store::RunTerminalCause::Committed {
+            commit: lash_core::store::TurnCommitId::new(TurnId::fixture(run), 0),
+            turn: TurnId::fixture(run),
+            outcome: lash_core::store::RunCommittedOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: String::new(),
                 },
@@ -301,19 +301,19 @@ fn host_root_terminal(
     }
 }
 
-/// Close the host-owned scope of `root` as the producer does — record the
+/// Close the host-owned scope of `run` as the producer does — record the
 /// plan, apply it — as the deployment's own host work. A refused delivery
 /// fails the producer's apply and leaves the plan to the recovery pass; a
 /// host that died inside the close never answers.
 async fn produce_parent_end(
     world: &CrashWorld,
     session: &SessionId,
-    root: &str,
+    run: &str,
 ) -> Result<(), String> {
     let sink = producer_sink(world)?;
-    let terminal = host_root_terminal(world, session, root);
+    let terminal = host_run_terminal(world, session, run);
     let _ = world
-        .host_op(async move { sink.close_root_scope(&terminal).await })
+        .host_op(async move { sink.close_run_scope(&terminal).await })
         .await;
     Ok(())
 }
@@ -338,8 +338,8 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
         CrashPoint::AfterStateCommit
         | CrashPoint::DuringEngineDelivery
         | CrashPoint::AfterDeliveryBeforeSettle => {
-            let root = "host-scope";
-            let parent = ScopeId::turn(session.clone(), TurnId::from(root));
+            let run = "host-scope";
+            let parent = ScopeId::turn(session.clone(), TurnId::from(run));
             // The mid-delivery cut needs a child delivered before the one the
             // host dies on.
             let child_count = if point == CrashPoint::DuringEngineDelivery {
@@ -375,15 +375,15 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
                         .crash_once_matching(HostSite::DeliverCancelAfter, last);
                 }
             }
-            produce_parent_end(&world, &session, root).await?;
+            produce_parent_end(&world, &session, run).await?;
             crash_and_restart(&world).await?
         }
         CrashPoint::DeliveryRefused => {
             // A page of plans whose only child refuses every cancel, then a
             // victim plan behind them whose child accepts it.
             for index in 0..POISONED_PLANS {
-                let root = format!("poisoned-{index}");
-                let parent = ScopeId::turn(session.clone(), TurnId::fixture(root.as_str()));
+                let run = format!("poisoned-{index}");
+                let parent = ScopeId::turn(session.clone(), TurnId::fixture(run.as_str()));
                 let child = register_until_child(&world, &session, &parent).await?;
                 world.faults().always_matching(
                     HostSite::DeliverCancelBefore,
@@ -394,7 +394,7 @@ pub(super) async fn stage_parent_end(point: CrashPoint, seed: u64) -> Result<Sta
                     child,
                     parent: parent.clone(),
                 });
-                produce_parent_end(&world, &session, &root).await?;
+                produce_parent_end(&world, &session, &run).await?;
             }
             let victim = ScopeId::turn(session.clone(), TurnId::from("victim"));
             let child = register_until_child(&world, &session, &victim).await?;

@@ -51,7 +51,7 @@ impl RuntimeEffectLocalRunner for LanguageRuntimeValueRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::LanguageRuntimeValue { operation } = envelope.command else {
             return Err(RuntimeEffectControllerError::new(
@@ -83,7 +83,7 @@ impl RuntimeEffectLocalRunner for RunSealRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::LanguageRuntimeValue { operation }
@@ -95,7 +95,7 @@ impl RuntimeEffectLocalRunner for RunSealRunner {
             }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "a run-seal executor requires a run-seal language_runtime_value command",
+                "a meter-seal executor requires a meter-seal language_runtime_value command",
             )),
         }
     }

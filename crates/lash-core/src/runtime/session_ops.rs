@@ -84,12 +84,12 @@ impl LashRuntime {
 
     /// Append `request`'s nodes to a storeless runtime's session graph.
     ///
-    /// A storeless runtime has no durable head and no drive: its `&mut self`
+    /// A storeless runtime has no durable head and no shift: its `&mut self`
     /// serializes the append with every turn it runs, so the append applies
     /// at once. A store-backed session's head is owned by its bound turn, so
     /// its host appends are
     /// [`SessionCommand::AppendSessionNodes`](crate::SessionCommand::AppendSessionNodes)
-    /// commands its drive applies at a turn boundary (FIG-4202); calling this
+    /// commands its shift applies at a turn boundary (FIG-4202); calling this
     /// on one is refused with [`RuntimeErrorCode::SessionCommandRequired`](crate::RuntimeErrorCode::SessionCommandRequired).
     pub async fn append_storeless_session_nodes(
         &mut self,
@@ -155,7 +155,7 @@ impl LashRuntime {
                 crate::RuntimeErrorCode::SessionCommandRequired,
                 format!(
                     "a store-backed session's head is owned by its bound turn: submit \
-                     `{operation}` as a session command, which its drive applies at a turn \
+                     `{operation}` as a session command, which its shift applies at a turn \
                      boundary"
                 ),
             ));
@@ -307,7 +307,7 @@ impl LashRuntime {
 
     /// Run plugin command `name` on a storeless runtime.
     ///
-    /// A storeless runtime has no durable head and no drive, so the command
+    /// A storeless runtime has no durable head and no shift, so the command
     /// runs at once, under `&mut self`. A store-backed session runs host
     /// plugin commands as
     /// [`SessionCommand::RunPluginCommand`](crate::SessionCommand::RunPluginCommand)

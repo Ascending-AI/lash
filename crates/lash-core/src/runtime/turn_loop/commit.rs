@@ -1,6 +1,6 @@
-//! The commit phase: finalize the assembled turn and drive the head-advancing
+//! The commit phase: finalize the assembled turn and execute the head-advancing
 //! commit that makes the turn durable. The commit carries no usage: every
-//! model call the turn made was delivered by its own usage run (ADR 0125).
+//! model call the turn made was delivered by its own usage meter (ADR 0125).
 //!
 //! The phase types are consumed in sequence and each transition takes the
 //! previous one by value, so a committed turn cannot be adopted twice and
@@ -34,8 +34,8 @@ fn trace_commit_cas_rejected(
 
 /// Select the exact closure operation a recovered turn must finish.
 ///
-/// A successor drive may settle and consume this persisted operation, but may
-/// not replace it with an authorization carrying its new drive epoch. The
+/// A successor shift may settle and consume this persisted operation, but may
+/// not replace it with an authorization carrying its new shift epoch. The
 /// binding and admitted physical scope remain part of the authorization being
 /// adopted, so recovery cannot broaden the original authority.
 pub(super) fn recovered_turn_cancel_closure(
@@ -82,7 +82,7 @@ struct PreparedTurn {
 }
 
 /// What the final commit writes: the session it advances and the ingress
-/// settlement it carries under its root's drive fence.
+/// settlement it carries under its run's shift fence.
 struct TurnCommitRequest<'commit> {
     session: Option<&'commit mut Session>,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
@@ -220,7 +220,7 @@ impl CommittedTurn {
 }
 
 /// What the commit phase needs to settle one physical turn: the assembled turn
-/// itself, the admitted rows it must settle, and the drive fence and control
+/// itself, the admitted rows it must settle, and the shift fence and control
 /// handles the settlement runs under.
 pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     pub(in crate::runtime) finish: TurnFinishInput,
@@ -229,7 +229,7 @@ pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     /// The cancellation the turn recorded honouring, if any: a journaled
     /// peek's answer, never a live token (FIG-3672 P9).
     pub(in crate::runtime) honoured_cancel: Option<crate::TurnCancellationEvidence>,
-    pub(in crate::runtime) drive_fence: Option<&'commit DriveFence>,
+    pub(in crate::runtime) shift_fence: Option<&'commit ShiftFence>,
     pub(in crate::runtime) turn_control: &'commit ActiveTurnControl,
     /// What the turn publishes through. The terminal publication waits
     /// until the host has received every event the turn queued (see
@@ -243,7 +243,7 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) driver: TurnDriverRemainder,
     pub(super) cancellation_messages: crate::MessageSequence,
     pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
-    pub(super) drive_fence: Option<&'cancel DriveFence>,
+    pub(super) shift_fence: Option<&'cancel ShiftFence>,
     pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
@@ -263,25 +263,25 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) admissions: LogicalTurnAdmissions,
-    pub(in crate::runtime) drive_fence: Option<&'error DriveFence>,
+    pub(in crate::runtime) shift_fence: Option<&'error ShiftFence>,
 }
 
 impl LashRuntime {
-    /// Exercise terminal commit with a root whose installed run record was
+    /// Exercise terminal commit with a run whose installed run record was
     /// lost. The conformance laws use the real commit path on each store.
     #[cfg(feature = "testing")]
     pub async fn finish_without_recorded_run_for_testing(
         &mut self,
-        root: TurnId,
+        run: TurnId,
         opts: TurnOptions<'_>,
     ) -> Result<(), RuntimeError> {
-        self.uninstall_root_view()?;
+        self.uninstall_run_view()?;
         let controller = opts.scoped_effect_controller();
         let binding =
             turn_control_binding(self.host.core.control.effect_host.as_ref(), &controller).await?;
         let control = ActiveTurnControl::new(
             binding.resolver(),
-            TurnAddress::new(&self.state.session_id, &root),
+            TurnAddress::new(&self.state.session_id, &run),
         )
         .await?;
         let (observer, _observations) =
@@ -290,7 +290,7 @@ impl LashRuntime {
         let pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
-            self.state.turn_scope(&root),
+            self.state.turn_scope(&run),
             self.host.core.durability.commit_budget,
         )
         .with_metrics(self.host.core.tracing.metrics().clone());
@@ -301,12 +301,12 @@ impl LashRuntime {
                 recorded_assembly: RecordedTurnAssembly::new(),
                 new_messages: crate::MessageSequence::default(),
                 turn_index: self.state.turn_index,
-                trace_turn_id: root,
+                trace_turn_id: run,
             },
             admissions: &admissions,
             scoped_effect_controller: &controller,
             honoured_cancel: None,
-            drive_fence: None,
+            shift_fence: None,
             turn_control: &control,
             observer: &observer,
         })
@@ -329,19 +329,19 @@ impl LashRuntime {
         finished
     }
 
-    /// The termination policy the running root recorded in its
+    /// The termination policy the running run recorded in its
     /// [`ResolvedRun`](crate::ResolvedRun). The logical-turn funnel installs
-    /// that record before the root's first physical turn and every resident
-    /// refresh re-installs it, so every commit of the root reads it.
+    /// that record before the run's first physical turn and every resident
+    /// refresh re-installs it, so every commit of the run reads it.
     fn recorded_termination(&self) -> Result<crate::runtime::TerminationPolicy, RuntimeError> {
         self.state
             .authority
-            .root_view()
+            .run_view()
             .map(|view| view.run.termination.clone())
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::RecordedTerminationUnavailable,
-                    "terminal assembly requires the root's recorded termination policy",
+                    "terminal assembly requires the run's recorded termination policy",
                 )
             })
     }
@@ -356,7 +356,7 @@ impl LashRuntime {
             admissions,
             scoped_effect_controller,
             honoured_cancel,
-            drive_fence,
+            shift_fence,
             turn_control,
             observer,
         } = context;
@@ -399,7 +399,7 @@ impl LashRuntime {
             };
         let turn_cancel_closure_authorization = match (
             self.session.as_ref().and_then(Session::history_store),
-            drive_fence,
+            shift_fence,
             interrupted_turn_cancel_intent.clone(),
         ) {
             (Some(store), Some(fence), Some(observed)) => {
@@ -472,7 +472,7 @@ impl LashRuntime {
                 })
             }
             // A turn that commits to a store closes its cancellation gate
-            // under its root's drive fence. With no fence no closure was
+            // under its run's shift fence. With no fence no closure was
             // authorized, and the store has nothing to settle the turn by.
             (None, Some(_)) => {
                 return Err(runtime_error_from_store_commit(
@@ -497,12 +497,12 @@ impl LashRuntime {
             }
         };
         // Interruption derives from the sealed gate evidence. When a durable
-        // cancel races a successor drive, the final commit's drive fence and
+        // cancel races a successor shift, the final commit's shift fence and
         // head CAS are the arbiters.
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
-        let turn_trace = self.host.core.tracing.turn_drive(
+        let turn_trace = self.host.core.tracing.turn_execution(
             &self.state.session_id,
             &trace_turn_id,
             scoped_effect_controller,
@@ -535,7 +535,7 @@ impl LashRuntime {
             .cloned();
         turn_pipeline.state_mut().last_prompt_usage = last_prompt_usage;
         let assembled_state = turn_pipeline.export_state_for_assembly();
-        // The root's recorded termination policy, never this worker's: a
+        // The run's recorded termination policy, never this worker's: a
         // replay or redrive on a worker with another policy assembles the
         // same terminal for the same recorded work (FIG-4389).
         let assembled = assembly.finish(assembled_state, cancellation.clone(), None, &termination);
@@ -547,9 +547,9 @@ impl LashRuntime {
                 &self.state,
                 &assembled.outcome,
                 &trace_turn_id,
-                self.drive_root
+                self.shift_run
                     .as_ref()
-                    .map_or(&trace_turn_id, |run| run.root()),
+                    .map_or(&trace_turn_id, |ran_execution| ran_execution.run()),
                 assembled.state.current_frame_node_id.as_ref(),
                 segment_boundary.as_ref(),
             )?;
@@ -587,7 +587,7 @@ impl LashRuntime {
 
         let plugins = Arc::clone(session.plugins());
         let manager = match self
-            .runtime_session_services_for_turn(drive_fence, turn_pipeline.graph_appends())
+            .runtime_session_services_for_turn(shift_fence, turn_pipeline.graph_appends())
         {
             Ok(manager) => manager,
             Err(err) => {
@@ -629,9 +629,9 @@ impl LashRuntime {
             &self.state,
             prepared.outcome(),
             &trace_turn_id,
-            self.drive_root
+            self.shift_run
                 .as_ref()
-                .map_or(&trace_turn_id, |run| run.root()),
+                .map_or(&trace_turn_id, |ran_execution| ran_execution.run()),
             prepared.turn.state.current_frame_node_id.as_ref(),
             segment_boundary.as_ref(),
         ) {
@@ -642,9 +642,9 @@ impl LashRuntime {
             }
         };
         let commit_effects = admissions.commit_effects(prepared.outcome(), pending_follow_on);
-        let settlement_trace = self.drive_root.as_ref().map(|root| {
+        let settlement_trace = self.shift_run.as_ref().map(|run| {
             commit_effects.ingress_settlement.clone().into_ingress(
-                root.root().clone(),
+                run.run().clone(),
                 cancellation
                     .as_ref()
                     .map_or(crate::TurnCancelUndeliveredInputPolicy::Defer, |evidence| {
@@ -652,26 +652,26 @@ impl LashRuntime {
                     }),
             )
         });
-        // Under an admitted root, the commit presents the root's drive fence
-        // and, when this turn ends the root, writes its terminal evidence
+        // Under an admitted run, the commit presents the run's shift fence
+        // and, when this turn ends the run, writes its terminal evidence
         // (FIG-3600 S7).
-        let drive_commit = self.drive_root.as_ref().and_then(|root| {
+        let shift_commit = self.shift_run.as_ref().and_then(|run| {
             let owes_follow_on = commit_effects.pending_follow_on.is_some()
                 || admissions.carries_follow_on_work(matches!(
                     prepared.outcome(),
                     TurnOutcome::Stopped(TurnStop::Cancelled { .. })
                 ));
-            root.commit_facts(&trace_turn_id, prepared.outcome(), owes_follow_on)
+            run.commit_facts(&trace_turn_id, prepared.outcome(), owes_follow_on)
         });
-        let writes_root_terminal = drive_commit
+        let writes_run_terminal = shift_commit
             .as_ref()
             .is_some_and(|commit| commit.terminal.is_some());
         let mut prepared = prepared;
-        prepared.turn_pipeline.set_drive_commit(drive_commit);
-        // The commit clears the park of the root the turn runs under, the
-        // same root an abort of the turn parks (D2 §1.3 P3).
-        prepared.turn_pipeline.set_park_root(self.park_root(
-            scoped_effect_controller.execution_scope().logical_root(),
+        prepared.turn_pipeline.set_shift_commit(shift_commit);
+        // The commit clears the park of the run the turn runs under, the
+        // same run an abort of the turn parks (D2 §1.3 P3).
+        prepared.turn_pipeline.set_park_run(self.park_run(
+            scoped_effect_controller.execution_scope().logical_run(),
             &trace_turn_id,
         ));
         let committed = match Box::pin(
@@ -702,8 +702,8 @@ impl LashRuntime {
         .await
         {
             Ok(committed) => {
-                if writes_root_terminal && let Some(root) = self.drive_root.as_mut() {
-                    root.mark_terminal_written();
+                if writes_run_terminal && let Some(run) = self.shift_run.as_mut() {
+                    run.mark_terminal_written();
                 }
                 committed
             }
@@ -779,10 +779,10 @@ impl LashRuntime {
                 )
             });
         }
-        // The commit's observers write under its drive's fence, a final
-        // commit's included (FIG-4202): they run at the root's boundary, so a
-        // write they make is the owner's own, never one outside the drive
-        // that waits on the drive's settlement and deadlocks it. A later
+        // The commit's observers write under its shift's fence, a final
+        // commit's included (FIG-4202): they run at the run's boundary, so a
+        // write they make is the owner's own, never one outside the shift
+        // that waits on the shift's settlement and deadlocks it. A later
         // admission that sealed since refuses such a write typed, with
         // nothing written.
         match self
@@ -790,7 +790,7 @@ impl LashRuntime {
                 &delivery.turn,
                 scoped_effect_controller,
                 &trace_turn_id,
-                drive_fence,
+                shift_fence,
             )
             .await
         {
@@ -834,7 +834,7 @@ impl LashRuntime {
             driver,
             cancellation_messages,
             finish_scoped_effect_controller,
-            drive_fence,
+            shift_fence,
             turn_control,
             turn_index,
             trace_turn_id,
@@ -885,14 +885,14 @@ impl LashRuntime {
             admissions: &admissions,
             scoped_effect_controller: finish_scoped_effect_controller,
             honoured_cancel: Some(evidence),
-            drive_fence,
+            shift_fence,
             turn_control,
             observer,
         }))
         .await
     }
 
-    /// A drive that is replaying its journal reconstructs the turn's
+    /// A shift that is replaying its journal reconstructs the turn's
     /// terminal and reports nothing. The commit reports no inserted-or-existing
     /// verdict yet, so the terminal is observed as the work of the attempt
     /// that first reaches it rather than as a logical transition.
@@ -934,9 +934,9 @@ impl LashRuntime {
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             admissions,
-            drive_fence,
+            shift_fence,
         } = context;
-        // A recovered follow-on's terminal commits at the index its root's
+        // A recovered follow-on's terminal commits at the index its run's
         // decision recorded, on the head it adopted (FIG-4380).
         let admitted_turn_index = self.admitted_turn_index.take();
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
@@ -1011,7 +1011,7 @@ impl LashRuntime {
             admissions: &admissions,
             scoped_effect_controller: &scoped_effect_controller,
             honoured_cancel: None,
-            drive_fence,
+            shift_fence,
             turn_control: &turn_control,
             observer,
         }))

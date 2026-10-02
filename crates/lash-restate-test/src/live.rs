@@ -379,7 +379,7 @@ impl LiveRestateBackend<dyn StoreSet> {
 impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
     /// Replace the deployment with a new engine and endpoint over its durable
     /// stores. Worker slots, handlers, watches and caches are constructed anew.
-    /// The caller must install a new process worker and session driver. Test
+    /// The caller must install a new process worker and `SessionShifts`. Test
     /// handler jobs are host oracles and deliberately do not survive.
     pub async fn rebuild(&self) -> Result<Self, LiveError> {
         self.rebuild_on_generation(self.lash_backend().build_generation()?.clone())
@@ -416,7 +416,7 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
     /// (ADR 0115 §3.5). This backend keeps serving what the server pinned to
     /// it, and a new invocation of a stable name routes to the newest
     /// registration. The caller installs the new build's process worker and
-    /// session driver.
+    /// `SessionShifts`.
     pub async fn add_build(
         &self,
         endpoint_bind: std::net::SocketAddr,
@@ -606,20 +606,20 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
         RestateIngressClient::new(self.inner.connection.clone())
     }
 
-    /// Attach to one drive invocation, without following its continuation.
+    /// Attach to one shift invocation, without following its continuation.
     #[expect(
         clippy::result_large_err,
         reason = "matches the ingress client's error API"
     )]
-    pub async fn attach_drive(
+    pub async fn attach_shift(
         &self,
         session: &lash_core::SessionId,
-        request: lash_core::engine::DriveRequestId,
-    ) -> Result<lash_core::engine::DriveOutcome, lash_restate::SendDriveError> {
+        request: lash_core::engine::ShiftRequestId,
+    ) -> Result<lash_core::engine::ShiftOutcome, lash_restate::SendShiftError> {
         self.inner
             .restate
             .session_work_engine()
-            .attach_drive(session, request)
+            .attach_shift(session, request)
             .await
     }
 

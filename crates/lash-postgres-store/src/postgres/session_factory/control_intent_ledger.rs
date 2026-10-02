@@ -10,7 +10,7 @@ use lash_core_execution::store::{
     decide_intent_application, decide_intent_refusal,
 };
 
-use crate::session_roots::{
+use crate::session_runs::{
     begin_session_close_tx, load_intent_conn, settle_intent_claimed_conn, write_intent_state_conn,
 };
 
@@ -45,13 +45,13 @@ impl PostgresStore {
 
 #[async_trait::async_trait]
 impl ControlIntentStore for PostgresStore {
-    async fn open_root_intent(
+    async fn open_run_intent(
         &self,
-        request: &lash_core_execution::store::RootIntentRequest,
+        request: &lash_core_execution::store::RunIntentRequest,
         at_ms: u64,
-    ) -> Result<ControlIntent, lash_core_execution::store::RootIntentRefused> {
+    ) -> Result<ControlIntent, lash_core_execution::store::RunIntentRefused> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        let intent = crate::root_verbs::open_root_intent_tx(&mut tx, request, at_ms).await?;
+        let intent = crate::run_verbs::open_run_intent_tx(&mut tx, request, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(intent)
     }

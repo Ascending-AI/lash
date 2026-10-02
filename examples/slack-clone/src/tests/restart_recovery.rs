@@ -837,7 +837,7 @@ async fn settle_on_recovery(
 async fn a_mention_interrupted_by_a_dead_boot_is_answered_once_by_the_next_boot() {
     // The other half: deferral is only correct if something later settles it.
     // The dead boot's turn is not lost with its process: the server keeps it and
-    // re-drives the interrupted attempt on the next boot's deployment.
+    // redrives the interrupted attempt on the next boot's deployment.
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
@@ -850,7 +850,7 @@ async fn a_mention_interrupted_by_a_dead_boot_is_answered_once_by_the_next_boot(
     let reborn = host.start(&platform, &script).await;
     drop(dead);
     let outcome = settle_on_recovery(&reborn, &app_mention.event_id).await;
-    // Whether recovery waits on the re-driven turn or reads its committed
+    // Whether recovery waits on the redriven turn or reads its committed
     // answer depends only on when the engine finished relative to the pass;
     // either way this boot's model answered, exactly once.
     assert!(

@@ -1,11 +1,11 @@
-//! FIG-3927 N9's turn crash cells on PostgreSQL: a root's turns run inside
+//! FIG-3927 N9's turn crash cells on PostgreSQL: a run's turns run inside
 //! the Restate double's handlers over this test's PostgreSQL stores, so a
 //! crash kills the handler execution where it stands and the recovery is
 //! the double's redelivery of it, replaying its journal.
 //!
-//! Cell (a), the root admission crashed before its record, is the drive
-//! admission law `a_root_admission_survives_a_worker_crash_without_widening`
-//! in this suite's `root_control` module.
+//! Cell (a), the run admission crashed before its record, is the shift
+//! admission law `a_run_admission_survives_a_worker_crash_without_widening`
+//! in this suite's `run_control` module.
 
 use std::sync::Arc;
 

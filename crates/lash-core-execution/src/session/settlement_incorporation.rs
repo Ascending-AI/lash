@@ -7,7 +7,7 @@
 //! are enqueued and trigger receipts are restored as evidence. It never
 //! executes a declaration, never emits a delivery, never re-runs a projector,
 //! and never charges usage: a child's spend was delivered by its attempts'
-//! usage runs when they were recorded (ADR 0125).
+//! usage meters when they were recorded (ADR 0125).
 //!
 //! Idempotence is carried, not hoped for: [`IncorporationLedger`] records the
 //! incorporated sources and travels with the execution context wherever

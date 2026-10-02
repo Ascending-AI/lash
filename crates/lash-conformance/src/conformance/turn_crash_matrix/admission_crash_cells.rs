@@ -1,20 +1,20 @@
 //! FIG-3927 N9's crash cells on the reference drain: a worker dies at a
 //! durable admission or settlement write whose outcome never reached the
-//! journal, and the tier redrives the root.
+//! journal, and the tier redrives the run.
 //!
-//! - (b) The root's final commit landed and its reply was lost. The redrive
+//! - (b) The run's final commit landed and its reply was lost. The redrive
 //!   replays the committed receipt by the commit's identity: it asks the
 //!   model nothing, runs no tool, and settles nothing a second time.
 //! - (c) The `AfterWork` checkpoint's admission bound the active-turn input
-//!   and the ready wake to the root, and the step's outcome was never
+//!   and the ready wake to the run, and the step's outcome was never
 //!   journaled. An active-turn input addressed to the same turn arrives
 //!   before the redrive. The step runs again and must read back the rows it
 //!   bound under its own step key, not compose again over what is open now:
 //!   the model call after the checkpoint renders the input and the wake it
 //!   bound and never the newcomer, which only a later boundary may take.
 //!
-//! Cell (a), the root admission crashed before its record, is the drive law
-//! `a_root_admission_survives_a_worker_crash_without_widening`.
+//! Cell (a), the run admission crashed before its record, is the shift law
+//! `a_run_admission_survives_a_worker_crash_without_widening`.
 //!
 //! Each cell crashes and redrives through
 //! [`ConformanceTurnRunner::run_crashed_then_redriven_turn`](crate::ConformanceTurnRunner::run_crashed_then_redriven_turn):
@@ -64,7 +64,7 @@ pub(super) async fn crash_then_redrive(
         crashing = crashing.fail_post_commit_delivery();
     }
     let crashing = crashing
-        .before_drive(move |control| control.arm(point.clone()))
+        .before_shift(move |control| control.arm(point.clone()))
         .attempt();
     let crashing: crate::ConformanceTurnAttempt = Arc::new(move |scoped| {
         let crashing = Arc::clone(&crashing);
@@ -94,7 +94,7 @@ pub(super) async fn crash_then_redrive(
     if fail_post_commit_delivery {
         successor = successor.fail_post_commit_delivery();
     }
-    let (successor, redriven) = successor.before_drive(SeamControl::clear).reporting();
+    let (successor, redriven) = successor.before_shift(SeamControl::clear).reporting();
     let writer = (law.make)(scenario);
     let pending_write = Arc::new(std::sync::Mutex::new(before_redrive));
     let written = Arc::new(AtomicBool::new(false));
@@ -146,9 +146,9 @@ fn matrix_law<'law>(
     }
 }
 
-/// N9 (b): the root's final commit landed and its reply was lost. The
+/// N9 (b): the run's final commit landed and its reply was lost. The
 /// redrive replays the committed receipt: it asks the model nothing, runs no
-/// tool, commits the root's one physical turn once, applies each input once
+/// tool, commits the run's one physical turn once, applies each input once
 /// and leaves no row bound or queued.
 #[expect(
     clippy::expect_used,
@@ -172,7 +172,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     let scenario = "final-commit-reply-lost";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader = make(scenario);
-    seed_reference_ingress_for_drive(&reader, &identity).await;
+    seed_reference_ingress_for_shift(&reader, &identity).await;
     let seeded = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
@@ -184,7 +184,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     let before = reader
         .load_session_head_meta(&identity.session_id)
         .await
-        .expect("read the head before the root")
+        .expect("read the head before the run")
         .map_or(0, |head| head.head_revision);
 
     let (report, redriven, executions, _) = Box::pin(crash_then_redrive(
@@ -201,12 +201,12 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     ))
     .await;
     let turn = report
-        .unwrap_or_else(|error| panic!("the redrive replays the committed root: {error}"))
+        .unwrap_or_else(|error| panic!("the redrive replays the committed run: {error}"))
         .ran()
-        .expect("the redrive runs its root");
+        .expect("the redrive executes its run");
     assert_eq!(
         turn.assistant_output.safe_text, "trace turn complete",
-        "the redrive reads the committed root's answer back"
+        "the redrive reads the committed run's answer back"
     );
     assert_eq!(executions, 1, "the tool ran once, before the crash");
     assert!(
@@ -221,11 +221,11 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
         .load_session_head_meta(&identity.session_id)
         .await
         .expect("read the head after the redrive")
-        .expect("the root committed");
+        .expect("the run committed");
     assert_eq!(
         head.head_revision,
         before + 1,
-        "the root's one physical turn committed once"
+        "the run's one physical turn committed once"
     );
     let applications = reader
         .list_turn_input_applications(&identity.session_id)
@@ -259,11 +259,11 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     );
     assert!(
         reader
-            .unfinished_root(&identity.session_id)
+            .unfinished_run(&identity.session_id)
             .await
-            .expect("read the unfinished root")
+            .expect("read the unfinished run")
             .is_none(),
-        "the root ended"
+        "the run ended"
     );
 }
 
@@ -291,7 +291,7 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
     let scenario = "checkpoint-admission-crash";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader = make(scenario);
-    seed_reference_ingress_for_drive(&reader, &identity).await;
+    seed_reference_ingress_for_shift(&reader, &identity).await;
     let newcomer = PendingTurnInputDraft::new(
         &identity.session_id,
         crate::TurnInputIngress::active_turn(
@@ -317,14 +317,14 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
     ))
     .await;
     report
-        .unwrap_or_else(|error| panic!("the redriven root failed: {error}"))
+        .unwrap_or_else(|error| panic!("the redriven run failed: {error}"))
         .ran()
-        .expect("the redrive runs its root");
+        .expect("the redrive executes its run");
 
     let state = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
-        .expect("read the redriven root's state")
-        .expect("the redriven root committed");
+        .expect("read the redriven run's state")
+        .expect("the redriven run committed");
     let read_model = state.session_graph.read_model();
     let parts = read_model
         .messages
@@ -335,7 +335,7 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
     let first_answer = parts
         .iter()
         .position(|part| part == "trace turn complete")
-        .unwrap_or_else(|| panic!("the redriven root answered: {parts:?}"));
+        .unwrap_or_else(|| panic!("the redriven run answered: {parts:?}"));
     let position = |matches: &dyn Fn(&str) -> bool| parts.iter().position(|part| matches(part));
     for (row, found) in [
         (

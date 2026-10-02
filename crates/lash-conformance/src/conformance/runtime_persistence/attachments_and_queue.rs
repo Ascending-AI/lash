@@ -295,29 +295,27 @@ async fn race<T: Send + 'static>(
     joined
 }
 
-/// One admission of a contested head: `Some` names the root that took it.
+/// One admission of a contested head: `Some` names the run that took it.
 fn admitted_by(
-    outcome: Result<Option<lash_core::store::RootAdmission>, StoreError>,
-    root: &str,
+    outcome: Result<Option<lash_core::store::RunAdmission>, StoreError>,
+    run: &str,
 ) -> Option<String> {
     match outcome {
-        Ok(Some(_)) => Some(root.to_string()),
-        Ok(None) | Err(StoreError::UnfinishedRootConflict { .. }) => None,
+        Ok(Some(_)) => Some(run.to_string()),
+        Ok(None) | Err(StoreError::UnfinishedRunConflict { .. }) => None,
         Err(error) => panic!("a contested admission resolves cleanly, got {error:?}"),
     }
 }
 
-/// FIG-3927: concurrent admissions bind every row to at most one root. Two
-/// roots racing for the same batch head, then for the same input head, and
+/// FIG-3927: concurrent admissions bind every row to at most one run. Two
+/// runs racing for the same batch head, then for the same input head, and
 /// two checkpoint steps racing for the same active-turn input: exactly one
 /// takes each row, and the store reads it back bound to the winner.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
-    store: Arc<dyn RuntimeStore>,
-) {
+pub async fn concurrent_admissions_bind_every_row_to_at_most_one_run(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("concurrent-queue-input");
     let batch = store
         .enqueue_queued_work(queued_draft(
@@ -327,15 +325,15 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
         ))
         .await
         .expect("enqueue queue batch for the admission race");
-    let fence = seal_drive_fence_for_test(&store, &session_id, "admission-race").await;
+    let fence = seal_shift_fence_for_test(&store, &session_id, "admission-race").await;
 
-    let admit = |root: &'static str, head: lash_core::store::AdmittedHead| {
+    let admit = |run: &'static str, head: lash_core::store::AdmittedHead| {
         let store = Arc::clone(&store);
         let fence = fence.clone();
         async move {
             admitted_by(
-                admit_root_for_test(&store, &fence, &TurnId::from(root), head).await,
-                root,
+                admit_run_for_test(&store, &fence, &TurnId::from(run), head).await,
+                run,
             )
         }
     };
@@ -346,11 +344,7 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
     )
     .await;
     let winners = [left, right].into_iter().flatten().collect::<Vec<_>>();
-    assert_eq!(
-        winners.len(),
-        1,
-        "exactly one root may admit the same batch"
-    );
+    assert_eq!(winners.len(), 1, "exactly one run may admit the same batch");
     assert!(
         store
             .list_open_queued_work(&session_id)
@@ -359,17 +353,17 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
             .is_empty(),
         "the winning admission binds its batch"
     );
-    let batch_root = winners[0].clone();
-    let recorded = admit_root_for_test(
+    let batch_run = winners[0].clone();
+    let recorded = admit_run_for_test(
         &store,
         &fence,
-        &TurnId::fixture(batch_root.as_str()),
+        &TurnId::fixture(batch_run.as_str()),
         lash_core::store::AdmittedHead::Batch(batch.batch_id.clone()),
     )
     .await
     .expect("read the winner's admission back")
     .expect("the winner holds its admission");
-    end_root(&store, &fence, completing_admission(&batch_root, &recorded)).await;
+    end_run(&store, &fence, completing_admission(&batch_run, &recorded)).await;
 
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
@@ -385,19 +379,15 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
     )
     .await;
     let winners = [left, right].into_iter().flatten().collect::<Vec<_>>();
-    assert_eq!(
-        winners.len(),
-        1,
-        "exactly one root may admit the same input"
-    );
+    assert_eq!(winners.len(), 1, "exactly one run may admit the same input");
     assert_eq!(
         store
-            .root_of_input(&session_id, &input.input_id)
+            .run_of_input(&session_id, &input.input_id)
             .await
-            .expect("read the input's root")
-            .map(|root| root.to_string()),
+            .expect("read the input's run")
+            .map(|run| run.to_string()),
         Some(winners[0].clone()),
-        "the input reads back bound to the winning root"
+        "the input reads back bound to the winning run"
     );
 
     let turn = TurnId::fixture(winners[0].as_str());
@@ -478,12 +468,12 @@ pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn Runtime
             DeliveryPolicy::AfterCurrentTurnCommit,
         ))
         .await
-        .expect("enqueue the batch a root admits");
-    let fence = seal_drive_fence_for_test(&store, &session, "owner").await;
-    let admission = admitted_root(
+        .expect("enqueue the batch a run admits");
+    let fence = seal_shift_fence_for_test(&store, &session, "owner").await;
+    let admission = admitted_run(
         &store,
         &fence,
-        "cancel-root",
+        "cancel-run",
         lash_core::store::AdmittedHead::Batch(admitted.batch_id.clone()),
     )
     .await;
@@ -503,7 +493,7 @@ pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn Runtime
             .expect("raw durable list while admitted")
             .len(),
         1,
-        "admitted batches remain durable until their root settles them"
+        "admitted batches remain durable until their run settles them"
     );
     assert!(
         store
@@ -513,10 +503,10 @@ pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn Runtime
             .is_none(),
         "admitted batches must not be cancelled"
     );
-    end_root(
+    end_run(
         &store,
         &fence,
-        releasing("cancel-root", [batch_row(&admitted)]),
+        releasing("cancel-run", [batch_row(&admitted)]),
     )
     .await;
     assert_eq!(
@@ -540,8 +530,8 @@ pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn Runtime
 
 /// The command lane goes first and binds nothing (design §2.7): a turn head
 /// behind an open command is not admitted until the command applies. A
-/// command enqueued behind the turn head a drive already chose never holds
-/// that root's admission back (ADR 0101 §4); it goes first at the next
+/// command enqueued behind the turn head a shift already chose never holds
+/// that run's admission back (ADR 0101 §4); it goes first at the next
 /// boundary. A turn admission takes only turn work.
 #[expect(
     clippy::expect_used,
@@ -549,7 +539,7 @@ pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn Runtime
 )]
 pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-work-classes");
-    let fence = seal_drive_fence_for_test(&store, &session, "turn-owner").await;
+    let fence = seal_shift_fence_for_test(&store, &session, "turn-owner").await;
     for (case, command_first) in [("command-first", true), ("turn-first", false)] {
         let command_draft = queued_session_command_draft(&session, &format!("{case} refresh"));
         let turn_draft = queued_draft(
@@ -578,11 +568,11 @@ pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn
                 .expect("enqueue command");
             (command, turn)
         };
-        let root = format!("{case}-turn-root");
-        let early = admit_root_for_test(
+        let run = format!("{case}-turn-run");
+        let early = admit_run_for_test(
             &store,
             &fence,
-            &TurnId::fixture(root.as_str()),
+            &TurnId::fixture(run.as_str()),
             lash_core::store::AdmittedHead::Batch(turn.batch_id.clone()),
         )
         .await
@@ -599,12 +589,13 @@ pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn
                 "{case}: a command enqueued behind the turn head never holds it back"
             );
         }
-        let run = store
+        let command_run = store
             .open_session_command_run(&fence)
             .await
             .expect("open the command run");
         assert_eq!(
-            run.iter()
+            command_run
+                .iter()
                 .map(|batch| batch.batch_id.clone())
                 .collect::<Vec<_>>(),
             vec![command.batch_id.clone()],
@@ -616,15 +607,18 @@ pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn
                 &fence,
                 crate::QueuedWorkCompletion {
                     session_id: session.clone(),
-                    batch_ids: run.iter().map(|batch| batch.batch_id.clone()).collect(),
+                    batch_ids: command_run
+                        .iter()
+                        .map(|batch| batch.batch_id.clone())
+                        .collect(),
                 },
             ))
             .await
             .expect("the command's applying commit settles it");
-        let admitted = admitted_root(
+        let admitted = admitted_run(
             &store,
             &fence,
-            &root,
+            &run,
             lash_core::store::AdmittedHead::Batch(turn.batch_id.clone()),
         )
         .await;
@@ -633,12 +627,12 @@ pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn
             vec![turn.batch_id.clone()],
             "{case}: a turn admission takes only turn work"
         );
-        end_root(&store, &fence, completing_admission(&root, &admitted)).await;
+        end_run(&store, &fence, completing_admission(&run, &admitted)).await;
     }
 }
 
 /// Queued work waits for the boundary its delivery policy names, and a
-/// completion settles only under the live fence of the root holding the rows.
+/// completion settles only under the live fence of the run holding the rows.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -664,18 +658,18 @@ pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
         .await
         .expect("enqueue earliest work");
 
-    let fence = seal_drive_fence_for_test(&store, &session, "owner-a").await;
-    let root = TurnId::from("boundary-root");
+    let fence = seal_shift_fence_for_test(&store, &session, "owner-a").await;
+    let run = TurnId::from("boundary-run");
     let checkpoint = |step: &'static str| {
         let store = Arc::clone(&store);
         let fence = fence.clone();
-        let root = root.clone();
+        let run = run.clone();
         async move {
             admit_at_checkpoint_for_test(
                 &store,
                 &fence,
-                &root,
-                &root,
+                &run,
+                &run,
                 crate::CheckpointKind::AfterWork,
                 step,
                 10,
@@ -690,16 +684,16 @@ pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
         "after-current-commit work at the queue head must wait for the idle boundary"
     );
 
-    let idle = admitted_root(
+    let idle = admitted_run(
         &store,
         &fence,
-        "boundary-root",
+        "boundary-run",
         lash_core::store::AdmittedHead::Batch(after_commit.batch_id.clone()),
     )
     .await;
     assert_eq!(idle.batch_ids(), vec![after_commit.batch_id.clone()]);
 
-    // With the after-commit head bound to the root, the checkpoint boundary
+    // With the after-commit head bound to the run, the checkpoint boundary
     // reaches the earliest-safe-boundary batch behind it.
     let at_checkpoint = checkpoint("boundary:step:2").await;
     assert_eq!(
@@ -712,22 +706,22 @@ pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
     );
 
     let settlement =
-        completing_checkpoint(completing_admission("boundary-root", &idle), &at_checkpoint);
+        completing_checkpoint(completing_admission("boundary-run", &idle), &at_checkpoint);
     let mut foreign = settlement.clone();
-    foreign.root = TurnId::from("another-root");
-    let err = try_end_root(&store, &fence, foreign)
+    foreign.run = TurnId::from("another-run");
+    let err = try_end_run(&store, &fence, foreign)
         .await
-        .expect_err("a completion keyed by another root must be rejected");
+        .expect_err("a completion keyed by another run must be rejected");
     assert!(
         matches!(err, StoreError::IngressRowNotAdmitted { .. }),
-        "a foreign-root completion produced the wrong error: {err:?}"
+        "a foreign-run completion produced the wrong error: {err:?}"
     );
-    let successor = seal_drive_fence_for_test(&store, &session, "owner-b").await;
-    let err = try_end_root(&store, &fence, settlement.clone())
+    let successor = seal_shift_fence_for_test(&store, &session, "owner-b").await;
+    let err = try_end_run(&store, &fence, settlement.clone())
         .await
         .expect_err("a completion under a superseded fence must be rejected");
     assert!(
-        matches!(err, StoreError::StaleDriveFence { .. }),
+        matches!(err, StoreError::StaleShiftFence { .. }),
         "a stale completion produced the wrong error: {err:?}"
     );
     assert_eq!(
@@ -739,7 +733,7 @@ pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
         2,
         "a refused completion must not delete an admitted batch"
     );
-    end_root(&store, &successor, settlement).await;
+    end_run(&store, &successor, settlement).await;
     assert!(
         store
             .list_queued_work(&session)

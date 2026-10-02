@@ -1,7 +1,7 @@
 //! Context-overflow recovery harness (`runbooks/context-overflow-recovery`).
 //!
 //! One process, SQLite scratch storage or private PostgreSQL, and a local
-//! `restate-server`, the zero-infra engine (ADR 0104 §4); no model token. Driven by
+//! `restate-server`, the zero-infra engine (ADR 0104 §4); no model token. Executed by
 //! `scripts/context-overflow-recovery-e2e.sh`, which runs it under
 //! `scripts/ci/with-service.sh restate` and owns the artifact directory and
 //! the exact gates.
@@ -22,7 +22,7 @@
 //! A separate standard-protocol session exercises plugin-owned overflow
 //! recovery on the same Restate stack. The RLM outcome arms remain separate.
 //!
-//! A control phase drives the same harness into a plain provider error and
+//! A control phase executes the same harness into a plain provider error and
 //! requires a *different* stop, because "distinguishable from a provider
 //! error" is the claim, and one outcome observed alone never proves a
 //! distinction.
@@ -329,7 +329,7 @@ impl Harness {
     /// A core on lash-restate's engine over the selected store set, its
     /// endpoint served and registered with the local server: each arm is a
     /// deployment of its own, so its scripted provider is the one the server
-    /// drives its turns with.
+    /// executes its turns with.
     async fn new(script: Script, protocol: Protocol) -> Result<Self> {
         let restate = lash_restate_postgres_workers_e2e::local_restate::LocalRestate::from_env()?;
         let scratch = tempfile::tempdir().context("scratch dir for the SQLite store set")?;

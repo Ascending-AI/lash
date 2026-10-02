@@ -437,29 +437,29 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
     > {
         self.read_turn_park_feed(after, limit).await
     }
-    async fn non_terminal_roots_page(
+    async fn non_terminal_runs_page(
         &self,
-        after: Option<&lash_core_execution::engine::RootRef>,
+        after: Option<&lash_core_execution::engine::RunRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::engine::OpenRun>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
             return Ok(Vec::new());
         };
         let session = after.map_or_else(String::new, |key| key.session.to_string());
-        let root = after.map_or_else(String::new, |key| key.root.to_string());
+        let run = after.map_or_else(String::new, |key| key.run.to_string());
         let rows = conn
             .call(move |conn| {
                 let mut stmt = conn.prepare_cached(
-                    crate::session_roots::session_roots_sql()
-                        .roots
+                    crate::session_runs::session_runs_sql()
+                        .runs
                         .select_open_page
                         .sql(),
                 )?;
-                let rows = stmt.query_map(params![session, root, limit.get() as i64], |row| {
+                let rows = stmt.query_map(params![session, run, limit.get() as i64], |row| {
                     Ok((
-                        lash_core_execution::engine::RootRef {
+                        lash_core_execution::engine::RunRef {
                             session: crate::codec::sql_identity(row.get::<_, String>(0)?)?,
-                            root: crate::codec::sql_identity(row.get::<_, String>(1)?)?,
+                            run: crate::codec::sql_identity(row.get::<_, String>(1)?)?,
                         },
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
@@ -471,9 +471,9 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             .map_err(sqlite_error)?;
         rows.into_iter()
             .map(|(target, admission, sealed)| {
-                Ok(lash_core_execution::engine::OpenRoot {
+                Ok(lash_core_execution::engine::OpenRun {
                     target,
-                    executor: lash_core_execution::store::RootExecutor::from_stored(
+                    executor: lash_core_execution::store::RunExecutor::from_stored(
                         admission.as_deref(),
                         sealed.as_deref(),
                     )?,
@@ -481,19 +481,19 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             })
             .collect()
     }
-    async fn end_lost_root(
+    async fn end_lost_run(
         &self,
-        target: &lash_core_execution::engine::RootRef,
-        loss: lash_core_execution::engine::RootRunLoss,
+        target: &lash_core_execution::engine::RunRef,
+        loss: lash_core_execution::engine::RunLoss,
         at_ms: u64,
-    ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
+    ) -> Result<Option<lash_core_execution::store::RunTerminal>, StoreError> {
         let Some(conn) = self.control_ledger().await? else {
             return Ok(None);
         };
         let target = target.clone();
         conn.write_flow(move |tx| {
             Ok(
-                match crate::session_roots::end_lost_root_conn(tx, &target, loss, at_ms) {
+                match crate::session_runs::end_lost_run_conn(tx, &target, loss, at_ms) {
                     Ok(terminal) => crate::conn::TxOutcome::Commit(Ok(terminal)),
                     Err(error) => crate::conn::TxOutcome::Rollback(Err(error)),
                 },
@@ -511,7 +511,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             return Ok(Vec::new());
         };
         conn.call(move |conn| {
-            let sql = &crate::session_roots::session_roots_sql().verbs;
+            let sql = &crate::session_runs::session_runs_sql().verbs;
             let mut stmt = conn.prepare_cached(sql.intents.sql())?;
             let rows = stmt
                 .query_map(
@@ -519,12 +519,12 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
                         after.map_or(0, |id| id.sequence()) as i64,
                         limit.get() as i64
                     ],
-                    crate::session_roots::intent_row,
+                    crate::session_runs::intent_row,
                 )?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows
                 .into_iter()
-                .map(crate::session_roots::StoredIntentRow::decode)
+                .map(crate::session_runs::StoredIntentRow::decode)
                 .collect())
         })
         .await

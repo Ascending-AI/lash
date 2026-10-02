@@ -1,6 +1,6 @@
 # Workbench durable approval runbook
 
-> Follow [`runbooks/RULES.md`](../RULES.md) exactly. It owns browser driving,
+> Follow [`runbooks/RULES.md`](../RULES.md) exactly. It owns browser executing,
 > objective gates, three-layer reconciliation, Abort/RCA, screenshots, boot,
 > and teardown. This runbook adds only the approval scenarios.
 
@@ -37,7 +37,7 @@ records its correlation key and returns Pending. The test aborts and joins the
 original turn task, drops the core, advances the injected effect clock past the
 interrupted claim's lease, and reopens the ledger, effect host, core, and session.
 The reconstructed host resolves the saved key through `core.completions().resolve`,
-then redrives the original turn id. No provider network call or sleep drives this
+then redrives the original turn id. No provider network call or sleep executes this
 companion.
 
 Gate every row on exactly **one provider invocation**, an accepted callback,
@@ -64,7 +64,7 @@ do not substitute a scripted model for the live rows.
 ## Golden rules
 
 1. Use a free port from this row's allocation in the 3200-3299 range per
-   [RULES.md](../RULES.md), and a fresh per-row directory under the drive's run root with
+   [RULES.md](../RULES.md), and a fresh per-row directory under the shift's run root with
    `{data,run,artifacts}` subdirectories. (Earlier wording pinned
    `/workspace/tmp/fig1117-approval-{scenario}-{data,run,artifacts}` and warned off ports
    3056/3057; that is an older layout and conflicts with RULES.md.)

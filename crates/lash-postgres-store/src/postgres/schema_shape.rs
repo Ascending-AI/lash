@@ -1369,7 +1369,7 @@ mod introspect;
 pub(crate) use introspect::{
     Installation, read_search_path, resolve_installation, verify_schema_shape,
 };
-/// Reached only by the artifact-generation and catalog tests, which drive the
+/// Reached only by the artifact-generation and catalog tests, which execute the
 /// introspection directly rather than through a full verification.
 #[cfg(test)]
 pub(crate) use introspect::{normalize_predicate, read_live_shape, resolve_tables};

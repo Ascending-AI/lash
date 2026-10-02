@@ -96,7 +96,7 @@ interface borrows:
   suspended on its request.
 
 The law `step_resume_matches_straight_through_for_every_corpus_program`
-drives every corpus program step by step, and in process mode parks it at
+executes every corpus program step by step, and in process mode parks it at
 every boundary and reopens each continuation from its bytes on a pristine
 instance, and compares both with the program run straight through.
 `effect_park_matches_straight_through_for_every_corpus_program` parks every
@@ -230,7 +230,7 @@ transport or pool:
 Determinism is not a goal; durability is. When a worker dies, the parent
 fences the transport lease, settles every operation it already admitted
 within its invocation, and returns a typed retryable infrastructure failure
-so the owning substrate invocation is re-driven. The VM and its counters
+so the owning substrate invocation is redriven. The VM and its counters
 are rebuilt only by real journal replay, never by resetting ordinals
 locally inside a live invocation. A replacement attaches to a still
 addressable operation rather than dispatching another, and no recorded
@@ -263,7 +263,7 @@ belongs to the transport, which reports a silent worker as
   request the next ordinal and derives its `ToolCallId`s through
   `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
   hosts also mint from. Each admission carries a fingerprint (BLAKE3 over
-  the canonical request) that the journal retains, so a re-driven run that
+  the canonical request) that the journal retains, so a redriven run that
   asks something different at a recorded ordinal fails with
   `RetainedRequestDrift` instead of reusing the recorded answer.
 - **Fencing.** A message whose lease, owner epoch, frame epoch or sequence
@@ -274,7 +274,7 @@ belongs to the transport, which reports a silent worker as
   EOF, an unresponsive transport or a violation), the broker kills it,
   settles the operation already admitted, within `BrokerBounds` and in the
   same invocation, and returns `BrokerFailure::WorkerLost`, which is
-  retryable. The substrate re-drives the invocation: the new attempt starts
+  retryable. The substrate redrives the invocation: the new attempt starts
   from the last committed checkpoint, re-admits from the checkpoint's
   ordinals, and gets each recorded answer back from the journal with no
   second dispatch. The broker never restarts a run, rewinds a counter or
@@ -487,7 +487,7 @@ It is non-transient and records no guest result. The turn writes a durable
 `WorkerDeployment` park on its first refusal, and the standard park path
 pauses its engine invocation after eight attempts with its journal retained.
 No Lash transient retry budget is spent. Supplying an executable at that path
-lets an operator redrive the same root to completion (FIG-4776).
+lets an operator redrive the same run to completion (FIG-4776).
 
 
 An owned child also installs a kernel CPU ceiling before guest work, from its

@@ -1,11 +1,11 @@
 //! The S5 functional laws on the double (FIG-3600): what a session's
-//! accepted input gets from the engine's drive.
+//! accepted input gets from the engine's shift.
 //!
 //! Every input enters through the session's durable ingress, and the
-//! acceptance asks the engine for a drive; nothing here runs a turn itself.
-//! The engine's `LashSession` drive admits the input and runs its root in a
-//! `LashTurn` workflow, on the kernel drive the core installed. The laws
-//! read the outcome from the drive and from durable session state, never
+//! acceptance asks the engine for a shift; nothing here runs a turn itself.
+//! The engine's `LashSession` shift admits the input and executes its run in a
+//! `LashTurn` workflow, on the kernel shift the core installed. The laws
+//! read the outcome from the shift and from durable session state, never
 //! from a caller-held future.
 
 #![expect(
@@ -17,13 +17,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lash_core::engine::{DriveOutcome, DriveRequestId, DriveStop, RootOutcome};
+use lash_core::engine::{RunOutcome, ShiftOutcome, ShiftRequestId, ShiftStop};
 use lash_core::facade_support::{TurnFinish, TurnOutcome, TurnStop};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::{SessionId, StoreSet as _, TurnInputStore as _};
 use lash_restate_test::{
-    RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
+    RestateTestBackend, SESSION_SHIFT_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
 };
 
 /// The first model call waits here until the law releases it, so a law can
@@ -116,34 +116,34 @@ async fn world(seed: u64) -> World {
     }
 }
 
-/// The drive the acceptance of `input_id` scheduled.
-fn request_of(input_id: &lash_core::InputId) -> DriveRequestId {
-    lash_core::drive::ingress_drive_request(
+/// The shift the acceptance of `input_id` scheduled.
+fn request_of(input_id: &lash_core::InputId) -> ShiftRequestId {
+    lash_core::shift::ingress_shift_request(
         input_id.as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     )
 }
 
 async fn attach(
     backend: &RestateTestBackend,
     session: &SessionId,
-    request: DriveRequestId,
-) -> DriveOutcome {
+    request: ShiftRequestId,
+) -> ShiftOutcome {
     tokio::time::timeout(
         Duration::from_secs(20),
-        backend.attach_drive(session, request),
+        backend.attach_shift(session, request),
     )
     .await
-    .expect("the drive ends")
-    .expect("the drive's outcome")
+    .expect("the shift ends")
+    .expect("the shift's outcome")
 }
 
-fn answers(outcome: &DriveOutcome) -> Vec<String> {
+fn answers(outcome: &ShiftOutcome) -> Vec<String> {
     outcome
         .ran
         .iter()
-        .map(|root| match root {
-            RootOutcome::Committed {
+        .map(|run| match run {
+            RunOutcome::Committed {
                 outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage { text }),
                 ..
             } => text.clone(),
@@ -163,8 +163,8 @@ async fn transcript(session: &lash::LashSession) -> String {
     serde_json::to_string(view.messages()).expect("encode the transcript")
 }
 
-/// An input accepted on an idle session is admitted by the drive its
-/// acceptance scheduled, at once: one root, answered and committed.
+/// An input accepted on an idle session is admitted by the shift its
+/// acceptance scheduled, at once: one run, answered and committed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn idle_send_is_admitted_at_once() {
     let world = world(0x5501).await;
@@ -182,7 +182,7 @@ async fn idle_send_is_admitted_at_once() {
         .clone();
     let outcome = attach(&world.backend, &session_id, request_of(&receipt.input_id)).await;
     assert_eq!(answers(&outcome), ["answer 1"]);
-    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(outcome.stop, ShiftStop::Idle);
     assert!(
         session
             .durable()
@@ -202,8 +202,8 @@ async fn idle_send_is_admitted_at_once() {
 }
 
 /// Inputs accepted while a turn runs are answered after it, in arrival
-/// order: a send committed during a running drive is admitted by that drive's
-/// next admission or by the drive its own schedule queued behind it, never
+/// order: a send committed during a running shift is admitted by that shift's
+/// next admission or by the shift its own schedule queued behind it, never
 /// stranded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn busy_sends_answer_in_arrival_order() {
@@ -247,7 +247,7 @@ async fn busy_sends_answer_in_arrival_order() {
             .await
             .expect("pending")
             .is_empty(),
-        "every accepted input was driven"
+        "every accepted input was executed"
     );
     let applied: Vec<_> = session
         .durable()
@@ -277,12 +277,12 @@ async fn busy_sends_answer_in_arrival_order() {
     assert!(at("second question") < at("third question"));
 }
 
-/// Sends accepted back-to-back ask for at most one drive behind the running
-/// one (FIG-4036): an ask that finds the session's drive in flight joins the
-/// one drive queued behind it instead of queuing its own, and every input
+/// Sends accepted back-to-back ask for at most one shift behind the running
+/// one (FIG-4036): an ask that finds the session's shift in flight joins the
+/// one shift queued behind it instead of queuing its own, and every input
 /// is still answered.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn back_to_back_sends_queue_at_most_one_drive() {
+async fn back_to_back_sends_queue_at_most_one_shift() {
     const SENDS: usize = 24;
     let world = world(0x5508).await;
     let session = created_session(&world.core, "back-to-back")
@@ -317,7 +317,7 @@ async fn back_to_back_sends_queue_at_most_one_drive() {
             .await
             .expect("pending")
             .is_empty(),
-        "every accepted input was driven"
+        "every accepted input was executed"
     );
     assert_eq!(
         session
@@ -332,28 +332,28 @@ async fn back_to_back_sends_queue_at_most_one_drive() {
         world
             .backend
             .server()
-            .inbox_high_water(SESSION_DRIVER_SERVICE, "back-to-back")
+            .inbox_high_water(SESSION_SHIFT_SERVICE, "back-to-back")
             <= 1,
-        "at most one drive ever waited behind the running one: {:?}",
+        "at most one shift ever waited behind the running one: {:?}",
         world.backend.server().invocations()
     );
 }
 
-/// The double's drive hold: while a test holds the engine's drive of a
+/// The double's shift hold: while a test holds the engine's shift of a
 /// session, an input accepted there stays pending — no admission takes it —
-/// and a root admitted before the hold still runs to its answer. Releasing
-/// the hold lets the drive admit the input. This is how a law asserts what
-/// is still pending without driving anything itself.
+/// and a run admitted before the hold still runs to its answer. Releasing
+/// the hold lets the shift admit the input. This is how a law asserts what
+/// is still pending without executing anything itself.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_held_drive_admits_nothing_until_released() {
+async fn a_held_shift_admits_nothing_until_released() {
     let world = world(0x5507).await;
     world.gate.armed.store(true, Ordering::SeqCst);
-    let session = created_session(&world.core, "held-drive")
+    let session = created_session(&world.core, "held-shift")
         .await
         .open()
         .await
         .expect("open");
-    let session_id = SessionId::from("held-drive");
+    let session_id = SessionId::from("held-shift");
     let running = session
         .send(lash::TurnInput::text("first question"))
         .await
@@ -361,7 +361,7 @@ async fn a_held_drive_admits_nothing_until_released() {
     tokio::time::timeout(Duration::from_secs(20), world.gate.reached.notified())
         .await
         .expect("the first turn is running");
-    let hold = world.backend.hold_session_drive(&session_id).await;
+    let hold = world.backend.hold_session_shift(&session_id).await;
     let held = session
         .send(lash::TurnInput::text("held question"))
         .await
@@ -369,11 +369,11 @@ async fn a_held_drive_admits_nothing_until_released() {
     world.gate.release.notify_one();
     let first = tokio::time::timeout(Duration::from_secs(20), running.outcome())
         .await
-        .expect("the first root answers under the hold")
+        .expect("the first run answers under the hold")
         .expect("the first outcome");
     assert!(
         matches!(first.status(), lash::TurnStatus::Answered),
-        "the admitted root runs on: {:?}",
+        "the admitted run executes on: {:?}",
         first.status()
     );
     world.backend.server().settle().await;
@@ -387,14 +387,14 @@ async fn a_held_drive_admits_nothing_until_released() {
             read.input.input_id == held.receipt().input_id
                 && matches!(read.status, lash::PendingTurnInputReadStatus::Open)
         }),
-        "the held drive admitted nothing: {pending:?}"
+        "the held shift admitted nothing: {pending:?}"
     );
     assert_eq!(world.calls.load(Ordering::SeqCst), 1);
 
     hold.release();
     let second = tokio::time::timeout(Duration::from_secs(20), held.outcome())
         .await
-        .expect("the released drive answers the held input")
+        .expect("the released shift answers the held input")
         .expect("the held outcome");
     assert!(
         matches!(second.status(), lash::TurnStatus::Answered),
@@ -472,7 +472,7 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
     };
     assert_eq!(again.terminal(), Some(terminal));
 
-    let root = world
+    let run = world
         .backend
         .server()
         .invocations()
@@ -487,13 +487,13 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
                 .and_then(|rest| rest.strip_suffix("/run"))
                 .map(str::to_owned)
         })
-        .expect("the running root has its LashTurn");
+        .expect("the running run has its LashTurn");
     world
         .backend
         .restate()
         .turn_work_driver()
         .request_cancel(lash::TurnCancelRequest::new(
-            lash::TurnAddress::new(session_id.clone(), lash_core::TurnId::fixture(root.clone())),
+            lash::TurnAddress::new(session_id.clone(), lash_core::TurnId::fixture(run.clone())),
             "withdraw-cancel-stop",
             Some("user".to_owned()),
         ))
@@ -504,7 +504,7 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
     let outcome = attach(&world.backend, &session_id, request_of(&running.input_id)).await;
     match outcome.ran.as_slice() {
         [
-            RootOutcome::Committed {
+            RunOutcome::Committed {
                 outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
                 ..
             },
@@ -532,7 +532,7 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
 
 /// The caller that accepted an input holds nothing the turn needs: dropping
 /// the session handle it accepted through, and the acceptance itself, stops
-/// nothing. The worker's core keeps serving drives, and the drive commits the
+/// nothing. The worker's core keeps serving shifts, and the shift commits the
 /// turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropping_the_handle_stops_nothing() {
@@ -720,7 +720,7 @@ async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
 }
 
 /// L-S11: a row committed whose immediate delivery was lost (its process
-/// died between the commit and the ask) is driven by the relay pass of the
+/// died between the commit and the ask) is executed by the relay pass of the
 /// engine's reconcile tick, through the ingress obligation its commit armed
 /// (ADR 0109 §3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -733,7 +733,7 @@ async fn dropped_schedule_is_reconciled() {
         .expect("open");
     let session_id = SessionId::from("dropped-schedule");
     // The row commits through the store alone: its obligation is armed, but
-    // no acceptance ran, so no drive was ever asked for.
+    // no acceptance ran, so no shift was ever asked for.
     let store = world.backend.stores().session_store_factory();
     let input_id = store
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
@@ -744,8 +744,8 @@ async fn dropped_schedule_is_reconciled() {
         .await
         .expect("commit the row")
         .input_id;
-    // The engine driver's own reconcile tick (ADR 0104 O2) relays the due
-    // obligation: its drive drains the row.
+    // The engine `SessionShifts`'s own reconcile tick (ADR 0104 O2) relays the due
+    // obligation: its shift drains the row.
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             if session
@@ -761,26 +761,26 @@ async fn dropped_schedule_is_reconciled() {
         }
     })
     .await
-    .expect("the reconcile tick's drive drains the row");
+    .expect("the reconcile tick's shift drains the row");
     #[derive(Debug, serde::Deserialize)]
-    struct DriveAsk {
+    struct ShiftAsk {
         idempotency_key: Option<String>,
     }
     let asks = lash_restate::RestateAdminClient::new(world.backend.connection())
-        .query_json::<DriveAsk>(
+        .query_json::<ShiftAsk>(
             "SELECT idempotency_key FROM sys_invocation \
              WHERE target_service_name = 'LashSession' AND target_service_key = 'dropped-schedule'",
         )
         .await
         .expect("sys_invocation");
-    let ask = lash_core::drive::ingress_drive_request(
+    let ask = lash_core::shift::ingress_shift_request(
         input_id.as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     assert!(
         asks.iter()
             .any(|row| row.idempotency_key.as_deref() == Some(ask.as_str())),
-        "the relay asked for the row's own drive: {asks:?}"
+        "the relay asked for the row's own shift: {asks:?}"
     );
 
     // The delivered obligation is settled: nothing asks for the row again.
@@ -805,8 +805,8 @@ async fn dropped_schedule_is_reconciled() {
 
 /// A row that lands while an engine-side invocation owns its session is
 /// asked for once, through its own ingress obligation, and never by a second ask:
-/// its ask joins the one drive the engine queues behind the live one, which
-/// is not sent while the live drive runs (FIG-4036), so no sibling ever
+/// its ask joins the one shift the engine queues behind the live one, which
+/// is not sent while the live shift runs (FIG-4036), so no sibling ever
 /// fences the live turn (S5a review, ADR 0109 §3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_with_live_engine_work_is_not_re_asked() {
@@ -839,44 +839,44 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
         .expect("commit the row")
         .input_id;
 
-    // The engine driver's own reconcile tick (ADR 0104 O2) relays the row's
+    // The engine `SessionShifts`'s own reconcile tick (ADR 0104 O2) relays the row's
     // obligation. A full tick after the row lands finds no ask but
     // exactly the row's own.
     tokio::time::sleep(Duration::from_secs(11)).await;
     #[derive(Debug, serde::Deserialize)]
-    struct DriveAsk {
+    struct ShiftAsk {
         idempotency_key: Option<String>,
     }
     let asks = lash_restate::RestateAdminClient::new(world.backend.connection())
-        .query_json::<DriveAsk>(
+        .query_json::<ShiftAsk>(
             "SELECT idempotency_key FROM sys_invocation \
              WHERE target_service_name = 'LashSession' AND target_service_key = 'in-flight'",
         )
         .await
         .expect("sys_invocation");
-    let own = lash_core::drive::ingress_drive_request(
+    let own = lash_core::shift::ingress_shift_request(
         behind.as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     assert!(
         asks.iter().all(|row| row
             .idempotency_key
             .as_deref()
             .is_none_or(|key| key.starts_with("ingress:"))),
-        "only ingress obligations asked for drives: {asks:?}"
+        "only ingress obligations asked for shifts: {asks:?}"
     );
     assert_eq!(
         asks.len(),
         1,
-        "the row's ask queued no drive behind the live one: {asks:?}"
+        "the row's ask queued no shift behind the live one: {asks:?}"
     );
     assert!(
         asks.iter()
             .all(|row| row.idempotency_key.as_deref() != Some(own.as_str())),
-        "the row's drive waits until the live one ended: {asks:?}"
+        "the row's shift waits until the live one ended: {asks:?}"
     );
 
-    // The live drive's own re-admission picks the row up once the turn
+    // The live shift's own re-admission picks the row up once the turn
     // ends: no sibling ever ran, and the work is not stranded.
     world.gate.release.notify_one();
     let outcome = attach(&world.backend, &session_id, request_of(receipt.input_id())).await;
@@ -891,9 +891,9 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
     );
 }
 
-/// LOW-14 (#2290 review): one engine serves one session driver, so a second
-/// core built over the same backend does not drive its own sessions. The
-/// build says so, naming the core whose driver is ignored.
+/// LOW-14 (#2290 review): one engine serves one `SessionShifts`, so a second
+/// core built over the same backend does not work its own sessions. The
+/// build says so, naming the core whose `SessionShifts` is ignored.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_second_core_over_one_engine_reports_its_ignored_driver() {
     let world = world(0x5a14).await;
@@ -906,7 +906,7 @@ async fn a_second_core_over_one_engine_reports_its_ignored_driver() {
         build_core(&world.backend, provider, "second-core")
     })
     .await;
-    let ignored = capture.exactly_one("session_driver.install_ignored");
+    let ignored = capture.exactly_one("session_shifts.install_ignored");
     assert_eq!(ignored.level, "WARN");
     assert_eq!(ignored.field("incarnation_id"), "second-core");
     drop(second);

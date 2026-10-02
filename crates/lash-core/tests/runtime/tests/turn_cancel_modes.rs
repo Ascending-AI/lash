@@ -5,7 +5,7 @@
 use super::*;
 use lash_core::TurnCancelMode;
 use lash_core::facade_support::{TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_c100;
 
@@ -232,7 +232,7 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("stop after this step"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped())
                         .with_events(&observed)
@@ -322,7 +322,7 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("stop after this step"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped()),
                 )
@@ -456,7 +456,7 @@ async fn immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context()
                 .await
                 .expect("open first turn");
             let turn = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("first turn"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped())
                         .with_turn_events(&activities),
@@ -537,7 +537,7 @@ async fn immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context()
         .await
         .expect("open next turn");
     let next = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("next turn"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -598,7 +598,7 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("stop, then abort"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped()),
                 )
@@ -703,7 +703,7 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
             .await
             .expect("open the scope's handler");
         let turn = runtime
-            .drive_turn(
+            .execute_turn(
                 TurnInput::text("never runs"),
                 TurnOptions::new(CancellationToken::new(), handler.scoped()),
             )
@@ -780,7 +780,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 .await
                 .expect("open the scope's handler");
             let turn = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("refused"),
                     lash_core::facade_support::TurnOptions::new(
                         CancellationToken::new(),
@@ -874,7 +874,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
                     .await
                     .expect("open the scope's handler");
                 let assembled = runtime
-                    .drive_turn(
+                    .execute_turn(
                         TurnInput::text("stop while queued work waits"),
                         lash_core::facade_support::TurnOptions::new(
                             CancellationToken::new(),
@@ -1086,7 +1086,7 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("retry then stop"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped()),
                 )
@@ -1123,7 +1123,7 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         .expect("request during the sleep");
     assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
     // SDK deadlines retain wall time spent before the sleep was issued.
-    // Drive the scheduled deadline, rather than a duration from server startup.
+    // Execute the scheduled deadline, rather than a duration from server startup.
     assert_eq!(double.server().advance_to(wake_at_ms - 1), 0);
     for _ in 0..16 {
         tokio::task::yield_now().await;
@@ -1186,7 +1186,7 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("retry then abort"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped()),
                 )

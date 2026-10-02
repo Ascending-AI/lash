@@ -90,17 +90,17 @@ across worker attempts and segments. A process opener is the process's minted
 id, which is never reused (ADR 0107), so a process registered later can never
 share it and alias another process's groups, closes or cancellation fences.
 
-**Every logical turn a drive runs is opened by `Turn(logical root)`.** Its
+**Every logical turn a shift runs is opened by `Turn(logical run)`.** Its
 later physical turns share the opener: a frame or terminal-checkpoint
-follow-on, and a follow-on that a later drive recovers under a recovery root
-of its own. The root's terminal evidence closes that scope once. Admission,
+follow-on, and a follow-on that a later shift recovers under a recovery run
+of its own. The run's terminal evidence closes that scope once. Admission,
 selection, retry and abandonment of queued work are ADR 0101's.
 
 **A session operation is a durable opener that runs no turn.** A host command
 runs under `SessionOperation(session, batch)`, so a redrive of the unsettled
-command under another root replays its effects, and a drive request's
+command under another run replays its effects, and a shift request's
 admissions are recorded under an operation named by the request. An operation
-has no logical root, and a logical turn started under one is refused. Its
+has no logical run, and a logical turn started under one is refused. Its
 session's close ends its scope.
 
 **`SessionDelete` and `RuntimeOperation` scopes are not openers and run no
@@ -594,7 +594,7 @@ and drains it. `CommittedFinalLost` for a generation refusal remains only as
 the typed backstop for forged or operator-forced state: a marker stamped by
 hand, or a draining generation's deployment force-removed. A future marker
 mover needs replay-safe exclusion of committed-undrained children, not only a
-drive fence: an invocation whose marker moved between its journaled admission
+shift fence: an invocation whose marker moved between its journaled admission
 and its commit would choose a different command sequence on replay.
 
 A seat that drains nothing waits on no sibling.
@@ -825,7 +825,7 @@ that committed journaled its own admission first, and it is answered
 `AttachExpired` whatever id it presents (`decide_group_child_admission`,
 `crates/lash-restate/src/effect_group/state_record.rs`). The successor drains
 the retained final through the child's driver and seats it at its reserved
-rank; it never drives the child again. No timeout, lease or unseated rank alone
+rank; it never executes the child again. No timeout, lease or unseated rank alone
 authorizes a drain.
 
 **Every opener has a lane.** A group's dispatch route is a generation lane of
@@ -916,8 +916,8 @@ served from.
 **The limit and its unit (FIG-4546).** The session's `max_tool_calls` is
 required host configuration with no default and no built-in ceiling: recorded at
 creation, changed only by the core `set_max_tool_calls` config command, and read
-from the record — a root's snapshot, a process's recorded environment — by every
-replay, redrive and reopen. A changed limit therefore binds from the next root
+from the record — a run's snapshot, a process's recorded environment — by every
+replay, redrive and reopen. A changed limit therefore binds from the next run
 and the next process start, and never refuses work already accepted. The unit
 is the **unique tool invocation**; a timer is not a tool call and is not
 counted, and operand positions are not host work (the position-to-child mapping
@@ -1315,7 +1315,7 @@ needs its rank, discharge and projection authority (§4).
 ## Model usage accounting
 
 Tool-child usage rides on no settlement and is not charged at
-incorporation (§13). Each `ToolAttempt` entry's usage run delivers the facts
+incorporation (§13). Each `ToolAttempt` entry's usage meter delivers the facts
 of its nested calls through the accounting continuation of [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md), and a
 nested call's unreported attempt is a fact. Settlements, captures and the
 incorporation ledger carry no usage.

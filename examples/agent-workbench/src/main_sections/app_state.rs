@@ -466,8 +466,8 @@ impl AppState {
                     address: address.clone(),
                 },
             };
-            // A pending terminal keeps the claim while the root still runs (its
-            // follower releases it); a claim with no running root is pruned.
+            // A pending terminal keeps the claim while the run still runs (its
+            // follower releases it); a claim with no running run is pruned.
             let routing_retained = if receipt.terminal_is_pending() {
                 match self.lash_turn_is_active(&address).await {
                     Ok(true) => true,
@@ -520,8 +520,8 @@ impl AppState {
         Ok(receipts)
     }
 
-    /// Whether Restate still reports the root's `LashTurn` invocation (the one
-    /// lash's engine runs it in, keyed by the session and the root) as running.
+    /// Whether Restate still reports the run's `LashTurn` invocation (the one
+    /// lash's engine runs it in, keyed by the session and the run) as running.
     pub(crate) async fn lash_turn_is_active(
         &self,
         address: &lash::TurnAddress,
@@ -1494,7 +1494,7 @@ pub(crate) fn parked_turn_message(error: &lash::EmbedError) -> Option<String> {
         {
             &error.code
         }
-        // A followed root that parked: its handle answers it unsettled.
+        // A followed run that parked: its handle answers it unsettled.
         lash::EmbedError::Send(error)
             if matches!(
                 error.as_ref(),

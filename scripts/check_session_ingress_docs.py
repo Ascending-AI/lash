@@ -5,10 +5,10 @@ FIG-4488 and FIG-4490: the Queued Work, Session Model and Parked Turn
 glossary entries in CONTEXT.md, ADR 0030 and ADR 0101 §4 must describe the
 config, batching and parking contracts the code already implements —
 `ConfigTransaction`/`ConfigWrite` submitted through `SessionConfigAdmin` and
-settling `Applied`/`Stale`/`Refused` (ADR 0126), durable per-root `RunSpec`
+settling `Applied`/`Stale`/`Refused` (ADR 0126), durable per-run `RunSpec`
 overrides (ADR 0101 §A5), merge key and authority as per-item data for the
 host's `QueuedDrainPolicy` (ADR 0101 §5.2,
-`crates/lash-core-store/src/queued_drain_policy.rs`), and implemented root
+`crates/lash-core-store/src/queued_drain_policy.rs`), and implemented run
 parks (`crates/lash/src/send.rs`,
 `crates/lash-core-execution/src/runtime/park.rs`).
 
@@ -121,7 +121,7 @@ DENIED = (
         r"(?:merge[ -]keys?|authorit\w+|principals?|elevation|row\s+count|rendered\s+(?:context\s+)?(?:reserve|size))",
     ),
     (
-        "durable per-root RunSpec overrides are admitted",
+        "durable per-run RunSpec overrides are admitted",
         r"\bno\s+turn[ -]level|\bturn[ -]level\s+(?:model\s+)?(?:overlay|override)s?\b"
         r"|\b(?:overrides?|overlays?)\s+(?:are|is|be)\s+(?:forbidden|prohibited|banned|not\s+(?:allowed|permitted|supported))",
     ),

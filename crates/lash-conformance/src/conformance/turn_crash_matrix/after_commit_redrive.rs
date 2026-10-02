@@ -4,12 +4,12 @@
 //! finished, including before the commit's response reached it. The substrate
 //! then redrives the same drain under the same identity (ADR 0069 §6).
 //!
-//! The drain runs through the session drive (FIG-3600): a recorded admission
-//! names the root, a recorded seal raises the drive epoch, and the root's
+//! The drain runs through the session shift (FIG-3600): a recorded admission
+//! names the run, a recorded seal raises the shift epoch, and the run's
 //! recorded claim records the head it was admitted on. The redrive must not
-//! re-decide any of that from the store, which has moved on: the root's input
+//! re-decide any of that from the store, which has moved on: the run's input
 //! is applied and the head is past the committed turn. It replays the
-//! recorded admission, seal and claim, rebuilds the root on its admitted head
+//! recorded admission, seal and claim, rebuilds the run on its admitted head
 //! (FIG-3682), and reads the committed turn back: it asks the model nothing,
 //! runs no tool, and leaves the committed head as it found it.
 //!
@@ -22,7 +22,7 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// Every seam placement of the drive's `trace` at which the root's final
+/// Every seam placement of the shift's `trace` at which the run's final
 /// commit is already durable: inside the final commit (its response lost),
 /// and at and inside every store call after it.
 fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoint)> {
@@ -37,7 +37,7 @@ fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoi
                 )
             )
         })
-        .unwrap_or_else(|| panic!("the drive's trace holds its final commit: {trace:?}"));
+        .unwrap_or_else(|| panic!("the shift's trace holds its final commit: {trace:?}"));
     let mut points = vec![(
         "final-commit-response-lost".to_string(),
         TurnCrashPoint {
@@ -57,17 +57,17 @@ fn after_commit_points(trace: &[TurnSeamOperation]) -> Vec<(String, TurnCrashPoi
     points
 }
 
-/// The reference drain through the session drive, run once to its end on a
+/// The reference drain through the session shift, run once to its end on a
 /// fresh scenario: the seam traffic the crash points are taken from.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn drive_trace(law: &MatrixLaw<'_>) -> Vec<TurnSeamOperation> {
+async fn shift_trace(law: &MatrixLaw<'_>) -> Vec<TurnSeamOperation> {
     let scenario = "after-commit-redrive-trace";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = (law.make)(scenario);
-    seed_reference_ingress_for_drive(&raw, &identity).await;
+    seed_reference_ingress_for_shift(&raw, &identity).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (attempt, reports) = ReferenceTurn::new(
@@ -79,22 +79,22 @@ async fn drive_trace(law: &MatrixLaw<'_>) -> Vec<TurnSeamOperation> {
         &executions,
         nominal_recovery_timings(),
     )
-    .before_drive(SeamControl::clear)
+    .before_shift(SeamControl::clear)
     .reporting();
     law.runner
         .run_turn(reference_admitted_scope(&identity), attempt)
         .await;
     reference_turn::reported(reports)
         .await
-        .expect("the traced drive runs")
+        .expect("the traced shift runs")
         .ran()
-        .expect("the traced drive runs its root");
+        .expect("the traced shift executes its run");
     control.trace()
 }
 
-/// Crash the reference drain, run through the session drive, after its final
+/// Crash the reference drain, run through the session shift, after its final
 /// commit at every placement in [`after_commit_points`], then redrive it on
-/// the same store: the redrive replays the committed root from what the first
+/// the same store: the redrive replays the committed run from what the first
 /// execution recorded, runs nothing again and commits nothing new.
 pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, S>(
     stores: Arc<dyn crate::StoreSet>,
@@ -113,7 +113,7 @@ pub async fn turn_crash_after_commit_redrive_replays_the_committed_receipt<F, S>
         host: &host,
         runner: &runner,
     };
-    let trace = Box::pin(drive_trace(&law)).await;
+    let trace = Box::pin(shift_trace(&law)).await;
     for (key, point) in after_commit_points(&trace) {
         let scenario = format!("after-commit-redrive-{key}");
         Box::pin(run_after_commit_redrive(&law, &scenario, &point)).await;
@@ -129,7 +129,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
     let identity = ReferenceIdentity::for_scenario(scenario);
     let admitted = reference_admitted_scope(&identity);
     let raw = make(scenario);
-    seed_reference_ingress_for_drive(&raw, &identity).await;
+    seed_reference_ingress_for_shift(&raw, &identity).await;
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let control = SeamControl::default();
     let crash = crash_at_armed_point(&control);
@@ -146,7 +146,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
                 &executions,
                 crashed_turn_timings(),
             )
-            .before_drive(move |control| control.arm(armed.clone()))
+            .before_shift(move |control| control.arm(armed.clone()))
             .attempt(),
             crash,
         )
@@ -172,8 +172,8 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
         reader
             .committed_turn_exists(&identity.session_id, &identity.turn_id)
             .await
-            .expect("read the root's commit receipt"),
-        "{scenario}: the root's final commit is durable before the crash"
+            .expect("read the run's commit receipt"),
+        "{scenario}: the run's final commit is durable before the crash"
     );
     let applied = reader
         .list_turn_input_applications(&identity.session_id)
@@ -191,7 +191,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
         &executions,
         nominal_recovery_timings(),
     )
-    .before_drive(SeamControl::clear)
+    .before_shift(SeamControl::clear)
     .reporting();
     law.runner.run_turn(admitted, successor).await;
     let drain = reference_turn::reported(redriven)
@@ -199,18 +199,18 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
         .unwrap_or_else(|error| panic!("{scenario}: the after-commit redrive failed: {error}"));
 
     let crate::facade_support::QueuedTurnDrain::Ran(turn) = drain else {
-        panic!("{scenario}: the redrive must replay the committed root, got {drain:?}");
+        panic!("{scenario}: the redrive must replay the committed run, got {drain:?}");
     };
     assert_eq!(
         turn.assistant_output.safe_text, "trace turn complete",
-        "{scenario}: the redrive reads the committed root's answer back"
+        "{scenario}: the redrive reads the committed run's answer back"
     );
     assert_eq!(
         executions.load(std::sync::atomic::Ordering::SeqCst),
         executed,
         "{scenario}: the redrive executes no effect"
     );
-    // The rebuilt root replays its journal: its tool group's bookkeeping
+    // The rebuilt run replays its journal: its tool group's bookkeeping
     // replays through the host, and a commit whose response was lost is
     // re-issued and adopted by its commit identity. Neither asks the model
     // or runs the tool, and the head below proves nothing committed twice.

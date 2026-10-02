@@ -55,7 +55,6 @@ mod definitions;
 mod deployment_view;
 mod direct_turn_acceptance;
 use deployment_view::DeploymentViewExt;
-mod drive_admission;
 mod effect_group_host;
 mod effect_host;
 mod fence_integrity;
@@ -88,22 +87,23 @@ mod process_registry;
 mod process_trigger_retention;
 mod queue_observation;
 mod queued_after_commit_redrive;
-mod queued_input_roots;
+mod queued_input_runs;
 pub mod registration_macro_support;
 mod release_stamp;
 mod retention;
-mod root_answers_its_rows;
-mod root_control;
-mod root_executor;
-mod root_start_marker;
-mod root_supersession;
-mod root_terminal;
+mod run_answers_its_rows;
+mod run_control;
+mod run_executor;
 mod run_shape;
-mod run_spec_drive;
+mod run_spec_shift;
+mod run_start_marker;
+mod run_supersession;
+mod run_terminal;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod segment_budget;
 mod segment_redrive;
+mod shift_admission;
 mod trace_provenance;
 pub use segment_budget::{
     SegmentBudgetHarness, SegmentBudgetObservation,
@@ -166,7 +166,6 @@ pub use completion_routing::*;
 pub use declared_start::{DeclaredStartTier, SubagentPlugin};
 pub use definitions::*;
 pub use direct_turn_acceptance::*;
-pub use drive_admission::*;
 pub use effect_group_host::*;
 pub use effect_host::*;
 pub use fence_integrity::*;
@@ -192,11 +191,11 @@ pub use process_prune_start_staging::*;
 pub use process_registry::*;
 pub use process_trigger_retention::*;
 pub use queued_after_commit_redrive::*;
-pub use queued_input_roots::*;
+pub use queued_input_runs::*;
 pub use release_stamp::{ReleaseStampDeployment, release_stamp_conformance};
 pub use retention::*;
 pub use revision_pins::*;
-pub use root_start_marker::*;
+pub use run_start_marker::*;
 pub use runtime_persistence::*;
 pub use runtime_persistence_state_machine::*;
 pub use served_process_start::SubagentFactories;
@@ -210,6 +209,7 @@ pub use session_ingress::{
 };
 pub use session_store_factory::*;
 pub use session_store_factory_failure_evidence::*;
+pub use shift_admission::*;
 pub use store_contract_state_machine::*;
 pub use store_maintenance_outcome::*;
 pub use store_recovery::*;
@@ -250,5 +250,5 @@ pub use usage_accounting::{
     usage_crash_p1_session_deleted, usage_crash_p2_committed_cancelled,
     usage_crash_p2_committed_completed, usage_crash_p2_committed_failed, usage_crash_p2_forked,
     usage_crash_p2_parked_forever, usage_crash_p2_session_deleted,
-    usage_of_a_root_parked_forever_before_finalization_is_read_without_driving,
+    usage_of_a_run_parked_forever_before_finalization_is_read_without_executing,
 };

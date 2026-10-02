@@ -48,11 +48,11 @@ pub enum EmbedError {
     /// Returned when the core would build without some obligation kind's
     /// relay: its store set arms every kind, and a kind nothing delivers
     /// stays owed forever (ADR 0109 §1.4).
-    ObligationRelayUnavailable(#[from] lash_core::drive::ObligationRelayUnavailable),
+    ObligationRelayUnavailable(#[from] lash_core::shift::ObligationRelayUnavailable),
     #[error("a model key is required; a root session's spec must name a registered model")]
     /// Returned when a creation's spec states no model: an overlay
     /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
-    /// root is created. Nothing is created.
+    /// run is created. Nothing is created.
     MissingLlmProfile,
     #[error(transparent)]
     /// Returned when a creation's model key has no binding in the host's
@@ -67,7 +67,7 @@ pub enum EmbedError {
     )]
     /// Returned when a creation's spec states no turn budget: an overlay
     /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
-    /// root is created. Nothing is created.
+    /// run is created. Nothing is created.
     MissingTurnBudget,
     #[error(
         "max_tool_calls is required; SessionSpec must carry a MaxToolCalls: the total tool calls one cell may make, and the number a process may hold at once"
@@ -166,7 +166,7 @@ pub enum EmbedError {
     #[error("runtime control unavailable: {0}")]
     Control(#[from] lash_core::facade_support::PluginOperationInvokeError),
     /// A [`send`](crate::LashSession::send) or one of its handles could not
-    /// answer (FIG-3600). Boxed: a [`SendError`] can carry a parked root's
+    /// answer (FIG-3600). Boxed: a [`SendError`] can carry a parked run's
     /// whole status, and every facade result carries this enum.
     #[error("send: {0}")]
     Send(Box<SendError>),
@@ -225,25 +225,25 @@ impl EmbedError {
 ///
 /// A committed turn that stopped (a provider error, max turns, a tool
 /// failure) is not an error: it answers `Ok` with a
-/// [`Failed`](crate::TurnStatus::Failed) status. A drive the engine refused
+/// [`Failed`](crate::TurnStatus::Failed) status. A shift the engine refused
 /// before the input settled surfaces as [`EmbedError::Runtime`] with the code
 /// the refusal carried.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SendError {
     /// [`output`](crate::SendHandle::output) was asked for the settled turn of
-    /// an input that has none: its root parked, or the input was withdrawn
+    /// an input that has none: its run parked, or the input was withdrawn
     /// before it ran. [`outcome`](crate::SendHandle::outcome) answers these
     /// without an error.
     #[error("input `{input_id}` has no settled turn: {status:?}")]
     NotSettled {
         /// The input the handle follows.
         input_id: lash_core::InputId,
-        /// What the input's root answered instead.
+        /// What the input's run answered instead.
         status: crate::TurnStatus,
     },
-    /// The input was applied and its drive stopped, but no terminal for its
-    /// root could be read within the handle's poll ceiling.
+    /// The input was applied and its shift stopped, but no terminal for its
+    /// run could be read within the handle's poll ceiling.
     #[error("input `{input_id}` settled but its terminal is unreadable")]
     Unresolved {
         /// The input the handle follows.
@@ -448,7 +448,7 @@ impl EmbedError {
 }
 
 /// A store error is terminal at the facade exactly when the engine ends a
-/// drive on it: the code the engine carries it under
+/// shift on it: the code the engine carries it under
 /// ([`StoreError::runtime_code`](lash_core::StoreError::runtime_code)) is
 /// terminal.
 fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
@@ -475,8 +475,8 @@ mod tests {
     fn head_ownership_stays_typed_and_recoverable_across_embed_boundary() {
         let session_id = SessionId::from("busy-session");
         for owner in [
-            lash_core::store::SessionHeadOwner::Root {
-                root: lash_core::TurnId::from("bound-root"),
+            lash_core::store::SessionHeadOwner::Run {
+                run: lash_core::TurnId::from("bound-run"),
             },
             lash_core::store::SessionHeadOwner::FollowOn {
                 follow_on: lash_core::TurnId::from("owed-follow-on"),

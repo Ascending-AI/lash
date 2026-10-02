@@ -64,7 +64,7 @@ where
     }
 
     /// The turn-control peek a `PeekAwaitEvent` effect journals. The effect
-    /// peeks only the running turn's own gate, whose root is still open, so
+    /// peeks only the running turn's own gate, whose run is still open, so
     /// the index's copy is the whole answer. Any other key keeps the general
     /// read.
     pub(super) async fn peek_turn_gate(
@@ -80,7 +80,7 @@ where
 
     /// The terminal a gate's session index holds, from one shared read that
     /// answers the revocation too. The general peek of a gate reads the
-    /// workflow on `None`: it may be asking after a retired root's gate,
+    /// workflow on `None`: it may be asking after a retired run's gate,
     /// whose terminal only the workflow still holds.
     pub(super) async fn mirrored_turn_gate(
         &self,

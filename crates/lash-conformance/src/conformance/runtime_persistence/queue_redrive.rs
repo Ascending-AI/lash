@@ -1,15 +1,15 @@
-//! Queued-work composition under a root's admission (FIG-3927 §2.2): a
-//! batch-headed root takes the ready prefix its policy admits, the next
-//! root takes what follows once the first settles, and a resumed root drives
+//! Queued-work composition under a run's admission (FIG-3927 §2.2): a
+//! batch-headed run takes the ready prefix its policy admits, the next
+//! run takes what follows once the first settles, and a resumed run executes
 //! exactly the composition its admission recorded.
 
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::{AdmittedHead, IngressSettlement};
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use pretty_assertions::assert_eq;
 
-fn batch_ids(admission: &lash_core::store::RootAdmission) -> Vec<String> {
+fn batch_ids(admission: &lash_core::store::RunAdmission) -> Vec<String> {
     admission
         .batch_ids()
         .iter()
@@ -24,7 +24,7 @@ fn ids(batches: &[&QueuedWorkBatch]) -> Vec<String> {
         .collect()
 }
 
-/// Admit `root` on `head` under `fence` with `policy` in place of the
+/// Admit `run` on `head` under `fence` with `policy` in place of the
 /// fixture's generous one.
 #[expect(
     clippy::expect_used,
@@ -32,24 +32,24 @@ fn ids(batches: &[&QueuedWorkBatch]) -> Vec<String> {
 )]
 async fn admitted_under(
     store: &Arc<dyn RuntimeStore>,
-    fence: &lash_core::store::DriveFence,
-    root: &str,
+    fence: &lash_core::store::ShiftFence,
+    run: &str,
     head: AdmittedHead,
     policy: crate::TurnLaneAdmissionPolicy,
-) -> lash_core::store::RootAdmission {
-    let mut request = admit_root_request_for_test(fence, &TurnId::fixture(root), head);
+) -> lash_core::store::RunAdmission {
+    let mut request = admit_run_request_for_test(fence, &TurnId::fixture(run), head);
     request.policy = policy;
     store
-        .admit_root(&request)
+        .admit_run(&request)
         .await
-        .expect("admit the root")
-        .expect("the root's admission reaches its head")
+        .expect("admit the run")
+        .expect("the run's admission reaches its head")
 }
 
-/// A batch-headed root takes the ready prefix its drain policy admits, a
+/// A batch-headed run takes the ready prefix its drain policy admits, a
 /// batch with no merge key included: `merge_key` is per-item data, not a
 /// composition gate (ADR 0101 §5.2). The row limit caps the prefix, and one
-/// session's roots never take another session's work.
+/// session's runs never take another session's work.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -80,8 +80,8 @@ pub async fn queued_work_respects_membership_limits_and_sessions(store: Arc<dyn 
         .await
         .expect("enqueue other session work");
 
-    let fence = seal_drive_fence_for_test(&store, &session, "owner-a").await;
-    let first = drive_root_to_end(
+    let fence = seal_shift_fence_for_test(&store, &session, "owner-a").await;
+    let first = execute_run_to_end(
         &store,
         &fence,
         "membership-unkeyed",
@@ -103,7 +103,7 @@ pub async fn queued_work_respects_membership_limits_and_sessions(store: Arc<dyn 
             .map(|batch| batch.batch_id)
             .collect::<Vec<_>>(),
         vec![other.batch_id.clone()],
-        "admitting one session's roots must not take queued work from another session"
+        "admitting one session's runs must not take queued work from another session"
     );
 
     let mut limited = Vec::new();
@@ -131,13 +131,13 @@ pub async fn queued_work_respects_membership_limits_and_sessions(store: Arc<dyn 
         ids(&[&limited[0], &limited[1]]),
         "max_batches must cap a joined admission"
     );
-    end_root(
+    end_run(
         &store,
         &fence,
         completing_admission("membership-limited", &capped),
     )
     .await;
-    let remaining = drive_root_to_end(
+    let remaining = execute_run_to_end(
         &store,
         &fence,
         "membership-remaining",
@@ -198,8 +198,8 @@ pub async fn queued_work_join_groups_by_delivery_policy(store: Arc<dyn RuntimeSt
         .await
         .expect("enqueue after-commit");
 
-    let fence = seal_drive_fence_for_test(&store, &session, "owner-a").await;
-    let first_root = drive_root_to_end(
+    let fence = seal_shift_fence_for_test(&store, &session, "owner-a").await;
+    let first_run = execute_run_to_end(
         &store,
         &fence,
         "join-a",
@@ -207,19 +207,19 @@ pub async fn queued_work_join_groups_by_delivery_policy(store: Arc<dyn RuntimeSt
     )
     .await;
     assert_eq!(
-        batch_ids(&first_root),
+        batch_ids(&first_run),
         ids(&[&first, &second, &different_merge]),
         "a joined admission groups adjacent batches with the head's delivery policy, whatever \
          their merge keys"
     );
-    let second_root = drive_root_to_end(
+    let second_run = execute_run_to_end(
         &store,
         &fence,
         "join-after-commit",
         AdmittedHead::Batch(different_delivery.batch_id.clone()),
     )
     .await;
-    assert_eq!(batch_ids(&second_root), ids(&[&different_delivery]));
+    assert_eq!(batch_ids(&second_run), ids(&[&different_delivery]));
     // FIG-3156. The runbook's phase-4 scorecard row asks for "two Each claims
     // vs one Coalesce claim". No `EachWake`/`Coalesce` delivery policy exists:
     // `DeliveryPolicy` is `EarliestSafeBoundary | AfterCurrentTurnCommit`
@@ -227,16 +227,16 @@ pub async fn queued_work_join_groups_by_delivery_policy(store: Arc<dyn RuntimeSt
     // admission shapes this law actually establishes are recorded instead.
     lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
         "checkpoint": "queued_work_admissions_join_by_delivery_policy",
-        "first_admission_batch_count": first_root.batch_ids().len(),
+        "first_admission_batch_count": first_run.batch_ids().len(),
         "first_admission_delivery_policy": DeliveryPolicy::EarliestSafeBoundary.as_str(),
         "first_admission_merge_keys": ["a", "a", "b"],
-        "second_admission_batch_count": second_root.batch_ids().len(),
+        "second_admission_batch_count": second_run.batch_ids().len(),
         "second_admission_delivery_policy": DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
         "second_admission_split_reason": "delivery_policy",
     }));
 }
 
-/// FIG-1313, FIG-3927 N3: a root's admission outlives the fence, the policy
+/// FIG-1313, FIG-3927 N3: a run's admission outlives the fence, the policy
 /// and the limits that chose it. A worker that dies after the admission
 /// commits leaves its successor exactly that composition: a later fence
 /// under a one-row drain policy and a smaller row limit, with rows enqueued
@@ -246,8 +246,8 @@ pub async fn queued_work_join_groups_by_delivery_policy(store: Arc<dyn RuntimeSt
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_resumed_root_drives_exactly_its_recorded_admission(store: Arc<dyn RuntimeStore>) {
-    let session = SessionId::from("resumed-root-admission");
+pub async fn a_resumed_run_executes_exactly_its_recorded_admission(store: Arc<dyn RuntimeStore>) {
+    let session = SessionId::from("resumed-run-admission");
     let mut rows = Vec::new();
     for (source_key, label) in [
         ("resume-w1", "w1"),
@@ -266,14 +266,14 @@ pub async fn a_resumed_root_drives_exactly_its_recorded_admission(store: Arc<dyn
                     .with_merge_key("resume-key"),
                 )
                 .await
-                .expect("enqueue resumed-root row"),
+                .expect("enqueue resumed-run row"),
         );
     }
     let head = AdmittedHead::Batch(rows[0].batch_id.clone());
-    let first = seal_drive_fence_for_test(&store, &session, "resume-owner-a").await;
+    let first = seal_shift_fence_for_test(&store, &session, "resume-owner-a").await;
     let mut coalescing = crate::testing::queued_work_admission_policy(64);
     coalescing.drain_policy = Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
-    let admitted = admitted_under(&store, &first, "resumed-root", head.clone(), coalescing).await;
+    let admitted = admitted_under(&store, &first, "resumed-run", head.clone(), coalescing).await;
     assert_eq!(batch_ids(&admitted), ids(&[&rows[0], &rows[1], &rows[2]]));
 
     store
@@ -289,28 +289,28 @@ pub async fn a_resumed_root_drives_exactly_its_recorded_admission(store: Arc<dyn
         .await
         .expect("enqueue a row after the admission");
     store
-        .supersede_drive_epoch_for_test(&first)
+        .supersede_shift_epoch_for_test(&first)
         .await
-        .expect("the predecessor's drive is superseded");
-    let successor = seal_drive_fence_for_test(&store, &session, "resume-owner-b").await;
+        .expect("the predecessor's shift is superseded");
+    let successor = seal_shift_fence_for_test(&store, &session, "resume-owner-b").await;
     let mut one_at_a_time = crate::testing::queued_work_admission_policy(1);
     one_at_a_time.drain_policy = crate::default_queued_drain_policy();
-    let resumed = admitted_under(&store, &successor, "resumed-root", head, one_at_a_time).await;
+    let resumed = admitted_under(&store, &successor, "resumed-run", head, one_at_a_time).await;
     assert_eq!(
         serde_json::to_value(&resumed).expect("encode the resumed admission"),
         serde_json::to_value(&admitted).expect("encode the recorded admission"),
-        "a resumed root must drive its recorded admission, not a composition re-decided \
+        "a resumed run must execute its recorded admission, not a composition re-decided \
          under the successor's policy, limits or later rows"
     );
     assert!(
         store
-            .admit_root(&admit_root_request_for_test(
+            .admit_run(&admit_run_request_for_test(
                 &first,
-                &TurnId::from("resumed-root"),
+                &TurnId::from("resumed-run"),
                 AdmittedHead::Batch(rows[0].batch_id.clone()),
             ))
             .await
-            .is_err_and(|error| matches!(error, StoreError::StaleDriveFence { .. })),
+            .is_err_and(|error| matches!(error, StoreError::StaleShiftFence { .. })),
         "the superseded fence reads nothing back"
     );
 }
@@ -334,11 +334,11 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimeStore>) {
                 .expect("enqueue default-key wake"),
         );
     }
-    let fence = seal_drive_fence_for_test(&store, &session, "merge-owner").await;
-    let merged = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session, "merge-owner").await;
+    let merged = admitted_run(
         &store,
         &fence,
-        "wake-default-batch-root",
+        "wake-default-batch-run",
         AdmittedHead::Batch(heads[0].batch_id.clone()),
     )
     .await;
@@ -354,10 +354,10 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimeStore>) {
             .iter()
             .all(|batch| { batch.merge_key.as_deref() == Some(crate::PROCESS_WAKE_MERGE_KEY) })
     );
-    end_root(
+    end_run(
         &store,
         &fence,
-        completing_admission("wake-default-batch-root", &merged),
+        completing_admission("wake-default-batch-run", &merged),
     )
     .await;
     assert!(
@@ -420,15 +420,15 @@ pub(super) fn policy_test_wake(
     }
 }
 
-/// A queued-work completion settles only under the live fence of the root
+/// A queued-work completion settles only under the live fence of the run
 /// that admitted the rows: a completion under a superseded fence is refused
-/// `StaleDriveFence`, one naming a row the root does not hold is refused
+/// `StaleShiftFence`, one naming a row the run does not hold is refused
 /// `IngressRowNotAdmitted`, and neither removes a row.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn RuntimeStore>) {
+pub async fn queued_work_completion_is_fenced_and_run_keyed(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-completion-fence");
     let mut joined = Vec::new();
     for text in ["join one", "join two"] {
@@ -442,17 +442,17 @@ pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn Runt
                 .expect("enqueue joined batch"),
         );
     }
-    let fence = seal_drive_fence_for_test(&store, &session, "owner-a").await;
-    let admission = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session, "owner-a").await;
+    let admission = admitted_run(
         &store,
         &fence,
-        "completion-root",
+        "completion-run",
         AdmittedHead::Batch(joined[0].batch_id.clone()),
     )
     .await;
     assert_eq!(batch_ids(&admission), ids(&[&joined[0], &joined[1]]));
 
-    let mut foreign = IngressSettlement::new(TurnId::from("another-root"));
+    let mut foreign = IngressSettlement::new(TurnId::from("another-run"));
     foreign.completed_batches.push(
         admission
             .queued
@@ -460,9 +460,9 @@ pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn Runt
             .expect("admitted batches")
             .completion(),
     );
-    let err = try_end_root(&store, &fence, foreign)
+    let err = try_end_run(&store, &fence, foreign)
         .await
-        .expect_err("a completion keyed by a root that does not hold the rows must fail");
+        .expect_err("a completion keyed by a run that does not hold the rows must fail");
     assert!(matches!(err, StoreError::IngressRowNotAdmitted { .. }));
     assert_eq!(
         store
@@ -473,15 +473,15 @@ pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn Runt
         2
     );
 
-    let successor = seal_drive_fence_for_test(&store, &session, "owner-b").await;
-    let err = try_end_root(
+    let successor = seal_shift_fence_for_test(&store, &session, "owner-b").await;
+    let err = try_end_run(
         &store,
         &fence,
-        completing_admission("completion-root", &admission),
+        completing_admission("completion-run", &admission),
     )
     .await
     .expect_err("a completion under a superseded fence must fail");
-    assert!(matches!(err, StoreError::StaleDriveFence { .. }));
+    assert!(matches!(err, StoreError::StaleShiftFence { .. }));
     assert_eq!(
         store
             .list_queued_work(&session)
@@ -491,10 +491,10 @@ pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn Runt
         2
     );
 
-    end_root(
+    end_run(
         &store,
         &successor,
-        completing_admission("completion-root", &admission),
+        completing_admission("completion-run", &admission),
     )
     .await;
     assert!(
@@ -534,13 +534,13 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             DeliveryPolicy::AfterCurrentTurnCommit,
         ))
         .await
-        .expect("enqueue a batch no root admits");
-    let fence = seal_drive_fence_for_test(&store, &session, "queue-owner").await;
-    let root = "turn-atomic";
-    let admission = admitted_root(
+        .expect("enqueue a batch no run admits");
+    let fence = seal_shift_fence_for_test(&store, &session, "queue-owner").await;
+    let run = "turn-atomic";
+    let admission = admitted_run(
         &store,
         &fence,
-        root,
+        run,
         AdmittedHead::Input(input.input_id.clone()),
     )
     .await;
@@ -548,8 +548,8 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     let checkpoint = admit_at_checkpoint_for_test(
         &store,
         &fence,
-        &TurnId::from(root),
-        &TurnId::from(root),
+        &TurnId::from(run),
+        &TurnId::from(run),
         crate::CheckpointKind::AfterWork,
         "turn-atomic:checkpoint:0",
         64,
@@ -565,7 +565,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             .unwrap_or_default(),
         vec![batch.batch_id.clone()]
     );
-    let settlement = completing_checkpoint(completing_admission(root, &admission), &checkpoint);
+    let settlement = completing_checkpoint(completing_admission(run, &admission), &checkpoint);
 
     let mut state = RuntimeSessionState {
         session_id: session.clone(),
@@ -577,7 +577,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     };
     state.ensure_agent_frame_initialized();
     // The switch commit writes the follow-on it owes onto the head, in the
-    // same transaction that settles the root's admitted rows (ADR 0101 §3).
+    // same transaction that settles the run's admitted rows (ADR 0101 §3).
     let follow_on = crate::store::PendingFollowOn {
         continuation: None,
         follow_on_turn_id: crate::TurnId::from("turn-atomic:agent-frame:1"),
@@ -609,9 +609,7 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             unadmitted,
         ))
         .await
-        .expect_err(
-            "a settlement naming a row the root does not hold must reject the whole commit",
-        );
+        .expect_err("a settlement naming a row the run does not hold must reject the whole commit");
     assert!(matches!(err, StoreError::IngressRowNotAdmitted { .. }));
     assert!(
         store

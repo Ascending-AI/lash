@@ -360,7 +360,7 @@ pub fn verify(load: &LoadContext, run: &str, snapshot: &WitnessSnapshot) -> Resu
 
     let answered_inputs = answered_inputs(&evidence);
 
-    // Turns, and everything a turn drives.
+    // Turns, and everything a turn executes.
     let mut answered: BTreeMap<(u64, u64), (TurnPlan, TurnReport)> = BTreeMap::new();
     let mut planned_effects = BTreeSet::new();
     for ((operation, subject), _) in evidence.sent.range(("turn", "")..("turn\u{1}", "")) {
@@ -611,8 +611,8 @@ fn verify_queued(
                     Ok(())
                 } else {
                     Err(format!(
-                        "queued input `{key}` ended {status:?} under root {:?} with final value {} and provider receipts {:?}",
-                        queued.outcome.root,
+                        "queued input `{key}` ended {status:?} under run {:?} with final value {} and provider receipts {:?}",
+                        queued.outcome.run,
                         queued.outcome.final_value,
                         evidence.receipts.get(key)
                     ))
@@ -622,14 +622,14 @@ fn verify_queued(
     }
 }
 
-/// An input a root answered, as its operation's terminal reported it.
+/// An input a run answered, as its operation's terminal reported it.
 struct AnsweredInput {
-    root: String,
+    run: String,
     /// The provider scenario that receipts a model call made for this input.
     scenario: &'static str,
 }
 
-/// Every input a turn operation reported Answered under a known root, by its
+/// Every input a turn operation reported Answered under a known run, by its
 /// key: the turn's own input and each of its queued inputs.
 fn answered_inputs(evidence: &Evidence<'_>) -> BTreeMap<String, AnsweredInput> {
     let mut inputs = BTreeMap::new();
@@ -643,11 +643,11 @@ fn answered_inputs(evidence: &Evidence<'_>) -> BTreeMap<String, AnsweredInput> {
             .iter()
             .map(|queued| (queued.key.as_str(), &queued.outcome, "load_queued"));
         for (key, outcome, scenario) in std::iter::once(turn).chain(queued) {
-            if let (ReportedStatus::Answered, Some(root)) = (outcome.status, &outcome.root) {
+            if let (ReportedStatus::Answered, Some(run)) = (outcome.status, &outcome.run) {
                 inputs.insert(
                     key.to_owned(),
                     AnsweredInput {
-                        root: root.clone(),
+                        run: run.clone(),
                         scenario,
                     },
                 );
@@ -660,28 +660,28 @@ fn answered_inputs(evidence: &Evidence<'_>) -> BTreeMap<String, AnsweredInput> {
 /// Whether `key`, which has no model call of its own, was answered by
 /// another input's receipted model call.
 ///
-/// One root answers every input it admitted (ADR 0101 §5.2): an idle root
+/// One run answers every input it admitted (ADR 0101 §5.2): an idle run
 /// admits the open prefix of accepted inputs, up to the turn-input admission
-/// bound, and a running root admits inputs at its checkpoints. The driver's
+/// bound, and a running run admits inputs at its checkpoints. The driver's
 /// sessions are open-loop, so a later turn's input can wait beside an earlier
-/// turn's queued input and share its root. Every input in a model request
+/// turn's queued input and share its run. Every input in a model request
 /// receives its own receipt and tool plan. An input admitted afterward at a
 /// checkpoint may share the completed cell without appearing in that request;
-/// it is witnessed by the receipted input answered under the same root.
+/// it is witnessed by the receipted input answered under the same run.
 fn answered_by_a_receipted_input(
     evidence: &Evidence<'_>,
     answered_inputs: &BTreeMap<String, AnsweredInput>,
     key: &str,
     outcome: &InputOutcome,
 ) -> bool {
-    let (Some(root), Some(answering)) = (outcome.root.as_deref(), outcome.finished_operation())
+    let (Some(run), Some(answering)) = (outcome.run.as_deref(), outcome.finished_operation())
     else {
         return false;
     };
     answering != key
-        && answered_inputs.get(answering).is_some_and(|input| {
-            input.root == root && evidence.receipted(answering, input.scenario)
-        })
+        && answered_inputs
+            .get(answering)
+            .is_some_and(|input| input.run == run && evidence.receipted(answering, input.scenario))
 }
 
 fn verify_host_processes(
@@ -1096,7 +1096,7 @@ pub(super) mod tests {
     fn outcome(status: ReportedStatus, final_value: Value) -> InputOutcome {
         InputOutcome {
             status,
-            root: None,
+            run: None,
             final_value,
             outcome: Value::Null,
         }
@@ -1488,8 +1488,8 @@ pub(super) mod tests {
     }
 
     /// Point the reported outcome of input `key` (a turn's own input or one
-    /// of its queued inputs) at `root`, answered by the cell of `operation`.
-    pub(crate) fn answer(snapshot: &mut WitnessSnapshot, key: &str, root: &str, operation: &str) {
+    /// of its queued inputs) at `run`, answered by the cell of `operation`.
+    pub(crate) fn answer(snapshot: &mut WitnessSnapshot, key: &str, run: &str, operation: &str) {
         let answered = json!({ "operation": operation, "synthetic": true });
         for event in &mut snapshot.events {
             if event.evidence.operation() != "turn" || event.evidence.phase() != "terminal" {
@@ -1497,7 +1497,7 @@ pub(super) mod tests {
             }
             let response = &mut event.detail["response"];
             if response["operation"] == key {
-                response["outcome"]["root"] = json!(root);
+                response["outcome"]["run"] = json!(run);
                 response["outcome"]["final_value"] = answered;
                 return;
             }
@@ -1505,7 +1505,7 @@ pub(super) mod tests {
                 .as_array_mut()
                 .and_then(|queued| queued.iter_mut().find(|queued| queued["key"] == key))
             {
-                queued["outcome"]["root"] = json!(root);
+                queued["outcome"]["run"] = json!(run);
                 queued["outcome"]["final_value"] = answered;
                 return;
             }
@@ -1517,33 +1517,33 @@ pub(super) mod tests {
         snapshot.receipts.retain(|(receipted, _)| receipted != key);
     }
 
-    /// FIG-4249: one root answers every input it admitted (ADR 0101 §5.2),
+    /// FIG-4249: one run answers every input it admitted (ADR 0101 §5.2),
     /// and the provider receipts its one model call under the latest input
     /// the request carries. The earlier input has no receipt of its own; its
-    /// root's cell finished with the later input's key, which was answered
-    /// under the same root and receipted.
+    /// run's cell finished with the later input's key, which was answered
+    /// under the same run and receipted.
     #[test]
-    fn a_queued_input_answered_by_a_receipted_input_of_its_root_is_witnessed() {
+    fn a_queued_input_answered_by_a_receipted_input_of_its_run_is_witnessed() {
         let load = smoke();
         let base = ideal(&load, lash_perf::workload::SMOKE_TURNS_PER_SESSION);
         let (earlier, later) = queued_pair(&load);
 
         let mut shared = base.clone();
-        let root = turn_id_for(&earlier);
-        answer(&mut shared, &earlier, &root, &later);
-        answer(&mut shared, &later, &root, &later);
+        let run = turn_id_for(&earlier);
+        answer(&mut shared, &earlier, &run, &later);
+        answer(&mut shared, &later, &run, &later);
         unreceipt(&mut shared, &earlier);
         let shared = verdict(&shared);
         assert!(shared.passed(), "{:?}", shared.lines());
 
-        // An input applied at a checkpoint of its own turn's root, which
+        // An input applied at a checkpoint of its own turn's run, which
         // then finished with the turn's cell.
         let (id, _) = OperationId::parse(&earlier).expect("a queued key");
         let turn = id.key();
         let mut folded = base.clone();
-        let root = turn_id_for(&turn);
-        answer(&mut folded, &turn, &root, &turn);
-        answer(&mut folded, &earlier, &root, &turn);
+        let run = turn_id_for(&turn);
+        answer(&mut folded, &turn, &run, &turn);
+        answer(&mut folded, &earlier, &run, &turn);
         unreceipt(&mut folded, &earlier);
         let folded = verdict(&folded);
         assert!(folded.passed(), "{:?}", folded.lines());
@@ -1552,19 +1552,19 @@ pub(super) mod tests {
     /// Nothing but a receipted model call of the same root witnesses an
     /// answered input that has no receipt of its own.
     #[test]
-    fn a_queued_input_without_a_receipted_answer_of_its_root_is_a_violation() {
+    fn a_queued_input_without_a_receipted_answer_of_its_run_is_a_violation() {
         let load = smoke();
         let base = ideal(&load, lash_perf::workload::SMOKE_TURNS_PER_SESSION);
         let (earlier, later) = queued_pair(&load);
-        let root = turn_id_for(&earlier);
+        let run = turn_id_for(&earlier);
         let mut shared = base.clone();
-        answer(&mut shared, &earlier, &root, &later);
-        answer(&mut shared, &later, &root, &later);
+        answer(&mut shared, &earlier, &run, &later);
+        answer(&mut shared, &later, &run, &later);
         unreceipt(&mut shared, &earlier);
 
-        let mut other_root = shared.clone();
-        answer(&mut other_root, &later, &turn_id_for(&later), &later);
-        assert!(violated(&verdict(&other_root), "queued-inputs"));
+        let mut other_run = shared.clone();
+        answer(&mut other_run, &later, &turn_id_for(&later), &later);
+        assert!(violated(&verdict(&other_run), "queued-inputs"));
 
         let mut unreceipted = shared.clone();
         unreceipt(&mut unreceipted, &later);
@@ -1578,21 +1578,21 @@ pub(super) mod tests {
                 .flatten()
             {
                 if queued["key"] == earlier.as_str() {
-                    queued["outcome"]["root"] = Value::Null;
+                    queued["outcome"]["run"] = Value::Null;
                 }
             }
         }
         assert!(violated(&verdict(&rootless), "queued-inputs"));
 
         let mut self_answered = shared.clone();
-        answer(&mut self_answered, &earlier, &root, &earlier);
+        answer(&mut self_answered, &earlier, &run, &earlier);
         assert!(violated(&verdict(&self_answered), "queued-inputs"));
 
         let mut unanswered = shared;
         answer(
             &mut unanswered,
             &earlier,
-            &root,
+            &run,
             "an operation no input reported",
         );
         assert!(violated(&verdict(&unanswered), "queued-inputs"));

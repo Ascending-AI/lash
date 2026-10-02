@@ -77,7 +77,7 @@ impl Fig790TurnObservationPublisher for Fig790TurnObservationPublisherImpl {
         }
         drop(observer);
 
-        lash_core::drive_with_observations(run_future.as_mut(), &mut observations, |_| async {})
+        lash_core::work_with_observations(run_future.as_mut(), &mut observations, |_| async {})
             .await?;
         Ok(Json(()))
     }

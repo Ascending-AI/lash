@@ -48,13 +48,13 @@
 //! One producer needs more than a script: an aggregate that is the body of a
 //! started process is issued by the process host bridge, and reaching it
 //! takes a process registry, process work bound to that registry, the engines
-//! the producer's plugins contribute, and a worker driving the registry while
+//! the producer's plugins contribute, and a worker executing the registry while
 //! the turn is parked on the process. The law stands all four up when a
 //! producer declares a registry, and a producer that issues its group from
 //! the turn pays none of it.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -90,7 +90,7 @@ const TURN_BUDGET: Duration = Duration::from_secs(60);
 /// control asserts.
 const SERIAL_BUDGET: Duration = Duration::from_secs(15);
 
-/// The widths every producer is driven at (ADR 0116 §7.1). 64 is the `batch`
+/// The widths every producer is executed at (ADR 0116 §7.1). 64 is the `batch`
 /// ceiling.
 const WIDTHS: [usize; 3] = [2, 8, 64];
 
@@ -1130,7 +1130,7 @@ async fn run_scenario(
     // The turn runs where the tier runs turns: the runner supplies the
     // controller admitted for the scenario's turn — the host's own in process,
     // a handler-bound one on Restate — and the observations come back over a
-    // channel because the attempt owns everything it drives. Each execution
+    // channel because the attempt owns everything it executes. Each execution
     // of the attempt (every replay, on Restate) builds its runtime afresh,
     // but every one of them shares the scenario's one state: the leaves of
     // one group meet at one rendezvous whichever execution routed them.
@@ -1229,7 +1229,7 @@ fn report_progress(
 
 /// The `run_scenario` body with the session and turn controller chosen by the
 /// caller. A host whose `scoped()` already yields the right controller passes
-/// `None` and lets `drive_turn` scope it; a handler-bound tier — Restate,
+/// `None` and lets `execute_turn` scope it; a handler-bound tier — Restate,
 /// whose controller only exists inside the handler — scopes its controller to
 /// [`tool_batch_turn_id`] itself and hands it in (FIG-3398).
 #[expect(
@@ -1262,7 +1262,7 @@ async fn run_scenario_on_session(
         session_id,
         process_registry: producer.process_registry.as_ref().map(|make| make()),
     };
-    let end = drive_turn(
+    let end = execute_turn(
         &world,
         runner,
         producer,
@@ -1413,7 +1413,7 @@ fn consumer_replies(turn: &crate::AssembledTurn) -> Vec<String> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn drive_turn(
+async fn execute_turn(
     world: &ScenarioWorld,
     runner: Option<&Arc<dyn crate::ConformanceTurnRunner>>,
     producer: &ToolBatchProducer,
@@ -1561,7 +1561,7 @@ async fn drive_turn(
     // shape a Restate-style host produces. The borrowed view makes
     // `to_static()` answer `None` everywhere, so every typed turn effect and
     // every `processes.*` command the scenario issues is wrapped in
-    // `EffectTaskController` and driven over its request channel rather than
+    // `EffectTaskController` and executed over its request channel rather than
     // taking the 'static shortcut (FIG-3415).
     let turn_scope = if producer.through_task_proxy {
         crate::ScopedEffectController::borrowed(
@@ -1581,7 +1581,7 @@ async fn drive_turn(
     // the rendezvous. The suite runner owns the bound on a scenario making no
     // progress.
     let turn = budget::run_with_activation_budget(
-        runtime.drive_turn(
+        runtime.execute_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
         ),
@@ -1668,7 +1668,7 @@ pub struct ToolBatchMeasurement {
     pub model_calls: usize,
 }
 
-/// Drives one width-`width` group through `producer` on `effect_host` under
+/// Executes one width-`width` group through `producer` on `effect_host` under
 /// `session_id` and measures it (FIG-3398 baseline).
 ///
 /// The plan is the plain one: every leaf takes the catalogue route, so the
@@ -1724,7 +1724,7 @@ pub async fn measure_tool_batch(
     }
 }
 
-/// Drives one gated width-`width` batch through `producer` on a tier's turn
+/// Executes one gated width-`width` batch through `producer` on a tier's turn
 /// runner, exactly as the law's width rows do, and measures it (FIG-4068).
 ///
 /// Every leaf waits for the whole width before it answers, so all `width`
@@ -1938,7 +1938,7 @@ pub async fn tool_group_members_start_before_any_finishes(
     );
     assert!(
         serial_safe.model_calls >= 1,
-        "{context}: the serial-safe half must have driven the producer",
+        "{context}: the serial-safe half must have executed the producer",
     );
 }
 

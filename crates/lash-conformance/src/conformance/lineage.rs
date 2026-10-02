@@ -463,9 +463,9 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
 pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
-    let root_id = SessionId::from("no-carrier-root");
+    let run_id = SessionId::from("no-carrier-root");
     let owner_id = SessionId::from("no-carrier-owner");
-    let (root, root_nodes) = seed(&factory, &root_id, 1).await;
+    let (root, root_nodes) = seed(&factory, &run_id, 1).await;
     let owner = fork(
         &factory,
         "no-carrier-root",

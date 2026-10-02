@@ -17,14 +17,14 @@ codec versions.
 
 ### Admission is the compatibility seam
 
-Drive admission reads the marker before admitting work. Recovery checks it
+Shift admission reads the marker before admitting work. Recovery checks it
 before guarded payload decoding. A version outside the fleet read window
 returns `SessionStateVersionUnsupported` or `SessionStateVersionNewerThanRuntime`
 without attempting to interpret the payload.
 
-`admit_session_state` validates a sealed `DriveFence` inside a backend
+`admit_session_state` validates a sealed `ShiftFence` inside a backend
 transaction before reading the marker. Its result carries the session id,
-version, and drive epoch. This admission checks compatibility; it does not
+version, and shift epoch. This admission checks compatibility; it does not
 execute a per-session converter chain or advance the marker.
 
 A tool child of an effect group (ADR 0099) passes the same gate before its
@@ -39,7 +39,7 @@ and a generation refusal of a committed child reports a violated
 precondition, not a compatibility outcome.
 
 The marker has no production writer. It moves only by fleet conversion under
-a drive fence, and a drive fence excludes drives, not group children: a
+a shift fence, and a shift fence excludes executes, not group children: a
 committed child whose seat is still owed may drain after the fence is taken.
 A future marker mover must therefore also exclude committed, undrained group
 children on the sessions it moves, replay-safely, before it advances a marker
@@ -75,7 +75,7 @@ physical-store admission also retain their own contracts.
 
 The session-state admission law places malformed payload behind an unsupported
 marker and asserts that marker refusal wins over decoding. It also proves
-that a stale drive fence fails before the marker check. These laws run against
+that a stale shift fence fails before the marker check. These laws run against
 SQLite file, SQLite memory, and PostgreSQL. Upgrade proofs use the synthetic-next
 tier; host laws cover the Restate server double, live Restate, and lash-sim's
 in-process effect host where applicable.
@@ -98,7 +98,7 @@ validation, while fleet conversion owns supported format transitions.
 
 - `crates/lash-core-store/src/store/state_version.rs:4-101` defines marker admission, the fleet window, and the `SessionAdmissionWindow` descriptor.
 - `crates/lash/src/formats.rs:594-660` folds the session admission window into the drain generation `G`.
-- `crates/lash-core/src/runtime/drive/admission.rs:108-113` gates drive admission.
-- `crates/lash-sqlite-store/src/persistence/session_commit.rs:166-199` validates the drive fence.
+- `crates/lash-core/src/runtime/shift/admission.rs:108-113` gates shift admission.
+- `crates/lash-sqlite-store/src/persistence/session_commit.rs:166-199` validates the shift fence.
 - `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs:220-239` implements the same transaction.
 - `crates/lash-conformance/src/conformance/session_store_factory/state_version.rs:16-139` pins refusal ordering.

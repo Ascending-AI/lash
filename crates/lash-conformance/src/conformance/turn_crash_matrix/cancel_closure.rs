@@ -1,5 +1,5 @@
 //! The turn-cancel closure across a crash, on the tier's turn runner, with the
-//! turn run as a root of the session drive (FIG-3600).
+//! turn run as a run of the session shift (FIG-3600).
 //!
 //! The reference turn carries a durable after-step cancellation that drops its
 //! undelivered active-turn input. The turn honours it and closes: it settles
@@ -8,7 +8,7 @@
 //! the turn at each of those eight cuts, before and inside each step, and the
 //! tier recovers the turn its own way: a fresh runtime over the same store in
 //! process, a redelivered invocation replaying its journal on Restate. The
-//! drive's recorded admission, seal and claim name the same root on every
+//! shift's recorded admission, seal and claim name the same run on every
 //! execution, so a recovery never re-decides from the store the crashed
 //! closure write already moved (FIG-3736). Every recovery must finish the
 //! same closure once: the cancellation records its
@@ -53,7 +53,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
         let scenario = format!("cancel-closure-{}", point_key(&point));
         let identity = ReferenceIdentity::for_scenario(&scenario);
         let store = make(&scenario);
-        seed_reference_ingress_for_drive(&store, &identity).await;
+        seed_reference_ingress_for_shift(&store, &identity).await;
         let address = crate::TurnAddress::new(&identity.session_id, &identity.turn_id);
         let receipt = crate::TurnWorkDriver::for_session(
             host.host(),
@@ -120,7 +120,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                     ))
                     .await
                     .expect("build the cancelled reference runtime");
-                    let turn = Box::pin(drive_root_on(runtime, seam.over_scoped(scoped))).await;
+                    let turn = Box::pin(execute_run_on(runtime, seam.over_scoped(scoped))).await;
                     let Some(ends) = ends else {
                         panic!("{point:?}: the armed cancellation cut was never reached: {turn:?}");
                     };

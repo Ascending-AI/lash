@@ -49,9 +49,9 @@ impl AdmittedRows for crate::AdmittedTurnInputs {
 /// Drop from `incoming` every row one of `held` already names, and answer
 /// those rows' ids.
 ///
-/// A row is admitted to one root once (FIG-3927), so a row two admitted sets
+/// A row is admitted to one run once (FIG-3927), so a row two admitted sets
 /// both name is the same binding reported twice — a replayed checkpoint
-/// outcome re-delivering the rows its turn already drives — never a second
+/// outcome re-delivering the rows its turn already executes — never a second
 /// authority over it. The set that already holds it keeps it.
 fn drop_held_rows<C: AdmittedRows>(
     held: &[C],
@@ -76,7 +76,7 @@ fn drop_held_rows<C: AdmittedRows>(
 }
 
 /// Whether an incoming queued-work admission names a batch this turn already
-/// drives, which marks it as a replay of the turn's own work rather than new
+/// executes, which marks it as a replay of the turn's own work rather than new
 /// work.
 fn shares_queued_batches(
     pending: &[crate::AdmittedQueuedWork],
@@ -93,7 +93,7 @@ fn shares_queued_batches(
 }
 
 /// Whether an incoming turn-input admission names a row this turn already
-/// drives.
+/// executes.
 fn shares_turn_input_rows(
     pending: &[crate::AdmittedTurnInputs],
     incoming: &crate::AdmittedTurnInputs,
@@ -149,7 +149,7 @@ struct TurnAdmissionSlots<'a> {
 
 /// Folds a checkpoint's recorded admitted set into the turn's rows by the
 /// rule the step body applied when it admitted them: at a terminal
-/// checkpoint, a row this turn does not already drive is withheld work, not
+/// checkpoint, a row this turn does not already shift is withheld work, not
 /// this turn's to settle.
 fn absorb_checkpoint_admissions(
     slots: TurnAdmissionSlots<'_>,
@@ -186,9 +186,9 @@ fn absorb_checkpoint_admissions(
             }
         } else {
             // A replayed checkpoint outcome can re-deliver rows this turn
-            // already drives — the withheld rows a follow-on turn was admitted
+            // already executes — the withheld rows a follow-on turn was admitted
             // with are carried by the journaled admitted set. Only rows no
-            // drive covers are new work for the pending checkpoint slot.
+            // shift covers are new work for the pending checkpoint slot.
             drop_held_rows(pending_turn_inputs, &mut admitted);
             if !admitted.inputs.is_empty() {
                 merge_pending_checkpoint_turn_inputs(pending_checkpoint_turn_inputs, admitted)?;
@@ -224,7 +224,7 @@ impl RuntimeTurnDriver<'_> {
             // and FIG-3726 rule for the other store-reading steps): the step
             // stays unrecorded and the engine runs it again. A hook's own
             // failure, and an answer the store did give, are still recorded:
-            // a superseded drive fence ends the run typed, with no retry.
+            // a superseded shift fence ends the run typed, with no retry.
             // The fault is told by its cause, not its code: every store
             // error that is not terminal is one (FIG-4824).
             Err(fault) if fault.turn_failure_cause() == crate::TurnFailureCause::LiveFault => {
@@ -406,17 +406,17 @@ impl RuntimeTurnDriver<'_> {
     }
 
     /// The store's admission at a checkpoint. Only a turn that runs under an
-    /// admitted root admits at its checkpoints: the rows bind to that root,
-    /// keyed by this step, under the root's drive fence (FIG-3927).
+    /// admitted run admits at its checkpoints: the rows bind to that run,
+    /// keyed by this step, under the run's shift fence (FIG-3927).
     async fn admit_at_checkpoint(
         &self,
         checkpoint: CheckpointKind,
         step: &str,
     ) -> Result<crate::store::CheckpointAdmission, RuntimeError> {
-        let (Some(store), Some(fence), Some(root)) = (
+        let (Some(store), Some(fence), Some(run)) = (
             self.session.history_store(),
-            self.drive_fence.as_ref(),
-            self.drive_root.as_ref(),
+            self.shift_fence.as_ref(),
+            self.shift_run.as_ref(),
         ) else {
             return Ok(crate::store::CheckpointAdmission::default());
         };
@@ -429,7 +429,7 @@ impl RuntimeTurnDriver<'_> {
         store
             .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
                 fence: fence.clone(),
-                root: root.clone(),
+                run: run.clone(),
                 turn_id: self.turn_id.clone(),
                 checkpoint,
                 step: step.to_string(),
@@ -453,7 +453,7 @@ impl RuntimeTurnDriver<'_> {
         let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();
-        if let Some(root) = self.drive_root.as_ref()
+        if let Some(run) = self.shift_run.as_ref()
             && !admission.is_empty()
         {
             let causes = admission
@@ -464,7 +464,7 @@ impl RuntimeTurnDriver<'_> {
             self.emit_trace(protocol_iteration, || lash_trace::TraceEvent::Custom {
                 name: "ingress.admitted".to_string(),
                 payload: ingress_admitted_trace_payload(
-                    root,
+                    run,
                     step,
                     crate::AdmissionBoundary::ActiveTurnCheckpoint,
                     admission.inputs.as_ref(),
@@ -488,7 +488,7 @@ impl RuntimeTurnDriver<'_> {
         let withholds_admitted_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
         if let Some(mut admitted) = turn_input_admission {
             let already_delivered = drop_held_rows(&self.pending_turn_inputs, &mut admitted);
-            // Rows this turn already drives are a replay of its own work, not
+            // Rows this turn already executes are a replay of its own work, not
             // new input: they settle with the turn rather than starting a
             // turn of their own.
             if withholds_admitted_work
@@ -729,7 +729,7 @@ mod checkpoint_admission_determinism_tests {
 
     /// The step body of a terminal checkpoint that admits `fresh` and then
     /// fails: its outcome is the failure plus the complete admitted set, the
-    /// root's own admission included.
+    /// run's own admission included.
     fn failed_checkpoint(
         admitted: crate::AdmittedQueuedWork,
         fresh: crate::AdmittedQueuedWork,
@@ -756,8 +756,8 @@ mod checkpoint_admission_determinism_tests {
     }
 
     /// What the turn commits after the failed checkpoint: the rows it still
-    /// drives, and the withheld work its failure path hands back.
-    fn drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
+    /// executes, and the withheld work its failure path hands back.
+    fn shift<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
         Box::pin(async move {
             let admitted = admitted_batch("batch-a");
             let mut pending_queued = vec![admitted.clone()];
@@ -798,7 +798,7 @@ mod checkpoint_admission_determinism_tests {
 
     #[test]
     fn a_failed_terminal_checkpoint_hands_back_its_admitted_rows_on_every_replay() {
-        let engine = LocalEngine::new(|| (), drive);
+        let engine = LocalEngine::new(|| (), shift);
         let report = DeterminismCheck::new(0x3672_0007)
             .perturbed_replays(6)
             .run(&engine)
@@ -807,7 +807,7 @@ mod checkpoint_admission_determinism_tests {
         assert_eq!(
             report.transcript.commits().collect::<Vec<_>>(),
             vec![r#"[["batch-a"],["batch-b"]]"#],
-            "the root's own rows stay the turn's; the fresh ones are withheld and handed back"
+            "the run's own rows stay the turn's; the fresh ones are withheld and handed back"
         );
     }
 

@@ -1,4 +1,4 @@
-//! The typed refusals of a root's shape and of a session's creation config
+//! The typed refusals of a run's shape and of a session's creation config
 //! (FIG-4652): their constructors and accessors.
 
 use super::{RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
@@ -26,7 +26,7 @@ impl RuntimeErrorCause {
 }
 
 impl RuntimeEffectControllerError {
-    /// A root's refused shape: the root's recorded failure, with its cause
+    /// A run's refused shape: the run's recorded failure, with its cause
     /// typed. A refused reasoning keeps its own code.
     #[must_use]
     pub fn run_shape_refused(refusal: RunShapeRefusal) -> Self {
@@ -45,7 +45,7 @@ impl RuntimeEffectControllerError {
         error
     }
 
-    /// Why the root's shape was refused. `None` on any other error.
+    /// Why the run's shape was refused. `None` on any other error.
     #[must_use]
     pub fn run_shape_refusal(&self) -> Option<&RunShapeRefusal> {
         RuntimeErrorCause::run_shape_refusal(self.cause.as_ref())
@@ -66,7 +66,7 @@ impl RuntimeError {
         })
     }
 
-    /// Why the root's shape was refused. `None` on any other error.
+    /// Why the run's shape was refused. `None` on any other error.
     #[must_use]
     pub fn run_shape_refusal(&self) -> Option<&RunShapeRefusal> {
         RuntimeErrorCause::run_shape_refusal(self.cause.as_ref())

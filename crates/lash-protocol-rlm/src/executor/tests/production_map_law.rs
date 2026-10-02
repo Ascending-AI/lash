@@ -519,7 +519,7 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
     .await;
     handler.close().await.expect("close the cell's handler");
     assert!(response.error.is_none(), "{:?}", response.error);
-    // Drive every started process to its end: the worker, then the literal
+    // Execute every started process to its end: the worker, then the literal
     // nested in it that the worker starts.
     let mut finished = BTreeSet::new();
     for _ in 0..4 {

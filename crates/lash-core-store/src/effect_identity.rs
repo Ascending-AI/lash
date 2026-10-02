@@ -36,7 +36,7 @@ pub enum RuntimeEffectKind {
     AssistantResponseHooks,
     Direct,
     ToolAttempt,
-    /// One tool child of a durable effect group, driven at invocation level
+    /// One tool child of a durable effect group, executed at invocation level
     /// (ADR 0099 §2). Distinct from [`ToolAttempt`](Self::ToolAttempt), which is
     /// the atomic body of one attempt.
     ToolInvocation,
@@ -63,33 +63,33 @@ pub enum RuntimeEffectKind {
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
-    /// A root's recorded admission (FIG-3927): the turn-lane rows it drives,
+    /// A run's recorded admission (FIG-3927): the turn-lane rows it executes,
     /// with the base and turn index it was admitted on. Replay returns it and
     /// never re-reads pending rows.
-    AdmitRoot,
-    /// The recorded decision about an admitted root's head.
+    AdmitRun,
+    /// The recorded decision about an admitted run's head.
     InspectAdmittedHead,
     /// A turn's recorded read, at a quiet point, of whether the build its
     /// invocation runs on is draining (FIG-4739): the fact its segment
     /// boundary is decided from, so a replay ends the turn where its first
     /// execution did.
     ObserveDrainMark,
-    /// A follow-on recovery root's recorded decision before its turn
+    /// A follow-on recovery run's recorded decision before its turn
     /// (FIG-4361): run the owed follow-on under its raised recovery count,
     /// commit it exhausted, or cede a follow-on the head owes no longer.
     RecoverFollowOn,
-    /// A session drive's recorded admission (ADR 0105 §2, FIG-3600): the root
+    /// A session shift's recorded admission (ADR 0105 §2, FIG-3600): the run
     /// it admitted, with its base and turn index, or why it admitted none.
-    AdmitDrive,
-    /// The start marker an execution of an admitted root drew in its own
+    AdmitShift,
+    /// The start marker an execution of an admitted run drew in its own
     /// journal before its seal (ADR 0105 L-S8).
-    DrawRootStart,
-    /// The recorded seal of a drive admission: the drive-epoch
-    /// compare-and-set whose fence the admitted root's commits present.
-    SealDriveAdmission,
-    /// The session config a logical turn runs under, recorded once per root
+    DrawRunStart,
+    /// The recorded seal of a shift admission: the shift-epoch
+    /// compare-and-set whose fence the admitted run's commits present.
+    SealShiftAdmission,
+    /// The session config a logical turn runs under, recorded once per run
     /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
-    /// of the root runs under the recorded config, never the live head's.
+    /// of the run executes under the recorded config, never the live head's.
     ResolveTurnConfig,
     /// The base an administrative compaction summarizes and opens its frame
     /// from, recorded before its summarizer runs (FIG-4133): a redrive
@@ -104,14 +104,14 @@ pub enum RuntimeEffectKind {
     /// publishes it (FIG-4379): a redrive publishes the recorded replacements
     /// and never runs a reducer again.
     ResolveConfigTransaction,
-    /// The command run a command root read from the session's command lane
-    /// (FIG-4201): every replay of the root applies the recorded run, never
+    /// The command run a command run read from the session's command lane
+    /// (FIG-4201): every replay of the run applies the recorded run, never
     /// the lane its own commits settled.
     ReadSessionCommandRun,
-    /// The recorded close of a logical root's scope, after its terminal
-    /// evidence (FIG-3600 S7, FIG-3607 item 7): the one step a root's end
+    /// The recorded close of a logical run's scope, after its terminal
+    /// evidence (FIG-3600 S7, FIG-3607 item 7): the one step a run's end
     /// runs, and what its lifetime-scope owner hooks.
-    CloseRootScope,
+    CloseRunScope,
     /// The recorded start of a session's close (FIG-3600 S7, FIG-3607 item
     /// 7): the store half of its `CloseSession` control intent, the point of
     /// no return of its deletion.
@@ -146,19 +146,19 @@ impl RuntimeEffectKind {
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
-            Self::AdmitRoot => "admit_root",
+            Self::AdmitRun => "admit_run",
             Self::InspectAdmittedHead => "inspect_admitted_head",
             Self::ObserveDrainMark => "observe_drain_mark",
             Self::RecoverFollowOn => "recover_follow_on",
-            Self::AdmitDrive => "admit_drive",
-            Self::DrawRootStart => "draw_root_start",
-            Self::SealDriveAdmission => "seal_drive_admission",
+            Self::AdmitShift => "admit_shift",
+            Self::DrawRunStart => "draw_run_start",
+            Self::SealShiftAdmission => "seal_shift_admission",
             Self::ResolveTurnConfig => "resolve_turn_config",
             Self::RecordCompactionBase => "record_compaction_base",
             Self::RenderCompactionPrompt => "render_compaction_prompt",
             Self::ResolveConfigTransaction => "resolve_config_transaction",
             Self::ReadSessionCommandRun => "read_session_command_run",
-            Self::CloseRootScope => "close_root_scope",
+            Self::CloseRunScope => "close_run_scope",
             Self::BeginSessionClose => "begin_session_close",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
@@ -222,7 +222,7 @@ impl RuntimeAttribution {
     }
 
     /// A turn's attribution before its admission fixed a turn index: the
-    /// acceptance of its input and the drive that admits it (FIG-3682). A
+    /// acceptance of its input and the shift that admits it (FIG-3682). A
     /// turn index read here would come from the live head, which a replay
     /// after the turn's own commit no longer shares.
     pub fn for_turn_admission(

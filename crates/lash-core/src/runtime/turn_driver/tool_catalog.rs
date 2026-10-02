@@ -37,13 +37,13 @@ impl RuntimeTurnDriver<'_> {
         };
         // The machine starts with no environment: its protocol-start sync
         // builds the prompt and the tool surface as a recorded step, so the
-        // drive never reads a surface a replay could not reproduce (FIG-3672
+        // shift never reads a surface a replay could not reproduce (FIG-3672
         // P7b). Only the protocol's driver configuration is taken here, and
         // that is host configuration, independent of the tools.
         self.mark_phase_begin(RuntimeTurnPhase::PromptBuild);
         let turn_driver_preamble = self.session.protocol_driver_preamble();
         // ADR 0117: the model's calls are named under the admitted scope's
-        // root, continued by this physical turn.
+        // run, continued by this physical turn.
         let model_tool_calls = lash_sansio::ModelToolCalls::new(
             crate::EffectOpener::for_scope(self.scoped_effect_controller.admitted_scope())
                 .expect("a turn runs under an opener scope")
@@ -82,7 +82,7 @@ impl RuntimeTurnDriver<'_> {
     /// The step body of an execution-environment sync: builds the prompt and
     /// the tool surface over the live registry, and returns both with the
     /// surface's definitions, which the sync records. It installs nothing: the
-    /// drive installs the surface the sync recorded.
+    /// shift installs the surface the sync recorded.
     pub(in crate::runtime) async fn refresh_execution_environment(
         &mut self,
         protocol_iteration: usize,
@@ -96,10 +96,10 @@ impl RuntimeTurnDriver<'_> {
         let execution_environment = self
             .prepare_execution_environment()
             .map_err(|error| SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error))?;
-        // The protocol plugin renders the prompt from the running root's
+        // The protocol plugin renders the prompt from the running run's
         // admitted config and the pinned tool surface (FIG-4589): a config
-        // command applied while this root runs reaches the next root, and a
-        // sync redriven after a redeploy renders what the root recorded.
+        // command applied while this run executes reaches the next run, and a
+        // sync redriven after a redeploy renders what the run recorded.
         let plugin_config = self.session.plugins().admitted_plugin_config();
         let protocol_session = Arc::clone(self.session.plugins().protocol_session());
         let system_prompt = protocol_session
@@ -168,7 +168,7 @@ impl RuntimeTurnDriver<'_> {
             .turn_pipeline
             .state()
             .authority
-            .root_view()
+            .run_view()
             .and_then(|view| view.run.render.as_ref());
         let mut context = crate::plugin::ProtocolSessionContext::new(
             &self.session_id,

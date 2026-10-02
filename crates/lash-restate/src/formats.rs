@@ -19,7 +19,7 @@ use crate::effect_group::{
     EFFECT_GROUP_STATE_FORMAT_VERSION,
 };
 use crate::process::RESTATE_PROCESS_JOURNAL_VERSION;
-use crate::session_driver::{LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION};
+use crate::session_shifts::{LASH_SESSION_SHIFT_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION};
 use crate::usage_accounting::USAGE_ACCOUNTING_WIRE_VERSION;
 
 // The rows are comparable counters whose bytes live in the engine's
@@ -150,10 +150,10 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {
-        id: "restate.session_drive",
-        name: "Restate session drive prefix",
-        version: LASH_SESSION_DRIVE_VERSION,
-        constant: "LASH_SESSION_DRIVE_VERSION",
+        id: "restate.session_shift",
+        name: "Restate session shift prefix",
+        version: LASH_SESSION_SHIFT_VERSION,
+        constant: "LASH_SESSION_SHIFT_VERSION",
         upgrade_policy: UpgradePolicy::Drain,
         unwalkable_reason: UNWALKABLE_REASON,
     },

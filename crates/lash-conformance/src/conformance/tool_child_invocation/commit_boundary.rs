@@ -2,7 +2,7 @@
 //! boundary (ADR 0099 §4) and drains are admitted in recorded commit order
 //! (§5), on the tier's real substrate — not on a test double.
 //!
-//! Both laws drive the `law_commit` leaf, whose body waits for a release the
+//! Both laws execute the `law_commit` leaf, whose body waits for a release the
 //! law controls and whose settlement declares two recorded intents routed
 //! through a [`GatedProcessService`]: the [`IntentSink`] parks an intent write
 //! on command, which is exactly the observation "this child is past its §4
@@ -196,7 +196,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
 ///
 /// On a durable tier the crash half runs first: both children committed, B
 /// parked mid-drain, A held at the barrier, and the process dies. The
-/// successor re-drives both; the recovered drain lands B's intents then A's —
+/// successor redrives both; the recovered drain lands B's intents then A's —
 /// commit order, not whichever redrive reached its intents first — and the
 /// bodies never re-run.
 #[expect(

@@ -337,7 +337,7 @@ async fn turn_hook_and_tool_provider_read_recorded_session_config() {
         .expect("turn");
 
     assert_eq!(assistant_prose(&result), "done");
-    // The before-turn hook runs once for the root, under the label its
+    // The before-turn hook runs once for the run, under the label its
     // session recorded.
     assert_eq!(plugin.hook_seen.lock_recover().as_slice(), ["page-a"]);
     assert_eq!(plugin.tool_seen.lock_recover().as_slice(), ["page-a"]);

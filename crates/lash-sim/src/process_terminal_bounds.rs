@@ -4,7 +4,7 @@
 //! The terminal transaction arms the process row's obligation; the execution
 //! that stored the terminal publishes it itself (the Restate double's laws own
 //! that immediate attempt). These cases take the relay's side of every way the
-//! immediate attempt can be lost, driving the real registry, ledger and
+//! immediate attempt can be lost, executing the real registry, ledger and
 //! [`ProcessTerminalRelay`] under a virtual clock and a reconcile tick of
 //! `T` = 10 s ±10%, and assert each bound the ADR states:
 //!
@@ -25,8 +25,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use lash_core::runtime::ClockWallTime as _;
-use lash_core::runtime::drive::relay::{RelayPolicy, relay_due};
 use lash_core::runtime::process_terminal::ProcessTerminalRelay;
+use lash_core::runtime::shift::relay::{RelayPolicy, relay_due};
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::testing::TestClock;
 use lash_core::{

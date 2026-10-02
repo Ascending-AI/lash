@@ -9,7 +9,7 @@
 //! asks the model once and crashes after its effect loop, before the turn
 //! commits. The redrive runs under changed host code the model request is
 //! built from (a plugin that adds a note to every turn, as a redeploy
-//! would; the session's config cannot drift a recorded root, FIG-3600 S6):
+//! would; the session's config cannot drift a recorded run, FIG-3600 S6):
 //! the recorded model call's envelope hash conflicts, and the conflict parks the
 //! turn — it aborts with the typed replay refusal, a `TurnPark` names the
 //! diverged effect kind, the model is not asked again and nothing terminal is
@@ -17,7 +17,7 @@
 //! model call, finishes the turn and clears the park.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -183,7 +183,7 @@ fn attempt(
                 runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
             }
             let turn = runtime
-                .drive_turn(
+                .execute_turn(
                     drift_input(&turn_id),
                     crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                 )
@@ -394,12 +394,12 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     );
 }
 
-/// A fresh worker replays the production drive despite later ingress and changed response hooks.
+/// A fresh worker replays the production shift despite later ingress and changed response hooks.
 #[expect(
     clippy::expect_used,
     reason = "conformance fixture asserts its setup and replay"
 )]
-pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
+pub async fn runtime_shift_cold_replay_ignores_live_input_and_hook_drift(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -407,8 +407,8 @@ pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
     protocol: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
     use crate::testing::runtime_helpers::{RuntimeTestPlugin, RuntimeTestPluginFactory};
-    let session_id = SessionId::fixture(format!("{prefix}-cold-drive"));
-    let turn_id = TurnId::fixture(format!("{prefix}-cold-root"));
+    let session_id = SessionId::fixture(format!("{prefix}-cold-shift"));
+    let turn_id = TurnId::fixture(format!("{prefix}-cold-run"));
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let hook_calls = Arc::new(AtomicUsize::new(0));
     let provider = crate::testing::TestProvider::builder()
@@ -514,13 +514,13 @@ pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
                     runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
                 }
                 let frames = runtime
-                    .drive_next_root(
-                        "cold-drive-request",
+                    .execute_next_run(
+                        "cold-shift-request",
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scoped),
                     )
                     .await
-                    .expect("drive recorded root")
-                    .expect("root ran");
+                    .expect("shift recorded run")
+                    .expect("run ran");
                 let turn = frames.into_final_turn().expect("terminal physical turn");
                 let _ = tx.send(turn);
                 crate::ConformanceTurnEnd::Settled
@@ -560,6 +560,6 @@ pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
         .list_pending_turn_inputs(&session_id)
         .await
         .expect("pending input rows");
-    assert_eq!(pending.len(), 1, "later input is left for the next root");
+    assert_eq!(pending.len(), 1, "later input is left for the next run");
     assert_eq!(turn.llm_calls.len(), 1);
 }

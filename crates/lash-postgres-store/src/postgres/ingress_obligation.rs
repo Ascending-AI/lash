@@ -62,7 +62,7 @@ pub(crate) async fn arm_turn_input_tx(
 
 /// Claim the still-due ingress obligation of turn input `input_id` under a
 /// minted token, held until `until_ms`, inside the transaction that admitted
-/// the row: an acceptor that drives the row itself holds its claim from the
+/// the row: an acceptor that executes the row itself holds its claim from the
 /// admission's commit (FIG-4728). An obligation that is claimed, delivered or
 /// stalled is left as it stands.
 pub(crate) async fn claim_turn_input_tx(

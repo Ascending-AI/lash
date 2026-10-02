@@ -106,7 +106,7 @@ fn recorded(key: &str) -> RecordedLlmProfile {
 fn catalog() -> Catalog {
     Catalog::serving(&[
         "session-model",
-        "root-model",
+        "run-model",
         "definition-model",
         "plain-model",
     ])
@@ -154,7 +154,7 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
     assert_eq!(resolved.base.config_revision, 7);
 }
 
-/// FIG-4389: a root records the termination policy it resolved under, the
+/// FIG-4389: a run records the termination policy it resolved under, the
 /// record round-trips it, and a record without it does not decode: no
 /// worker's live policy fills the gap.
 #[test]
@@ -217,7 +217,7 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    state.install_root_view(&decoded);
+    state.install_run_view(&decoded);
     let env = state.process_execution_env_spec(&state.policy);
     assert_eq!(env.render, Some(record.clone()));
     let env_bytes = env.to_store_bytes().expect("encode env");
@@ -339,7 +339,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     assert_eq!(
         resolved.config(),
         &snapshot(),
-        "capabilities alone leave the root's config unchanged"
+        "capabilities alone leave the run's config unchanged"
     );
     // The spec's capability refs order canonically, so slot insertion order
     // cannot name a different spec.
@@ -370,7 +370,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
 #[test]
 fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
     let spec = RunSpec::overrides(RunOverrides {
-        model: Some(LlmProfileKey::new("root-model")),
+        model: Some(LlmProfileKey::new("run-model")),
         ..RunOverrides::default()
     });
     let catalog = catalog();
@@ -386,7 +386,7 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
         .expect("resolve");
     assert_eq!(catalog.snapshots(), 1, "the key is minted exactly once");
     let model = resolved.config().model.clone().expect("model");
-    assert_eq!(model.model, recorded("root-model"));
+    assert_eq!(model.model, recorded("run-model"));
     assert_eq!(
         model.reasoning,
         ReasoningSelection::Effort("low".to_string()),
@@ -444,7 +444,7 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
     }
 }
 
-/// FIG-4531: a per-run override is judged when the root's shape resolves.
+/// FIG-4531: a per-run override is judged when the run's shape resolves.
 /// A key whose capability has no reasoning controls cannot take the
 /// session's recorded effort, and an effort the session's model does not
 /// advertise cannot be overridden onto it: both are the typed refusal, never

@@ -4,7 +4,7 @@ use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionStore;
-use crate::testing::RuntimeStoreTestDriveExt as _;
+use crate::testing::RuntimeStoreTestShiftExt as _;
 use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, shared_parts,
@@ -186,12 +186,12 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         .expect("valid test session id");
     let turn_id = crate::TurnId::from("final-cancel-cas:turn");
     let address = crate::TurnAddress::new(&state.session_id, &turn_id);
-    // The turn runs as its own root, so input may address it (ADR 0101 §5.1).
+    // The turn runs as its own run, so input may address it (ADR 0101 §5.1).
     let runtime_store: Arc<dyn crate::RuntimeStore> = recording.clone();
-    let root_fence = crate::testing::store_fixtures::seal_drive_fence_for_test(
+    let run_fence = crate::testing::store_fixtures::seal_shift_fence_for_test(
         &runtime_store,
         &state.session_id,
-        "final-cancel-cas-root",
+        "final-cancel-cas-run",
     )
     .await;
     let head = store
@@ -205,15 +205,15 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         )
         .await
         .expect("enqueue the turn's own input");
-    crate::testing::store_fixtures::admit_root_for_test(
+    crate::testing::store_fixtures::admit_run_for_test(
         &runtime_store,
-        &root_fence,
+        &run_fence,
         &turn_id,
         crate::store::AdmittedHead::Input(head.input_id),
     )
     .await
-    .expect("admit the turn's root")
-    .expect("the root's admission reaches its head");
+    .expect("admit the turn's run")
+    .expect("the run's admission reaches its head");
     let pending = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &state.session_id,
@@ -315,10 +315,10 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         )
         .await
         .expect("prepare stable final state");
-    // The closure is consumed by the turn's commit under its drive fence.
-    pipeline.set_drive_commit(Some(DriveCommit {
+    // The closure is consumed by the turn's commit under its shift fence.
+    pipeline.set_shift_commit(Some(ShiftCommit {
         fence: lease.clone(),
-        root: turn_id.clone(),
+        run: turn_id.clone(),
         terminal: None,
     }));
     let returned_state = pipeline.export_state_for_assembly();
@@ -381,7 +381,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
 async fn leased_boundary(
     store: &SessionStore,
     state: RuntimeSessionState,
-) -> (TurnBoundary, crate::store::DriveFence) {
+) -> (TurnBoundary, crate::store::ShiftFence) {
     assert_eq!(store.session_id(), &state.session_id);
     store
         .store()
@@ -398,7 +398,7 @@ async fn leased_boundary(
     let owner = lease_owner("turn-boundary-test");
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &state.session_id,
             &owner,
             "leased-boundary-executor",
@@ -1096,9 +1096,9 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
     let committed = committed_attachment_ids(&state, &tool_calls, None, &[]);
     assert_eq!(committed, vec![attachment.id.clone()]);
 
-    let roots = FixedAttachmentRoots(committed.into_iter().collect());
+    let runs = FixedAttachmentRoots(committed.into_iter().collect());
     let report = crate::reclaim_unreferenced_attachments(
-        &roots,
+        &runs,
         backend.as_ref(),
         crate::AttachmentReclamationPolicy {
             grace_period_ms: 0,
@@ -1153,11 +1153,11 @@ async fn final_commit_updates_persisted_graph_count() {
     assert!(pipeline.state_mut().head_revision > 0);
 }
 
-/// A settlement names rows its root admitted, and only the root's drive fence
+/// A settlement names rows its run admitted, and only the run's shift fence
 /// may settle them (FIG-3927): a final commit carrying row completions but no
-/// drive commit is refused before it reaches persistence.
+/// shift commit is refused before it reaches persistence.
 #[tokio::test]
-async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
+async fn final_commit_refuses_a_settlement_without_a_shift_fence() {
     let graph = SessionGraph::from_active_read_state(&[text_message(
         "admitted-input",
         MessageRole::User,
@@ -1208,9 +1208,9 @@ async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
         ));
         store
             .store()
-            .supersede_drive_epoch_for_test(&lease)
+            .supersede_shift_epoch_for_test(&lease)
             .await
-            .expect("release the case's drive epoch");
+            .expect("release the case's shift epoch");
     }
     assert_eq!(
         *recording.runtime_commit_count.lock_recover(),

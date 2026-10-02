@@ -45,7 +45,7 @@ impl LashCore {
             // An accepted close retires any pin its final commit overtook.
             if self
                 .store_factory
-                .drive_epoch(session_id)
+                .shift_epoch(session_id)
                 .await?
                 .closing
                 .is_some()
@@ -113,7 +113,7 @@ impl LashCore {
             SessionLookup::Absent => return Ok(Some(SessionDeleteCompletion::Absent)),
             SessionLookup::Live(_) => {}
         }
-        let Some(close_id) = self.store_factory.drive_epoch(session_id).await?.closing else {
+        let Some(close_id) = self.store_factory.shift_epoch(session_id).await?.closing else {
             return Ok(Some(SessionDeleteCompletion::NotClosing));
         };
         let own = ScopeId::session(session_id.clone()).storage_id();

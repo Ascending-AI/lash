@@ -80,7 +80,7 @@ const DOUBLE_SEED: u64 = 0x1a5b_d0b1;
 
 /// The backend every facade test runs on unless it names another: Restate's
 /// engine on a fresh server double, held for the rest of the running test.
-/// A test that reaches the double itself (a drive hold, its store set, its
+/// A test that reaches the double itself (a shift hold, its store set, its
 /// clock) builds one with [`restate_double`] and keeps it.
 pub(crate) async fn double_backend() -> lash_core::Backend {
     let double = restate_double(DOUBLE_SEED).await;
@@ -89,9 +89,9 @@ pub(crate) async fn double_backend() -> lash_core::Backend {
     backend
 }
 
-/// The backend over `double` whose installed driver starts no wall-clock
+/// The backend over `double` whose installed `SessionShifts` starts no wall-clock
 /// reconcile tick: every obligation delivery is one the test made — a
-/// verb's immediate attempt or a pass it drives — so no scheduled pass can
+/// verb's immediate attempt or a pass it executes — so no scheduled pass can
 /// claim an obligation out from under the assertion being made (FIG-3926).
 fn explicit_reconcile(double: &lash_restate_test::RestateTestBackend) -> lash_core::Backend {
     lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
@@ -165,13 +165,13 @@ pub(crate) fn held_double(core: &crate::LashCore) -> Option<lash_restate_test::R
     })
 }
 
-/// Wait until the held double `core` runs over has no drive of `session` in
-/// flight ([`settle_session_drive`](lash_restate_test::RestateTestBackend::settle_session_drive)):
-/// a handle answers before its root's scope closes (FIG-3979).
-pub(crate) async fn settle_session_drive(core: &crate::LashCore, session: &str) {
+/// Wait until the held double `core` runs over has no shift of `session` in
+/// flight ([`settle_session_shift`](lash_restate_test::RestateTestBackend::settle_session_shift)):
+/// a handle answers before its run's scope closes (FIG-3979).
+pub(crate) async fn settle_session_shift(core: &crate::LashCore, session: &str) {
     held_double(core)
         .expect("the core runs on a held double")
-        .settle_session_drive(&lash_core::SessionId::fixture(session))
+        .settle_session_shift(&lash_core::SessionId::fixture(session))
         .await;
 }
 
@@ -215,7 +215,7 @@ pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestB
 /// process behind it is gone and a new one serves it, over the same stores
 /// and the same Restate state, under the same authority. Its engine runs the
 /// driver of the first core built over it. One engine serves one core's
-/// driver, so a law about another build's drive redeploys rather than
+/// driver, so a law about another build's shift redeploys rather than
 /// building a second core over the same engine.
 ///
 /// [`RestateTestBackend::restart`]: lash_restate_test::RestateTestBackend::restart
@@ -318,7 +318,7 @@ pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
 }
 
 /// A backend over a fresh SQLite memory store set stamping from `clock`,
-/// whose effect host only records and which drives no session work: for a
+/// whose effect host only records and which executes no session work: for a
 /// test that reads what the stores stamp.
 pub(crate) async fn store_backend_with_clock(
     clock: Arc<dyn lash_core::Clock>,
@@ -400,7 +400,7 @@ impl DecoratedBackend {
         }
     }
 
-    /// Drive this backend's processes through `wire`, which receives the
+    /// Execute this backend's processes through `wire`, which receives the
     /// (possibly decorated) registry the wiring must be built over.
     pub(crate) fn process_work(
         self,
@@ -520,7 +520,7 @@ pub(crate) async fn output_into_cancelled_by(
 }
 
 /// The durable acceptance receipt of a send: what a law reads when it
-/// asserts on the pending row a send accepted before anything drives it.
+/// asserts on the pending row a send accepted before anything executes it.
 pub(crate) trait AcceptedSend {
     async fn accepted(self) -> Result<lash_core::runtime::TurnInputAcceptanceReceipt>;
 }

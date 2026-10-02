@@ -1,6 +1,6 @@
 //! Serving a lash endpoint to Restate.
 //!
-//! Restate drives every lash turn through the deployment's endpoint: each
+//! Restate executes every lash turn through the deployment's endpoint: each
 //! journaled step is a small HTTP/2 frame the handler writes and a small frame
 //! the server answers, dozens per turn. With Nagle's algorithm on the
 //! accepted connection, a handler's frame written while its previous one is

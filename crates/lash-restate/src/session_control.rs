@@ -1,10 +1,10 @@
-//! Restate's implementation of root release, resume and bounded park recovery.
+//! Restate's implementation of run release, resume and bounded park recovery.
 //!
-//! A paused session drive is never resumed blindly by recovery (ADR 0109
-//! §3): it is parked on its session's next root, and the park's redrive,
-//! cancel or fork resumes it. Recovery resumes only a drive that stopped
+//! A paused session shift is never resumed blindly by recovery (ADR 0109
+//! §3): it is parked on its session's next run, and the park's redrive,
+//! cancel or fork resumes it. Recovery resumes only a shift that stopped
 //! behind a redrive that has since settled (D15), and releases one whose
-//! session's next work names no root, leaving that work to its ingress
+//! session's next work names no run, leaving that work to its ingress
 //! obligations.
 //!
 //! Every verb reaches the engine through the Restate admin API: pausing,
@@ -15,19 +15,19 @@
 use std::sync::Arc;
 
 use lash_core::engine::{
-    EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, OpenRoot,
-    ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef, RootRunLoss,
-    SessionControlEngine, StalledExecution,
+    EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, OpenRun,
+    ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RunLoss, RunRef, SessionControlEngine,
+    StalledExecution,
 };
-use lash_core::store::{EnginePark, RootExecutor};
+use lash_core::store::{EnginePark, RunExecutor};
 
-use crate::session_driver::{parse_turn_workflow_key, turn_workflow_key};
+use crate::session_shifts::{parse_turn_workflow_key, turn_workflow_key};
 use crate::{RestateAdminClient, RestateIngressClient, RestateInvocationId};
 
 pub(crate) struct RestateSessionControl {
     pub(crate) admin: RestateAdminClient,
     pub(crate) ingress: RestateIngressClient,
-    /// The namespace whose drives, roots and segments this control reads
+    /// The namespace whose shifts, runs and segments this control reads
     /// and settles (FIG-3898): another deployment's paused work on the same
     /// server is never this one's.
     pub(crate) namespace: crate::RestateNamespace,
@@ -37,14 +37,14 @@ pub(crate) struct RestateSessionControl {
     pub(crate) generation: lash_core::engine::EngineGeneration,
     pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
     pub(crate) lost_processes: tokio::sync::Mutex<Option<lash_core::ProcessRegistryCursor>>,
-    pub(crate) lost_roots: tokio::sync::Mutex<Option<RootRef>>,
+    pub(crate) lost_runs: tokio::sync::Mutex<Option<RunRef>>,
 }
 
 #[derive(Default)]
-pub(crate) struct LostRootPass {
-    pub(crate) ended: Vec<RootRef>,
+pub(crate) struct LostSessionRunPass {
+    pub(crate) ended: Vec<RunRef>,
     pub(crate) unchanged: usize,
-    /// Roots this pass could not settle, each by its workflow key, with why.
+    /// Runs this pass could not settle, each by its workflow key, with why.
     pub(crate) failed: Vec<(String, String)>,
 }
 
@@ -54,59 +54,59 @@ pub(crate) struct RecoveryScan<'a, C> {
     pub(crate) deadline: tokio::time::Instant,
 }
 
-/// Visit one stable page of the store's open roots and end each one whose
+/// Visit one stable page of the store's open runs and end each one whose
 /// execution Restate lost, on the evidence its runs give
-/// ([`RootRunLoss`]). The store supplies the keys, so the engine's retained
-/// history never decides which roots are read, and every generation lane of
+/// ([`RunLoss`]). The store supplies the keys, so the engine's retained
+/// history never decides which runs are read, and every generation lane of
 /// a key is read together: a live, paused or completed run on any lane
-/// keeps its root.
+/// keeps its run.
 ///
 /// - Every run of the key failed: the key never runs again. A run that
-///   recorded an outcome is not lost: it committed its root, or it met a
-///   refusal no retry changes and ended the root in the store before it
+///   recorded an outcome is not lost: it committed its run, or it met a
+///   refusal no retry changes and ended the run in the store before it
 ///   recorded `Released` (FIG-4018), so the refused run is the one writer of
-///   that root's terminal. A root whose failed runs recorded nothing ends
-///   ([`RootRunLoss::FailedRun`]).
-/// - No lane holds a run of the key: the pass judges the root by the
-///   execution its recorded admission names ([`RootExecutor`], FIG-4403),
-///   never by the root's name.
-///   - Its own run ([`RootExecutor::Root`]): the run was purged or its
-///     history lost after the root was admitted (FIG-4281). The root
+///   that run's terminal. A run whose failed executions recorded nothing ends
+///   ([`RunLoss::FailedRun`]).
+/// - No lane holds a run of the key: the pass judges the run by the
+///   execution its recorded admission names ([`RunExecutor`], FIG-4403),
+///   never by the run's name.
+///   - Its own execution ([`RunExecutor::Run`]): the run was purged or its
+///     history lost after the run was admitted (FIG-4281). The run
 ///     started, and a fresh execution would run its effects again under an
-///     empty journal, so the store ends it ([`RootRunLoss::NoRun`]).
-///   - A process's run ([`RootExecutor::Inline`] under a process scope):
-///     the process drives the root inline and no lane ever holds a run of
-///     its key. While the process is live the pass leaves the root, and the
+///     empty journal, so the store ends it ([`RunLoss::NoRun`]).
+///   - A process's run ([`RunExecutor::Inline`] under a process scope):
+///     the process executes the run inline and no lane ever holds an execution of
+///     its key. While the process is live the pass leaves the run, and the
 ///     lost-process pass owns the process's run. A terminal process runs
-///     nothing more, so the root ends ([`RootRunLoss::NoRun`]).
-///   - Another execution's drive: an in-process drive the engine holds no
+///     nothing more, so the run ends ([`RunLoss::NoRun`]).
+///   - Another execution's shift: an in-process shift the engine holds no
 ///     run of. Its absence from every lane proves nothing, so the pass
-///     leaves the root.
-///   - No recorded admission: the root started nothing; its ingress
-///     obligation still owns its input and drives it, so the pass leaves it.
+///     leaves the run.
+///   - No recorded admission: the run started nothing; its ingress
+///     obligation still owns its input and executes it, so the pass leaves it.
 ///
 /// An admin read that fails proves nothing about any run: the pass stops
 /// before it ends anything on that page. Every row spends the inspected-record
 /// budget. The cursor advances before engine requests, including failures and
 /// timeouts, and an exhausted catalog wraps and retries them. Store reads,
 /// queries, outcomes and terminal writes share the page deadline.
-pub(crate) async fn end_lost_root_runs(
+pub(crate) async fn end_lost_run_executions(
     admin: &RestateAdminClient,
     ingress: &RestateIngressClient,
     namespace: &crate::RestateNamespace,
     sessions: &Arc<dyn lash_core::DeploymentStore>,
     processes: &Arc<dyn lash_core::ProcessRegistry>,
-    scan: RecoveryScan<'_, RootRef>,
-) -> Result<LostRootPass, lash_core::StoreError> {
+    scan: RecoveryScan<'_, RunRef>,
+) -> Result<LostSessionRunPass, lash_core::StoreError> {
     let RecoveryScan {
         limit,
         after,
         deadline,
     } = scan;
-    let mut pass = LostRootPass::default();
+    let mut pass = LostSessionRunPass::default();
     let page = match recovery_request(
         deadline,
-        sessions.non_terminal_roots_page(after.as_ref(), limit),
+        sessions.non_terminal_runs_page(after.as_ref(), limit),
     )
     .await
     {
@@ -114,7 +114,7 @@ pub(crate) async fn end_lost_root_runs(
         Err(RecoveryRequestError::Failed(error)) => return Err(error),
         Err(error) => {
             pass.failed
-                .push(("lost-root-page".into(), error.to_string()));
+                .push(("lost-run-page".into(), error.to_string()));
             return Ok(pass);
         }
     };
@@ -128,40 +128,38 @@ pub(crate) async fn end_lost_root_runs(
     }
     let keys: Vec<String> = page
         .iter()
-        .map(|open| turn_workflow_key(&open.target.session, &open.target.root))
+        .map(|open| turn_workflow_key(&open.target.session, &open.target.run))
         .collect();
-    let runs = match recovery_request(deadline, admin.root_runs(namespace, &keys)).await {
+    let runs = match recovery_request(deadline, admin.run_executions(namespace, &keys)).await {
         Ok(runs) => runs,
         Err(RecoveryRequestError::Failed(error)) => {
             return Err(lash_core::StoreError::Backend(format!(
-                "read root runs from Restate: {error}"
+                "read run executes from Restate: {error}"
             )));
         }
         Err(error) => {
             pass.failed
-                .push(("lost-root-page".into(), error.to_string()));
+                .push(("lost-run-page".into(), error.to_string()));
             return Ok(pass);
         }
     };
-    for (OpenRoot { target, executor }, key) in page.iter().zip(&keys) {
+    for (OpenRun { target, executor }, key) in page.iter().zip(&keys) {
         let key_runs: Vec<&crate::RestateInvocationStatus> = runs
             .iter()
-            .filter(|run| run.target_service_key.as_deref() == Some(key.as_str()))
+            .filter(|executed| executed.target_service_key.as_deref() == Some(key.as_str()))
             .collect();
         let loss = if key_runs.is_empty() {
             let lost = match executor {
-                Some(RootExecutor::Root) => Ok(true),
-                Some(RootExecutor::Acceptor {
+                Some(RunExecutor::Run) => Ok(true),
+                Some(RunExecutor::Acceptor {
                     scope: lash_core::ExecutionScope::Process { process_id },
                 }) => recovery_request(deadline, process_ended(processes, process_id))
                     .await
                     .map_err(|error| error.to_string()),
-                Some(RootExecutor::Acceptor { .. } | RootExecutor::Inline { .. }) | None => {
-                    Ok(false)
-                }
+                Some(RunExecutor::Acceptor { .. } | RunExecutor::Inline { .. }) | None => Ok(false),
             };
             match lost {
-                Ok(true) => RootRunLoss::NoRun,
+                Ok(true) => RunLoss::NoRun,
                 Ok(false) => {
                     pass.unchanged += 1;
                     continue;
@@ -171,9 +169,12 @@ pub(crate) async fn end_lost_root_runs(
                     continue;
                 }
             }
-        } else if key_runs.iter().all(|run| run.completed_with_failure()) {
+        } else if key_runs
+            .iter()
+            .all(|executed| executed.completed_with_failure())
+        {
             match recorded_outcome(ingress, &key_runs, key, deadline).await {
-                Ok(false) => RootRunLoss::FailedRun,
+                Ok(false) => RunLoss::FailedRun,
                 Ok(true) => {
                     pass.unchanged += 1;
                     continue;
@@ -191,30 +192,30 @@ pub(crate) async fn end_lost_root_runs(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        match recovery_request(deadline, sessions.end_lost_root(target, loss, at_ms)).await {
+        match recovery_request(deadline, sessions.end_lost_run(target, loss, at_ms)).await {
             Ok(Some(_)) => {
                 tracing::warn!(
-                    event = "root.run_lost",
+                    event = "run.run_lost",
                     session_id = target.session.as_str(),
-                    root = target.root.as_str(),
+                    run = target.run.as_str(),
                     ?loss,
-                    "Restate lost a root's execution; the root ends substrate-lost"
+                    "Restate lost a run's execution; the run ends substrate-lost"
                 );
-                // The lost run's open usage runs can never settle: its
+                // The lost run's open usage meters can never settle: its
                 // settlements, if any, precede this on the owner's object.
                 if let Err(error) = recovery_request(
                     deadline,
-                    crate::usage_accounting::retire_root_usage(
+                    crate::usage_accounting::retire_run_usage(
                         ingress,
                         namespace,
                         &target.session,
-                        &target.root,
+                        &target.run,
                     ),
                 )
                 .await
                 {
                     pass.failed
-                        .push((key.clone(), format!("retire root usage: {error}")));
+                        .push((key.clone(), format!("retire run usage: {error}")));
                 }
                 pass.ended.push(target.clone());
             }
@@ -249,14 +250,14 @@ pub(crate) enum RecoveryRequestError<E: std::fmt::Display> {
     BudgetExhausted,
 }
 
-/// Whether process `process_id`, whose run a root's admission recorded as
+/// Whether process `process_id`, whose execution a run's admission recorded as
 /// its executor, runs nothing more (FIG-4403): its record is terminal, or
 /// the registry holds none.
 ///
-/// A process drives the roots its drive admits inline, in its own
-/// `LashProcessWorkflow` run: its child turn's root and every root admitted
+/// A process executes the runs its shift admits inline, in its own
+/// `LashProcessWorkflow` run: its child turn's run and every run admitted
 /// ahead of it in the session. While the process is live the lost-process
-/// pass owns that run, so a root it runs is never judged lost here.
+/// pass owns that execution, so a run it runs is never judged lost here.
 async fn process_ended(
     processes: &Arc<dyn lash_core::ProcessRegistry>,
     process_id: &lash_core::ProcessId,
@@ -267,7 +268,7 @@ async fn process_ended(
         .is_none_or(|record| record.is_terminal()))
 }
 
-/// Whether any of `key`'s failed runs recorded the root's outcome, read on
+/// Whether any of `key`'s failed executions recorded the run's outcome, read on
 /// the lane each ran under.
 async fn recorded_outcome(
     ingress: &RestateIngressClient,
@@ -276,12 +277,12 @@ async fn recorded_outcome(
     deadline: tokio::time::Instant,
 ) -> Result<bool, String> {
     for run in failed {
-        let outcome: Option<lash_core::engine::RootOutcome> = recovery_request(
+        let outcome: Option<lash_core::engine::RunOutcome> = recovery_request(
             deadline,
             ingress.call_lash_workflow(&run.target_service_name, key, "outcome", &()),
         )
         .await
-        .map_err(|error| format!("read root outcome of run `{}`: {error}", run.id))?;
+        .map_err(|error| format!("read run outcome of run `{}`: {error}", run.id))?;
         if outcome.is_some() {
             return Ok(true);
         }
@@ -356,15 +357,15 @@ pub(crate) fn refusal(error: impl ControlFailure) -> EngineRefusal {
     error.into_refusal()
 }
 
-/// The refusal of a drive ask Restate did not accept: the cause keeps its
-/// code and retry class, and the message names the drive it refused.
-pub(crate) fn unaccepted_drive(
+/// The refusal of a shift ask Restate did not accept: the cause keeps its
+/// code and retry class, and the message names the shift it refused.
+pub(crate) fn unaccepted_shift(
     session: &lash_core::SessionId,
-    request: &lash_core::engine::DriveRequestId,
+    request: &lash_core::engine::ShiftRequestId,
     mut cause: EngineRefusal,
 ) -> EngineRefusal {
     cause.message = format!(
-        "drive `{}` of session `{session}` was not accepted: {}",
+        "shift `{}` of session `{session}` was not accepted: {}",
         request.as_str(),
         cause.message
     );
@@ -463,15 +464,15 @@ impl RestateSessionControl {
         .map_err(refusal)
     }
 
-    async fn lost_root_page(
+    async fn lost_run_page(
         &self,
         page: &EnginePage,
         deadline: tokio::time::Instant,
-    ) -> Result<LostRootPass, EngineRefusal> {
-        let mut cursor = tokio::time::timeout_at(deadline, self.lost_roots.lock())
+    ) -> Result<LostSessionRunPass, EngineRefusal> {
+        let mut cursor = tokio::time::timeout_at(deadline, self.lost_runs.lock())
             .await
             .map_err(refusal)?;
-        end_lost_root_runs(
+        end_lost_run_executions(
             &self.admin,
             &self.ingress,
             &self.namespace,
@@ -489,7 +490,7 @@ impl RestateSessionControl {
 
     async fn invocation(
         &self,
-        target: &RootRef,
+        target: &RunRef,
         handle: Option<&EnginePark>,
     ) -> Result<Option<crate::ingress::RestateInvocationStatus>, EngineRefusal> {
         let status = match handle {
@@ -502,16 +503,16 @@ impl RestateSessionControl {
                 self.admin
                     .workflow_invocation_status(
                         &self.namespace.stable(crate::LashService::TurnDriver).name(),
-                        &turn_workflow_key(&target.session, &target.root),
+                        &turn_workflow_key(&target.session, &target.run),
                         "run",
                     )
                     .await
             }
         }
         .map_err(refusal)?;
-        // A stored handle names the root's execution: a `LashTurn` run of
-        // the root's session. A follow-on's recovery runs under an admitted
-        // name of its own, so the key's root may differ from the park's.
+        // A stored handle names the run's execution: a `LashTurn` run of
+        // the run's session. A follow-on's recovery runs under an admitted
+        // name of its own, so the key's run may differ from the park's.
         if let Some(status) = status.as_ref()
             && (!self
                 .namespace
@@ -526,14 +527,14 @@ impl RestateSessionControl {
         {
             return Err(EngineRefusal::permanent(
                 lash_core::RuntimeErrorCode::EngineHandleMismatch,
-                "stored engine handle does not name a run of the requested root's session",
+                "stored engine handle does not name an execution of the requested run's session",
             ));
         }
         Ok(status)
     }
 
     /// Settle one paused invocation of the listing: resume an admission-only
-    /// drive, park or release a root's execution or the group child it waits
+    /// shift, park or release a run's execution or the group child it waits
     /// on, or hand a process to its registry's reconcile.
     async fn reconcile_invocation(
         &self,
@@ -551,10 +552,10 @@ impl RestateSessionControl {
             .namespace
             .parse(&invocation.target_service_name)
             .map(|route| route.service());
-        if service == Some(crate::LashService::SessionDriver) {
+        if service == Some(crate::LashService::SessionShifts) {
             let session = lash_core::SessionId::parse(key.as_str())
                 .map_err(|error| EngineRefusal::from(lash_core::StoreError::from(error)))?;
-            self.reconcile_drive(parks, invocation, session, report)
+            self.reconcile_shift(parks, invocation, session, report)
                 .await?;
         } else if service == Some(crate::LashService::ProcessWorkflow) {
             let pass = crate::process::park_reconcile::reconcile_process_invocations(
@@ -574,10 +575,10 @@ impl RestateSessionControl {
         } else if service == Some(crate::LashService::EffectGroupDispatch) {
             self.reconcile_group_work(parks, invocation, &key, report)
                 .await?;
-        } else if let Some((session, root)) = parse_turn_workflow_key(&key) {
-            let target = ParkTarget::Root {
+        } else if let Some((session, run)) = parse_turn_workflow_key(&key) {
+            let target = ParkTarget::Run {
                 session: session.clone(),
-                root: root.clone(),
+                run: run.clone(),
             };
             let reason = crate::process::park_reconcile::exhausted_reason(&invocation);
             let probe = PausedInvocation {
@@ -598,7 +599,7 @@ impl RestateSessionControl {
                 EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
                 EngineParkRecorded::Redriven
                 | EngineParkRecorded::NothingToPark
-                | EngineParkRecorded::ResumeDrive => {
+                | EngineParkRecorded::ResumeShift => {
                     report.unchanged += 1;
                 }
                 EngineParkRecorded::TargetTerminal | EngineParkRecorded::TargetGone => {
@@ -606,15 +607,15 @@ impl RestateSessionControl {
                         .kill_invocation(&invocation.invocation_id())
                         .await
                         .map_err(refusal)?;
-                    crate::usage_accounting::retire_root_usage(
+                    crate::usage_accounting::retire_run_usage(
                         &self.ingress,
                         &self.namespace,
                         &session,
-                        &root,
+                        &run,
                     )
                     .await
                     .map_err(refusal)?;
-                    report.released.push(RootRef { session, root });
+                    report.released.push(RunRef { session, run });
                 }
             }
         } else {
@@ -649,7 +650,7 @@ impl RestateSessionControl {
 
     /// Stopped group preparation, a child or retirement the group still
     /// needs parks the scope it runs for with its typed cause: a process
-    /// through its registry, a root with the invocation's handle recorded on
+    /// through its registry, a run with the invocation's handle recorded on
     /// its park, which is what the park's redrive resumes (FIG-4630). A
     /// terminal owner releases stopped work instead of acquiring another
     /// park, and so does a group that needs the work no more: a child whose
@@ -703,15 +704,15 @@ impl RestateSessionControl {
         }
         let lash_core::ExecutionScope::Turn {
             session_id: session,
-            turn_id: root,
+            turn_id: run,
         } = opener
         else {
             report.unchanged += 1;
             return Ok(());
         };
-        let target = ParkTarget::RootChild {
+        let target = ParkTarget::RunChild {
             session: session.clone(),
-            root: root.clone(),
+            run: run.clone(),
         };
         let reason = crate::process::park_reconcile::exhausted_reason(&invocation);
         let probe = PausedInvocation {
@@ -732,7 +733,7 @@ impl RestateSessionControl {
             EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
             EngineParkRecorded::Redriven
             | EngineParkRecorded::NothingToPark
-            | EngineParkRecorded::ResumeDrive => {
+            | EngineParkRecorded::ResumeShift => {
                 report.unchanged += 1;
             }
             EngineParkRecorded::TargetTerminal | EngineParkRecorded::TargetGone => {
@@ -740,34 +741,34 @@ impl RestateSessionControl {
                     .kill_invocation(&invocation.invocation_id())
                     .await
                     .map_err(refusal)?;
-                crate::usage_accounting::retire_root_usage(
+                crate::usage_accounting::retire_run_usage(
                     &self.ingress,
                     &self.namespace,
                     &session,
-                    &root,
+                    &run,
                 )
                 .await
                 .map_err(refusal)?;
-                report.released.push(RootRef { session, root });
+                report.released.push(RunRef { session, run });
             }
         }
         Ok(())
     }
 
-    /// Settle one paused session drive (ADR 0109 §3): never resumed blindly.
-    /// Its session is parked on its next root, and only that park's operator
-    /// verb resumes it ([`Self::resume_session_drives`]). A drive that
+    /// Settle one paused session shift (ADR 0109 §3): never resumed blindly.
+    /// Its session is parked on its next run, and only that park's operator
+    /// verb resumes it ([`Self::resume_session_shifts`]). A shift that
     /// stopped behind a redrive that has since settled is resumed; one whose
-    /// session is gone, or whose next work names no root to park on, is
-    /// killed, and the session's ingress obligations ask for a fresh drive.
-    async fn reconcile_drive(
+    /// session is gone, or whose next work names no run to park on, is
+    /// killed, and the session's ingress obligations ask for a fresh shift.
+    async fn reconcile_shift(
         &self,
         parks: &dyn ParkRecoveryWriter,
         invocation: crate::ingress::RestatePausedInvocation,
         session: lash_core::SessionId,
         report: &mut ParkReconcileReport,
     ) -> Result<(), EngineRefusal> {
-        let target = ParkTarget::Drive {
+        let target = ParkTarget::Shift {
             session: session.clone(),
         };
         let reason = crate::process::park_reconcile::exhausted_reason(&invocation);
@@ -787,7 +788,7 @@ impl RestateSessionControl {
         {
             EngineParkRecorded::Parked(_) => report.parked.push(target),
             EngineParkRecorded::AttachedToExisting(_) => report.attached += 1,
-            EngineParkRecorded::ResumeDrive => {
+            EngineParkRecorded::ResumeShift => {
                 self.admin
                     .resume_invocation(&invocation.invocation_id())
                     .await
@@ -795,10 +796,10 @@ impl RestateSessionControl {
                 tracing::info!(
                     session_id = %session,
                     invocation = invocation.id.as_str(),
-                    event = "session.drive.resumed",
-                    "a session drive paused behind a redrive that has since settled is resumed"
+                    event = "session.shift.resumed",
+                    "a session shift paused behind a redrive that has since settled is resumed"
                 );
-                report.resumed_drives.push(session);
+                report.resumed_shifts.push(session);
             }
             EngineParkRecorded::NothingToPark => {
                 self.admin
@@ -808,11 +809,11 @@ impl RestateSessionControl {
                 tracing::warn!(
                     session_id = %session,
                     invocation = invocation.id.as_str(),
-                    event = "session.drive.released",
-                    "a paused session drive has no root to park on; it is released, and the \
-                     session's ingress obligations ask for a fresh drive"
+                    event = "session.shift.released",
+                    "a paused session shift has no run to park on; it is released, and the \
+                     session's ingress obligations ask for a fresh shift"
                 );
-                report.released_drives.push(session);
+                report.released_shifts.push(session);
             }
             EngineParkRecorded::Redriven | EngineParkRecorded::TargetTerminal => {
                 report.unchanged += 1;
@@ -822,36 +823,36 @@ impl RestateSessionControl {
                     .kill_invocation(&invocation.invocation_id())
                     .await
                     .map_err(refusal)?;
-                report.released_drives.push(session);
+                report.released_shifts.push(session);
             }
         }
         Ok(())
     }
 
-    /// Resume the session's paused drive, if one is paused: the half of a
+    /// Resume the session's paused shift, if one is paused: the half of a
     /// park's operator verb that lets the session's admission go on. Whether
     /// any was resumed.
-    async fn resume_session_drives(
+    async fn resume_session_shifts(
         &self,
         session: &lash_core::SessionId,
     ) -> Result<bool, EngineRefusal> {
         let paused = self
             .admin
-            .paused_session_drives(&self.namespace, session.as_str())
+            .paused_session_shifts(&self.namespace, session.as_str())
             .await
             .map_err(refusal)?;
-        for drive in &paused {
+        for shift in &paused {
             self.admin
-                .resume_invocation(&drive.invocation_id())
+                .resume_invocation(&shift.invocation_id())
                 .await
                 .map_err(refusal)?;
         }
         Ok(!paused.is_empty())
     }
 
-    /// Resume the stopped group work a root's park recorded: exactly the
+    /// Resume the stopped group work a run's park recorded: exactly the
     /// invocations `children` names, each read on its own (FIG-4630). No
-    /// listing is read and no group index is asked, so work of another root,
+    /// listing is read and no group index is asked, so work of another run,
     /// session or deployment is never touched and can never fail this
     /// redrive. A handle whose invocation is no longer paused moved on since
     /// it was recorded and is skipped. Whether any was resumed.
@@ -984,17 +985,17 @@ impl SessionControlEngine for RestateSessionControl {
         Ok(())
     }
 
-    async fn resume_root(
+    async fn resume_run(
         &self,
-        target: &RootRef,
+        target: &RunRef,
         handle: Option<&EnginePark>,
         children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
-        // A redrive resumes the root's stopped execution, the stopped group
-        // work its park recorded, and the session's drive stopped behind the
-        // park (ADR 0109 §3): the only resume a paused drive gets.
+        // A redrive resumes the run's stopped execution, the stopped group
+        // work its park recorded, and the session's shift stopped behind the
+        // park (ADR 0109 §3): the only resume a paused shift gets.
         let status = self.invocation(target, handle).await?;
-        let root = match status {
+        let run = match status {
             Some(status) if status.status == crate::ingress::RestateInvocationLifecycle::Paused => {
                 self.admin
                     .resume_invocation(&status.invocation_id())
@@ -1005,8 +1006,8 @@ impl SessionControlEngine for RestateSessionControl {
             _ => false,
         };
         let children = self.resume_recorded_work(children).await?;
-        let drive = self.resume_session_drives(&target.session).await?;
-        Ok(if root || children || drive {
+        let shift = self.resume_session_shifts(&target.session).await?;
+        Ok(if run || children || shift {
             EngineAck::Resumed
         } else {
             EngineAck::NothingHeld
@@ -1055,9 +1056,9 @@ impl SessionControlEngine for RestateSessionControl {
         })
     }
 
-    async fn release_root(
+    async fn release_run(
         &self,
-        target: &RootRef,
+        target: &RunRef,
         handle: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
         let status = self.invocation(target, handle).await?;
@@ -1075,17 +1076,17 @@ impl SessionControlEngine for RestateSessionControl {
         // admitted and never recorded is resolved `unknown(execution_ended)`
         // behind them (ADR 0125). Idempotent, so a release with nothing held
         // retires nothing.
-        crate::usage_accounting::retire_root_usage(
+        crate::usage_accounting::retire_run_usage(
             &self.ingress,
             &self.namespace,
             &target.session,
-            &target.root,
+            &target.run,
         )
         .await
         .map_err(refusal)?;
-        // The store already ended the root: the session's drive stopped
+        // The store already ended the run: the session's shift stopped
         // behind its park admits what follows it once resumed.
-        self.resume_session_drives(&target.session).await?;
+        self.resume_session_shifts(&target.session).await?;
         Ok(if released {
             EngineAck::Released
         } else {
@@ -1103,14 +1104,14 @@ impl SessionControlEngine for RestateSessionControl {
         parks: &dyn ParkRecoveryWriter,
         page: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal> {
-        // Independent pages: a slow paused invocation, lost process or root
+        // Independent pages: a slow paused invocation, lost process or run
         // never serializes either of the other catalogs. Cursor locks belong
         // to this installed control, so concurrent callers cannot repeat a page.
         let deadline = tokio::time::Instant::now() + page.budget;
-        let (paused, processes, roots) = tokio::join!(
+        let (paused, processes, runs) = tokio::join!(
             self.paused_page(parks, &page, deadline),
             self.lost_process_page(&page, deadline),
-            self.lost_root_page(&page, deadline),
+            self.lost_run_page(&page, deadline),
         );
         let mut report = match paused {
             Ok(report) => report,
@@ -1146,9 +1147,9 @@ impl SessionControlEngine for RestateSessionControl {
                 .failed
                 .push((EngineCursor::new("lost-process-page"), error.to_string())),
         }
-        match roots {
+        match runs {
             Ok(pass) => {
-                report.ended_roots.extend(pass.ended);
+                report.ended_runs.extend(pass.ended);
                 report.unchanged += pass.unchanged;
                 report.failed.extend(
                     pass.failed
@@ -1158,7 +1159,7 @@ impl SessionControlEngine for RestateSessionControl {
             }
             Err(error) => report
                 .failed
-                .push((EngineCursor::new("lost-root-page"), error.to_string())),
+                .push((EngineCursor::new("lost-run-page"), error.to_string())),
         }
         Ok(report)
     }

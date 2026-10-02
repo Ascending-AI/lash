@@ -404,7 +404,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
             .all(|record| record.timestamp.timestamp_millis() == 1_700_000_000_123)
     );
     graphs.clear();
-    let replay = context(runtime.drive(Some(scope.clone()), &controller));
+    let replay = context(runtime.shift(Some(scope.clone()), &controller));
     let trace = foreground_lashlang_execution_trace(&replay, &artifact, "typescript")
         .expect("product observation stays enabled on replay");
     assert_eq!(replay.trace_scope(), Some(&scope));

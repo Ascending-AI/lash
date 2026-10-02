@@ -76,13 +76,13 @@ pub mod runtime_helpers;
 pub mod runtime_internals;
 #[cfg(target_os = "linux")]
 mod thread_census;
-mod turn_drive;
+mod turn_execution;
 
 #[cfg(target_os = "linux")]
 pub use thread_census::ThreadCensus;
 
 pub use poll::{poll_until, wait_until};
-pub use turn_drive::TestTurnDrive;
+pub use turn_execution::TestTurnExecution;
 
 #[cfg(test)]
 std::thread_local! {
@@ -205,4 +205,4 @@ pub fn response_synthesized_from_aborted_stream(
     crate::runtime::response_synthesized_from_aborted_stream(events)
 }
 
-pub use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
+pub use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt;

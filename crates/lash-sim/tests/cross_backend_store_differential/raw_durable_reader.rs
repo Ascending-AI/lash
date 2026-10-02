@@ -2,7 +2,7 @@ use super::*;
 
 type PendingTurnInputRow = (String, String, Option<String>, Option<String>);
 
-/// One `session_roots` row's terminal and obligation columns, as each
+/// One `session_runs` row's terminal and obligation columns, as each
 /// backend's durable read hands them to [`scope_close_obligations`].
 type ScopeCloseObligationRow = (
     String,
@@ -16,7 +16,7 @@ type ScopeCloseObligationRow = (
     Option<i64>,
 );
 
-/// The `session_roots` obligation projection, with ADR 0109 §1.8's
+/// The `session_runs` obligation projection, with ADR 0109 §1.8's
 /// detection bound asserted per row as the durable read returns it:
 ///
 /// - terminal evidence and the `ScopeClose` obligation arm together — a
@@ -26,7 +26,7 @@ type ScopeCloseObligationRow = (
 ///   is bounded — `obligation_due_at_ms` is never further out than one
 ///   claim TTL (`claimed`) or one maximum backoff (`due`) from the read, so
 ///   the next due pass finds it inside the tick bound rather than any pass
-///   rescanning terminal roots;
+///   rescanning terminal runs;
 /// - a settled row stamps when it settled.
 ///
 /// `now_ms` is the clock the backend stamped these rows with: the harness's
@@ -41,11 +41,11 @@ fn scope_close_obligations(
     now_ms: u64,
     rows: Vec<ScopeCloseObligationRow>,
 ) -> Vec<ScopeCloseObligationObservation> {
-    let policy = lash_core::runtime::drive::relay::RelayPolicy::default();
+    let policy = lash_core::runtime::shift::relay::RelayPolicy::default();
     rows.into_iter()
         .map(
             |(
-                root,
+                run,
                 terminal_kind,
                 terminal_at_ms,
                 obligation_id,
@@ -58,19 +58,19 @@ fn scope_close_obligations(
                 assert_eq!(
                     terminal_kind.is_some(),
                     obligation_id.is_some(),
-                    "root `{root}`: terminal evidence and its scope-close obligation arm \
+                    "run `{run}`: terminal evidence and its scope-close obligation arm \
                      together (ADR 0109 §3)"
                 );
                 if let Some(id) = &obligation_id {
                     let derived = lash_core::store::ObligationKey::ScopeClose {
                         session_id: session_id.clone(),
-                        root: lash_core::TurnId::fixture(root.as_str()),
+                        run: lash_core::TurnId::fixture(run.as_str()),
                     }
                     .id();
                     assert_eq!(
                         id.as_str(),
                         derived.as_str(),
-                        "root `{root}`: the armed obligation carries the row's derived id"
+                        "run `{run}`: the armed obligation carries the row's derived id"
                     );
                 }
                 match obligation_state.as_deref() {
@@ -86,20 +86,20 @@ fn scope_close_obligations(
                             as u64;
                         assert!(
                             due_at_ms <= now_ms + horizon,
-                            "root `{root}`: obligation due at {due_at_ms} is beyond the \
+                            "run `{run}`: obligation due at {due_at_ms} is beyond the \
                              §1.8 detection horizon {horizon} ms past {now_ms}"
                         );
                     }
                     Some("delivered") | Some("stalled") => {
                         assert!(
                             obligation_settled_at_ms.is_some(),
-                            "root `{root}`: a settled obligation stamps when it settled"
+                            "run `{run}`: a settled obligation stamps when it settled"
                         );
                     }
-                    Some(state) => panic!("root `{root}`: unknown obligation state `{state}`"),
+                    Some(state) => panic!("run `{run}`: unknown obligation state `{state}`"),
                 }
                 ScopeCloseObligationObservation {
-                    root,
+                    run,
                     terminal_kind,
                     terminal_at_ms: terminal_at_ms.map(|at_ms| at_ms as u64),
                     obligation_id,
@@ -302,7 +302,7 @@ impl RawDurableReader {
                     .expect("read PostgreSQL session metadata")
                     .map(session_meta_observation);
                 let pending_rows: Vec<PendingTurnInputRow> = sqlx::query_as(
-                    "SELECT input_id, state, admitted_root, admitted_by
+                    "SELECT input_id, state, admitted_run, admitted_by
                      FROM lash_pending_turn_inputs
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
@@ -313,19 +313,19 @@ impl RawDurableReader {
                 .expect("read Postgres pending turn inputs");
                 let pending_turn_inputs = pending_rows
                     .into_iter()
-                    .map(|(input_id, state, admitted_root, admitted_by)| {
+                    .map(|(input_id, state, admitted_run, admitted_by)| {
                         PendingTurnInputObservation {
                             input_id,
                             state: TurnInputStateKind::from_wire_str(&state)
                                 .expect("decode Postgres pending-input state"),
-                            admitted_root,
+                            admitted_run,
                             admitted_by,
                         }
                     })
                     .collect();
                 let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
                     "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                            authority_json, merge_key, admitted_root, admitted_by, payload_json
+                            authority_json, merge_key, admitted_run, admitted_by, payload_json
                      FROM lash_queued_work_batches
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
@@ -336,13 +336,13 @@ impl RawDurableReader {
                 .expect("read Postgres queued-work batches");
                 let queued_work = queued_work_observations_from_sql_rows(queued_work_batches);
                 let obligation_rows: Vec<ScopeCloseObligationRow> = sqlx::query_as(
-                    "SELECT root, terminal_kind, terminal_at_ms, obligation_id,
+                    "SELECT run, terminal_kind, terminal_at_ms, obligation_id,
                             obligation_state, obligation_attempts::BIGINT, obligation_due_at_ms,
                             obligation_stall_reason, obligation_settled_at_ms
-                     FROM lash_session_roots
+                     FROM lash_session_runs
                      WHERE session_id = $1
                        AND (terminal_kind IS NOT NULL OR obligation_state IS NOT NULL)
-                     ORDER BY root ASC",
+                     ORDER BY run ASC",
                 )
                 .bind(session_id.as_str())
                 .fetch_all(pool)
@@ -370,8 +370,8 @@ impl RawDurableReader {
 }
 
 /// Decode the full SQLite durable surface into the normalized, cross-backend
-/// comparable `RawDurableState`. Lives here rather than in the harness root so
-/// the root stays inside the repository's test-file line budget.
+/// comparable `RawDurableState`. Lives here rather than in the harness run so
+/// the run stays inside the repository's test-file line budget.
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -507,7 +507,7 @@ pub(super) async fn read_sqlite_durable_state(
             )
             .expect("read attachment roots")
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode roots")
+            .expect("decode runs")
             .into_iter()
             .map(
                 |(id, referrer_kind, referrer_id, edge, written, pending_writes)| {
@@ -572,7 +572,7 @@ pub(super) async fn read_sqlite_durable_state(
     let pending_turn_inputs = {
         let mut statement = connection
             .prepare(
-                "SELECT input_id, state, admitted_root, admitted_by
+                "SELECT input_id, state, admitted_run, admitted_by
                  FROM pending_turn_inputs
                  WHERE session_id = ?1
                  ORDER BY enqueue_seq ASC",
@@ -592,11 +592,11 @@ pub(super) async fn read_sqlite_durable_state(
             .expect("decode SQLite pending turn inputs")
             .into_iter()
             .map(
-                |(input_id, state, admitted_root, admitted_by)| PendingTurnInputObservation {
+                |(input_id, state, admitted_run, admitted_by)| PendingTurnInputObservation {
                     input_id,
                     state: TurnInputStateKind::from_wire_str(&state)
                         .expect("decode SQLite pending-input state"),
-                    admitted_root,
+                    admitted_run,
                     admitted_by,
                 },
             )
@@ -606,7 +606,7 @@ pub(super) async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                        authority_json, merge_key, admitted_root, admitted_by, payload_json
+                        authority_json, merge_key, admitted_run, admitted_by, payload_json
                  FROM queued_work_batches
                  WHERE session_id = ?1
                  ORDER BY enqueue_seq ASC",
@@ -635,13 +635,13 @@ pub(super) async fn read_sqlite_durable_state(
     let obligation_rows: Vec<ScopeCloseObligationRow> = {
         let mut statement = connection
             .prepare(
-                "SELECT root, terminal_kind, terminal_at_ms, obligation_id,
+                "SELECT run, terminal_kind, terminal_at_ms, obligation_id,
                         obligation_state, obligation_attempts, obligation_due_at_ms,
                         obligation_stall_reason, obligation_settled_at_ms
-                 FROM session_roots
+                 FROM session_runs
                  WHERE session_id = ?1
                    AND (terminal_kind IS NOT NULL OR obligation_state IS NOT NULL)
-                 ORDER BY root ASC",
+                 ORDER BY run ASC",
             )
             .expect("prepare SQLite scope-close obligation read");
         statement

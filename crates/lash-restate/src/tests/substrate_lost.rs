@@ -1,6 +1,6 @@
 //! Lash never restarts started work from scratch on Restate (FIG-3588).
 //!
-//! Every law here drives the real `LashProcessWorkflow/run` handler through
+//! Every law here executes the real `LashProcessWorkflow/run` handler through
 //! the Restate protocol, with Restate's own identity rule: a workflow's
 //! invocation id is a function of its key, so the harness gives a retry and a
 //! fresh invocation of one key the same id. A retry replays the journal the
@@ -107,7 +107,7 @@ fn substrate_lost(owner: lash_core::LeaseOwnerIdentity) -> impl Fn(&ProcessAwait
     }
 }
 
-const ROOT_EXECUTION: &str = "root-nonce";
+const RUN_EXECUTION: &str = "run-nonce";
 
 fn segment_input(
     process_id: &ProcessId,
@@ -124,7 +124,7 @@ fn segment_input(
     }
 }
 
-/// Counts the segment runs it is driven for — the only path any effect of
+/// Counts the segment runs it is executed for — the only path any effect of
 /// the segment can take — and settles each successfully, or crashes after the
 /// run's effect when told to.
 #[derive(Default)]
@@ -166,14 +166,14 @@ impl RestateProcessRunner for EffectRunner {
     }
 }
 
-/// A process whose root execution started and handed segment 1 over, served
+/// A process whose run execution started and handed segment 1 over, served
 /// by an endpoint whose runner is `runner`.
 struct HandedOverSegment {
     process_id: ProcessId,
     registration: ProcessRegistration,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
-    root_start: lash_core::ProcessStarted,
+    run_start: lash_core::ProcessStarted,
     runner: Arc<EffectRunner>,
     endpoint: Endpoint,
 }
@@ -187,11 +187,11 @@ impl HandedOverSegment {
             .await
             .expect("register the handed-over process")
             .id;
-        let (authority, root_start) = invocation_started(&process_id, ROOT_EXECUTION, 1);
+        let (authority, run_start) = invocation_started(&process_id, RUN_EXECUTION, 1);
         registry
-            .record_first_started_with_authority(&process_id, root_start.clone(), &authority)
+            .record_first_started_with_authority(&process_id, run_start.clone(), &authority)
             .await
-            .expect("record the root execution's start");
+            .expect("record the run execution's start");
         continuations
             .put_segment_handover(
                 &process_id,
@@ -225,7 +225,7 @@ impl HandedOverSegment {
             registration,
             registry,
             continuations,
-            root_start,
+            run_start,
             runner,
             endpoint,
         }
@@ -382,7 +382,7 @@ pub(super) async fn law_c_a_journal_lost_after_the_marker_is_substrate_lost_with
     assert_eq!(segment.runs(), 0, "no effect ever ran");
     let outcome = segment.outcome().await.expect("the refusal is stored");
     assert!(
-        substrate_lost(segment.root_start.owner.clone())(&outcome),
+        substrate_lost(segment.run_start.owner.clone())(&outcome),
         "got {outcome:?}"
     );
 }
@@ -415,7 +415,7 @@ pub(super) async fn law_d_a_journal_lost_after_effects_is_substrate_lost_with_no
     );
     let outcome = segment.outcome().await.expect("the refusal is stored");
     assert!(
-        substrate_lost(segment.root_start.owner.clone())(&outcome),
+        substrate_lost(segment.run_start.owner.clone())(&outcome),
         "got {outcome:?}"
     );
 }
@@ -460,7 +460,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
             process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default().with_execution_write_authority(
-                lash_core::ProcessExecutionWriteAuthority::invocation(&process_id, ROOT_EXECUTION),
+                lash_core::ProcessExecutionWriteAuthority::invocation(&process_id, RUN_EXECUTION),
             ),
             controller
                 .process_scope_for_test(durable_admission(&ExecutionScope::process(&process_id)))
@@ -684,7 +684,7 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         .await
         .expect("register the started row")
         .id;
-    let (authority, started) = invocation_started(&started_id, ROOT_EXECUTION, 1);
+    let (authority, started) = invocation_started(&started_id, RUN_EXECUTION, 1);
     registry
         .record_first_started_with_authority(&started_id, started.clone(), &authority)
         .await
@@ -751,14 +751,14 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         record.outcome(),
         Some(process_success(serde_json::json!("ran")))
     );
-    let root = record
+    let run = record
         .first_started
         .expect("the start step recorded first_started");
     assert!(
-        root.owner
+        run.owner
             .engine_process_execution_id(&fresh_id)
             .is_some_and(|nonce| nonce != fresh_id.as_str()),
-        "segment 0's execution is its journaled nonce, not the key-derived invocation id: {root:?}"
+        "segment 0's execution is its journaled nonce, not the key-derived invocation id: {run:?}"
     );
 }
 
@@ -974,7 +974,7 @@ pub(super) async fn a_failed_handover_write_ends_the_process_failed_typed() {
 
 /// FIG-3809/FIG-3789: a later segment admitted with no handover to resume
 /// from ends its process Failed, typed `process_segment_handover_missing`,
-/// and delivers the terminal to the root workflow awaiters wait on.
+/// and delivers the terminal to the run workflow awaiters wait on.
 #[tokio::test]
 pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
     let stores = memory_process_stores().await;
@@ -1008,7 +1008,7 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
         Vec::new(),
     )
     .await
-    .expect("the segment suspends on its root delivery");
+    .expect("the segment suspends on its run delivery");
     assert_eq!(restate_output_failure_message(&suspended), None);
     assert!(
         restate_recorded_commands(&suspended)
@@ -1019,7 +1019,7 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
                     service == "LashProcessWorkflow" && handler == "complete_terminal"
                 })
             ),
-        "the segment delivers the terminal to the root workflow"
+        "the segment delivers the terminal to the run workflow"
     );
     let record = registry
         .get_process(&process_id)
@@ -1269,12 +1269,12 @@ pub(super) fn retired_process_requests_are_refused_by_generation_not_by_shape() 
 }
 
 /// FIG-3818 → FIG-3820: after the SubstrateLost recovery stored the
-/// process's `Abandoned` terminal, a zombie root execution (killed, purged,
+/// process's `Abandoned` terminal, a zombie run execution (killed, purged,
 /// still running on its deployment) can still park its handover and send
-/// its successor. Segment 1's admission finds the handover and the root's
-/// start, admits it, and drives the runner under a process that already
+/// its successor. Segment 1's admission finds the handover and the run's
+/// start, admits it, and executes the runner under a process that already
 /// ended. The stored terminal is the revocation: segment 1's admission finds
-/// it, runs nothing and delivers it to the root workflow (FIG-3820).
+/// it, runs nothing and delivers it to the run workflow (FIG-3820).
 #[tokio::test]
 pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_body() {
     let segment = HandedOverSegment::new().await;
@@ -1283,7 +1283,7 @@ pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_bod
             writer: lash_core::AbandonWriter::ResumeRefused {
                 reason: lash_core::ProcessResumeRefusal::SubstrateLost,
             },
-            owner: Some(segment.root_start.owner.clone()),
+            owner: Some(segment.run_start.owner.clone()),
             epoch_ms: 1,
         }),
         control: None,
@@ -1308,11 +1308,11 @@ pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_bod
     assert_eq!(segment.outcome().await, Some(abandoned));
 }
 
-/// A process whose root execution started under [`ROOT_EXECUTION`] and whose
-/// root invocation's journal is gone: a fresh root invocation is its
-/// SubstrateLost recovery, and the zombie root execution may still hand
+/// A process whose run execution started under [`RUN_EXECUTION`] and whose
+/// run invocation's journal is gone: a fresh run invocation is its
+/// SubstrateLost recovery, and the zombie run execution may still hand
 /// segment 1 over. Both segments run on one endpoint over one store.
-struct ZombieRoot {
+struct ZombieRun {
     process_id: ProcessId,
     registration: ProcessRegistration,
     registry: Arc<dyn ProcessRegistry>,
@@ -1321,7 +1321,7 @@ struct ZombieRoot {
     endpoint: Endpoint,
 }
 
-impl ZombieRoot {
+impl ZombieRun {
     async fn new() -> Self {
         let (registry, continuations) = process_stores();
         let registration = executed_registration();
@@ -1330,11 +1330,11 @@ impl ZombieRoot {
             .await
             .expect("register the process")
             .id;
-        let (authority, root_start) = invocation_started(&process_id, ROOT_EXECUTION, 1);
+        let (authority, run_start) = invocation_started(&process_id, RUN_EXECUTION, 1);
         registry
-            .record_first_started_with_authority(&process_id, root_start, &authority)
+            .record_first_started_with_authority(&process_id, run_start, &authority)
             .await
-            .expect("record the zombie root execution's start");
+            .expect("record the zombie run execution's start");
         let runner = Arc::new(EffectRunner::default());
         let endpoint = Endpoint::builder()
             .bind(
@@ -1373,9 +1373,9 @@ impl ZombieRoot {
         .unwrap_or_default()
     }
 
-    /// Restate's retry of the root invocation, with its first `journaled`
+    /// Restate's retry of the run invocation, with its first `journaled`
     /// commands acknowledged.
-    async fn retry_root(&self, prior: &[u8], journaled: usize) -> bytes::Bytes {
+    async fn retry_run(&self, prior: &[u8], journaled: usize) -> bytes::Bytes {
         self.retry(0, prior, journaled).await
     }
 
@@ -1415,7 +1415,7 @@ impl ZombieRoot {
             .unwrap_or_default()
     }
 
-    /// The zombie root execution's handover step: the successor reference,
+    /// The zombie run execution's handover step: the successor reference,
     /// then the handover, as `lash.segment.handover` writes them.
     async fn zombie_hands_over(&self) -> Result<(), PluginError> {
         self.registry
@@ -1477,26 +1477,26 @@ impl ZombieRoot {
 }
 
 /// FIG-3820, the in-between order: the recovery's verdict is journaled
-/// (SubstrateLost), then the zombie root hands over, then the recovery's
+/// (SubstrateLost), then the zombie run hands over, then the recovery's
 /// completion step runs. The step finds segment 1 named as the carrier in the
 /// same transaction that would store Abandoned, records `HandedOver` and
 /// stores nothing; segment 1 carries the process.
 #[tokio::test]
 pub(super) async fn a_zombie_handover_between_the_recovery_verdict_and_its_terminal_wins() {
-    let root = ZombieRoot::new().await;
+    let run = ZombieRun::new().await;
     // The sentinel, then the verdict over it (FIG-3795).
-    let sentinel = root.invoke_fresh(0, false).await;
-    let verdict = root.retry_unacknowledged(0, &sentinel, 1).await;
+    let sentinel = run.invoke_fresh(0, false).await;
+    let verdict = run.retry_unacknowledged(0, &sentinel, 1).await;
     assert_eq!(
         proposed_runs(&verdict),
         1,
         "the verdict proposed: {verdict:?}"
     );
     let verdict = [sentinel.to_vec(), verdict.to_vec()].concat();
-    root.zombie_hands_over()
+    run.zombie_hands_over()
         .await
         .expect("the zombie hands over before any terminal");
-    let recovered = root.retry_root(&verdict, 2).await;
+    let recovered = run.retry_run(&verdict, 2).await;
     assert!(
         matches!(
             restate_output_json::<RestateProcessWorkflowOutput>(&recovered),
@@ -1507,10 +1507,10 @@ pub(super) async fn a_zombie_handover_between_the_recovery_verdict_and_its_termi
         "the recovery stands down for segment 1: {:?}",
         restate_error_message(&recovered)
     );
-    assert_eq!(root.outcome().await, None, "the recovery stored nothing");
-    root.invoke_fresh(1, true).await;
-    assert_eq!(root.runs(), 1, "segment 1 carries the process");
-    root.assert_exactly_one_carrier().await;
+    assert_eq!(run.outcome().await, None, "the recovery stored nothing");
+    run.invoke_fresh(1, true).await;
+    assert_eq!(run.runs(), 1, "segment 1 carries the process");
+    run.assert_exactly_one_carrier().await;
 }
 
 /// FIG-3820, recovery first: the recovery stores Abandoned, so the zombie's
@@ -1518,58 +1518,58 @@ pub(super) async fn a_zombie_handover_between_the_recovery_verdict_and_its_termi
 /// send that lands anyway runs nothing.
 #[tokio::test]
 pub(super) async fn a_zombie_handover_after_the_recovery_terminal_is_refused_typed() {
-    let root = ZombieRoot::new().await;
-    root.invoke_fresh(0, true).await;
+    let run = ZombieRun::new().await;
+    run.invoke_fresh(0, true).await;
     assert!(
-        root.outcome()
+        run.outcome()
             .await
             .is_some_and(|outcome| matches!(outcome, ProcessAwaitOutput::Abandoned { .. })),
         "the recovery stored Abandoned"
     );
     assert!(
         matches!(
-            root.zombie_hands_over().await,
+            run.zombie_hands_over().await,
             Err(PluginError::ProcessAlreadyTerminal { .. })
         ),
         "the zombie's successor reference is refused typed"
     );
-    root.invoke_fresh(1, true).await;
-    assert_eq!(root.runs(), 0, "no successor body runs");
-    root.assert_exactly_one_carrier().await;
+    run.invoke_fresh(1, true).await;
+    assert_eq!(run.runs(), 0, "no successor body runs");
+    run.assert_exactly_one_carrier().await;
 }
 
 /// FIG-3820, zombie first: the zombie hands over before the recovery's
 /// verdict, so the verdict is Superseded; segment 1 carries the process.
 #[tokio::test]
 pub(super) async fn a_zombie_handover_before_the_recovery_verdict_supersedes_it() {
-    let root = ZombieRoot::new().await;
-    root.zombie_hands_over()
+    let run = ZombieRun::new().await;
+    run.zombie_hands_over()
         .await
         .expect("the zombie hands over before any terminal");
-    root.invoke_fresh(0, true).await;
-    assert_eq!(root.outcome().await, None, "the recovery stored nothing");
-    root.invoke_fresh(1, true).await;
-    assert_eq!(root.runs(), 1, "segment 1 carries the process");
-    root.assert_exactly_one_carrier().await;
+    run.invoke_fresh(0, true).await;
+    assert_eq!(run.outcome().await, None, "the recovery stored nothing");
+    run.invoke_fresh(1, true).await;
+    assert_eq!(run.runs(), 1, "segment 1 carries the process");
+    run.assert_exactly_one_carrier().await;
 }
 
 /// FIG-3820: a handover put on an ended process is refused typed, in the
 /// transaction that would park it.
 #[tokio::test]
 pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
-    let root = ZombieRoot::new().await;
-    root.registry
+    let run = ZombieRun::new().await;
+    run.registry
         .complete_process(
-            &root.process_id,
+            &run.process_id,
             process_success(serde_json::json!("done")),
-            crate::process::workflow_key_authority(&root.process_id),
+            crate::process::workflow_key_authority(&run.process_id),
         )
         .await
         .expect("the process ends");
-    let refused = root
+    let refused = run
         .continuations
         .put_segment_handover(
-            &root.process_id,
+            &run.process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
                 written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
@@ -1588,8 +1588,8 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
         "{refused:?}"
     );
     assert_eq!(
-        root.continuations
-            .latest_segment_handover(&root.process_id)
+        run.continuations
+            .latest_segment_handover(&run.process_id)
             .await
             .expect("read handovers"),
         None
@@ -1603,33 +1603,33 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
 /// starts nothing.
 #[tokio::test]
 pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_body() {
-    let root = ZombieRoot::new().await;
-    root.zombie_hands_over()
+    let run = ZombieRun::new().await;
+    run.zombie_hands_over()
         .await
-        .expect("the root hands segment 1 over");
+        .expect("the run hands segment 1 over");
     // The sentinel, then the verdict over it (FIG-3795).
-    let sentinel = root.invoke_fresh(1, false).await;
-    let verdict = root.retry_unacknowledged(1, &sentinel, 1).await;
+    let sentinel = run.invoke_fresh(1, false).await;
+    let verdict = run.retry_unacknowledged(1, &sentinel, 1).await;
     assert_eq!(
         proposed_runs(&verdict),
         1,
         "the verdict proposed: {verdict:?}"
     );
     let verdict = [sentinel.to_vec(), verdict.to_vec()].concat();
-    root.registry
+    run.registry
         .complete_process(
-            &root.process_id,
+            &run.process_id,
             process_success(serde_json::json!("ended")),
-            crate::process::workflow_key_authority(&root.process_id),
+            crate::process::workflow_key_authority(&run.process_id),
         )
         .await
         .expect("the process ends after the verdict");
-    let _ = root.retry(1, &verdict, 2).await;
-    assert_eq!(root.runs(), 0, "no segment body runs after the terminal");
+    let _ = run.retry(1, &verdict, 2).await;
+    assert_eq!(run.runs(), 0, "no segment body runs after the terminal");
     assert_eq!(
-        root.continuations
+        run.continuations
             .segment_start(&lash_core::ProcessSegmentKey::new(
-                root.process_id.clone(),
+                run.process_id.clone(),
                 1
             ))
             .await
@@ -1638,7 +1638,7 @@ pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_b
         "the refused start records no marker"
     );
     assert!(
-        root.outcome()
+        run.outcome()
             .await
             .is_some_and(|outcome| !matches!(outcome, ProcessAwaitOutput::Abandoned { .. })),
         "the stored terminal stands"

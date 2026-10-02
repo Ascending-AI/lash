@@ -2,7 +2,7 @@
 //! [`DeploymentStore`](crate::DeploymentStore) backends.
 //!
 //! Split out of `session_store_factory.rs` to keep it under the file-size
-//! budget; these cases are driven from that module's suite entry.
+//! budget; these cases are executed from that module's suite entry.
 
 use super::session_store_factory::session_store_request;
 use super::*;

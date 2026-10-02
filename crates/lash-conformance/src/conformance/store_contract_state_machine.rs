@@ -14,7 +14,7 @@ use crate::{
     process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
@@ -1767,7 +1767,7 @@ async fn assert_enqueued_wake_high_water_safety(
         "law-high-water-earlier-incarnation",
     );
     let lease = runtime
-        .seal_drive_epoch_for_test(&session, &owner, "wake-high-water-executor-2", 60_000)
+        .seal_shift_epoch_for_test(&session, &owner, "wake-high-water-executor-2", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1785,7 +1785,7 @@ async fn assert_enqueued_wake_high_water_safety(
                 "Enqueued-wake high-water safety: lower wake did not remain admissible",
             )
         })?;
-    super::drive_root_to_end(
+    super::execute_run_to_end(
         runtime,
         &lease,
         "store-contract-high-water",
@@ -1865,7 +1865,7 @@ async fn assert_prune_reregister_wake_fence(
     );
     let lease = handles
         .runtime
-        .seal_drive_epoch_for_test(&session, &owner, "wake-fence-executor", 60_000)
+        .seal_shift_epoch_for_test(&session, &owner, "wake-fence-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
@@ -1878,7 +1878,7 @@ async fn assert_prune_reregister_wake_fence(
         .into_iter()
         .next()
         .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not admissible"))?;
-    super::drive_root_to_end(
+    super::execute_run_to_end(
         &handles.runtime,
         &lease,
         "store-contract-prune",
@@ -2257,7 +2257,7 @@ async fn consume_wake(
     // The turn lane is claimed in enqueue order, so only the head wake is
     // consumed by a settled claim. A wake behind it leaves through the other
     // terminal transition, a host cancel, which raises the same floor
-    // (FIG-3545); a stale settlement needs a claim, so it drives the head.
+    // (FIG-3545); a stale settlement needs a claim, so it executes the head.
     let head = queued.iter().min_by_key(|batch| batch.enqueue_seq);
     if head.is_none_or(|head| head.batch_id != batch.batch_id) {
         if stale {
@@ -2271,25 +2271,25 @@ async fn consume_wake(
     }
     let owner = LeaseOwnerIdentity::opaque("property-consumer", "property-consumer-incarnation");
     let Some(lease) = runtime
-        .seal_drive_epoch_for_test(&session, &owner, "consume-wake-executor", 60_000)
+        .seal_shift_epoch_for_test(&session, &owner, "consume-wake-executor", 60_000)
         .await
         .map_err(|error| error.to_string())?
         .acquired()
     else {
         return Ok(false);
     };
-    let root = crate::TurnId::fixture(format!(
+    let run = crate::TurnId::fixture(format!(
         "store-contract-consume:{}",
         lease.admission().as_str()
     ));
-    let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+    let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
         &lease,
-        &root,
+        &run,
         crate::store::AdmittedHead::Batch(batch.batch_id.clone()),
     );
     request.policy = crate::testing::queued_work_admission_policy(1);
     let Some(admission) = runtime
-        .admit_root(&request)
+        .admit_run(&request)
         .await
         .map_err(|error| error.to_string())?
     else {
@@ -2312,7 +2312,7 @@ async fn consume_wake(
                 crate::MaxToolCalls::new(1024),
             ))
         });
-    let settling = |fence: &crate::store::DriveFence, label: &str| {
+    let settling = |fence: &crate::store::ShiftFence, label: &str| {
         let operation = crate::OperationId::new(
             crate::ExecutionScope::runtime_operation(format!(
                 "store-contract-consume:{process_id}:{sequence}:{}:{label}",
@@ -2320,20 +2320,20 @@ async fn consume_wake(
             )),
             "commit",
         );
-        let mut settlement = crate::store::IngressSettlement::new(root.clone());
+        let mut settlement = crate::store::IngressSettlement::new(run.clone());
         if let Some(queued) = &admission.queued {
             settlement.completed_batches.push(queued.completion());
         }
         RuntimeCommit::persisted_state_for_test(&state)
             .with_operation(operation)
             .map(|(mut commit, _)| {
-                commit.drive_fence = Some(Box::new(fence.clone()));
+                commit.shift_fence = Some(Box::new(fence.clone()));
                 commit.ingress = Some(settlement);
-                commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
-                    commit: crate::store::TurnCommitId::new(root.clone(), 0),
-                    turn: root.clone(),
-                    root: root.clone(),
-                    outcome: crate::store::RootCommittedOutcome::Finished(
+                commit.run_terminal = Some(Box::new(crate::store::RunTerminalWrite {
+                    commit: crate::store::TurnCommitId::new(run.clone(), 0),
+                    turn: run.clone(),
+                    run: run.clone(),
+                    outcome: crate::store::RunCommittedOutcome::Finished(
                         lash_core::facade_support::TurnFinish::AssistantMessage {
                             text: String::new(),
                         },
@@ -2345,16 +2345,16 @@ async fn consume_wake(
     };
     if stale {
         let successor = runtime
-            .seal_drive_epoch_for_test(&session, &owner, "consume-wake-successor", 60_000)
+            .seal_shift_epoch_for_test(&session, &owner, "consume-wake-successor", 60_000)
             .await
             .map_err(|error| error.to_string())?
             .acquired()
-            .ok_or_else(|| "the successor drive did not seal".to_string())?;
+            .ok_or_else(|| "the successor shift did not seal".to_string())?;
         let before = queued_batch_snapshot(runtime, &session, &batch.batch_id).await?;
         let result = runtime
             .commit_runtime_state(settling(&lease, "stale")?)
             .await;
-        if !matches!(result, Err(crate::StoreError::StaleDriveFence { .. })) {
+        if !matches!(result, Err(crate::StoreError::StaleShiftFence { .. })) {
             return Err(format!(
                 "Stale-authority non-mutation: a superseded fence's settlement was not refused: {result:?}"
             ));
@@ -2365,7 +2365,7 @@ async fn consume_wake(
                 "Stale-authority non-mutation: a refused settlement changed its batch".to_string(),
             );
         }
-        // The live drive ends the root settling nothing: its terminal hands
+        // The live shift ends the run settling nothing: its terminal hands
         // the wake back open at its own position.
         let mut release = settling(&successor, "release")?;
         if let Some(ingress) = release.ingress.as_mut() {

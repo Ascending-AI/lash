@@ -12,7 +12,7 @@ use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use lashlang::Value as FlowValue;
 
 /// What a turn runs under, read from `namespace`, the RLM namespace the
-/// turn's root recorded. A session that recorded none runs under the
+/// turn's run recorded. A session that recorded none runs under the
 /// defaults.
 pub(crate) fn decode_rlm_options(
     namespace: &lash_core::ProtocolTurnOptions,

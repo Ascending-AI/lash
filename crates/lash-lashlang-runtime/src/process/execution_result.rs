@@ -69,7 +69,7 @@ pub(super) fn process_lashlang_execution_result(
 }
 
 /// What a worker failure is to the process it ran: its terminal, or `None`
-/// for a failure of the attempt, which is re-driven.
+/// for a failure of the attempt, which is redriven.
 ///
 /// A limit the run itself exhausted and a refusal of the run's own inputs
 /// meet every attempt the same way, so they end the process. A host verdict

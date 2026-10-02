@@ -156,7 +156,7 @@ pub(crate) async fn law_session_store_with_config(
 
 /// A backend over `stores` whose effects journal on `effect_host`, for an
 /// embedder whose substrate is storage only: the law's runtime reaches every
-/// storage port of `stores`, drives no session work, and runs its effects on
+/// storage port of `stores`, executes no session work, and runs its effects on
 /// the host the embedder supplies.
 pub fn backend_over(
     stores: Arc<dyn crate::StoreSet>,
@@ -279,10 +279,10 @@ impl StoreLawUsageAccounting {
 
 #[async_trait::async_trait]
 impl lash_core::UsageAccountingStore for StoreLawUsageAccounting {
-    async fn admit_usage_run(
+    async fn admit_usage_meter(
         &self,
-        _admission: &lash_core::UsageRunAdmission,
-    ) -> Result<lash_core::UsageRunAdmitted, lash_core::UsageAdmissionError> {
+        _admission: &lash_core::UsageMeterAdmission,
+    ) -> Result<lash_core::UsageMeterAdmitted, lash_core::UsageAdmissionError> {
         Err(lash_core::UsageAdmissionError::Store(Self::refused()))
     }
 
@@ -345,13 +345,13 @@ impl lash_core::UsageAccountingStore for StoreLawUsageAccounting {
         Err(Self::refused())
     }
 
-    async fn load_usage_run_page(
+    async fn load_usage_meter_page(
         &self,
         _owner: &lash_core::RuntimeOwner,
-        _filter: lash_core::UsageRunFilter,
-        _after: Option<&lash_core::UsageRunCursor>,
+        _filter: lash_core::UsageMeterFilter,
+        _after: Option<&lash_core::UsageMeterCursor>,
         _limit: std::num::NonZeroU32,
-    ) -> Result<lash_core::UsageRunPage, crate::StoreError> {
+    ) -> Result<lash_core::UsageMeterPage, crate::StoreError> {
         Err(Self::refused())
     }
 }

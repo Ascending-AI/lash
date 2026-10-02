@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::ConfigCommandEntry;
 use lash_core::plugin::ConfigRegistry;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -133,7 +133,7 @@ fn creation_override_is_recorded_and_children_inherit_it() {
 }
 
 #[tokio::test]
-async fn prompt_commands_apply_only_to_the_next_root() {
+async fn prompt_commands_apply_only_to_the_next_run() {
     registry()
         .admit(
             "replace",
@@ -209,9 +209,9 @@ async fn prompt_commands_apply_only_to_the_next_root() {
     };
     let mut runtime = prompt_runtime(&backend, store.clone(), provider.clone(), &observed).await;
     let handler = double
-        .open_handler(lash_core::AdmittedScope::turn(&session_id, "held-root"))
+        .open_handler(lash_core::AdmittedScope::turn(&session_id, "held-run"))
         .await
-        .expect("held root handler");
+        .expect("held run handler");
     let submitting = async {
         entered.notified().await;
         let mut submitter =
@@ -228,7 +228,7 @@ async fn prompt_commands_apply_only_to_the_next_root() {
                 ),
             )
             .await
-            .expect("submit prompt while root owns head");
+            .expect("submit prompt while run owns head");
         let head = store
             .load_session_head_meta()
             .await
@@ -248,7 +248,7 @@ async fn prompt_commands_apply_only_to_the_next_root() {
         receipt
     };
     let (turn, receipt) = tokio::join!(
-        runtime.drive_turn(
+        runtime.execute_turn(
             lash_core::TurnInput::text("first"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -257,7 +257,7 @@ async fn prompt_commands_apply_only_to_the_next_root() {
         ),
         submitting
     );
-    turn.expect("held root finishes");
+    turn.expect("held run finishes");
     handler.close().await.expect("close held handler");
     assert_eq!(runtime.config_revision(), 0);
     assert_eq!(
@@ -269,7 +269,7 @@ async fn prompt_commands_apply_only_to_the_next_root() {
     );
     apply_prompt_command(&mut runtime, &double, &session_id, "replace", receipt).await;
     assert_eq!(runtime.config_revision(), 1);
-    drive_prompt_root(&mut runtime, &double, &session_id, "next-root").await;
+    execute_prompt_run(&mut runtime, &double, &session_id, "next-run").await;
     let mut whole_prompt: StandardPrompt =
         serde_json::from_value(configured_prompt()).expect("prompt");
     whole_prompt.context = vec!["Updated working directory: /next".into()];
@@ -289,7 +289,7 @@ async fn prompt_commands_apply_only_to_the_next_root() {
         .await
         .expect("submit context replacement");
     apply_prompt_command(&mut runtime, &double, &session_id, "context", receipt).await;
-    drive_prompt_root(&mut runtime, &double, &session_id, "context-root").await;
+    execute_prompt_run(&mut runtime, &double, &session_id, "context-run").await;
     let mut context_prompt = whole_prompt;
     context_prompt.context = replacement_context;
     assert_eq!(
@@ -456,30 +456,30 @@ async fn prompt_runtime(
     .expect("prompt runtime")
 }
 
-async fn drive_prompt_root(
+async fn execute_prompt_run(
     runtime: &mut lash_core::facade_support::LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
     session_id: &lash_core::SessionId,
-    root: &str,
+    run: &str,
 ) {
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn(
             session_id,
-            lash_core::TurnId::fixture(root.to_string()),
+            lash_core::TurnId::fixture(run.to_string()),
         ))
         .await
-        .expect("root handler");
+        .expect("run handler");
     runtime
-        .drive_turn(
-            lash_core::TurnInput::text(root),
+        .execute_turn(
+            lash_core::TurnInput::text(run),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 handler.scoped(),
             ),
         )
         .await
-        .expect("root finishes");
-    handler.close().await.expect("close root handler");
+        .expect("run finishes");
+    handler.close().await.expect("close run handler");
 }
 
 async fn apply_prompt_command(
@@ -497,7 +497,7 @@ async fn apply_prompt_command(
         .await
         .expect("command handler");
     runtime
-        .drive_next_root(
+        .execute_next_run(
             command,
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

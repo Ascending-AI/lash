@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::runtime::drive::relay::{
+use crate::runtime::shift::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, deliver_now,
 };
 use crate::store::{
@@ -45,7 +45,7 @@ impl ProcessStartRelay {
     /// A producer's own-commit attempt on `process_id`'s armed start row
     /// (ADR 0109 §1.5): claim it and run one delivery through this relay at
     /// once. The reconcile tick's `relay_due` retries whatever this could
-    /// not deliver; [`super::drive::relay::RelayVerdict::NotDue`] means the
+    /// not deliver; [`super::shift::relay::RelayVerdict::NotDue`] means the
     /// row was already claimed, delivered or stalled.
     ///
     /// # Errors
@@ -55,7 +55,7 @@ impl ProcessStartRelay {
     pub async fn deliver_start(
         &self,
         process_id: &crate::ProcessId,
-    ) -> Result<super::drive::relay::RelayVerdict, crate::StoreError> {
+    ) -> Result<super::shift::relay::RelayVerdict, crate::StoreError> {
         deliver_now(
             self,
             &crate::store::ObligationKey::ProcessStart {

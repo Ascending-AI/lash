@@ -46,7 +46,7 @@ impl RuntimeStoreDecorator for GatedCatalog {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        fence: &lash_core::store::DriveFence,
+        fence: &lash_core::store::ShiftFence,
         authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> {
         let answer = self
@@ -233,10 +233,10 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
     world.barrier.release.notify_one();
     let answer = handle.outcome().await.expect("answer");
     assert_eq!(answer.status(), lash::TurnStatus::Answered);
-    let root = answer.root().cloned().expect("answered root");
+    let run = answer.run().cloned().expect("answered run");
     let scope_close = lash_core::store::ObligationKey::ScopeClose {
         session_id: SESSION.into(),
-        root: root.clone(),
+        run: run.clone(),
     }
     .id();
     if pinned {
@@ -254,8 +254,8 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         })
         .await;
     } else {
-        root_run_completed(&world, &root).await;
-        wait_until("the answered root owes its close", || {
+        run_execution_completed(&world, &run).await;
+        wait_until("the answered run owes its close", || {
             gate.close_reached.load(Ordering::SeqCst)
         })
         .await;
@@ -284,8 +284,9 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         gate.release_pin();
     } else {
         wait_until("the delete closes the session", || {
-            world.backend.server().invocations().iter().any(|run| {
-                run.target.starts_with("LashTestHandlerHost/") && run.status == "completed"
+            world.backend.server().invocations().iter().any(|executed| {
+                executed.target.starts_with("LashTestHandlerHost/")
+                    && executed.status == "completed"
             })
         })
         .await;
@@ -407,12 +408,12 @@ pub(super) async fn finish_session_cleanup(world: &World, session_id: &str) {
         }
     })
     .await
-    .expect("root cleanup discharges when its closure ends");
+    .expect("run cleanup discharges when its closure ends");
     let relay = lash_core::session_delete::SessionDeleteRelay::new(
         world.core.session_administration().await,
     );
     let clock = lash_core::testing::TestClock::new(world.backend.server().now_ms() + 2_000);
-    let pass = lash_core::drive::relay::relay_due(&relay, &clock, NonZeroUsize::MIN)
+    let pass = lash_core::shift::relay::relay_due(&relay, &clock, NonZeroUsize::MIN)
         .await
         .expect("next due finalizer pass");
     eprintln!("finalizer after cleanup {pass:?}");
@@ -451,7 +452,7 @@ async fn live_delete_after_answer(pinned: bool) {
         })
         .await;
     } else {
-        wait_until("the root owes its close", || {
+        wait_until("the run owes its close", || {
             gate.close_reached.load(Ordering::SeqCst)
         })
         .await;
@@ -578,15 +579,15 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
     })
     .await;
     world.barrier.release.notify_one();
-    let root = handle
+    let run = handle
         .outcome()
         .await
         .expect("answer")
-        .root()
+        .run()
         .cloned()
         .expect("root");
-    root_run_completed(&world, &root).await;
-    wait_until("the root close is owed", || {
+    run_execution_completed(&world, &run).await;
+    wait_until("the run close is owed", || {
         gate.close_reached.load(Ordering::SeqCst)
     })
     .await;
@@ -602,7 +603,7 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
     ));
     let id = lash_core::store::ObligationKey::ScopeClose {
         session_id: session.clone(),
-        root: root.clone(),
+        run: run.clone(),
     }
     .id();
     let ledger = world
@@ -691,21 +692,24 @@ completion_laws! {
     deletion_wait_reports_state_and_stalls_on_postgres_replaying, Postgres, true;
 }
 
-async fn root_run_completed(world: &World, root: &lash::TurnId) {
+async fn run_execution_completed(world: &World, run: &lash::TurnId) {
     let target = format!(
         "{}/{}/run",
         world
             .backend
             .service_name(lash_restate_test::TURN_DRIVER_SERVICE),
-        lash_restate::turn_workflow_key(&SESSION.into(), root)
+        lash_restate::turn_workflow_key(&SESSION.into(), run)
     );
-    wait_until("the root's run has completed beside its held close", || {
-        world
-            .backend
-            .server()
-            .invocations()
-            .iter()
-            .any(|run| run.target == target && run.status == "completed")
-    })
+    wait_until(
+        "the run's execution has completed beside its held close",
+        || {
+            world
+                .backend
+                .server()
+                .invocations()
+                .iter()
+                .any(|executed| executed.target == target && executed.status == "completed")
+        },
+    )
     .await;
 }

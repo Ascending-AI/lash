@@ -21,28 +21,28 @@ lash_store_sql::statements! {
 
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2 FOR UPDATE";
 
         /// The input session `?1` filed under source key `?2`, locked for the
         /// caller's transaction.
         select_by_source_key_for_update = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2 FOR UPDATE";
 
         /// The facts the settlement verdict consults about input `?2` of
         /// session `?1`, locked for the caller's transaction.
-        settlement_facts = "SELECT admitted_root, state
+        settlement_facts = "SELECT admitted_run, state
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2 LIMIT 1 FOR UPDATE";
 
         /// Session `?1`'s inputs from `?2` onwards, locked: the suffix a cancel
         /// anchored at one input covers.
         select_suffix = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND enqueue_seq >= ?2
              ORDER BY enqueue_seq ASC
@@ -52,17 +52,17 @@ lash_store_sql::statements! {
         /// interrupted turn's commit re-defers: input addressed to the turn
         /// that no checkpoint admitted.
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{pending_active_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC
              FOR UPDATE";
 
-        /// Session `?1`'s open next-turn inputs a root's admission composes
+        /// Session `?1`'s open next-turn inputs a run's admission composes
         /// from, up to `?2` of them, waiting for locked rows so the head
         /// cannot be skipped (ADR 0101 §4, §5).
         ///
@@ -72,12 +72,12 @@ lash_store_sql::statements! {
         /// also ends at the earliest open queued turn work, because the turn
         /// lane is one FIFO over both admission tables.
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
@@ -87,7 +87,7 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS turn_work
                     WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
-                      AND turn_work.admitted_root IS NULL
+                      AND turn_work.admitted_run IS NULL
                       AND turn_work.terminal_cause IS NULL
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
@@ -102,12 +102,12 @@ lash_store_sql::statements! {
         /// set is what the checkpoint decides, and an optional predicate over a
         /// bound boundary cannot seek the open-row index.
         admission_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
-                    source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{pending_active_turn_input_state(state)}}
                AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                AND ingress_json::jsonb ->> 'turn_id' = ?3
@@ -121,11 +121,11 @@ lash_store_sql::statements! {
         /// at the `before_completion` checkpoint, which admits both boundaries.
         admission_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id,
                     session_id, source_key, ingress_json, state, input_json, enqueued_at_ms,
-                    admitted_root, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{pending_active_turn_input_state(state)}}
                AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                AND ingress_json::jsonb ->> 'turn_id' = ?3

@@ -1,4 +1,4 @@
-//! A redrive is asked of a park that names its root, and a redriven root
+//! A redrive is asked of a park that names its run, and a redriven run
 //! resumes.
 //!
 //! The turn park feed is the store's own record of every park transition;
@@ -8,12 +8,12 @@
 //!
 //! - an acknowledged redrive (the store's [`Fact::IntentAck`], or the host's
 //!   own `Known` [`HostOp::Redrive`]) has a `redrive_requested` feed event
-//!   for its root, on a park a `parked` event opened for that root before it;
-//! - a root the engine was asked to resume ([`Fact::Resume`]) has a
-//!   `redrive_requested` event: nothing resumes a root nobody redrove;
+//!   for its run, on a park a `parked` event opened for that run before it;
+//! - a run the engine was asked to resume ([`Fact::Resume`]) has a
+//!   `redrive_requested` event: nothing resumes a run nobody redrove;
 //! - once the final recovery pass ran, every `redrive_requested` event is
 //!   followed by the park's end, and, unless the park ended cancelled, by
-//!   the intent's acknowledgement and the root's resume.
+//!   the intent's acknowledgement and the run's resume.
 
 use std::num::NonZeroUsize;
 
@@ -31,7 +31,7 @@ pub struct ParkEventRow {
     pub seq: u64,
     pub at_ms: u64,
     pub session: String,
-    pub root: String,
+    pub run: String,
     /// The park the transition applies to.
     pub park: u64,
     /// `parked`, `unparked`, `cancelled` or `redrive_requested`.
@@ -45,8 +45,8 @@ pub struct ParkEventRow {
 }
 
 impl ParkEventRow {
-    fn names(&self, session: &str, root: &str) -> bool {
-        self.session == session && self.root == root
+    fn names(&self, session: &str, run: &str) -> bool {
+        self.session == session && self.run == run
     }
 
     fn requested(&self) -> bool {
@@ -93,7 +93,7 @@ pub(super) async fn read_park_feed(
                 seq: event.seq,
                 at_ms: event.at_ms,
                 session: event.target.session_id.to_string(),
-                root: event.target.turn_id.to_string(),
+                run: event.target.turn_id.to_string(),
                 park: event.park_id.feed_sequence(),
                 kind: event.kind.kind_code().to_owned(),
                 intent,
@@ -107,20 +107,20 @@ pub(super) async fn read_park_feed(
     }
 }
 
-/// The `redrive_requested` events of `session`'s `root` on a park a `parked`
-/// event opened for that root before them.
+/// The `redrive_requested` events of `session`'s `run` on a park a `parked`
+/// event opened for that run before them.
 fn requests<'a>(
     history: &'a History,
     session: &'a str,
-    root: &'a str,
+    run: &'a str,
 ) -> impl Iterator<Item = &'a ParkEventRow> {
     history.park_events.iter().filter(move |event| {
         event.requested()
-            && event.names(session, root)
+            && event.names(session, run)
             && history.park_events.iter().any(|opened| {
                 opened.kind == "parked"
                     && opened.park == event.park
-                    && opened.names(session, root)
+                    && opened.names(session, run)
                     && opened.seq < event.seq
             })
     })
@@ -164,11 +164,11 @@ impl HistoryChecker for RedriveResumes {
                     intent,
                     session,
                     verb,
-                    root: Some(root),
+                    run: Some(run),
                     park: Some(park),
                     ..
                 } if verb == "redrive" => {
-                    if !requests(history, session, root).any(|event| {
+                    if !requests(history, session, run).any(|event| {
                         event.park == *park && event.intent.as_deref() == Some(intent.as_str())
                     }) {
                         violations.push(
@@ -176,7 +176,7 @@ impl HistoryChecker for RedriveResumes {
                                 history,
                                 session,
                                 format!(
-                                    "redrive intent {intent} of `{root}` was acknowledged, but the feed holds no redrive request of it on park {park} opened for that root"
+                                    "redrive intent {intent} of `{run}` was acknowledged, but the feed holds no redrive request of it on park {park} opened for that run"
                                 ),
                             )
                             .records([record.at]),
@@ -186,17 +186,17 @@ impl HistoryChecker for RedriveResumes {
                 Fact::HostOp {
                     op: HostOp::Redrive,
                     session,
-                    roots,
+                    runs,
                     outcome: HostOutcome::Known,
                 } => {
-                    for root in roots {
-                        if requests(history, session, root).next().is_none() {
+                    for run in runs {
+                        if requests(history, session, run).next().is_none() {
                             violations.push(
                                 violation(
                                     history,
                                     session,
                                     format!(
-                                        "the host heard its redrive of `{root}` accepted, but the feed holds no redrive request on a park opened for that root"
+                                        "the host heard its redrive of `{run}` accepted, but the feed holds no redrive request on a park opened for that run"
                                     ),
                                 )
                                 .records([record.at]),
@@ -204,15 +204,15 @@ impl HistoryChecker for RedriveResumes {
                         }
                     }
                 }
-                Fact::Resume { session, root, .. }
-                    if requests(history, session, root).next().is_none() =>
+                Fact::Resume { session, run, .. }
+                    if requests(history, session, run).next().is_none() =>
                 {
                     violations.push(
                         violation(
                             history,
                             session,
                             format!(
-                                "the engine was asked to resume `{root}`, which no redrive request on a park opened for it names"
+                                "the engine was asked to resume `{run}`, which no redrive request on a park opened for it names"
                             ),
                         )
                         .records([record.at]),
@@ -222,13 +222,13 @@ impl HistoryChecker for RedriveResumes {
             }
         }
         for event in history.park_events.iter().filter(|event| event.requested()) {
-            let (session, root) = (event.session.as_str(), event.root.as_str());
-            if requests(history, session, root).all(|named| named.seq != event.seq) {
+            let (session, run) = (event.session.as_str(), event.run.as_str());
+            if requests(history, session, run).all(|named| named.seq != event.seq) {
                 violations.push(violation(
                     history,
                     session,
                     format!(
-                        "feed event {} requests a redrive of `{root}` on park {}, which no earlier `parked` event opened for that root",
+                        "feed event {} requests a redrive of `{run}` on park {}, which no earlier `parked` event opened for that run",
                         event.seq, event.park
                     ),
                 ));
@@ -246,14 +246,14 @@ impl HistoryChecker for RedriveResumes {
                     history,
                     session,
                     format!(
-                        "park {} of `{root}` never ended after feed event {} requested its redrive",
+                        "park {} of `{run}` never ended after feed event {} requested its redrive",
                         event.park, event.seq
                     ),
                 ));
                 continue;
             };
             if end.kind == "cancelled" {
-                // A cancel, fork or deletion took the root: nothing resumes.
+                // A cancel, fork or deletion took the run: nothing resumes.
                 continue;
             }
             let acknowledged: Vec<usize> = history
@@ -269,8 +269,8 @@ impl HistoryChecker for RedriveResumes {
                 .records
                 .iter()
                 .filter(|record| {
-                    matches!(&record.fact, Fact::Resume { session: resumed, root: of, .. }
-                        if resumed == session && of == root)
+                    matches!(&record.fact, Fact::Resume { session: resumed, run: of, .. }
+                        if resumed == session && of == run)
                 })
                 .map(|record| record.at)
                 .collect();
@@ -280,7 +280,7 @@ impl HistoryChecker for RedriveResumes {
                         history,
                         session,
                         format!(
-                            "the redrive of `{root}` feed event {} requested was never acknowledged, though park {} ended `{}`",
+                            "the redrive of `{run}` feed event {} requested was never acknowledged, though park {} ended `{}`",
                             event.seq,
                             event.park,
                             end.cause.as_deref().unwrap_or(&end.kind)
@@ -295,7 +295,7 @@ impl HistoryChecker for RedriveResumes {
                         history,
                         session,
                         format!(
-                            "`{root}` was never resumed after feed event {} requested its redrive, though park {} ended `{}`",
+                            "`{run}` was never resumed after feed event {} requested its redrive, though park {} ended `{}`",
                             event.seq,
                             event.park,
                             end.cause.as_deref().unwrap_or(&end.kind)

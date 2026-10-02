@@ -33,12 +33,12 @@ pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
 /// format_manifest = "SessionStateGeneration"
 pub const CURRENT_SESSION_STATE_VERSION: u32 = 4;
 
-/// Successful drive-fenced admission of one complete session-state generation.
+/// Successful shift-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionStateAdmission {
     pub session_id: SessionId,
     pub version: u32,
-    pub drive_epoch: u64,
+    pub shift_epoch: u64,
 }
 
 /// The session-state generations one build's admission gate can admit, as a

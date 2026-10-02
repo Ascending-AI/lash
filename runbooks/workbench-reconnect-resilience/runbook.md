@@ -13,8 +13,8 @@
 > never substitute the destructive reset.
 
 **Purpose.** Referee the *client's reconnection machine*. Every other workbench runbook
-drives the shell while the web process it talks to stays alive; `workbench-engine-restart`
-bounces the Restate container underneath a living web process. Nothing drives the opposite
+executes the shell while the web process it talks to stays alive; `workbench-engine-restart`
+bounces the Restate container underneath a living web process. Nothing executes the opposite
 fault — **the web process dies and is replaced while a browser is attached and a turn is in
 flight**, which is what every deploy of the workbench actually does to every connected tab.
 That fault is the only one that exercises the reconnection machine end to end:
@@ -68,7 +68,7 @@ two projection paths both drew the same message.
 **Why the web process, not Restate.** Every composer send is submitted to Restate as a
 workflow invocation (`send_turn` → `commit_and_start_user_turn` in `routes.rs`) and executed through the workbench's
 registered endpoint. So killing the web process mid-turn does **not** kill the turn: Restate
-retains the invocation and drives it against the replacement process. The in-flight turn's
+retains the invocation and executes it against the replacement process. The in-flight turn's
 correct outcome is therefore *usually* completion, and the durable stores — not the DOM at
 the moment of the kill — decide what "correct" means. This is what makes the scenario worth
 running: the client must converge on a truth that changed while it was disconnected.
@@ -156,7 +156,7 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 8. **Settle by stability, not by a sleep.** After each convergence gate, poll until row and
    message counts are unchanged across several consecutive samples before counting. A
    duplicate that lands one retry interval late must still be caught.
-9. **Scope everything to one session id.** Drive `/?session_id=<S>` and scope every read —
+9. **Scope everything to one session id.** Shift `/?session_id=<S>` and scope every read —
    `/api/state?session_id=<S>`, the `graph_nodes.session_id` filter, the product-event log
    key, and the trace's `context.session_id`. An unscoped read mixes other tabs in and voids
    the run.
@@ -295,7 +295,7 @@ the reason has thrown away evidence that distinguishes this fault from a trim.
 **3b — force a gap deliberately if 3a saw none.** Optional, and only if the reconnect
 produced a plain reattach: reconnect the observation stream at a cursor the replacement
 process cannot serve (reload the page while injecting a stale cursor, or idle past the 120s
-replay TTL and then drive activity so the buffer trims) and require `replay_gap` with reason
+replay TTL and then execute activity so the buffer trims) and require `replay_gap` with reason
 `unavailable` or `trimmed`, followed by convergence on the same multiset. Record it as
 attempted-and-unreached rather than inventing a path if the fault does not materialize;
 `resync` in particular needs >1024 unconsumed product events and is not expected to be
@@ -345,7 +345,7 @@ and the port-derived Restate container are both gone (`docker ps -a` shows no
 | Teardown | workbench and port-derived Restate container gone | | command log |
 
 **Aggregate:** with a browser attached and a turn in flight, did replacing the workbench web
-process — Restate untouched — drive the shell honestly through a degraded phase and back to
+process — Restate untouched — shift the shell honestly through a degraded phase and back to
 `live` with no human action, resolve the interrupted turn to whatever the durable stores
 actually say happened, and leave one transcript that the rendered DOM, the durable session
 graph, the state and product-event projections, and the turn trace all agree on — before and

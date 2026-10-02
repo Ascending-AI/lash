@@ -273,9 +273,9 @@ admission is made. A plugin that writes no permitted format refuses
 `PluginWriterUnwritable` and nothing is admitted. This is the one place the
 fleet record is read to choose a writer.
 
-Three records carry it. A Run's admission records it on the root
-(`RootAdmission.plugins`): the store keeps the first admission's choice and
-answers it to every later admission of the root. A process's start records it
+Three records carry it. A Run's admission records it on the run
+(`RunAdmission.plugins`): the store keeps the first admission's choice and
+answers it to every later admission of the run. A process's start records it
 on `ProcessStarted.plugins`, and each later process segment on its
 `SegmentStartMarker.plugins`, written by the segment's journaled start step.
 A process child and a segment successor therefore adopt the plugins of the
@@ -319,7 +319,7 @@ states its build's own epoch and warns `restate.host_wire_unbound` once
 (`crates/lash-restate/src/compat.rs:110`, `:128`, `:152`,
 `crates/lash-restate/src/engine.rs:210`).
 Session and turn requests rely on this wire contract rather than a request
-`drive_version` gate (`crates/lash-restate/src/session_driver.rs:788`, `:796`).
+`shift_version` gate (`crates/lash-restate/src/session_shifts.rs:788`, `:796`).
 Journal generation remains a separate routing concern.
 
 #### 3.2 The per-object `_compat` record
@@ -356,12 +356,12 @@ body (`crates/lash-restate/src/object_state.rs:81`, `:368`, `:386`).
 A stale epoch view writes the older readable format rather than advancing
 formats before the SQL fence observes finalize.
 
-#### 3.4 The versioned `RootOutcome`
+#### 3.4 The versioned `RunOutcome`
 
 `LashTurn` records its outcome under `LASH_TURN_OUTCOME_FORMAT_VERSION` in
 the same stamped envelope. It is immutable history and has no object sweep.
-The run, outcome and session-drive replies use the selected wire version
-(`crates/lash-restate/src/session_driver.rs:71`, `:153`, `:788`, `:796`,
+The run, outcome and session-shift replies use the selected wire version
+(`crates/lash-restate/src/session_shifts.rs:71`, `:153`, `:788`, `:796`,
 `crates/lash-core-store/src/store/fleet_format.rs:464`).
 
 #### 3.5 Deployment and rollback routing
@@ -456,7 +456,7 @@ narrow supported history or mutable reads at finalize
 | Module artifacts | Store family and encoding in an envelope; verify under the stored supported family. Unknown family or encoding is `UnsupportedFamily`, rather than a hash mismatch (`crates/lashlang/src/artifact.rs:364`, `:410`, `:457`). |
 | SQLite blobs | Store a versioned compression envelope. Unknown version or compression refuses without rewriting the bytes (`crates/lash-sqlite-store/src/codec.rs:110`, `:141`). |
 | Artifact and attachment referrers | Preserve canonical identities. Unknown kind is `Incompatible(UnknownVocabulary)`; malformed known identity is corruption (`crates/lash-core-store/src/artifact_referrer.rs:1`, `crates/lash-core-store/src/store/attachment_referrers.rs:321`). |
-| Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs:529`, `crates/lash-core-execution/src/runtime/drive/relay.rs:288`). |
+| Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs:529`, `crates/lash-core-execution/src/runtime/shift/relay.rs:288`). |
 | Trace JSONL | Count and skip unknown event kinds. Malformed known events and unsupported schema versions refuse (`crates/lash-trace/src/jsonl_records.rs:84`). |
 | Process cursors | Cursor minting uses the fleet-selected writer version; parsing rejects versions outside its readable range (`crates/lash-sansio/src/process_cursor.rs:25`, `:142`, `:167`, `crates/lash/src/process_observation.rs:911`). |
 | Operator JSON | `lashctl` owns command DTOs and the `{schema_version, command, result, error}` envelope (`crates/lashctl/src/main.rs:26`, `:874`). |
@@ -562,7 +562,7 @@ SQLite has one compatibility row per transaction domain, and an object
 versions its own family while SQL owns fleet format selection.
 
 One Restate wire version covers calls across all Lash handlers. A request's
-drive stamp cannot replace journal routing: a stable handler can legitimately
+shift stamp cannot replace journal routing: a stable handler can legitimately
 serve a caller from another build. Mutable unknown-field preservation is also
 insufficient for new semantics; writer pins must keep N's semantics before
 finalize. Immutable history needs permanent decoders because no backfill can

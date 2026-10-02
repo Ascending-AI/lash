@@ -392,7 +392,7 @@ pub(super) async fn crash_when(
                 tokio::select! {
                     biased;
                     () = crash.fired() => panic!("the law kills the turn's execution here"),
-                    ended = world.drive(&turn, scope, None) => panic!(
+                    ended = world.shift(&turn, scope, None) => panic!(
                         "the crashing turn ended ({ended:?}) before its crash fired"
                     ),
                 }
@@ -506,7 +506,7 @@ pub async fn recorded_outcome_skips_execution(tier: ToolCallIdentityTier) {
             let turn = turn.clone();
             Box::pin(async move {
                 let ended = world
-                    .drive(&turn, scope, Some(Arc::new(PanicBeforeTurnCommit)))
+                    .shift(&turn, scope, Some(Arc::new(PanicBeforeTurnCommit)))
                     .await;
                 panic!("the crash probe did not fire before the turn commit: {ended:?}");
             })
@@ -1015,7 +1015,7 @@ pub async fn live_and_durable_queue_paths_share_results_and_capability_refusals(
             .into_backend();
     let ops = crate::facade_support::DurableSessionOps::new(
         world.session_id.clone(),
-        lash_core::drive::IngressRelay::over_backend(
+        lash_core::shift::IngressRelay::over_backend(
             &backend,
             Arc::new(crate::NoSessionWork::new()),
             backend.clock(),

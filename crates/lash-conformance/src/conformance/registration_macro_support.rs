@@ -15,7 +15,6 @@ pub use super::completion_routing::*;
 pub use super::declared_start::*;
 pub use super::definitions::*;
 pub use super::direct_turn_acceptance::*;
-pub use super::drive_admission::*;
 pub use super::effect_group_host::*;
 pub use super::effect_host::*;
 pub use super::fence_integrity::*;
@@ -44,13 +43,13 @@ pub use super::process_registry::*;
 pub use super::process_trigger_retention::*;
 pub use super::queue_observation::*;
 pub use super::queued_after_commit_redrive::*;
-pub use super::queued_input_roots::*;
+pub use super::queued_input_runs::*;
 pub use super::retention::*;
 pub use super::revision_pins::*;
-pub use super::root_answers_its_rows::*;
-pub use super::root_start_marker::*;
-pub use super::root_terminal::*;
-pub use super::run_spec_drive::*;
+pub use super::run_answers_its_rows::*;
+pub use super::run_spec_shift::*;
+pub use super::run_start_marker::*;
+pub use super::run_terminal::*;
 pub use super::runtime_persistence::*;
 pub use super::runtime_persistence_state_machine::*;
 pub use super::segment_redrive::*;
@@ -63,6 +62,7 @@ pub use super::session_graph_state_machine::*;
 pub use super::session_ingress::*;
 pub use super::session_store_factory::*;
 pub use super::session_store_factory_failure_evidence::*;
+pub use super::shift_admission::*;
 pub use super::store_contract_state_machine::*;
 pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;
@@ -90,7 +90,7 @@ pub fn effect_group_test_prefix(label: &str) -> String {
     format!("{label}-{}", uuid::Uuid::new_v4().simple())
 }
 
-pub use super::root_control::*;
-pub use super::root_executor::*;
-pub use super::root_supersession::*;
+pub use super::run_control::*;
+pub use super::run_executor::*;
+pub use super::run_supersession::*;
 pub use super::trace_provenance::*;

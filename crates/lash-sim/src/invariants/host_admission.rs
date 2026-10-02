@@ -38,10 +38,10 @@ pub(super) fn markers<'a>(
     text.match_indices(prefix).filter_map(move |(at, _)| {
         let rest = &text[at + prefix.len()..];
         let end = rest.find(';')?;
-        let root = &rest[..end];
-        root.chars()
+        let run = &rest[..end];
+        run.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            .then_some((at, root))
+            .then_some((at, run))
     })
 }
 
@@ -76,20 +76,20 @@ impl HistoryChecker for HostAdmission {
             if let Fact::HostOp {
                 op: HostOp::Send | HostOp::SendBatch,
                 session,
-                roots,
+                runs,
                 outcome,
             } = &record.fact
             {
-                for root in roots {
-                    named.insert((session.as_str(), root.as_str()), (record.at, outcome));
+                for run in runs {
+                    named.insert((session.as_str(), run.as_str()), (record.at, outcome));
                 }
             }
         }
         let mut violations = Vec::new();
-        for ((session, root), (at, outcome)) in &named {
+        for ((session, run), (at, outcome)) in &named {
             let id = lash_core::PendingTurnInputDraft::keyed_input_id(
                 &lash_core::SessionId::fixture(*session),
-                root,
+                run,
             );
             let rows: Vec<_> = history
                 .stores
@@ -115,11 +115,11 @@ impl HistoryChecker for HostAdmission {
                         _ => continue,
                     };
                     *count += markers(text, prefix)
-                        .filter(|(_, found)| found == root)
+                        .filter(|(_, found)| found == run)
                         .count();
                 }
             }
-            let weakened = deleted.contains(session) || root.starts_with("held-");
+            let weakened = deleted.contains(session) || run.starts_with("held-");
             let valid = match outcome {
                 HostOutcome::Known if !weakened => rows.len() == 1 && asked == 1 && answered == 1,
                 HostOutcome::Known | HostOutcome::Maybe => {
@@ -129,7 +129,7 @@ impl HistoryChecker for HostAdmission {
             };
             if !valid {
                 let mut violation = Violation::new(INVARIANT, format!(
-                    "{session}/{root}: {outcome:?}, {} input row(s), {asked} user marker(s), {answered} answer marker(s); downgraded={weakened}", rows.len()
+                    "{session}/{run}: {outcome:?}, {} input row(s), {asked} user marker(s), {answered} answer marker(s); downgraded={weakened}", rows.len()
                 )).session(*session).records([*at]);
                 for row in rows {
                     violation = violation.row(row.render());
@@ -139,12 +139,12 @@ impl HistoryChecker for HostAdmission {
         }
         let ids: BTreeSet<_> = named
             .keys()
-            .map(|(session, root)| {
+            .map(|(session, run)| {
                 (
                     *session,
                     lash_core::PendingTurnInputDraft::keyed_input_id(
                         &lash_core::SessionId::fixture(*session),
-                        root,
+                        run,
                     )
                     .to_string(),
                 )
@@ -169,10 +169,10 @@ impl HistoryChecker for HostAdmission {
                         "assistant" => "answer:",
                         _ => continue,
                     };
-                    for (_, root) in markers(text, prefix) {
-                        if !named.contains_key(&(transcript.session.as_str(), root)) {
+                    for (_, run) in markers(text, prefix) {
+                        if !named.contains_key(&(transcript.session.as_str(), run)) {
                             violations.push(
-                                Violation::new(INVARIANT, format!("phantom {role} marker {root}"))
+                                Violation::new(INVARIANT, format!("phantom {role} marker {run}"))
                                     .session(&transcript.session)
                                     .row(text),
                             );

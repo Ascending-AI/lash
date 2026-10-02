@@ -237,22 +237,22 @@ fn core(
     })
 }
 
-/// Drive only artifact cleanup past its guarded deferral once this root's
+/// Execute only artifact cleanup past its guarded deferral once this run's
 /// journal settles. The recovery interval retains its ordinary clock and
 /// lapsed-claim bound; storage reclamation gets its own deterministic pass.
 async fn deferred_cleanup(
     world: &CrashWorld,
     session: &lash_core::SessionId,
-    root: &str,
+    run: &str,
 ) -> Result<(), String> {
     use lash_core::runtime::artifact_cleanup::{
         ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
     };
-    use lash_core::runtime::drive::relay::{RelayPolicy, relay_due};
+    use lash_core::runtime::shift::relay::{RelayPolicy, relay_due};
     let backend = world.backend();
     let journal = lash_core::ExecutionScope::turn(
         session.clone(),
-        lash_core::TurnId::fixture(root.to_string()),
+        lash_core::TurnId::fixture(run.to_string()),
     )
     .journal_identity()
     .map_err(|error| error.to_string())?;
@@ -322,12 +322,12 @@ fn carried_then_reclaimed(
             if world.ticks_run() > ticks_at_restart {
                 hold.release();
             }
-            let root = if carried.load(Ordering::SeqCst) {
+            let run = if carried.load(Ordering::SeqCst) {
                 "uncarry"
             } else {
                 "carry"
             };
-            if let Err(error) = deferred_cleanup(world, &session, root).await {
+            if let Err(error) = deferred_cleanup(world, &session, run).await {
                 return vec![error];
             }
             if !carried.load(Ordering::SeqCst) {

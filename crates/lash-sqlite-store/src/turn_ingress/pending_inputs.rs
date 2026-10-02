@@ -10,8 +10,8 @@
 //! Every admission scan seeks `idx_pending_turn_inputs_open_state`, the partial
 //! index over undelivered states. SQLite uses it only when the query repeats
 //! the index's state set, which the vocabulary token renders to exactly the
-//! schema's predicate. Admission also tests `admitted_root IS NULL` so a root
-//! cannot bind an input another root already holds.
+//! schema's predicate. Admission also tests `admitted_run IS NULL` so a run
+//! cannot bind an input another run already holds.
 
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only SQLite issues.
@@ -21,7 +21,7 @@ lash_store_sql::statements! {
         ///
         /// No lock suffix: the commit already holds the database write lock.
         /// PostgreSQL must take the row lock explicitly.
-        settlement_facts = "SELECT admitted_root, state
+        settlement_facts = "SELECT admitted_run, state
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
@@ -29,30 +29,30 @@ lash_store_sql::statements! {
         /// anchored at one input covers. Same lock fork as
         /// [`settlement_facts`](Self::settlement_facts).
         select_suffix = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash,
+                    state, input_json, enqueued_at_ms, admitted_run, admitted_by, run_spec_hash,
                     terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND enqueue_seq >= ?2
              ORDER BY enqueue_seq ASC";
 
         /// Session `?1`'s open active-turn inputs: what an interrupted turn's
-        /// commit and a root's terminal write sweep for input addressed to a
+        /// commit and a run's terminal write sweep for input addressed to a
         /// turn that is over. Same lock fork as
         /// [`settlement_facts`](Self::settlement_facts).
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{pending_active_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s open next-turn inputs a root's admission composes
+        /// Session `?1`'s open next-turn inputs a run's admission composes
         /// from, up to `?2` of them (ADR 0101 §4, §5).
         ///
-        /// A root's admission runs with no turn running, so every open input
+        /// A run's admission runs with no turn running, so every open input
         /// is next-turn input by rule, an addressed one included: its turn
         /// ran and is over (ADR 0101 §5.1).
         ///
@@ -64,12 +64,12 @@ lash_store_sql::statements! {
         /// after it is taken past it. PostgreSQL takes `FOR UPDATE` here;
         /// SQLite is already the only writer.
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
-                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
                     WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
@@ -79,7 +79,7 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS turn_work
                     WHERE turn_work.session_id = ?1 AND turn_work.work_kind = 'turn'
-                      AND turn_work.admitted_root IS NULL
+                      AND turn_work.admitted_run IS NULL
                       AND turn_work.terminal_cause IS NULL
                       AND turn_work.enqueue_seq < pending_turn_inputs.enqueue_seq
                )
@@ -95,12 +95,12 @@ lash_store_sql::statements! {
         /// cannot seek. The two checkpoints are picked by an exhaustive match,
         /// so a third would not compile.
         admission_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
-                    source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_run,
                     admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{pending_active_turn_input_state(state)}}
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?3
@@ -113,11 +113,11 @@ lash_store_sql::statements! {
         /// at the `before_completion` checkpoint, which admits both boundaries.
         admission_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id,
                     session_id, source_key, ingress_json, state, input_json, enqueued_at_ms,
-                    admitted_root, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
+                    admitted_run, admitted_by, run_spec_hash, terminal_at_ms, trace_cause_json
              FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
-               AND admitted_root IS NULL
+               AND admitted_run IS NULL
                AND {{pending_active_turn_input_state(state)}}
                AND json_extract(ingress_json, '$.scope') = 'active_turn'
                AND json_extract(ingress_json, '$.turn_id') = ?3

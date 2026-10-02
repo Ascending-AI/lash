@@ -61,7 +61,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .await
         .expect("open multi-frame session");
     let initial_output = session
-        .root(initial_turn_id.clone())
+        .run(initial_turn_id.clone())
         .output()
         .await
         .expect("the real send settled across two frame switches")
@@ -100,7 +100,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .await
         .expect("reopen final follow frame");
     let ordinary_output = session
-        .root(ordinary_turn_id.clone())
+        .run(ordinary_turn_id.clone())
         .output()
         .await
         .expect("the ordinary follow-frame send settled")

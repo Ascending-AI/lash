@@ -18,7 +18,7 @@ use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 /// How long one step may run in wall time before the epoch calls it hung.
 const STEP_WALL_LIMIT: Duration = Duration::from_secs(60);
 
-/// How long a held step waits in wall time for its root to reach the model.
+/// How long a held step waits in wall time for its run to reach the model.
 const HELD_WAIT: Duration = Duration::from_secs(20);
 
 /// The ticks a rolling deploy's drain may take before the epoch reports the
@@ -32,7 +32,7 @@ pub(super) const DRAIN_TICKS: usize = 30;
 /// relay's claim TTL, then the tick that retakes it.
 fn lapsed_claim_ticks() -> usize {
     let tick_ms = crate::crash_matrix::TICK.as_millis() as u64;
-    let ttl_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    let ttl_ms = lash_core::shift::relay::RelayPolicy::default().claim_ttl_ms;
     usize::try_from(ttl_ms.div_ceil(tick_ms) + 1).unwrap_or(usize::MAX)
 }
 
@@ -59,15 +59,15 @@ use crate::invariants::{Fact, FaultKind, HostOp, HostRefusalCode};
 #[derive(Clone, Debug)]
 pub struct SentInput {
     pub session: SessionId,
-    pub root: String,
+    pub run: String,
     pub admission: Admission,
 }
 
-/// A held root the host sent and then cancelled or deleted.
+/// A held run the host sent and then cancelled or deleted.
 #[derive(Clone, Debug)]
-pub struct HeldRoot {
+pub struct HeldRun {
     pub session: SessionId,
-    pub root: String,
+    pub run: String,
     pub admission: Admission,
 }
 
@@ -99,7 +99,7 @@ pub struct SessionSlot {
 pub struct Ledger {
     pub sessions: Vec<SessionSlot>,
     pub inputs: Vec<SentInput>,
-    pub held: Vec<HeldRoot>,
+    pub held: Vec<HeldRun>,
     pub children: Vec<crate::crash_matrix::invariants::ChildOf>,
     pub child_scopes: Vec<ScopeId>,
     pub processes: Vec<StartedProcess>,
@@ -121,7 +121,7 @@ pub struct Counts {
 /// The deployment every epoch runs: the standard protocol answering from the
 /// shared scripted model, a Lashlang process engine, and a recovery lease
 /// that competes at the rank of the build it runs. `drain` is how much
-/// eligible turn-lane work one root takes.
+/// eligible turn-lane work one run takes.
 pub(super) fn soak_core(
     reached: Reached,
     rank: Arc<AtomicI64>,
@@ -146,27 +146,27 @@ pub(super) fn soak_core(
     })
 }
 
-/// The held roots that reached their model call, by root: a held step
-/// waits for its own root, not for any held root, since a cancelled root a
+/// The held runs that reached their model call, by run: a held step
+/// waits for its own run, not for any held run, since a cancelled run a
 /// restart replays reaches the model again.
 pub(super) type Reached = Arc<tokio::sync::watch::Sender<BTreeSet<String>>>;
 
-/// How long the model takes, in wall time, to answer a `slow-` root.
+/// How long the model takes, in wall time, to answer a `slow-` run.
 #[cfg(test)]
 const SLOW_ANSWER: Duration = Duration::from_millis(250);
 
-/// The crash matrix's scripted model, recording which held root reached it:
-/// a held root's call never answers, and every other root is answered from
-/// its input. Under test a `slow-` root is answered after [`SLOW_ANSWER`],
-/// as every root is on a runner short of CPU; no plan names one.
+/// The crash matrix's scripted model, recording which held run reached it:
+/// a held run's call never answers, and every other run is answered from
+/// its input. Under test a `slow-` run is answered after [`SLOW_ANSWER`],
+/// as every run is on a runner short of CPU; no plan names one.
 fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle {
-    use crate::crash_matrix::invariants::{answer_text, input_roots};
+    use crate::crash_matrix::invariants::{answer_text, input_runs};
     lash_core::testing::TestProvider::builder()
         .kind("chaos-soak")
         .complete(move |request: lash_core::llm::types::LlmRequest| {
             let reached = Arc::clone(&reached);
             async move {
-                let (input_at, roots) = request
+                let (input_at, runs) = request
                     .messages
                     .iter()
                     .enumerate()
@@ -175,16 +175,16 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                         if !matches!(message.role, lash_core::llm::types::LlmRole::User) {
                             return None;
                         }
-                        let roots: Vec<_> = message.blocks.iter().flat_map(|block| match block {
-                            lash_core::llm::types::LlmContentBlock::Text { text, .. } => input_roots(text),
+                        let runs: Vec<_> = message.blocks.iter().flat_map(|block| match block {
+                            lash_core::llm::types::LlmContentBlock::Text { text, .. } => input_runs(text),
                             _ => Vec::new(),
                         }).collect();
-                        (!roots.is_empty()).then_some((at, roots))
+                        (!runs.is_empty()).then_some((at, runs))
                     })
                     .unwrap_or_default();
-                let held: Vec<String> = roots
+                let held: Vec<String> = runs
                     .iter()
-                    .filter(|root| root.starts_with("held-"))
+                    .filter(|run| run.starts_with("held-"))
                     .cloned()
                     .collect();
                 if !held.is_empty() {
@@ -192,7 +192,7 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                     std::future::pending::<()>().await;
                 }
                 #[cfg(test)]
-                if roots.iter().any(|root| root.starts_with("slow-")) {
+                if runs.iter().any(|run| run.starts_with("slow-")) {
                     tokio::time::sleep(SLOW_ANSWER).await;
                 }
                 let tool_done = request
@@ -204,7 +204,7 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                         lash_core::llm::types::LlmContentBlock::ToolResult { tool_name: Some(name), .. }
                         if name == "soak_witness"
                     ));
-                if roots.iter().any(|root| root == "tool-witness") && !tool_done {
+                if runs.iter().any(|run| run == "tool-witness") && !tool_done {
                     return Ok(lash_core::llm::types::LlmResponse {
                         parts: vec![lash_core::llm::types::LlmOutputPart::ToolCall {
                             call_id: "witness-call".to_owned(),
@@ -218,7 +218,7 @@ fn soak_provider(reached: Reached) -> lash_core::facade_support::ProviderHandle 
                 Ok::<_, lash_core::llm::transport::LlmTransportError>(
                     lash_core::llm::types::LlmResponse {
                         parts: vec![lash_core::llm::types::LlmOutputPart::Text {
-                            text: roots.iter().map(|root| answer_text(root)).collect(),
+                            text: runs.iter().map(|run| answer_text(run)).collect(),
                             response_meta: None,
                         }],
                         ..lash_core::llm::types::LlmResponse::default()
@@ -321,7 +321,7 @@ pub(super) struct Driver {
     /// Wall-clock epoch milliseconds the live deployment came up at: the
     /// recovery lease's row names its election in the same clock.
     pub live_since_wall_ms: i64,
-    /// The held roots that reached their model call.
+    /// The held runs that reached their model call.
     reached: Reached,
     rank: Arc<AtomicI64>,
     /// Crashes already answered with a restart.
@@ -338,13 +338,13 @@ pub(super) struct Driver {
 }
 
 impl Driver {
-    /// A world under the default drain: every input is its own root.
+    /// A world under the default drain: every input is its own run.
     pub async fn new(seed: u64) -> Result<Self, String> {
         Self::with_drain(seed, lash::DrainMode::default()).await
     }
 
-    /// A world whose drain takes every eligible input into one root
-    /// (`DrainMode::All`), for a law about an input another input's root
+    /// A world whose drain takes every eligible input into one run
+    /// (`DrainMode::All`), for a law about an input another input's run
     /// admitted: the default drain never composes one (FIG-4457).
     #[cfg(test)]
     pub async fn composing(seed: u64) -> Result<Self, String> {
@@ -605,23 +605,23 @@ impl Driver {
                 }
                 Ok(format!("the host died inside all {OPEN_ATTEMPTS} opens"))
             }
-            Step::Send { session, root } => {
+            Step::Send { session, run } => {
                 let id = self.slot(*session)?.id.clone();
-                let admission = self.send(&id, vec![root.clone()]).await?;
+                let admission = self.send(&id, vec![run.clone()]).await?;
                 self.ledger.inputs.push(SentInput {
                     session: id,
-                    root: root.clone(),
+                    run: run.clone(),
                     admission: admission.clone(),
                 });
                 Ok(format!("{admission:?}"))
             }
-            Step::SendBatch { session, roots } => {
+            Step::SendBatch { session, runs } => {
                 let id = self.slot(*session)?.id.clone();
-                let admission = self.send(&id, roots.clone()).await?;
-                for root in roots {
+                let admission = self.send(&id, runs.clone()).await?;
+                for run in runs {
                     self.ledger.inputs.push(SentInput {
                         session: id.clone(),
-                        root: root.clone(),
+                        run: run.clone(),
                         admission: admission.clone(),
                     });
                 }
@@ -630,7 +630,7 @@ impl Driver {
             Step::Command { session, key } => {
                 let id = self.slot(*session)?.id.clone();
                 self.ledger.commands += 1;
-                // A command runs on the session's own runtime, which a drive
+                // A command runs on the session's own runtime, which a shift
                 // the engine is running holds: a contended open is retried,
                 // as a host retries it.
                 for _ in 0..100 {
@@ -660,30 +660,30 @@ impl Driver {
             }
             Step::CancelHeld {
                 session,
-                root,
+                run,
                 child,
             } => {
                 let id = self.slot(*session)?.id.clone();
-                let admission = self.send_held(&id, root, *child).await?;
-                let receipt = self.cancel(&id, root).await?;
+                let admission = self.send_held(&id, run, *child).await?;
+                let receipt = self.cancel(&id, run).await?;
                 Ok(format!("{admission:?}; cancel: {receipt}"))
             }
             Step::DeleteHeld {
                 session,
-                root,
+                run,
                 child,
             } => {
                 let id = self.slot(*session)?.id.clone();
-                let admission = self.send_held(&id, root, *child).await?;
+                let admission = self.send_held(&id, run, *child).await?;
                 let deleted = self.delete(*session).await?;
                 Ok(format!("{admission:?}; delete: {deleted}"))
             }
-            Step::ParkAndRedrive { session, root } => {
+            Step::ParkAndRedrive { session, run } => {
                 let id = self.slot(*session)?.id.clone();
-                let redriven = self.park_and_redrive(&id, root).await?;
+                let redriven = self.park_and_redrive(&id, run).await?;
                 self.ledger.inputs.push(SentInput {
                     session: id,
-                    root: root.clone(),
+                    run: run.clone(),
                     admission: redriven.admission.clone(),
                 });
                 Ok(match redriven.park {
@@ -739,10 +739,10 @@ impl Driver {
         }
     }
 
-    /// Accept `roots` on `session` as one request (one input, or a batch).
+    /// Accept `runs` on `session` as one request (one input, or a batch).
     /// Keyed retry attempts share one final host fact, including refusals.
-    async fn send(&mut self, session: &SessionId, roots: Vec<String>) -> Result<Admission, String> {
-        let op = if roots.len() == 1 {
+    async fn send(&mut self, session: &SessionId, runs: Vec<String>) -> Result<Admission, String> {
+        let op = if runs.len() == 1 {
             HostOp::Send
         } else {
             HostOp::SendBatch
@@ -750,25 +750,25 @@ impl Driver {
         for _ in 0..20 {
             let core = self.world.core()?;
             let id = session.clone();
-            let inputs = roots.clone();
+            let inputs = runs.clone();
             let sent = self
                 .host(async move {
                     let session = core.session(id).durable().await?;
-                    if let [root] = inputs.as_slice() {
+                    if let [run] = inputs.as_slice() {
                         session
                             .send(lash::TurnInput::text(
-                                crate::crash_matrix::invariants::input_text(root),
+                                crate::crash_matrix::invariants::input_text(run),
                             ))
-                            .id(lash_core::TurnId::fixture(root.clone()))
+                            .id(lash_core::TurnId::fixture(run.clone()))
                             .await
                             .map(|_| ())
                     } else {
                         session
-                            .send_batch(inputs.iter().map(|root| {
+                            .send_batch(inputs.iter().map(|run| {
                                 lash::BatchInput::new(lash::TurnInput::text(
-                                    crate::crash_matrix::invariants::input_text(root),
+                                    crate::crash_matrix::invariants::input_text(run),
                                 ))
-                                .id(lash_core::TurnId::fixture(root.clone()))
+                                .id(lash_core::TurnId::fixture(run.clone()))
                             }))
                             .await
                             .map(|_| ())
@@ -786,10 +786,10 @@ impl Driver {
                     code: refusal_code(&error)?,
                 },
             };
-            self.record_host(op, session, roots, outcome.clone());
+            self.record_host(op, session, runs, outcome.clone());
             return Ok(outcome);
         }
-        self.record_host(op, session, roots, Admission::Maybe);
+        self.record_host(op, session, runs, Admission::Maybe);
         Err(format!("`{session}` refused a send retryably twenty times"))
     }
 
@@ -797,20 +797,20 @@ impl Driver {
         &self,
         op: HostOp,
         session: &SessionId,
-        roots: Vec<String>,
+        runs: Vec<String>,
         outcome: Admission,
     ) {
         self.world.history().record(Fact::HostOp {
             op,
             session: session.to_string(),
-            roots,
+            runs,
             outcome,
         });
     }
 
     pub(super) async fn send_probe(&mut self, session: &SessionId) -> Result<(), String> {
-        let root = format!("probe-{}", self.world.seed() % 100_000);
-        self.send(session, vec![root]).await.map(|_| ())
+        let run = format!("probe-{}", self.world.seed() % 100_000);
+        self.send(session, vec![run]).await.map(|_| ())
     }
 
     /// One real deferred tool round trip gives the existing tool checkers facts.
@@ -859,7 +859,7 @@ impl Driver {
         let expected = crate::crash_matrix::invariants::Expected {
             inputs: vec![crate::crash_matrix::invariants::AcceptedInput {
                 session: id,
-                root: lash_core::TurnId::from("tool-witness"),
+                run: lash_core::TurnId::from("tool-witness"),
             }],
             ..Default::default()
         };
@@ -876,18 +876,18 @@ impl Driver {
         Err("the deferred witness did not finish".to_owned())
     }
 
-    /// Whether the held root `root` reached its model call.
-    fn reached(&self, root: &str) -> bool {
-        self.reached.borrow().contains(root)
+    /// Whether the held run `run` reached its model call.
+    fn reached(&self, run: &str) -> bool {
+        self.reached.borrow().contains(run)
     }
 
     /// Wait for the model to observe an input, without advancing the engine.
     #[cfg(test)]
-    pub(super) async fn wait_reached(&self, root: &str) -> bool {
+    pub(super) async fn wait_reached(&self, run: &str) -> bool {
         let mut observed = self.reached.subscribe();
         let deadline = tokio::time::Instant::now() + HELD_WAIT;
         loop {
-            if observed.borrow_and_update().contains(root) {
+            if observed.borrow_and_update().contains(run) {
                 return true;
             }
             if tokio::time::timeout_at(deadline, observed.changed())
@@ -899,29 +899,29 @@ impl Driver {
         }
     }
 
-    /// Send the held root `root` on `session` (with a child that lives until
+    /// Send the held run `run` on `session` (with a child that lives until
     /// it ends, when `child`) and wait until it reaches its model call.
     pub(super) async fn send_held(
         &mut self,
         session: &SessionId,
-        root: &str,
+        run: &str,
         child: bool,
     ) -> Result<Admission, String> {
-        let root = root.to_owned();
-        let admission = self.send(session, vec![root.clone()]).await?;
+        let run = run.to_owned();
+        let admission = self.send(session, vec![run.clone()]).await?;
         if matches!(admission, Admission::Refused { .. }) {
             return Ok(admission);
         }
-        self.ledger.held.push(HeldRoot {
+        self.ledger.held.push(HeldRun {
             session: session.clone(),
-            root: root.clone(),
+            run: run.clone(),
             admission: admission.clone(),
         });
         let deadline = tokio::time::Instant::now() + HELD_WAIT;
-        while !self.reached(&root) {
+        while !self.reached(&run) {
             if tokio::time::Instant::now() > deadline {
-                // The root never reached its model call: a send that never
-                // committed, or a drive still waiting for recovery. The
+                // The run never reached its model call: a send that never
+                // committed, or a shift still waiting for recovery. The
                 // cancel or the delete that follows answers for it.
                 return Ok(admission);
             }
@@ -933,15 +933,15 @@ impl Driver {
             self.settle_crash().await?;
             self.advance_retry()?;
         }
-        // The root runs: a child it registers lives until it ends, as a
+        // The run executes: a child it registers lives until it ends, as a
         // tool call's child process would.
         if child {
-            self.register_held_child(session, &root).await?;
+            self.register_held_child(session, &run).await?;
         }
         Ok(admission)
     }
 
-    /// Register a child under the root that actually admitted `input`.
+    /// Register a child under the run that actually admitted `input`.
     pub(super) async fn register_held_child(
         &mut self,
         session: &SessionId,
@@ -960,10 +960,10 @@ impl Driver {
             ));
         }
         let owner = store
-            .root_of_input(session, &input_id(session, input))
+            .run_of_input(session, &input_id(session, input))
             .await
-            .map_err(|error| format!("resolve root of `{input}`: {error}"))?
-            .ok_or_else(|| format!("`{input}` reached the model without a durable root"))?;
+            .map_err(|error| format!("resolve run of `{input}`: {error}"))?
+            .ok_or_else(|| format!("`{input}` reached the model without a durable run"))?;
         let scope = ScopeId::turn(session.clone(), owner);
         let registered = register_child(&self.world, session, &scope).await?;
         self.ledger
@@ -976,32 +976,30 @@ impl Driver {
         Ok(scope)
     }
 
-    /// Cancel the held root `root` of `session` until the host sees the
+    /// Cancel the held run `run` of `session` until the host sees the
     /// cancel answered: a host that died inside it retries after the
-    /// restart, since a held root ends only by its cancel.
+    /// restart, since a held run ends only by its cancel.
     pub(super) async fn cancel(
         &mut self,
         session: &SessionId,
-        root: &str,
+        run: &str,
     ) -> Result<String, String> {
-        let root = root.to_owned();
+        let run = run.to_owned();
         let store = self.world.backend().session_store_factory();
         if !matches!(
             store
                 .lookup_session(session)
                 .await
-                .map_err(|error| format!("open `{session}` to cancel `{root}`: {error}"))?,
+                .map_err(|error| format!("open `{session}` to cancel `{run}`: {error}"))?,
             lash_core::SessionLookup::Live(_)
         ) {
-            return Err(format!(
-                "`{session}` disappeared before cancelling `{root}`"
-            ));
+            return Err(format!("`{session}` disappeared before cancelling `{run}`"));
         }
         let target = store
-            .root_of_input(session, &input_id(session, &root))
+            .run_of_input(session, &input_id(session, &run))
             .await
-            .map_err(|error| format!("resolve root to cancel `{root}`: {error}"))?
-            .unwrap_or_else(|| lash_core::TurnId::fixture(root.as_str()));
+            .map_err(|error| format!("resolve run to cancel `{run}`: {error}"))?
+            .unwrap_or_else(|| lash_core::TurnId::fixture(run.as_str()));
         let mut last = String::new();
         for _ in 0..20 {
             let core = self.world.core()?;
@@ -1010,17 +1008,12 @@ impl Driver {
             let cancelled = self
                 .host(async move {
                     let session = core.session(id).durable().await?;
-                    session.cancel(lash::CancelTarget::Root(target)).await
+                    session.cancel(lash::CancelTarget::Run(target)).await
                 })
                 .await?;
             match cancelled {
                 (Some(Ok(receipt)), _) => {
-                    self.record_host(
-                        HostOp::Cancel,
-                        session,
-                        vec![root.clone()],
-                        Admission::Known,
-                    );
+                    self.record_host(HostOp::Cancel, session, vec![run.clone()], Admission::Known);
                     return Ok(match receipt {
                         lash::CancelReceipt::Withdrawn(_) => "withdrawn".to_owned(),
                         lash::CancelReceipt::Requested { .. } => "requested".to_owned(),
@@ -1033,12 +1026,12 @@ impl Driver {
                     self.record_host(
                         HostOp::Cancel,
                         session,
-                        vec![root.clone()],
+                        vec![run.clone()],
                         Admission::Refused {
                             code: refusal_code(&error)?,
                         },
                     );
-                    return Err(format!("the cancel of `{root}` was refused: {error}"));
+                    return Err(format!("the cancel of `{run}` was refused: {error}"));
                 }
                 (Some(Err(error)), _) => {
                     last = error.to_string();
@@ -1047,13 +1040,8 @@ impl Driver {
                 (None, _) => last = "the host died inside the cancel".to_owned(),
             }
         }
-        self.record_host(
-            HostOp::Cancel,
-            session,
-            vec![root.clone()],
-            Admission::Maybe,
-        );
-        Err(format!("the cancel of `{root}` never answered: {last}"))
+        self.record_host(HostOp::Cancel, session, vec![run.clone()], Admission::Maybe);
+        Err(format!("the cancel of `{run}` never answered: {last}"))
     }
 
     /// Delete a session through a handler of the host's own, once. A host
@@ -1299,12 +1287,12 @@ impl Driver {
     /// moving, and answer every crash that work fired.
     ///
     /// [`CrashWorld::quiesce`] gives up after a wall-time budget, because a
-    /// held root's model call never answers. A caller that counts ticks
+    /// held run's model call never answers. A caller that counts ticks
     /// against a bound must not take that budget for the end of the work:
-    /// a drive on a starved runner is still calling its roots when it runs
+    /// a shift on a starved runner is still calling its runs when it runs
     /// out, and each tick taken then is charged to work that needs no time
     /// to pass. So this waits past the budget for as long as an attempt other
-    /// than a held root's run is working. An attempt that never stops working
+    /// than a held run's execution is working. An attempt that never stops working
     /// runs the step into [`STEP_WALL_LIMIT`].
     async fn settle_work(&mut self) -> Result<(), String> {
         loop {
@@ -1319,8 +1307,8 @@ impl Driver {
     }
 
     /// Whether an invocation that ends by itself is working right now: any
-    /// the engine is running but the run of a held root, which stays in its
-    /// model call until the root is cancelled or its session deleted.
+    /// the engine is running but the execution of a held run, which stays in its
+    /// model call until the run is cancelled or its session deleted.
     fn works(&self) -> Result<bool, String> {
         let held = |target: &str| {
             target.starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
@@ -1328,7 +1316,7 @@ impl Driver {
                     .ledger
                     .held
                     .iter()
-                    .any(|held| target.ends_with(&format!("{}{}/run", held.session, held.root)))
+                    .any(|held| target.ends_with(&format!("{}{}/run", held.session, held.run)))
         };
         Ok(self
             .world

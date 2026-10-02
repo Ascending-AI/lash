@@ -14,12 +14,12 @@
 
 use super::harness::{HarnessMode, Session};
 use super::syntax::{Cell, Literal};
-use super::{assert_not_inherited, drive};
+use super::{assert_not_inherited, shift};
 
 // The inherited-diagnostic check this axis is named for lives in the suite root
-// and runs inside `drive` on every outcome of every scenario. The scenarios here
+// and runs inside `shift` on every outcome of every scenario. The scenarios here
 // call it directly for the sequences they build cell by cell rather than through
-// `drive`.
+// `shift`.
 
 /// The trivial cell from the FIG-1562 report. A session that cannot run this
 /// cannot run anything.
@@ -86,7 +86,7 @@ fn a_closure_bearing_cell_does_not_poison_the_next_cell(shape: ClosureShape) {
 /// A cell that fails to compile leaves nothing behind.
 #[test]
 fn a_compile_error_does_not_poison_the_session() {
-    let (mut session, _) = drive(
+    let (mut session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("before", Literal::List(vec![1.0, 2.0])),
@@ -105,7 +105,7 @@ fn a_compile_error_does_not_poison_the_session() {
 /// A cell that fails at runtime leaves nothing behind either.
 #[test]
 fn a_runtime_error_does_not_poison_the_session() {
-    let (mut session, _) = drive(
+    let (mut session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("before", Literal::List(vec![1.0, 2.0])),
@@ -125,7 +125,7 @@ fn a_runtime_error_does_not_poison_the_session() {
 /// just as harmless.
 #[test]
 fn a_refusal_does_not_poison_the_session() {
-    let (mut session, _) = drive(
+    let (mut session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("before", Literal::List(vec![1.0, 2.0])),
@@ -168,7 +168,7 @@ fn a_run_of_failing_cells_does_not_poison_the_session() {
     cells.push(Cell::closure_garbage("scaled"));
     cells.push(Cell::extend("grown", "kept", 4.0));
 
-    let (session, _) = drive(HarnessMode::Resident, &cells);
+    let (session, _) = shift(HarnessMode::Resident, &cells);
     assert_eq!(
         session.globals().get("grown"),
         Some(&serde_json::json!([1, 2, 3, 4]))

@@ -10,10 +10,10 @@
 //! it sits. An id stored with other content, or one id named twice in the
 //! request, refuses the whole request and accepts nothing.
 //!
-//! The batch promises order and contiguity, not grouping: how the drive
-//! groups the block into roots follows the session's batching and ADR 0101's
+//! The batch promises order and contiguity, not grouping: how the shift
+//! groups the block into runs follows the session's batching and ADR 0101's
 //! selector, as for any queued inputs. The command lane still drains first at
-//! every turn boundary, and inputs sharing the batch's spec may share a root.
+//! every turn boundary, and inputs sharing the batch's spec may share a run.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use crate::support::TurnInput;
 /// One input of a [`send_batch`](crate::LashSession::send_batch), with the
 /// host id it is sent under.
 ///
-/// The id is the input's idempotency key and names the root it starts, as
+/// The id is the input's idempotency key and names the run it starts, as
 /// [`SendBuilder::id`](crate::SendBuilder::id) does for one send. An input
 /// without one is sent under a fresh id, so only an input with an id is
 /// retried by resending its batch.
@@ -105,7 +105,7 @@ impl SendBatchBuilder {
         let trace_cause = lash_core::TraceCause::linked_to(target.capture_trace_context());
         let mut submissions = Vec::with_capacity(inputs.len());
         for BatchInput { mut input, id } in inputs {
-            // As for one send: the host id names the root, and an input sent
+            // As for one send: the host id names the run, and an input sent
             // without one gets a fresh id.
             let id = id
                 .or_else(|| input.trace_turn_id.take())

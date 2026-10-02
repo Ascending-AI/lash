@@ -1,20 +1,20 @@
 //! FIG-3927's admission-binding laws over the store surface: a stale fence
-//! writes nothing (N4), the command lane binds nothing (N6), a root's
+//! writes nothing (N4), the command lane binds nothing (N6), a run's
 //! terminal commit leaves no row bound to it (N2's commit paths), and a
-//! settlement is predicated on the root that holds its rows (N10).
+//! settlement is predicated on the run that holds its rows (N10).
 
 use super::*;
-use lash_core::store::{AdmittedHead, DriveFence, IngressSettlement};
+use lash_core::store::{AdmittedHead, IngressSettlement, ShiftFence};
 use pretty_assertions::assert_eq;
 
 /// Everything a refused write must leave as it found: the session's rows
-/// with their bindings, its open queue, its unfinished root and its head.
+/// with their bindings, its open queue, its unfinished run and its head.
 #[derive(Debug, PartialEq)]
 struct DurableIngress {
     inputs: serde_json::Value,
     batches: Vec<crate::BatchId>,
     open_batches: Vec<crate::BatchId>,
-    unfinished_root: Option<TurnId>,
+    unfinished_run: Option<TurnId>,
     head_revision: u64,
 }
 
@@ -42,11 +42,11 @@ async fn durable_ingress(store: &Arc<dyn RuntimeStore>, session: &SessionId) -> 
             .list_open_queued_work(session)
             .await
             .expect("list open batches")),
-        unfinished_root: store
-            .unfinished_root(session)
+        unfinished_run: store
+            .unfinished_run(session)
             .await
-            .expect("read the unfinished root")
-            .map(|unfinished| unfinished.root),
+            .expect("read the unfinished run")
+            .map(|unfinished| unfinished.run),
         head_revision: store
             .load_session_head_meta(session)
             .await
@@ -55,9 +55,9 @@ async fn durable_ingress(store: &Arc<dyn RuntimeStore>, session: &SessionId) -> 
     }
 }
 
-/// The inputs a read reports admitted to `root`, and the batches a root
-/// holds: listed but not open. Each law's session has one root at a time,
-/// so a held batch is that root's. Every listed input's point read
+/// The inputs a read reports admitted to `run`, and the batches a run
+/// holds: listed but not open. Each law's session has one run at a time,
+/// so a held batch is that run's. Every listed input's point read
 /// (`pending_turn_input`) must answer the status the list answers.
 #[expect(
     clippy::expect_used,
@@ -66,7 +66,7 @@ async fn durable_ingress(store: &Arc<dyn RuntimeStore>, session: &SessionId) -> 
 async fn rows_bound_to(
     store: &Arc<dyn RuntimeStore>,
     session: &SessionId,
-    root: &str,
+    run: &str,
 ) -> (Vec<crate::InputId>, Vec<crate::BatchId>) {
     let listed = store
         .list_pending_turn_inputs(session)
@@ -89,7 +89,7 @@ async fn rows_bound_to(
         .filter(|read| {
             matches!(
                 &read.status,
-                crate::PendingTurnInputReadStatus::Admitted { root: holder } if holder.as_str() == root
+                crate::PendingTurnInputReadStatus::Admitted { run: holder } if holder.as_str() == run
             )
         })
         .map(|read| read.input.input_id)
@@ -113,10 +113,10 @@ async fn rows_bound_to(
 }
 
 fn is_stale_fence(result: &Result<impl std::fmt::Debug, StoreError>) -> bool {
-    matches!(result, Err(StoreError::StaleDriveFence { .. }))
+    matches!(result, Err(StoreError::StaleShiftFence { .. }))
 }
 
-/// A `Cancelled` stop, as a cancelled root's final turn records it.
+/// A `Cancelled` stop, as a cancelled run's final turn records it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the evidence literal is well formed"
@@ -128,17 +128,17 @@ fn cancelled_stop() -> crate::TurnStop {
     }
 }
 
-/// FIG-3927 N2, the commit paths: whatever the root's final commit settles,
-/// its terminal write leaves no row bound to the root. The session's roots
-/// end one after another: a failed and a cancelled root settle nothing, and
-/// an answered root completes its inputs and says nothing of the batches its
-/// checkpoint took. After each terminal every row the root held is answered
-/// or open again at its position, free for a later root to admit.
+/// FIG-3927 N2, the commit paths: whatever the run's final commit settles,
+/// its terminal write leaves no row bound to the run. The session's runs
+/// end one after another: a failed and a cancelled run settle nothing, and
+/// an answered run completes its inputs and says nothing of the batches its
+/// checkpoint took. After each terminal every row the run held is answered
+/// or open again at its position, free for a later run to admit.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn RuntimeStore>) {
+pub async fn no_row_stays_bound_after_a_runs_terminal_commit(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("no-bound-row-commit");
     for (case, stop) in [
         ("failed", Some(crate::TurnStop::ProviderError)),
@@ -160,9 +160,9 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
             ))
             .await
             .expect("enqueue batch");
-        let fence = seal_drive_fence_for_test(&store, &session, case).await;
-        let root = format!("{case}-root");
-        // An earlier root's released batch heads the lane at its position.
+        let fence = seal_shift_fence_for_test(&store, &session, case).await;
+        let run = format!("{case}-run");
+        // An earlier run's released batch heads the lane at its position.
         let first_input = store
             .list_pending_turn_inputs(&session)
             .await
@@ -187,45 +187,45 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
             .chain(first_batch)
             .min_by_key(|(seq, _)| *seq)
             .expect("the turn lane has a head");
-        let admission = admitted_root(&store, &fence, &root, head).await;
+        let admission = admitted_run(&store, &fence, &run, head).await;
         admit_at_checkpoint_for_test(
             &store,
             &fence,
-            &TurnId::fixture(root.as_str()),
-            &TurnId::fixture(root.as_str()),
+            &TurnId::fixture(run.as_str()),
+            &TurnId::fixture(run.as_str()),
             crate::CheckpointKind::AfterWork,
-            &format!("{root}:checkpoint"),
+            &format!("{run}:checkpoint"),
             64,
             crate::testing::queued_work_admission_policy(64),
         )
         .await
         .expect("admit at the checkpoint");
-        let (inputs, batches) = rows_bound_to(&store, &session, &root).await;
+        let (inputs, batches) = rows_bound_to(&store, &session, &run).await;
         assert!(
             !batches.is_empty(),
-            "{case}: the root holds the rows it was admitted with: {inputs:?} {batches:?}"
+            "{case}: the run holds the rows it was admitted with: {inputs:?} {batches:?}"
         );
 
         let settlement = if stop.is_none() {
-            let mut settlement = completing_admission(&root, &admission);
+            let mut settlement = completing_admission(&run, &admission);
             settlement.completed_batches.clear();
             settlement
         } else {
-            IngressSettlement::new(TurnId::fixture(root.as_str()))
+            IngressSettlement::new(TurnId::fixture(run.as_str()))
         };
         let mut commit = final_commit(head_commit(&store, &session).await, &fence, settlement);
-        if let (Some(terminal), Some(stop)) = (commit.root_terminal.as_mut(), &stop) {
-            terminal.outcome = lash_core::store::RootCommittedOutcome::Stopped(stop.clone());
+        if let (Some(terminal), Some(stop)) = (commit.run_terminal.as_mut(), &stop) {
+            terminal.outcome = lash_core::store::RunCommittedOutcome::Stopped(stop.clone());
         }
         store
             .commit_runtime_state(commit)
             .await
-            .expect("the root's final commit lands");
+            .expect("the run's final commit lands");
 
         assert_eq!(
-            rows_bound_to(&store, &session, &root).await,
+            rows_bound_to(&store, &session, &run).await,
             (Vec::new(), Vec::new()),
-            "{case}: no row stays bound to a root after its terminal"
+            "{case}: no row stays bound to a run after its terminal"
         );
         let open = store
             .list_open_queued_work(&session)
@@ -235,7 +235,7 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
             batches
                 .iter()
                 .all(|held| open.iter().any(|batch| batch.batch_id == *held)),
-            "{case}: every batch the root never settled is open again"
+            "{case}: every batch the run never settled is open again"
         );
         let pending = store
             .list_pending_turn_inputs(&session)
@@ -258,29 +258,27 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
 }
 
 /// FIG-3946, the terminal-write invariant extended to addressed input: every
-/// open row addressed to a turn of a root with terminal evidence is
-/// next-turn input. The turns a root ends are its own physical turns and the
+/// open row addressed to a turn of a run with terminal evidence is
+/// next-turn input. The turns a run ends are its own physical turns and the
 /// turn each member of its admission was accepted under (the member's source
-/// key): a member composed into this root never runs as a root of its own,
-/// so input addressed to it is accepted while the root runs. Its terminal
-/// write applies the root's disposition to that input. `Defer`, with no
+/// key): a member composed into this run never runs as a run of its own,
+/// so input addressed to it is accepted while the run executes. Its terminal
+/// write applies the run's disposition to that input. `Defer`, with no
 /// cancellation recorded, writes nothing: the row keeps its submitted
 /// delivery and is next-turn input by rule at its own position (ADR 0101
-/// §5.1), and the next root admits it; a recorded `Drop` withdraws the
+/// §5.1), and the next run admits it; a recorded `Drop` withdraws the
 /// addressed host input and records it on the request's outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
-    store: Arc<dyn RuntimeStore>,
-) {
-    let session = SessionId::from("addressed-to-ended-root");
+pub async fn open_input_addressed_to_an_ended_run_is_next_turn_input(store: Arc<dyn RuntimeStore>) {
+    let session = SessionId::from("addressed-to-ended-run");
     for (case, disposition) in [
         ("defer", crate::TurnCancelUndeliveredInputPolicy::Defer),
         ("drop", crate::TurnCancelUndeliveredInputPolicy::Drop),
     ] {
-        let root = format!("{case}-composing-root");
+        let run = format!("{case}-composing-run");
         let member_turn = TurnId::fixture(format!("{case}-member-turn"));
         let enqueue = |draft: crate::PendingTurnInputDraft| {
             let store = Arc::clone(&store);
@@ -300,21 +298,21 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
             pending_next_turn_input_draft(&session, "member").with_source_key(member_turn.as_str()),
         )
         .await;
-        let fence = seal_drive_fence_for_test(&store, &session, &root).await;
-        let admission = admitted_root(
+        let fence = seal_shift_fence_for_test(&store, &session, &run).await;
+        let admission = admitted_run(
             &store,
             &fence,
-            &root,
+            &run,
             AdmittedHead::Input(head.input_id.clone()),
         )
         .await;
         assert_eq!(
             admission.input_ids(),
             vec![head.input_id.clone(), member.input_id.clone()],
-            "{case}: the root composes the member's acceptance"
+            "{case}: the run composes the member's acceptance"
         );
 
-        // While the root runs, input may address any turn it runs.
+        // While the run executes, input may address any turn it runs.
         let addressed = enqueue(pending_active_turn_input_draft(
             &session,
             &member_turn,
@@ -331,15 +329,15 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
         .await;
         let own = enqueue(pending_active_turn_input_draft(
             &session,
-            &TurnId::fixture(root.as_str()),
+            &TurnId::fixture(run.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "addressed to the root's own turn",
+            "addressed to the run's own turn",
         ))
         .await;
         let addressed_rows = [&addressed, &follow_on, &own];
         let swept = addressed_rows.map(|input| input.input_id.clone()).to_vec();
 
-        let address = crate::TurnAddress::new(session.clone(), TurnId::fixture(root.as_str()));
+        let address = crate::TurnAddress::new(session.clone(), TurnId::fixture(run.as_str()));
         if disposition == crate::TurnCancelUndeliveredInputPolicy::Drop {
             store
                 .record_turn_cancel_request(
@@ -347,9 +345,9 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
                         .undelivered(disposition),
                 )
                 .await
-                .expect("record the root's cancellation");
+                .expect("record the run's cancellation");
         }
-        end_root(&store, &fence, completing_admission(&root, &admission)).await;
+        end_run(&store, &fence, completing_admission(&run, &admission)).await;
 
         let pending = store
             .list_pending_turn_inputs(&session)
@@ -358,7 +356,7 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
         for read in &pending {
             assert!(
                 read.input.state.is_next_turn_input(None),
-                "{case}: {} is open and addressed to a turn of an ended root, so it is \
+                "{case}: {} is open and addressed to a turn of an ended run, so it is \
                  next-turn input: {:?}",
                 read.input.input_id,
                 read.input.state
@@ -380,22 +378,22 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
                         read.input.state
                     );
                 }
-                let next = admitted_root(
+                let next = admitted_run(
                     &store,
                     &fence,
-                    "defer-next-root",
+                    "defer-next-run",
                     AdmittedHead::Input(addressed.input_id.clone()),
                 )
                 .await;
                 assert_eq!(
                     next.input_ids(),
                     swept,
-                    "defer: the next root admits the deferred input at its own positions"
+                    "defer: the next run admits the deferred input at its own positions"
                 );
-                end_root(
+                end_run(
                     &store,
                     &fence,
-                    completing_admission("defer-next-root", &next),
+                    completing_admission("defer-next-run", &next),
                 )
                 .await;
             }
@@ -409,10 +407,10 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
                 let outcome = store
                     .turn_cancel_request(&address)
                     .await
-                    .expect("read the root's cancellation")
-                    .expect("the root's cancellation is recorded")
+                    .expect("read the run's cancellation")
+                    .expect("the run's cancellation is recorded")
                     .outcome
-                    .expect("the root's terminal wrote the cancellation's outcome");
+                    .expect("the run's terminal wrote the cancellation's outcome");
                 assert_eq!(
                     outcome
                         .affected_inputs
@@ -431,9 +429,9 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
 }
 
 /// FIG-3927 N4: a stale fence writes nothing. After a later seal, the
-/// earlier fence's root admission, checkpoint admission, settling commit and
-/// command commit are each refused `StaleDriveFence`, and the rows, their
-/// bindings, the unfinished root and the head are unchanged. The live fence
+/// earlier fence's run admission, checkpoint admission, settling commit and
+/// command commit are each refused `StaleShiftFence`, and the rows, their
+/// bindings, the unfinished run and the head are unchanged. The live fence
 /// then settles the same rows.
 #[expect(
     clippy::expect_used,
@@ -441,16 +439,16 @@ pub async fn open_input_addressed_to_an_ended_root_is_next_turn_input(
 )]
 pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("stale-fence-writes-nothing");
-    let root = "stale-fence-root";
+    let run = "stale-fence-run";
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session, "fenced input"))
         .await
         .expect("enqueue input");
-    let stale = seal_drive_fence_for_test(&store, &session, "stale-fence").await;
-    let admission = admitted_root(
+    let stale = seal_shift_fence_for_test(&store, &session, "stale-fence").await;
+    let admission = admitted_run(
         &store,
         &stale,
-        root,
+        run,
         AdmittedHead::Input(input.input_id.clone()),
     )
     .await;
@@ -466,25 +464,25 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
         .enqueue_queued_work(queued_session_command_draft(&session, "fenced command"))
         .await
         .expect("enqueue command");
-    let live: DriveFence = seal_drive_fence_for_test(&store, &session, "live-fence").await;
+    let live: ShiftFence = seal_shift_fence_for_test(&store, &session, "live-fence").await;
     assert!(live.epoch() > stale.epoch(), "the later seal supersedes");
     let before = durable_ingress(&store, &session).await;
 
-    let readmitted = admit_root_for_test(
+    let readmitted = admit_run_for_test(
         &store,
         &stale,
-        &TurnId::from(root),
+        &TurnId::from(run),
         AdmittedHead::Input(input.input_id.clone()),
     )
     .await;
-    assert!(is_stale_fence(&readmitted), "admit_root: {readmitted:?}");
+    assert!(is_stale_fence(&readmitted), "admit_run: {readmitted:?}");
     let checkpoint = admit_at_checkpoint_for_test(
         &store,
         &stale,
-        &TurnId::from(root),
-        &TurnId::from(root),
+        &TurnId::from(run),
+        &TurnId::from(run),
         crate::CheckpointKind::AfterWork,
-        "stale-fence-root:checkpoint",
+        "stale-fence-run:checkpoint",
         64,
         crate::testing::queued_work_admission_policy(64),
     )
@@ -493,7 +491,7 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
         is_stale_fence(&checkpoint),
         "admit_at_checkpoint: {checkpoint:?}"
     );
-    let settled = try_end_root(&store, &stale, completing_admission(root, &admission)).await;
+    let settled = try_end_run(&store, &stale, completing_admission(run, &admission)).await;
     assert!(is_stale_fence(&settled), "settling commit: {settled:?}");
     let applied = store
         .commit_runtime_state(applying_commands(
@@ -516,10 +514,10 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
     let checkpoint = admit_at_checkpoint_for_test(
         &store,
         &live,
-        &TurnId::from(root),
-        &TurnId::from(root),
+        &TurnId::from(run),
+        &TurnId::from(run),
         crate::CheckpointKind::AfterWork,
-        "stale-fence-root:checkpoint",
+        "stale-fence-run:checkpoint",
         64,
         crate::testing::queued_work_admission_policy(64),
     )
@@ -533,10 +531,10 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
             .unwrap_or_default(),
         vec![batch.batch_id.clone()]
     );
-    end_root(
+    end_run(
         &store,
         &live,
-        completing_checkpoint(completing_admission(root, &admission), &checkpoint),
+        completing_checkpoint(completing_admission(run, &admission), &checkpoint),
     )
     .await;
     store
@@ -562,23 +560,23 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
 
 /// FIG-3927 N6: the command lane is bindless. A command row is settled only
 /// by the fenced commit that applied it. A host withdraws a command until a
-/// drive's fenced read of the lane admits it (FIG-4202); a commit that names
+/// shift's fenced read of the lane admits it (FIG-4202); a commit that names
 /// a withdrawn command is refused whole (`SessionCommandWithdrawn`) and
 /// nothing is written, and a read command is no longer withdrawn. A command
-/// is never bound to a root, by a root's admission or its checkpoint.
+/// is never bound to a run, by a run's admission or its checkpoint.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("command-lane-bindless");
-    let fence = seal_drive_fence_for_test(&store, &session, "command-lane").await;
+    let fence = seal_shift_fence_for_test(&store, &session, "command-lane").await;
     let command_completion = |batch: &crate::QueuedWorkBatch| crate::QueuedWorkCompletion {
         session_id: session.clone(),
         batch_ids: vec![batch.batch_id.clone()],
     };
 
-    // A withdrawal before any drive read the command removes it, and a
+    // A withdrawal before any shift read the command removes it, and a
     // commit that names it anyway is refused with nothing written.
     let withdrawn = store
         .enqueue_queued_work(queued_session_command_draft(&session, "withdrawn"))
@@ -590,7 +588,7 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
             .await
             .expect("withdraw the command")
             .is_some(),
-        "a command no drive read is withdrawable"
+        "a command no shift read is withdrawable"
     );
     let before = durable_ingress(&store, &session).await;
     let refused = store
@@ -616,12 +614,13 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         .enqueue_queued_work(queued_session_command_draft(&session, "applied"))
         .await
         .expect("enqueue the applied command");
-    let run = store
+    let command_run = store
         .open_session_command_run(&fence)
         .await
         .expect("open the command run");
     assert_eq!(
-        run.iter()
+        command_run
+            .iter()
             .map(|batch| batch.batch_id.clone())
             .collect::<Vec<_>>(),
         vec![applied.batch_id.clone()]
@@ -651,8 +650,8 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         "the applied command is settled"
     );
 
-    // Neither a root's admission nor its checkpoint binds a command: the
-    // root is admitted first, and a command enqueued behind it stays open.
+    // Neither a run's admission nor its checkpoint binds a command: the
+    // run is admitted first, and a command enqueued behind it stays open.
     let turn = store
         .enqueue_queued_work(queued_draft(
             &session,
@@ -661,11 +660,11 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         ))
         .await
         .expect("enqueue turn work");
-    let root = "command-lane-root";
-    let admission = admitted_root(
+    let run = "command-lane-run";
+    let admission = admitted_run(
         &store,
         &fence,
-        root,
+        run,
         AdmittedHead::Batch(turn.batch_id.clone()),
     )
     .await;
@@ -677,10 +676,10 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
     let checkpoint = admit_at_checkpoint_for_test(
         &store,
         &fence,
-        &TurnId::from(root),
-        &TurnId::from(root),
+        &TurnId::from(run),
+        &TurnId::from(run),
         crate::CheckpointKind::AfterWork,
-        "command-lane-root:checkpoint",
+        "command-lane-run:checkpoint",
         64,
         crate::testing::queued_work_admission_policy(64),
     )
@@ -694,9 +693,9 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
         "a checkpoint never binds a command"
     );
     assert_eq!(
-        rows_bound_to(&store, &session, root).await.1,
+        rows_bound_to(&store, &session, run).await.1,
         vec![turn.batch_id.clone()],
-        "the root holds its turn work and never the command"
+        "the run holds its turn work and never the command"
     );
     assert!(
         store
@@ -705,23 +704,23 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
             .expect("list open batches")
             .iter()
             .any(|open| open.batch_id == command.batch_id),
-        "the command stays open while a root is unfinished"
+        "the command stays open while a run is unfinished"
     );
 }
 
-/// ADR 0101 §4 under FIG-3927: a session command enqueued after the drive
-/// chose the turn lane never holds a root's head back, whichever table the
-/// head is in. The drive admitted the turn lane at a boundary whose command
-/// lane was empty, so the root's admission takes the run enqueued before the
+/// ADR 0101 §4 under FIG-3927: a session command enqueued after the shift
+/// chose the turn lane never holds a run's head back, whichever table the
+/// head is in. The shift admitted the turn lane at a boundary whose command
+/// lane was empty, so the run's admission takes the run enqueued before the
 /// command, and only the rows enqueued after it wait for the next boundary,
 /// where the command applies first.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<dyn RuntimeStore>) {
+pub async fn a_command_enqueued_behind_a_runs_head_never_starves_it(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("command-behind-the-head");
-    let fence = seal_drive_fence_for_test(&store, &session, "command-behind-the-head").await;
+    let fence = seal_shift_fence_for_test(&store, &session, "command-behind-the-head").await;
     let apply = |command: &crate::QueuedWorkBatch| {
         let store = Arc::clone(&store);
         let session = session.clone();
@@ -742,7 +741,7 @@ pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<
         }
     };
 
-    // An input-headed root.
+    // An input-headed run.
     let head = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session, "input head"))
         .await
@@ -758,18 +757,18 @@ pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<
         ))
         .await
         .expect("enqueue an input behind the command");
-    let root = "input-headed-root";
-    let admission = admitted_root(
+    let run = "input-headed-run";
+    let admission = admitted_run(
         &store,
         &fence,
-        root,
+        run,
         AdmittedHead::Input(head.input_id.clone()),
     )
     .await;
     assert_eq!(
         admission.input_ids(),
         vec![head.input_id.clone()],
-        "the root takes the inputs enqueued before the command, and none behind it"
+        "the run takes the inputs enqueued before the command, and none behind it"
     );
     let pending = store
         .list_pending_turn_inputs(&session)
@@ -793,17 +792,17 @@ pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<
     );
     // The next boundary applies the command, and the input behind it is
     // then the lane's head.
-    end_root(&store, &fence, completing_admission(root, &admission)).await;
+    end_run(&store, &fence, completing_admission(run, &admission)).await;
     apply(&command).await;
-    drive_root_to_end(
+    execute_run_to_end(
         &store,
         &fence,
-        "input-behind-root",
+        "input-behind-run",
         AdmittedHead::Input(behind.input_id.clone()),
     )
     .await;
 
-    // A batch-headed root, the same way.
+    // A batch-headed run, the same way.
     let head = store
         .enqueue_queued_work(queued_draft(
             &session,
@@ -824,19 +823,19 @@ pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<
         ))
         .await
         .expect("enqueue a batch behind the command");
-    let admission = admit_root_for_test(
+    let admission = admit_run_for_test(
         &store,
         &fence,
-        &TurnId::from("batch-headed-root"),
+        &TurnId::from("batch-headed-run"),
         AdmittedHead::Batch(head.batch_id.clone()),
     )
     .await
-    .expect("admit the batch-headed root")
-    .expect("a command behind the head never makes the root miss its head");
+    .expect("admit the batch-headed run")
+    .expect("a command behind the head never makes the run miss its head");
     assert_eq!(
         admission.batch_ids(),
         vec![head.batch_id.clone()],
-        "the root takes the run enqueued before the command, and no row behind it"
+        "the run takes the run enqueued before the command, and no row behind it"
     );
     assert_eq!(
         store
@@ -851,27 +850,27 @@ pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<
     );
 }
 
-/// FIG-3927 N10: a settlement is predicated on the root. A commit whose
-/// settlement names a row bound to another root, or to none, is refused
-/// `IngressRowNotAdmitted` and writes nothing; the owning root then settles
-/// its row once, and a second settlement of it is refused because no root
+/// FIG-3927 N10: a settlement is predicated on the run. A commit whose
+/// settlement names a row bound to another run, or to none, is refused
+/// `IngressRowNotAdmitted` and writes nothing; the owning run then settles
+/// its row once, and a second settlement of it is refused because no run
 /// holds it any more.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimeStore>) {
-    let session = SessionId::from("settlement-predicated-on-root");
-    let root = "settlement-owner-root";
+pub async fn settlement_is_predicated_on_the_run(store: Arc<dyn RuntimeStore>) {
+    let session = SessionId::from("settlement-predicated-on-run");
+    let run = "settlement-owner-run";
     let bound = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session, "bound input"))
         .await
         .expect("enqueue the bound input");
-    let fence = seal_drive_fence_for_test(&store, &session, "settlement-owner").await;
-    let admission = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session, "settlement-owner").await;
+    let admission = admitted_run(
         &store,
         &fence,
-        root,
+        run,
         AdmittedHead::Input(bound.input_id.clone()),
     )
     .await;
@@ -900,25 +899,25 @@ pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimeStore>) 
             store.commit_runtime_state(commit).await
         }
     };
-    let foreign = refused(completing_admission("another-root", &admission)).await;
+    let foreign = refused(completing_admission("another-run", &admission)).await;
     assert!(
         matches!(
             &foreign,
-            Err(StoreError::IngressRowNotAdmitted { admitted_root: Some(holder), .. })
-                if holder.as_str() == root
+            Err(StoreError::IngressRowNotAdmitted { admitted_run: Some(holder), .. })
+                if holder.as_str() == run
         ),
-        "a row bound to another root refuses the settlement: {foreign:?}"
+        "a row bound to another run refuses the settlement: {foreign:?}"
     );
     for (row, settlement) in [
-        ("input", releasing(root, [input_row(&open_input)])),
-        ("batch", releasing(root, [batch_row(&open_batch)])),
+        ("input", releasing(run, [input_row(&open_input)])),
+        ("batch", releasing(run, [batch_row(&open_batch)])),
     ] {
         let unbound = refused(settlement).await;
         assert!(
             matches!(
                 &unbound,
                 Err(StoreError::IngressRowNotAdmitted {
-                    admitted_root: None,
+                    admitted_run: None,
                     ..
                 })
             ),
@@ -926,7 +925,7 @@ pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimeStore>) 
         );
     }
     let mixed = refused({
-        let mut settlement = completing_admission(root, &admission);
+        let mut settlement = completing_admission(run, &admission);
         settlement.released.push(input_row(&open_input));
         settlement
     })
@@ -941,7 +940,7 @@ pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimeStore>) 
         "a refused settlement writes nothing"
     );
 
-    let settlement = completing_admission(root, &admission);
+    let settlement = completing_admission(run, &admission);
     store
         .commit_runtime_state(settling_commit_for_test(
             head_commit(&store, &session).await,
@@ -949,13 +948,13 @@ pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimeStore>) 
             settlement.clone(),
         ))
         .await
-        .expect("the owning root settles its row");
+        .expect("the owning run settles its row");
     let again = refused(settlement).await;
     assert!(
         matches!(
             again,
             Err(StoreError::IngressRowNotAdmitted {
-                admitted_root: None,
+                admitted_run: None,
                 ..
             })
         ),

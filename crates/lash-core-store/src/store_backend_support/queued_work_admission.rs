@@ -133,10 +133,10 @@ pub fn queued_work_submission_digest(draft: &QueuedWorkBatchDraft) -> Result<Str
 /// admitting transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnAddressEvidence {
-    /// The turn is one of the session's unfinished root's turns, or the
+    /// The turn is one of the session's unfinished run's turns, or the
     /// follow-on its head owes.
     Running,
-    /// The turn's final commit is recorded, or its root has terminal
+    /// The turn's final commit is recorded, or its run has terminal
     /// evidence.
     Ended,
     /// Nothing the session records names the turn.
@@ -144,13 +144,13 @@ pub enum TurnAddressEvidence {
 }
 
 /// What the session records about `turn_id`: `running` names the
-/// unfinished root's turns, if a root is unfinished; `owed_follow_on` is the
+/// unfinished run's turns, if a run is unfinished; `owed_follow_on` is the
 /// follow-on turn the head owes, if any; `ended` is whether the turn's final
-/// commit or its root's terminal evidence is recorded.
+/// commit or its run's terminal evidence is recorded.
 #[must_use]
 pub fn turn_address_evidence(
     turn_id: &TurnId,
-    running: Option<&crate::store::RootTurns>,
+    running: Option<&crate::store::RunTurns>,
     owed_follow_on: Option<&crate::store::PendingFollowOn>,
     ended: bool,
 ) -> TurnAddressEvidence {
@@ -220,7 +220,7 @@ pub fn encode_trace_cause(cause: &lash_trace::TraceCause) -> Result<Option<Strin
         .map_err(|error| StoreError::Backend(format!("failed to encode trace cause: {error}")))
 }
 
-/// The trace cause a stored row's `trace_cause_json` column spells: a root
+/// The trace cause a stored row's `trace_cause_json` column spells: a run
 /// cause when it is NULL. A value that does not decode is stored data the
 /// backend refuses; nothing replaces it with another cause.
 pub fn decode_trace_cause(

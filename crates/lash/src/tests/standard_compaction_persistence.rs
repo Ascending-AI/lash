@@ -1242,7 +1242,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .id("attachment-prune-first")
         .output()
         .await?;
-    // The turn's input is admitted durably before it drives (ADR 0069), so its
+    // The turn's input is admitted durably before it executes (ADR 0069), so its
     // committed message is addressed by the acceptance it came from rather than
     // by a turn-shaped id.
     let original_durable_message =
@@ -2025,7 +2025,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
 }
 
 /// An administrative compaction whose commit fails once is applied on the
-/// engine's retry of its command drive: the command stays open, its
+/// engine's retry of its command shift: the command stays open, its
 /// journaled summary is read back rather than requested again, the summary
 /// lands once, and the summarizer's billed usage settles exactly once
 /// (FIG-4201).

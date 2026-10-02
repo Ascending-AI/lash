@@ -215,7 +215,7 @@ where
         ),
     );
     let clock = crate::testing::TestClock::new(4_000_000_000_000);
-    let pass = lash_core::drive::relay::relay_due(&relay, &clock, std::num::NonZeroUsize::MIN)
+    let pass = lash_core::shift::relay::relay_due(&relay, &clock, std::num::NonZeroUsize::MIN)
         .await
         .expect("run the due pass");
     assert_eq!((pass.claimed, pass.retried, pass.stalled), (1, 0, 1));
@@ -246,7 +246,7 @@ where
             .expect("read the refused start")
             .is_none()
     );
-    let next = lash_core::drive::relay::relay_due(&relay, &clock, std::num::NonZeroUsize::MIN)
+    let next = lash_core::shift::relay::relay_due(&relay, &clock, std::num::NonZeroUsize::MIN)
         .await
         .expect("a later due pass");
     assert_eq!(next.claimed, 0, "the refused delivery is settled");
@@ -1195,7 +1195,7 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
         "the crash left no process"
     );
     let occurrences_before = occurrences().await;
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&handles.triggers)),
         &clock,
         page,
@@ -1235,7 +1235,7 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
     let start_key = lash_core::facade_support::trigger_delivery_start_key(&reserved);
     let crashing = Arc::new(BindCrashesOnce::new(Arc::clone(&handles.triggers)));
     clock.advance(3_600_000);
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&crashing) as Arc<dyn TriggerStore>),
         &clock,
         page,
@@ -1264,7 +1264,7 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
         "the crash came before the bind"
     );
     clock.advance(3_600_000);
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&handles.triggers)),
         &clock,
         page,
@@ -1299,7 +1299,7 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
 
     // Both deliveries are delivered: a later pass has nothing to recover.
     clock.advance(3_600_000);
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&handles.triggers)),
         &clock,
         page,
@@ -1419,7 +1419,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
                 .with_process_starts(
                     Arc::clone(&handles.process_starts),
                     Arc::clone(&clock) as Arc<dyn crate::Clock>,
-                    crate::drive::relay::RelayPolicy::default(),
+                    crate::shift::relay::RelayPolicy::default(),
                 ),
         )
     };
@@ -1471,7 +1471,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
 
     // 1. The first attempt registers and starts the child; its bind is lost.
     let crashing = Arc::new(BindCrashesOnce::new(Arc::clone(&handles.triggers)));
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&crashing) as Arc<dyn TriggerStore>),
         clock.as_ref(),
         page,
@@ -1532,7 +1532,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
         faults.lose_next_trigger_delivery_pin_release(point);
     }
     clock.advance(3_600_000);
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&handles.triggers)),
         clock.as_ref(),
         page,
@@ -1591,7 +1591,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
 
     // Nothing is owed and nothing ran again.
     clock.advance(3_600_000);
-    let pass = lash_core::drive::relay::relay_due(
+    let pass = lash_core::shift::relay::relay_due(
         &relay_over(Arc::clone(&handles.triggers)),
         clock.as_ref(),
         page,

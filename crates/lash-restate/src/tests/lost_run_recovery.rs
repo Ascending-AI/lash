@@ -6,9 +6,9 @@
 use super::*;
 use lash_core::StoreSet;
 use lash_core::engine::{BuildGeneration, ReconcileCursor};
-use lash_core::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
-use lash_core::runtime::drive::{ReconcileParts, ReconcileProcesses, RelayLanes, reconcile_once};
 use lash_core::runtime::recovery_lease::RecoveryDuties;
+use lash_core::runtime::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+use lash_core::runtime::shift::{ReconcileParts, ReconcileProcesses, RelayLanes, reconcile_once};
 use lash_core::store::{ObligationKind, ObligationLedger};
 use std::num::NonZeroUsize;
 
@@ -44,7 +44,7 @@ impl HttpTransport for RecoveryTransport {
                 let kind = if query.contains("LashProcessWorkflow") {
                     "process"
                 } else {
-                    "root"
+                    "run"
                 };
                 self.pages.lock_recover().push((
                     kind.into(),
@@ -117,7 +117,7 @@ impl lash_core::ProcessWorkSubstrate for DrainPort {
     }
 }
 
-struct RecoveryDriver {
+struct RecoveryShifts {
     stores: Arc<dyn StoreSet>,
     engine: RestateEngine,
     lanes: RelayLanes,
@@ -129,7 +129,7 @@ struct RecoveryDriver {
 }
 
 #[async_trait::async_trait]
-impl lash_core::SessionDriver for RecoveryDriver {
+impl lash_core::SessionShifts for RecoveryShifts {
     async fn reconcile(
         &self,
         cursor: &ReconcileCursor,
@@ -169,27 +169,27 @@ impl lash_core::SessionDriver for RecoveryDriver {
     async fn admit(
         &self,
         _: ScopedEffectController<'_>,
-        _: &lash_core::engine::DriveRequest,
+        _: &lash_core::engine::ShiftRequest,
         _admitting_generation: &lash_core::engine::BuildGeneration,
         _: u32,
         _: Option<&lash_core::engine::BuildGeneration>,
-    ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
-        panic!("the recovery schedule admits no drives")
+    ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::ShiftAbort> {
+        panic!("the recovery schedule admits no shifts")
     }
-    async fn run_root(
+    async fn execute_run(
         &self,
         _: ScopedEffectController<'_>,
         _: lash_core::engine::Admitted,
-    ) -> lash_core::engine::RootRunEnd {
-        panic!("the recovery schedule runs no roots")
+    ) -> lash_core::engine::RunEnd {
+        panic!("the recovery schedule runs no runs")
     }
-    async fn close_root(
+    async fn close_run(
         &self,
         _: ScopedEffectController<'_>,
         _: &SessionId,
         _: &TurnId,
-    ) -> Result<(), lash_core::engine::DriveAbort> {
-        panic!("the recovery schedule closes no roots")
+    ) -> Result<(), lash_core::engine::ShiftAbort> {
+        panic!("the recovery schedule closes no runs")
     }
 }
 
@@ -237,9 +237,9 @@ async fn seed(stores: &dyn StoreSet, start: usize, count: usize) {
             .await
             .expect("session");
         sessions
-            .bind_root_inputs(&session, &TurnId::from("root"), &[])
+            .bind_run_inputs(&session, &TurnId::from("run"), &[])
             .await
-            .expect("root");
+            .expect("run");
     }
     stores
         .generation_drain()
@@ -248,12 +248,12 @@ async fn seed(stores: &dyn StoreSet, start: usize, count: usize) {
         .expect("drain");
 }
 
-fn driver(
+fn shifts(
     stores: Arc<dyn StoreSet>,
     transport: Arc<RecoveryTransport>,
     ingress_url: String,
     admin_url: String,
-) -> Arc<RecoveryDriver> {
+) -> Arc<RecoveryShifts> {
     let connection = RestateConnection::with_transport(ingress_url, transport.clone());
     let admin = RestateConnection::with_transport(admin_url, transport);
     let generation = BuildGeneration::for_test("recovery-new");
@@ -262,7 +262,7 @@ fn driver(
         RestateConfig::new(connection.clone(), admin, test_restate_authority_id())
             .stamped(generation.clone()),
     );
-    Arc::new(RecoveryDriver {
+    Arc::new(RecoveryShifts {
         lanes: lash_conformance::deployment_tick_lanes(
             stores.clock(),
             lash_core::engine::RecoveryPassBudget::default(),
@@ -293,17 +293,17 @@ async fn page_law(stores: Arc<dyn StoreSet>) {
     let server = lash_restate_test::RestateTestServer::new(Default::default()).expect("double");
     let transport = transport(server.transport(), false);
     seed(stores.as_ref(), 0, 5).await;
-    let driver = driver(
+    let shifts = shifts(
         stores,
         transport.clone(),
         server.ingress_url().to_string(),
         server.ingress_url().to_string(),
     );
-    let sessions = driver.stores.session_store_factory();
-    let clock = driver.stores.clock();
-    let parks = lash_core::drive::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
+    let sessions = shifts.stores.session_store_factory();
+    let clock = shifts.stores.clock();
+    let parks = lash_core::shift::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
     let control =
-        lash_core::SessionWorkEngine::control(driver.engine.session_work_engine().as_ref());
+        lash_core::SessionWorkEngine::control(shifts.engine.session_work_engine().as_ref());
     let mut cursor = None;
     let mut seen = BTreeMap::<String, Vec<String>>::new();
     for index in 0..4 {
@@ -321,7 +321,7 @@ async fn page_law(stores: Arc<dyn StoreSet>) {
             .expect("page")
             .next;
         let pages = transport.pages.lock_recover().clone();
-        for kind in ["process", "root"] {
+        for kind in ["process", "run"] {
             let inspected: usize = pages
                 .iter()
                 .filter(|(k, _, _)| k == kind)
@@ -368,8 +368,8 @@ async fn growing_law(
     );
     seed(stores.as_ref(), 0, 129).await;
     let transport = transport(inner, true);
-    let driver = driver(stores.clone(), transport.clone(), ingress_url, admin_url);
-    let scheduled: Arc<dyn lash_core::SessionDriver> = driver.clone();
+    let shifts = shifts(stores.clone(), transport.clone(), ingress_url, admin_url);
+    let scheduled: Arc<dyn lash_core::SessionShifts> = shifts.clone();
     let schedule = tokio::spawn(crate::session_reconcile::run(
         Arc::downgrade(&scheduled),
         Arc::downgrade(&scheduled),
@@ -377,7 +377,7 @@ async fn growing_law(
     tokio::time::timeout(Duration::from_secs(60), transport.held.notified())
         .await
         .expect("recovery request held");
-    let initial = driver.relay.delivered.load(Ordering::SeqCst);
+    let initial = shifts.relay.delivered.load(Ordering::SeqCst);
     let appended = Arc::new(AtomicUsize::new(0));
     let producer = {
         let appended = appended.clone();
@@ -391,9 +391,9 @@ async fn growing_law(
         })
     };
     let progress = tokio::time::timeout(Duration::from_secs(60), async {
-        while driver.ticks.load(Ordering::SeqCst) < 2
-            || driver.relay.delivered.load(Ordering::SeqCst) <= initial
-            || driver.drain.0.load(Ordering::SeqCst) == 0
+        while shifts.ticks.load(Ordering::SeqCst) < 2
+            || shifts.relay.delivered.load(Ordering::SeqCst) <= initial
+            || shifts.drain.0.load(Ordering::SeqCst) == 0
             || transport.process_query_count() < 2
         {
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -407,11 +407,11 @@ async fn growing_law(
     assert!(
         progress.is_ok(),
         "held recovery starved schedule: ticks {}, drain {}, due {} -> {}, starts {:?}, appended {}",
-        driver.ticks.load(Ordering::SeqCst),
-        driver.drain.0.load(Ordering::SeqCst),
+        shifts.ticks.load(Ordering::SeqCst),
+        shifts.drain.0.load(Ordering::SeqCst),
         initial,
-        driver.relay.delivered.load(Ordering::SeqCst),
-        driver
+        shifts.relay.delivered.load(Ordering::SeqCst),
+        shifts
             .tick_starts
             .lock_recover()
             .iter()
@@ -431,14 +431,14 @@ async fn growing_law(
         appended.load(Ordering::SeqCst) > 0,
         "the producer kept growing the catalog"
     );
-    let starts = driver.tick_starts.lock_recover();
+    let starts = shifts.tick_starts.lock_recover();
     let cadence = starts[1].duration_since(starts[0]);
     println!(
         "recovery tick cadence {cadence:?}; appended {}",
         appended.load(Ordering::SeqCst)
     );
     assert!(
-        cadence <= lash_core::runtime::drive::RECOVERY_TICK + Duration::from_secs(4),
+        cadence <= lash_core::runtime::shift::RECOVERY_TICK + Duration::from_secs(4),
         "recovery kept its cadence: {cadence:?}"
     );
     let pages = transport.pages.lock_recover();
@@ -480,13 +480,13 @@ async fn growing_lost_run_catalog_does_not_starve_drain_or_due_relays() {
 }
 
 #[derive(Debug)]
-struct FailedRootTransport {
+struct FailedRunTransport {
     inner: Arc<dyn HttpTransport>,
     hold_outcome: AtomicBool,
 }
 
 #[async_trait::async_trait]
-impl HttpTransport for FailedRootTransport {
+impl HttpTransport for FailedRunTransport {
     async fn send(
         &self,
         request: HttpRequest,
@@ -517,7 +517,7 @@ impl HttpTransport for FailedRootTransport {
             Some(
                 serde_json::to_value(crate::Reply::at(
                     crate::compat::RESTATE_WIRE_VERSION,
-                    None::<lash_core::engine::RootOutcome>,
+                    None::<lash_core::engine::RunOutcome>,
                 ))
                 .expect("outcome"),
             )
@@ -536,7 +536,7 @@ impl HttpTransport for FailedRootTransport {
 }
 
 #[tokio::test]
-async fn a_timed_out_root_outcome_keeps_its_failure_and_advances_its_page() {
+async fn a_timed_out_run_outcome_keeps_its_failure_and_advances_its_page() {
     println!(
         "host load {}",
         std::fs::read_to_string("/proc/loadavg")
@@ -551,13 +551,13 @@ async fn a_timed_out_root_outcome_keeps_its_failure_and_advances_its_page() {
     seed(stores.as_ref(), 0, 5).await;
     let server = lash_restate_test::RestateTestServer::new(Default::default()).expect("double");
     let transport = transport(
-        Arc::new(FailedRootTransport {
+        Arc::new(FailedRunTransport {
             inner: server.transport(),
             hold_outcome: AtomicBool::new(true),
         }),
         false,
     );
-    let driver = driver(
+    let shifts = shifts(
         stores.clone(),
         transport,
         server.ingress_url().to_string(),
@@ -565,9 +565,9 @@ async fn a_timed_out_root_outcome_keeps_its_failure_and_advances_its_page() {
     );
     let sessions = stores.session_store_factory();
     let clock = stores.clock();
-    let parks = lash_core::drive::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
+    let parks = lash_core::shift::StoreParkRecovery::new(sessions.as_ref(), clock.as_ref());
     let control =
-        lash_core::SessionWorkEngine::control(driver.engine.session_work_engine().as_ref());
+        lash_core::SessionWorkEngine::control(shifts.engine.session_work_engine().as_ref());
     let page = || lash_core::engine::EnginePage {
         after: None,
         limit: NonZeroUsize::new(2).expect("page"),
@@ -577,9 +577,9 @@ async fn a_timed_out_root_outcome_keeps_its_failure_and_advances_its_page() {
         .reconcile_parks(&parks, page())
         .await
         .expect("first page");
-    let first_key = crate::session_driver::turn_workflow_key(
+    let first_key = crate::session_shifts::turn_workflow_key(
         &SessionId::from("recovery-000000"),
-        &TurnId::from("root"),
+        &TurnId::from("run"),
     );
     assert!(
         first
@@ -595,15 +595,15 @@ async fn a_timed_out_root_outcome_keeps_its_failure_and_advances_its_page() {
         .await
         .expect("next page");
     assert_eq!(
-        second.ended_roots.len(),
+        second.ended_runs.len(),
         2,
-        "later roots still settle: {second:?}"
+        "later runs still settle: {second:?}"
     );
     assert!(
         second
-            .ended_roots
+            .ended_runs
             .iter()
-            .all(|root| root.session.as_str() >= "recovery-000002"),
+            .all(|run| run.session.as_str() >= "recovery-000002"),
         "the failed page advanced: {second:?}"
     );
 }

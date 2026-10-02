@@ -109,7 +109,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             value: 0,
             coalesce: false,
         },
-        // A root takes the ready prefix and its commit settles it.
+        // A run takes the ready prefix and its commit settles it.
         AdmitWork,
         Commit {
             component_mode: 0,
@@ -124,8 +124,8 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             coalesce: false,
         },
         AdmitWork,
-        // Work queued behind the running root stays open: a foreign row to
-        // the root, and the next root's joined admission.
+        // Work queued behind the running run stays open: a foreign row to
+        // the run, and the next run's joined admission.
         EnqueueWork {
             slot: 2,
             value: 2,
@@ -160,13 +160,13 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        // A joined admission, merge keys being per-item data; a second root
+        // A joined admission, merge keys being per-item data; a second run
         // is refused while it is unfinished.
         AdmitWork,
         EnqueueTurnInput { slot: 0, value: 0 },
         EnqueueTurnInput { slot: 1, value: 1 },
         AdmitTurnInputs { max_inputs: 3 },
-        // The root ends settling nothing: its terminal hands its rows back.
+        // The run ends settling nothing: its terminal hands its rows back.
         Commit {
             component_mode: 0,
             value: 0,

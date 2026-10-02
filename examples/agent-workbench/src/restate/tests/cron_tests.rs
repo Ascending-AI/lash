@@ -967,7 +967,7 @@ impl lash::persistence::RuntimeStoreDecorator for ContendedDeploymentStore {
 
     async fn admit_session_state(
         &self,
-        fence: &lash::persistence::DriveFence,
+        fence: &lash::persistence::ShiftFence,
     ) -> Result<lash::persistence::SessionStateAdmission, lash::persistence::StoreError> {
         if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
             self.contended_attempts

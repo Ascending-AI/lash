@@ -8,7 +8,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -36,7 +36,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        super::drive_epoch::require_fence_tx(&mut tx, session_id, fence).await?;
+        super::shift_epoch::require_fence_tx(&mut tx, session_id, fence).await?;
         let existing: Option<(String, Option<String>)> = sqlx::query_as(
             crate::turn_ingress::turn_ingress_sql()
                 .bindings_postgres
@@ -104,7 +104,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         authorization: &lash_core_execution::TurnCancelClosureAuthorization,
     ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
@@ -268,7 +268,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
@@ -603,7 +603,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                         .map_err(|err| {
                             pending_turn_input_insert_error(err, session_id, &input_id)
                         })?;
-                    // The admitted input owes its session a drive (ADR 0109
+                    // The admitted input owes its session a shift (ADR 0109
                     // §3): the row is armed in the transaction that admits
                     // it. A row an earlier submission admitted already
                     // carries its obligation and is left as it stands.
@@ -619,7 +619,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
             };
             if draft.pin {
                 // The pin is written with the acceptance, new or replayed,
-                // so the input is pinned before its root can start.
+                // so the input is pinned before its run can start.
                 crate::revisions::pin_tx(
                     &mut tx,
                     session_id,
@@ -635,8 +635,8 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     })?,
             );
         }
-        // An acceptor that drives its rows itself holds their ingress claims
-        // from this commit (FIG-4728): its inline drive is the ask, so no
+        // An acceptor that executes its rows itself holds their ingress claims
+        // from this commit (FIG-4728): its inline shift is the ask, so no
         // relay pass finds the rows due before the acceptor's own admission.
         if let Some(claim_ttl_ms) = batch.acceptor_claim_ttl_ms() {
             let until_ms = now.saturating_add(claim_ttl_ms);
@@ -703,7 +703,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // Open and admitted rows, and the rows a checkpoint accepted into a
-        // running root, read in one snapshot and listed in `enqueue_seq`
+        // running run, read in one snapshot and listed in `enqueue_seq`
         // order (FIG-4044). The isolation level must precede every other
         // statement in the transaction.
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -740,7 +740,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
         // One point read by primary key; the list's lifecycle filter is
         // applied to the one row here: a row is listed until it is completed
-        // or cancelled, open or admitted to its root alike.
+        // or cancelled, open or admitted to its run alike.
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
@@ -951,7 +951,7 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
 
     async fn open_session_command_run(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         super::open_session_command_run_postgres(self, fence).await
     }
@@ -1046,7 +1046,7 @@ async fn admit_run_spec_tx(
                 Some((state.as_str(), hash.as_deref())),
             )?,
             // No input started `turn_id` under a source key: the addressed
-            // turn may still be a running root of another kind (FIG-3877).
+            // turn may still be a running run of another kind (FIG-3877).
             None => check_unsourced_steering_run_spec_tx(tx, draft, turn_id, &spec).await?,
         }
     }
@@ -1072,15 +1072,15 @@ async fn admit_run_spec_tx(
     Ok(spec)
 }
 
-/// The steering verdict over the root kinds no `source_key`-filed input
+/// The steering verdict over the run kinds no `source_key`-filed input
 /// starts (FIG-3877), read inside the admission transaction:
 ///
 /// * `turn_id` is the follow-on the head owes: it inherits the shape its
 ///   fact recorded at the switch.
-/// * `turn_id` is a physical turn of the unfinished queued-headed root: it
+/// * `turn_id` is a physical turn of the unfinished queued-headed run: it
 ///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
-///   next-turn root under its own spec.
+///   next-turn run under its own spec.
 async fn check_unsourced_steering_run_spec_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     draft: &lash_core_execution::PendingTurnInputDraft,
@@ -1088,7 +1088,7 @@ async fn check_unsourced_steering_run_spec_tx(
     spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     use lash_core_execution::store_backend_support as support;
-    // `Some(hash)` is the shape the running root resolved under (`None` =
+    // `Some(hash)` is the shape the running run resolved under (`None` =
     // the default spec); `None` means the evidence did not decide.
     let mut running: Option<Option<String>> = None;
     if let Some(owed) = pending_follow_on_tx(tx, &draft.session_id, false)
@@ -1104,19 +1104,19 @@ async fn check_unsourced_steering_run_spec_tx(
     }
     if running.is_none()
         && let Some(unfinished) =
-            crate::session_roots::unfinished_root_conn(tx, &draft.session_id).await?
+            crate::session_runs::unfinished_run_conn(tx, &draft.session_id).await?
         && matches!(
             unfinished.head,
             lash_core_execution::store::AdmittedHead::Batch(_)
         )
-        && lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0 == unfinished.root
+        && lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0 == unfinished.run
     {
-        // A queued-headed root starts from no input, so it runs the default
+        // A queued-headed run starts from no input, so it runs the default
         // spec.
         running = Some(None);
     }
     if let Some(hash) = running {
-        support::check_running_root_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
+        support::check_running_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
     }
     Ok(())
 }
@@ -1129,7 +1129,7 @@ async fn turn_address_evidence_tx(
     session_id: &SessionId,
     turn_id: &lash_core_execution::TurnId,
 ) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
-    let root = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
+    let run = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
     let ended: bool = sqlx::query_scalar(
         crate::turn_ingress::turn_ingress_sql()
             .family
@@ -1138,11 +1138,11 @@ async fn turn_address_evidence_tx(
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    let running = crate::session_roots::unfinished_root_turns_conn(tx, session_id).await?;
+    let running = crate::session_runs::unfinished_run_turns_conn(tx, session_id).await?;
     let owed = pending_follow_on_tx(tx, session_id, false).await?;
     Ok(
         lash_core_execution::store_backend_support::turn_address_evidence(

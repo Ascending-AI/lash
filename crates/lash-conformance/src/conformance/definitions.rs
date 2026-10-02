@@ -2,7 +2,7 @@
 //! store that registers them.
 //!
 //! A definition is a descriptor in the store set's definition store plus the
-//! manifest it names, held as one closure by every reader. These laws drive
+//! manifest it names, held as one closure by every reader. These laws execute
 //! the real store, the real start staging and the real artifact-cleanup relay:
 //!
 //! - a definition is never reclaimed while any referrer of any kind holds it,
@@ -25,7 +25,7 @@ use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
     SubscriptionRevisionStanding,
 };
-use lash_core::runtime::drive::relay::{RelayPolicy, relay_due};
+use lash_core::runtime::shift::relay::{RelayPolicy, relay_due};
 use lash_core::testing::TestClock;
 
 const DEFINITION_ENGINE: &str = "definition-law";

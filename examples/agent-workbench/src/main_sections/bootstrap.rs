@@ -241,7 +241,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         as Arc<dyn lash::process::ProcessEventSink>;
     // One Restate backend over the store set: the engine host journals the
     // turns' effects, runs the background processes, whose appended events
-    // reach the sink best-effort after their durable write, and drives each
+    // reach the sink best-effort after their durable write, and executes each
     // session's accepted input through its `LashSession` service.
     let backend = Arc::new(lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
@@ -490,7 +490,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         // The turns a previous incarnation was following are settled by the
         // session's engine whoever follows them; this process takes them up.
         restate::resume_turn_followers(&state).await;
-        restate::watch_session_roots(&state, &state.current_session_id()).await;
+        restate::watch_session_runs(&state, &state.current_session_id()).await;
         emit_workbench_trace(
             &state.trace_sink,
             None,

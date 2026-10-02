@@ -560,7 +560,7 @@ async fn cores_in_distinct_namespaces_share_one_server_without_cross_talk() {
         let namespace = core.deployment.namespace();
         let own = server
             .route_to(&namespace.service_name("LashSession"))
-            .expect("the namespace's session driver is registered");
+            .expect("the namespace's SessionShifts is registered");
         let mine: Vec<_> = views
             .iter()
             .filter(|view| {

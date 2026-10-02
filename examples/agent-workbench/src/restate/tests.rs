@@ -716,9 +716,9 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 /// Replay ownership chooses where effects execute; it does not stop the facade
 /// from deriving and handing the turn scope to the backend's effect host. A
 /// Restate backend binds turn control to its own host; a turn it runs does so
-/// inside its session drive's handler, never on the caller's foreground
+/// inside its session shift's handler, never on the caller's foreground
 /// (FIG-3600): the foreground `send` on the Restate double hands the turn to
-/// that drive, which runs the provider once.
+/// that execute, which runs the provider once.
 #[tokio::test]
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
@@ -784,26 +784,26 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     };
 
     // The foreground entry point on an engine with a server behind it: the
-    // session drive runs the turn and executes the provider body.
+    // session shift runs the turn and executes the provider body.
     let double = crate::tests::test_double_backend(0).await;
-    let driven = ownership_core(double.lash_backend(), "Restate double");
-    let session = crate::created_session(&driven, "workbench-runtime-owned-replay")
+    let executed = ownership_core(double.lash_backend(), "Restate double");
+    let session = crate::created_session(&executed, "workbench-runtime-owned-replay")
         .await
         .open()
         .await
         .expect("open the session on the double");
     let handle = session
-        .send(lash::TurnInput::text("drive me from the foreground"))
+        .send(lash::TurnInput::text("shift me from the foreground"))
         .await
         .expect("the engine accepts the input");
     let mut stream = handle.events();
     while let Some(activity) = stream.next_activity().await {
-        activity.expect("the session drive streams turn activity");
+        activity.expect("the session shift streams turn activity");
     }
     let report = handle
         .output()
         .await
-        .expect("the session drive executes the turn")
+        .expect("the session shift executes the turn")
         .result;
     assert_eq!(
         report.final_value(),
@@ -812,7 +812,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         1,
-        "the session drive runs the turn once"
+        "the session shift runs the turn once"
     );
     session.close().await.expect("close the executed session");
 }

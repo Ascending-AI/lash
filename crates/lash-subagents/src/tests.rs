@@ -5,7 +5,7 @@
 
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
@@ -508,7 +508,7 @@ finish(result);
 /// Children used to be created with no dialect, which resolved to a Lashlang
 /// default, so a TypeScript parent silently spawned Lashlang children. Since
 /// ADR 0096 there is only one language, so the guarantee is stated directly:
-/// the prompt a child is actually served is the TypeScript one. This drives a
+/// the prompt a child is actually served is the TypeScript one. This executes a
 /// real spawn and reads that prompt rather than a synthesised one.
 #[tokio::test]
 async fn a_typescript_parent_spawns_typescript_children() {
@@ -1029,7 +1029,7 @@ async fn run_seed_probe_inner(
         .map(|store| Arc::clone(store) as Arc<dyn lash_core::facade_support::TraceSink>);
     let language_features = LashlangLanguageFeatures::default().with_label_annotations();
     // The probe's every port lives on the Restate double (D1 F2): the engine
-    // drives the spawned SessionTurn processes through the worker installed
+    // executes the spawned SessionTurn processes through the worker installed
     // below, and the test holds the double to the end.
     let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
@@ -1126,7 +1126,7 @@ async fn run_seed_probe_inner(
         )
     };
     // `agents.spawn(...)` starts a SessionTurn (subagent) process that the
-    // engine drives through the worker installed on the double below — not
+    // engine executes through the worker installed on the double below — not
     // directly. The engine's own process-work wiring is the runtime's port and
     // the worker's nested port alike, so the nested case (`handle = start
     // spawn_child` then `await handle`) reaches a serving worker too.
@@ -1191,7 +1191,7 @@ async fn run_seed_probe_inner(
         .open_handler(lash_core::AdmittedScope::turn("root", "subagent-test-turn"))
         .await
         .expect("open the turn's handler");
-    let turn = Box::pin(runtime.drive_turn(
+    let turn = Box::pin(runtime.execute_turn(
         input,
         lash_core::facade_support::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),

@@ -28,7 +28,7 @@ app row exists; clients must not perform read-after-see database reads. Once the
 HTTP 200 stream has started, a failed turn or a client that disconnects produces
 a silently truncated stream, with the error reported only in the server logs.
 That behavior is deliberate for this raw transport lane: the session's engine
-drives the turn, and the route only watches it.
+executes the turn, and the route only watches it.
 
 Validate the example build and unit tests:
 
@@ -74,7 +74,7 @@ AGENT_SERVICE_TRACE=.agent-service/trace.jsonl
 The service keeps its stores in one SQLite store set under
 `$AGENT_SERVICE_DATA_DIR/lash-sessions` and runs a `RestateEngine` over it
 (ADR 0104: Restate is the only effect engine, and zero-infra is a local
-`restate-server`). Every turn is driven by lash's `LashSession` service in a
+`restate-server`). Every turn is executed by lash's `LashSession` service in a
 Restate handler. It uses these local defaults:
 
 | Path | App | Restate endpoint | Ingress | Admin |
@@ -105,7 +105,7 @@ and register `http://host.docker.internal:9080` (or add
 
 For the live E2E, use the one-command recipe. It starts the agent-service
 Restate endpoint in-process, registers it through the Restate Admin API, sends
-a chat message through the chat route (which `LashSession` drives), runs a named
+a chat message through the chat route (which `LashSession` executes), runs a named
 background process against the tic-tac-toe board through `LashProcessWorkflow`,
 verifies the persisted assistant message, and removes the container on exit:
 
@@ -124,7 +124,7 @@ The Axum app serves `AGENT_SERVICE_ADDR`, the same process
 also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and the chat
 route hands each message to the chat session's `send(input).id(turn_id)`: the
 session's engine asks lash's `LashSession` service, through
-`RESTATE_INGRESS_URL`, to drive it. `RESTATE_AUTHORITY_ID` identifies the durable
+`RESTATE_INGRESS_URL`, to execute it. `RESTATE_AUTHORITY_ID` identifies the durable
 Restate state independently of that endpoint; preserve it across endpoint
 moves and choose a different value for every independent Restate state. The endpoint starts from
 `RestateEngine::endpoint_builder`, which binds every Lash-owned service,
@@ -135,11 +135,11 @@ route process. The service binds only its own workflows beside them: the
 effect-group demo, and the chat-discard workflow its fork compensator calls to
 delete a half-built fork's session through the engine (a session delete's close
 is a journaled effect, so it runs in a handler). It runs no turn itself. The chat id names the session and the turn id
-names the root, so Restate replay and Lash's final commit address the same
+names the run, so Restate replay and Lash's final commit address the same
 operation. The route follows the input through the send handle
 (`outcome_into`) and maps all four
-statuses: an Answered root's reply is persisted, while a Failed, Cancelled or
-Parked root is reported on the stream, and a retryable refusal is marked
+statuses: an Answered run's reply is persisted, while a Failed, Cancelled or
+Parked run is reported on the stream, and a retryable refusal is marked
 retryable there. The raw activity route accepts before it responds, so a
 retryable refusal of its acceptance answers 503. A host whose HTTP process is
 not the `LashTurn` worker sees no live events for the turn; the outcome then
@@ -244,7 +244,7 @@ The plugin demonstrates:
   `play_move` validates and mutates that canonical board.
 - The canonical board in recorded RLM prompt context. Board changes submit
   `SetRlmPromptContext`, so user turns and process wakes use the same context;
-  a running root and its replay keep the render they recorded.
+  a running run and its replay keep the render they recorded.
 - Additive semantic streaming: thinking is shown live from
   `TurnEvent::ReasoningDelta`, assistant prose as
   `TurnEvent::AssistantProseDelta`, code/tool activity as structured cards, and

@@ -423,7 +423,7 @@ fn standard_protocol_full_text_projection_guard() {
     assert_eq!(
         result.get("llm_call_count").and_then(Value::as_u64),
         Some(1),
-        "the guard must drive a real Standard LLM turn"
+        "the guard must execute a real Standard LLM turn"
     );
     assert_eq!(
         result.get("done").and_then(Value::as_bool),
@@ -880,7 +880,7 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
     }
 }
 
-/// A deployment refusal retains the root on its first attempt, then redrives
+/// A deployment refusal retains the run on its first attempt, then redrives
 /// the same accepted work when the configured worker becomes executable.
 #[tokio::test]
 async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_repair() {
@@ -909,7 +909,7 @@ async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_
         }
     })
     .await
-    .expect("the standard park path pauses the root");
+    .expect("the standard park path pauses the run");
     assert_eq!(
         paused.attempts,
         lash_restate::TURN_HANDLER_MAX_ATTEMPTS as u32,
@@ -933,15 +933,15 @@ async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_
     assert_eq!(reason["executable"], path.to_string_lossy().as_ref());
     assert_eq!(reason["fault"], "not_found");
     let invocations = engine.restate().server().invocations();
-    let roots: Vec<_> = invocations
+    let runs: Vec<_> = invocations
         .iter()
         .filter(|view| view.target.starts_with("LashTurn") && view.target.ends_with("/run"))
         .collect();
-    assert_eq!(roots.len(), 1, "{roots:?}");
+    assert_eq!(runs.len(), 1, "{runs:?}");
     assert_eq!(
-        roots[0].attempts,
+        runs[0].attempts,
         lash_restate::TURN_HANDLER_MAX_ATTEMPTS as u32,
-        "the standard park path keeps the journal: {roots:?}"
+        "the standard park path keeps the journal: {runs:?}"
     );
     std::os::unix::fs::symlink(
         std::fs::canonicalize(std::env::var_os("LASH_VM_WORKER").expect("worker helper"))
@@ -958,11 +958,11 @@ async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_
             park.park_id,
         )
         .await
-        .expect("redrive the parked root");
+        .expect("redrive the parked run");
     let report = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             let outcome = session
-                .root("sim-final-value-turn")
+                .run("sim-final-value-turn")
                 .outcome()
                 .await
                 .expect("redriven outcome");
@@ -973,7 +973,7 @@ async fn a_missing_vm_worker_parks_without_transient_retries_and_redrives_after_
         }
     })
     .await
-    .expect("the repaired root completes");
+    .expect("the repaired run completes");
     assert!(report.final_value().is_some(), "{report:?}");
     let resumed = engine
         .restate()
@@ -1084,7 +1084,7 @@ async fn final_value_semantic_channel_proof_uses_runtime_outcome_and_event() {
 
 #[tokio::test]
 async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
-    // END-TO-END NEGATIVE: drive a REAL `session.send().output()` against a VALID
+    // END-TO-END NEGATIVE: shift a REAL `session.send().output()` against a VALID
     // success script that streams AND COMMITS the leak prose (the same prose a
     // failure turn must NOT commit). The live-failure oracle MUST fail on it —
     // proving the "no committed output" assertion bites end-to-end, not just on
@@ -1093,7 +1093,7 @@ async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
         .expect("valid success control script");
     let facts = run_live_turn_facts(7, OPENAI_COMPATIBLE, script, "success_control", 1)
         .await
-        .expect("drive committing control turn");
+        .expect("shift committing control turn");
 
     // The control turn really did commit the prose (the runtime CAN commit).
     assert!(
@@ -1249,7 +1249,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     assert_eq!(report.counts.oracle_failures, 0);
     assert!(
         report.counts.interleaving_depth_max >= 2,
-        "generated lane must drive >= 2 provider turns concurrently, got {}",
+        "generated lane must execute >= 2 provider turns concurrently, got {}",
         report.counts.interleaving_depth_max
     );
     assert!(report.counts.interleaving_depth_min >= 1);

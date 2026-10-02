@@ -16,7 +16,7 @@ use lash_core_execution::{EffectOpener, ScopeId, SessionId};
 use lash_store_sql::Dialect;
 use lash_store_sql::process::parent_end_plans::ParentEndPlanCleanupStatements;
 use lash_store_sql::session::meta::SessionMetaDeleteStatements;
-use lash_store_sql::session_roots::roots::SessionRootCleanupStatements;
+use lash_store_sql::session_runs::runs::SessionRunCleanupStatements;
 use sqlx::{PgConnection, PgPool};
 
 use crate::StoreError;
@@ -24,8 +24,8 @@ use crate::support::store_sqlx_error;
 
 static META: LazyLock<SessionMetaDeleteStatements> =
     LazyLock::new(|| SessionMetaDeleteStatements::render(Dialect::postgres()));
-static ROOTS: LazyLock<SessionRootCleanupStatements> =
-    LazyLock::new(|| SessionRootCleanupStatements::render(Dialect::postgres()));
+static RUNS: LazyLock<SessionRunCleanupStatements> =
+    LazyLock::new(|| SessionRunCleanupStatements::render(Dialect::postgres()));
 static PLANS: LazyLock<ParentEndPlanCleanupStatements> =
     LazyLock::new(|| ParentEndPlanCleanupStatements::render(Dialect::postgres()));
 
@@ -101,7 +101,7 @@ impl SessionDeleteLedger for PostgresSessionDeleteLedger {
         &self,
         session_id: &SessionId,
     ) -> Result<SessionCleanup, StoreError> {
-        let scope_close: i64 = sqlx::query_scalar(ROOTS.count_undelivered_scope_close.sql())
+        let scope_close: i64 = sqlx::query_scalar(RUNS.count_undelivered_scope_close.sql())
             .bind(session_id.as_str())
             .fetch_one(&self.pool)
             .await

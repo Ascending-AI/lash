@@ -1,11 +1,11 @@
-//! The administrative compaction (FIG-4201): a session command the drive's
+//! The administrative compaction (FIG-4201): a session command the shift's
 //! command lane applies at a turn boundary.
 //!
 //! The bound turn owns the session head. A store-backed session therefore
-//! never compacts beside the drive: `compact_context` is
+//! never compacts beside the shift: `compact_context` is
 //! [`SessionCommand::CompactContext`](crate::SessionCommand::CompactContext),
-//! which the command drain applies under the command root's sealed fence,
-//! once no root is bound (ADR 0101 §4). The compaction's effects are
+//! which the command drain applies under the command run's sealed fence,
+//! once no run is bound (ADR 0101 §4). The compaction's effects are
 //! journaled under the command's own scope, named by its batch, so a redrive
 //! of the command reads its recorded base and its summary back, and a
 //! settled command is never committed again: its replay adopts the head its
@@ -15,10 +15,10 @@
 //! ([`CompactContextOutcome`](super::CompactContextOutcome)), which the
 //! submitter reads back from the batch's completion. The compaction's billed
 //! usage is not part of that commit: its summarizer call is a spending
-//! effect whose usage run the engine delivers (ADR 0125).
+//! effect whose usage meter the engine delivers (ADR 0125).
 //!
 //! A storeless runtime keeps a direct path,
-//! [`LashRuntime::compact_storeless_context`]: it has no drive and no durable
+//! [`LashRuntime::compact_storeless_context`]: it has no shift and no durable
 //! head, and its `&mut self` already serializes the compaction with every
 //! turn it runs.
 
@@ -27,7 +27,7 @@ use crate::facade_support::RuntimeSessionStateFacadeOps;
 use crate::runtime::turn_boundary::SeedCarries;
 
 /// The named phase a runtime's turn-phase probe sees once an administrative
-/// compaction's commit has landed, before its command root goes on.
+/// compaction's commit has landed, before its command run goes on.
 pub const COMPACT_CONTEXT_COMMITTED_PHASE: &str = "compact_context.committed";
 
 /// What one administrative compaction did in resident state, before anything
@@ -67,7 +67,7 @@ struct CompactionFrameSwitch {
 
 impl LashRuntime {
     /// Whether the runtime's session is store-backed: its administrative
-    /// compaction is then a session command its drive applies, and a
+    /// compaction is then a session command its shift applies, and a
     /// storeless runtime compacts through
     /// [`Self::compact_storeless_context`].
     pub fn is_store_backed(&self) -> bool {
@@ -77,7 +77,7 @@ impl LashRuntime {
     /// Compact a storeless runtime's context directly, under
     /// `scoped_effect_controller`.
     ///
-    /// A storeless runtime has no drive and no durable head: its `&mut self`
+    /// A storeless runtime has no shift and no durable head: its `&mut self`
     /// serializes the compaction with every turn it runs, so the compaction
     /// needs no command lane. It records its base and journals its summary
     /// under the controller, opens its frame in resident state and restarts
@@ -115,12 +115,12 @@ impl LashRuntime {
     }
 
     /// Apply the administrative compaction the command run `completion`
-    /// names, under the command root's `drive_fence` (FIG-4201). `false`
+    /// names, under the command run's `shift_fence` (FIG-4201). `false`
     /// when the command was withdrawn since the lane was read: nothing was
     /// applied.
     ///
     /// The compaction runs under the command's own scope, the session operation its
-    /// batch names, rescoped from the command root's controller: a redrive of
+    /// batch names, rescoped from the command run's controller: a redrive of
     /// the unsettled command replays the base it recorded and the summary it
     /// journaled, and the frame key it derives from that scope names the
     /// same frame. A compaction that opened nothing, or failed, settles the
@@ -130,8 +130,8 @@ impl LashRuntime {
         &mut self,
         instructions: Option<String>,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
-        root_controller: &crate::ScopedEffectController<'_>,
+        shift_fence: &crate::store::ShiftFence,
+        run_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
         let [batch_id] = completion.batch_ids.as_slice() else {
             return Err(RuntimeError::new(
@@ -143,8 +143,8 @@ impl LashRuntime {
             ));
         };
         let host = Arc::clone(&self.host.core.control.effect_host);
-        let controller = super::drive::step_controller(
-            root_controller,
+        let controller = super::shift::step_controller(
+            run_controller,
             host.as_ref(),
             crate::AdmittedScope::session_operation(
                 self.state.session_id.clone(),
@@ -152,7 +152,7 @@ impl LashRuntime {
             ),
         )?;
         let run = Box::pin(self.run_compaction(instructions, &controller)).await?;
-        Box::pin(self.commit_compact_context_command(run, completion, drive_fence)).await
+        Box::pin(self.commit_compact_context_command(run, completion, shift_fence)).await
     }
 
     /// Summarize the frame current at the compaction's recorded base and
@@ -256,14 +256,14 @@ impl LashRuntime {
 
     /// Commit what `run` did as the command's one commit (F2): the frame, its
     /// seed, the execution-state and prompt-usage reset and the command's
-    /// settlement with its outcome, under the command root's fence.
+    /// settlement with its outcome, under the command run's fence.
     ///
-    /// A replay of a command this root already settled commits nothing
+    /// A replay of a command this run already settled commits nothing
     /// (FIG-4258): it adopts the durable head. The replay must not present
-    /// the fence again. The drive that applied
+    /// the fence again. The shift that applied
     /// the command goes on to the input queued behind it, whose seal
-    /// supersedes the command root's fence, and Restate replays the whole
-    /// drive from its journal: the store checks a commit's fence before its
+    /// supersedes the command run's fence, and Restate replays the whole
+    /// shift from its journal: the store checks a commit's fence before its
     /// receipt, so the settled commit would be refused as superseded.
     ///
     /// A frame whose recorded base the head has moved from, which only a
@@ -272,13 +272,13 @@ impl LashRuntime {
     /// with [`RuntimeErrorCode::StoreCommitSuperseded`] over the live head,
     /// and the lane goes on. A settlement without a frame is written over the
     /// live head whatever moved it. A newer admission that sealed since the
-    /// command root's seal refuses the commit as superseded, with nothing of
-    /// it durable: that admission's drive applies the command.
+    /// command run's seal refuses the commit as superseded, with nothing of
+    /// it durable: that admission's shift applies the command.
     async fn commit_compact_context_command(
         &mut self,
         run: CompactionRun,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let store = self
             .session
@@ -353,7 +353,7 @@ impl LashRuntime {
                     message: error.message.clone(),
                 },
             };
-            commit.drive_fence = Some(Box::new(drive_fence.clone()));
+            commit.shift_fence = Some(Box::new(shift_fence.clone()));
             commit.applied_commands = Some(completion.clone());
             for batch_id in &completion.batch_ids {
                 commit.command_outcomes.insert(
@@ -372,7 +372,7 @@ impl LashRuntime {
                     self.state.mark_node_ids_persisted(persisted_node_ids);
                     if switch.is_some() {
                         // Every accepted open restarts the live interpreter
-                        // from the new frame's seed, on the drive's own
+                        // from the new frame's seed, on the shift's own
                         // resident runtime (F5).
                         self.restore_protocol_session_after_frame_open().await?;
                     }
@@ -407,8 +407,8 @@ impl LashRuntime {
                         // (FIG-3927 §2.7).
                         crate::StoreError::SessionCommandWithdrawn { .. } => Ok(false),
                         // A later admission that sealed after the command
-                        // root's is a superseded commit: that admission's
-                        // drive applies the command.
+                        // run's is a superseded commit: that admission's
+                        // shift applies the command.
                         error => Err(super::runtime_error_from_store_commit(error)),
                     };
                 }

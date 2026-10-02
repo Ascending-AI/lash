@@ -1,6 +1,6 @@
 //! The execute phase: run the prepared turn's effect loop to a terminal
 //! outcome while its observations are published to the host sinks outside the
-//! drive. Cancellation reaches the loop only as recorded facts: the journaled
+//! shift. Cancellation reaches the loop only as recorded facts: the journaled
 //! gate peeks and the recorded outcomes of its steps (FIG-3672 P9).
 
 use super::*;
@@ -26,7 +26,7 @@ pub(super) struct TurnDriverRemainder {
     pub(super) segment_boundary: Option<crate::runtime::turn_driver::BoundaryTaken>,
 }
 
-/// Everything the execute phase needs to drive an already-prepared turn.
+/// Everything the execute phase needs to execute an already-prepared turn.
 ///
 /// The prepare phase (and the host-prepared entry point) builds one of these;
 /// the execute phase consumes it whole.
@@ -36,7 +36,7 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) initial_admissions: LogicalTurnAdmissions,
-    pub(in crate::runtime) drive_fence: Option<&'sinks DriveFence>,
+    pub(in crate::runtime) shift_fence: Option<&'sinks ShiftFence>,
 }
 
 /// The preamble step of the execute phase: the plugin prepare-turn hooks and
@@ -60,7 +60,7 @@ struct PreparedTurnAbortContext<'abort, 'run> {
     trace_turn_id: TurnId,
     admissions: &'abort LogicalTurnAdmissions,
     scoped_effect_controller: &'abort ScopedEffectController<'run>,
-    drive_fence: Option<&'abort DriveFence>,
+    shift_fence: Option<&'abort ShiftFence>,
     turn_control: &'abort ActiveTurnControl,
     turn_graph_appends: TurnGraphAppendDraft,
     observer: &'abort TurnObserver,
@@ -178,7 +178,7 @@ async fn run_turn_effect_loop(
     // further call would be a fresh peek of the same terminal cause. On the
     // SQL engines the failure is sealed under the gate's replay key, so a
     // second attempt would replay it. A fault outside the journal aborts the
-    // turn for the substrate to re-drive.
+    // turn for the substrate to redrive.
     let start_gate = crate::runtime::RuntimeNamedPhase::begin(
         driver.turn_phase_probe.clone(),
         "turn_cancel.start_gate",
@@ -248,7 +248,7 @@ impl LashRuntime {
             trace_turn_id,
             admissions,
             scoped_effect_controller,
-            drive_fence,
+            shift_fence,
             turn_control,
             turn_graph_appends,
             observer,
@@ -295,7 +295,7 @@ impl LashRuntime {
             admissions,
             scoped_effect_controller,
             honoured_cancel: None,
-            drive_fence,
+            shift_fence,
             turn_control,
             observer,
         }))
@@ -329,7 +329,7 @@ impl LashRuntime {
             scoped_effect_controller,
             local_stop,
             mut initial_admissions,
-            drive_fence,
+            shift_fence,
         } = context;
         let turn_observer = logical_observer.for_turn(&trace_turn_id);
         let observer = &turn_observer;
@@ -344,7 +344,7 @@ impl LashRuntime {
             )
             .await?,
         );
-        // Host glue, not drive code: a host-local stop becomes a durable
+        // Host glue, not shift code: a host-local stop becomes a durable
         // request on this turn's gate for as long as the turn runs, and the
         // turn sees it only where it sees any request — its journaled peeks
         // and its steps' recorded outcomes.
@@ -352,11 +352,11 @@ impl LashRuntime {
             .forward_to(Arc::clone(&turn_control), Arc::clone(&turn_control_host))
             .await;
         let turn_policy = self.state.effective_policy().clone();
-        // The root's recorded view: its protocol turn options are a view of
+        // The run's recorded view: its protocol turn options are a view of
         // the protocol namespace of the configuration it was admitted under.
         let effective_protocol_turn_options = self.state.effective_protocol_turn_options();
         let manager = self
-            .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
+            .runtime_session_services_for_turn(shift_fence, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -395,7 +395,7 @@ impl LashRuntime {
                 trace_turn_id,
                 admissions: &initial_admissions,
                 scoped_effect_controller: &scoped_effect_controller,
-                drive_fence,
+                shift_fence,
                 turn_control: turn_control.as_ref(),
                 turn_graph_appends,
                 observer,
@@ -436,11 +436,11 @@ impl LashRuntime {
             .await
         {
             let error = super::runtime_error_from_store_commit(error);
-            let root = self.park_root(
-                scoped_effect_controller.execution_scope().logical_root(),
+            let run = self.park_run(
+                scoped_effect_controller.execution_scope().logical_run(),
                 &trace_turn_id,
             );
-            self.record_turn_park_after_abort(&error, &root, None).await;
+            self.record_turn_park_after_abort(&error, &run, None).await;
             return Err(error);
         }
         // The model binding is the turn's recorded config (D3 §2.1). Nothing
@@ -449,9 +449,9 @@ impl LashRuntime {
         let resolved_turn_policy = self
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-            .map_err(crate::runtime::drive::llm_profile_unconfigured)?;
+            .map_err(crate::runtime::shift::llm_profile_unconfigured)?;
         let manager = self
-            .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
+            .runtime_session_services_for_turn(shift_fence, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -463,11 +463,11 @@ impl LashRuntime {
         let carried_withheld = initial_admissions.withheld_terminal_work.take();
         // The turn's part in its run's segment boundaries (FIG-4739). A
         // continuation counts on from the iterations its run already spent;
-        // a turn outside a drive, or one carrying withheld work to the run's
+        // a turn outside a shift, or one carrying withheld work to the run's
         // follow-on, takes no boundary.
         let segment = crate::runtime::turn_driver::TurnSegment::new(
-            drive_fence.is_some()
-                && self.drive_root.is_some()
+            shift_fence.is_some()
+                && self.shift_run.is_some()
                 && carried_withheld.is_none()
                 && matches!(
                     scoped_effect_controller.execution_scope(),
@@ -505,12 +505,12 @@ impl LashRuntime {
             pending_checkpoint_turn_inputs: None,
             withheld_terminal_work: Default::default(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            drive_fence: drive_fence.cloned(),
-            drive_root: self.drive_root.as_ref().map(|root| root.root().clone()),
+            shift_fence: shift_fence.cloned(),
+            shift_run: self.shift_run.as_ref().map(|run| run.run().clone()),
             drive_generation: self
-                .drive_root
+                .shift_run
                 .as_ref()
-                .map(|root| root.journal_generation().clone()),
+                .map(|run| run.journal_generation().clone()),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
@@ -521,9 +521,9 @@ impl LashRuntime {
             turn_observations: super::turn_observation_cursor(
                 &scoped_effect_controller,
                 &trace_turn_id,
-                "drive",
+                "shift",
             ),
-            trace: self.host.core.tracing.turn_drive(
+            trace: self.host.core.tracing.turn_execution(
                 &self.state.session_id,
                 &trace_turn_id,
                 &scoped_effect_controller,
@@ -574,7 +574,7 @@ impl LashRuntime {
                             driver,
                             cancellation_messages,
                             finish_scoped_effect_controller: &finish_scoped_effect_controller,
-                            drive_fence,
+                            shift_fence,
                             turn_control: turn_control.as_ref(),
                             turn_index,
                             trace_turn_id,
@@ -583,20 +583,20 @@ impl LashRuntime {
                     ))
                     .await;
                 }
-                // The rows the turn drove stay bound to its root: a redrive
-                // drives them again, and the root's terminal releases them
+                // The rows the turn drove stay bound to its run: a redrive
+                // executes them again, and the run's terminal releases them
                 // (FIG-3927 §2.5).
                 drop(driver.reclaim());
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                // The park names the logical root, never this physical turn
+                // The park names the logical run, never this physical turn
                 // (D2 §1.3).
-                let root = self.park_root(
+                let run = self.park_run(
                     finish_scoped_effect_controller
                         .execution_scope()
-                        .logical_root(),
+                        .logical_run(),
                     &trace_turn_id,
                 );
-                Box::pin(self.record_turn_park_after_abort(&err, &root, None)).await;
+                Box::pin(self.record_turn_park_after_abort(&err, &run, None)).await;
                 return Err(err);
             }
         };
@@ -639,7 +639,7 @@ impl LashRuntime {
                 admissions: &pending_admissions,
                 scoped_effect_controller: &finish_scoped_effect_controller,
                 honoured_cancel: turn_cancel,
-                drive_fence,
+                shift_fence,
                 turn_control: turn_control.as_ref(),
                 observer,
             }),

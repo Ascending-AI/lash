@@ -9,7 +9,7 @@
 //! notification.
 //!
 //! These laws read the journals a real width-4 tool batch leaves on the server
-//! double, driven by the endpoint's own turn runner:
+//! double, executed by the endpoint's own turn runner:
 //!
 //! - a seat invokes no other service: it writes its settlement, one exclusive
 //!   decision per child, and completes its subscribers in its own journal;

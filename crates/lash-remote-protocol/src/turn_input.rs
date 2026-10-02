@@ -146,7 +146,7 @@ pub enum RemoteInputItem {
 pub struct RemoteTurnRequest {
     /// Target session.
     pub session_id: SessionId,
-    /// Stable turn identifier for the submitted input: the root the input
+    /// Stable turn identifier for the submitted input: the run the input
     /// opens and its idempotency key at once. A transport sends it as
     /// `send(input).id(turn_id)`, so resending the same request answers the
     /// first acceptance instead of admitting the input again.
@@ -155,7 +155,7 @@ pub struct RemoteTurnRequest {
     /// tool results, usage, and activity.
     pub turn_id: TurnId,
     pub input: RemoteTurnInput,
-    /// Protocol turn options for this input's root only: the send's run
+    /// Protocol turn options for this input's run only: the send's run
     /// spec overrides, merged over the session's options. They never become
     /// the session's.
     #[serde(default, skip_serializing_if = "Option::is_none")]

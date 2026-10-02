@@ -457,7 +457,7 @@ pub struct PluginSessionContext {
     /// The session's recorded plugin configuration at this build (FIG-4379):
     /// what it was created with or last patched to, or a process's captured
     /// configuration. It is the value at build time only: a hook reads the
-    /// configuration its root was admitted under from its own context, so a
+    /// configuration its run was admitted under from its own context, so a
     /// hook closure must not keep a copy of this.
     pub plugin_config: super::AdmittedPluginConfig,
     /// Whether factories are constructing a new session or rebuilding one

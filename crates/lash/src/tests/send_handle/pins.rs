@@ -1,6 +1,6 @@
 //! FIG-4731 at the facade: fork at any retained turn, and pin by input, turn
 //! or revision at any time. Every law runs on lash-restate's engine over the
-//! Restate server double, whose drive admits the next root as soon as one
+//! Restate server double, whose shift admits the next run as soon as one
 //! commits.
 
 use super::*;
@@ -114,7 +114,7 @@ async fn assert_no_session(fixture: &Fixture, branch: &str) -> Result<()> {
 }
 
 /// Law 1 (a): `send(..).pin()` pins the input in the transaction that accepts
-/// it, before its root can start. The turn survives the next turn and a host
+/// it, before its run can start. The turn survives the next turn and a host
 /// collection, and a fork of the input is that turn's committed state.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_pinned_at_acceptance_keeps_its_turn_through_collection() -> Result<()> {
@@ -219,14 +219,14 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     session.send(TurnInput::text("one")).output().await?;
     let before = published(&fixture, "pin-running").await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
     provider_called(&fixture, 2).await;
     let turn = session
         .current_turn()
         .await?
-        .expect("the held turn is the unfinished root");
-    assert_eq!(turn, lash_core::TurnId::from("held-root"));
-    assert_eq!(running.root().await?, Some(turn.clone()));
+        .expect("the held turn is the unfinished run");
+    assert_eq!(turn, lash_core::TurnId::from("held-run"));
+    assert_eq!(running.run().await?, Some(turn.clone()));
     let target = Target::Turn(turn);
     session.pin(target.clone()).await?;
     session.pin(target.clone()).await?;
@@ -268,10 +268,10 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     assert_fork_is(&fixture, "pin-running", target, "pin-running-held", &held).await
 }
 
-/// Law 2: an input a merging drain answers inside another input's root pins,
-/// and forks, the root that applied it. `SendHandle::root()` names that root.
+/// Law 2: an input a merging drain answers inside another input's run pins,
+/// and forks, the run that applied it. `SendHandle::run()` names that run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_merged_inputs_pin_resolves_to_the_root_that_applied_it() -> Result<()> {
+async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()> {
     let fixture = composing_fixture().await?;
     let session = fixture
         .core
@@ -281,17 +281,17 @@ async fn a_merged_inputs_pin_resolves_to_the_root_that_applied_it() -> Result<()
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id("second-root")
+        .id("second-run")
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id("third-root")
+        .id("third-run")
         .await?;
-    assert_eq!(third.root().await?, None, "no root has taken the input yet");
+    assert_eq!(third.run().await?, None, "no run has taken the input yet");
     third.pin().await?;
     third.pin().await?;
     let third_input = third.input_id().clone();
@@ -299,9 +299,9 @@ async fn a_merged_inputs_pin_resolves_to_the_root_that_applied_it() -> Result<()
     running.output().await?;
     second.output().await?;
     assert_eq!(
-        session.attach(third_input.clone()).root().await?,
-        Some(lash_core::TurnId::from("second-root")),
-        "the merged input is bound to the root that applied it"
+        session.attach(third_input.clone()).run().await?,
+        Some(lash_core::TurnId::from("second-run")),
+        "the merged input is bound to the run that applied it"
     );
     let merged = published(&fixture, "pin-merged").await?;
     session.send(TurnInput::text("after")).output().await?;
@@ -320,12 +320,12 @@ async fn a_merged_inputs_pin_resolves_to_the_root_that_applied_it() -> Result<()
         .store_factory
         .resolve_target(
             &SessionId::from("pin-merged"),
-            &Target::Turn(lash_core::TurnId::from("second-root")),
+            &Target::Turn(lash_core::TurnId::from("second-run")),
         )
         .await?;
     assert_eq!(
         by_input.head_revision, by_turn.head_revision,
-        "the merged input and the applying root name one revision"
+        "the merged input and the applying run name one revision"
     );
     Ok(())
 }
@@ -433,7 +433,7 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     Ok(())
 }
 
-/// Law 5: a withdrawn input refuses `Unavailable`, an accepted input no root
+/// Law 5: a withdrawn input refuses `Unavailable`, an accepted input no run
 /// has taken refuses `Pending`, and neither forks the head in its place.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
@@ -445,17 +445,17 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
         .await
         .open()
         .await?;
-    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
     provider_called(&fixture, 1).await;
     let waiting = session
         .send(TurnInput::text("waits"))
-        .id("waiting-root")
+        .id("waiting-run")
         .pin()
         .await?;
     let waiting_target = Target::Input(waiting.input_id().clone());
     let withdrawn = session
         .send(TurnInput::text("withdraw me"))
-        .id("withdrawn-root")
+        .id("withdrawn-run")
         .pin()
         .await?;
     let withdrawn_target = Target::Input(withdrawn.input_id().clone());
@@ -471,7 +471,7 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
         "fork-refused-waiting",
     )
     .await
-    .expect_err("no root has taken the waiting input");
+    .expect_err("no run has taken the waiting input");
     assert!(
         matches!(
             &pending,
@@ -520,7 +520,7 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
 /// next turn and a host collection leave it forkable, and both pins name the
 /// one revision it published. The store may outlive a run, so every session
 /// is named under `prefix`. Answers the core, which serves the session's
-/// drive until the caller's deployment has finished.
+/// shift until the caller's deployment has finished.
 async fn a_held_turn_pinned_both_ways_forks_after_collection(
     backend: lash_core::Backend,
     prefix: &str,
@@ -544,18 +544,18 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
         .await?;
     session.send(TurnInput::text("one")).output().await?;
 
-    let held_root = format!("{prefix}-held");
+    let held_run = format!("{prefix}-held");
     let running = session
         .send(TurnInput::text(HELD))
-        .id(lash_core::TurnId::fixture(held_root.as_str()))
+        .id(lash_core::TurnId::fixture(held_run.as_str()))
         .pin()
         .await?;
     reaches(&calls, 2, "the held turn's model call starts").await;
     let turn = session
         .current_turn()
         .await?
-        .expect("the held turn is the unfinished root");
-    assert_eq!(turn, lash_core::TurnId::fixture(held_root.as_str()));
+        .expect("the held turn is the unfinished run");
+    assert_eq!(turn, lash_core::TurnId::fixture(held_run.as_str()));
     let by_turn = Target::Turn(turn);
     let by_input = Target::Input(running.input_id().clone());
     session.pin(by_turn.clone()).await?;
@@ -644,11 +644,11 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection_on_postgres() -> Re
     Ok(())
 }
 
-/// The law on a live `restate-server` (the `recorded-roots` suite of
+/// The law on a live `restate-server` (the `recorded-runs` suite of
 /// `scripts/restate-suites.toml`). The server's state outlives a run, so each
 /// run names its own sessions.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by the recorded-roots suite"]
+#[ignore = "requires an isolated Restate server; run by the recorded-runs suite"]
 #[allow(
     clippy::disallowed_methods,
     reason = "the live law reads the suite's server and endpoint addresses"
@@ -673,7 +673,7 @@ async fn live_a_held_turn_pinned_both_ways_forks_after_collection() -> Result<()
         })
         .await
         .expect("serve the live deployment");
-    // The core outlives the census: the session's drive finishes on it.
+    // The core outlives the census: the session's shift finishes on it.
     let result =
         a_held_turn_pinned_both_ways_forks_after_collection(live.lash_backend(), &prefix).await;
     live.finish().await;

@@ -1,11 +1,11 @@
 # E2E Scenario: Agent Service — Restate Effect Groups
 
 > **Read [../RULES.md](../RULES.md) first.** This scenario is API-only: every gate is an HTTP
-> request and a JSON body, so drive it with an HTTP client. Boot and teardown are part of the
+> request and a JSON body, so shift it with an HTTP client. Boot and teardown are part of the
 > run here as in every other full-host row — Phase 0 boots the stack this row owns and Phase 4
 > takes it down. The agent under test is never given a host-affecting or `shell.*` tool.
 
-**Purpose.** Prove that agent-service's public HTTP surface drives the complete Restate
+**Purpose.** Prove that agent-service's public HTTP surface executes the complete Restate
 effect-group choreography: the index admits one fresh group, the dispatcher starts three
 children, the READY/RANK waits expose the first settlement, close cancels both losers, and
 the terminal rank order remains readable through the app.
@@ -62,10 +62,10 @@ run_slug="<shell-safe slug unique to this row>"
 container="lash-agent-service-restate-$run_slug"
 run_id="$run_slug-effect-group-$(date +%s)"
 authority_id="agent-service-runbook:$run_slug"
-run_root="<fresh artifact directory for this row>"
-mkdir -p "$run_root"
-data_dir="$run_root/agent-service-data"
-host_log="$run_root/agent-service.log"
+execute_run="<fresh artifact directory for this row>"
+mkdir -p "$execute_run"
+data_dir="$execute_run/agent-service-data"
+host_log="$execute_run/agent-service.log"
 app_port="<app port>"
 admin_port="<restate admin port>"
 ingress_port="<restate ingress port>"
@@ -84,7 +84,7 @@ docker run -d --name "$container" --network host \
   -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
   -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
   -e RESTATE_BIND_PORT="$node_port" \
-  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b | tee "$run_root/container-id.txt"
+  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b | tee "$execute_run/container-id.txt"
 ```
 
 Poll the admin and ingress ports with a 90-second deadline; on failure save only
@@ -123,7 +123,7 @@ register this host's endpoint with the container this row started:
 
 ```sh
 restate -y deployments register "http://127.0.0.1:$endpoint_port" \
-  | tee "$run_root/00-register.txt"
+  | tee "$execute_run/00-register.txt"
 ```
 
 Record `base_url`, `run_id`, `authority_id`, `container`, every port, and `host_pid` in
@@ -193,7 +193,7 @@ match nothing, saving it as `04-host-panic-sweep.txt`:
 
 ```sh
 awk 'emit; /^[[:space:]]*Running /{emit=1}' "$host_log" \
-  | grep -F 'panicked at' | tee "$run_root/04-host-panic-sweep.txt"
+  | grep -F 'panicked at' | tee "$execute_run/04-host-panic-sweep.txt"
 ```
 
 An unscoped grep sweeps compiler diagnostics as well, so a dependency that merely prints that

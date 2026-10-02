@@ -4,15 +4,15 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only SQLite
     /// issues.
     pub(crate) struct TurnIngressSqliteStatements @ "turn_ingress" {
-        /// States of inputs bound to root `?2` in session `?1`, read under
+        /// States of inputs bound to run `?2` in session `?1`, read under
         /// the write transaction that records its park.
-        root_bound_input_states = "SELECT pti.state FROM session_root_inputs binding
+        run_bound_input_states = "SELECT pti.state FROM session_run_inputs binding
              JOIN pending_turn_inputs pti
                ON pti.session_id = binding.session_id AND pti.input_id = binding.input_id
-             WHERE binding.session_id = ?1 AND binding.root = ?2
+             WHERE binding.session_id = ?1 AND binding.run = ?2
              ORDER BY pti.input_id";
 
-        /// Whether session `?1`'s root `?5` has checkpoint work for turn
+        /// Whether session `?1`'s run `?5` has checkpoint work for turn
         /// `?2` at the `after_work` checkpoint: rows step `?6` already bound
         /// (a re-executed step reads them back), open active-turn input while
         /// `?3` inputs may still be admitted, or a non-command item at the
@@ -26,24 +26,24 @@ lash_store_sql::statements! {
         checkpoint_work_pending_after_work = "WITH queued_work_head_candidate AS (
                  SELECT batch_id AS head_batch_id, delivery_policy AS head_delivery_policy
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL
                    AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT EXISTS (
                 SELECT 1 FROM pending_turn_inputs
-                WHERE session_id = ?1 AND admitted_root = ?5 AND admitted_by = ?6
+                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
              ) OR EXISTS (
                 SELECT 1 FROM queued_work_batches
-                WHERE session_id = ?1 AND admitted_root = ?5 AND admitted_by = ?6
+                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
              ) OR (
                 ?3 > 0 AND EXISTS (
                     SELECT 1
                     FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
                     WHERE session_id = ?1
                       AND {{undelivered_turn_input_state(state)}}
-                      AND admitted_root IS NULL
+                      AND admitted_run IS NULL
                       AND {{pending_active_turn_input_state(state)}}
                       AND json_extract(ingress_json, '$.scope') = 'active_turn'
                       AND json_extract(ingress_json, '$.turn_id') = ?2
@@ -67,24 +67,24 @@ lash_store_sql::statements! {
         checkpoint_work_pending_before_completion = "WITH queued_work_head_candidate AS (
                  SELECT batch_id AS head_batch_id, delivery_policy AS head_delivery_policy
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL
                    AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT EXISTS (
                 SELECT 1 FROM pending_turn_inputs
-                WHERE session_id = ?1 AND admitted_root = ?5 AND admitted_by = ?6
+                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
              ) OR EXISTS (
                 SELECT 1 FROM queued_work_batches
-                WHERE session_id = ?1 AND admitted_root = ?5 AND admitted_by = ?6
+                WHERE session_id = ?1 AND admitted_run = ?5 AND admitted_by = ?6
              ) OR (
                 ?3 > 0 AND EXISTS (
                     SELECT 1
                     FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
                     WHERE session_id = ?1
                       AND {{undelivered_turn_input_state(state)}}
-                      AND admitted_root IS NULL
+                      AND admitted_run IS NULL
                       AND {{pending_active_turn_input_state(state)}}
                       AND json_extract(ingress_json, '$.scope') = 'active_turn'
                       AND json_extract(ingress_json, '$.turn_id') = ?2

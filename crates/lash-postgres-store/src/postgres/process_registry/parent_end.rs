@@ -1,7 +1,7 @@
 //! The scope-close ledger: one row per closed scope (FIG-3607 R9).
 //!
 //! The ledger is keyed by the scope itself — `(kind, id)` — not by a process
-//! row. A turn root or a session has no process row, and a process scope's row
+//! row. A turn run or a session has no process row, and a process scope's row
 //! may be pruned before its children settle, so a foreign key onto
 //! `lash_processes` cannot express the fact this table records.
 

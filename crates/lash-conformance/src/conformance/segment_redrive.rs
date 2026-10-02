@@ -1,4 +1,4 @@
-//! FIG-3547: a segment re-drive never re-executes a recorded effect, and a
+//! FIG-3547: a segment redrive never re-executes a recorded effect, and a
 //! segment whose engine lost its record ends `Abandoned(SubstrateLost)`.
 //!
 //! The law runs one process segment per scenario on the tier's engine, through
@@ -24,7 +24,7 @@
 //! Each crash is recovered two ways ([`SegmentRecovery`](crate::SegmentRecovery)):
 //!
 //! - **Replay**: the engine delivers the execution again over its surviving
-//!   record. A recorded effect never runs again, and the re-drive observes the
+//!   record. A recorded effect never runs again, and the redrive observes the
 //!   recorded result. An unrecorded effect runs exactly once more, under the
 //!   identity its first run had: the same call id and replay key, which is the
 //!   idempotency key an effect implementor relies on. The process completes.
@@ -711,12 +711,12 @@ fn assert_crash_precondition(scenario: &Scenario) -> BTreeMap<&'static str, usiz
 /// add, given what the crash left.
 fn expected_after_replay(scenario: &Scenario, effect: &'static str, at_crash: usize) -> usize {
     match (scenario.kind, scenario.case, effect) {
-        // The start is keyed by its start key: a re-drive of either case
+        // The start is keyed by its start key: a redrive of either case
         // starts no second run of the child.
         (EffectKind::ChildStart, _, _) => at_crash,
         // The recorded effect is served, never run again.
         (_, CrashCase::Recorded, _) => at_crash,
-        // The unrecorded effect never answered, so the re-drive runs it once
+        // The unrecorded effect never answered, so the redrive runs it once
         // more.
         (_, CrashCase::Unrecorded, _) => at_crash + 1,
     }
@@ -801,7 +801,7 @@ async fn run_scenario(
                 assert_eq!(
                     runs.len(),
                     expected,
-                    "{name}: `{effect}` runs across the re-drive: {runs:?}"
+                    "{name}: `{effect}` runs across the redrive: {runs:?}"
                 );
                 assert!(
                     runs.windows(2).all(|pair| pair[0] == pair[1]),
@@ -822,7 +822,7 @@ async fn run_scenario(
                     assert_eq!(
                         probe.observed(Phase::Recovery, effect),
                         Some(Ok(1)),
-                        "{name}: the re-drive's start answers the child"
+                        "{name}: the redrive's start answers the child"
                     );
                 } else {
                     assert_eq!(
@@ -834,7 +834,7 @@ async fn run_scenario(
                     assert_eq!(
                         probe.observed(Phase::Recovery, effect),
                         Some(Ok(expected)),
-                        "{name}: the re-drive observes the result of `{effect}`'s last run, \
+                        "{name}: the redrive observes the result of `{effect}`'s last run, \
                          the recorded one where it was recorded"
                     );
                 }

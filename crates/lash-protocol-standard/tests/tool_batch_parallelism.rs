@@ -1,7 +1,7 @@
 //! The standard protocol's registrations of the barrier laws (ADR 0116 §7.1)
 //! and the `batch` sugar laws (§7.2) on the in-process tier: lash-restate's
 //! engine on the Restate server double this crate opens, each law turn
-//! driven inside a live handler.
+//! executed inside a live handler.
 //!
 //! The laws, their tools and every assertion live in lash-conformance; this
 //! file supplies what that crate cannot construct — the standard protocol,

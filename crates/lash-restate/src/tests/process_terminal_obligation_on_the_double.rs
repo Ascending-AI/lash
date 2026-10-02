@@ -14,9 +14,9 @@
 
 use super::*;
 
-use lash_core::runtime::drive::relay::relay_due;
 use lash_core::runtime::process_start::ProcessStartRelay;
 use lash_core::runtime::process_terminal::ProcessTerminalRelay;
+use lash_core::runtime::shift::relay::relay_due;
 use lash_core::store::{ObligationKind, ObligationState};
 
 /// Completes every run with a fixed success, fails every attempt live,
@@ -123,7 +123,7 @@ impl World {
                     Arc::clone(&continuations),
                 )
                 .with_retry_max_attempts(MAX_ATTEMPTS),
-                session_driver: crate::RestateSessionDriverSlot::new(),
+                session_shifts: crate::RestateSessionShiftsSlot::new(),
                 build_generation: lash_core::engine::BuildGeneration::for_test(
                     "process-terminal-obligation",
                 ),

@@ -4,7 +4,7 @@
 //! `remote-host` as a child process and speaks to it over the child's
 //! stdin and stdout, one JSON line per message. The host embeds lash as a
 //! host does: on its first accepted request it serves and registers a
-//! Restate deployment of its own build, so the root runs in the host and
+//! Restate deployment of its own build, so the run executes in the host and
 //! its activity streams to the client live. The client opens with a
 //! `Hello`, builds its [`Negotiated`] version from the host's answer, and
 //! sends a turn request at that version; the host answers the request's
@@ -80,7 +80,7 @@ pub enum Frame {
     Negotiation(Negotiation),
     /// A request, at the negotiated version.
     Request(serde_json::Value),
-    /// One activity of the request's root, at the request's version.
+    /// One activity of the request's run, at the request's version.
     Stream(serde_json::Value),
     /// The request's outcome, at the request's version.
     Reply(serde_json::Value),

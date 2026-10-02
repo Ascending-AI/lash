@@ -2,7 +2,7 @@
 //! server double over SQLite and PostgreSQL.
 //!
 //! A context-pressure hook is protocol-neutral: an RLM session opens a
-//! pressure frame the way a standard one does, and a root whose turn then
+//! pressure frame the way a standard one does, and a run whose turn then
 //! ends in `control.continue_as` commits both frames, in order, each exactly
 //! once, however its execution dies. The live interpreter restarts from the
 //! new frame's seed exactly as the durable execution state does, whichever

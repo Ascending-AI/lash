@@ -12,7 +12,7 @@
 //! nothing and the definition store holds no descriptor.
 //!
 //! The typed evidence is then the bound controller itself: the law mints it
-//! through `scoped_for_group_child` — the same seam `ToolChildHost` drives —
+//! through `scoped_for_group_child` — the same seam `ToolChildHost` executes —
 //! while the group is still live, exactly as the real child's controller
 //! exists from dispatch, and pushes a `PublishDefinition` admission through
 //! it after the cancel decision commits. The substrate answers with

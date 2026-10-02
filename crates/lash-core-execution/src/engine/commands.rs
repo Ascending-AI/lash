@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use super::context::DriveObservation;
+use super::context::ShiftObservation;
 
 /// Where a step body publishes observations.
 pub trait ObservationSink: Send + Sync {
-    fn observe(&self, observation: DriveObservation);
+    fn observe(&self, observation: ShiftObservation);
 }
 
-/// An [`ObservationSink`] that drops every observation, for drive paths that
+/// An [`ObservationSink`] that drops every observation, for shift paths that
 /// run without a host stream.
 pub struct NullObservationSink;
 
@@ -21,11 +21,11 @@ impl NullObservationSink {
 }
 
 impl ObservationSink for NullObservationSink {
-    fn observe(&self, _observation: DriveObservation) {}
+    fn observe(&self, _observation: ShiftObservation) {}
 }
 
 /// An [`ObservationSink`] that forwards to `inner` while `open` holds, then
-/// drops everything. A live-opener registration wraps the shared drive sink
+/// drops everything. A live-opener registration wraps the shared shift sink
 /// in this so a child tool keeps publishing while the entry is live and stops
 /// the moment the caller's turn removes it — the same gate the forwarder
 /// task's `select` imposed, without a spawned forwarding task.
@@ -47,15 +47,15 @@ impl<F> ObservationSink for GatedObservationSink<F>
 where
     F: Fn() -> bool + Send + Sync,
 {
-    fn observe(&self, observation: DriveObservation) {
+    fn observe(&self, observation: ShiftObservation) {
         if (self.open)() {
             self.inner.observe(observation);
         }
     }
 }
 
-/// The drive-side emitter a step body publishes through: one cursor per
-/// effect body or drive step, keyed by that body's replay key, minting the
+/// The shift-side emitter a step body publishes through: one cursor per
+/// effect body or shift step, keyed by that body's replay key, minting the
 /// ordinal sequence itself (ADR 0105 §1).
 ///
 /// A cursor is owned locally — there is no shared counter. The
@@ -79,7 +79,7 @@ impl ObservationCursor {
     /// advance. Synchronous and non-waking; what the sink does with an
     /// observation is never a decision input.
     pub fn observe(&mut self, sink: &dyn ObservationSink, event: super::context::ObservedEvent) {
-        sink.observe(DriveObservation {
+        sink.observe(ShiftObservation {
             key: self.key.clone(),
             ordinal: self.next,
             event,

@@ -358,7 +358,7 @@ async fn a_per_turn_protocol_override_cannot_re_point_the_dialect() -> Result<()
 
     // The attack: a host-supplied per-turn override naming a session pin.
     // A run's options are the RLM owner's typed run options, which have no
-    // field for a pin (FIG-4652): the root's shape is refused whether the
+    // field for a pin (FIG-4652): the run's shape is refused whether the
     // payload re-points the pin or restates the value the session recorded.
     for pin in [
         serde_json::json!({ "dialect": "lashlang" }),

@@ -211,7 +211,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         "initial frame should contain the original request"
     );
 
-    // The compaction is a session command the engine's drive applies at the
+    // The compaction is a session command the engine's shift applies at the
     // next turn boundary; the admin call awaits its settlement (FIG-4201).
     let compacted = Box::pin(
         session
@@ -507,7 +507,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     let cursor = session.observe().current_observation().cursor;
     let _hold = held_double(&core)
         .expect("the core runs on its held double")
-        .hold_session_drive(&SessionId::from("pending-input-facade-cancel"))
+        .hold_session_shift(&SessionId::from("pending-input-facade-cancel"))
         .await;
 
     let first = session
@@ -1555,7 +1555,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
             .source_key
             .as_deref()
             .is_some_and(|key| !key.is_empty()),
-        "direct ingress keys its row by the turn's id, the root the drive runs it under"
+        "direct ingress keys its row by the turn's id, the run the shift runs it under"
     );
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),

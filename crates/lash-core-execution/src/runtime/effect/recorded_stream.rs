@@ -27,7 +27,7 @@
 //!   reference to that entry instead, and emission restores it.
 //! * **What the settlement already holds is not recorded again.** The
 //!   child's call events carry the arguments and output its own journaled
-//!   call record holds. Once the child's drive has returned,
+//!   call record holds. Once the child's shift has returned,
 //!   any sizable part of a recorded payload equal to a part of the child's
 //!   own journaled call record is replaced by a reference to it, and
 //!   emission restores it from that record.

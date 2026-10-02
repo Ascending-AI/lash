@@ -204,7 +204,7 @@ store.
 Connected inbox accounts are recorded RLM prompt context. Adding or removing
 an account, or clearing accounts on reset, applies `SetRlmPromptContext` to
 live sessions. New sessions record the current accounts at creation. Every
-turn source uses that config, while a running root and its replay keep their
+turn source uses that config, while a running run and its replay keep their
 recorded render.
 
 Six low-frequency data utilities under `text`, `json`, and `list` are kept out
@@ -339,14 +339,14 @@ turn leaves exactly one committed assistant copy.
 
 ### One turn at a time, admitted honestly
 
-A session runs one turn at a time — drive epoch admission and the
+A session runs one turn at a time — shift epoch admission and the
 commit-CAS fence enforce that durably — so `POST /api/turn` cannot start a turn
 on a session that already has one running. It admits the send as the next turn's
 input instead and says so: `{"accepted":true,"queued":true,"queued_input":{…}}`
 carries the same `TurnInputReceipt` `/api/turn/input` returns, and the same
 `turn_input` product event reaches every viewer, so a second client's message is
 held durably, rendered as a queued receipt, and answered as its own turn once the
-session's engine drives the next root over it. No optimistic user row is published for it: the receipt is the
+session's engine executes the next run over it. No optimistic user row is published for it: the receipt is the
 row, and the drained turn's committed message reconciles against it through
 `turn_input_applied`.
 

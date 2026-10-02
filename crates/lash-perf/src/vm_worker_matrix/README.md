@@ -20,7 +20,7 @@ kiln gate lash FORK -- "$binary" --out .benchmarks/vm-worker
 rm -f "$report"
 ```
 
-`--verify` drives every workload on both sides and checks the profiler's exact
+`--verify` executes every workload on both sides and checks the profiler's exact
 report, results, effect counts, segment resumption, reset reuse across owners,
 reservation across 256 growing lease IDs and a genuinely queued checkout.
 Run it twenty times and inspect each log. It has no timing population. The

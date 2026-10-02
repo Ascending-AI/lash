@@ -15,15 +15,15 @@
 //!   [`ArmEffect::Crash`] records the trip and never returns, as a dead
 //!   process never does; the world then aborts every task the deployment ran.
 //!
-//! [`DriverProxy`] is the deployment slot the engine's handlers reach the
-//! session driver through. While no deployment is up, a handler's call waits
+//! [`ShiftsProxy`] is the deployment slot the engine's handlers reach the
+//! `SessionShifts` through. While no deployment is up, a handler's call waits
 //! in it, as an invoker's retries against a restarting deployment would,
 //! without spending the handler's retry budget.
 
 use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
-use lash_core::{DeploymentStore, SessionDriver, SessionId, SessionWorkEngine};
+use lash_core::{DeploymentStore, SessionId, SessionShifts, SessionWorkEngine};
 use tokio::sync::watch;
 
 /// A crash that fired: where, and when on the server's virtual clock.
@@ -121,14 +121,14 @@ pub enum HostSite {
     FrameCommitBefore,
     /// The frame SQL transaction committed, before its caller hears the receipt.
     FrameCommitAfter,
-    /// The host's drive ask after an acceptance committed: the ingress
-    /// obligation's awaited `SessionWorkEngine::request_drive` (the host dies
-    /// there) or a fire-and-forget `schedule_drive` (the ask never leaves).
-    DriveAsk,
-    /// `SessionControlEngine::release_root`, before the engine sees it.
-    ReleaseRootBefore,
-    /// `SessionControlEngine::release_root`, after the engine answered.
-    ReleaseRootAfter,
+    /// The host's shift ask after an acceptance committed: the ingress
+    /// obligation's awaited `SessionWorkEngine::request_shift` (the host dies
+    /// there) or a fire-and-forget `schedule_shift` (the ask never leaves).
+    ShiftAsk,
+    /// `SessionControlEngine::release_run`, before the engine sees it.
+    ReleaseRunBefore,
+    /// `SessionControlEngine::release_run`, after the engine answered.
+    ReleaseRunAfter,
     /// `ControlIntentStore::acknowledge_intent`, before it writes.
     AcknowledgeIntentBefore,
     /// `DeploymentStore::delete_session`, before the physical delete.
@@ -137,16 +137,16 @@ pub enum HostSite {
     DeliverCancelBefore,
     /// `ProcessWorkSubstrate::deliver_cancel`, after the engine answered.
     DeliverCancelAfter,
-    /// `SessionDriver::run_root`, before the deployment runs the root: the
+    /// `SessionShifts::execute_run`, before the deployment executes the run: the
     /// attempt fails live, and the engine retries it until it stops.
-    RunRootBefore,
+    ExecuteRunBefore,
 }
 
 /// What an armed site does when a call reaches it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArmEffect {
     /// The host dies here: the trip fires and the call never returns. A
-    /// swallowed drive ask returns at once instead, since the ask is
+    /// swallowed shift ask returns at once instead, since the ask is
     /// fire-and-forget and the host's next step is the crash.
     Crash,
     /// The engine refuses the delivery for good.
@@ -258,7 +258,7 @@ impl HostFaults {
     }
 
     /// Record that the store holds `intent` acknowledged: `applied` when its
-    /// engine half ran, not when the store settled a redrive its root ran
+    /// engine half ran, not when the store settled a redrive its run ran
     /// past.
     fn record_acknowledged(&self, intent: &lash_core::store::ControlIntent, applied: bool) {
         if !matches!(
@@ -267,11 +267,11 @@ impl HostFaults {
         ) {
             return;
         }
-        let (root, park) = match &intent.kind {
-            lash_core::store::ControlIntentKind::Redrive { root, park, .. }
-            | lash_core::store::ControlIntentKind::Cancel { root, park }
-            | lash_core::store::ControlIntentKind::Fork { root, park, .. } => {
-                (Some(root.to_string()), Some(park.feed_sequence()))
+        let (run, park) = match &intent.kind {
+            lash_core::store::ControlIntentKind::Redrive { run, park, .. }
+            | lash_core::store::ControlIntentKind::Cancel { run, park }
+            | lash_core::store::ControlIntentKind::Fork { run, park, .. } => {
+                (Some(run.to_string()), Some(park.feed_sequence()))
             }
             lash_core::store::ControlIntentKind::CloseSession { .. } => (None, None),
         };
@@ -279,7 +279,7 @@ impl HostFaults {
             intent: intent.id.to_string(),
             session: intent.session_id.to_string(),
             verb: intent.kind.code().to_owned(),
-            root,
+            run,
             park,
             applied,
         });
@@ -355,25 +355,25 @@ async fn die<T>() -> T {
 // The deployment slot
 // ---------------------------------------------------------------------------
 
-/// The session driver the engine's handlers reach: the live deployment's, or
+/// The `SessionShifts` the engine's handlers reach: the live deployment's, or
 /// a wait for the next one while none is up.
-pub struct DriverProxy {
-    current: Mutex<Option<Arc<dyn SessionDriver>>>,
+pub struct ShiftsProxy {
+    current: Mutex<Option<Arc<dyn SessionShifts>>>,
     up: watch::Sender<u64>,
-    /// The world's armed sites: a root's run crosses [`HostSite::RunRootBefore`].
+    /// The world's armed sites: a run's execution crosses [`HostSite::ExecuteRunBefore`].
     faults: Option<Arc<HostFaults>>,
 }
 
-impl std::fmt::Debug for DriverProxy {
+impl std::fmt::Debug for ShiftsProxy {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("DriverProxy")
+            .debug_struct("ShiftsProxy")
             .field("up", &self.current.lock_recover().is_some())
             .finish()
     }
 }
 
-impl Default for DriverProxy {
+impl Default for ShiftsProxy {
     fn default() -> Self {
         Self {
             current: Mutex::new(None),
@@ -383,8 +383,8 @@ impl Default for DriverProxy {
     }
 }
 
-impl DriverProxy {
-    /// A slot whose root runs cross `faults`.
+impl ShiftsProxy {
+    /// A slot whose run executes cross `faults`.
     #[must_use]
     pub fn with_faults(faults: Arc<HostFaults>) -> Self {
         Self {
@@ -393,9 +393,9 @@ impl DriverProxy {
         }
     }
 
-    /// Serve `driver` from now on.
-    pub fn serve(&self, driver: Arc<dyn SessionDriver>) {
-        *self.current.lock_recover() = Some(driver);
+    /// Serve `shifts` from now on.
+    pub fn serve(&self, shifts: Arc<dyn SessionShifts>) {
+        *self.current.lock_recover() = Some(shifts);
         self.up.send_modify(|generation| *generation += 1);
     }
 
@@ -405,17 +405,17 @@ impl DriverProxy {
         self.up.send_modify(|generation| *generation += 1);
     }
 
-    /// The live deployment's driver, if one is up.
+    /// The live deployment's `SessionShifts`, if one is up.
     #[must_use]
-    pub fn current(&self) -> Option<Arc<dyn SessionDriver>> {
+    pub fn current(&self) -> Option<Arc<dyn SessionShifts>> {
         self.current.lock_recover().clone()
     }
 
-    async fn live(&self) -> Arc<dyn SessionDriver> {
+    async fn live(&self) -> Arc<dyn SessionShifts> {
         let mut changes = self.up.subscribe();
         loop {
-            if let Some(driver) = self.current() {
-                return driver;
+            if let Some(shifts) = self.current() {
+                return shifts;
             }
             if changes.changed().await.is_err() {
                 return die().await;
@@ -425,44 +425,44 @@ impl DriverProxy {
 }
 
 #[async_trait::async_trait]
-impl SessionDriver for DriverProxy {
-    fn hold_drive(&self, session: &lash_core::SessionId) -> lash_core::engine::DriveHold {
+impl SessionShifts for ShiftsProxy {
+    fn hold_shift(&self, session: &lash_core::SessionId) -> lash_core::engine::ShiftHold {
         self.current()
-            .map_or_else(lash_core::engine::DriveHold::empty, |driver| {
-                driver.hold_drive(session)
+            .map_or_else(lash_core::engine::ShiftHold::empty, |shifts| {
+                shifts.hold_shift(session)
             })
     }
 
     async fn admit(
         &self,
         controller: lash_core::ScopedEffectController<'_>,
-        request: &lash_core::engine::DriveRequest,
+        request: &lash_core::engine::ShiftRequest,
         admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         draining: Option<&lash_core::engine::BuildGeneration>,
-    ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
+    ) -> Result<lash_core::engine::AdmitVerdict, lash_core::engine::ShiftAbort> {
         self.live()
             .await
             .admit(controller, request, admitting_generation, ordinal, draining)
             .await
     }
 
-    async fn run_root(
+    async fn execute_run(
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> lash_core::engine::RootRunEnd {
-        let driver = self.live().await;
-        let detail = format!("{}/{}", admitted.session(), admitted.root());
+    ) -> lash_core::engine::RunEnd {
+        let shifts = self.live().await;
+        let detail = format!("{}/{}", admitted.session(), admitted.run());
         match self
             .faults
             .as_ref()
-            .and_then(|faults| faults.take(HostSite::RunRootBefore, &detail))
+            .and_then(|faults| faults.take(HostSite::ExecuteRunBefore, &detail))
         {
             Some(ArmEffect::Crash) => return die().await,
             Some(effect) => {
-                return lash_core::engine::RootRunEnd::owing_nothing(Err(
-                    lash_core::engine::DriveAbort::Retry(lash_core::RuntimeError::new(
+                return lash_core::engine::RunEnd::owing_nothing(Err(
+                    lash_core::engine::ShiftAbort::Retry(lash_core::RuntimeError::new(
                         lash_core::RuntimeErrorCode::PluginSessionManager,
                         format!("crash matrix: {effect:?} at the run of `{detail}`"),
                     )),
@@ -470,19 +470,16 @@ impl SessionDriver for DriverProxy {
             }
             None => {}
         }
-        driver.run_root(controller, admitted).await
+        shifts.execute_run(controller, admitted).await
     }
 
-    async fn close_root(
+    async fn close_run(
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         session: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> Result<(), lash_core::engine::DriveAbort> {
-        self.live()
-            .await
-            .close_root(controller, session, root)
-            .await
+        run: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::ShiftAbort> {
+        self.live().await.close_run(controller, session, run).await
     }
 }
 
@@ -491,36 +488,36 @@ impl SessionDriver for DriverProxy {
 // ---------------------------------------------------------------------------
 
 /// The engine's session work as a deployment reaches it: every answer is the
-/// engine's, a core's driver installs into the [`DriverProxy`], and the
-/// drive ask and the control verbs cross [`HostFaults`].
+/// engine's, a core's `SessionShifts` installs into the [`ShiftsProxy`], and the
+/// shift ask and the control verbs cross [`HostFaults`].
 pub struct CrashSessionWork {
     inner: Arc<dyn SessionWorkEngine>,
-    proxy: Arc<DriverProxy>,
+    proxy: Arc<ShiftsProxy>,
     faults: Arc<HostFaults>,
     /// The engine's installation of the proxy, installed once and kept for
     /// the world's life.
-    installed: std::sync::OnceLock<Arc<dyn SessionDriver>>,
-    /// Every drive request a waiter awaited, and every ask the engine
+    installed: std::sync::OnceLock<Arc<dyn SessionShifts>>,
+    /// Every shift request a waiter awaited, and every ask the engine
     /// accepted, in order.
-    drives: Arc<DriveLog>,
+    shifts: Arc<ShiftLog>,
 }
 
-/// The drive requests a deployment's session work saw: those a waiter
+/// The shift requests a deployment's session work saw: those a waiter
 /// awaited, and those the engine accepted as asks.
 #[derive(Debug, Default)]
-pub struct DriveLog {
+pub struct ShiftLog {
     awaited: std::sync::Mutex<Vec<String>>,
     asked: std::sync::Mutex<Vec<String>>,
 }
 
-impl DriveLog {
-    /// Every drive request a waiter awaited, in order.
+impl ShiftLog {
+    /// Every shift request a waiter awaited, in order.
     #[must_use]
     pub fn awaited(&self) -> Vec<String> {
         self.awaited.lock_recover().clone()
     }
 
-    /// Every drive ask the engine accepted, in order.
+    /// Every shift ask the engine accepted, in order.
     #[must_use]
     pub fn asked(&self) -> Vec<String> {
         self.asked.lock_recover().clone()
@@ -539,16 +536,16 @@ impl CrashSessionWork {
     #[must_use]
     pub fn new(
         inner: Arc<dyn SessionWorkEngine>,
-        proxy: Arc<DriverProxy>,
+        proxy: Arc<ShiftsProxy>,
         faults: Arc<HostFaults>,
-        drives: Arc<DriveLog>,
+        shifts: Arc<ShiftLog>,
     ) -> Self {
         Self {
             inner,
             proxy,
             faults,
             installed: std::sync::OnceLock::new(),
-            drives,
+            shifts,
         }
     }
 }
@@ -562,54 +559,54 @@ impl SessionWorkEngine for CrashSessionWork {
         })
     }
 
-    fn schedule_drive(&self, session: &SessionId, request: lash_core::engine::DriveRequestId) {
+    fn schedule_shift(&self, session: &SessionId, request: lash_core::engine::ShiftRequestId) {
         let detail = format!("{session}/{}", request.as_str());
-        if self.faults.take(HostSite::DriveAsk, &detail).is_some() {
+        if self.faults.take(HostSite::ShiftAsk, &detail).is_some() {
             return;
         }
-        self.inner.schedule_drive(session, request);
+        self.inner.schedule_shift(session, request);
     }
 
-    /// Every deployment's driver is served through the one proxy the engine
-    /// holds; the core keeps its own driver alive.
-    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        self.proxy.serve(Arc::clone(&driver));
+    /// Every deployment's `SessionShifts` is served through the one proxy the engine
+    /// holds; the core keeps its own `SessionShifts` alive.
+    fn install_session_shifts(&self, shifts: Arc<dyn SessionShifts>) -> Arc<dyn SessionShifts> {
+        self.proxy.serve(Arc::clone(&shifts));
         self.installed.get_or_init(|| {
             self.inner
-                .install_session_driver(Arc::clone(&self.proxy) as Arc<dyn SessionDriver>)
+                .install_session_shifts(Arc::clone(&self.proxy) as Arc<dyn SessionShifts>)
         });
-        driver
+        shifts
     }
 
-    async fn await_drive(
+    async fn await_shift(
         &self,
         session: &SessionId,
-        request: &lash_core::engine::DriveRequestId,
-    ) -> Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-        self.drives
+        request: &lash_core::engine::ShiftRequestId,
+    ) -> Result<lash_core::engine::ShiftOutcome, lash_core::engine::ShiftAbort> {
+        self.shifts
             .awaited
             .lock_recover()
             .push(request.as_str().to_owned());
-        self.inner.await_drive(session, request).await
+        self.inner.await_shift(session, request).await
     }
 
-    /// The awaited drive ask an admitted row's ingress obligation delivers
+    /// The awaited shift ask an admitted row's ingress obligation delivers
     /// (ADR 0109 §3): a host that dies here never hears the engine's answer,
     /// so the claim its delivery took lapses and the relay retakes it.
-    async fn request_drive(
+    async fn request_shift(
         &self,
         session: &SessionId,
-        request: lash_core::engine::DriveRequestId,
+        request: lash_core::engine::ShiftRequestId,
     ) -> Result<(), lash_core::engine::EngineRefusal> {
         let detail = format!("{session}/{}", request.as_str());
-        match self.faults.take(HostSite::DriveAsk, &detail) {
+        match self.faults.take(HostSite::ShiftAsk, &detail) {
             Some(ArmEffect::Crash) => return die().await,
-            Some(effect) => return Err(refusal(effect, HostSite::DriveAsk)),
+            Some(effect) => return Err(refusal(effect, HostSite::ShiftAsk)),
             None => {}
         }
         let asked = request.as_str().to_owned();
-        self.inner.request_drive(session, request).await?;
-        self.drives.asked.lock_recover().push(asked);
+        self.inner.request_shift(session, request).await?;
+        self.shifts.asked.lock_recover().push(asked);
         Ok(())
     }
 }
@@ -650,16 +647,16 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
         self.inner.reconcile_parks(parks, page).await
     }
 
-    async fn resume_root(
+    async fn resume_run(
         &self,
-        target: &lash_core::engine::RootRef,
+        target: &lash_core::engine::RunRef,
         engine: Option<&lash_core::store::EnginePark>,
         children: &[lash_core::store::EnginePark],
     ) -> Result<lash_core::engine::EngineAck, lash_core::engine::EngineRefusal> {
-        let ack = self.inner.resume_root(target, engine, children).await?;
+        let ack = self.inner.resume_run(target, engine, children).await?;
         self.faults.record(crate::invariants::Fact::Resume {
             session: target.session.to_string(),
-            root: target.root.to_string(),
+            run: target.run.to_string(),
             held: matches!(ack, lash_core::engine::EngineAck::Resumed),
         });
         Ok(ack)
@@ -673,21 +670,21 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
         self.inner.resume_process(process, park).await
     }
 
-    async fn release_root(
+    async fn release_run(
         &self,
-        target: &lash_core::engine::RootRef,
+        target: &lash_core::engine::RunRef,
         engine: Option<&lash_core::store::EnginePark>,
     ) -> Result<lash_core::engine::EngineAck, lash_core::engine::EngineRefusal> {
         let detail = format!("{target:?}");
-        match self.faults.take(HostSite::ReleaseRootBefore, &detail) {
+        match self.faults.take(HostSite::ReleaseRunBefore, &detail) {
             Some(ArmEffect::Crash) => return die().await,
-            Some(effect) => return Err(refusal(effect, HostSite::ReleaseRootBefore)),
+            Some(effect) => return Err(refusal(effect, HostSite::ReleaseRunBefore)),
             None => {}
         }
-        let answer = self.inner.release_root(target, engine).await;
-        match self.faults.take(HostSite::ReleaseRootAfter, &detail) {
+        let answer = self.inner.release_run(target, engine).await;
+        match self.faults.take(HostSite::ReleaseRunAfter, &detail) {
             Some(ArmEffect::Crash) => die().await,
-            Some(effect) => Err(refusal(effect, HostSite::ReleaseRootAfter)),
+            Some(effect) => Err(refusal(effect, HostSite::ReleaseRunAfter)),
             None => answer,
         }
     }
@@ -797,7 +794,7 @@ impl lash_core::store::RuntimeStoreDecorator for CrashSessionFactory {
         }
     }
 
-    /// A redrive its root ran past is settled acknowledged here, without
+    /// A redrive its run ran past is settled acknowledged here, without
     /// its engine half: the claim's own transaction writes it.
     async fn claim_intent_application(
         &self,

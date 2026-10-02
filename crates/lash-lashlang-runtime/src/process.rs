@@ -100,7 +100,7 @@ pub(crate) fn record_segment_boundary_decline(
 /// and embeds VM continuation v18.
 /// v18 (FIG-3571) embeds VM continuation v19 over the carrier IR's node ids. A
 /// v17 segment parked before the cutover is refused before continuation
-/// restore; it is never re-driven under the new node ids.
+/// restore; it is never redriven under the new node ids.
 /// v19 (FIG-3586) carries the run's issue-ordinal state — the ordinal the
 /// next command takes and the running digest of the commands it wrote — in
 /// place of the per-kind sleep sequence, and embeds VM continuation state
@@ -616,7 +616,7 @@ async fn run_lashlang_process_scoped(
         lashlang_execution_trace.emit_started(&artifact);
     }
     let processes = context.processes();
-    // The drive's recorded cancellation fact (FIG-3673): advanced only by what
+    // The shift's recorded cancellation fact (FIG-3673): advanced only by what
     // the engine recorded — a cancelled tool outcome, a wait the process's
     // cancellation won, a cancel checkpoint's recorded peek — so a replay
     // advances it at the same point. The engine's live stop is lent to step
@@ -1357,7 +1357,7 @@ impl LashlangProcessHost<'_> {
                 if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
             {
                 // The process's cancellation won the recorded race with the
-                // timer: the drive's fact advances here, at the same point on
+                // timer: the shift's fact advances here, at the same point on
                 // every replay.
                 self.cancellation.cancel();
                 Some(lash_core::ProcessEffectOutcomeClass::Cancelled)

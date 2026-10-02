@@ -17,7 +17,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 
 ## Examples
 
-Runnable apps under `examples/` drive the facade end-to-end, with real
+Runnable apps under `examples/` shift the facade end-to-end, with real
 persistence, remote DTO streams, and optional durable execution.
 
 Two of them are hosts that **own** their UI. Start with `agent-service` for the
@@ -58,7 +58,7 @@ way a web service does.
 
 ## Contributing
 
-Feature requests and bug reports welcome — open an [issue](https://github.com/Ascending-AI/lash/issues). At this alpha stage detailed write-ups (what you tried, expected, and saw) help more than drive-by PRs — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Feature requests and bug reports welcome — open an [issue](https://github.com/Ascending-AI/lash/issues). At this alpha stage detailed write-ups (what you tried, expected, and saw) help more than shift-by PRs — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

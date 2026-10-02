@@ -464,12 +464,12 @@ async fn another_generation_does_not_compare_the_added_step_journal() {
     );
 }
 
-/// A service fixture and the journals of a build whose `drive` handler
+/// A service fixture and the journals of a build whose `shift` handler
 /// journals one more step than the fixture recorded.
 async fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJournals) {
     let journal = |steps: &[&str]| {
         BTreeMap::from([(
-            "drive".to_string(),
+            "shift".to_string(),
             BTreeSet::from([steps
                 .iter()
                 .map(|step| step.to_string())
@@ -480,11 +480,11 @@ async fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJ
         scenario: service_scenario_name("LashSession"),
         service: "LashSession".to_string(),
         generation: current_generation().await,
-        handlers: journal(&["InputCommand", "RunCommand lash.drive.leg", "OutputCommand"]),
+        handlers: journal(&["InputCommand", "RunCommand lash.shift.leg", "OutputCommand"]),
     };
     let current = journal(&[
         "InputCommand",
-        "RunCommand lash.drive.leg",
+        "RunCommand lash.shift.leg",
         "RunCommand lash:release-journal-added-step",
         "OutputCommand",
     ]);

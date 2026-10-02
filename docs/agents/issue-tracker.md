@@ -36,7 +36,7 @@ Create a Linear issue in team `figments`, project `lash`.
 A multi-ticket effort is one **parent** Linear issue with its slices and decisions as **sub-issues** ([way-of-working.md](way-of-working.md), [ticket-style.md](ticket-style.md)).
 
 - **Parent**: `save_issue { team: "figments", project: "lash", title: <effort name> }`, body carrying the destination plus the one-line-per-child index.
-- **Child ticket**: a Linear issue with `parentId: "<parent key>"`. Once claimed, assign it to the driving dev.
+- **Child ticket**: a Linear issue with `parentId: "<parent key>"`. Once claimed, assign it to the executing dev.
 - **Blocking**: Linear native relations, e.g. `save_issue { id: <child>, blockedBy: ["<blocker key>"] }`. A ticket is unblocked when every blocker is in a terminal state (`Done`/`Canceled`). Read blockers via `get_issue { includeRelations: true }`.
 - **Frontier query**: `list_issues { parentId: "<parent key>", state: <non-terminal> }` → drop any child with an open blocker or an assignee; first in index order wins.
 - **Claim**: `save_issue { id: <n>, assignee: "me" }` (the session's first write).

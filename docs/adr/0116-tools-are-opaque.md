@@ -422,7 +422,7 @@ These fixtures test the public boundary.
 ### 9. Durable composition and host integration
 
 Process engines own executable process bodies. Language aggregates compose
-recorded calls and process operations. Hosts never drive a durable process;
+recorded calls and process operations. Hosts never execute a durable process;
 a custom host subagent tool is an ordinary provider returning a
 `DeclaredStart`. Process ancestry and lifetimes follow
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)

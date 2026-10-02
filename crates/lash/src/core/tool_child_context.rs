@@ -45,7 +45,7 @@ pub(crate) struct CoreToolChildContextSource {
     plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     process_lifecycle_available: bool,
     work_ports: CoreWorkPorts,
-    drive_owner: lash_core::LeaseOwnerIdentity,
+    shift_owner: lash_core::LeaseOwnerIdentity,
 }
 
 impl CoreToolChildContextSource {
@@ -64,7 +64,7 @@ impl CoreToolChildContextSource {
         plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
         process_lifecycle_available: bool,
         work_ports: CoreWorkPorts,
-        drive_owner: lash_core::LeaseOwnerIdentity,
+        shift_owner: lash_core::LeaseOwnerIdentity,
     ) -> Arc<dyn ToolChildContextSource> {
         let source: Arc<dyn ToolChildContextSource> = Arc::new(Self {
             env: env.clone(),
@@ -72,7 +72,7 @@ impl CoreToolChildContextSource {
             plugin_factories,
             process_lifecycle_available,
             work_ports,
-            drive_owner,
+            shift_owner,
         });
         let installed = env
             .core
@@ -127,7 +127,7 @@ impl ToolChildContextSource for CoreToolChildContextSource {
                     plugin_host,
                     process_id.clone(),
                     execution_env.clone(),
-                    self.drive_owner.clone(),
+                    self.shift_owner.clone(),
                 )?;
                 let mut dispatch = runtime.tool_child_dispatch(lent_controller)?;
                 dispatch.process_lineage = enclosing_lineage(&env, request).await?;
@@ -150,7 +150,7 @@ impl ToolChildContextSource for CoreToolChildContextSource {
         state.authority.plugin_config = execution_env.plugin_config.config.as_ref().clone();
         state.config_revision = execution_env.plugin_config.revision;
         let runtime =
-            LashRuntime::from_environment(&env, policy, state, None, self.drive_owner.clone())
+            LashRuntime::from_environment(&env, policy, state, None, self.shift_owner.clone())
                 .await
                 .map_err(|error| {
                     PluginError::Session(format!(

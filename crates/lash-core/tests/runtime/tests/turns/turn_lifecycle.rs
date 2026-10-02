@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f410;
 
@@ -150,7 +150,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         ))
         .await
         .expect("open the turn's handler");
-    let mut turn = Box::pin(runtime.drive_turn(
+    let mut turn = Box::pin(runtime.execute_turn(
         TurnInput::text("commit before delivering"),
         TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
     ));
@@ -175,7 +175,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         .await
         .expect("open the turn's handler");
     let recovered = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("continue after dropped host delivery"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -257,7 +257,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         .await
         .expect("open the turn's handler");
     let committed = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("switch frames"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -355,7 +355,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
     );
 
     // The switch committed its follow-on onto the head before the restore
-    // failed, so the session's next drive reloads and then recovers the
+    // failed, so the session's next shift reloads and then recovers the
     // owed follow-on in its frame before anything else (ADR 0101 §3).
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -363,17 +363,17 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
             "after-post-commit-restore-failure-drain",
         ))
         .await
-        .expect("open the drive's handler");
+        .expect("open the shift's handler");
     let follow_on = runtime
-        .drive_next_root(
+        .execute_next_run(
             "after-post-commit-restore-failure-drain",
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
-        .expect("the drive runs")
+        .expect("the shift runs")
         .and_then(lash_core::facade_support::AgentFrameRun::into_final_turn)
-        .expect("the drive answers the owed follow-on");
-    handler.close().await.expect("close the drive's handler");
+        .expect("the shift answers the owed follow-on");
+    handler.close().await.expect("close the shift's handler");
     assert_eq!(
         *runtime.resident_session.validity(),
         ResidentSessionState::Valid
@@ -516,7 +516,7 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
             .await
             .expect("open the turn's handler");
         let error = runtime
-            .drive_turn(
+            .execute_turn(
                 lash_core::TurnInput::text("reach the production final commit caller"),
                 lash_core::facade_support::TurnOptions::new(
                     CancellationToken::new(),
@@ -536,14 +536,14 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
 }
 
 /// FIG-1573 under FIG-3927 §2.6: a turn that ends without committing leaves
-/// no input pinned to a dead turn once its root ends.
+/// no input pinned to a dead turn once its run ends.
 ///
 /// The host routed an input into the running turn, and the turn's checkpoint
-/// admitted it to the root. The turn's commit is refused for good. The row
-/// stays bound to the root until the root's terminal write, here the refused
+/// admitted it to the run. The turn's commit is refused for good. The row
+/// stays bound to the run until the run's terminal write, here the refused
 /// run's own end (FIG-4018), releases it open with its submitted delivery:
-/// its turn is over, so it is next-turn input by rule. The root's own
-/// acceptance ends with the root.
+/// its turn is over, so it is next-turn input by rule. The run's own
+/// acceptance ends with the run.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
@@ -588,8 +588,8 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     .await;
 
     // An outcome, not a live fault: a live fault is the engine's to retry
-    // under the same root, so no teardown runs for it (FIG-3897); a commit
-    // the store refuses for good ends the root, and its teardown owes the
+    // under the same run, so no teardown runs for it (FIG-3897); a commit
+    // the store refuses for good ends the run, and its teardown owes the
     // pinned input the repair.
     store.fail_next_runtime_commit(lash_core::StoreError::RecordEncodingFailed {
         record_kind: "turn commit".to_string(),
@@ -603,7 +603,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         .await
         .expect("open the turn's handler");
     let error = runtime
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("run the turn that will be fenced at commit"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -627,30 +627,30 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         .await
         .expect("list pending turn inputs")
     };
-    let terminal = lash_core::store::RootStore::root_terminal(
+    let terminal = lash_core::store::RunStore::run_terminal(
         store.as_ref(),
         &SessionId::from(session_id),
         &TurnId::from(live_turn_id),
     )
     .await
-    .expect("read the root's terminal")
-    .expect("the refused run ended its root");
+    .expect("read the run's terminal")
+    .expect("the refused execution ended its run");
     assert!(
         matches!(
             &terminal.cause,
-            lash_core::store::RootTerminalCause::Refused { code, .. }
+            lash_core::store::RunTerminalCause::Refused { code, .. }
                 if *code == lash_core::RuntimeErrorCode::RecordEncodingFailed
         ),
-        "the root's terminal is its refusal: {terminal:?}"
+        "the run's terminal is its refusal: {terminal:?}"
     );
     assert!(
-        lash_core::DeploymentStore::end_lost_root(
+        lash_core::DeploymentStore::end_lost_run(
             lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
-            &lash_core::engine::RootRef {
+            &lash_core::engine::RunRef {
                 session: SessionId::from(session_id),
-                root: TurnId::from(live_turn_id),
+                run: TurnId::from(live_turn_id),
             },
-            lash_core::engine::RootRunLoss::FailedRun,
+            lash_core::engine::RunLoss::FailedRun,
             0,
         )
         .await
@@ -662,18 +662,18 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     assert_eq!(
         pending.len(),
         1,
-        "the root's end re-defers the routed input, and its own acceptance ends with it"
+        "the run's end re-defers the routed input, and its own acceptance ends with it"
     );
     let row = &pending[0];
     assert!(
         row.input.source_key.is_none(),
-        "the re-deferred row is the routed input, not the root's own acceptance"
+        "the re-deferred row is the routed input, not the run's own acceptance"
     );
     assert_eq!(row.status, lash_core::PendingTurnInputReadStatus::Open);
     assert_eq!(
         row.input.ingress().active_turn_id(),
         Some(&TurnId::from(live_turn_id)),
-        "the root's end keeps the input's submitted delivery (ADR 0101 §5.1)"
+        "the run's end keeps the input's submitted delivery (ADR 0101 §5.1)"
     );
     assert!(
         row.input.state.is_next_turn_input(None),
@@ -750,7 +750,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .await
         .expect("open the turn's handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("commit the baseline"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -767,7 +767,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .await
         .expect("open the turn's handler");
     let error = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("capture must fail"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -883,7 +883,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
     let colliding_frame_key =
         lash_core::FrameKey::from_caller_material("caller-named-existing-frame")
             .expect("non-empty caller material");
-    // A host's frame open is a session command the runtime's next drive
+    // A host's frame open is a session command the runtime's next shift
     // applies (FIG-4202).
     let opened = match Box::pin(crate::runtime_support::apply_host_command(
         &mut runtime,
@@ -924,7 +924,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         .await
         .expect("open the turn's handler");
     let switched = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("redrive an already materialized frame switch"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1053,7 +1053,7 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
         .await
         .expect("open the turn's handler");
     let switched = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("switch to a distinct frame"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1132,7 +1132,7 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
         .await
         .expect("open the owner's handler");
     let error = first
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1169,16 +1169,16 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
         .await
         .expect("open the peer's handler");
     let reclaimed = peer
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
         .await
-        .expect("a new drive can reclaim after capture failure")
+        .expect("a new shift can reclaim after capture failure")
         .ran()
         .expect("peer immediately resumes the admitted input");
     handler.close().await.expect("close the peer's handler");
-    // A new drive epoch can resume the admitted input immediately.
+    // A new shift epoch can resume the admitted input immediately.
     assert_eq!(
         reclaimed.assistant_output.safe_text,
         "peer reclaimed after abort"
@@ -1271,7 +1271,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         .await
         .expect("open the drain's handler");
     let committed = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1294,7 +1294,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     .pending_follow_on
     .expect("the failed follow-on remains owed");
     assert_eq!(pending.physical_index(), 1);
-    assert_eq!(pending.root_turn_id().as_str(), inbound.input_id.as_str());
+    assert_eq!(pending.run_turn_id().as_str(), inbound.input_id.as_str());
     let durable = durable_window(store.clone(), "root").await;
     assert_eq!(durable.head_revision, 1);
 
@@ -1308,7 +1308,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         .await
         .expect("open the drain's handler");
     let recovered = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1493,7 +1493,7 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
         .await
         .expect("open the turn's handler");
     let run = runtime
-        .drive_turn_frames(
+        .execute_turn_frames(
             TurnInput::text("rotate the frame"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1805,26 +1805,26 @@ impl lash_core::store::RuntimeStoreDecorator for JournalRedriveStore {
     }
 }
 
-/// Sends the steering fixture's queued input the moment a root admission
+/// Sends the steering fixture's queued input the moment a run admission
 /// returns: for a turn whose model calls never reach the test's provider.
-pub(super) struct SteerAfterRootAdmissionStore {
+pub(super) struct SteerAfterRunAdmissionStore {
     pub(super) inner: Arc<RecordingStore>,
     pub(super) steer: SteerWhileRunning,
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for SteerAfterRootAdmissionStore {
+impl lash_core::store::RuntimeStoreDecorator for SteerAfterRunAdmissionStore {
     type Inner = RecordingStore;
 
     fn inner(&self) -> &RecordingStore {
         self.inner.as_ref()
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &lash_core::store::AdmitRootRequest,
-    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
-        let admission = self.inner.admit_root(request).await?;
+        request: &lash_core::store::AdmitRunRequest,
+    ) -> Result<Option<lash_core::store::RunAdmission>, lash_core::StoreError> {
+        let admission = self.inner.admit_run(request).await?;
         if admission.is_some() {
             self.steer.send_queued().await;
         }
@@ -1832,24 +1832,24 @@ impl lash_core::store::RuntimeStoreDecorator for SteerAfterRootAdmissionStore {
     }
 }
 
-/// Withdraws the accepted head input just before the drive's root admission,
-/// as a host cancel racing the drive would.
-pub(super) struct WithdrawBeforeDriveStore {
+/// Withdraws the accepted head input just before the shift's run admission,
+/// as a host cancel racing the shift would.
+pub(super) struct WithdrawBeforeShiftStore {
     pub(super) inner: Arc<RecordingStore>,
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for WithdrawBeforeDriveStore {
+impl lash_core::store::RuntimeStoreDecorator for WithdrawBeforeShiftStore {
     type Inner = RecordingStore;
 
     fn inner(&self) -> &RecordingStore {
         self.inner.as_ref()
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &lash_core::store::AdmitRootRequest,
-    ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
+        request: &lash_core::store::AdmitRunRequest,
+    ) -> Result<Option<lash_core::store::RunAdmission>, lash_core::StoreError> {
         if let lash_core::store::AdmittedHead::Input(input_id) = &request.head {
             lash_core::store::TurnInputStore::cancel_pending_turn_input(
                 self.inner.as_ref(),
@@ -1858,7 +1858,7 @@ impl lash_core::store::RuntimeStoreDecorator for WithdrawBeforeDriveStore {
             )
             .await?;
         }
-        self.inner.admit_root(request).await
+        self.inner.admit_run(request).await
     }
 }
 
@@ -1910,7 +1910,7 @@ pub(super) fn request_contains_text(
 
 /// Input a test sends to a turn while the turn runs (ADR 0101 §5.1: a turn is
 /// addressable only while it runs or once it has ended). The test queues the
-/// input before it drives the turn; the provider sends it, addressed to that
+/// input before it executes the turn; the provider sends it, addressed to that
 /// turn's checkpoints, when it takes its first call, and the test reads back
 /// what the store admitted.
 #[derive(Clone, Default)]

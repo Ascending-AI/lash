@@ -879,7 +879,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
 }
 
 /// Where a turn's model-issued tool calls are admitted: the turn's admitted
-/// root and its physical continuation (ADR 0117 §2). The host fixes it when
+/// run and its physical continuation (ADR 0117 §2). The host fixes it when
 /// it builds the turn's machine; the machine adds the protocol iteration and
 /// the model response's effect ordinal.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1404,7 +1404,7 @@ mod tests {
         .await;
     }
 
-    // One case per fixture: each of these runs one generate/drive/minimize cycle,
+    // One case per fixture: each of these runs one generate/shift/minimize cycle,
     // and a single case that looped over all six was the slowest test in the
     // crate. The bodies are the same assertion the loop ran, fixture by fixture.
     #[tokio::test]

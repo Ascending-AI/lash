@@ -1,11 +1,11 @@
 //! A turn cancel that reaches a running effect-group tool child (ADR 0105 §4,
 //! FIG-3904).
 //!
-//! One input's root calls a tool whose attempt never answers and never
+//! One input's run calls a tool whose attempt never answers and never
 //! watches its token, so only the child's own cancel fact ends it: the
 //! attempt's body races a live watch of that fact, and the body the watch
 //! drops leaves the typed cancel as the attempt's recorded outcome. The host
-//! cancels the root while the attempt runs; the turn's close decides the
+//! cancels the run while the attempt runs; the turn's close decides the
 //! child's cancel.
 //!
 //! The mid-journal cell kills the deployment at a seeded command the child
@@ -15,7 +15,7 @@
 //! the engine: that outcome was never recorded, so the replayed attempt runs
 //! once more, its watch ends it at once, and the child still settles. Either
 //! way the child replays the journal it left, without a mismatch, and the
-//! root ends cancelled once.
+//! run ends cancelled once.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,8 +33,8 @@ use crate::crash_matrix::{CrashPoint, Seam};
 
 const TOOL: &str = "stuck";
 
-/// The root the host cancels while its tool child runs.
-const ROOT: &str = "cancel-0";
+/// The run the host cancels while its tool child runs.
+const RUN: &str = "cancel-0";
 
 /// The service every tool child runs on, before its build's lane suffix.
 const DISPATCH: &str = "EffectGroupDispatch";
@@ -76,7 +76,7 @@ impl lash_core::ToolProvider for StuckTool {
     }
 }
 
-/// The scripted model of this seam: a `cancel-` root calls the stuck tool,
+/// The scripted model of this seam: a `cancel-` run calls the stuck tool,
 /// and every other input is answered as the standard model answers it.
 fn tool_provider() -> lash_core::facade_support::ProviderHandle {
     lash_core::testing::TestProvider::builder()
@@ -89,8 +89,8 @@ fn tool_provider() -> lash_core::facade_support::ProviderHandle {
                 .find(|message| matches!(message.role, lash_core::llm::types::LlmRole::User))
                 .and_then(|message| serde_json::to_string(message).ok())
                 .unwrap_or_default();
-            let roots = invariants::input_roots(&latest_user);
-            let parts = if roots.iter().any(|root| root.starts_with("cancel-")) {
+            let runs = invariants::input_runs(&latest_user);
+            let parts = if runs.iter().any(|run| run.starts_with("cancel-")) {
                 vec![LlmOutputPart::ToolCall {
                     call_id: "call-1".into(),
                     tool_name: TOOL.to_owned(),
@@ -99,9 +99,9 @@ fn tool_provider() -> lash_core::facade_support::ProviderHandle {
                 }]
             } else {
                 vec![LlmOutputPart::Text {
-                    text: roots
+                    text: runs
                         .iter()
-                        .map(|root| invariants::answer_text(root))
+                        .map(|run| invariants::answer_text(run))
                         .collect(),
                     response_meta: None,
                 }]
@@ -134,7 +134,7 @@ fn tool_core(executions: Arc<AtomicUsize>) -> CoreBuild {
     })
 }
 
-/// The root's tool child invocation, once its attempt runs.
+/// The run's tool child invocation, once its attempt runs.
 async fn running_child(
     world: &CrashWorld,
     executions: &AtomicUsize,
@@ -151,7 +151,7 @@ async fn running_child(
             return Ok(child);
         }
         if tokio::time::Instant::now() > deadline {
-            return Err("the root's tool child never ran its attempt".to_owned());
+            return Err("the run's tool child never ran its attempt".to_owned());
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -185,21 +185,21 @@ async fn stored_through_attempt(world: &CrashWorld, child: &str) -> Result<usize
     }
 }
 
-/// Cancel `root` through the live deployment, as the host's own work. A
+/// Cancel `run` through the live deployment, as the host's own work. A
 /// retryable refusal is retried, as a host retries it.
-async fn cancel_root(world: &CrashWorld, session: &SessionId, root: &str) -> Result<(), String> {
+async fn cancel_run(world: &CrashWorld, session: &SessionId, run: &str) -> Result<(), String> {
     let mut last = String::new();
     for _ in 0..20 {
         let core = world.core()?;
         let session = session.clone();
-        let root = TurnId::fixture(root);
+        let run = TurnId::fixture(run);
         match world
             .host_op(async move {
                 // The durable session: a cancel needs no runtime of its own
-                // beside the one driving the root.
+                // beside the one executing the run.
                 let session = core.session(session).durable().await?;
                 session
-                    .cancel(lash::CancelTarget::Root(root))
+                    .cancel(lash::CancelTarget::Run(run))
                     .reason("crash-matrix cancel")
                     .await
                     .map(|_| ())
@@ -217,7 +217,7 @@ async fn cancel_root(world: &CrashWorld, session: &SessionId, root: &str) -> Res
     Err(format!("the cancel stayed refused retryably: {last}"))
 }
 
-/// The child's end: the root ended cancelled, the tool ran at most
+/// The child's end: the run ended cancelled, the tool ran at most
 /// `max_executions` times, and the child's invocation completed without a
 /// journal mismatch.
 fn child_settled(
@@ -235,16 +235,16 @@ fn child_settled(
             match world
                 .backend()
                 .session_store_factory()
-                .root_terminal(&session, &TurnId::from(ROOT))
+                .run_terminal(&session, &TurnId::from(RUN))
                 .await
             {
                 Ok(Some(terminal))
-                    if terminal.kind() == lash_core::store::RootTerminalKind::Cancelled => {}
+                    if terminal.kind() == lash_core::store::RunTerminalKind::Cancelled => {}
                 Ok(other) => violations.push(format!(
-                    "root `{ROOT}` of `{session}` ended {:?}, not cancelled",
+                    "run `{RUN}` of `{session}` ended {:?}, not cancelled",
                     other.map(|terminal| (terminal.kind(), terminal.cause))
                 )),
-                Err(error) => violations.push(format!("read the root's terminal: {error}")),
+                Err(error) => violations.push(format!("read the run's terminal: {error}")),
             }
             let ran = executions.load(Ordering::SeqCst);
             if ran == 0 || ran > max_executions {
@@ -280,7 +280,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
     let world = CrashWorld::new(seed, tool_core(Arc::clone(&executions)), false).await?;
     world.restart().await?;
     let session = session_name(Seam::ChildCancel, seed);
-    send(&world, &session, ROOT).await?;
+    send(&world, &session, RUN).await?;
     let child = running_child(&world, &executions).await?;
     // The child runs on its build's dispatch lane, a service of its own.
     let lane = child
@@ -309,13 +309,13 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         other => return Err(format!("the child-cancel seam has no {other:?} cell")),
     };
     world.crash_on(CrashRule::new(cut).service(lane).handler("child").times(1));
-    cancel_root(&world, &session, ROOT).await?;
+    cancel_run(&world, &session, RUN).await?;
     let origin_ms = crash_and_restart(&world).await?;
     Ok(Staged {
         world,
         notes: vec![note],
         expected: Expected {
-            closed_scopes: vec![ScopeId::turn(session.clone(), TurnId::from(ROOT))],
+            closed_scopes: vec![ScopeId::turn(session.clone(), TurnId::from(RUN))],
             live_sessions: vec![session.clone()],
             custom: vec![(
                 "child_cancel",
@@ -343,7 +343,7 @@ mod tests {
         .expect("build the world");
         world.restart().await.expect("start the deployment");
         let session = session_name(Seam::ChildCancel, world.seed());
-        send(&world, &session, ROOT).await.expect("start the root");
+        send(&world, &session, RUN).await.expect("start the run");
         let child = running_child(&world, &executions)
             .await
             .expect("running child");
@@ -356,9 +356,9 @@ mod tests {
                 .service(lane)
                 .handler("child"),
         );
-        cancel_root(&world, &session, ROOT)
+        cancel_run(&world, &session, RUN)
             .await
-            .expect("cancel the root");
+            .expect("cancel the run");
         assert!(
             world.trip().wait(TRIP_WAIT).await.is_some(),
             "the crash fired"

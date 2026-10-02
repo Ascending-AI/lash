@@ -2,7 +2,7 @@
 //!
 //! `ProcessRecord::from_registration` `.expect()`s on any validation error, so
 //! a peer record core would refuse used to abort the host instead of yielding a
-//! typed error (FIG-2985). The corpus driving these tests lives in
+//! typed error (FIG-2985). The corpus executing these tests lives in
 //! `lash_core::runtime::refused_process_registrations`, whose match over
 //! `ProcessRegistrationRefusal::ALL` is exhaustive: a new core rule without a
 //! fixture fails to compile, and a fixture the remote decoder still accepts

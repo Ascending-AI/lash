@@ -18,7 +18,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -43,7 +43,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    super::drive_epoch::require_fence_conn(tx, &session_id, &fence)?;
+                    super::shift_epoch::require_fence_conn(tx, &session_id, &fence)?;
                     let sql = crate::turn_ingress::turn_ingress_sql();
                     let existing = tx
                         .query_row(
@@ -88,7 +88,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         authorization: &lash_core_execution::TurnCancelClosureAuthorization,
     ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
@@ -240,7 +240,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
@@ -578,7 +578,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::parse(session_id.to_string())?;
         // Open and admitted rows, and the rows a checkpoint accepted into a
-        // running root, read in one snapshot and listed in `enqueue_seq`
+        // running run, read in one snapshot and listed in `enqueue_seq`
         // order (FIG-4044).
         self.conn
             .read(move |tx| {
@@ -627,7 +627,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
             .call(move |conn| {
                 // One point read by primary key; the list's lifecycle filter
                 // is applied to the one row here: a row is listed until it is
-                // completed or cancelled, open or admitted to its root alike.
+                // completed or cancelled, open or admitted to its run alike.
                 let outcome = (|| {
                     let row = conn
                         .prepare_cached(
@@ -877,7 +877,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
 
     async fn open_session_command_run(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         super::open_session_command_run_sqlite(self, fence).await
     }
@@ -1044,16 +1044,16 @@ fn enqueue_pending_turn_inputs_conn(
                 .map_err(|err| {
                     crate::sqlite_pending_turn_input_insert_error(err, session_id, &input_id)
                 })?;
-                // The admitted input owes its session a drive (ADR 0109 §3):
+                // The admitted input owes its session a shift (ADR 0109 §3):
                 // the row is armed in the transaction that admits it, so no
-                // crash between the commit and the drive ask loses the ask.
+                // crash between the commit and the shift ask loses the ask.
                 crate::ingress_obligation::arm_turn_input_tx(tx, session_id, &input_id, now)?;
                 input_id
             }
         };
         if draft.pin {
             // The pin is written with the acceptance, new or replayed, so
-            // the input is pinned before its root can start.
+            // the input is pinned before its run can start.
             crate::revisions::pin_conn(
                 tx,
                 session_id,
@@ -1066,8 +1066,8 @@ fn enqueue_pending_turn_inputs_conn(
             })?,
         );
     }
-    // An acceptor that drives its rows itself holds their ingress claims
-    // from this commit (FIG-4728): its inline drive is the ask, so no relay
+    // An acceptor that executes its rows itself holds their ingress claims
+    // from this commit (FIG-4728): its inline shift is the ask, so no relay
     // pass finds the rows due before the acceptor's own admission.
     if let Some(claim_ttl_ms) = batch.acceptor_claim_ttl_ms() {
         claim_due_ingress_conn(tx, &admitted, now.saturating_add(claim_ttl_ms))?;
@@ -1114,18 +1114,18 @@ fn turn_address_evidence_conn(
     session_id: &SessionId,
     turn_id: &lash_core_execution::TurnId,
 ) -> Result<lash_core_execution::store_backend_support::TurnAddressEvidence, StoreError> {
-    let root = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
+    let run = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
     let ended: bool = tx
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .turn_address_ended
                 .sql(),
-            params![session_id.as_str(), turn_id.as_str(), root.as_str()],
+            params![session_id.as_str(), turn_id.as_str(), run.as_str()],
             |row| row.get(0),
         )
         .map_err(sqlite_error)?;
-    let running = crate::session_roots::unfinished_root_turns_conn(tx, session_id)?;
+    let running = crate::session_runs::unfinished_run_turns_conn(tx, session_id)?;
     let owed = pending_follow_on_conn(tx, session_id)?;
     Ok(
         lash_core_execution::store_backend_support::turn_address_evidence(
@@ -1197,7 +1197,7 @@ fn admit_run_spec_conn(
                 Some((state.as_str(), hash.as_deref())),
             )?,
             // No input started `turn_id` under a source key: the addressed
-            // turn may still be a running root of another kind (FIG-3877).
+            // turn may still be a running run of another kind (FIG-3877).
             None => check_unsourced_steering_run_spec_conn(tx, draft, turn_id, &spec)?,
         }
     }
@@ -1223,15 +1223,15 @@ fn admit_run_spec_conn(
     Ok(spec)
 }
 
-/// The steering verdict over the root kinds no `source_key`-filed input
+/// The steering verdict over the run kinds no `source_key`-filed input
 /// starts (FIG-3877), read inside the admission transaction:
 ///
 /// * `turn_id` is the follow-on the head owes: it inherits the shape its
 ///   fact recorded at the switch.
-/// * `turn_id` is a physical turn of the unfinished queued-headed root: it
+/// * `turn_id` is a physical turn of the unfinished queued-headed run: it
 ///   started from no input, so it runs the default spec.
 /// * Otherwise nothing running names `turn_id`: the steering input is a
-///   next-turn root under its own spec.
+///   next-turn run under its own spec.
 fn check_unsourced_steering_run_spec_conn(
     tx: &Connection,
     draft: &lash_core_execution::PendingTurnInputDraft,
@@ -1239,7 +1239,7 @@ fn check_unsourced_steering_run_spec_conn(
     spec: &lash_core_execution::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     use lash_core_execution::store_backend_support as support;
-    // `Some(hash)` is the shape the running root resolved under (`None` =
+    // `Some(hash)` is the shape the running run resolved under (`None` =
     // the default spec); `None` means the evidence did not decide.
     let mut running: Option<Option<String>> = None;
     if let Some(owed) =
@@ -1253,19 +1253,19 @@ fn check_unsourced_steering_run_spec_conn(
         );
     }
     if running.is_none()
-        && let Some(unfinished) = crate::session_roots::unfinished_root_conn(tx, &draft.session_id)?
+        && let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, &draft.session_id)?
         && matches!(
             unfinished.head,
             lash_core_execution::store::AdmittedHead::Batch(_)
         )
-        && lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0 == unfinished.root
+        && lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0 == unfinished.run
     {
-        // A queued-headed root starts from no input, so it runs the default
+        // A queued-headed run starts from no input, so it runs the default
         // spec.
         running = Some(None);
     }
     if let Some(hash) = running {
-        support::check_running_root_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
+        support::check_running_run_spec(&draft.session_id, turn_id, spec, hash.as_deref())?;
     }
     Ok(())
 }

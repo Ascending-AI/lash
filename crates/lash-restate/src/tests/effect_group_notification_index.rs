@@ -1,5 +1,5 @@
 //! The group index answers its own notices (FIG-4344, ADR 0099 §2 and §5),
-//! driven through the index's handlers.
+//! executed through the index's handlers.
 //!
 //! - Every transition answers a subscriber recorded before it, and a
 //!   subscriber that arrives after it is answered from the record at once:

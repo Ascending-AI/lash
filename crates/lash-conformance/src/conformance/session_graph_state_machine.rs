@@ -7,7 +7,7 @@
 
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -587,7 +587,7 @@ impl SessionGraphScenario {
         let live = self.live.get(&slot).expect("ensured live session");
         let runtime = property_runtime(live.store.store(), &live.request).await?;
         // The plugin-facing service writes straight through the store's
-        // append path: nothing drives this session, so nothing owns its head.
+        // append path: nothing works this session, so nothing owns its head.
         let service = runtime
             .session_graph_service()
             .map_err(|error| error.to_string())?;
@@ -1353,12 +1353,12 @@ impl SessionGraphScenario {
                 }
             }
         }
-        self.assert_fork_roots().await
+        self.assert_fork_runs().await
     }
 
     /// Every live session lists exactly the revisions the model retains, with
     /// the leaf each published, its head flagged and its pins named.
-    async fn assert_fork_roots(&self) -> Result<(), String> {
+    async fn assert_fork_runs(&self) -> Result<(), String> {
         for (slot, expected) in &self.model.sessions {
             let live = self
                 .live
@@ -1406,7 +1406,7 @@ impl SessionGraphScenario {
     }
 
     async fn assert_reachability(&mut self) -> Result<(), String> {
-        self.assert_fork_roots().await?;
+        self.assert_fork_runs().await?;
         let reachable = self.reachable_nodes();
         for node_id in &reachable {
             if !self.model.nodes.contains_key(node_id) {
@@ -1597,7 +1597,7 @@ async fn commit_runtime_state_for_property(
         format!("session-graph-property-{owner_suffix}-incarnation"),
     );
     let lease = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &session_id,
             &owner,
             "commit-runtime-state-for-property-executor",
@@ -1608,7 +1608,7 @@ async fn commit_runtime_state_for_property(
         .ok_or(crate::StoreError::Contended)?;
     let result = store.commit_runtime_state(commit).await;
     if result.is_err() {
-        store.supersede_drive_epoch_for_test(&lease).await?;
+        store.supersede_shift_epoch_for_test(&lease).await?;
     }
     result
 }

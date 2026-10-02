@@ -64,14 +64,14 @@ pub const DELETED_EVIDENCE_COLUMNS: &str =
 crate::statements! {
     /// `session_meta` statements both backends issue verbatim.
     pub struct SessionMetaStatements @ "session_meta" {
-        /// Session `?1`'s drive epoch, the admission that last raised it, the
+        /// Session `?1`'s shift epoch, the admission that last raised it, the
         /// start marker of the execution that sealed that admission, the
         /// control intent the session is closing under, and whether a cancel
         /// or fork still owes its engine half (`engine_half_owed`). A verb
         /// the engine refused for good, or whose obligation stalled, owes
         /// nothing more: it is surfaced for an operator, and the session
-        /// drives on.
-        select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
+        /// executes on.
+        select_shift_epoch = "SELECT shift_epoch, shift_admission_id, shift_run_start, closing_intent,
             EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
                 AND kind IN ('cancel', 'fork') AND engine_half_owed),
             fault_json, fault_at_ms
@@ -96,21 +96,21 @@ crate::statements! {
         clear_fault = "UPDATE session_meta SET fault_json = NULL, fault_at_ms = NULL
              WHERE session_id = ?1 AND fault_json IS NOT NULL";
 
-        /// The seal's compare-and-set: raise session `?1`'s drive epoch from
+        /// The seal's compare-and-set: raise session `?1`'s shift epoch from
         /// `?2` to `?3` under admission `?4`, sealed by the execution whose
         /// start marker is `?5`. Zero rows means the epoch moved.
-        seal_drive_epoch = "UPDATE session_meta
-             SET drive_epoch = ?3, drive_admission_id = ?4, drive_root_start = ?5
-             WHERE session_id = ?1 AND drive_epoch = ?2";
+        seal_shift_epoch = "UPDATE session_meta
+             SET shift_epoch = ?3, shift_admission_id = ?4, shift_run_start = ?5
+             WHERE session_id = ?1 AND shift_epoch = ?2";
 
         /// Close session `?1` under control intent `?2`: record the intent
-        /// and raise the drive epoch under admission `?3`, so every fence an
+        /// and raise the shift epoch under admission `?3`, so every fence an
         /// earlier admission sealed is stale (FIG-3600 S7); no execution
         /// sealed it, so it stores no start marker. A session already closing
         /// is left as it is: zero rows.
         begin_close = "UPDATE session_meta
-             SET closing_intent = ?2, drive_epoch = drive_epoch + 1, drive_admission_id = ?3,
-                 drive_root_start = NULL
+             SET closing_intent = ?2, shift_epoch = shift_epoch + 1, shift_admission_id = ?3,
+                 shift_run_start = NULL
              WHERE session_id = ?1 AND closing_intent IS NULL";
 
         /// The control intent session `?1` is closing under, if any.
@@ -164,9 +164,9 @@ crate::statements! {
 }
 
 crate::statements! {
-    /// Statements for parked-root control and recovery.
-    pub struct MetaRootVerbStatements @ "session_meta" {
-        raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
+    /// Statements for parked-run control and recovery.
+    pub struct MetaRunVerbStatements @ "session_meta" {
+        raise_epoch = "UPDATE session_meta SET shift_epoch = shift_epoch + 1, shift_admission_id = ?2, shift_run_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
     }
 }
 

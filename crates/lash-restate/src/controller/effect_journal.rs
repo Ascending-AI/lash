@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 /// end state), and the assistant-response step's command carries those
 /// stream-hook states.
 /// 3: every execution-environment sync records the tool surface it built,
-/// which the drive installs as the turn's catalog (FIG-3672 P7b); a turn
+/// which the shift installs as the turn's catalog (FIG-3672 P7b); a turn
 /// machine always opens with its protocol-start sync.
 /// 4: a tool child reads its recorded execution environment through its own
 /// recorded `load_execution_env` step, the first effect it journals, so a
@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 /// step's recorded outcome, which replaying would surface forever, so those
 /// journals are refused rather than replayed.
 /// 6: a turn's admission records the head it was admitted on and its turn
-/// index in its journaled drive outcome, and the acceptance names no turn index
+/// index in its journaled shift outcome, and the acceptance names no turn index
 /// read from the live head, so a replay after the turn's own commit rebuilds
 /// the turn from its recorded base (FIG-3682).
 /// 7: cancellation is an engine event (FIG-3672 P9). A turn-observing
@@ -60,7 +60,7 @@ use serde::{Deserialize, Serialize};
 /// `lash:{replay_key}:frontier` before it acts, recording the start's process
 /// id, so a drifted binding's recorded start or sleep is served and only one
 /// at the live frontier refuses (FIG-3779).
-/// 10: a direct turn's journaled admission (now `AdmitRoot`) records
+/// 10: a direct turn's journaled admission (now `AdmitRun`) records
 /// the executable generation it runs under, and an execution-environment sync
 /// no longer journals a cell replay-key grammar (FIG-3571): the turn's one
 /// generation is checked at its admission.
@@ -69,7 +69,7 @@ use serde::{Deserialize, Serialize};
 /// the end journals the index's `drain_blockers` call where it journaled rank
 /// reads and rank waits (FIG-3826).
 /// 12: a logical turn journals its session-config resolution as a recorded
-/// `turn-config:{root}` step at its start, ahead of every effect the root
+/// `turn-config:{run}` step at its start, ahead of every effect the run
 /// records, so a replay adopts the config the first execution ran under
 /// (FIG-3600 S6).
 /// 13: a process is named by the id its registrar minted (FIG-3607): a
@@ -77,9 +77,9 @@ use serde::{Deserialize, Serialize};
 /// incarnation-qualified reference, a start is addressed by its start key and
 /// journals its registration, a process start's frontier marker records its
 /// start key, and a recorded process event carries no incarnation.
-/// 14: a logical root whose final commit wrote its terminal evidence journals
-/// its scope close as a recorded `drive-close:{root}` step
-/// (`CloseRootScope`), whose outcome is the evidence it closed (FIG-3600 S7).
+/// 14: a logical run whose final commit wrote its terminal evidence journals
+/// its scope close as a recorded `shift-close:{run}` step
+/// (`CloseRunScope`), whose outcome is the evidence it closed (FIG-3600 S7).
 /// 15: a session's deletion journals the start of its close as a recorded
 /// `{session}:begin-close` step (`BeginSessionClose`), whose outcome is the
 /// session's `CloseSession` control intent (FIG-3600 S7).
@@ -90,7 +90,7 @@ use serde::{Deserialize, Serialize};
 /// before it journal their request's messages, tools and instructions as
 /// digests rather than verbatim.
 /// It changed in place again for FIG-4236: a spending effect's recorded entry
-/// carries its usage run's owner, identity and facts beside its outcome
+/// carries its usage meter's owner, identity and facts beside its outcome
 /// (`usage`, absent for an effect that dispatched nothing), and the entry is
 /// followed by the run's one-way settle send (ADR 0125).
 ///
@@ -114,7 +114,7 @@ pub const EFFECT_JOURNAL_VERSION: u32 = 15;
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";
 
 /// A recorded effect: the envelope replay validation matches on, the
-/// outcome the effect produced, and what a spending effect's usage run
+/// outcome the effect produced, and what a spending effect's usage meter
 /// delivers (ADR 0125).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RecordedRuntimeEffect {

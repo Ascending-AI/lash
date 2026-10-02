@@ -305,7 +305,7 @@ test("resident replacement async refetch preserves an actual provisional tool ro
     },
   }));
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(fetchCalls, 1, "resident replacement must drive the async state refetch");
+  assert.equal(fetchCalls, 1, "resident replacement must execute the async state refetch");
 
   resolveSnapshot({
     settings: {
@@ -2732,7 +2732,7 @@ test("a 503 from a snapshot read retries quietly instead of claiming an outage",
     Error,
     async fetchStateSnapshot() {
       if (nextFailure) throw nextFailure;
-      throw new Error("the test drives only failures");
+      throw new Error("the test executes only failures");
     },
     renderShellStatus() {},
     setTimeout(callback, delay) {
@@ -3396,14 +3396,14 @@ test("pending ingress receipts survive transcript replay until their turn commit
      renderStateTranscript({
        transcript: [],
        pending_turn_inputs: [
-         ${JSON.stringify(pending("input-now", "active_turn", "injected now", { kind: "held", drive_epoch: 7 }))},
+         ${JSON.stringify(pending("input-now", "active_turn", "injected now", { kind: "held", shift_epoch: 7 }))},
          ${JSON.stringify(pending("input-next", "next_turn", "queued next", { kind: "pending" }))}
        ]
      });
      this.initial = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
        status: row.dataset.status,
-       driveEpoch: row.dataset.driveEpoch,
+       shiftEpoch: row.dataset.shiftEpoch,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -3414,7 +3414,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
      this.applied = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
        status: row.dataset.status,
-       driveEpoch: row.dataset.driveEpoch,
+       shiftEpoch: row.dataset.shiftEpoch,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -3426,7 +3426,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
      this.afterFirstSettle = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
        status: row.dataset.status,
-       driveEpoch: row.dataset.driveEpoch,
+       shiftEpoch: row.dataset.shiftEpoch,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -3440,7 +3440,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
     {
       inputId: "input-now",
       status: "held",
-      driveEpoch: "7",
+      shiftEpoch: "7",
       kind: "injected now · held under epoch 7",
       text: "injected now",
     },
@@ -3450,7 +3450,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
     {
       inputId: "input-now",
       status: "held",
-      driveEpoch: "7",
+      shiftEpoch: "7",
       kind: "applied to turn",
       text: "injected now",
     },

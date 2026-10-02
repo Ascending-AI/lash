@@ -4,7 +4,7 @@
 //! by `&mut`.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_2d00;
 
@@ -50,7 +50,7 @@ async fn a_no_summary_response_is_established_before_execution_evidence_on_the_d
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("observe a response without summary metadata"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -67,7 +67,7 @@ async fn a_no_summary_response_is_established_before_execution_evidence_on_the_d
     );
 }
 
-/// A queued input driven on the double under an open queue-drain handler.
+/// A queued input executed on the double under an open queue-drain handler.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_queued_input_drains_in_an_open_handler_on_the_double() {
     let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
@@ -111,13 +111,13 @@ async fn a_queued_input_drains_in_an_open_handler_on_the_double() {
         .await
         .expect("open the drain's handler");
     let drained = runtime
-        .drive_next_root(
+        .execute_next_run(
             "queued-drain-on-the-double",
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("the queued input drains")
-        .expect("the drive admitted queued input")
+        .expect("the shift admitted queued input")
         .into_final_turn()
         .expect("the drain ran the queued input");
     handler.close().await.expect("close the drain's handler");

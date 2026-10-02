@@ -13,7 +13,7 @@ pub(crate) use lash_core::testing::sansio_transcript::record_effects;
 pub(crate) use lash_core::{Effect, TurnMachine, TurnMachineConfig};
 pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtocolPluginFactory};
 
-/// Actor name pinned on every RLM Protocol Scenario transcript. The harness drives
+/// Actor name pinned on every RLM Protocol Scenario transcript. The harness executes
 /// one sans-io machine for one session.
 pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 pub(crate) use lash_rlm_types::{
@@ -433,7 +433,7 @@ pub(crate) fn rewrite_first_rlm_driver_state_owner(value: &mut serde_json::Value
 
 // === RLM Protocol Scenario Harness ===
 //
-// These scenarios drive the protocol state machine through declarative LLM,
+// These scenarios execute the protocol state machine through declarative LLM,
 // exec, and checkpoint steps. Direct white-box tests remain below only when
 // they intentionally corrupt turn options or checkpoint driver state.
 pub(crate) struct RlmProtocolScenario {
@@ -543,7 +543,7 @@ impl RlmProtocolScenario {
 
     #[expect(
         clippy::expect_used,
-        reason = "test support: scenarios drive supported checkpoints, non-empty frame key material and crate-owned entries; failure is the scenario under test"
+        reason = "test support: scenarios shift supported checkpoints, non-empty frame key material and crate-owned entries; failure is the scenario under test"
     )]
     pub(crate) fn run(self) -> RlmProtocolRun {
         let build_config = || {

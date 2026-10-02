@@ -1,5 +1,5 @@
 //! What a substrate takes out of a local executor to answer a command its
-//! own way, and what the issuing drive lends the executor.
+//! own way, and what the issuing shift lends the executor.
 
 use super::*;
 
@@ -120,7 +120,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Lends this effect's body the standing of the drive that issued it.
+    /// Lends this effect's body the standing of the shift that issued it.
     pub(crate) fn issued_under(
         mut self,
         frontier: crate::trace::JournalFrontier,
@@ -130,7 +130,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// What the issuing drive lent this effect: a substrate that records a
+    /// What the issuing shift lent this effect: a substrate that records a
     /// step of its own for the effect (a wait it installs, a timer it starts)
     /// begins that step's live body from it.
     pub fn step_issue(&self) -> &crate::trace::StepIssue {
@@ -187,7 +187,7 @@ impl RuntimeEffectLocalRunner for LiveStepRunner<'_> {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let Some(live) = self.live else {
             return Err(RuntimeEffectControllerError::new(

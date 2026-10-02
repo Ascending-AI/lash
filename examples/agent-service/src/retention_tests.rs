@@ -18,8 +18,8 @@ use crate::retention::{
 #[tokio::test]
 async fn production_retention_pass_reclaims_each_store_residue_class() {
     let data_dir = tempfile::tempdir().expect("retention data dir");
-    let session_root = data_dir.path().join("lash-sessions");
-    let stores = SqliteStoreSet::open(&session_root)
+    let session_run = data_dir.path().join("lash-sessions");
+    let stores = SqliteStoreSet::open(&session_run)
         .await
         .expect("open the session store set");
     let factory = stores.session_store_factory();
@@ -134,9 +134,9 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
 #[tokio::test]
 async fn scheduled_retention_refuses_a_witnessed_empty_attachment_root_set() {
     let data_dir = tempfile::tempdir().expect("retention data dir");
-    let session_root = data_dir.path().join("lash-sessions");
-    std::fs::create_dir_all(&session_root).expect("session store root");
-    let stores = SqliteStoreSet::open(&session_root)
+    let session_run = data_dir.path().join("lash-sessions");
+    std::fs::create_dir_all(&session_run).expect("session store root");
+    let stores = SqliteStoreSet::open(&session_run)
         .await
         .expect("open the session store set");
     let factory = stores.session_store_factory();

@@ -11,8 +11,8 @@
 //! nothing; a bounded heap that writes an unbounded snapshot costs it a growing
 //! write on every turn. The persisted size is the number a host pays for.
 
-use super::drive;
 use super::harness::{HarnessMode, Session};
+use super::shift;
 use super::syntax::{Cell, Literal};
 
 /// The FIG-1562 law at its narrowest: a cell that leaves a closure behind as
@@ -33,7 +33,7 @@ fn garbage_from_one_cell_does_not_reach_the_next_cells_validation() {
 /// Garbage left behind by a cell that *failed* is garbage too.
 #[test]
 fn garbage_from_a_failed_cell_does_not_reach_the_next_cell() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::closure_garbage("scaled"),
@@ -56,7 +56,7 @@ fn a_rooted_structure_survives_the_boundary_collection() {
     for step in 0..6 {
         cells.push(Cell::closure_garbage(&format!("garbage{step}")));
     }
-    let (session, _) = drive(HarnessMode::Resident, &cells);
+    let (session, _) = shift(HarnessMode::Resident, &cells);
     assert_eq!(
         session.globals().get("rooted"),
         Some(

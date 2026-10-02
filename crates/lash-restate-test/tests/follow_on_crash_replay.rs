@@ -1,15 +1,15 @@
 //! A frame switch's follow-on under crashes on Restate (ADR 0101 §3,
 //! FIG-3542).
 //!
-//! A real lash turn is sent to the session and the engine drives it: the
-//! session's `LashSession` drive admits the input and runs its root in a
+//! A real lash turn is sent to the session and the engine executes it: the
+//! session's `LashSession` shift admits the input and executes its run in a
 //! `LashTurn` workflow on the server double. Its model calls a tool that
 //! switches agent frame, the switch commit leaves the follow-on owed on the
 //! session head, and the follow-on answers in the switched frame, in the same
-//! root. A clean run fixes the reference. Then, for every journal point of the
-//! root's workflow — among them the gap between the switch commit and the
+//! run. A clean run fixes the reference. Then, for every journal point of the
+//! run's workflow — among them the gap between the switch commit and the
 //! follow-on — a fresh backend under the same seed drops the handler just
-//! before the server stores that frame and replays the invocation. The root
+//! before the server stores that frame and replays the invocation. The run
 //! owns its chain, so the replay continues it in order: every crash reaches
 //! the reference answer, the follow-on commits exactly once, and the head owes
 //! nothing afterwards.
@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::engine::RootOutcome;
+use lash_core::engine::RunOutcome;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
@@ -167,33 +167,33 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .id(TURN)
         .await
         .expect("accept the turn input");
-    // The acceptance scheduled the drive under the input's own request; the
-    // attach names the same request, so it waits on that one drive.
-    let request = lash_core::drive::ingress_drive_request(
+    // The acceptance scheduled the shift under the input's own request; the
+    // attach names the same request, so it waits on that one shift.
+    let request = lash_core::shift::ingress_shift_request(
         handle.input_id().as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     let server = backend.server();
-    let drive = tokio::time::timeout(
+    let shift = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        backend.attach_drive(&lash_core::SessionId::from(SESSION), request),
+        backend.attach_shift(&lash_core::SessionId::from(SESSION), request),
     )
     .await;
-    // A drive bounded per invocation may cede the root and yield (FIG-3600):
-    // a later drive finishes it. The root's answer is its handle's.
-    let answer = match drive {
+    // A shift bounded per invocation may cede the run and yield (FIG-3600):
+    // a later shift finishes it. The run's answer is its handle's.
+    let answer = match shift {
         Ok(Ok(outcome)) => match outcome.ran.as_slice() {
-            [RootOutcome::Committed { outcome, .. }] => committed_text(outcome),
+            [RunOutcome::Committed { outcome, .. }] => committed_text(outcome),
             _ => match tokio::time::timeout(std::time::Duration::from_secs(8), handle.output())
                 .await
             {
                 Ok(Ok(output)) => committed_text(&output.result.outcome),
                 Ok(Err(error)) => format!(
-                    "drive ran {:?}, stopped {:?}; then {error}",
+                    "shift ran {:?}, stopped {:?}; then {error}",
                     outcome.ran, outcome.stop
                 ),
                 Err(_) => format!(
-                    "drive ran {:?}, stopped {:?}; then timed out",
+                    "shift ran {:?}, stopped {:?}; then timed out",
                     outcome.ran, outcome.stop
                 ),
             },
@@ -240,8 +240,8 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     }
 }
 
-/// Every crash point the root workflow's journal offers: each command it
-/// stored and each `ctx.run` result, by position (a root's step names embed
+/// Every crash point the run workflow's journal offers: each command it
+/// stored and each `ctx.run` result, by position (a run's step names embed
 /// the accepted input's id).
 fn crash_points(reference: &Run) -> Vec<(CrashRule, Option<String>)> {
     let mut points = Vec::new();

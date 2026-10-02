@@ -136,7 +136,7 @@ pub(crate) fn restate_effect_execution(
         // and §2 forbids coordination inside a recorded body ("A recorded body
         // must not emit commands into an ordinal-addressed journal"). The
         // `EffectGroupDispatch::child` handler resolves the `ToolChildDriver`
-        // and drives it at handler level with a ctx-bound admitted controller;
+        // and executes it at handler level with a ctx-bound admitted controller;
         // the driver's own atomic effects arrive here individually. This arm
         // remains the guard for any path that tries to execute the command
         // itself as one recorded step.
@@ -144,7 +144,7 @@ pub(crate) fn restate_effect_execution(
             return Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "a tool invocation is a handler-level driver, not an atomic effect; the \
-                 effect-group child handler drives it, so reaching this controller arm means \
+                 effect-group child handler shifts it, so reaching this controller arm means \
                  coordination was routed into a recorded body, which ADR 0099 section 2 forbids",
             ));
         }
@@ -163,7 +163,7 @@ pub(crate) fn restate_effect_execution(
         command @ (RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
-        | RuntimeEffectCommand::DrawRootStart { .. }
+        | RuntimeEffectCommand::DrawRunStart { .. }
         | RuntimeEffectCommand::RecordCompactionBase { .. }
         | RuntimeEffectCommand::RenderCompactionPrompt { .. }
         | RuntimeEffectCommand::ResolveConfigTransaction { .. }
@@ -185,25 +185,25 @@ pub(crate) fn restate_effect_execution(
         // A model call whose body lost its watch on the turn's cancellation
         // gate ends the attempt the same way (FIG-3672 P9): the watch fault is
         // never the call's recorded outcome, and never a cancellation.
-        // A drive's admission and its seal read and write the session's
+        // A shift's admission and its seal read and write the session's
         // store: a store that did not answer is this attempt's fault, so the
         // step runs again, and only a verdict is ever recorded (FIG-3600).
-        // A root's admission is the same: its re-admitted root would replay a
-        // recorded store fault on every later drive. So is a root's scope
+        // A run's admission is the same: its re-admitted run would replay a
+        // recorded store fault on every later shift. So is a run's scope
         // close: an owner that did not acknowledge it closes it again. So is
         // a session's close: a deletion past it only retries, and a retry
-        // must reach the store, not a recorded fault. So is a root's
+        // must reach the store, not a recorded fault. So is a run's
         // resolution: a spec read the store did not answer, or a definition
         // revision this worker does not register, is repaired by a retry or a
         // redeploy, and only a definition's refusal of its context is
-        // recorded (FIG-3838). So is a command root's read of its command
+        // recorded (FIG-3838). So is a command run's read of its command
         // lane: only the run it read, or its fence's refusal, is recorded
         // (FIG-4201). So is a trigger delivery's admission: the binding a
         // start refused as bound is read again, and only an admission or the
         // delivery's absence is recorded (FIG-4369). So are an emission's
         // ingest and a started delivery's bind: only the store's receipt, the
         // bound process, or the store's refusal is recorded (FIG-4503). So is
-        // a follow-on recovery root's decision: only its answer, or its
+        // a follow-on recovery run's decision: only its answer, or its
         // session's retirement, is recorded (FIG-4361).
         // Presentation likewise retries when the recorded renderer is absent;
         // an unavailable deployment must not turn that fault into history.
@@ -218,9 +218,9 @@ pub(crate) fn restate_effect_execution(
         command @ (RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
-        | RuntimeEffectCommand::AdmitDrive { .. }
-        | RuntimeEffectCommand::SealDriveAdmission { .. }
-        | RuntimeEffectCommand::AdmitRoot { .. }
+        | RuntimeEffectCommand::AdmitShift { .. }
+        | RuntimeEffectCommand::SealShiftAdmission { .. }
+        | RuntimeEffectCommand::AdmitRun { .. }
         | RuntimeEffectCommand::InspectAdmittedHead { .. }
         | RuntimeEffectCommand::ObserveDrainMark { .. }
         | RuntimeEffectCommand::RecoverFollowOn { .. }
@@ -228,7 +228,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::IngestTriggerOccurrence { .. }
         | RuntimeEffectCommand::AdmitTriggerDelivery { .. }
         | RuntimeEffectCommand::ResolveTurnConfig { .. }
-        | RuntimeEffectCommand::CloseRootScope { .. }
+        | RuntimeEffectCommand::CloseRunScope { .. }
         | RuntimeEffectCommand::BeginSessionClose { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::BeforeLlmCall { .. }

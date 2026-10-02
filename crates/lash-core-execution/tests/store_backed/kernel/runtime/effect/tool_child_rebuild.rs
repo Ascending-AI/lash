@@ -1,5 +1,5 @@
 //! A group tool child whose opener is not live where it runs builds its
-//! context from the deployment's source (FIG-3712), driven end to end through
+//! context from the deployment's source (FIG-3712), executed end to end through
 //! a group on the Restate server double.
 
 mod tests {
@@ -362,7 +362,7 @@ mod tests {
     /// Waits until the child's dispatch invocation reports `needle` as the
     /// live fault it keeps retrying, and returns that failure. A refused
     /// child settles nothing on the double — "the engine keeps it for its
-    /// opener" is the invocation retrying its drive — so the typed refusal
+    /// opener" is the invocation retrying its shift — so the typed refusal
     /// is observed in the invocation's `last_failure` rather than an outcome.
     async fn await_child_retry(backend: &Backend, group_key: &str, needle: &str) -> (u32, String) {
         // The dispatch runs on the lane the opener's build recorded: stable
@@ -745,7 +745,7 @@ mod tests {
             &ToolChildRebuildRefusal::SessionServices.to_string(),
         )
         .await;
-        // The child retries its drive, so the counts are floors, not exact:
+        // The child retries its shift, so the counts are floors, not exact:
         // each retry rebuilds the context and re-runs the journaled tool
         // attempt that the refused read abandoned.
         assert!(fixed.builds.load(Ordering::SeqCst) >= 1);

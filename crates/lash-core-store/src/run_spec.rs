@@ -11,14 +11,14 @@
 //! bytes once. The hash is part of the input's submission digest, so a
 //! same-id retry with a different spec is a conflict.
 //!
-//! The drive resolves a root's spec exactly once, against the root's config
+//! The shift resolves a run's spec exactly once, against the run's config
 //! snapshot taken after the boundary's command drain, and records the result
-//! as the root's [`ResolvedRun`]. Every replay and worker hop reads the
-//! record; the resolver never runs again for a recorded root. Overrides shape
-//! that root only: they never reach the sticky session config.
+//! as the run's [`ResolvedRun`]. Every replay and worker hop reads the
+//! record; the resolver never runs again for a recorded run. Overrides shape
+//! that run only: they never reach the sticky session config.
 //!
 //! A claim never mixes specs: the next-turn prefix stops at the first input
-//! whose spec differs from its head's. Steering joins the running root's
+//! whose spec differs from its head's. Steering joins the running run's
 //! recorded shape, so an input addressed to a running turn under a differing
 //! explicit spec is refused before acceptance.
 
@@ -67,8 +67,8 @@ impl std::fmt::Display for DefinitionRef {
     }
 }
 
-/// A slot a root's spec fills with a durable capability (D5): the name the
-/// definition or the root's tooling binds the capability under.
+/// A slot a run's spec fills with a durable capability (D5): the name the
+/// definition or the run's tooling binds the capability under.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -151,17 +151,17 @@ pub struct CapabilityRef {
 // `ResolvedRun`'s `Eq` (carried on `PendingFollowOn`) requires.
 impl Eq for CapabilityRef {}
 
-/// One-shot overrides of the session config for the root that runs an
-/// input. Each field left `None` keeps the root's snapshot value.
+/// One-shot overrides of the session config for the run that runs an
+/// input. Each field left `None` keeps the run's snapshot value.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RunOverrides {
-    /// The model this root runs, by the host's key. The root resolves it once,
+    /// The model this run executes, by the host's key. The run resolves it once,
     /// when it records its shape: the registry mints the binding then, and
     /// every replay reads the recorded binding. The snapshot's reasoning
     /// stays unless [`Self::reasoning`] is set too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<LlmProfileKey>,
-    /// The reasoning this root runs its model with.
+    /// The reasoning this run executes its model with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -190,10 +190,10 @@ impl RunOverrides {
             && self.protocol_turn_options.is_none()
     }
 
-    /// Apply these overrides to `config`, the root's snapshot. An override
+    /// Apply these overrides to `config`, the run's snapshot. An override
     /// key is resolved through `models` here, once; a reasoning override
-    /// applies to whichever model the root ends up with. An override of
-    /// either has the pair the root would record judged against the recorded
+    /// applies to whichever model the run ends up with. An override of
+    /// either has the pair the run would record judged against the recorded
     /// capability. The protocol options are applied apart, by their owner
     /// ([`apply_protocol_options`]).
     fn apply(
@@ -309,8 +309,8 @@ where
     }
 }
 
-/// Why a registered definition refused to shape a root: deterministic, so it
-/// is recorded as the root's failure. `refusal` is the definition's own
+/// Why a registered definition refused to shape a run: deterministic, so it
+/// is recorded as the run's failure. `refusal` is the definition's own
 /// refusal type, serialized, and `message` its display text.
 #[derive(
     Clone,
@@ -346,7 +346,7 @@ impl RunDefinitionRefusal {
 
 impl Eq for RunDefinitionRefusal {}
 
-/// Why a protocol refused to resolve the render a root's results present
+/// Why a protocol refused to resolve the render a run's results present
 /// with. `refusal` is the protocol's own refusal type, serialized, and
 /// `message` its display text.
 #[derive(
@@ -378,7 +378,7 @@ impl RenderRefusal {
 
 impl Eq for RenderRefusal {}
 
-/// Why a protocol resolved no render: it refused the root's options, or the
+/// Why a protocol resolved no render: it refused the run's options, or the
 /// recorded namespace it reads them from is corrupt.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RenderFault {
@@ -388,7 +388,7 @@ pub enum RenderFault {
     RecordedCorrupt(#[from] crate::config_transaction::RecordedNamespaceCorrupt),
 }
 
-/// Why a root's shape was refused: deterministic, so it is the root's
+/// Why a run's shape was refused: deterministic, so it is the run's
 /// recorded failure, carried typed as
 /// [`RuntimeErrorCause::RunShapeRefused`](crate::RuntimeErrorCause::RunShapeRefused).
 #[derive(
@@ -413,7 +413,7 @@ pub enum RunShapeRefusal {
     Owner {
         refusal: crate::config_transaction::ConfigRefusal,
     },
-    /// The reasoning the root would run is one its model's recorded
+    /// The reasoning the run would run is one its model's recorded
     /// capability refuses.
     #[error(transparent)]
     Reasoning {
@@ -428,7 +428,7 @@ pub enum RunShapeRefusal {
         "run overrides state protocol turn options, but the session records no protocol plugin"
     )]
     ProtocolOptionsWithoutProtocol,
-    /// The protocol refused to resolve the root's render.
+    /// The protocol refused to resolve the run's render.
     #[error("the run's render was refused: {refusal}")]
     Render { refusal: RenderRefusal },
 }
@@ -437,7 +437,7 @@ pub enum RunShapeRefusal {
 #[derive(Debug, thiserror::Error)]
 pub enum RunResolveError {
     /// The spec's model key has no binding on this deployment: a redeploy
-    /// repairs it, so it is never the root's recorded outcome.
+    /// repairs it, so it is never the run's recorded outcome.
     #[error(transparent)]
     Model(crate::provider::LlmProfileUnavailable),
     /// The spec is refused, on any attempt.
@@ -454,7 +454,7 @@ pub enum RunResolveError {
 /// The shape one accepted input runs under.
 ///
 /// Explicit overrides win over the definition's output, which wins over the
-/// root's config snapshot. The default spec (no definition, no context, no
+/// run's config snapshot. The default spec (no definition, no context, no
 /// overrides) resolves to the snapshot itself.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RunSpec {
@@ -542,11 +542,11 @@ impl RunSpec {
         ))))
     }
 
-    /// Resolve this spec against `snapshot`, the root's config after the
+    /// Resolve this spec against `snapshot`, the run's config after the
     /// boundary's command drain. `definition` is what the spec's registered
     /// definition produced over its context (`None` without a definition).
     /// `termination` and `follow_on_recoveries` are the host's policy and
-    /// follow-on recovery bound the root records.
+    /// follow-on recovery bound the run records.
     /// `models` mints the binding of an override key, and `owner` applies
     /// the stated protocol options: the definition's first, then the spec's
     /// own over them.
@@ -615,13 +615,13 @@ impl std::fmt::Display for RunSpecHash {
     }
 }
 
-/// A root's recorded shape: what its spec resolved to, once.
+/// A run's recorded shape: what its spec resolved to, once.
 ///
-/// It is the root's config record. The first execution of the root resolves
+/// It is the run's config record. The first execution of the run resolves
 /// its spec against the snapshot and records this; every replay, redrive and
 /// worker hop reads it back, so a later config command, a redeploy of the
-/// definition, or a fresh worker never changes the shape a recorded root runs
-/// under. Its config is the root's execution view only: commits keep writing
+/// definition, or a fresh worker never changes the shape a recorded run executes
+/// under. Its config is the run's execution view only: commits keep writing
 /// the sticky session config.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -645,7 +645,7 @@ impl RecordedRender {
 /// How a turn's terminal is assembled when its stream ended with neither a
 /// cancellation, an explicit outcome nor a `Done` event.
 ///
-/// A host states it; each root records the host's policy in its
+/// A host states it; each run records the host's policy in its
 /// [`ResolvedRun`] on first execution, and terminal assembly reads that
 /// record. A replay, redrive or recovered follow-on on a worker with another
 /// policy assembles the same terminal (ADR 0105 §1, FIG-4389).
@@ -666,14 +666,14 @@ impl Default for TerminationPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedRun {
-    /// The root's snapshot: the session config after the boundary's command
+    /// The run's snapshot: the session config after the boundary's command
     /// drain, which the spec resolved against. Its revision is the config
-    /// revision the root was admitted under.
+    /// revision the run was admitted under.
     pub base: PersistedSessionConfig,
-    /// The spec the root resolved; `None` for the default spec.
+    /// The spec the run resolved; `None` for the default spec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec: Option<RunSpecHash>,
-    /// The config the root runs under when its spec changed the snapshot;
+    /// The config the run executes under when its spec changed the snapshot;
     /// `None` when it runs under the snapshot itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved: Option<Box<PersistedSessionConfig>>,
@@ -684,15 +684,15 @@ pub struct ResolvedRun {
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RecordedRender>,
-    /// The host's termination policy when the root first resolved: how its
+    /// The host's termination policy when the run first resolved: how its
     /// terminal is assembled when its stream ends without `Done`. Recorded so
-    /// every execution of the root assembles the same terminal (FIG-4389).
+    /// every execution of the run assembles the same terminal (FIG-4389).
     pub termination: TerminationPolicy,
-    /// The host's follow-on recovery bound when the root first resolved
-    /// (ADR 0101 §3): how many times a drive may recover a follow-on this
-    /// root's frame switches owe before it commits failed. A pending
+    /// The host's follow-on recovery bound when the run first resolved
+    /// (ADR 0101 §3): how many times a shift may recover a follow-on this
+    /// run's frame switches owe before it commits failed. A pending
     /// follow-on carries this record, so every recovery of the logical run
-    /// decides on it, never on the bound of the host that drives it.
+    /// decides on it, never on the bound of the host that executes it.
     pub follow_on_recoveries: u32,
 }
 
@@ -715,14 +715,14 @@ impl ResolvedRun {
         }
     }
 
-    /// The config the root runs under.
+    /// The config the run executes under.
     pub fn config(&self) -> &PersistedSessionConfig {
         self.resolved.as_deref().unwrap_or(&self.base)
     }
 }
 
 /// A registered run definition: a pure, deterministic function from the
-/// root's config snapshot and the spec's context to overrides. It does no
+/// run's config snapshot and the spec's context to overrides. It does no
 /// I/O; live resources are bound on the worker by id.
 pub trait RunDefinition: Send + Sync {
     fn reference(&self) -> DefinitionRef;
@@ -737,7 +737,7 @@ pub trait RunDefinition: Send + Sync {
 /// The run definitions a deployment registers, by exact reference.
 ///
 /// A worker resolves a spec's definition only by the exact name and revision
-/// the spec names. A worker without it fails the root's resolution as its
+/// the spec names. A worker without it fails the run's resolution as its
 /// deployment's fault, retried and then parked, never with another revision.
 #[derive(Clone, Default)]
 pub struct RunDefinitions {

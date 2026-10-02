@@ -11,7 +11,7 @@ use lash_core_execution::{
 };
 use lash_sqlite_store::SqliteStore;
 
-async fn admit_root(store: &SqliteStore) {
+async fn admit_run(store: &SqliteStore) {
     store
         .admit_session(
             &lash_core_execution::testing::store_fixtures::root_session_request(
@@ -72,7 +72,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("SQLite store");
-    admit_root(&store).await;
+    admit_run(&store).await;
     let state = RuntimeSessionState {
         session_id: "root".into(),
         ..RuntimeSessionState::new(SessionPolicy::new(
@@ -159,7 +159,7 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
     let store = SqliteStore::open_file_for_testing(&directory.path().join("session.db"))
         .await
         .expect("SQLite store");
-    admit_root(&store).await;
+    admit_run(&store).await;
     let mut state = RuntimeSessionState {
         session_id: "root".into(),
         ..RuntimeSessionState::new(SessionPolicy::new(
@@ -229,7 +229,7 @@ async fn append_identity_replays_after_head_advance() {
     let store = SqliteStore::open_file_for_testing(&directory.path().join("session.db"))
         .await
         .expect("SQLite store");
-    admit_root(&store).await;
+    admit_run(&store).await;
     let mut state = RuntimeSessionState {
         session_id: "root".into(),
         ..RuntimeSessionState::new(SessionPolicy::new(

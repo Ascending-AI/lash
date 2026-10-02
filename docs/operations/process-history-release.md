@@ -107,7 +107,7 @@ promises, child work, trigger linkage, holds and wake content are outside
 release. Counts include released signal rows, so a successor cannot reuse an
 ordinal. Recorded engine steps replay their recorded answers. An old segment
 or tool child retrying an unrecorded append still has its digest fence. Hosts
-submit work through `send()` and the engine; release drives no turn.
+submit work through `send()` and the engine; release executes no turn.
 
 Deleting rows would require proof that every writer stopped replaying its
 keys and replacement signal-ordinal evidence. Storage has neither proof.

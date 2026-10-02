@@ -722,7 +722,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // Boxed: the driver future carries the whole dispatch, and a group
         // child is spawned per member — 21 kB of stack per pending child is a
@@ -738,7 +738,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
             &self.host,
             &self.opener,
             &request,
-            ChildTerminal::Drive {
+            ChildTerminal::Shift {
                 child: envelope.invocation.address.clone(),
             },
             self.host
@@ -748,7 +748,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
     }
 }
 
-/// The handler-level driving seam a tool child's resolver hands to a tier that
+/// The handler-level executing seam a tool child's resolver hands to a tier that
 /// supplies the admitted controller itself (ADR 0099 §2, FIG-2266).
 ///
 /// On the in-process tiers the runner is self-contained: `execute` builds the
@@ -756,13 +756,13 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 /// whose admitted controller is bound to a live handler context — Restate,
 /// where only a `ctx`-bound controller journals steps in the child's own
 /// invocation — cannot use that shape, so it resolves the same runner through
-/// `executor_for` and calls [`drive`](Self::drive) with the controller *it*
+/// `executor_for` and calls [`shift`](Self::shift) with the controller *it*
 /// built. The driver inside is identical either way: the controller is the
 /// only tier-specific input.
 ///
 /// `controller` is deliberately a borrow-bounded [`ScopedEffectController`]
 /// rather than the `'static` one the in-process path builds: a handler-bound
-/// controller is valid exactly as long as the handler drives it.
+/// controller is valid exactly as long as the handler executes it.
 #[async_trait::async_trait]
 pub trait ToolChildDriver: Send {
     /// Runs the child to a terminal on `controller`, returning its settlement
@@ -774,7 +774,7 @@ pub trait ToolChildDriver: Send {
     /// token, as it is for the in-process `execute`; a deployment-built
     /// context has none, and the opener's turn cancel reaches the child
     /// through its durable gate.
-    async fn drive<'run>(
+    async fn shift<'run>(
         &self,
         request: &ToolChildRequest,
         child: crate::EffectAddress,
@@ -788,7 +788,7 @@ pub trait ToolChildDriver: Send {
     /// the §5 barrier of the rank its commit reserved, and returns the
     /// settlement outcome of that final. The tool's attempts never run again
     /// (W15), and the child's context is resolved exactly as
-    /// [`drive`](Self::drive) resolves it.
+    /// [`shift`](Self::shift) resolves it.
     async fn drain_committed<'run>(
         &self,
         request: &ToolChildRequest,
@@ -799,7 +799,7 @@ pub trait ToolChildDriver: Send {
 
 #[async_trait::async_trait]
 impl ToolChildDriver for ToolChildRunner {
-    async fn drive<'run>(
+    async fn shift<'run>(
         &self,
         request: &ToolChildRequest,
         child: crate::EffectAddress,
@@ -809,7 +809,7 @@ impl ToolChildDriver for ToolChildRunner {
             &self.host,
             &self.opener,
             request,
-            ChildTerminal::Drive { child },
+            ChildTerminal::Shift { child },
             controller,
         ))
         .await
@@ -836,7 +836,7 @@ impl ToolChildDriver for ToolChildRunner {
 enum ChildTerminal {
     /// Runs its attempts, retry sleeps and deferred await, and commits its
     /// final against its own replay row (`child`).
-    Drive { child: crate::EffectAddress },
+    Shift { child: crate::EffectAddress },
     /// Drains the final an earlier invocation committed.
     DrainCommitted {
         committed: super::CommittedGroupChildFinal,
@@ -1055,7 +1055,7 @@ fn admitted_tool_drift(
 /// intents is admitted by the barrier on its reserved rank before the first
 /// declared intent runs. A child whose final an earlier invocation committed
 /// takes the same context and the same barrier, and drains that final instead
-/// of driving (`terminal`).
+/// of executing (`terminal`).
 async fn run_tool_child<'run>(
     host: &ToolChildHost,
     opener: &ChildOpenerContext,
@@ -1123,9 +1123,9 @@ async fn run_tool_child<'run>(
     // The presentation hook's duration input is this observed window — the
     // journaled outcome carries no clock facts (FIG-3696).
     let run_started = dispatch.clock.now();
-    // Boxed for the same reason the runner's call is: `drive` holds the
+    // Boxed for the same reason the runner's call is: `shift` holds the
     // coordinator and its attempt machinery live across every await.
-    let driven: std::pin::Pin<
+    let executed: std::pin::Pin<
         Box<
             dyn std::future::Future<
                     Output = Result<ToolDispatchOutcome, RuntimeEffectControllerError>,
@@ -1133,8 +1133,8 @@ async fn run_tool_child<'run>(
                 + '_,
         >,
     > = match terminal {
-        ChildTerminal::Drive { child } => {
-            Box::pin(drive(&dispatch, request, child, turn_cancel_wait))
+        ChildTerminal::Shift { child } => {
+            Box::pin(shift(&dispatch, request, child, turn_cancel_wait))
         }
         ChildTerminal::DrainCommitted { committed } => {
             let dispatch = Arc::clone(&dispatch);
@@ -1145,11 +1145,11 @@ async fn run_tool_child<'run>(
         }
     };
     // On a built context, a session service call the child made abandons the
-    // drive where it stands, as a crash would: nothing the refused call led
+    // shift where it stands, as a crash would: nothing the refused call led
     // to is recorded (see `SessionServicesRefusal`).
     let mut outcome = match &resolved.refusal {
-        None => driven.await?,
-        Some(refusal) => match refusal.abandoning(driven).await {
+        None => executed.await?,
+        Some(refusal) => match refusal.abandoning(executed).await {
             Ok(outcome) => outcome?,
             Err(refusal) => {
                 tracing::warn!(
@@ -1316,8 +1316,8 @@ pub(crate) async fn validate_recorded_authorities(
     Ok(())
 }
 
-/// Drives the child's attempts, retry sleeps and deferred await.
-async fn drive(
+/// Executes the child's attempts, retry sleeps and deferred await.
+async fn shift(
     dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     child: crate::EffectAddress,

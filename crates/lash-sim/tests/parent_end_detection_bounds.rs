@@ -17,8 +17,8 @@ use std::collections::VecDeque;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::{Arc, Mutex};
 
-use lash_core::runtime::drive::ParentEndRelay;
-use lash_core::runtime::drive::relay::{RelayPolicy, relay_due};
+use lash_core::runtime::shift::ParentEndRelay;
+use lash_core::runtime::shift::relay::{RelayPolicy, relay_due};
 use lash_core::store::{
     ObligationId, ObligationKey, ObligationKind, ObligationLedger, ObligationSettlement,
     ObligationState, SettleOutcome, StallReason,

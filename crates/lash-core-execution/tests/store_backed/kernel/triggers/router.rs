@@ -610,7 +610,7 @@ mod tests {
             })
         };
 
-        // The first drive restores the route and registers; its bind is lost.
+        // The first shift restores the route and registers; its bind is lost.
         let granted = stub(None);
         router_with_restorer(
             Arc::new(BindFailsOnce::new(Arc::clone(&world.store))),
@@ -621,7 +621,7 @@ mod tests {
         .await
         .recover_delivery(&occurrence_id, &subscription_id)
         .await
-        .expect_err("the first drive's bind is lost");
+        .expect_err("the first shift's bind is lost");
         assert_eq!(
             granted.calls.load(std::sync::atomic::Ordering::SeqCst),
             1,
@@ -632,7 +632,7 @@ mod tests {
             .get_process_by_start_key(&trigger_delivery_start_key(&reservation))
             .await
             .expect("read the start key")
-            .expect("the first drive registered the delivery's process");
+            .expect("the first shift registered the delivery's process");
 
         // The provider revokes the route; the redrive binds the started
         // process and asks nothing.
@@ -649,7 +649,7 @@ mod tests {
         .await
         .recover_delivery(&occurrence_id, &subscription_id)
         .await
-        .expect("the redrive answers the process the first drive started");
+        .expect("the redrive answers the process the first shift started");
         assert_eq!(redriven, started.id);
         assert_eq!(
             revoked.calls.load(std::sync::atomic::Ordering::SeqCst),

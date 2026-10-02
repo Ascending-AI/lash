@@ -39,7 +39,7 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         );
 
         const ROLLED_BACK_MARKER: &str = "must-not-survive-stale-append";
-        // A host's append is a session command the drive applies at a turn
+        // A host's append is a session command the shift applies at a turn
         // boundary (FIG-4202); a stale ancestor settles it `StaleBranch`.
         let result = session
             .admin()
@@ -221,14 +221,14 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .open()
         .await?;
 
-    let root_id = format!("{session_id}:switch-root");
+    let run_id = format!("{session_id}:switch-run");
     let switched = first_session
         .send(TurnInput::text("switch away from the abandoned frame"))
-        .id(TurnId::fixture(root_id.clone()))
+        .id(TurnId::fixture(run_id.clone()))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(5), follow_on_started_rx)
         .await
-        .expect("the drive reaches the follow-on provider call")
+        .expect("the shift reaches the follow-on provider call")
         .expect("follow-on provider signal");
     drop(switched);
     let switch_turn_index = 1;
@@ -267,7 +267,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     drop(durable);
 
     // The attempt dies while the follow-on model call is held; the engine
-    // redrives the root, which replays its journal up to the follow-on call
+    // redrives the run, which replays its journal up to the follow-on call
     // and answers it.
     let turn_invocation = double
         .server()
@@ -278,19 +278,17 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
                 && invocation.target.contains(session_id.as_str())
                 && invocation.status == "running"
         })
-        .expect("the switch root's turn invocation runs");
+        .expect("the switch run's turn invocation runs");
     assert!(
         double.server().crash(&turn_invocation.id),
         "the held attempt dies"
     );
     let redriven = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        first_session
-            .root(TurnId::fixture(root_id.clone()))
-            .outcome(),
+        first_session.run(TurnId::fixture(run_id.clone())).outcome(),
     )
     .await
-    .expect("the redriven root settles")?;
+    .expect("the redriven run settles")?;
     assert_eq!(redriven.status(), crate::TurnStatus::Answered);
 
     let resident_execution_state = first_session
@@ -320,7 +318,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .expect("reopened RLM has an execution snapshot");
 
     let follow_on = reopened_session
-        .root(TurnId::fixture(root_id.clone()))
+        .run(TurnId::fixture(run_id.clone()))
         .output()
         .await?;
     assert_eq!(
@@ -330,7 +328,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         ))
     );
     let settled_again = reopened_session
-        .root(TurnId::fixture(root_id))
+        .run(TurnId::fixture(run_id))
         .outcome()
         .await?;
     assert_eq!(settled_again.status(), crate::TurnStatus::Answered);
@@ -410,8 +408,8 @@ pub(super) fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> 
     })
 }
 
-/// The engine's session drive runs a chained frame handoff through nested
-/// commits (D5: the drive is the only executor).
+/// The engine's session shift runs a chained frame handoff through nested
+/// commits (D5: the shift is the only executor).
 #[cfg(feature = "rlm")]
 #[test]
 pub(super) fn engine_driven_chained_continue_as_survives_nested_commit_handoff() -> Result<()> {
@@ -468,7 +466,7 @@ pub(super) fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_c
 pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commits_inner()
 -> Result<()> {
     let session_id = "agent-frame-durable";
-    let root_turn_id = "agent-frame-root-turn";
+    let run_turn_id = "agent-frame-root-turn";
     let double = restate_double(0x0a9e_f5a1).await;
     let core = LashCore::standard_builder(double.lash_backend())
         .serve_test_llm_profile(agent_frame_switch_provider(), mock_llm_profile_spec())
@@ -481,12 +479,12 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let activities = RecordingEvents::default();
     let output = session
         .send(TurnInput::text("switch frames"))
-        .id(root_turn_id)
+        .id(run_turn_id)
         .output_into(&activities)
         .await?;
 
     assert_eq!(output.assistant_message(), Some("done after frame switch"));
-    let follow_turn_id = TurnId::fixture(format!("{root_turn_id}:agent-frame:1"));
+    let follow_turn_id = TurnId::fixture(format!("{run_turn_id}:agent-frame:1"));
     let activities = activities.snapshot().await;
     let started = activities
         .iter()
@@ -502,27 +500,27 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
             .iter()
             .map(|(_, turn_id)| *turn_id)
             .collect::<Vec<_>>(),
-        vec![root_turn_id, follow_turn_id.as_str()],
+        vec![run_turn_id, follow_turn_id.as_str()],
         "each physical frame turn must announce its own identity exactly once"
     );
     // Each frame turn journals its model calls under its own turn: the
-    // follow turn's id extends the root's, so a root key is one that names
-    // the root and not the follow turn.
+    // follow turn's id extends the run's, so a root key is one that names
+    // the run and not the follow turn.
     let llm_calls = journaled_llm_call_keys(&double);
     let follow_calls = llm_calls
         .iter()
         .filter(|key| key.contains(&format!("{session_id}:{follow_turn_id}:")))
         .count();
-    let root_calls = llm_calls
+    let run_calls = llm_calls
         .iter()
         .filter(|key| {
-            key.contains(&format!("{session_id}:{root_turn_id}:"))
+            key.contains(&format!("{session_id}:{run_turn_id}:"))
                 && !key.contains(follow_turn_id.as_str())
         })
         .count();
     assert!(
-        root_calls > 0 && follow_calls > 0 && root_calls + follow_calls == llm_calls.len(),
-        "every model call is journaled under the root or the follow turn: {llm_calls:?}"
+        run_calls > 0 && follow_calls > 0 && run_calls + follow_calls == llm_calls.len(),
+        "every model call is journaled under the run or the follow turn: {llm_calls:?}"
     );
 
     let conn = rusqlite::Connection::open(
@@ -552,7 +550,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .collect::<Vec<_>>();
     assert_eq!(
         turn_commit_ids,
-        vec![root_turn_id.to_string(), follow_turn_id.to_string()]
+        vec![run_turn_id.to_string(), follow_turn_id.to_string()]
     );
     Ok(())
 }
@@ -983,7 +981,7 @@ pub(super) async fn an_after_step_cancel_stops_at_the_step_boundary() -> Result<
     let handle = session
         .send(TurnInput::text("use the tool, then stop"))
         .await?;
-    // This core runs no session work: a waiter drives the input in its own
+    // This core runs no session work: a waiter executes the input in its own
     // task, so the events follower is what starts the turn.
     let mut events = handle.events();
     started.notified().await;
@@ -1051,13 +1049,13 @@ pub(super) async fn host_escalates_an_after_step_cancel_to_an_immediate_abort() 
         .await?;
 
     let handle = session.send(TurnInput::text("hang, then escalate")).await?;
-    // This core runs no session work: a waiter drives the input in its own
+    // This core runs no session work: a waiter executes the input in its own
     // task, so the events follower is what starts the turn.
     let _events = handle.events();
     started.notified().await;
     let requested = |receipt: crate::CancelReceipt| match receipt {
         crate::CancelReceipt::Requested { receipt, .. } => receipt.outcome,
-        other => panic!("the running root must receive the request, got {other:?}"),
+        other => panic!("the running run must receive the request, got {other:?}"),
     };
     assert!(matches!(
         requested(

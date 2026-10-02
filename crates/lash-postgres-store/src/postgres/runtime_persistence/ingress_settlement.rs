@@ -1,8 +1,8 @@
 //! A commit's ingress settlement (FIG-3927), inside its write transaction.
 //!
-//! Every row a commit names is settled under the root that admitted it: the
+//! Every row a commit names is settled under the run that admitted it: the
 //! shared verdict decides over the row as read under `FOR UPDATE`, and the
-//! write keeps the root predicate as its backstop. A row the root does not
+//! write keeps the run predicate as its backstop. A row the run does not
 //! hold refuses the whole commit. The session-command run a commit applied
 //! settles bindlessly, predicated on each row still being open.
 
@@ -47,23 +47,23 @@ pub(super) async fn settle_commit_ingress_tx(
     let mut affected_inputs = Vec::new();
     let mut affected_wakes = Vec::new();
     if let Some(ingress) = commit.ingress.as_ref() {
-        let root = &ingress.root;
+        let run = &ingress.run;
         for completion in &ingress.completed_inputs {
             for input_id in &completion.input_ids {
-                admitted_input_tx(tx, session_id, root, input_id).await?;
+                admitted_input_tx(tx, session_id, run, input_id).await?;
                 settle_admitted_input_tx(
                     tx,
                     session_id,
-                    root,
+                    run,
                     input_id,
                     lash_core_execution::runtime::TurnInputStateKind::Completed,
                     now,
                 )
                 .await?;
-                // The completing commit binds the input to the root that
+                // The completing commit binds the input to the run that
                 // applied it: a checkpoint-admitted input carries no binding
-                // until now, and a root-admitted input's is this same row.
-                crate::session_roots::bind_applied_input_tx(tx, session_id, input_id, root).await?;
+                // until now, and a run-admitted input's is this same row.
+                crate::session_runs::bind_applied_input_tx(tx, session_id, input_id, run).await?;
             }
         }
         for completion in &ingress.completed_batches {
@@ -71,7 +71,7 @@ pub(super) async fn settle_commit_ingress_tx(
                 crate::queued_work::complete_admitted_batch_tx(
                     tx,
                     session_id,
-                    root,
+                    run,
                     batch_id,
                     lash_core_execution::store::IngressTerminal {
                         cause: lash_core_execution::store::IngressTerminalCause::Delivered,
@@ -94,16 +94,16 @@ pub(super) async fn settle_commit_ingress_tx(
             for row in rows {
                 match row {
                     lash_core_execution::store::IngressRowId::Input(input_id) => {
-                        let held = admitted_input_tx(tx, session_id, root, input_id).await?;
+                        let held = admitted_input_tx(tx, session_id, run, input_id).await?;
                         match disposition {
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
-                                release_admitted_input_tx(tx, session_id, root, input_id).await?;
+                                release_admitted_input_tx(tx, session_id, run, input_id).await?;
                             }
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop => {
                                 settle_admitted_input_tx(
                                     tx,
                                     session_id,
-                                    root,
+                                    run,
                                     input_id,
                                     lash_core_execution::runtime::TurnInputStateKind::Cancelled,
                                     now,
@@ -127,8 +127,8 @@ pub(super) async fn settle_commit_ingress_tx(
                             // deferred (FIG-3543).
                             lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer => {
                                 let batch =
-                                    admitted_batch_tx(tx, session_id, root, batch_id).await?;
-                                release_admitted_batch_tx(tx, session_id, root, batch_id).await?;
+                                    admitted_batch_tx(tx, session_id, run, batch_id).await?;
+                                release_admitted_batch_tx(tx, session_id, run, batch_id).await?;
                                 affected_wakes.extend(
                                     lash_core_execution::store_backend_support::deferred_wake_records(
                                         std::slice::from_ref(&batch),
@@ -139,7 +139,7 @@ pub(super) async fn settle_commit_ingress_tx(
                                 crate::queued_work::complete_admitted_batch_tx(
                                     tx,
                                     session_id,
-                                    root,
+                                    run,
                                     batch_id,
                                     lash_core_execution::store::IngressTerminal {
                                         cause:
@@ -163,7 +163,7 @@ pub(super) async fn settle_commit_ingress_tx(
     // admitted names a turn that is over: by rule it is next-turn input at
     // its own position, its submitted delivery unchanged (ADR 0101 §5.1),
     // unless the cancellation's disposition, which governs host-authored
-    // input only, drops it. Once the turn's root has terminal evidence its
+    // input only, drops it. Once the turn's run has terminal evidence its
     // terminal write has already applied the disposition, and what it left
     // open is next-turn input no teardown of that turn reaches.
     let disposition = cancellation.map_or(
@@ -171,10 +171,10 @@ pub(super) async fn settle_commit_ingress_tx(
         |evidence| evidence.undelivered,
     );
     let sql = crate::turn_ingress::turn_ingress_sql();
-    let root = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
-    let root_ended: bool = sqlx::query_scalar(sql.family.root_ended.sql())
+    let run = lash_core_execution::store::PhysicalTurn::split_turn_id(turn_id).0;
+    let run_ended: bool = sqlx::query_scalar(sql.family.run_ended.sql())
         .bind(session_id.as_str())
-        .bind(root.as_str())
+        .bind(run.as_str())
         .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -191,7 +191,7 @@ pub(super) async fn settle_commit_ingress_tx(
         let released = affected_inputs
             .iter()
             .any(|(_, affected)| affected.input_id == input.input_id);
-        if !root_ended && !released && input.state.active_turn_id() == Some(turn_id) {
+        if !run_ended && !released && input.state.active_turn_id() == Some(turn_id) {
             open.push(input);
         }
     }
@@ -235,11 +235,11 @@ pub(super) async fn settle_commit_ingress_tx(
     Ok(outcome)
 }
 
-/// Input `input_id`, which root `root` must hold, locked for the commit.
+/// Input `input_id`, which run `run` must hold, locked for the commit.
 async fn admitted_input_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     input_id: &lash_core_execution::InputId,
 ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
     let row = sqlx::query(
@@ -255,23 +255,23 @@ async fn admitted_input_tx(
     .map_err(store_sqlx_error)?
     .map(pending_turn_input_row)
     .transpose()?;
-    lash_core_execution::store_backend_support::require_admitted_to_root(
+    lash_core_execution::store_backend_support::require_admitted_to_run(
         session_id,
-        root,
+        run,
         &input_row(input_id),
-        row.as_ref().map(|row| row.admitted_root.as_deref()),
+        row.as_ref().map(|row| row.admitted_run.as_deref()),
     )?;
     let row =
         row.ok_or_else(|| StoreError::Backend(format!("admitted input `{input_id}` vanished")))?;
     pending_turn_input_from_row(row)
 }
 
-/// The hydrated batch `batch_id`, which root `root` must hold, locked for
+/// The hydrated batch `batch_id`, which run `run` must hold, locked for
 /// the commit.
 async fn admitted_batch_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     batch_id: &lash_core_execution::BatchId,
 ) -> Result<QueuedWorkBatch, StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
@@ -282,9 +282,9 @@ async fn admitted_batch_tx(
             .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-    lash_core_execution::store_backend_support::require_admitted_to_root(
+    lash_core_execution::store_backend_support::require_admitted_to_run(
         session_id,
-        root,
+        run,
         &lash_core_execution::store::IngressRowId::Batch(batch_id.clone()),
         observed.as_ref().map(Option::as_deref),
     )?;
@@ -293,12 +293,12 @@ async fn admitted_batch_tx(
         .ok_or_else(|| StoreError::Backend(format!("admitted batch `{batch_id}` vanished")))
 }
 
-/// Settle input `input_id`, held by `root`, into the terminal `state` at
+/// Settle input `input_id`, held by `run`, into the terminal `state` at
 /// `now`.
 async fn settle_admitted_input_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     input_id: &lash_core_execution::InputId,
     state: lash_core_execution::runtime::TurnInputStateKind,
     now: u64,
@@ -312,20 +312,20 @@ async fn settle_admitted_input_tx(
     .bind(session_id.as_str())
     .bind(input_id.as_str())
     .bind(state.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .bind(crate::support::clamp_epoch_ms(now))
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?
     .rows_affected();
-    require_settlement_applied(session_id, root, input_row(input_id), settled)
+    require_settlement_applied(session_id, run, input_row(input_id), settled)
 }
 
-/// Hand input `input_id`, held by `root`, back open at its own position.
+/// Hand input `input_id`, held by `run`, back open at its own position.
 async fn release_admitted_input_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     input_id: &lash_core_execution::InputId,
 ) -> Result<(), StoreError> {
     let released = sqlx::query(
@@ -336,19 +336,19 @@ async fn release_admitted_input_tx(
     )
     .bind(session_id.as_str())
     .bind(input_id.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?
     .rows_affected();
-    require_settlement_applied(session_id, root, input_row(input_id), released)
+    require_settlement_applied(session_id, run, input_row(input_id), released)
 }
 
-/// Hand batch `batch_id`, held by `root`, back open at its own position.
+/// Hand batch `batch_id`, held by `run`, back open at its own position.
 async fn release_admitted_batch_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     batch_id: &lash_core_execution::BatchId,
 ) -> Result<(), StoreError> {
     let released = sqlx::query(
@@ -359,14 +359,14 @@ async fn release_admitted_batch_tx(
     )
     .bind(session_id.as_str())
     .bind(batch_id.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?
     .rows_affected();
     require_settlement_applied(
         session_id,
-        root,
+        run,
         lash_core_execution::store::IngressRowId::Batch(batch_id.clone()),
         released,
     )
@@ -377,11 +377,11 @@ fn input_row(input_id: &lash_core_execution::InputId) -> lash_core_execution::st
 }
 
 /// Backstop: the verdict was taken over this row under its lock earlier in
-/// the same transaction, so the root predicate cannot legitimately miss. A
+/// the same transaction, so the run predicate cannot legitimately miss. A
 /// miss is recorded as evidence and then fails closed.
 fn require_settlement_applied(
     session_id: &SessionId,
-    root: &TurnId,
+    run: &TurnId,
     row: lash_core_execution::store::IngressRowId,
     rows_affected: u64,
 ) -> Result<(), StoreError> {
@@ -392,9 +392,9 @@ fn require_settlement_applied(
         rows_affected,
         || StoreError::IngressRowNotAdmitted {
             session_id: session_id.clone(),
-            root: root.clone(),
+            run: run.clone(),
             row: Box::new(row.clone()),
-            admitted_root: None,
+            admitted_run: None,
         },
     )
 }

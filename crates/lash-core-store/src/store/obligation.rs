@@ -55,11 +55,11 @@ pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 2;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ObligationKind {
-    /// An admitted ingress item owes its session a drive.
+    /// An admitted ingress item owes its session a shift.
     Ingress,
-    /// A control intent owes its engine half and its follow-on drive.
+    /// A control intent owes its engine half and its follow-on shift.
     ControlIntent,
-    /// A terminal root owes its scope close.
+    /// A terminal run owes its scope close.
     ScopeClose,
     /// A closed scope's plan owes each child its cancel.
     ParentEnd,
@@ -163,8 +163,8 @@ pub enum ObligationKey {
     },
     /// A `control_intents` row.
     ControlIntent { intent_id: ControlIntentId },
-    /// A `session_roots` row.
-    ScopeClose { session_id: SessionId, root: TurnId },
+    /// A `session_runs` row.
+    ScopeClose { session_id: SessionId, run: TurnId },
     /// A `parent_end_plans` row: the scope's stored kind label and id.
     ParentEnd {
         parent_kind: String,
@@ -262,9 +262,9 @@ impl ObligationKey {
             Self::ControlIntent { intent_id } => vec![KeyColumn::Integer(
                 i64::try_from(intent_id.sequence()).unwrap_or(i64::MAX),
             )],
-            Self::ScopeClose { session_id, root } => vec![
+            Self::ScopeClose { session_id, run } => vec![
                 KeyColumn::Text(session_id.as_str().to_owned()),
-                KeyColumn::Text(root.as_str().to_owned()),
+                KeyColumn::Text(run.as_str().to_owned()),
             ],
             Self::ParentEnd {
                 parent_kind,
@@ -312,7 +312,7 @@ impl ObligationKey {
             },
             ObligationKind::ScopeClose => Self::ScopeClose {
                 session_id: next_identity(&mut columns, kind, "session_id")?,
-                root: next_identity(&mut columns, kind, "root")?,
+                run: next_identity(&mut columns, kind, "run")?,
             },
             ObligationKind::ParentEnd => Self::ParentEnd {
                 parent_kind: next_text(&mut columns, kind, "parent_kind")?,

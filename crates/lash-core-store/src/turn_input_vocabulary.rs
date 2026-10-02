@@ -368,7 +368,7 @@ pub struct PendingTurnInputDraft {
     #[serde(default, skip_serializing_if = "crate::run_spec::RunSpec::is_default")]
     pub run_spec: crate::run_spec::RunSpec,
     /// Pin the input in the transaction that accepts it: the revision its
-    /// root's terminal commit publishes is retained from the start. The pin
+    /// run's terminal commit publishes is retained from the start. The pin
     /// is no part of the submission, so a retry that asks for it pins an
     /// input its first attempt left unpinned.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -512,7 +512,7 @@ pub struct PendingTurnInputBatch {
     session_id: SessionId,
     drafts: Vec<PendingTurnInputDraft>,
     /// How long the acceptor holds the ingress claim of the rows it admits,
-    /// when it drives them itself ([`Self::held_by_acceptor`]).
+    /// when it executes them itself ([`Self::held_by_acceptor`]).
     acceptor_claim_ttl_ms: Option<u64>,
 }
 
@@ -562,12 +562,12 @@ impl PendingTurnInputBatch {
         }
     }
 
-    /// The same batch, accepted by an execution that drives its rows itself
+    /// The same batch, accepted by an execution that executes its rows itself
     /// (a child session's turn inside its parent's execution, ADR 0069 §6).
-    /// That inline drive is the ask each row's ingress obligation owes, so
+    /// That inline shift is the ask each row's ingress obligation owes, so
     /// the store takes every still-due obligation's claim in the transaction
     /// that admits the rows, held for `claim_ttl_ms`. No relay pass asks the
-    /// session for a second drive of a row its acceptor is about to admit;
+    /// session for a second shift of a row its acceptor is about to admit;
     /// a claim that lapses because the acceptor was lost is the relay's to
     /// retake (ADR 0109 §3).
     #[must_use]
@@ -576,7 +576,7 @@ impl PendingTurnInputBatch {
         self
     }
 
-    /// The claim TTL of [`Self::held_by_acceptor`], when the acceptor drives
+    /// The claim TTL of [`Self::held_by_acceptor`], when the acceptor executes
     /// the batch's rows itself.
     pub fn acceptor_claim_ttl_ms(&self) -> Option<u64> {
         self.acceptor_claim_ttl_ms
@@ -691,8 +691,8 @@ pub struct PendingTurnInput {
 ///
 /// This projection is separate from [`PendingTurnInput`] because a row's
 /// durable lifecycle state and its admission answer different questions: an
-/// open row waits for a root to admit it, an admitted one is bound to the
-/// root that will settle or release it (FIG-3927).
+/// open row waits for a run to admit it, an admitted one is bound to the
+/// run that will settle or release it (FIG-3927).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct PendingTurnInputRead {
@@ -703,7 +703,7 @@ pub struct PendingTurnInputRead {
 }
 
 impl PendingTurnInputRead {
-    /// Project a row no root has admitted.
+    /// Project a row no run has admitted.
     pub fn open(input: PendingTurnInput) -> Self {
         Self {
             input,
@@ -711,26 +711,26 @@ impl PendingTurnInputRead {
         }
     }
 
-    /// Project a row bound to the root that admitted it.
-    pub fn admitted(input: PendingTurnInput, root: crate::TurnId) -> Self {
+    /// Project a row bound to the run that admitted it.
+    pub fn admitted(input: PendingTurnInput, run: crate::TurnId) -> Self {
         Self {
             input,
-            status: PendingTurnInputReadStatus::Admitted { root },
+            status: PendingTurnInputReadStatus::Admitted { run },
         }
     }
 }
 
-/// Whether an undelivered input waits for admission or is bound to a root
+/// Whether an undelivered input waits for admission or is bound to a run
 /// (FIG-3927).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PendingTurnInputReadStatus {
-    /// No root has admitted the row.
+    /// No run has admitted the row.
     Open,
-    /// Root `root` admitted the row; only that root's commit or terminal
+    /// Run `run` admitted the row; only that run's commit or terminal
     /// settles or releases it.
-    Admitted { root: crate::TurnId },
+    Admitted { run: crate::TurnId },
 }
 
 /// Durable acceptance evidence returned to an ingress caller.
@@ -842,11 +842,11 @@ impl PendingTurnInputCancelTarget {
 #[serde(tag = "outcome", content = "data", rename_all = "snake_case")]
 pub enum PendingTurnInputCancelOutcome {
     Cancelled(PendingTurnInput),
-    /// A root admitted the row: only that root settles or releases it, so
-    /// the host cancels the root instead (FIG-3927).
+    /// A run admitted the row: only that run settles or releases it, so
+    /// the host cancels the run instead (FIG-3927).
     AlreadyAdmitted {
         input: PendingTurnInput,
-        root: crate::TurnId,
+        run: crate::TurnId,
     },
     AlreadyCompleted(PendingTurnInput),
     AlreadyCancelled(PendingTurnInput),
@@ -903,7 +903,7 @@ pub struct TurnInputCompletionData {
     pub applications: Vec<TurnInputApplication>,
 }
 /// The turn inputs one commit completes, with their application evidence
-/// (FIG-3927): row identities only, settled under the committing root's
+/// (FIG-3927): row identities only, settled under the committing run's
 /// admission.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputCompletion {
@@ -923,9 +923,9 @@ impl std::ops::DerefMut for TurnInputCompletion {
         &mut self.data
     }
 }
-/// Turn inputs one admission bound to a root, with their payloads, in
+/// Turn inputs one admission bound to a run, with their payloads, in
 /// `enqueue_seq` order (FIG-3927). The binding lives on the rows; this is
-/// what the root drives and what its journal records.
+/// what the run executes and what its journal records.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AdmittedTurnInputs {
     pub session_id: SessionId,
@@ -1334,12 +1334,12 @@ impl TurnInput {
     ///
     /// The live `TurnContext` (a child turn's process correlation and
     /// lineage) is process-local state that no store can hold, so the
-    /// acceptance commit records everything else and the caller driving the
+    /// acceptance commit records everything else and the caller executing the
     /// turn keeps the live state (ADR 0069). A worker that later recovers the
-    /// row drives exactly this projection.
+    /// row executes exactly this projection.
     ///
-    /// `trace_turn_id` is dropped for the same reason: it labels one drive
-    /// attempt, not the input. A recovered row is driven under the recovering
+    /// `trace_turn_id` is dropped for the same reason: it labels one shift
+    /// attempt, not the input. A recovered row is executed under the recovering
     /// worker's own execution scope, and a persisted trace id from the
     /// abandoned attempt would collide with it
     /// ([`RuntimeErrorCode::ExecutionScopeTurnIdMismatch`](crate::RuntimeErrorCode::ExecutionScopeTurnIdMismatch)),

@@ -1296,10 +1296,10 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
 // A turn whose attempts never commit an error-free execution used to re-call
 // the provider for as long as the turn budget allowed, which in a workbench
 // running `TurnBudget::Unbounded` was forever: one measured send bought 1,223
-// provider calls in 4m36s and committed nothing. These drive the real machine
+// provider calls in 4m36s and committed nothing. These shift the real machine
 // to a terminal state and count the calls.
 
-/// Drive `machine` until it is done or `max_llm_calls` provider calls have been answered,
+/// Shift `machine` until it is done or `max_llm_calls` provider calls have been answered,
 /// answering each call with `reply` and each exec with `exec_result`.
 #[expect(
     clippy::expect_used,
@@ -1995,7 +1995,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
     );
 }
 
-/// Leg 1 of the retry-hygiene triple, driven through the real machine.
+/// Leg 1 of the retry-hygiene triple, executed through the real machine.
 ///
 /// Within one iteration a failing cell keeps whatever it printed before it
 /// failed — that output is real and the model should see it. What must not
@@ -2129,7 +2129,7 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     assert_ne!(
         serde_json::to_vec(&recorded_initial.0).expect("first request serializes"),
         serde_json::to_vec(&redriven.0).expect("first request serializes"),
-        "the protocol-start sync drives iteration 1, so the stale record differs there"
+        "the protocol-start sync executes iteration 1, so the stale record differs there"
     );
     assert_eq!(
         serde_json::to_vec(&recorded_initial.1).expect("second request serializes"),
@@ -2147,7 +2147,7 @@ fn rlm_redrive_projects_identical_llm_envelope() {
     );
 }
 
-/// Drive an RLM machine through one executed cell and return the two projected
+/// Execute an RLM machine through one executed cell and return the two projected
 /// LLM requests. The protocol-start sync records `initial_inputs`, and the
 /// iteration boundary's `SyncExecutionEnvironment` is answered with
 /// `journaled_sync` — the recorded outcome a redrive replays verbatim instead
@@ -2237,7 +2237,7 @@ fn drive_rlm_to_second_llm_request(
     (first, second)
 }
 
-/// Drive one cell to its exec effect, answer it with `result`, and return the
+/// Execute one cell to its exec effect, answer it with `result`, and return the
 /// machine with the effects that followed.
 #[expect(
     clippy::expect_used,

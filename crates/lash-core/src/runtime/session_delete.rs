@@ -4,15 +4,15 @@
 //! ([`close_session`]): its `CloseSession` intent commits, the session is
 //! marked closing and refuses new sends typed
 //! ([`StoreError::SessionClosing`]), and the intent's engine half releases
-//! the session's roots and closes its scopes. The intent's acknowledgement
+//! the session's runs and closes its scopes. The intent's acknowledgement
 //! arms the session's `SessionDelete` obligation on its `session_meta` row,
 //! in the same transaction.
 //!
 //! **Phase two, the physical delete.** The `SessionDelete` obligation's
 //! delivery ([`SessionDeleteRelay`]) refuses, retryably, while any cleanup
-//! obligation the close left behind — a root's scope close, a parent-end plan
+//! obligation the close left behind — a run's scope close, a parent-end plan
 //! of a scope the session owns — is undelivered. It does not wait for the
-//! engine's work of the session: a drive or root replayed after the delete
+//! engine's work of the session: a shift or run replayed after the delete
 //! answers the retirement from its journaled steps (FIG-3881). Then it
 //! deletes the
 //! session's process state, trigger subscriptions and durable waits, retires
@@ -40,10 +40,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::drive::relay::{
+use crate::session_close::{SessionCloseError, close_session};
+use crate::shift::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
 };
-use crate::session_close::{SessionCloseError, close_session};
 use crate::store::session_delete::{SessionCleanup, SessionDeleteLedger, SessionDeleteObligation};
 use crate::store::{
     ControlIntentState, DeliveryError, MaintenanceFailure, ObligationId, ObligationKey,
@@ -149,7 +149,7 @@ impl SessionDeleteFailure {
             | Self::Waits { source }
             | Self::Journal { source } => source.code.clone(),
             Self::Process { source } | Self::Triggers { source } => {
-                crate::drive::relay::plugin_delivery_error((**source).clone()).code
+                crate::shift::relay::plugin_delivery_error((**source).clone()).code
             }
             Self::Storage(failure) => match &failure.stop {
                 crate::store::MaintenanceStop::Failed(error) => error.runtime_code(),

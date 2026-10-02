@@ -267,13 +267,13 @@ pub(super) async fn pending_follow_on_tx(
     )
 }
 
-/// Refuse `fence` unless it is the session's current drive fence, read in
+/// Refuse `fence` unless it is the session's current shift fence, read in
 /// the caller's transaction.
-pub(super) async fn require_drive_fence_tx(
+pub(super) async fn require_shift_fence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    fence: &lash_core_execution::store::DriveFence,
+    fence: &lash_core_execution::store::ShiftFence,
 ) -> Result<(), StoreError> {
-    super::drive_epoch::require_fence_tx(tx, fence.session(), fence).await
+    super::shift_epoch::require_fence_tx(tx, fence.session(), fence).await
 }
 
 pub(super) fn requested_append_ancestor(

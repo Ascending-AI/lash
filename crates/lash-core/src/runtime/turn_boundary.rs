@@ -81,12 +81,12 @@ pub(super) struct TurnBoundary {
     /// identity.
     protocol_terminal_output: materialize::ProtocolTerminalOutput,
     /// What the final commit presents when the turn runs under an admitted
-    /// root (FIG-3600 S7): the root's drive fence, and the root's terminal
+    /// run (FIG-3600 S7): the run's shift fence, and the run's terminal
     /// evidence when this turn ends it.
-    drive_commit: Option<DriveCommit>,
-    /// The logical root the turn runs under, whose park the final commit
+    shift_commit: Option<ShiftCommit>,
+    /// The logical run the turn runs under, whose park the final commit
     /// clears (FIG-3600 S7, D2 §1.3 P3).
-    park_root: Option<crate::TurnId>,
+    park_run: Option<crate::TurnId>,
 }
 
 /// The frame end a final commit makes (ADR 0113 §3.1). A switch the turn
@@ -100,9 +100,9 @@ pub(super) struct FrameSwitchCommit {
     committing: crate::ExecutionScope,
 }
 
-/// A final commit's drive fence and root, and the terminal evidence it
+/// A final commit's shift fence and run, and the terminal evidence it
 /// writes.
-pub(super) type DriveCommit = crate::runtime::drive::DriveCommit;
+pub(super) type ShiftCommit = crate::runtime::shift::ShiftCommit;
 
 /// Explicit two-phase lifecycle for a turn commit.
 /// Drafting accumulates progress; finalization irreversibly assembles and
@@ -187,19 +187,19 @@ impl TurnBoundary {
             metrics: Default::default(),
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
-            drive_commit: None,
-            park_root: None,
+            shift_commit: None,
+            park_run: None,
         }
     }
 
-    /// Present `drive_commit` on the final commit.
-    pub(super) fn set_drive_commit(&mut self, drive_commit: Option<DriveCommit>) {
-        self.drive_commit = drive_commit;
+    /// Present `shift_commit` on the final commit.
+    pub(super) fn set_shift_commit(&mut self, shift_commit: Option<ShiftCommit>) {
+        self.shift_commit = shift_commit;
     }
 
-    /// Clear `root`'s park with the final commit.
-    pub(super) fn set_park_root(&mut self, root: crate::TurnId) {
-        self.park_root = Some(root);
+    /// Clear `run`'s park with the final commit.
+    pub(super) fn set_park_run(&mut self, run: crate::TurnId) {
+        self.park_run = Some(run);
     }
 
     pub(super) fn record_protocol_terminal_output(
@@ -569,7 +569,7 @@ impl TurnBoundary {
 
     /// Whether this turn's one recorded switch opens a frame the session is
     /// not already in. Derived from the slot alone, so the commit and the
-    /// protocol-execution clear it drives answer the same question.
+    /// protocol-execution clear it executes answer the same question.
     fn recorded_frame_switch_materializes(&self) -> bool {
         self.graph_appends
             .pending_frame_switch()
@@ -604,7 +604,7 @@ impl TurnBoundary {
             recorded_attachment_intent_ids,
         } = input;
         // Every path into the final commit reconciles the same way. A turn
-        // driven through `final_commit` already recorded this outcome so the
+        // executed through `final_commit` already recorded this outcome so the
         // refusal lands before execution state is captured; recording it here
         // again is a replay of that record and answers it unchanged.
         self.record_outcome_frame_switch(outcome)?;
@@ -665,8 +665,8 @@ impl TurnBoundary {
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
         let metrics = self.metrics.clone();
-        let drive_commit = self.drive_commit.clone();
-        let park_root = self.park_root.clone();
+        let shift_commit = self.shift_commit.clone();
+        let park_run = self.park_run.clone();
         // A switch this turn makes ends the frame the turn was admitted on;
         // otherwise the commit ends whatever frame a resident open left
         // behind, if any.
@@ -710,8 +710,8 @@ impl TurnBoundary {
                 turn_control_resolver,
                 committed_attachment_ids,
                 adopted_intent_rows,
-                drive_commit,
-                park_root,
+                shift_commit,
+                park_run,
                 frame_switch,
             )
             .await
@@ -743,8 +743,8 @@ impl TurnBoundary {
         _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
-        drive_commit: Option<DriveCommit>,
-        park_root: Option<TurnId>,
+        shift_commit: Option<ShiftCommit>,
+        park_run: Option<TurnId>,
         frame_switch: FrameSwitchCommit,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
@@ -803,16 +803,16 @@ impl TurnBoundary {
                 evidence.undelivered
             });
         commit.interrupted_turn = interrupted_turn;
-        // The rows a turn settles are its root's, settled under the root's
-        // drive fence (FIG-3927): a turn that runs under no admitted root
+        // The rows a turn settles are its run's, settled under the run's
+        // shift fence (FIG-3927): a turn that runs under no admitted run
         // admitted nothing and settles nothing.
-        match drive_commit {
-            Some(drive_commit) => {
-                commit.drive_fence = Some(Box::new(drive_commit.fence));
-                commit.root_terminal = drive_commit.terminal.map(Box::new);
+        match shift_commit {
+            Some(shift_commit) => {
+                commit.shift_fence = Some(Box::new(shift_commit.fence));
+                commit.run_terminal = shift_commit.terminal.map(Box::new);
                 if !ingress_settlement.is_empty() {
                     commit.ingress =
-                        Some(ingress_settlement.into_ingress(drive_commit.root, disposition));
+                        Some(ingress_settlement.into_ingress(shift_commit.run, disposition));
                 }
             }
             None if !ingress_settlement.is_empty() => {
@@ -820,7 +820,7 @@ impl TurnBoundary {
             }
             None => {}
         }
-        commit.park_root = park_root;
+        commit.park_run = park_run;
         super::frame_definition_carry::prepare(definition_engines, frame_transition.as_ref())
             .await?;
         commit.frame_transition = frame_transition;

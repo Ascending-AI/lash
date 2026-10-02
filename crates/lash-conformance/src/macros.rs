@@ -103,15 +103,15 @@ macro_rules! runtime_persistence_tests {
             (pending_follow_on_refuses_every_other_commit_that_would_drop_it, "follow-on"),
             (pending_follow_on_frame_is_current_on_every_head_write, "follow-on"),
             (pending_follow_on_recovery_raise_is_fenced_and_never_resets, "follow-on"),
-            (an_unfinished_roots_input_survives_host_cancellation_after_lane_rotation, "root-admission-input-cancel-fence"),
-            (an_unfinished_roots_batch_survives_host_cancellation_after_lane_rotation, "root-admission-batch-cancel-fence"),
-            (an_admitted_row_is_not_withdrawable_until_its_root_releases_it, "admitted-row-withdrawal"),
-            (no_row_stays_bound_after_a_roots_terminal_commit, "no-bound-row-commit"),
-            (open_input_addressed_to_an_ended_root_is_next_turn_input, "addressed-to-ended-root"),
+            (an_unfinished_runs_input_survives_host_cancellation_after_lane_rotation, "run-admission-input-cancel-fence"),
+            (an_unfinished_runs_batch_survives_host_cancellation_after_lane_rotation, "run-admission-batch-cancel-fence"),
+            (an_admitted_row_is_not_withdrawable_until_its_run_releases_it, "admitted-row-withdrawal"),
+            (no_row_stays_bound_after_a_runs_terminal_commit, "no-bound-row-commit"),
+            (open_input_addressed_to_an_ended_run_is_next_turn_input, "addressed-to-ended-run"),
             (a_stale_fence_writes_nothing, "stale-fence-writes-nothing"),
             (the_command_lane_is_bindless, "command-lane-bindless"),
-            (settlement_is_predicated_on_the_root, "settlement-predicated-on-root"),
-            (a_command_enqueued_behind_a_roots_head_never_starves_it, "command-behind-the-head"),
+            (settlement_is_predicated_on_the_run, "settlement-predicated-on-run"),
+            (a_command_enqueued_behind_a_runs_head_never_starves_it, "command-behind-the-head"),
             (serves_each_admitted_session_and_refuses_an_unknown_one, "alpha"),
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
@@ -152,27 +152,27 @@ macro_rules! runtime_persistence_tests {
             (committed_leaf_is_derived_from_the_terminal_appended_node, "root"),
             (preserve_head_commit_reports_the_resident_leaf, "root"),
             (empty_append_cannot_move_the_head, "empty-append-head-move"),
-            (commit_rejects_leaf_without_frame_open_ancestor, "missing-frame-root"),
+            (commit_rejects_leaf_without_frame_open_ancestor, "missing-frame-run"),
             (queued_work_source_keys_are_idempotent_and_list_ordered, "queued-work-source-keys"),
             (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
             (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
             (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
-            (concurrent_admissions_bind_every_row_to_at_most_one_root, "concurrent-queue-input"),
+            (concurrent_admissions_bind_every_row_to_at_most_one_run, "concurrent-queue-input"),
             (checkpoint_admission_takes_both_families_once, "checkpoint-work"),
-            (a_checkpoint_applied_input_resolves_to_its_root_by_point_read, "checkpoint-applied-binding"),
-            (checkpoint_admission_is_idempotent_by_root_and_step, "checkpoint-step-idempotence"),
+            (a_checkpoint_applied_input_resolves_to_its_run_by_point_read, "checkpoint-applied-binding"),
+            (checkpoint_admission_is_idempotent_by_run_and_step, "checkpoint-step-idempotence"),
             (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-atomicity"),
             (checkpoint_admissions_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
             (a_checkpoint_refuses_a_stale_fence_whatever_its_caps, "checkpoint-stale-fence-caps"),
-            (a_checkpoint_admitted_input_is_listed_admitted_to_its_root, "checkpoint-admitted-listing"),
+            (a_checkpoint_admitted_input_is_listed_admitted_to_its_run, "checkpoint-admitted-listing"),
             (queued_work_cancel_removes_only_open_batches, "queued-work-cancel"),
             (queued_work_classes_gate_command_and_turn_admissions, "queued-work-classes"),
             (queued_work_admission_respects_boundaries_and_stale_completion, "queued-work-boundaries"),
             (queued_work_respects_membership_limits_and_sessions, "queued-membership"),
             (queued_work_join_groups_by_delivery_policy, "queued-join"),
-            (a_resumed_root_drives_exactly_its_recorded_admission, "resumed-root-admission"),
+            (a_resumed_run_executes_exactly_its_recorded_admission, "resumed-run-admission"),
             (process_wakes_batch_by_default, "wake-default-batch"),
-            (queued_work_completion_is_fenced_and_root_keyed, "queued-completion-fence"),
+            (queued_work_completion_is_fenced_and_run_keyed, "queued-completion-fence"),
             (queued_wake_delivery_is_source_key_idempotent_and_admitted_once, "root"),
             (host_cancelled_wake_is_not_redelivered, "root"),
             (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
@@ -187,14 +187,14 @@ macro_rules! runtime_persistence_tests {
             (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
             (a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch, "turn-input-batch-refusals"),
             (a_steering_spec_must_match_a_pending_follow_ons_shape, "run-spec-follow-on-steering"),
-            (a_steering_spec_must_match_a_queued_headed_roots_default_shape, "run-spec-queued-steering"),
+            (a_steering_spec_must_match_a_queued_headed_runs_default_shape, "run-spec-queued-steering"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (pending_turn_inputs_admit_settle_and_fence, "root"),
             (turn_park_lives_while_its_turn_holds_work, "turn-parks"),
-            (root_terminal_evidence_commits_in_the_head_transaction, "root-terminal-head"),
-            (a_commit_sealed_under_a_superseded_admission_is_refused, "root-terminal-fence"),
-            (accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
-            (a_queued_headed_root_writes_its_terminal_like_any_root, "root-terminal-queued"),
+            (run_terminal_evidence_commits_in_the_head_transaction, "run-terminal-head"),
+            (a_commit_sealed_under_a_superseded_admission_is_refused, "run-terminal-fence"),
+            (accepted_turn_input_released_by_its_run_terminal_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
+            (a_queued_headed_run_writes_its_terminal_like_any_run, "run-terminal-queued"),
             (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
             (a_checkpoint_admission_rerun_returns_its_own_rows, "fig905-active-reacquire"),
             (a_turn_that_cannot_commit_leaves_no_input_pinned_to_it, "root"),
@@ -386,7 +386,7 @@ macro_rules! process_registry_tests {
                 (every_execution_write_refuses_a_superseded_invocation_without_mutation, "invocation-write-matrix"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
-                (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),
+                (a_session_close_reaps_the_turn_scopes_that_never_became_runs, "never-run-turn-scopes"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
                 (parked_processes_list_by_since_with_filters_and_keyset_pages, "parked-process-list"),
@@ -820,14 +820,14 @@ macro_rules! attachment_adoption_tests {
                 (cross_session_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
                 (concurrent_adoption_deletes_once, "attachment-condemnation-concurrent-adoption"),
             ]
-            roots [
+            runs [
                 (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),
             ]
         );
     };
     (@catalogue $fixture:block;
         bytes [$(( $bytes_law:ident, $bytes_label:literal )),* $(,)?]
-        roots [$(( $law:ident, $label:literal )),* $(,)?]
+        runs [$(( $law:ident, $label:literal )),* $(,)?]
     ) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1490,7 +1490,7 @@ macro_rules! session_store_factory_tests {
             (session_meta_records_the_process_that_owns_it, "session-meta-owning-process"),
             (a_closing_session_lists_as_closing_never_as_live, "catalog-closing-entry"),
             (a_control_raise_answers_no_seal_as_sealed, "control-raise-seal"),
-            (a_command_roots_end_unparks_it, "command-root-end-unparks"),
+            (a_command_runs_end_unparks_it, "command-run-end-unparks"),
             (concurrent_session_admissions_preserve_one_relation, "concurrent-session-relation"),
             (ingress_follow_on_fork_and_command_run_matrix, "ingress-follow-on-fork-commands"),
             (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
@@ -1504,11 +1504,11 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
             (a_pin_written_before_during_or_after_its_turn_keeps_that_turn_through_collection, "pin-timing"),
             (a_pin_racing_its_turns_commit_and_the_next_admission_keeps_the_turn, "pin-race"),
-            (a_merged_or_deferred_input_resolves_to_the_root_that_applied_it, "pin-merge-defer"),
+            (a_merged_or_deferred_input_resolves_to_the_run_that_applied_it, "pin-merge-defer"),
             (every_turn_forks_until_the_host_collects_and_refuses_pruned_after, "fork-retained-until-gc"),
             (a_session_that_never_ran_a_turn_forks_at_its_creation_revision, "fork-empty-session"),
             (every_reclaimer_keeps_a_pinned_turn_until_its_last_pin_is_released, "pin-reclaimers"),
-            (the_retention_window_counts_terminal_roots_and_pins_extend_it, "retention-window"),
+            (the_retention_window_counts_terminal_runs_and_pins_extend_it, "retention-window"),
             (pending_and_unavailable_targets_refuse_typed_and_never_fork_the_head, "fork-refusals"),
         ]);
         $crate::session_store_factory_tests!(@turn_cancel_hosted $fixture; [
@@ -2154,7 +2154,7 @@ macro_rules! wake_delivery_isolation_tests {
 
 /// Register the wake content-conflict law (FIG-4487) on a backend. The
 /// fixture returns its guard, the deployment and process registry on one
-/// test clock, the session-work engine the wake driver asks for drives, and
+/// test clock, the session-work engine the wake driver asks for shifts, and
 /// the backend's receiver-floor probe.
 #[macro_export]
 macro_rules! wake_delivery_conflict_tests {

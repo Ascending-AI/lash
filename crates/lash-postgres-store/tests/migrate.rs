@@ -489,7 +489,7 @@ async fn a_component_without_an_expand_step_is_refused() {
         .await
         .expect("connect scratch provisioner");
     sqlx::query(&format!(
-        "DROP TABLE {schema}.lash_session_root_inputs, {schema}.lash_session_roots,
+        "DROP TABLE {schema}.lash_session_run_inputs, {schema}.lash_session_runs,
                     {schema}.lash_control_intents CASCADE"
     ))
     .execute(&mut admin)

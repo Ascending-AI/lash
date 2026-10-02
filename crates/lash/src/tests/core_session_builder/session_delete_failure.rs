@@ -85,14 +85,14 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
     let relay = lash_core::session_delete::SessionDeleteRelay::new(administration);
     let now = core_now_ms(&core);
     let page = std::num::NonZeroUsize::new(8).expect("non-zero page");
-    let early = lash_core::runtime::drive::relay::relay_due(
+    let early = lash_core::runtime::shift::relay::relay_due(
         &relay,
         &lash_core::testing::TestClock::new(now),
         page,
     )
     .await?;
     assert_eq!(early.claimed, 0, "the retry waits out its backoff");
-    let pass = lash_core::runtime::drive::relay::relay_due(
+    let pass = lash_core::runtime::shift::relay::relay_due(
         &relay,
         &lash_core::testing::TestClock::new(now + 2_000),
         page,

@@ -47,7 +47,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
 }
 
 /// A successor segment whose process was cancelled between segments is still
-/// driven, so its command emission matches its journal: its stop delivery
+/// executed, so its command emission matches its journal: its stop delivery
 /// fires the stop its runner was lent, and the runner's own recorded outcome
 /// is the cancellation (FIG-3673).
 #[tokio::test]

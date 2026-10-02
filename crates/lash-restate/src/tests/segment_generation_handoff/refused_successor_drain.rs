@@ -5,7 +5,7 @@
 //! segment 1 runs and cannot run the process's program, so it refuses
 //! segment 2: the process parks `RetiredGeneration` for N and the stable
 //! invocation ends. An operator marks N draining, and the laws run the
-//! recovery leader's drain pass ([`lash_core::drive::drain_hand_over_slot`])
+//! recovery leader's drain pass ([`lash_core::shift::drain_hand_over_slot`])
 //! over the deployment's real process port:
 //!
 //! - **completes**: the pass re-sends segment 2 to `LashProcessWorkflow_g<N>`,
@@ -211,7 +211,7 @@ impl World {
                         generation(build),
                         &crate::services::DEFAULT_NAMESPACE,
                     ),
-                    session_driver: crate::RestateSessionDriverSlot::new(),
+                    session_shifts: crate::RestateSessionShiftsSlot::new(),
                     build_generation: generation(build),
                     namespace: crate::RestateNamespace::default(),
                     fleet: crate::object_state::FleetView::default(),
@@ -422,7 +422,7 @@ impl World {
     /// One drain pass of a recovery leader on build N+1: a fresh process
     /// port over the deployment's ingress and stores, as a leader that just
     /// took the lease builds it.
-    async fn drain_pass(&self) -> lash_core::drive::DrainHandOverPass {
+    async fn drain_pass(&self) -> lash_core::shift::DrainHandOverPass {
         self.drain_pass_led_by(generation("N+1")).await
     }
 
@@ -431,7 +431,7 @@ impl World {
     async fn drain_pass_led_by(
         &self,
         own: lash_core::engine::BuildGeneration,
-    ) -> lash_core::drive::DrainHandOverPass {
+    ) -> lash_core::shift::DrainHandOverPass {
         let port = crate::process::RestateProcessIngressRunner::new(
             self.connection.clone(),
             Arc::clone(&self.registry),
@@ -439,14 +439,14 @@ impl World {
             lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         );
         let drain = self.stores.generation_drain();
-        lash_core::drive::drain_hand_over_slot(
-            &lash_core::drive::ReconcileProcesses {
+        lash_core::shift::drain_hand_over_slot(
+            &lash_core::shift::ReconcileProcesses {
                 registry: self.registry.as_ref(),
                 port: &port,
                 drain: drain.as_ref(),
                 generation: &own,
             },
-            lash_core::drive::DrainHandOverCursor::default(),
+            lash_core::shift::DrainHandOverCursor::default(),
             std::num::NonZeroUsize::new(16).expect("non-zero"),
         )
         .await

@@ -93,7 +93,7 @@ include the stored `record_json`/payload JSON needed to establish identities.
   — `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state, and the
   workbench refuses to start without it — and read the derived ingress URL back from the host's own `agent_workbench.startup`
   record rather than assuming it. Gate `GET /healthz` to 200.
-- Drive Chromium with a PEP 723 Playwright script under the artifact directory and `uv run`.
+- Shift Chromium with a PEP 723 Playwright script under the artifact directory and `uv run`.
   Navigate with `wait_until="domcontentloaded"`, then explicit assertions.
 - Judge a **once-a-minute UTC schedule**, not one spelling of it. The agent authors the
   expression, and both the 5-field `* * * * *` and the 6-field `0 * * * * *` (seconds
@@ -246,7 +246,7 @@ This phase distinguishes a valid non-current schedule from a retired-session orp
 4. Wait for two schedule intervals. PASS only if the scoped run-record count for `(S0, J)` increases by at least two, both new records say `decision_basis == "session_store_meta_present"` and `session_state == "live"`, and there is no scoped `agent_workbench.cron.restate.zombie_cancelled` record. This is the non-current-live gate.
 5. Delete `S0` through the supported scoped session-delete path,
    `DELETE /api/session?session_id=<S0>` — the page's **reset** control acts on the tab's own
-   current session, so drive the delete for a non-current `S0` over that route.
+   current session, so shift the delete for a non-current `S0` over that route.
 6. PASS only if the supported delete path emits exactly one scoped typed cancellation record for `(S0, J)` and `WorkbenchCronJob/J/info` returns `null` after that record. Capture the exact cancel/sync event name and payload from the trace during the run and pin them in the execution report; for the current supported path this is `agent_workbench.cron.restate.cancel` with `payload.job_key == J` and `payload.reason == "reset"` in `S0`'s trace context. This is the retired-cancel gate.
 7. Record the scoped run and occurrence counts after that cancellation, then wait two more schedule intervals. PASS only if neither count changes and no delivery, queued wake, or assistant tick output attributable to `(S0, J)` appears. This is the post-retirement-silence gate.
 

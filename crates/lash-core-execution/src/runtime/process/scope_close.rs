@@ -1,16 +1,16 @@
 //! The process registry's scope-close adapter (FIG-3607 item 7, R9, R10): the
-//! owner of lifetime scopes the drive reports a closed root or session to.
+//! owner of lifetime scopes the shift reports a closed run or session to.
 //!
 //! Closing a scope writes its row in the registry's scope-close ledger. The
 //! row is what requests cancellation of every process living `Until` the
 //! scope, and what refuses a start that names the scope as its starter or its
 //! lifetime afterwards (R11). Writing a row that already exists keeps the
-//! first, so the drive's at-least-once call is idempotent per root and per
+//! first, so the shift's at-least-once call is idempotent per run and per
 //! session.
 //!
-//! When the session factory is installed, a root close also reads the turn
-//! scopes of inputs bound to that root. Those joined inputs never become
-//! roots, so their scopes close with the admitting root. The session close
+//! When the session factory is installed, a run close also reads the turn
+//! scopes of inputs bound to that run. Those joined inputs never become
+//! runs, so their scopes close with the admitting run. The session close
 //! still covers turn scopes whose inputs were never admitted (FIG-3948).
 //!
 //! A sink built with a process-work port also **applies** the plan the row
@@ -24,10 +24,10 @@
 use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
-use crate::store::{ControlIntentId, RootTerminal, RootTerminalCause, StoreError};
+use crate::store::{ControlIntentId, RunTerminal, RunTerminalCause, StoreError};
 use crate::{
     Clock, DeploymentStore, EffectHost, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId,
-    TurnId, apply_parent_end_plan, end_session_roots,
+    TurnId, apply_parent_end_plan, end_session_runs,
 };
 
 /// Closes lifetime scopes in a process registry's scope-close ledger, and —
@@ -72,7 +72,7 @@ impl RegistryScopeClose {
         }
     }
 
-    /// Retire the closed root's wait-index rows through the same engine host
+    /// Retire the closed run's wait-index rows through the same engine host
     /// that issued them. This runs after the registry records the scope end.
     #[must_use]
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
@@ -80,27 +80,27 @@ impl RegistryScopeClose {
         self
     }
 
-    /// Read the root's admitted input bindings from the session catalog when
+    /// Read the run's admitted input bindings from the session catalog when
     /// its terminal closes. The binding identifies joined turn scopes that
-    /// never get their own root terminal.
+    /// never get their own run terminal.
     #[must_use]
     pub fn with_session_store_factory(mut self, sessions: Arc<dyn DeploymentStore>) -> Self {
         self.sessions = Some(sessions);
         self
     }
 
-    async fn retire_root_waits(
+    async fn retire_run_waits(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         committed_turn: Option<&TurnId>,
     ) -> Result<(), StoreError> {
         if let Some(host) = &self.effect_host {
-            host.retire_closed_root_waits(session, root, committed_turn)
+            host.retire_closed_run_waits(session, run, committed_turn)
                 .await
                 .map_err(|error| {
                     StoreError::Backend(format!(
-                        "retire wait index for root `{root}` of session `{session}`: {error}"
+                        "retire wait index for run `{run}` of session `{session}`: {error}"
                     ))
                 })?;
         }
@@ -153,66 +153,66 @@ async fn settle_childless_plan(
 
 #[async_trait::async_trait]
 impl ScopeCloseSink for RegistryScopeClose {
-    async fn close_root_scope(&self, terminal: &RootTerminal) -> Result<(), StoreError> {
+    async fn close_run_scope(&self, terminal: &RunTerminal) -> Result<(), StoreError> {
         let joined = if let Some(sessions) = &self.sessions {
             sessions
-                .bound_turn_scopes(&terminal.session_id, &terminal.root)
+                .bound_turn_scopes(&terminal.session_id, &terminal.run)
                 .await?
         } else {
             Vec::new()
         };
         self.close(&ScopeId::turn(
             terminal.session_id.clone(),
-            terminal.root.clone(),
+            terminal.run.clone(),
         ))
         .await?;
         for turn in joined {
-            if turn != terminal.root {
+            if turn != terminal.run {
                 self.close(&ScopeId::turn(terminal.session_id.clone(), turn))
                     .await?;
             }
         }
         let committed_turn = match &terminal.cause {
-            RootTerminalCause::Committed { turn, .. } => Some(turn),
+            RunTerminalCause::Committed { turn, .. } => Some(turn),
             _ => None,
         };
-        self.retire_root_waits(&terminal.session_id, &terminal.root, committed_turn)
+        self.retire_run_waits(&terminal.session_id, &terminal.run, committed_turn)
             .await
     }
 
-    /// The session's roots close before the session itself: a start that
-    /// names a root is refused from the moment its root closes, and the
+    /// The session's runs close before the session itself: a start that
+    /// names a run is refused from the moment its run closes, and the
     /// session's own row is the last fact the close writes. That row also
     /// closes every scope inside the session with no row of its own — a turn
-    /// that never became a root (FIG-3948): it refuses a start naming one,
+    /// that never became a run (FIG-3948): it refuses a start naming one,
     /// and its plan cancels their children.
     async fn close_session_scope(
         &self,
         session: &SessionId,
         _intent: ControlIntentId,
-        roots: &[TurnId],
+        runs: &[TurnId],
     ) -> Result<(), StoreError> {
         if let Some(delivery) = &self.delivery {
-            end_session_roots(
+            end_session_runs(
                 self.registry.as_ref(),
                 delivery.as_ref(),
                 session,
-                roots,
+                runs,
                 self.clock.timestamp_ms(),
             )
             .await
             .map_err(|error| {
-                StoreError::Backend(format!("close session `{session}` roots: {error}"))
+                StoreError::Backend(format!("close session `{session}` runs: {error}"))
             })?;
-            for root in roots {
-                self.retire_root_waits(session, root, None).await?;
+            for run in runs {
+                self.retire_run_waits(session, run, None).await?;
             }
             self.close(&ScopeId::session(session.clone())).await
         } else {
-            for root in roots {
-                self.close(&ScopeId::turn(session.clone(), root.clone()))
+            for run in runs {
+                self.close(&ScopeId::turn(session.clone(), run.clone()))
                     .await?;
-                self.retire_root_waits(session, root, None).await?;
+                self.retire_run_waits(session, run, None).await?;
             }
             self.close(&ScopeId::session(session.clone())).await
         }

@@ -272,22 +272,22 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         Ok(page)
     }
 
-    async fn non_terminal_roots_page(
+    async fn non_terminal_runs_page(
         &self,
-        after: Option<&lash_core_execution::engine::RootRef>,
+        after: Option<&lash_core_execution::engine::RunRef>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::engine::OpenRun>, StoreError> {
         let session = after.map_or("", |key| key.session.as_str());
-        let root = after.map_or("", |key| key.root.as_str());
+        let run = after.map_or("", |key| key.run.as_str());
         let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
         let rows = sqlx::query(
-            crate::session_roots::session_roots_sql()
-                .roots
+            crate::session_runs::session_runs_sql()
+                .runs
                 .select_open_page
                 .sql(),
         )
         .bind(session)
-        .bind(root)
+        .bind(run)
         .bind(limit.get() as i64)
         .fetch_all(&mut *connection)
         .await
@@ -297,18 +297,18 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                 let admission = row
                     .try_get::<Option<String>, _>(2)
                     .map_err(crate::store_sqlx_error)?;
-                Ok(lash_core_execution::engine::OpenRoot {
-                    target: lash_core_execution::engine::RootRef {
+                Ok(lash_core_execution::engine::OpenRun {
+                    target: lash_core_execution::engine::RunRef {
                         session: SessionId::parse(
                             row.try_get::<String, _>(0)
                                 .map_err(crate::store_sqlx_error)?,
                         )?,
-                        root: lash_sansio::TurnId::parse(
+                        run: lash_sansio::TurnId::parse(
                             row.try_get::<String, _>(1)
                                 .map_err(crate::store_sqlx_error)?,
                         )?,
                     },
-                    executor: lash_core_execution::store::RootExecutor::from_stored(
+                    executor: lash_core_execution::store::RunExecutor::from_stored(
                         admission.as_deref(),
                         row.try_get::<Option<String>, _>(3)
                             .map_err(crate::store_sqlx_error)?
@@ -319,15 +319,15 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             .collect()
     }
 
-    async fn end_lost_root(
+    async fn end_lost_run(
         &self,
-        target: &lash_core_execution::engine::RootRef,
-        loss: lash_core_execution::engine::RootRunLoss,
+        target: &lash_core_execution::engine::RunRef,
+        loss: lash_core_execution::engine::RunLoss,
         at_ms: u64,
-    ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
+    ) -> Result<Option<lash_core_execution::store::RunTerminal>, StoreError> {
         let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let result = crate::session_roots::end_lost_root_tx(&mut tx, target, loss, at_ms).await?;
+        let result = crate::session_runs::end_lost_run_tx(&mut tx, target, loss, at_ms).await?;
         tx.commit().await.map_err(crate::store_sqlx_error)?;
         Ok(result)
     }
@@ -337,7 +337,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         after: Option<lash_core_execution::store::ControlIntentId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        let sql = &crate::session_roots::session_roots_sql().verbs;
+        let sql = &crate::session_runs::session_runs_sql().verbs;
         let rows = sqlx::query(sql.intents.sql())
             .bind(after.map_or(0, |id| id.sequence()) as i64)
             .bind(limit.get() as i64)
@@ -345,7 +345,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             .await
             .map_err(store_sqlx_error)?;
         rows.iter()
-            .map(crate::session_roots::decode_intent)
+            .map(crate::session_runs::decode_intent)
             .collect()
     }
 
@@ -763,7 +763,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 ),
                 session_id: request.session_id.clone(),
                 config,
-                published_by_drive: false,
+                published_by_shift: false,
             },
             0,
             checkpoint_ref.clone().map(Into::into),
@@ -1135,7 +1135,7 @@ pub(crate) async fn delete_session_tx(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
-    // A closing session's pins are its ended roots': the close cut their
+    // A closing session's pins are its ended runs': the close cut their
     // turns' final commits short and no activation will ever drain them, so
     // they go with the storage below. Any other pin is a live turn's
     // closure, and refuses the delete.
@@ -1277,9 +1277,9 @@ pub(crate) async fn delete_session_tx(
         )
         .await?;
     }
-    // The session's logical roots and their input bindings go with it; a
+    // The session's logical runs and their input bindings go with it; a
     // `close_session` intent stays as its deletion tombstone.
-    crate::session_roots::delete_session_roots_conn(tx, session_id).await?;
+    crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
     for statement in [
         turn_ingress.queued_batches.delete_by_session.sql(),
         crate::process_sql::process_sql()

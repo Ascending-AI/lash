@@ -208,7 +208,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         // boot for exactly this reason.
         //
         // The pass cannot settle everything synchronously. A boot recovering while
-        // the engine is still re-driving an interrupted turn on this endpoint can
+        // the engine is still redriving an interrupted turn on this endpoint can
         // meet a contended admission — another writer's in-flight admission — and
         // the event comes back deferred. Those are retried on a background task
         // rather than blocking boot — the endpoint has live traffic to serve.

@@ -5,7 +5,7 @@
 //! bound under their stable names only, their journal shapes frozen, so an
 //! invocation suspended on build N may resume on build N+1. L10 proves it —
 //! the precondition for the drain moving them off a build it retires. L3
-//! drives the drain's `HandOver` arm (FIG-3799): a real process segment
+//! executes the drain's `HandOver` arm (FIG-3799): a real process segment
 //! waiting for a signal on build N is woken for the drain of N's generation,
 //! hands its open wait to a successor segment on N+1, and the successor
 //! waits on the same wait again.
@@ -538,7 +538,7 @@ impl HandOff {
                 // A held segment keeps retrying for as long as a law holds
                 // it — through a lease's lapse, too — and never pauses.
                 .with_retry_max_attempts(10_000),
-                session_driver: crate::RestateSessionDriverSlot::new(),
+                session_shifts: crate::RestateSessionShiftsSlot::new(),
                 build_generation: generation,
                 namespace: crate::RestateNamespace::default(),
                 fleet: crate::object_state::FleetView::default(),
@@ -753,12 +753,12 @@ impl HandOff {
         let scopes = lash_core::engine::NoScopeClose;
         let clock = lash_core::facade_support::SystemClock;
         let generation = lash_core::engine::BuildGeneration::for_test(build);
-        lash_core::drive::reconcile_once(
-            &lash_core::drive::ReconcileParts {
+        lash_core::shift::reconcile_once(
+            &lash_core::shift::ReconcileParts {
                 sessions: sessions.as_ref(),
                 work: &work,
                 scopes: &scopes,
-                processes: Some(lash_core::drive::ReconcileProcesses {
+                processes: Some(lash_core::shift::ReconcileProcesses {
                     registry: self.registry.as_ref(),
                     port: &port,
                     drain: drain.as_ref(),
@@ -1322,7 +1322,7 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     start(None).await;
 
     let port = RecordedWakes::default();
-    let processes = lash_core::drive::ReconcileProcesses {
+    let processes = lash_core::shift::ReconcileProcesses {
         registry: registry.as_ref(),
         port: &port,
         drain: drain.as_ref(),
@@ -1333,9 +1333,9 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     let mut passes = Vec::new();
     // Bounded: a cursor that does not advance would page forever.
     for _ in 0..8 {
-        let pass = lash_core::drive::drain_hand_over_slot(
+        let pass = lash_core::shift::drain_hand_over_slot(
             &processes,
-            lash_core::drive::DrainHandOverCursor {
+            lash_core::shift::DrainHandOverCursor {
                 wake: cursor.as_ref(),
                 resend: None,
             },
@@ -1369,9 +1369,9 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
         .push(failing.clone());
     port.wakes.lock().expect("the wake log").clear();
     let whole = NonZeroUsize::new(64).unwrap_or(NonZeroUsize::MIN);
-    let pass = lash_core::drive::drain_hand_over_slot(
+    let pass = lash_core::shift::drain_hand_over_slot(
         &processes,
-        lash_core::drive::DrainHandOverCursor::default(),
+        lash_core::shift::DrainHandOverCursor::default(),
         whole,
     )
     .await
@@ -1379,9 +1379,9 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     assert_eq!((pass.pass.handled, pass.pass.deferred), (5, 1));
     assert_eq!(pass.next, None, "the pass read every generation");
     port.failing.lock().expect("the failing set").clear();
-    let pass = lash_core::drive::drain_hand_over_slot(
+    let pass = lash_core::shift::drain_hand_over_slot(
         &processes,
-        lash_core::drive::DrainHandOverCursor::default(),
+        lash_core::shift::DrainHandOverCursor::default(),
         whole,
     )
     .await
@@ -1391,9 +1391,9 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     // A cleared mark is no longer swept.
     drain.clear_draining(&marked[0]).await.expect("clear");
     port.wakes.lock().expect("the wake log").clear();
-    let pass = lash_core::drive::drain_hand_over_slot(
+    let pass = lash_core::shift::drain_hand_over_slot(
         &processes,
-        lash_core::drive::DrainHandOverCursor::default(),
+        lash_core::shift::DrainHandOverCursor::default(),
         whole,
     )
     .await

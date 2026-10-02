@@ -163,7 +163,7 @@ pub struct ResidentSessionContinuity {
     last_committed_observation_turn: Option<(u64, TurnId)>,
     /// Number of invalidation incidents this handle has minted. The count —
     /// not a random draw — names each incident's decision id, so a replay of
-    /// the same drive traces the same ids.
+    /// the same shift traces the same ids.
     invalidation_incidents: u64,
 }
 
@@ -349,7 +349,7 @@ impl LashRuntime {
     ///
     /// The resident session is more than `self.state`: a state adopted without
     /// these components keeps the executor of whatever head was open before,
-    /// so a turn driven on it runs its cells over another head's heap. Every
+    /// so a turn executed on it runs its cells over another head's heap. Every
     /// adoption of a durable state as the resident one goes through here: the
     /// reload gate's latest head and a redriven turn's admitted base alike
     /// (FIG-3684).

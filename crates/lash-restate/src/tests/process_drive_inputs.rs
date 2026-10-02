@@ -1,4 +1,4 @@
-//! The inputs a process segment's drive decides by are recorded (FIG-3673):
+//! The inputs a process segment's shift decides by are recorded (FIG-3673):
 //! a redrive under a changed host reads what the first execution read.
 
 use super::*;

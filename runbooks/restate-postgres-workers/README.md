@@ -76,7 +76,7 @@ tombstones with their admission bindings released. The runner prints each
 batch's source key, cause and terminal timestamp, redelivers its original wake,
 and requires the original terminal batch back. It compares all retained batch
 and item columns before and after redelivery and checks that no live work or
-additional driven root appeared. Missing retained evidence fails the run;
+additional executed run appeared. Missing retained evidence fails the run;
 cleanup never deletes tombstones.
 
 ## Recovery laws with independent evidence (FIG-608)

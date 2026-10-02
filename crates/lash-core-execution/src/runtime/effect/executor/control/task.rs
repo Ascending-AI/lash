@@ -203,7 +203,7 @@ impl EffectControllerTaskRequest {
 
 pub(in crate::runtime::effect::executor) struct RemoteLocalExecutionRequest {
     pub(in crate::runtime::effect::executor) envelope: RuntimeEffectEnvelope,
-    pub(in crate::runtime::effect::executor) usage_run: Option<crate::UsageRun>,
+    pub(in crate::runtime::effect::executor) usage_meter: Option<crate::UsageMeter>,
     pub(in crate::runtime::effect::executor) response:
         oneshot::Sender<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
 }
@@ -436,7 +436,7 @@ impl RuntimeEffectController for EffectTaskController {
                         unreachable!("local execution request requires a local executor");
                     };
                     let result = executor
-                        .execute_forwarded(request.envelope, request.usage_run)
+                        .execute_forwarded(request.envelope, request.usage_meter)
                         .await;
                     let _ = request.response.send(result);
                 }
@@ -660,7 +660,7 @@ pub async fn drive_effect_controller_task(
     // parked-wait claim suspended mid-transaction while a `ResolveAwaitEvent`
     // needed its scope lock was exactly that shape. Requests are independent
     // RPCs whose callers already await their own response, so progress under
-    // the root is free.
+    // the run is free.
     //
     // Each in-flight request is polled at most once per poll of this task. A
     // host future may wake its task and park to hand a terminal state to an

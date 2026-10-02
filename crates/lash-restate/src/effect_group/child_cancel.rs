@@ -10,14 +10,14 @@
 //! - a durable wait of the child races the notice's awakeable as a journaled
 //!   arm, subscribed beside the wait's own command, so a replay takes the arm
 //!   the first execution took;
-//! - a tool child's drive reads it at each step boundary, one journaled shared
+//! - a tool child's shift reads it at each step boundary, one journaled shared
 //!   read of the index;
 //! - a recorded step body watches it live through the ingress, which the
 //!   journal never sees: the body's recorded outcome is what a replay serves.
 
 use super::*;
 
-/// One child's cancel fact, as the controller that drives the child holds it:
+/// One child's cancel fact, as the controller that executes the child holds it:
 /// the group and the child's position in it.
 #[derive(Clone)]
 pub(crate) struct GroupChildCancel {

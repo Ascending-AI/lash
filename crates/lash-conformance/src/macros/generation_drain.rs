@@ -16,7 +16,7 @@ macro_rules! generation_drain_tests {
                 "generation-drain-in-flight"
             ),
             (
-                a_recovered_follow_on_moves_its_root_to_the_recovering_generation,
+                a_recovered_follow_on_moves_its_run_to_the_recovering_generation,
                 "generation-drain-recovered-follow-on"
             ),
         ]);

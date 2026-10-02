@@ -48,7 +48,7 @@ TERMS = (
 # backend. Upstream APIs and recording/reference models keep their real names.
 LEGITIMATE_MEMORY_IDENTIFIERS = frozenset({
     "InMemoryLiveReplayStore", "InMemoryLiveReplayStoreConfig",
-    "InMemoryDriveEpochs", "InMemoryRootLedger", "InMemoryRoots",
+    "InMemoryShiftEpochs", "InMemoryRunLedger", "InMemoryRuns",
     "InMemoryLashlangArtifactStore", "InMemoryArtifactState",
     "InMemoryMetricExporter", "InMemorySpanExporter", "InMemory",
     "open_in_memory",
@@ -63,8 +63,8 @@ IDENTIFIER_RULES = (
 )
 
 
-# Queue-drain ownership is deleted (FIG-4489): every driver-run logical turn
-# is owned by Turn(logical root), and a host command or a drive admission by a
+# Queue-drain ownership is deleted (FIG-4489): every engine-executed logical turn
+# is owned by Turn(logical run), and a host command or a shift admission by a
 # session operation. The names are refused wherever they are declared,
 # constructed, matched, stored or documented: source, SQL, schemas and docs,
 # comments and tests included. Nothing is exempt, and no marker excuses one.
@@ -86,7 +86,7 @@ def check_queue_drain(path: Path, body: str) -> list[str]:
         return []
     return [
         f"{path}:{number}: retired queue-drain ownership: '{match[0]}' is deleted; "
-        "a driver-run turn is owned by Turn(logical root), a host command by a session operation"
+        "a driver-run turn is owned by Turn(logical run), a host command by a session operation"
         for number, line in enumerate(body.splitlines(), 1)
         for match in QUEUE_DRAIN.finditer(line)
     ]

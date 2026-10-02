@@ -117,7 +117,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    marker without the prompt restating it. The non-seeded probe names the fact by alias but
    never includes its marker; its reply must not contain the non-seeded marker. Structural
    gates still precede both judgements.
-10. **Scope everything to one session.** Drive `/?session_id=<S>` and filter the state API,
+10. **Scope everything to one session.** Shift `/?session_id=<S>` and filter the state API,
     product-event log, graph database, and trace by `<S>`. Record message ids and physical
     turn ids; never normalize away a cross-layer mismatch.
 
@@ -212,7 +212,7 @@ paired tool records in golden rule 7. Screenshot
 `01-pressure-ready.png`; save `01-pressure-{dom,state,store,trace}.json`,
 `01-rlm-budget-warning.json`, `01-warned-model-request.json`, and `01-tool-call.json`.
 
-## Phase 2 — Drive and prove `continue_as`
+## Phase 2 — Shift and prove `continue_as`
 
 First submit one organic switch opportunity after pressure without naming `continue_as`:
 ask the agent to preserve only the future baton and supporting fact needed to continue the

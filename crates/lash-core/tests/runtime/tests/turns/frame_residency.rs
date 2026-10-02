@@ -4,7 +4,7 @@
 //! from the commit itself rather than read back from the store.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::collections::HashSet;
 
 const SEED: u64 = 0x5_f4a0;
@@ -40,7 +40,7 @@ fn tool_call(call_id: &str, tool_name: &str) -> MockCall {
     }
 }
 
-async fn drive_text_turn(
+async fn execute_text_turn(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
     turn_id: &str,
@@ -54,7 +54,7 @@ async fn drive_text_turn(
         .await
         .expect("open the turn's handler");
     runtime
-        .drive_turn_frames(
+        .execute_turn_frames(
             TurnInput::text(text),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -177,14 +177,14 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "frame-residency-first",
         "first request",
     )
     .await;
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "frame-residency-second",
@@ -203,7 +203,7 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
         probe + 1,
         "the counter counts window reads on the runtime's store"
     );
-    // The compaction is a session command the runtime's next drive applies
+    // The compaction is a session command the runtime's next shift applies
     // at its turn boundary (FIG-4201).
     let command = lash_core::runtime::SessionCommand::CompactContext { instructions: None };
     let batch = lash_core::QueuedWorkStore::enqueue_queued_work(
@@ -225,20 +225,20 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
             "frame-residency-compaction",
         ))
         .await
-        .expect("open the compaction's drive handler");
+        .expect("open the compaction's shift handler");
     let drained = Box::pin(
         runtime
-            .drive_next_queued_root(TurnOptions::new(CancellationToken::new(), handler.scoped())),
+            .execute_next_queued_run(TurnOptions::new(CancellationToken::new(), handler.scoped())),
     )
     .await
-    .expect("the drive applies the compaction");
+    .expect("the shift applies the compaction");
     handler
         .close()
         .await
-        .expect("close the compaction's drive handler");
+        .expect("close the compaction's shift handler");
     assert!(
         drained.ran().is_none(),
-        "the drive only applies the command"
+        "the shift only applies the command"
     );
     assert!(
         matches!(
@@ -318,7 +318,7 @@ pub(super) async fn a_pressure_frame_starts_without_a_reload() {
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "frame-residency-first",
@@ -340,7 +340,7 @@ pub(super) async fn a_pressure_frame_starts_without_a_reload() {
     let window_loads_before = store.load_session_count();
 
     armed.store(true, std::sync::atomic::Ordering::SeqCst);
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "frame-residency-pressure",
@@ -399,7 +399,7 @@ pub(super) async fn continue_as_starts_a_frame_without_a_reload() {
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "frame-residency-first",
@@ -420,7 +420,7 @@ pub(super) async fn continue_as_starts_a_frame_without_a_reload() {
     );
     let window_loads_before = store.load_session_count();
 
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "frame-residency-continue",
@@ -458,7 +458,7 @@ pub(super) async fn the_admitted_window_of_a_frame_switching_turn_is_its_admissi
         store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
-    drive_text_turn(&mut runtime, &double, "admitted-first", "first request").await;
+    execute_text_turn(&mut runtime, &double, "admitted-first", "first request").await;
     let admitted_frame = runtime
         .state()
         .current_frame_node_id
@@ -500,7 +500,7 @@ pub(super) async fn the_admitted_window_of_a_frame_switching_turn_is_its_admissi
         "a replay at the admission boundary hashes the first execution's snapshot"
     );
 
-    drive_text_turn(
+    execute_text_turn(
         &mut runtime,
         &double,
         "admitted-continue",

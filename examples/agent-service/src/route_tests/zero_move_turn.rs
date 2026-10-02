@@ -56,7 +56,7 @@ fn scripted_provider(
         .into_handle()
 }
 
-async fn drive(state: &AppStateData, chat_id: &str, board: BoardState) -> Vec<serde_json::Value> {
+async fn shift(state: &AppStateData, chat_id: &str, board: BoardState) -> Vec<serde_json::Value> {
     // Boxed for the same reason the replay test boxes: the handler future
     // is large enough to trip `clippy::large_futures` in a test frame.
     let response = Box::pin(send_message(
@@ -126,7 +126,7 @@ async fn a_turn_that_never_plays_leaves_the_board_playable() {
         .await
         .expect("create chat");
 
-    let lines = drive(&state, &chat.id, board_owing_a_move()).await;
+    let lines = shift(&state, &chat.id, board_owing_a_move()).await;
 
     let board = state
         .with_db({
@@ -205,7 +205,7 @@ async fn a_turn_that_plays_spends_no_retry() {
         .await
         .expect("create chat");
 
-    let lines = drive(&state, &chat.id, board_owing_a_move()).await;
+    let lines = shift(&state, &chat.id, board_owing_a_move()).await;
 
     let board = state
         .with_db({
@@ -232,7 +232,7 @@ async fn a_turn_that_plays_spends_no_retry() {
 }
 
 /// The recovery is host policy, not durability plumbing: it lives in one
-/// helper the send route calls, so this drives that helper directly with a
+/// helper the send route calls, so this executes that helper directly with a
 /// turn runner that never plays.
 #[tokio::test]
 async fn the_zero_move_policy_is_one_shared_bounded_loop() {

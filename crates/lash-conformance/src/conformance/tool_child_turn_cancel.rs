@@ -2,7 +2,7 @@
 //!
 //! Since FIG-3397 a turn's tool calls run as `ToolInvocation` children of a
 //! durable effect group: on the in-process tiers in host-owned child tasks, on
-//! Restate in the endpoint's dispatch invocations. These laws drive a real
+//! Restate in the endpoint's dispatch invocations. These laws execute a real
 //! turn on the tier (through its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner))
 //! and pin what turn control means for a child: an after-step stop does not
 //! cut a child's retry sleep short, a child spawned under a follow-on agent
@@ -11,7 +11,7 @@
 //! ignores its cancellation token.
 
 use crate::admit;
-use lash_core::testing::{TestTurnDrive as _, wait_until};
+use lash_core::testing::{TestTurnExecution as _, wait_until};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -126,7 +126,7 @@ fn spawn_turn(
                 Box::pin(async move {
                     let turn = build_runtime(parts)
                         .await
-                        .drive_turn(
+                        .execute_turn(
                             input,
                             crate::TurnOptions::new(
                                 tokio_util::sync::CancellationToken::new(),
@@ -479,8 +479,8 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let session_id = SessionId::fixture(format!("{prefix}-follow-on-session"));
-    let root_turn_id = TurnId::fixture(format!("{prefix}-follow-on-root"));
-    let follow_turn_id = TurnId::fixture(format!("{root_turn_id}:agent-frame:1"));
+    let run_turn_id = TurnId::fixture(format!("{prefix}-follow-on-run"));
+    let follow_turn_id = TurnId::fixture(format!("{run_turn_id}:agent-frame:1"));
     let executions = Arc::new(AtomicUsize::new(0));
     let (completion_key_tx, completion_key_rx) = tokio::sync::oneshot::channel();
     let tools = Arc::new(FollowOnPendingTools {
@@ -506,7 +506,7 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
         plugin,
         model,
     };
-    let mut turn = spawn_turn(runner, parts, &root_turn_id, "switch and wait", false);
+    let mut turn = spawn_turn(runner, parts, &run_turn_id, "switch and wait", false);
 
     let completion_key = tokio::select! {
         key = completion_key_rx => match key {
@@ -772,13 +772,13 @@ pub async fn cancel_dispositions_survive_group_child_teardown_and_redrive(
     } if recorded == evidence),
             "the recorded TurnStop survives control reattachment: {terminal:?}"
         );
-        let root = store
-            .root_terminal(&session_id, &turn_id)
+        let run = store
+            .run_terminal(&session_id, &turn_id)
             .await
-            .expect("read root terminal")
-            .expect("cancellation committed root terminal evidence");
+            .expect("read run terminal")
+            .expect("cancellation committed run terminal evidence");
         assert!(
-            matches!(root.cause, crate::RootTerminalCause::Committed { outcome: crate::store::RootCommittedOutcome::Stopped(TurnStop::Cancelled { evidence: ref recorded }), .. } if recorded == evidence)
+            matches!(run.cause, crate::RunTerminalCause::Committed { outcome: crate::store::RunCommittedOutcome::Stopped(TurnStop::Cancelled { evidence: ref recorded }), .. } if recorded == evidence)
         );
 
         wait_until("the cancel-ignoring tool child is dropped", || {

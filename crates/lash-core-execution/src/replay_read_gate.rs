@@ -400,7 +400,7 @@ impl StepBody {
 
 const STEP_BODIES: &[StepBody] = &[
     // The workload delete's owned-process listing runs inside its recorded
-    // `load.model-children.list` step, whose stored IDs drive cancellation
+    // `load.model-children.list` step, whose stored IDs execute cancellation
     // (FIG-4348).
     StepBody {
         declaring_file: LOAD_WORKER,
@@ -1040,7 +1040,7 @@ mod self_test {
             async fn recv(&mut self) -> Event {
                 self.registry.get_process(&self.id).await
             }
-            async fn drive(scoped: ScopedEffectController<'_>) {
+            async fn shift(scoped: ScopedEffectController<'_>) {
                 let event = channel.recv().await;
             }
             "#,

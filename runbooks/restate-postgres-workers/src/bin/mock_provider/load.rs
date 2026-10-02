@@ -97,7 +97,7 @@ pub(super) fn load_operations_text(text: &str) -> Vec<LoadOperation> {
 }
 /// New inputs follow the last assistant response. An unfinished RLM cell
 /// carries its admission into later iterations; iteration one never inherits
-/// an earlier root's admission, including a root that failed without an answer.
+/// an earlier run's admission, including a run that failed without an answer.
 fn admitted_user_texts(request: &Value) -> Vec<String> {
     let Some(messages) = request["messages"].as_array() else {
         return vec![];
@@ -188,7 +188,7 @@ pub(super) async fn completion(
         }
     }
     // A newly admitted primary input owns its retry decision even when an
-    // earlier queued input already had a provider call under another root.
+    // earlier queued input already had a provider call under another run.
     let first_attempt: bool=sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM unnest($1::text[]) AS input(key) WHERE NOT EXISTS (SELECT 1 FROM witness_provider_receipts WHERE workflow_id=input.key AND scenario IN ('load_turn','load_retryable')))")
         .bind(&retry_keys).fetch_one(&state.witness).await.map_err(internal)?;
     let attempt = if first_attempt { 1 } else { 2 };
@@ -526,10 +526,10 @@ mod tests {
     fn admitted_continuation_merges_inputs_and_excludes_failed_history() {
         let mut request = json!({"messages":[
             {"role":"user","content":"load_turn=r/0/0 load_workload=w"},
-            {"role":"assistant","content":"<load-admission>\nload_turn=r/0/0 load_workload=w\n</load-admission>\n<typescript>throw new Error('old failed root');</typescript>"},
+            {"role":"assistant","content":"<load-admission>\nload_turn=r/0/0 load_workload=w\n</load-admission>\n<typescript>throw new Error('old failed run');</typescript>"},
             {"role":"user","content":"load_turn=r/0/1 load_workload=w"},
-            {"role":"assistant","content":"<load-admission>\nload_turn=r/0/1 load_workload=w\nload_queued=r/0/1/queued/0 load_workload=w\n</load-admission>\n<typescript>throw new Error('active root');</typescript>"},
-            {"role":"user","content":"history[3].error: active root"},
+            {"role":"assistant","content":"<load-admission>\nload_turn=r/0/1 load_workload=w\nload_queued=r/0/1/queued/0 load_workload=w\n</load-admission>\n<typescript>throw new Error('active run');</typescript>"},
+            {"role":"user","content":"history[3].error: active run"},
             {"role":"user","content":"load_queued=r/0/1/queued/1 load_workload=w"},
             {"role":"user","content":"=== CURRENT ITERATION: 2 ==="}
         ]});

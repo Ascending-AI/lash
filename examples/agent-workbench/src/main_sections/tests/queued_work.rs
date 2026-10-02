@@ -70,7 +70,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             .expect("open queued-work controls session");
         // The engine admits none of the batches while the test lists and
         // controls them.
-        let _hold = double.hold_session_drive(&session_id).await;
+        let _hold = double.hold_session_shift(&session_id).await;
         let cursor = session.observe().current_observation().cursor;
         store_factory
             .admit_session(&lash::persistence::SessionStoreCreateRequest {
@@ -146,7 +146,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         )));
 
         assert!(ui::INDEX_HTML.contains("id=\"queuedWorkList\""));
-        // The engine drives every pending batch; the page only cancels one.
+        // The engine executes every pending batch; the page only cancels one.
         assert!(!ui::INDEX_HTML.contains("Run only this queued-work batch now"));
         assert!(ui::INDEX_HTML.contains("Cancel this pending queued-work batch"));
         let _ = std::fs::remove_dir_all(data_dir);
@@ -534,10 +534,10 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         )
         .await;
         let session_id = state.current_session_id();
-        // The workbench follows every root the engine starts on this session,
+        // The workbench follows every run the engine starts on this session,
         // as its boot does: the watch is in place before the wake exists, so
-        // a drive the engine starts on its own is followed too.
-        crate::restate::watch_session_roots(&state, &session_id).await;
+        // a shift the engine starts on its own is followed too.
+        crate::restate::watch_session_runs(&state, &session_id).await;
         let registry = state.core.process_registry();
         let process_id = registry
             .register_process(
@@ -581,7 +581,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .wake_delivery
             .expect("wake single-reply delivery");
 
-        // Delivering the wake asks the engine to drive it; the engine's own
+        // Delivering the wake asks the engine to execute it; the engine's own
         // reconcile tick may already have.
         state
             .core
@@ -591,7 +591,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("deliver the wake to its session");
         await_rendered_assistant_text(&state, WAKE_REPLY).await;
 
-        // A lease-free read: the engine's drive may still hold the session.
+        // A lease-free read: the engine's shift may still hold the session.
         let committed = state
             .core
             .session(session_id.clone())
@@ -800,7 +800,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .wake_delivery
             .expect("wake keeps-previous delivery");
 
-        crate::restate::watch_session_roots(&state, &session_id).await;
+        crate::restate::watch_session_runs(&state, &session_id).await;
         state
             .core
             .processes()
@@ -808,7 +808,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .await
             .expect("deliver the wake to its session");
         await_rendered_assistant_text(&state, WAKE_REPLY).await;
-        // A lease-free read: the engine's drive may still hold the session.
+        // A lease-free read: the engine's shift may still hold the session.
         let committed = state
             .core
             .session(session_id.clone())
@@ -852,7 +852,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
 }
 
 /// Wait until the workbench's follower has rendered an assistant row with
-/// `text`: the engine ran the root, and the follower recorded and settled it.
+/// `text`: the engine ran the run, and the follower recorded and settled it.
 async fn await_rendered_assistant_text(state: &AppState, text: &str) {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -871,5 +871,5 @@ async fn await_rendered_assistant_text(state: &AppState, text: &str) {
         }
     })
     .await
-    .expect("the followed root's reply is rendered");
+    .expect("the followed run's reply is rendered");
 }

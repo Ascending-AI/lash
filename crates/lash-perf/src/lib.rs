@@ -1,7 +1,7 @@
 //! Developer-only performance harness for the Lash runtime.
 //!
 //! This crate is never published or shipped. It owns the synthetic
-//! non-inference runtime benchmark (`runtime_perf`, driven by the
+//! non-inference runtime benchmark (`runtime_perf`, executed by the
 //! `lash-perf` binary and `scripts/profile_runtime*.py`) plus its private
 //! measurement helpers (`perf_support`). Host applications own their own UI
 //! measurement support.

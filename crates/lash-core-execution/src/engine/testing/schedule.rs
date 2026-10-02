@@ -1,9 +1,9 @@
 //! Seeded scheduling perturbation.
 //!
-//! A drive that is deterministic must not care when, relative to one another,
+//! A shift that is deterministic must not care when, relative to one another,
 //! its operations become ready. A perturbed run holds each settled operation
 //! back for a seeded number of executor rounds and wakes the ones released in
-//! a round in a seeded order, so a drive that races two operations, or reads
+//! a round in a seeded order, so a shift that races two operations, or reads
 //! which one landed first, issues different commands under different seeds.
 
 /// Holds are drawn from `0..=MAX_HOLD` rounds.

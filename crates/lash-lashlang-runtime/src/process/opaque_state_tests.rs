@@ -152,7 +152,7 @@ async fn parent_state_decode_never_compiles_regexp() {
 
 /// FIG-4645: the worker refuses a continuation it cannot decode the same way
 /// on every attempt. The refusal crosses the pipe and the broker as its typed
-/// cause, is not retryable, and ends the process instead of re-driving it
+/// cause, is not retryable, and ends the process instead of redriving it
 /// into the same refusal.
 #[tokio::test(flavor = "current_thread")]
 async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried() {
@@ -240,7 +240,7 @@ async fn a_continuation_the_worker_refuses_ends_the_process_and_is_never_retried
 
 /// FIG-4645: the one mapping from a worker failure to a process. Only what
 /// meets every attempt the same way ends it; the attempt's own failures are
-/// re-driven.
+/// redriven.
 #[test]
 fn only_a_refusal_or_a_run_limit_ends_the_process() {
     use lash_vm_broker::{BrokerFailure, CheckoutRefusal, Settlement};
@@ -291,7 +291,7 @@ fn only_a_refusal_or_a_run_limit_ends_the_process() {
     ] {
         for failure in [lost(outcome.clone()), unavailable(outcome)] {
             assert!(failure.is_retryable(), "{failure:?}");
-            assert_eq!(code(&failure), None, "{failure:?} is re-driven");
+            assert_eq!(code(&failure), None, "{failure:?} is redriven");
         }
     }
     assert_eq!(

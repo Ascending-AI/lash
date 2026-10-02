@@ -215,15 +215,15 @@ that redrives forever, or a composer that refuses further turns — do not simpl
 companion. Either run it on a fresh session on the same live stack and say so in the
 scorecard, or record all three of its rows as **blocked by the Phase 3/4 failure**, naming
 the address and the phase that left it. A Phase 3 failure must never cost three scorecard
-rows with no recorded reason. Record the session's sealed drive epoch
-(`session_meta.drive_epoch`, below) before the restart; it is what the supersession
+rows with no recorded reason. Record the session's sealed shift epoch
+(`session_meta.shift_epoch`, below) before the restart; it is what the supersession
 evidence hangs on.
 
 **Do not gate on either commit racing the restart's epoch seal.** There is no
-lease TTL a live run must beat: the dead worker's sealed drive epoch stands until
-the replacement drive's admission supersedes it, and replacing the Workbench
+lease TTL a live run must beat: the dead worker's sealed shift epoch stands until
+the replacement shift's admission supersedes it, and replacing the Workbench
 process costs a rebuild and a boot — tens of seconds at best. What the arm must
-show is that the replacement drive seals a newer epoch and the turn still commits
+show is that the replacement shift seals a newer epoch and the turn still commits
 exactly once.
 
 1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
@@ -236,9 +236,9 @@ exactly once.
    Require the PID to change and the run log to gain a fresh `starting agent-workbench` line,
    while the session and turn address remain exact.
 
-   Record `session_meta.drive_epoch` in `<data-dir>/lash-sessions/durable-core.db`
+   Record `session_meta.shift_epoch` in `<data-dir>/lash-sessions/durable-core.db`
    on both sides of the restart. Copy the database together with its `-wal` and
-   `-shm` files before querying. Require the replacement drive to seal a newer
+   `-shm` files before querying. Require the replacement shift to seal a newer
    epoch. Each arm also requires **exactly one** `runtime_turn_commits` row with
    `key: "final"` for its turn and no duplicate node append. A second `final`
    commit row for one turn id is the failure.
@@ -254,7 +254,7 @@ exactly once.
    only for an actual overlapping writer and must carry complete loser evidence. Save
    `06b-new-turn-{state,store,trace}.json` and report this arm separately.
 
-The deterministic companions verify that a restarted drive seals a newer
+The deterministic companions verify that a restarted shift seals a newer
 epoch and stale claims refuse before effects.
 
 ## Phase 6 — Teardown and score

@@ -207,7 +207,7 @@ pub(super) async fn start_store_fault_law<S: lash_core::StoreSet + ?Sized>(
                             .with_process_starts(
                                 ledger,
                                 clock,
-                                lash_core::drive::relay::RelayPolicy::default(),
+                                lash_core::shift::relay::RelayPolicy::default(),
                             ),
                     )
                     .await;

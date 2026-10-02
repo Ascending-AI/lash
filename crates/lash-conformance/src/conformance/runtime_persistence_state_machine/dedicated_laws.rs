@@ -14,7 +14,7 @@ where
     })
     .await?;
     assert_on_fresh_store(make, seed + 2, |store| async move {
-        law_a_resumed_root_keeps_its_admission_across_fences(store).await
+        law_a_resumed_run_keeps_its_admission_across_fences(store).await
     })
     .await?;
     assert_on_fresh_store(make, seed + 3, |store| async move {
@@ -62,9 +62,9 @@ fn fail(error: impl std::fmt::Display) -> TestCaseError {
     TestCaseError::fail(error.to_string())
 }
 
-async fn seal(store: &Arc<dyn RuntimeStore>, index: u8) -> Result<DriveFence, TestCaseError> {
+async fn seal(store: &Arc<dyn RuntimeStore>, index: u8) -> Result<ShiftFence, TestCaseError> {
     store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &session_id(),
             &owner(index),
             "dedicated-law-executor",
@@ -73,24 +73,24 @@ async fn seal(store: &Arc<dyn RuntimeStore>, index: u8) -> Result<DriveFence, Te
         .await
         .map_err(fail)?
         .acquired()
-        .ok_or_else(|| fail("the drive epoch seal lost a concurrent admission"))
+        .ok_or_else(|| fail("the shift epoch seal lost a concurrent admission"))
 }
 
 async fn admit(
     store: &Arc<dyn RuntimeStore>,
-    fence: &DriveFence,
-    root: &str,
+    fence: &ShiftFence,
+    run: &str,
     head: AdmittedHead,
-) -> Result<RootAdmission, TestCaseError> {
+) -> Result<RunAdmission, TestCaseError> {
     store
-        .admit_root(&admission_request(fence, &TurnId::fixture(root), head, 64))
+        .admit_run(&admission_request(fence, &TurnId::fixture(run), head, 64))
         .await
         .map_err(fail)?
         .ok_or_else(|| fail("the admission missed its head"))
 }
 
-fn completing(root: &str, admission: &RootAdmission) -> IngressSettlement {
-    let mut settlement = IngressSettlement::new(TurnId::fixture(root));
+fn completing(run: &str, admission: &RunAdmission) -> IngressSettlement {
+    let mut settlement = IngressSettlement::new(TurnId::fixture(run));
     if let Some(queued) = &admission.queued {
         settlement.completed_batches.push(queued.completion());
     }
@@ -100,20 +100,20 @@ fn completing(root: &str, admission: &RootAdmission) -> IngressSettlement {
     settlement
 }
 
-/// `commit` settling `settlement` under `fence`, ending its root.
+/// `commit` settling `settlement` under `fence`, ending its run.
 fn final_commit(
     mut commit: RuntimeCommit,
-    fence: &DriveFence,
+    fence: &ShiftFence,
     settlement: IngressSettlement,
 ) -> RuntimeCommit {
-    let root = settlement.root.clone();
-    commit.drive_fence = Some(Box::new(fence.clone()));
+    let run = settlement.run.clone();
+    commit.shift_fence = Some(Box::new(fence.clone()));
     commit.ingress = Some(settlement);
-    commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
-        commit: crate::store::TurnCommitId::new(root.clone(), 0),
-        turn: root.clone(),
-        root,
-        outcome: crate::store::RootCommittedOutcome::Finished(
+    commit.run_terminal = Some(Box::new(crate::store::RunTerminalWrite {
+        commit: crate::store::TurnCommitId::new(run.clone(), 0),
+        turn: run.clone(),
+        run,
+        outcome: crate::store::RunCommittedOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -161,16 +161,16 @@ async fn law_stale_fences_admit_nothing(store: Arc<dyn RuntimeStore>) -> Result<
     }
     prop_assert!(
         shape[RunShapeCounter::StaleFenceRejections] >= 2,
-        "the drive fence did not refuse both stale admissions"
+        "the shift fence did not refuse both stale admissions"
     );
     prop_assert_eq!(model.work.len(), 1, "a stale admission removed work");
     prop_assert_eq!(model.inputs.len(), 1, "a stale admission removed input");
     Ok(())
 }
 
-/// A root's final commit settles its rows once: the exact replay answers
+/// A run's final commit settles its rows once: the exact replay answers
 /// from its receipt, and a distinct second settlement of the same rows is
-/// refused because no root holds them any more.
+/// refused because no run holds them any more.
 async fn law_admitted_work_settles_exactly_once(
     store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
@@ -223,7 +223,7 @@ async fn law_admitted_work_settles_exactly_once(
         ))
         .map_err(fail)?;
     let mut second_settlement = second_settlement;
-    second_settlement.drive_fence = Some(Box::new(fence.clone()));
+    second_settlement.shift_fence = Some(Box::new(fence.clone()));
     second_settlement.ingress = Some(completing("settles-once", &admission));
     let before = session_snapshot(store.as_ref())
         .await
@@ -242,7 +242,7 @@ async fn law_admitted_work_settles_exactly_once(
 /// N3: a coalesced admission read back under a successor's fence is the
 /// recorded one, the predecessor's settlement is refused whole without
 /// disturbing the successor's rows, and the successor settles them.
-async fn law_a_resumed_root_keeps_its_admission_across_fences(
+async fn law_a_resumed_run_keeps_its_admission_across_fences(
     store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let first = store
@@ -262,7 +262,7 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
         "the joined admission did not coalesce"
     );
     store
-        .supersede_drive_epoch_for_test(&predecessor)
+        .supersede_shift_epoch_for_test(&predecessor)
         .await
         .map_err(fail)?;
     let successor = seal(&store, 1).await?;
@@ -284,7 +284,7 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
         ))
         .await;
     prop_assert!(
-        matches!(stale_result, Err(StoreError::StaleDriveFence { .. })),
+        matches!(stale_result, Err(StoreError::StaleShiftFence { .. })),
         "the predecessor's settlement was not refused whole: {stale_result:?}"
     );
     assert_snapshot_unchanged(store.as_ref(), before, "superseded predecessor settlement")
@@ -296,7 +296,7 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
             .await
             .map_err(fail)?
             .is_empty(),
-        "the refused settlement released the root's rows"
+        "the refused settlement released the run's rows"
     );
     store
         .commit_runtime_state(final_commit(
@@ -318,15 +318,15 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
     Ok(())
 }
 
-/// A drive that runs two roots in one journal replays the first root's final
-/// commit after the second root's seal superseded its fence (FIG-4498). The
+/// A shift that runs two runs in one journal replays the first run's final
+/// commit after the second run's seal superseded its fence (FIG-4498). The
 /// commit is already stored: its exact replay answers from its receipt and
 /// writes nothing, whichever fence is current. The superseded fence still
 /// authorizes no new write.
 async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
     store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
-    // One row per root, as the default drain admits them (FIG-4457).
+    // One row per run, as the default drain admits them (FIG-4457).
     let ahead = store
         .enqueue_pending_turn_input(turn_input_draft(0, 0))
         .await
@@ -335,13 +335,13 @@ async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
         .enqueue_pending_turn_input(turn_input_draft(1, 1))
         .await
         .map_err(fail)?;
-    let admit_one = |fence: DriveFence, root: &'static str, input: crate::InputId| {
+    let admit_one = |fence: ShiftFence, run: &'static str, input: crate::InputId| {
         let store = Arc::clone(&store);
         async move {
             store
-                .admit_root(&admission_request(
+                .admit_run(&admission_request(
                     &fence,
-                    &TurnId::from(root),
+                    &TurnId::from(run),
                     AdmittedHead::Input(input),
                     1,
                 ))
@@ -355,7 +355,7 @@ async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
     prop_assert_eq!(
         admission.input_ids().len(),
         1,
-        "the first root admitted the second root's row"
+        "the first run admitted the second run's row"
     );
     let mut state = state_with_tool_generation(41);
     let commit = final_commit(
@@ -370,7 +370,7 @@ async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
     prop_assert!(!first.receipt_replayed, "the first commit was a replay");
 
     store
-        .supersede_drive_epoch_for_test(&predecessor)
+        .supersede_shift_epoch_for_test(&predecessor)
         .await
         .map_err(fail)?;
     let successor = seal(&store, 1).await?;
@@ -420,14 +420,14 @@ async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
         ))
         .await;
     prop_assert!(
-        matches!(stale_result, Err(StoreError::StaleDriveFence { .. })),
+        matches!(stale_result, Err(StoreError::StaleShiftFence { .. })),
         "a new commit under the superseded fence was not refused: {stale_result:?}"
     );
     assert_snapshot_unchanged(store.as_ref(), before, "superseded-fence new commit")
         .await
         .map_err(TestCaseError::fail)?;
 
-    // The successor's own root settles under its fence.
+    // The successor's own run settles under its fence.
     store
         .commit_runtime_state(final_commit(
             RuntimeCommit::persisted_state_for_test(&state),
@@ -442,14 +442,14 @@ async fn law_a_settled_commit_replays_its_receipt_under_a_superseded_fence(
             .await
             .map_err(fail)?
             .is_empty(),
-        "the successor could not settle its own root"
+        "the successor could not settle its own run"
     );
     Ok(())
 }
 
-/// Head CAS serializes competing commits: a loser carrying the root's
+/// Head CAS serializes competing commits: a loser carrying the run's
 /// settlement under the live fence but a stale head is refused whole, the
-/// winner's head standing and the root's rows still bound.
+/// winner's head standing and the run's rows still bound.
 async fn law_head_cas_serializes_competing_commits(
     store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
@@ -509,7 +509,7 @@ async fn law_head_cas_serializes_competing_commits(
 }
 
 /// A superseded predecessor's settlement of a subset of the rows is refused
-/// whole and cannot disturb the successor that resumed the root; the
+/// whole and cannot disturb the successor that resumed the run; the
 /// successor still settles every row.
 async fn law_stale_settlement_cannot_damage_successor(
     store: Arc<dyn RuntimeStore>,
@@ -526,7 +526,7 @@ async fn law_stale_settlement_cannot_damage_successor(
     let head = AdmittedHead::Batch(first.batch_id.clone());
     let admitted = admit(&store, &predecessor, "damage", head.clone()).await?;
     store
-        .supersede_drive_epoch_for_test(&predecessor)
+        .supersede_shift_epoch_for_test(&predecessor)
         .await
         .map_err(fail)?;
     let successor = seal(&store, 1).await?;
@@ -549,7 +549,7 @@ async fn law_stale_settlement_cannot_damage_successor(
         ))
         .await;
     prop_assert!(
-        matches!(stale_result, Err(StoreError::StaleDriveFence { .. })),
+        matches!(stale_result, Err(StoreError::StaleShiftFence { .. })),
         "stale subset settlement was not refused: {stale_result:?}"
     );
     assert_snapshot_unchanged(
@@ -577,7 +577,7 @@ async fn law_stale_settlement_cannot_damage_successor(
     );
     prop_assert!(
         seal(&store, 2).await.is_ok(),
-        "a stale settlement must not prevent a successor drive seal"
+        "a stale settlement must not prevent a successor shift seal"
     );
     let live = seal(&store, 3).await?;
     store
@@ -594,7 +594,7 @@ async fn law_stale_settlement_cannot_damage_successor(
             .await
             .map_err(fail)?
             .is_empty(),
-        "the successor could not settle the root's rows"
+        "the successor could not settle the run's rows"
     );
     let _ = admitted;
     Ok(())
@@ -626,7 +626,7 @@ async fn law_turn_inputs_apply_once_in_order(
     let mut inputs = *admission
         .inputs
         .clone()
-        .ok_or_else(|| fail("the root admitted no inputs"))?;
+        .ok_or_else(|| fail("the run admitted no inputs"))?;
     inputs.record_initial_turn_application(&TurnId::from("ordered-turn"), "ordered-message");
     let expected = inputs.applications.clone();
     let mut settlement = IngressSettlement::new(TurnId::from("ordered-turn"));
@@ -707,8 +707,8 @@ async fn law_commit_atomicity_and_stale_head_non_mutation(
     .map_err(TestCaseError::fail)?;
     prop_assert_eq!(model.head_revision, 1);
     prop_assert!(
-        model.inputs.is_empty() && model.work.len() == 1 && model.root.is_none(),
-        "the root's final commit settles its input and leaves the open batch"
+        model.inputs.is_empty() && model.work.len() == 1 && model.run.is_none(),
+        "the run's final commit settles its input and leaves the open batch"
     );
     prop_assert!(
         model.components.tool_ref.is_some()

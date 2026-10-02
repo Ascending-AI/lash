@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 #[tokio::test]
 pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
@@ -109,10 +109,10 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     assert_eq!(rows, 1);
 }
 
-/// A dropped suspended handler is redriven under a newer drive admission and
+/// A dropped suspended handler is redriven under a newer shift admission and
 /// publishes one final commit even though its first provider attempt was lost.
 #[tokio::test]
-pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
+pub(super) async fn restate_replay_shift_seal_takes_recorded_branch() {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "restate-replay-lease-branch";
     let turn_id = "restate-replay-lease-turn-1";
@@ -159,10 +159,10 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
             .expect("open session store"),
     );
     let underlying_store = session_view(store.clone(), session_id);
-    let drive_seal_count = Arc::new(AtomicUsize::new(0));
+    let shift_seal_count = Arc::new(AtomicUsize::new(0));
     let probed_store = decorated_view(&underlying_store, |inner| CommitRetryStore {
         inner,
-        drive_seal_count: Arc::clone(&drive_seal_count),
+        shift_seal_count: Arc::clone(&shift_seal_count),
     });
     let runtime_store: lash_core::store::SessionStore = probed_store;
     let policy = lash_core::testing::mock_session_policy();
@@ -194,7 +194,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
     )
     .await
     .expect("first durable worker reaches provider suspension");
-    assert_eq!(drive_seal_count.load(Ordering::SeqCst), 1);
+    assert_eq!(shift_seal_count.load(Ordering::SeqCst), 1);
     assert!(
         !context.runs().is_empty(),
         "the suspended handler reached the real Restate run boundary"
@@ -210,7 +210,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
     // The fresh worker is the dropped handler's retry: Restate replays the
     // journal the first attempt recorded, and the provider call it never
     // recorded runs live. A worker that cannot read that journal is a fresh
-    // execution of a started root, which is SubstrateLost (ADR 0105 L-S8).
+    // execution of a started run, which is SubstrateLost (ADR 0105 L-S8).
     context.start_replay_allowing_journal_extension();
     let mut fresh_worker = replay_test_runtime(
         &SessionId::from(session_id),
@@ -225,7 +225,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
         .scoped_effect_controller(durable_admission(&durable_turn_scope(session_id, turn_id)))
         .expect("scoped replay controller");
     let replay_turn = fresh_worker
-        .drive_turn(
+        .execute_turn(
             replay_test_input(&TurnId::from(turn_id)),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -237,8 +237,8 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
     let replay_turn = replay_turn.unwrap_or_else(|error| {
         panic!(
             "fresh durable worker must redrive under a new admission: \
-             {error:?}; drive_seals={}",
-            drive_seal_count.load(Ordering::SeqCst)
+             {error:?}; shift_seals={}",
+            shift_seal_count.load(Ordering::SeqCst)
         )
     });
     assert!(matches!(
@@ -250,9 +250,9 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
         "fresh worker progressed"
     );
     assert_eq!(
-        drive_seal_count.load(Ordering::SeqCst),
+        shift_seal_count.load(Ordering::SeqCst),
         1,
-        "the fresh worker replays the recorded drive seal"
+        "the fresh worker replays the recorded shift seal"
     );
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),

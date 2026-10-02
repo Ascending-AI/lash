@@ -55,13 +55,13 @@ pub enum EffectOpener {
         turn_id: TurnId,
     },
     /// One operation on a session that runs no turn: a host command, named
-    /// by its batch, or the admissions of one drive request.
+    /// by its batch, or the admissions of one shift request.
     ///
     /// An operation is a lifecycle owner in the sense §1 means: its id is
     /// durable and retry-stable, so a redrive of the operation binds the
-    /// same opener. No logical turn runs under it: every turn a drive runs
-    /// is opened by its logical root's [`Turn`](Self::Turn) (FIG-3607
-    /// contract 4). No root's end closes an operation's scope; its session's
+    /// same opener. No logical turn runs under it: every turn a shift runs
+    /// is opened by its logical run's [`Turn`](Self::Turn) (FIG-3607
+    /// contract 4). No run's end closes an operation's scope; its session's
     /// close does.
     SessionOperation {
         /// The session the operation is on.

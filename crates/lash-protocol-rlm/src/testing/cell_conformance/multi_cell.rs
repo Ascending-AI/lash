@@ -6,13 +6,13 @@
 //! grow a structure, drop a value, and put a failing cell in the middle — the
 //! shapes a session actually contains.
 
-use super::drive;
 use super::harness::{HarnessMode, Session};
+use super::shift;
 use super::syntax::{Cell, Literal};
 
 #[test]
 fn a_later_cell_reads_an_earlier_cells_binding() {
-    let (_, model) = drive(
+    let (_, model) = shift(
         HarnessMode::Resident,
         &[
             Cell::number("seed", 41.0),
@@ -36,13 +36,13 @@ fn a_binding_survives_a_long_run_of_unrelated_cells() {
     }
     cells.push(Cell::finish("kept"));
 
-    let (session, _) = drive(HarnessMode::Resident, &cells);
+    let (session, _) = shift(HarnessMode::Resident, &cells);
     assert_eq!(session.globals().get("kept"), Some(&serde_json::json!(7)));
 }
 
 #[test]
 fn a_later_cell_shadows_an_earlier_binding() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("value", Literal::List(vec![1.0, 2.0])),
@@ -56,7 +56,7 @@ fn a_later_cell_shadows_an_earlier_binding() {
 
 #[test]
 fn a_later_cell_grows_a_structure_an_earlier_cell_built() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("base", Literal::List(vec![1.0, 2.0])),
@@ -74,7 +74,7 @@ fn a_later_cell_grows_a_structure_an_earlier_cell_built() {
 
 #[test]
 fn a_nested_structure_crosses_the_boundary_intact() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind(
@@ -96,7 +96,7 @@ fn a_nested_structure_crosses_the_boundary_intact() {
 
 #[test]
 fn a_dropped_binding_keeps_its_name_and_loses_its_value() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("payload", Literal::List(vec![1.0, 2.0, 3.0])),
@@ -113,10 +113,10 @@ fn a_dropped_binding_keeps_its_name_and_loses_its_value() {
 
 #[test]
 fn a_failing_cell_between_two_working_cells_changes_nothing() {
-    // `drive` already checks the model after the failing cell; this scenario
+    // `shift` already checks the model after the failing cell; this scenario
     // exists to pin the sequence itself as a named case, because it is the one
     // a host reported.
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("before", Literal::List(vec![1.0, 2.0])),
@@ -149,7 +149,7 @@ fn the_session_finishes_with_a_value_an_earlier_cell_bound() {
 /// `docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md`.
 #[test]
 fn a_closure_valued_binding_does_not_survive_the_cell_boundary() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::closure_binding("callback"),
@@ -193,7 +193,7 @@ fn a_container_reaching_a_closure_does_not_survive_either() {
 /// runtime roots still reach a closure through.
 #[test]
 fn an_ordinary_value_shadows_a_closure_valued_binding() {
-    let (session, _) = drive(
+    let (session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::closure_binding("slot"),

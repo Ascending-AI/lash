@@ -1,7 +1,7 @@
 //! FIG-4379: a session records each installed owner's plugin configuration
 //! at creation, delivers it unchanged on every open, changes it only through
 //! its owner's typed config commands in one revision-checked transaction, and
-//! hands every scoped hook the revision its root was admitted under.
+//! hands every scoped hook the revision its run was admitted under.
 
 use super::*;
 
@@ -627,11 +627,11 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     Ok(())
 }
 
-/// On a Restate double that replays every await, each root's hooks see the
-/// configuration and revision that root was admitted under, however often it
-/// is redriven; the root after a config transaction sees its revision.
+/// On a Restate double that replays every await, each run's hooks see the
+/// configuration and revision that run was admitted under, however often it
+/// is redriven; the run after a config transaction sees its revision.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn redriven_roots_see_their_admitted_revision() -> Result<()> {
+async fn redriven_runs_see_their_admitted_revision() -> Result<()> {
     let probe = Arc::new(ProbeFactory::default());
     let backend = double_backend_over(
         lash_restate_test::ServerConfig::default().always_replay(true),
@@ -651,14 +651,14 @@ async fn redriven_roots_see_their_admitted_revision() -> Result<()> {
     let admitted = recorded_state(&core, "probe-admitted")
         .await?
         .config_revision;
-    session.send(TurnInput::text("first root")).output().await?;
+    session.send(TurnInput::text("first run")).output().await?;
     let first = std::mem::take(&mut *probe.hooks.lock_recover());
     assert!(!first.is_empty());
     assert!(
         first
             .iter()
             .all(|seen| seen == &(admitted, Some(capped(12)))),
-        "every run of the first root sees its admission: {first:?}"
+        "every execution of the first run sees its admission: {first:?}"
     );
 
     session.admin().config().configure(raise(20)).await?;
@@ -671,20 +671,17 @@ async fn redriven_roots_see_their_admitted_revision() -> Result<()> {
         settling
             .iter()
             .all(|seen| seen == &(admitted, Some(capped(12)))),
-        "no root runs under a revision it was not admitted with while the transaction settles: \
+        "no run executes under a revision it was not admitted with while the transaction settles: \
          {settling:?}"
     );
-    session
-        .send(TurnInput::text("second root"))
-        .output()
-        .await?;
+    session.send(TurnInput::text("second run")).output().await?;
     let second = probe.hooks.lock_recover().clone();
     assert!(!second.is_empty());
     assert!(
         second
             .iter()
             .all(|seen| seen == &(committed, Some(capped(20)))),
-        "the next root is admitted under the transaction's revision: {second:?}"
+        "the next run is admitted under the transaction's revision: {second:?}"
     );
     Ok(())
 }

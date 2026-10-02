@@ -58,7 +58,7 @@ const RESUMED_TURN_WAIT: Duration = Duration::from_secs(2);
 
 /// Default deadline for [`ChannelBot::retry_deferred`].
 ///
-/// Long enough for the restate-server to re-drive an interrupted invocation on
+/// Long enough for the restate-server to redrive an interrupted invocation on
 /// the restarted endpoint and for transient admission contention to clear, and
 /// finite so a genuinely stuck row is reported instead of retried forever.
 pub const DEFERRED_RETRY_DEADLINE: Duration = Duration::from_secs(120);
@@ -816,7 +816,7 @@ impl ChannelBot {
     /// A resumed mention whose input a committed turn already answered is
     /// read back out of the transcript. A resumed mention whose turn has not
     /// settled within [`RESUMED_TURN_WAIT`] is deferred, never terminalized:
-    /// its root may still be re-driving on the engine after a previous boot
+    /// its root may still be redriving on the engine after a previous boot
     /// died, and the retry loop re-attaches to the same input until it settles.
     async fn run_mention_turn(
         &self,

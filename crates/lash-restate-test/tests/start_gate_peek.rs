@@ -3,10 +3,10 @@
 //! The turn observes its cancellation gate once, before its first model call.
 //! Here the session's await events are revoked before the turn runs, so the
 //! start-gate peek fails with the typed unknown-or-revoked refusal. The turn
-//! is sent to the session and the engine drives it: the root's `LashTurn`
+//! is sent to the session and the engine executes it: the run's `LashTurn`
 //! workflow must fail on that one observation, its journal recording a single
 //! revocation read for the gate, and no model call follows. Then, for every
-//! journal point of the root's workflow, a fresh backend under the same seed
+//! journal point of the run's workflow, a fresh backend under the same seed
 //! drops the handler just before the server stores that frame and replays the
 //! invocation: the replay must fail the same way, with the same recorded reads
 //! and no model call.
@@ -37,12 +37,12 @@ struct Run {
     outcome: String,
     llm_calls: usize,
     crashes: u64,
-    /// The root workflow's journal, in order.
+    /// The run workflow's journal, in order.
     journal: Vec<(MessageType, Option<String>, bytes::Bytes)>,
 }
 
 impl Run {
-    /// How many times the root's workflow read the session's revocation, the
+    /// How many times the run's workflow read the session's revocation, the
     /// read the start-gate peek fails on: the gate's own `peek_turn_gate`,
     /// which answers the revocation with the gate (FIG-3978), or a general
     /// peek's `is_revoked`.
@@ -125,18 +125,18 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .id("turn-1")
         .await
         .expect("accept the turn input");
-    let request = lash_core::drive::ingress_drive_request(
+    let request = lash_core::shift::ingress_shift_request(
         handle.input_id().as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     let server = backend.server();
-    let drive = tokio::time::timeout(
+    let shift = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        backend.attach_drive(&lash_core::SessionId::from(SESSION), request),
+        backend.attach_shift(&lash_core::SessionId::from(SESSION), request),
     )
     .await;
-    let outcome = match drive {
-        Ok(Ok(outcome)) => format!("drive ran {:?}, stopped {:?}", outcome.ran, outcome.stop),
+    let outcome = match shift {
+        Ok(Ok(outcome)) => format!("shift ran {:?}, stopped {:?}", outcome.ran, outcome.stop),
         Ok(Err(error)) => format!("error: {error}"),
         Err(_) => "stuck: timed out".to_string(),
     };
@@ -163,8 +163,8 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
     let seed = 0x3647;
     let reference = run_turn(seed, None).await;
     assert!(
-        reference.outcome == r#"drive ran [Released { root: TurnId("turn-1") }], stopped Idle"#,
-        "a revoked start gate fails the root, whose refusal ends it, and the drive finds \
+        reference.outcome == r#"shift ran [Released { run: TurnId("turn-1") }], stopped Idle"#,
+        "a revoked start gate fails the run, whose refusal ends it, and the shift finds \
          nothing more to run: {reference:?}"
     );
     assert_eq!(
@@ -172,7 +172,7 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
         "no model call follows the failed gate"
     );
     // One read: the start gate is observed once, and nothing probes it after
-    // the failure. A failed root's rows are released by its terminal write,
+    // the failure. A failed run's rows are released by its terminal write,
     // not by a teardown repair that reads the gate (FIG-3927 §2.6). A retry
     // of the start gate would add a read per attempt.
     assert_eq!(
@@ -266,18 +266,18 @@ async fn an_answered_turn_peeks_its_gate_in_one_shared_read_and_publishes_one_wa
         .id("turn-1")
         .await
         .expect("accept the turn input");
-    let request = lash_core::drive::ingress_drive_request(
+    let request = lash_core::shift::ingress_shift_request(
         handle.input_id().as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        backend.attach_drive(&lash_core::SessionId::from("gate-hops"), request),
+        backend.attach_shift(&lash_core::SessionId::from("gate-hops"), request),
     )
     .await
-    .expect("the drive ends")
-    .expect("the drive's outcome");
-    assert_eq!(outcome.ran.len(), 1, "one root ran: {outcome:?}");
+    .expect("the shift ends")
+    .expect("the shift's outcome");
+    assert_eq!(outcome.ran.len(), 1, "one run ran: {outcome:?}");
     let server = backend.server();
     server.settle().await;
 
@@ -298,8 +298,8 @@ async fn an_answered_turn_peeks_its_gate_in_one_shared_read_and_publishes_one_wa
     let turn = invocations
         .iter()
         .find(|view| view.target.split('/').next() == Some(TURN_DRIVER_SERVICE))
-        .expect("the root's workflow ran");
-    let journal = server.journal(&turn.id).expect("the root's journal");
+        .expect("the run's workflow ran");
+    let journal = server.journal(&turn.id).expect("the run's journal");
     let calls_naming = |service: &[u8], handler: &[u8]| {
         journal
             .iter()

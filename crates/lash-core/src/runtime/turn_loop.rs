@@ -36,8 +36,8 @@ pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
 
 /// What every turn phase publishes through: the logical turn's observer,
-/// whose host end [`drive_logical_turn`](LashRuntime::drive_logical_turn)
-/// publishes to the host sinks outside the drive.
+/// whose host end [`execute_logical_turn`](LashRuntime::execute_logical_turn)
+/// publishes to the host sinks outside the shift.
 pub(in crate::runtime) struct TurnSinks<'sinks> {
     pub(in crate::runtime) observer: &'sinks TurnObserver,
 }
@@ -196,11 +196,11 @@ async fn turn_control_binding<'a>(
 }
 
 /// The `ingress.admitted` trace of one admission (FIG-3927): the rows
-/// `root` bound under `admitted_by` (its root admission step, or a
+/// `run` bound under `admitted_by` (its run admission step, or a
 /// checkpoint's replay key), at `boundary`, with the causes its queued work
 /// materialized.
 pub(in crate::runtime) fn ingress_admitted_trace_payload(
-    root: &TurnId,
+    run: &TurnId,
     admitted_by: &str,
     boundary: crate::AdmissionBoundary,
     inputs: Option<&crate::AdmittedTurnInputs>,
@@ -208,7 +208,7 @@ pub(in crate::runtime) fn ingress_admitted_trace_payload(
     causes: &[crate::TurnCause],
 ) -> serde_json::Value {
     serde_json::json!({
-        "root": root,
+        "run": run,
         "admitted_by": admitted_by,
         "boundary": boundary,
         "input_ids": inputs.map(crate::AdmittedTurnInputs::input_ids).unwrap_or_default(),
@@ -222,7 +222,7 @@ pub(in crate::runtime) fn ingress_admitted_trace_payload(
     })
 }
 
-/// The `ingress.settled` trace of one commit: the rows `root` settled as
+/// The `ingress.settled` trace of one commit: the rows `run` settled as
 /// delivered, and the rows it handed back open or dropped.
 pub(in crate::runtime) fn ingress_settled_trace_payload(
     settlement: &crate::store::IngressSettlement,
@@ -236,7 +236,7 @@ pub(in crate::runtime) fn ingress_settled_trace_payload(
             .collect::<Vec<_>>()
     };
     serde_json::json!({
-        "root": settlement.root,
+        "run": settlement.run,
         "input_ids": settlement
             .completed_inputs
             .iter()
@@ -345,15 +345,15 @@ trait TypedTurnPhase {
 }
 
 impl LashRuntime {
-    /// The recorded prompt budget queued-root admission measures against.
+    /// The recorded prompt budget queued-run admission measures against.
     /// A session whose recorded config selects no model has none, and its
-    /// roots are refused: no deployment can run them.
+    /// runs are refused: no deployment can run them.
     pub(super) fn max_context_tokens(&self) -> Result<usize, RuntimeError> {
         self.state
             .effective_policy()
             .context_window_tokens()
             .ok_or_else(|| {
-                crate::runtime::drive::llm_profile_unconfigured(
+                crate::runtime::shift::llm_profile_unconfigured(
                     crate::SessionError::LlmProfileUnconfigured {
                         session_id: self.state.session_id.clone(),
                     },
@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_turn_ids_count_on_from_the_root_deterministically() {
+    fn physical_turn_ids_count_on_from_the_run_deterministically() {
         let first = next_physical_turn_id(&TurnId::from("root-turn"), 0).expect("first");
         assert_eq!(first, "root-turn:agent-frame:1");
         let second = next_physical_turn_id(&TurnId::from("root-turn"), 1).expect("second");

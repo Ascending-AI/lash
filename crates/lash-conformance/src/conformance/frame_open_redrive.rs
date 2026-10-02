@@ -12,8 +12,8 @@
 //! - **`continue_as`.** The turn's own `AgentFrameSwitch` outcome, opened by
 //!   the turn's commit; the task runs as a follow-on physical turn.
 //! - **`compact_context`.** An administrative compaction: a session command
-//!   the drive's command lane applies at a turn boundary, under the command
-//!   root's sealed fence (FIG-4201). Core records the head and frame it
+//!   the shift's command lane applies at a turn boundary, under the command
+//!   run's sealed fence (FIG-4201). Core records the head and frame it
 //!   compacts as one recorded step under the command's own scope, a
 //!   compactor returns seed nodes over that base, and core opens and commits
 //!   the frame in the commit that settles the command. A redrive of the
@@ -71,8 +71,8 @@ mod adversarial;
 pub use adversarial::*;
 mod followup;
 pub use followup::*;
-mod superseded_root;
-pub use superseded_root::*;
+mod superseded_run;
+pub use superseded_run::*;
 mod host_commands;
 pub use host_commands::*;
 mod command_budget;
@@ -87,7 +87,7 @@ const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
 /// Marks a summarizer request so the provider counts it apart from the
 /// turns' own calls.
 const SUMMARY_REQUEST_MARKER: &str = "frame-open-law-summary";
-const SUMMARY_TEXT: &str = "summary of the first root";
+const SUMMARY_TEXT: &str = "summary of the first run";
 const FOLLOW_ON_TASK: &str = "finish in the continued frame";
 
 /// How a protocol's model answers and switches frames, and the plugins that
@@ -241,14 +241,14 @@ pub enum FrameOpenCrash {
     /// The summarizer's completion is journaled; the frame's commit is not.
     AfterSummary,
     /// The frame's own commit is durable: the pressure frame's, before its
-    /// turn runs, or an administrative compaction's, before its command root
+    /// turn runs, or an administrative compaction's, before its command run
     /// goes on.
     AfterFrameCommit,
     /// The turn's model and tool effects are journaled; its commit is not.
     BeforeTurnCommit,
     /// The turn that opened a frame (by pressure or `continue_as`) committed.
     AfterTurnCommit,
-    /// The `continue_as` follow-on turn committed; the root has not ended.
+    /// The `continue_as` follow-on turn committed; the run has not ended.
     AfterFollowOnCommit,
 }
 
@@ -982,16 +982,16 @@ async fn unless_the_provider_answer_is_lost<T>(
     }
 }
 
-type DriveResultTx = tokio::sync::mpsc::UnboundedSender<
+type ShiftResultTx = tokio::sync::mpsc::UnboundedSender<
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>,
 >;
 
-/// One attempt at a drive. A crashing attempt must die at its crash point;
-/// the others send back how their drive ended.
-fn drive_attempt(
+/// One attempt at a shift. A crashing attempt must die at its crash point;
+/// the others send back how their shift ended.
+fn shift_attempt(
     parts: &LawParts,
     crash: Option<FrameOpenCrash>,
-    result_tx: Option<DriveResultTx>,
+    result_tx: Option<ShiftResultTx>,
 ) -> crate::ConformanceTurnAttempt {
     let parts = parts.clone();
     Arc::new(move |scope| {
@@ -999,10 +999,10 @@ fn drive_attempt(
         let result_tx = result_tx.clone();
         Box::pin(async move {
             let mut runtime = build_runtime(&parts, crash).await;
-            let drive = unless_the_provider_answer_is_lost(
+            let shift = unless_the_provider_answer_is_lost(
                 &parts,
                 crash,
-                Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+                Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     scope,
                 ))),
@@ -1011,11 +1011,11 @@ fn drive_attempt(
             let Some(result_tx) = result_tx else {
                 panic!(
                     "the crash at {crash:?} did not fire: {:?}",
-                    drive.map(crate::facade_support::QueuedTurnDrain::ran)
+                    shift.map(crate::facade_support::QueuedTurnDrain::ran)
                 );
             };
-            let end = crate::ConformanceTurnEnd::of(&drive);
-            let _ = result_tx.send(drive);
+            let end = crate::ConformanceTurnEnd::of(&shift);
+            let _ = result_tx.send(shift);
             end
         })
     })
@@ -1071,7 +1071,7 @@ struct LawHead {
     graph: crate::SessionGraph,
 }
 
-/// A law's session, store and first root.
+/// A law's session, store and first run.
 struct LawSession {
     parts: LawParts,
     store: Arc<dyn crate::RuntimeStore>,
@@ -1153,8 +1153,8 @@ impl LawSession {
 
     /// Submits an administrative compaction to the session's command lane,
     /// as `submit_session_command` records it: the command's batch, which
-    /// the next drive applies at its turn boundary (FIG-4201). The law
-    /// submits through the store so the submission itself drives nothing.
+    /// the next shift applies at its turn boundary (FIG-4201). The law
+    /// submits through the store so the submission itself executes nothing.
     async fn submit_compaction(&self, key: &str) -> crate::SessionCommandReceipt {
         self.submit_command(
             crate::SessionCommand::CompactContext { instructions: None },
@@ -1276,56 +1276,56 @@ impl LawSession {
         }
     }
 
-    /// Runs the root queued next to its end, with no crash.
+    /// Executes the run queued next to its end, with no crash.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn run_root(&self, drive: &str) -> crate::TurnOutcome {
+    async fn execute_run(&self, shift: &str) -> crate::TurnOutcome {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::time::timeout(
             std::time::Duration::from_secs(90),
             self.runner.run_turn(
                 admit(crate::ExecutionScope::turn(
                     &self.session_id,
-                    crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
+                    crate::TurnId::fixture(format!("{}-{shift}", self.prefix)),
                 )),
-                drive_attempt(&self.parts, None, Some(tx)),
+                shift_attempt(&self.parts, None, Some(tx)),
             ),
         )
         .await
-        .expect("the drive ends");
+        .expect("the shift ends");
         rx.recv()
             .await
-            .expect("the tier's runner ran the drive")
-            .unwrap_or_else(|error| panic!("the drive runs: {error:?}"))
+            .expect("the tier's runner ran the shift")
+            .unwrap_or_else(|error| panic!("the shift runs: {error:?}"))
             .ran()
-            .expect("the drive runs its root")
+            .expect("the shift executes its run")
             .outcome
     }
 
-    /// Runs the root queued next, killing it at `crash` and redriving it.
+    /// Executes the run queued next, killing it at `crash` and redriving it.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn run_root_crashed_at(&self, drive: &str, crash: FrameOpenCrash) {
-        self.drive_crashed_at(drive, crash)
+    async fn execute_run_crashed_at(&self, shift: &str, crash: FrameOpenCrash) {
+        self.shift_crashed_at(shift, crash)
             .await
             .ran()
-            .expect("the redrive runs the root to its end");
+            .expect("the redrive executes the run to its end");
     }
 
-    /// Runs one drive of the session, killing it at `crash` and redriving
-    /// it, and answers how the redrive ended: the turn root it ran, or the
-    /// empty drain of a drive that only applied the command lane.
+    /// Runs one shift of the session, killing it at `crash` and redriving
+    /// it, and answers how the redrive ended: the turn run it ran, or the
+    /// empty drain of a shift that only applied the command lane.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn drive_crashed_at(
+    async fn shift_crashed_at(
         &self,
-        drive: &str,
+        shift: &str,
         crash: FrameOpenCrash,
     ) -> crate::facade_support::QueuedTurnDrain<crate::AssembledTurn> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1334,10 +1334,10 @@ impl LawSession {
             self.runner.run_crashed_then_redriven_turn(
                 admit(crate::ExecutionScope::turn(
                     &self.session_id,
-                    crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
+                    crate::TurnId::fixture(format!("{}-{shift}", self.prefix)),
                 )),
-                drive_attempt(&self.parts, Some(crash), None),
-                drive_attempt(&self.parts, None, Some(tx)),
+                shift_attempt(&self.parts, Some(crash), None),
+                shift_attempt(&self.parts, None, Some(tx)),
             ),
         )
         .await
@@ -1346,7 +1346,7 @@ impl LawSession {
         });
         rx.recv()
             .await
-            .expect("the tier's runner ran the redriven drive")
+            .expect("the tier's runner ran the redriven shift")
             .unwrap_or_else(|error| panic!("the redrive after {crash:?} replays: {error:?}"))
     }
 }
@@ -1368,7 +1368,7 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
 ) {
     let model = law_model(ModelScript {
         turns: vec![
-            // The first root's usage crosses the hook's threshold.
+            // The first run's usage crosses the hook's threshold.
             (protocol.answer("answer 1"), PRESSURE_THRESHOLD_TOKENS),
             (protocol.answer("answer 2"), 1),
         ],
@@ -1386,7 +1386,7 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
     model.arm(crash, &mut law.parts);
 
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 0);
     let first_frame = law
         .head()
@@ -1396,7 +1396,7 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
 
     law.enqueue("second question").await;
     let before = law.head().await.head_revision;
-    law.run_root_crashed_at("root-2", crash).await;
+    law.execute_run_crashed_at("run-2", crash).await;
 
     assert_eq!(
         model.summary_calls.load(Ordering::SeqCst),
@@ -1407,7 +1407,7 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
     assert_eq!(
         model.turn_calls.load(Ordering::SeqCst),
         2,
-        "one model call per root"
+        "one model call per run"
     );
     let head = law.head().await;
     assert_eq!(
@@ -1442,11 +1442,11 @@ pub async fn a_pressure_frame_opens_once_whatever_its_crash(
     assert_eq!(path[seed_at - 1], "FrameOpen", "the seed opens the frame");
     assert!(
         path[seed_at..].iter().any(|text| text == "second question"),
-        "the compacted root runs in the new frame: {path:?}"
+        "the compacted run executes in the new frame: {path:?}"
     );
 }
 
-/// A root whose first turn opens a context-pressure frame and ends in a
+/// A run whose first turn opens a context-pressure frame and ends in a
 /// `continue_as`, killed at `crash` and redriven, commits both frames in
 /// order, each exactly once: the compaction frame follows the first, the
 /// `continue_as` frame follows the compaction frame, the follow-on runs
@@ -1489,7 +1489,7 @@ pub async fn a_pressure_frame_then_continue_as_commits_both_frames_once(
     model.arm(crash, &mut law.parts);
 
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let first_frame = law
         .head()
         .await
@@ -1498,7 +1498,7 @@ pub async fn a_pressure_frame_then_continue_as_commits_both_frames_once(
 
     law.enqueue("second question").await;
     let before = law.head().await.head_revision;
-    law.run_root_crashed_at("root-2", crash).await;
+    law.execute_run_crashed_at("run-2", crash).await;
 
     assert_eq!(
         model.summary_calls.load(Ordering::SeqCst),
@@ -1541,8 +1541,8 @@ pub async fn a_pressure_frame_then_continue_as_commits_both_frames_once(
 }
 
 /// A context-pressure frame ends the frame's live execution state, exactly as
-/// its durable state (F5): a global the first root set is gone from the
-/// interpreter the compacted root runs in, and from the state it commits.
+/// its durable state (F5): a global the first run set is gone from the
+/// interpreter the compacted run executes in, and from the state it commits.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1575,9 +1575,9 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
     .await;
 
     law.enqueue("set the global").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     law.enqueue("read the global").await;
-    let outcome = law.run_root("root-2").await;
+    let outcome = law.execute_run("run-2").await;
 
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 1);
     let chain = frame_chain(&law.head().await, &law.session_id);
@@ -1587,16 +1587,16 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
         crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value }) => value
             .as_str()
             .map_or_else(|| value.to_string(), str::to_string),
-        other => panic!("the compacted root finishes: {other:?}"),
+        other => panic!("the compacted run finishes: {other:?}"),
     };
     assert_eq!(
         answer, "undefined",
-        "the compacted root's interpreter restarted from the frame's seed, without the \
+        "the compacted run's interpreter restarted from the frame's seed, without the \
          ended frame's global"
     );
 }
 
-/// An administrative compaction the command lane applies, its drive killed
+/// An administrative compaction the command lane applies, its shift killed
 /// at `crash` and redriven, opens its frame once: one summarizer call, one
 /// compaction frame, one commit, and the command settles with the frame it
 /// opened. Killed before its commit, the redrive replays the recorded base
@@ -1767,10 +1767,10 @@ macro_rules! frame_open_execution_state_tests {
 /// input, killed at the same points (FIG-4201); the FIG-4134 laws: the
 /// production standard compactor and its overflow recovery across the crash
 /// matrix, a session deleted and a fork made during an open, an empty seed,
-/// a refused frame commit, and pressure hooks sharing an id; FIG-4200's root
+/// a refused frame commit, and pressure hooks sharing an id; FIG-4200's run
 /// whose held pressure frame a writer holding its fence overtakes, ending
-/// typed on the drive loop and the engine path, uninterrupted and across a
-/// crash before its end; a root resumed on a fresh journal after its own
+/// typed on the shift loop and the engine path, uninterrupted and across a
+/// crash before its end; a run resumed on a fresh journal after its own
 /// pressure frame committed, which continues from that frame on both paths
 /// (FIG-4201); and FIG-4202's host commands: an append, a plugin command and
 /// task, and a frame open, each waiting for the bound turn and applied once
@@ -1838,16 +1838,16 @@ macro_rules! frame_open_redrive_tests {
             (pressure_hooks_sharing_an_id_crashed_after_the_turns_commit_keep_their_records_apart,
                 pressure_hooks_sharing_an_id_keep_their_records_apart, AfterTurnCommit));
         $crate::frame_open_redrive_tests!(@superseded [$(#[$attr])*] $fixture;
-            (a_superseded_root_ends_typed_on_the_drive_loop, DriveLoop, None),
-            (a_superseded_root_ends_typed_on_the_drive_loop_across_a_crash_before_its_end,
-                DriveLoop, CrashBeforeEnd),
-            (a_superseded_root_ends_typed_on_the_engine_path, Engine, None),
-            (a_superseded_root_ends_typed_on_the_engine_path_across_a_crash_before_its_end,
+            (a_superseded_run_ends_typed_on_the_shift_loop, ShiftLoop, None),
+            (a_superseded_run_ends_typed_on_the_shift_loop_across_a_crash_before_its_end,
+                ShiftLoop, CrashBeforeEnd),
+            (a_superseded_run_ends_typed_on_the_engine_path, Engine, None),
+            (a_superseded_run_ends_typed_on_the_engine_path_across_a_crash_before_its_end,
                 Engine, CrashBeforeEnd));
         $crate::frame_open_redrive_tests!(@own [$(#[$attr])*] $fixture;
-            (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_drive_loop,
-                DriveLoop),
-            (a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_engine_path,
+            (a_run_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_shift_loop,
+                ShiftLoop),
+            (a_run_resumed_on_a_fresh_journal_continues_from_its_own_frame_on_the_engine_path,
                 Engine));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
             a_commanded_compaction_redriven_on_another_worker_replays_its_recorded_prompt,
@@ -1864,7 +1864,7 @@ macro_rules! frame_open_redrive_tests {
             plugin_state_dirty_park_reparks_from_the_recorded_head,
             command_cancellation_before_admission_withdraws_it,
             plugin_queued_turns_preserve_reserved_source_key_refusals,
-            a_lowered_budget_refuses_a_stranded_command_once_per_drive,
+            a_lowered_budget_refuses_a_stranded_command_once_per_shift,
             raising_the_budget_settles_a_stranded_command,
             an_over_budget_command_settles_failed_at_its_bare_commits_size,
             an_over_budget_append_on_an_uncommitted_head_leaves_nothing_of_it,
@@ -1953,13 +1953,13 @@ macro_rules! frame_open_redrive_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $name() {
             let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::a_superseded_root_ends_typed_on_every_drive_path(
+            $crate::registration_macro_support::a_superseded_run_ends_typed_on_every_shift_path(
                 prefix,
                 host,
                 stores,
                 runner,
-                $crate::registration_macro_support::SupersededRootPath::$path,
-                $crate::registration_macro_support::SupersededRootRecovery::$recovery,
+                $crate::registration_macro_support::SupersededRunPath::$path,
+                $crate::registration_macro_support::SupersededRunRecovery::$recovery,
             )
             .await;
         }
@@ -1971,12 +1971,12 @@ macro_rules! frame_open_redrive_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $name() {
             let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::a_root_resumed_on_a_fresh_journal_continues_from_its_own_frame(
+            $crate::registration_macro_support::a_run_resumed_on_a_fresh_journal_continues_from_its_own_frame(
                 prefix,
                 host,
                 stores,
                 runner,
-                $crate::registration_macro_support::SupersededRootPath::$path,
+                $crate::registration_macro_support::SupersededRunPath::$path,
             )
             .await;
         }

@@ -1,4 +1,4 @@
-//! Live Restate turn runner for the turn-driving conformance laws.
+//! Live Restate turn runner for the turn-executing conformance laws.
 //!
 //! A Restate turn runs only inside a handler: its effects journal on a
 //! `ctx`-bound [`RestateRuntimeEffectController`](crate::RestateRuntimeEffectController),

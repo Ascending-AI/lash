@@ -25,7 +25,7 @@
 //! does about each:
 //!
 //! * **The opener's cooperative cancellation.** A live opener fires the stop
-//!   it lends its children when its drive records the turn's cancellation. A
+//!   it lends its children when its shift records the turn's cancellation. A
 //!   reconstructed child has no running opener to do that, so its context's
 //!   stop is fired by a watch of its turn's durable gate instead
 //!   ([`watch_turn_stop`]), the way a recorded step body watches it
@@ -134,7 +134,7 @@ impl std::fmt::Debug for DeploymentToolChildContext {
 /// synchronous, so there is no channel to pin and no collector task to
 /// await — every `observe` pushes into a bounded
 /// [`RecordedChildStreamBuilder`] in program order, and [`Self::finish`]
-/// hands the stream back once the child's drive has returned. A session
+/// hands the stream back once the child's shift has returned. A session
 /// event is recorded raw: its projected activity is emitted where the
 /// settlement is incorporated, the way a live opener's forwarder projects
 /// it, so the stream never stores a payload twice. An activity the child
@@ -156,15 +156,15 @@ impl ChildStreamRecorder {
         dispatch.observer = Arc::clone(self) as Arc<dyn crate::engine::ObservationSink>;
     }
 
-    /// Every event the child emitted, once its drive has returned.
+    /// Every event the child emitted, once its shift has returned.
     pub(super) fn finish(&self) -> RecordedChildStream {
         std::mem::take(&mut *self.stream.lock_recover()).finish()
     }
 }
 
 impl crate::engine::ObservationSink for ChildStreamRecorder {
-    fn observe(&self, observation: crate::engine::DriveObservation) {
-        let crate::engine::DriveObservation {
+    fn observe(&self, observation: crate::engine::ShiftObservation) {
+        let crate::engine::ShiftObservation {
             key,
             ordinal,
             event,
@@ -206,7 +206,7 @@ impl crate::engine::ObservationSink for ChildStreamRecorder {
 /// outside that turn has neither: a read would see a session the turn has
 /// moved past, and a write would race the turn's own commit. So every such
 /// call fires this latch and then never returns, and the latch aborts the
-/// child's drive ([`abandoning`](Self::abandoning)). The driver ends the
+/// child's shift ([`abandoning`](Self::abandoning)). The driver ends the
 /// attempt with
 /// [`ToolChildRebuildRefusal::SessionServices`](super::super::ToolChildRebuildRefusal::SessionServices):
 /// the call's step is abandoned the way a crash abandons it, so nothing the
@@ -244,17 +244,17 @@ impl SessionServicesRefusal {
         dispatch.session_graph = services;
     }
 
-    /// Runs `drive` until it finishes or a session service call fires the
+    /// Runs `shift` until it finishes or a session service call fires the
     /// latch, which abandons it where it stands. Called once per latch.
     pub(super) async fn abandoning<F: std::future::Future>(
         &self,
-        drive: F,
+        shift: F,
     ) -> Result<F::Output, super::super::ToolChildRebuildRefusal> {
         let registration = self.registration.lock_recover().take();
         let Some(registration) = registration else {
             return Err(super::super::ToolChildRebuildRefusal::SessionServices);
         };
-        futures_util::future::Abortable::new(drive, registration)
+        futures_util::future::Abortable::new(shift, registration)
             .await
             .map_err(|_| super::super::ToolChildRebuildRefusal::SessionServices)
     }

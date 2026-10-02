@@ -1,16 +1,16 @@
 {
   "scenario": "service-LashSession",
   "service": "LashSession",
-  "generation": "1654dff52a0a",
+  "generation": "b14bcd97a3f0",
   "handlers": {
-    "drive": [
+    "shift": [
       [
         "InputCommand",
-        "RunCommand lash.drive.leg",
-        "RunCommand lash:drive-admission:ingress:ti:#:1#0",
+        "RunCommand lash.shift.leg",
+        "RunCommand lash:shift-admission:ingress:ti:#:1#0",
         "CallCommand LashTurn/run",
-        "RunCommand lash.drive.boundary",
-        "RunCommand lash:drive-admission:ingress:ti:#:1#1",
+        "RunCommand lash.shift.boundary",
+        "RunCommand lash:shift-admission:ingress:ti:#:1#1",
         "OutputCommand"
       ]
     ]

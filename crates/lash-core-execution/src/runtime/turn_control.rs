@@ -913,7 +913,7 @@ async fn effective_cancel_evidence(
 /// escalation promise.
 ///
 /// An engine that races a wait it records against a turn's cancellation, and
-/// a recorded step body that watches it, both wait on this pair; drive code
+/// a recorded step body that watches it, both wait on this pair; shift code
 /// never does (FIG-3672 P9).
 #[derive(Clone, Debug)]
 pub struct TurnCancelGatePair {
@@ -1018,19 +1018,19 @@ async fn close_cancel_escalation(
 /// One physical turn's handle on its durable cancellation gate pair.
 ///
 /// It holds the gate keys and nothing mutable. What the turn honours is a
-/// recorded fact the drive keeps itself (ADR 0105 §3): it is advanced only by
-/// the journaled peeks below and by recorded outcomes, and the drive hands it
+/// recorded fact the shift keeps itself (ADR 0105 §3): it is advanced only by
+/// the journaled peeks below and by recorded outcomes, and the shift hands it
 /// back here when it settles the gate. No live watch, flag or token on the
-/// drive path decides anything.
+/// shift path decides anything.
 ///
 /// Two kinds of caller use this handle:
 ///
-/// - **drive code** issues the journaled peeks ([`Self::observe_pending_cancel`])
+/// - **shift code** issues the journaled peeks ([`Self::observe_pending_cancel`])
 ///   and settles the gate before the final commit ([`Self::settle_before_commit`]);
 /// - **execution-side code** — a recorded step body, or a host-local stop
 ///   forwarder — watches or resolves the gate over a deployment resolver
 ///   ([`Self::watch_immediate`], [`Self::request_local_stop`]). What it observes
-///   reaches the drive only through the step's recorded outcome or a later
+///   reaches the shift only through the step's recorded outcome or a later
 ///   journaled peek.
 pub struct ActiveTurnControl {
     address: TurnAddress,
@@ -1041,7 +1041,7 @@ pub struct ActiveTurnControl {
 
 impl ActiveTurnControl {
     /// The terminal the turn proposes for its base gate: the cancellation it
-    /// honours (the drive's recorded fact), else the one its assembled outcome
+    /// honours (the shift's recorded fact), else the one its assembled outcome
     /// carries, else a completion seal.
     fn proposed_terminal(
         honoured: Option<&TurnCancellationEvidence>,
@@ -1058,7 +1058,7 @@ impl ActiveTurnControl {
         &self,
         binding_id: impl Into<String>,
         admitted_scope: ExecutionScope,
-        fence: &crate::store::DriveFence,
+        fence: &crate::store::ShiftFence,
         observed_intent: TurnCancelIntentSnapshot,
         honoured: Option<&TurnCancellationEvidence>,
         assembled: Option<TurnCancellationEvidence>,
@@ -1154,7 +1154,7 @@ impl ActiveTurnControl {
                         ),
                     ));
                 };
-                // The boundary that honoured the request is the drive's
+                // The boundary that honoured the request is the shift's
                 // recorded fact, not the gate's: carry it onto the settled
                 // winner when the winner is the request the turn honoured.
                 if let Some(honoured) = honoured {
@@ -1271,7 +1271,7 @@ impl ActiveTurnControl {
     /// the deployment resolver, and records what it saw in its own outcome:
     /// this is how a race against a step that cannot be selected away from
     /// mid-flight keeps its loser (ADR 0105 §3). See
-    /// [`TurnCancelGatePair::await_stop`]. Drive code never awaits this.
+    /// [`TurnCancelGatePair::await_stop`]. Shift code never awaits this.
     pub async fn watch_immediate(
         &self,
         resolver: &dyn AwaitEventResolver,
@@ -1300,7 +1300,7 @@ impl ActiveTurnControl {
     ///
     /// The base gate is first-writer-wins, so a stop that finds a request
     /// already there changes nothing but, for an `Immediate` stop over an
-    /// `AfterStep` winner, the escalation promise. The drive observes the
+    /// `AfterStep` winner, the escalation promise. The shift observes the
     /// result only through its journaled peeks and the recorded outcomes of
     /// its steps, exactly like a routed [`TurnWorkDriver::request_cancel`].
     pub async fn request_local_stop(
@@ -1427,7 +1427,7 @@ impl ActiveTurnControl {
     /// Settle the durable cancellation gate and close escalation before the
     /// turn commits.
     ///
-    /// `honoured` is the cancellation the drive recorded the turn honouring;
+    /// `honoured` is the cancellation the shift recorded the turn honouring;
     /// `assembled` is the evidence the executed turn already carries, when it
     /// stopped cancelled. Sealing that value rather than minting a fresh one
     /// is what keeps a single cancellation to a single request id: the
@@ -1477,7 +1477,7 @@ impl ActiveTurnControl {
     }
 }
 
-/// The pure turn-control laws; the laws that drive a host and a session store
+/// The pure turn-control laws; the laws that execute a host and a session store
 /// run over a SQLite memory store set in `tests/store_backed` (ADR 0102).
 #[cfg(test)]
 #[path = "turn_control/tests.rs"]

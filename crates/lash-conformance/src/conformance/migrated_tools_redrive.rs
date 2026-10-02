@@ -18,7 +18,7 @@
 //! crates reach the tool-batch parallelism law.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -270,7 +270,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
                 let mut runtime = build_migrated_runtime(parts).await;
                 runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         migrated_input(&turn_id),
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
@@ -290,7 +290,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
             Box::pin(async move {
                 let mut runtime = build_migrated_runtime(parts).await;
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         migrated_input(&turn_id),
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )

@@ -28,7 +28,7 @@
 //! so the server never stores it either. Host-side crash sites are the same
 //! decorators on both. The faults that differ:
 //!
-//! - **Holding an object's work** ([`Engine::hold_session_drive`],
+//! - **Holding an object's work** ([`Engine::hold_session_shift`],
 //!   [`Engine::hold_service`]). The double keeps a held invocation's
 //!   attempts from starting and suspends a running one at its next await. A
 //!   live server has no such lever, so the deployment makes it with its own
@@ -565,15 +565,15 @@ impl Engine {
         }
     }
 
-    /// Hold the engine's drive of `session`: no attempt of it runs until
+    /// Hold the engine's shift of `session`: no attempt of it runs until
     /// the hold is released.
-    pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> EngineHold {
+    pub async fn hold_session_shift(&self, session: &lash_core::SessionId) -> EngineHold {
         match self {
             Self::Double(double) => {
-                EngineHold::Double(double.backend.hold_session_drive(session).await)
+                EngineHold::Double(double.backend.hold_session_shift(session).await)
             }
             Self::Live(live) => EngineHold::Live(live.hold(
-                lash_restate_test::SESSION_DRIVER_SERVICE,
+                lash_restate_test::SESSION_SHIFT_SERVICE,
                 Some(session.as_str()),
             )),
         }

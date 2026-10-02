@@ -13,7 +13,7 @@
 # the pinned release binary from `scripts/ci/restate_suite.py server-path`, with
 # its data under the state directory so it outlives a bot restart. The bot
 # serves its Restate endpoint on a stable port and registers it at boot; the
-# server re-drives a killed boot's in-flight turn on the restarted bot.
+# server redrives a killed boot's in-flight turn on the restarted bot.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

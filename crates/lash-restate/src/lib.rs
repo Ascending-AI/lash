@@ -102,8 +102,8 @@ mod serve;
 mod services;
 mod session_administration;
 mod session_control;
-mod session_driver;
 mod session_reconcile;
+mod session_shifts;
 mod turn;
 mod turn_handler;
 mod usage_accounting;
@@ -191,10 +191,10 @@ pub use process::{
 pub use process_attach::RestateProcessAttachRequest;
 pub use serve::{RestateEndpointLimits, serve_endpoint};
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
-pub use session_driver::{
-    LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRootCloseRequest,
-    RestateSessionDriveRequest, RestateSessionDriverSlot, RestateSessionWork,
-    RestateTurnDriveRequest, SendDriveError, turn_workflow_key,
+pub use session_shifts::{
+    LASH_SESSION_SHIFT_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRunCloseRequest,
+    RestateRunRequest, RestateSessionShiftRequest, RestateSessionShiftsSlot, RestateSessionWork,
+    SendShiftError, turn_workflow_key,
 };
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{
@@ -209,7 +209,7 @@ pub use durable_wait::RestateTurnCancelRaceOutcome;
 
 // Lash's own Restate services. A deployment binds them only through
 // `RestateEngine::endpoint_builder`, so they are not a host contract; the
-// crate's tests drive them one at a time.
+// crate's tests execute them one at a time.
 #[cfg(test)]
 pub(crate) use durable_wait::{
     LashDurableWaitRegistry, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow,
@@ -227,14 +227,14 @@ pub use services::{RestateNamespace, RestateNamespaceError};
 /// The wall clock a journaled wait request converts its deadline on when the
 /// invoking path carries no configured clock: a host-side await API has no
 /// clock channel, so the request names the system clock through this seam
-/// rather than inside scanned drive code.
+/// rather than inside scanned shift code.
 pub(crate) fn system_clock() -> &'static dyn lash_core::Clock {
     &lash_core::facade_support::SystemClock
 }
 
 /// A fresh, unguessable nonce drawn from OS randomness. Journaled verdicts
 /// that must mint a discriminator no redrive can reproduce — a process
-/// segment's admission nonce — draw it through this seam so the scanned drive
+/// segment's admission nonce — draw it through this seam so the scanned shift
 /// paths name the draw rather than spelling `Uuid::new_v4` (FIG-3672). The
 /// Restate context RNG and the invocation id are never substitutes: both
 /// repeat after a purge, and the nonce exists to tell those apart.
@@ -245,8 +245,8 @@ pub(crate) fn journaled_nonce() -> String {
 /// The boxed completion a journaled engine-context operation returns. The
 /// controller context's methods hand back the Restate `ctx.run` step's
 /// future; boxing keeps the trait object-safe across its generic methods.
-/// FIG-3672 names the erased shape once here, outside the scanned drive
-/// paths, so drive code refers to the seam by name.
+/// FIG-3672 names the erased shape once here, outside the scanned shift
+/// paths, so shift code refers to the seam by name.
 pub(crate) type JournaledFuture<'a, T, E = restate_sdk::errors::TerminalError> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'a>>;
 

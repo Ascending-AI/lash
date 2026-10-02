@@ -264,7 +264,7 @@ stack's run metadata under `AGENT_WORKBENCH_RUN_DIR` — the boot's value, or th
 `.agent-workbench/run` when boot did not set it — and the restart refuses without it, so
 re-export both variables the boot used. It keeps the Restate deployment,
 its journals and the application data, and reports that it did; `workbench-engine-restart`
-drives the same command in its FIG-1117 companion. Never substitute the destructive reset.
+executes the same command in its FIG-1117 companion. Never substitute the destructive reset.
 After the restart, poll `/healthz`. Require:
 
 - a new Workbench PID;

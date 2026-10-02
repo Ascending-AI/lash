@@ -51,8 +51,8 @@ fn main() {
 fn inspect_send(outcome: lash::SendOutcome) {
     let _ = outcome.status();
     match outcome {
-        lash::SendOutcome::Settled { root, output, gaps } => {
-            let _ = (root, output, gaps);
+        lash::SendOutcome::Settled { run, output, gaps } => {
+            let _ = (run, output, gaps);
         }
         lash::SendOutcome::Parked { parked, gaps } => {
             let _ = (parked, gaps);

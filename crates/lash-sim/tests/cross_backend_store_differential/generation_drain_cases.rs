@@ -121,8 +121,8 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
         }
         aliases.insert(process_id, name);
     }
-    // The in-flight turn count (FIG-3884, FIG-3927 N8): a root admits under
-    // the generation its drive carried and stays in flight until it ends.
+    // The in-flight turn count (FIG-3884, FIG-3927 N8): a run admits under
+    // the generation its shift carried and stays in flight until it ends.
     // ia (input-headed) and qa (queued-headed) stay unfinished under a, qb
     // ends under a before the read, qc stays unfinished under b.
     for (name, stamp, batch_head, end) in [
@@ -148,7 +148,7 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             },
         )
         .await
-        .expect("create the root's session");
+        .expect("create the run's session");
         let head = if batch_head {
             lash_core::store::AdmittedHead::Batch(
                 store
@@ -177,39 +177,39 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             format!("{nonce}-{name}:incarnation"),
         );
         let lease = store
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &session_id,
                 &owner,
                 &format!("{nonce}-{name}-executor"),
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("seal the root's drive epoch")
+            .expect("seal the run's shift epoch")
             .acquired()
-            .expect("drive seal");
-        let root = lash_core::TurnId::fixture(format!("{nonce}-{name}"));
+            .expect("shift seal");
+        let run = lash_core::TurnId::fixture(format!("{nonce}-{name}"));
         let mut request =
-            lash_core::testing::store_fixtures::admit_root_request_for_test(&lease, &root, head);
+            lash_core::testing::store_fixtures::admit_run_request_for_test(&lease, &run, head);
         request.admitted_generation = stamp.clone();
         store
-            .admit_root(&request)
+            .admit_run(&request)
             .await
-            .expect("admit the root")
-            .expect("the root reaches its head");
+            .expect("admit the run")
+            .expect("the run reaches its head");
         if end {
             stores
                 .session_store_factory()
-                .end_lost_root(
-                    &lash_core::engine::RootRef {
+                .end_lost_run(
+                    &lash_core::engine::RunRef {
                         session: session_id.clone(),
-                        root,
+                        run,
                     },
-                    lash_core::engine::RootRunLoss::FailedRun,
+                    lash_core::engine::RunLoss::FailedRun,
                     T0,
                 )
                 .await
-                .expect("end the root")
-                .expect("the root had no terminal");
+                .expect("end the run")
+                .expect("the run had no terminal");
         }
     }
     for (name, stamp) in [("a", &a), ("b", &b)] {

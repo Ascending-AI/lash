@@ -25,8 +25,8 @@ four permitted suffixes has one role:
 
 The operation an outcome answers is explicit. A tool body's return and a whole
 tool call's settlement are different operations. An observation operation can
-finish while the observed root is parked; ending that observation does not
-make the root terminal.
+finish while the observed run is parked; ending that observation does not
+make the run terminal.
 
 `Result` is reserved for `std::Result` and genuine aliases.
 `Disposition` and `Summary` are not domain-type suffixes. A caller's choice is

@@ -2,7 +2,7 @@
 //!
 //! A host that holds a turn in process — a shutdown lever, the facade's
 //! `cancel` token, a process runner stopping its child turn — asks it to stop
-//! through a [`LocalTurnStop`]. The drive never reads the handle. For as long
+//! through a [`LocalTurnStop`]. The shift never reads the handle. For as long
 //! as a physical turn runs, its forwarding turns a fired stop into a
 //! request on that turn's durable gate pair, with lash's internal evidence,
 //! exactly as a routed [`TurnWorkDriver::request_cancel`](super::TurnWorkDriver::request_cancel)
@@ -85,7 +85,7 @@ impl LocalTurnStop {
     }
 
     /// The `Immediate` lever's token, for a host-level wait that runs before
-    /// or outside a turn's drive (a queued drain waiting for its lane). Drive
+    /// or outside a turn's shift (a queued drain waiting for its lane). Shift
     /// code never reads it.
     pub fn immediate_token(&self) -> CancellationToken {
         self.immediate.clone()

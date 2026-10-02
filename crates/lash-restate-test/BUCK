@@ -288,12 +288,12 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "root_close__test",
+    name = "run_close__test",
     crate_features = [],
-    crate_name = "root_close",
-    crate_root = "tests/root_close.rs",
+    crate_name = "run_close",
+    crate_root = "tests/run_close.rs",
     declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-restate-test", "root_close", "//crates/lash-restate-test:root_close__test"),
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "run_close", "//crates/lash-restate-test:run_close__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -330,12 +330,12 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "session_driver__test",
+    name = "session_send__test",
     crate_features = [],
-    crate_name = "session_driver",
-    crate_root = "tests/session_driver.rs",
+    crate_name = "session_send",
+    crate_root = "tests/session_send.rs",
     declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-restate-test", "session_driver", "//crates/lash-restate-test:session_driver__test"),
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "session_send", "//crates/lash-restate-test:session_send__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -351,12 +351,12 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "session_send__test",
+    name = "session_shifts__test",
     crate_features = [],
-    crate_name = "session_send",
-    crate_root = "tests/session_send.rs",
+    crate_name = "session_shifts",
+    crate_root = "tests/session_shifts.rs",
     declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-restate-test", "session_send", "//crates/lash-restate-test:session_send__test"),
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "session_shifts", "//crates/lash-restate-test:session_shifts__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",

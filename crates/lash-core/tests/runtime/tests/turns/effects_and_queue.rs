@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_a300;
 
@@ -95,13 +95,13 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         .await
         .expect("open the scope's handler");
     let first_result = runtime
-        .drive_next_root(
+        .execute_next_run(
             "queued-frame-chain",
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("queued frame chain succeeds")
-        .expect("queued frame root admitted")
+        .expect("queued frame run admitted")
         .into_final_turn()
         .expect("queued frame chain returns its terminal turn");
     handler.close().await.expect("close the scope's handler");
@@ -152,13 +152,13 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         .await
         .expect("open the scope's handler");
     let second_result = runtime
-        .drive_next_root(
+        .execute_next_run(
             "second-queued-after-frame-chain",
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
         .expect("second queued turn succeeds")
-        .expect("second queued root admitted")
+        .expect("second queued run admitted")
         .into_final_turn()
         .expect("second queued turn runs after the frame chain");
     handler.close().await.expect("close the scope's handler");
@@ -245,7 +245,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         .await
         .expect("open the scope's handler");
     let terminal = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(cancel, handler.scoped()))
+        .execute_one_admitted_queued_run(TurnOptions::new(cancel, handler.scoped()))
         .await
         .expect("cancelled chain assembles")
         .ran()
@@ -324,7 +324,7 @@ pub(super) async fn admitted_normalization_failure_commits_and_settles_input() {
         .await
         .expect("open the scope's handler");
     let terminal = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -396,7 +396,7 @@ pub(super) async fn admitted_plugin_abort_commits_and_settles_input() {
         .await
         .expect("open the scope's handler");
     let terminal = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -445,7 +445,7 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
         .await
         .expect("open the scope's handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("store an attachment"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -457,7 +457,7 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_next_drive() {
+pub(super) async fn admitted_shift_reuses_graph_across_follow_on_and_rechecks_next_shift() {
     let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -509,7 +509,7 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
                 frame_key: lash_core::FrameKey::from_caller_material("resident-follow-frame")
                     .expect("non-empty caller material"),
                 initial_nodes: Vec::new(),
-                task: Some("continue in the admitted drive".to_string()),
+                task: Some("continue in the admitted shift".to_string()),
             }],
         }),
         transport,
@@ -525,12 +525,12 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
         .await
         .expect("open the scope's handler");
     let run = runtime
-        .drive_turn_frames(
-            TurnInput::text("start the admitted drive chain"),
+        .execute_turn_frames(
+            TurnInput::text("start the admitted shift chain"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
-        .expect("admitted drive chain succeeds");
+        .expect("admitted shift chain succeeds");
     handler.close().await.expect("close the scope's handler");
     assert_eq!(run.turns.len(), 2);
     // ADR 0069: one acceptance admitted this run, and it admitted exactly the
@@ -547,14 +547,14 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
     assert_eq!(
         store.load_session_count(),
         0,
-        "the admitted root and its follow-on must not hydrate an unchanged graph"
+        "the admitted run and its follow-on must not hydrate an unchanged graph"
     );
     // The admission's pending-follow-on probe answers from the head, the
-    // root checks its epoch against it, and the follow-on rechecks it.
+    // run checks its epoch against it, and the follow-on rechecks it.
     assert_eq!(
         store.load_session_head_meta_count(),
         3,
-        "the admitted drive probes its follow-on, checks its epoch and rechecks head freshness \
+        "the admitted shift probes its follow-on, checks its epoch and rechecks head freshness \
          for the follow-on"
     );
     let handler = double
@@ -577,12 +577,12 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
     }
 
     runtime
-        .drive_turn(
-            TurnInput::text("turn in the next drive"),
+        .execute_turn(
+            TurnInput::text("turn in the next shift"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
-        .expect("turn in the next drive succeeds");
+        .expect("turn in the next shift succeeds");
     handler.close().await.expect("close the scope's handler");
     assert_eq!(
         store.load_session_count(),
@@ -592,7 +592,7 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
     assert_eq!(
         store.load_session_head_meta_count(),
         5,
-        "the next admitted drive probes its follow-on and checks the durable head once more"
+        "the next admitted shift probes its follow-on and checks the durable head once more"
     );
 }
 
@@ -655,7 +655,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_admiss
         .await
         .expect("open the scope's handler");
     let terminal = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -778,7 +778,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_admission_b
         .await
         .expect("open the scope's handler");
     let committed = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -812,7 +812,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_admission_b
         "a frame handoff is never a queue row"
     );
     assert_eq!(
-        pending.root_turn_id().as_str(),
+        pending.run_turn_id().as_str(),
         inbound.input_id.as_str(),
         "only the admitted input's follow-on remains owed"
     );
@@ -856,7 +856,7 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
         .await
         .expect("open the scope's handler");
     let drained = runtime
-        .drive_one_admitted_queued_root(
+        .execute_one_admitted_queued_run(
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
         )
@@ -926,7 +926,7 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
             .await
             .expect("open the scope's handler");
         let drained = runtime
-            .drive_one_admitted_queued_root(TurnOptions::new(
+            .execute_one_admitted_queued_run(TurnOptions::new(
                 CancellationToken::new(),
                 handler.scoped(),
             ))
@@ -986,7 +986,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
         .await
         .expect("open the scope's handler");
     let drained = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1017,7 +1017,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
         .await
         .expect("open the scope's handler");
     let command_only = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1040,7 +1040,7 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
 // Boundary: Runtime Scenarios own the idle queue admission and completion
 // invariant. This full runtime test stays here because it verifies the
 // app-facing queued-work turn event, prompt projection, and blank-history
-// suppression produced by `drive_next_queued_root`.
+// suppression produced by `execute_next_queued_run`.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
     let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
@@ -1116,7 +1116,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         .await
         .expect("open the scope's handler");
     runtime
-        .drive_one_admitted_queued_root(
+        .execute_one_admitted_queued_run(
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
         )
@@ -1134,7 +1134,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
     else {
         panic!("queued turn must begin with TurnStarted");
     };
-    assert_eq!(turn_id, "drive-run:queued-work-started-turn#0");
+    assert_eq!(turn_id, "shift-run:queued-work-started-turn#0");
     let queued_started = events
         .iter()
         .position(|activity| {

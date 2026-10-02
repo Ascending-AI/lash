@@ -126,19 +126,19 @@ fn resolve_conn(
     session_id: &SessionId,
     target: &Target,
 ) -> Result<TargetResolution, StoreError> {
-    let of_root = |root: &lash_core_execution::TurnId| {
-        crate::session_roots::root_terminal_conn(conn, session_id, root)
-            .map(|terminal| TargetResolution::of_root(terminal.as_ref()))
+    let of_run = |run: &lash_core_execution::TurnId| {
+        crate::session_runs::run_terminal_conn(conn, session_id, run)
+            .map(|terminal| TargetResolution::of_run(terminal.as_ref()))
     };
     match target {
         Target::Revision(revision) => Ok(TargetResolution::of_revision(
             *revision,
             head_revision_conn(conn, session_id)?,
         )),
-        Target::Turn(root) => of_root(root),
+        Target::Turn(run) => of_run(run),
         Target::Input(input) => {
-            if let Some(root) = crate::session_roots::root_binding_conn(conn, session_id, input)? {
-                return of_root(&root);
+            if let Some(run) = crate::session_runs::run_binding_conn(conn, session_id, input)? {
+                return of_run(&run);
             }
             let state: Option<String> = conn
                 .query_row(

@@ -1,5 +1,5 @@
 //! Process state another generation wrote is refused with a typed terminal
-//! before any effect, never re-driven under this build's node ids. The
+//! before any effect, never redriven under this build's node ids. The
 //! refusals name the generation they found, so a drain can identify that
 //! state.
 //!

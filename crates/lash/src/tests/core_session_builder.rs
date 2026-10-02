@@ -13,8 +13,6 @@ mod commit_budget;
 mod config_settlement;
 #[cfg(test)]
 mod creation_config;
-#[cfg(test)]
-mod driver_install;
 mod lineage_materialization;
 #[cfg(all(test, feature = "rlm"))]
 mod rlm_session_facts;
@@ -29,6 +27,8 @@ mod session_delete_finalizer;
 #[cfg(feature = "rlm")]
 #[path = "core_session_builder/session_lifecycle_growth.rs"]
 mod session_lifecycle_growth;
+#[cfg(test)]
+mod shifts_install;
 #[cfg(test)]
 mod tool_child_source;
 

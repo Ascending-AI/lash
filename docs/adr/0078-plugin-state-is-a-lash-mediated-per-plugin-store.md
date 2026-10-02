@@ -99,7 +99,7 @@ its captured generations differ. Otherwise it retains the reference.
 
 Per-key generations add no useful invalidation boundary because capture writes
 the whole component. A resident hydration adopts the recorded head's
-namespaces. The head is durable truth, committed by the drive that owned it
+namespaces. The head is durable truth, committed by the shift that owned it
 (ADR 0105), so accepted writes it does not carry are an uncommitted tail: the
 hydration drops them, replays the materialization log as a cold rebuild from
 that head does (§5), and traces the drop. A namespace bound live but absent

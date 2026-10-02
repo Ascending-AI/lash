@@ -1062,7 +1062,7 @@ where
                 }
                 RestateTurnCancelRaceOutcome::ProcessCancelled => {
                     // The awaiting process was cancelled while it waited: its
-                    // await ends cancelled, which the drive records as its
+                    // await ends cancelled, which the shift records as its
                     // own cancellation. The awaited process is left to its
                     // own lifecycle; the ended parent scope's parent-end
                     // plan, not this wait, owns its children.

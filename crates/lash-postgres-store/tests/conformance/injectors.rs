@@ -1,4 +1,4 @@
-//! Backend adapters that let the shared conformance suites drive raw
+//! Backend adapters that let the shared conformance suites shift raw
 //! PostgreSQL state: lineage forcing and fence-integrity injection.
 
 use super::*;

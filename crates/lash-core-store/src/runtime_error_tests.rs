@@ -52,7 +52,7 @@ first_party_codes! {
         Self::SessionWorkUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
-        Self::SessionRootPending,
+        Self::SessionRunPending,
         Self::FollowOnPending,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
@@ -159,7 +159,7 @@ first_party_codes! {
         Self::EngineProcessTurnCancelContextMissing,
         Self::EngineProcessTerminalEncode,
         Self::EngineTurnTerminalAttach,
-        Self::EngineRootSubstrateLost,
+        Self::EngineRunSubstrateLost,
         Self::EngineControlRequest,
         Self::EngineControlUnsupported,
         Self::EngineHandleMismatch,
@@ -195,7 +195,7 @@ first_party_codes! {
         Self::RuntimeEffectToolChildRequestAdmission,
         Self::RuntimeEffectToolChildRequestOpener,
         Self::RuntimeEffectToolChildRequestVersion,
-        Self::UsageRunMissing,
+        Self::UsageMeterMissing,
         Self::UsageAdmissionFault,
         Self::UsageOwnerRetired,
         Self::RuntimeEffectInvocationSubject,
@@ -223,7 +223,7 @@ first_party_codes! {
         Self::StoreRefused,
         Self::SessionCommandRun,
         Self::SessionCommandIdempotencyKey,
-        Self::SessionCommandPostDriveRefresh,
+        Self::SessionCommandPostShiftRefresh,
         Self::SessionCommandRefresh,
         Self::SessionCommandRefreshTools,
         Self::SessionDeleteScopeMismatch,
@@ -784,7 +784,7 @@ fn a_stored_session_state_refusal_round_trips_with_its_generations() {
 /// A journaled step body whose store read hits the session's own retirement
 /// records the refusal instead of asking for another attempt: the
 /// retirement is the step's settled answer (FIG-3630), and retrying the
-/// derivation forever was the `LashSession/drive` wedge a session delete
+/// derivation forever was the `LashSession/shift` wedge a session delete
 /// left behind (FIG-3822).
 #[test]
 fn session_retirement_never_takes_derivation_retry_authority() {
@@ -804,7 +804,7 @@ fn session_retirement_never_takes_derivation_retry_authority() {
         .retryable_uncommitted_derivation();
         assert!(fault.is_session_retirement());
         assert_eq!(
-            fault.journal_disposition(crate::RuntimeEffectKind::AdmitDrive),
+            fault.journal_disposition(crate::RuntimeEffectKind::AdmitShift),
             EffectErrorJournalPolicy::Terminal,
             "a retired session's fault records; the step never runs again"
         );
@@ -815,7 +815,7 @@ fn session_retirement_never_takes_derivation_retry_authority() {
     )
     .retryable_uncommitted_derivation();
     assert_eq!(
-        live.journal_disposition(crate::RuntimeEffectKind::AdmitDrive),
+        live.journal_disposition(crate::RuntimeEffectKind::AdmitShift),
         EffectErrorJournalPolicy::RetryUncommittedResponseDerivation,
         "a live fault is still the attempt's, never the step's outcome"
     );
@@ -875,15 +875,15 @@ fn assert_terminal_derivation(fault: &crate::runtime_error::RuntimeEffectControl
         Kind::LoadExecutionEnv,
         Kind::PresentToolResult,
         Kind::LanguageRuntimeValue,
-        Kind::AdmitDrive,
-        Kind::SealDriveAdmission,
-        Kind::AdmitRoot,
+        Kind::AdmitShift,
+        Kind::SealShiftAdmission,
+        Kind::AdmitRun,
         Kind::InspectAdmittedHead,
         Kind::ObserveDrainMark,
         Kind::RecoverFollowOn,
         Kind::ResolveTurnConfig,
         Kind::ResolveConfigTransaction,
-        Kind::CloseRootScope,
+        Kind::CloseRunScope,
         Kind::BeginSessionClose,
         Kind::IngestTriggerOccurrence,
         Kind::AdmitTriggerDelivery,
@@ -967,8 +967,8 @@ fn an_unbound_llm_profile_is_the_attempts_fault_on_model_calls_alone() {
         );
         // Any other failure of the call is its recorded result, marked or not.
         let other = RuntimeEffectControllerError::new(
-            RuntimeErrorCode::UsageRunMissing,
-            "a call reached its provider outside any usage run",
+            RuntimeErrorCode::UsageMeterMissing,
+            "a call reached its provider outside any usage meter",
         )
         .retryable_uncommitted_derivation();
         assert_eq!(

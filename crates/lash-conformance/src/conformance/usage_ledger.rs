@@ -5,7 +5,7 @@
     reason = "conformance laws establish each fixture and expected result"
 )]
 use super::deployment_view::DeploymentViewExt;
-use lash_core::store::{AdmissionId, RetentionBound, RootStartNonce};
+use lash_core::store::{AdmissionId, RetentionBound, RunStartNonce};
 use lash_core::usage_accounting::*;
 use lash_core::{
     DeploymentStore, LlmCallId, LlmProfileKey, RuntimeOwner, SessionId, TokenUsage,
@@ -39,14 +39,14 @@ fn effect(label: &str) -> UsageEffectKey {
 fn admission(
     owner: &RuntimeOwner,
     effect: &UsageEffectKey,
-    run: UsageRunId,
+    meter: UsageMeterId,
     admitted_at_ms: u64,
-) -> UsageRunAdmission {
-    UsageRunAdmission {
+) -> UsageMeterAdmission {
+    UsageMeterAdmission {
         owner: owner.clone(),
         effect: effect.clone(),
         execution_scope_key: "scope".into(),
-        run,
+        meter,
         source: "turn".into(),
         profile_key: LlmProfileKey::new("model-key"),
         requested_model: "model".into(),
@@ -84,19 +84,27 @@ fn facts() -> Vec<UsageAttemptFact> {
         })
         .collect()
 }
-fn settlement(owner: &RuntimeOwner, effect: &UsageEffectKey, run: UsageRunId) -> UsageSettlement {
+fn settlement(
+    owner: &RuntimeOwner,
+    effect: &UsageEffectKey,
+    meter: UsageMeterId,
+) -> UsageSettlement {
     UsageSettlement {
         owner: owner.clone(),
         effect: effect.clone(),
-        run,
+        meter,
         facts: facts(),
-        accounting: RunAccounting::Complete,
+        accounting: MeterAccounting::Complete,
     }
 }
 async fn setup(f: &UsageLedgerStoreFixture) -> UsageSettlement {
-    let s = settlement(&owner("usage-owner"), &effect("effect"), UsageRunId::mint());
+    let s = settlement(
+        &owner("usage-owner"),
+        &effect("effect"),
+        UsageMeterId::mint(),
+    );
     f.accounting
-        .admit_usage_run(&admission(&s.owner, &s.effect, s.run.clone(), 10))
+        .admit_usage_meter(&admission(&s.owner, &s.effect, s.meter.clone(), 10))
         .await
         .expect("admit");
     s
@@ -129,7 +137,7 @@ pub async fn identical_settlement_retry_is_a_no_op(f: &UsageLedgerStoreFixture) 
     let retry = f.accounting.settle_usage(&s, 30).await.unwrap();
     assert_eq!(retry.inserted_facts, 0);
     assert_eq!(retry.duplicate_facts, 4);
-    assert_eq!(retry.run, UsageRunResolution::Settled);
+    assert_eq!(retry.meter, UsageMeterResolution::Settled);
     assert_eq!(all_facts(f, &s.owner).await.len(), 4);
     assert_eq!(
         usage,
@@ -143,26 +151,26 @@ pub async fn a_settlement_without_admission_never_invents_dispatch_attribution(
     f: &UsageLedgerStoreFixture,
 ) {
     for accounting in [
-        RunAccounting::Complete,
-        RunAccounting::CallWithoutRecord { calls: 1 },
+        MeterAccounting::Complete,
+        MeterAccounting::CallWithoutRecord { calls: 1 },
     ] {
         let s = UsageSettlement {
             owner: owner("unadmitted-owner"),
             effect: effect("unadmitted-effect"),
-            run: UsageRunId::mint(),
+            meter: UsageMeterId::mint(),
             facts: Vec::new(),
             accounting,
         };
         f.accounting.settle_usage(&s, 20).await.unwrap();
         f.accounting.settle_usage(&s, 30).await.unwrap();
-        let runs = f
+        let meters = f
             .accounting
-            .load_usage_run_page(&s.owner, UsageRunFilter::All, None, limit(10))
+            .load_usage_meter_page(&s.owner, UsageMeterFilter::All, None, limit(10))
             .await
             .unwrap()
-            .runs;
-        let run = runs.iter().find(|run| run.run == s.run).unwrap();
-        let json = serde_json::to_value(run).unwrap();
+            .meters;
+        let meter = meters.iter().find(|meter| meter.meter == s.meter).unwrap();
+        let json = serde_json::to_value(meter).unwrap();
         assert_eq!(json.get("admission"), Some(&serde_json::Value::Null));
         assert_eq!(json["state"]["Resolved"]["at_ms"], 20);
         assert!(!json.as_object().unwrap().contains_key("resolved_at_ms"));
@@ -181,7 +189,7 @@ pub async fn a_run_conflict_round_trips_the_typed_fact_conflict(f: &UsageLedgerS
     let s = setup(f).await;
     f.accounting.settle_usage(&s, 20).await.unwrap();
     let mut changed = s.clone();
-    changed.run = UsageRunId::mint();
+    changed.meter = UsageMeterId::mint();
     let Err(UsageAppendError::Conflict(conflict)) = f.accounting.settle_usage(&changed, 30).await
     else {
         panic!("expected a typed conflict");
@@ -194,14 +202,17 @@ pub async fn a_run_conflict_round_trips_the_typed_fact_conflict(f: &UsageLedgerS
         .mark_usage_settlement_conflicted(&changed, &conflict, 41)
         .await
         .unwrap();
-    let runs = f
+    let meters = f
         .accounting
-        .load_usage_run_page(&s.owner, UsageRunFilter::Unresolved, None, limit(10))
+        .load_usage_meter_page(&s.owner, UsageMeterFilter::Unresolved, None, limit(10))
         .await
         .unwrap()
-        .runs;
-    let run = runs.iter().find(|run| run.run == changed.run).unwrap();
-    let json = serde_json::to_value(run).unwrap();
+        .meters;
+    let meter = meters
+        .iter()
+        .find(|meter| meter.meter == changed.meter)
+        .unwrap();
+    let json = serde_json::to_value(meter).unwrap();
     assert_eq!(
         json["state"]["Resolved"]["outcome"]["Conflicted"],
         serde_json::json!({
@@ -211,8 +222,8 @@ pub async fn a_run_conflict_round_trips_the_typed_fact_conflict(f: &UsageLedgerS
         })
     );
     assert_eq!(json["state"]["Resolved"]["at_ms"], 31);
-    let round_trip: UsageRunRecord = serde_json::from_value(json.clone()).unwrap();
-    assert_eq!(&round_trip, run);
+    let round_trip: UsageMeterRecord = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(&round_trip, meter);
     assert_eq!(json.get("admission"), Some(&serde_json::Value::Null));
 }
 
@@ -241,7 +252,10 @@ pub async fn fact_records_derive_kind_and_disposition_from_their_body(f: &UsageL
         assert!(!record.as_object().unwrap().contains_key("identity"));
         match record["body"]["kind"].as_str() {
             Some("attempt") => {
-                assert_eq!(record["body"]["run"], serde_json::to_value(&s.run).unwrap());
+                assert_eq!(
+                    record["body"]["meter"],
+                    serde_json::to_value(&s.meter).unwrap()
+                );
                 assert!(matches!(
                     record["body"]["outcome"]["kind"].as_str(),
                     Some("reported" | "unreported")
@@ -249,7 +263,7 @@ pub async fn fact_records_derive_kind_and_disposition_from_their_body(f: &UsageL
             }
             Some("correction") => {
                 assert_eq!(record["body"]["generation_id"], "recovered");
-                assert!(!record["body"].as_object().unwrap().contains_key("run"));
+                assert!(!record["body"].as_object().unwrap().contains_key("meter"));
             }
             other => panic!("invalid fact body {other:?}"),
         }
@@ -263,9 +277,9 @@ pub async fn conflicting_payload_is_a_typed_conflict_and_appends_nothing(
 ) {
     let s = setup(f).await;
     f.accounting.settle_usage(&s, 20).await.unwrap();
-    let other = UsageRunId::mint();
+    let other = UsageMeterId::mint();
     f.accounting
-        .admit_usage_run(&admission(&s.owner, &s.effect, other.clone(), 21))
+        .admit_usage_meter(&admission(&s.owner, &s.effect, other.clone(), 21))
         .await
         .unwrap();
     let before = all_facts(f, &s.owner).await;
@@ -286,34 +300,39 @@ pub async fn conflicting_payload_is_a_typed_conflict_and_appends_nothing(
     assert_eq!(conflict.identity.kind, UsageFactKind::Attempt);
     assert_eq!(
         conflict.stored_payload_hash,
-        usage_fact_payload_hash(&s.facts[0], &s.run)
+        usage_fact_payload_hash(&s.facts[0], &s.meter)
     );
     assert_eq!(
         conflict.offered_payload_hash,
-        usage_fact_payload_hash(&changed.facts[1], &changed.run)
+        usage_fact_payload_hash(&changed.facts[1], &changed.meter)
     );
     assert_ne!(conflict.stored_payload_hash, conflict.offered_payload_hash);
     assert_eq!(all_facts(f, &s.owner).await, before);
-    let runs = f
+    let meters = f
         .accounting
-        .load_usage_run_page(&s.owner, UsageRunFilter::All, None, limit(10))
+        .load_usage_meter_page(&s.owner, UsageMeterFilter::All, None, limit(10))
         .await
         .unwrap()
-        .runs;
-    assert!(runs.iter().any(|r| r.run == s.run && r.state.is_settled()));
+        .meters;
+    assert!(
+        meters
+            .iter()
+            .any(|r| r.meter == s.meter && r.state.is_settled())
+    );
     f.accounting
         .mark_usage_settlement_conflicted(&changed, &conflict, 31)
         .await
         .unwrap();
     let unresolved = f
         .accounting
-        .load_usage_run_page(&s.owner, UsageRunFilter::Unresolved, None, limit(10))
+        .load_usage_meter_page(&s.owner, UsageMeterFilter::Unresolved, None, limit(10))
         .await
         .unwrap()
-        .runs;
-    assert!(unresolved.iter().any(
-        |r| r.run == other && matches!(r.state.outcome(), Some(UsageRunOutcome::Conflicted(_)))
-    ));
+        .meters;
+    assert!(
+        unresolved.iter().any(|r| r.meter == other
+            && matches!(r.state.outcome(), Some(UsageMeterOutcome::Conflicted(_))))
+    );
     assert_eq!(all_facts(f, &s.owner).await, before);
 }
 
@@ -396,16 +415,16 @@ pub async fn each_fact_counts_once_under_any_grouping_order_and_repeat(
         runner
             .run(&strategy, |schedule| {
                 runtime.block_on(async {
-                    let owner = owner(&format!("grouping-{}", UsageRunId::mint().as_str()));
-                    let runs: Vec<_> = (0..4).map(|_| UsageRunId::mint()).collect();
+                    let owner = owner(&format!("grouping-{}", UsageMeterId::mint().as_str()));
+                    let meters: Vec<_> = (0..4).map(|_| UsageMeterId::mint()).collect();
                     let mut distinct = std::collections::BTreeSet::new();
                     for (key, start, width) in schedule {
                         let mut s = UsageSettlement {
                             owner: owner.clone(),
                             effect: effect(&format!("effect-{key}")),
-                            run: runs[key as usize].clone(),
+                            meter: meters[key as usize].clone(),
                             facts: Vec::new(),
-                            accounting: RunAccounting::Complete,
+                            accounting: MeterAccounting::Complete,
                         };
                         for offset in 0..width {
                             let ordinal = (u32::from(start) + u32::from(offset)) % 4;
@@ -444,10 +463,10 @@ pub async fn each_fact_counts_once_under_any_grouping_order_and_repeat(
 
 pub async fn admission_is_idempotent_and_retirement_fences_it(f: &UsageLedgerStoreFixture) {
     let s = setup(f).await;
-    let a = admission(&s.owner, &s.effect, s.run.clone(), 10);
+    let a = admission(&s.owner, &s.effect, s.meter.clone(), 10);
     assert_eq!(
-        f.accounting.admit_usage_run(&a).await.unwrap(),
-        UsageRunAdmitted::AlreadyAdmitted
+        f.accounting.admit_usage_meter(&a).await.unwrap(),
+        UsageMeterAdmitted::AlreadyAdmitted
     );
     assert_eq!(
         f.accounting
@@ -470,7 +489,7 @@ pub async fn admission_is_idempotent_and_retirement_fences_it(f: &UsageLedgerSto
         retired_at_ms,
     }) = f
         .accounting
-        .admit_usage_run(&admission(&s.owner, &s.effect, UsageRunId::mint(), 40))
+        .admit_usage_meter(&admission(&s.owner, &s.effect, UsageMeterId::mint(), 40))
         .await
     else {
         panic!("owner must be retired");
@@ -479,13 +498,15 @@ pub async fn admission_is_idempotent_and_retirement_fences_it(f: &UsageLedgerSto
     assert_eq!(retired_at_ms, 20);
     assert_eq!(
         f.accounting
-            .load_usage_run_page(&s.owner, UsageRunFilter::Unresolved, None, limit(10))
+            .load_usage_meter_page(&s.owner, UsageMeterFilter::Unresolved, None, limit(10))
             .await
             .unwrap()
-            .runs[0]
+            .meters[0]
             .state
             .outcome(),
-        Some(&UsageRunOutcome::Unknown(UsageUnknownReason::OwnerRetired))
+        Some(&UsageMeterOutcome::Unknown(
+            UsageUnknownReason::OwnerRetired
+        ))
     );
     f.accounting.settle_usage(&s, 50).await.unwrap();
     assert_eq!(
@@ -497,12 +518,12 @@ pub async fn admission_is_idempotent_and_retirement_fences_it(f: &UsageLedgerSto
             .unknown_runs,
         0
     );
-    // Race retirement with admission. Any admitted run must already be resolved when both return.
+    // Race retirement with admission. Any admitted meter must already be resolved when both return.
     for index in 0..8 {
         let owner = self::owner(&format!("race-{index}"));
-        let a = admission(&owner, &effect("race"), UsageRunId::mint(), 1);
+        let a = admission(&owner, &effect("race"), UsageMeterId::mint(), 1);
         let (admitted, retired) = tokio::join!(
-            f.accounting.admit_usage_run(&a),
+            f.accounting.admit_usage_meter(&a),
             f.accounting.retire_usage_owner(&owner, 2)
         );
         retired.unwrap();
@@ -523,9 +544,9 @@ pub async fn admission_is_idempotent_and_retirement_fences_it(f: &UsageLedgerSto
 
 pub async fn settlement_resolves_superseded_runs_unknown(f: &UsageLedgerStoreFixture) {
     let s = setup(f).await;
-    let r1 = UsageRunId::mint();
+    let r1 = UsageMeterId::mint();
     f.accounting
-        .admit_usage_run(&admission(&s.owner, &s.effect, r1.clone(), 11))
+        .admit_usage_meter(&admission(&s.owner, &s.effect, r1.clone(), 11))
         .await
         .unwrap();
     let receipt = f.accounting.settle_usage(&s, 20).await.unwrap();
@@ -533,22 +554,24 @@ pub async fn settlement_resolves_superseded_runs_unknown(f: &UsageLedgerStoreFix
     let usage = f.accounting.load_owner_usage(&s.owner).await.unwrap();
     assert_eq!(usage.completeness.unknown_runs, 1);
     assert_eq!(usage.completeness.open_runs, 0);
-    let runs = f
+    let meters = f
         .accounting
-        .load_usage_run_page(&s.owner, UsageRunFilter::Unresolved, None, limit(10))
+        .load_usage_meter_page(&s.owner, UsageMeterFilter::Unresolved, None, limit(10))
         .await
         .unwrap();
-    assert_eq!(runs.runs[0].run, r1);
+    assert_eq!(meters.meters[0].meter, r1);
     assert_eq!(
-        runs.runs[0].state.outcome(),
-        Some(&UsageRunOutcome::Unknown(UsageUnknownReason::SupersededRun))
+        meters.meters[0].state.outcome(),
+        Some(&UsageMeterOutcome::Unknown(
+            UsageUnknownReason::SupersededMeter
+        ))
     );
-    // Execution retirement only resolves open runs in the selected scope.
-    let mut other = admission(&s.owner, &effect("other"), UsageRunId::mint(), 12);
+    // Execution retirement only resolves open meters in the selected scope.
+    let mut other = admission(&s.owner, &effect("other"), UsageMeterId::mint(), 12);
     other.execution_scope_key = "other-scope".into();
-    f.accounting.admit_usage_run(&other).await.unwrap();
-    let a = admission(&s.owner, &effect("unrecorded"), UsageRunId::mint(), 13);
-    f.accounting.admit_usage_run(&a).await.unwrap();
+    f.accounting.admit_usage_meter(&other).await.unwrap();
+    let a = admission(&s.owner, &effect("unrecorded"), UsageMeterId::mint(), 13);
+    f.accounting.admit_usage_meter(&a).await.unwrap();
     assert_eq!(
         f.accounting
             .retire_usage_execution(&s.owner, "scope", 30)
@@ -586,25 +609,25 @@ pub async fn a_late_settlement_supersedes_retirement(f: &UsageLedgerStoreFixture
     for (suffix, accounting, reason) in [
         (
             "cancel",
-            RunAccounting::CallWithoutRecord { calls: 1 },
+            MeterAccounting::CallWithoutRecord { calls: 1 },
             UsageUnknownReason::CallWithoutRecord,
         ),
         (
             "poison",
-            RunAccounting::FactsUnjournalable { dropped_facts: 4 },
+            MeterAccounting::FactsUnjournalable { dropped_facts: 4 },
             UsageUnknownReason::FactsUnjournalable,
         ),
     ] {
         let s = UsageSettlement {
             owner: s.owner.clone(),
             effect: effect(suffix),
-            run: UsageRunId::mint(),
+            meter: UsageMeterId::mint(),
             facts: Vec::new(),
             accounting,
         };
         assert_eq!(
-            f.accounting.settle_usage(&s, 40).await.unwrap().run,
-            UsageRunResolution::Unknown(reason)
+            f.accounting.settle_usage(&s, 40).await.unwrap().meter,
+            UsageMeterResolution::Unknown(reason)
         );
     }
 }
@@ -636,40 +659,40 @@ pub async fn accounting_writes_never_touch_head_fence_or_receipts(f: &UsageLedge
         .unwrap()
         .input_id;
     let seal = store
-        .seal_drive_epoch(
+        .seal_shift_epoch(
             &id,
             &AdmissionId::new("sealed"),
             0,
-            &RootStartNonce::new("root-start"),
+            &RunStartNonce::new("run-start"),
             None,
         )
         .await
         .unwrap();
-    let lash_core::store::DriveEpochSeal::Sealed(fence) = seal else {
-        panic!("the initial drive must seal");
+    let lash_core::store::ShiftEpochSeal::Sealed(fence) = seal else {
+        panic!("the initial shift must seal");
     };
-    let mut root = lash_core::testing::store_fixtures::admit_root_request_for_test(
+    let mut run = lash_core::testing::store_fixtures::admit_run_request_for_test(
         &fence,
-        &lash_core::TurnId::from("accounting-independent-root"),
+        &lash_core::TurnId::from("accounting-independent-run"),
         lash_core::store::AdmittedHead::Input(head),
     );
     let head = store.load_session_head_meta(&id).await.unwrap().unwrap();
-    root.base = lash_core::store::SessionHeadRef {
+    run.base = lash_core::store::SessionHeadRef {
         generation: 0,
         revision: head.head_revision,
         leaf: head.leaf_node_id,
         checkpoint: head.checkpoint_ref,
     };
-    assert!(store.admit_root(&root).await.unwrap().is_some());
+    assert!(store.admit_run(&run).await.unwrap().is_some());
     f.factory.begin_session_close(&id, 5).await.unwrap();
     let before = (f.snapshot)().await;
     let s = settlement(
         &RuntimeOwner::Session(id.clone()),
         &effect("independent"),
-        UsageRunId::mint(),
+        UsageMeterId::mint(),
     );
     f.accounting
-        .admit_usage_run(&admission(&s.owner, &s.effect, s.run.clone(), 10))
+        .admit_usage_meter(&admission(&s.owner, &s.effect, s.meter.clone(), 10))
         .await
         .unwrap();
     f.accounting.settle_usage(&s, 20).await.unwrap();
@@ -688,7 +711,7 @@ pub async fn accounting_writes_never_touch_head_fence_or_receipts(f: &UsageLedge
     assert_eq!((f.snapshot)().await, before);
     f.factory.delete_session(&id).await.unwrap();
     let deleted = (f.snapshot)().await;
-    let s = settlement(&s.owner, &effect("after-delete"), UsageRunId::mint());
+    let s = settlement(&s.owner, &effect("after-delete"), UsageMeterId::mint());
     f.accounting.settle_usage(&s, 50).await.unwrap();
     assert_eq!((f.snapshot)().await, deleted);
     assert_eq!(all_facts(f, &s.owner).await.len(), 9);
@@ -703,9 +726,9 @@ pub async fn retention_reclaims_only_retired_owners_before_the_horizon(
         ("recent", Some(300)),
         ("at-bound", Some(200)),
     ] {
-        let s = settlement(&owner(label), &effect("retained"), UsageRunId::mint());
+        let s = settlement(&owner(label), &effect("retained"), UsageMeterId::mint());
         f.accounting
-            .admit_usage_run(&admission(&s.owner, &s.effect, s.run.clone(), 10))
+            .admit_usage_meter(&admission(&s.owner, &s.effect, s.meter.clone(), 10))
             .await
             .unwrap();
         f.accounting.settle_usage(&s, 20).await.unwrap();
@@ -721,7 +744,7 @@ pub async fn retention_reclaims_only_retired_owners_before_the_horizon(
         .await
         .unwrap();
     assert_eq!(report.removed_usage_fact_count, 4);
-    assert_eq!(report.removed_usage_run_count, 1);
+    assert_eq!(report.removed_usage_meter_count, 1);
     assert_eq!(report.removed_usage_owner_retirement_count, 1);
     assert_eq!(all_facts(f, &owner("old")).await.len(), 0);
     assert!(
@@ -736,10 +759,10 @@ pub async fn retention_reclaims_only_retired_owners_before_the_horizon(
         assert_eq!(all_facts(f, &owner(label)).await.len(), 4);
         assert_eq!(
             f.accounting
-                .load_usage_run_page(&owner(label), UsageRunFilter::All, None, limit(10))
+                .load_usage_meter_page(&owner(label), UsageMeterFilter::All, None, limit(10))
                 .await
                 .unwrap()
-                .runs
+                .meters
                 .len(),
             1
         );
@@ -762,7 +785,7 @@ pub async fn reads_select_by_owner_without_a_committed_turn(f: &UsageLedgerStore
         RuntimeOwner::Process(lash_sansio::ProcessId::fixture("usage-process")),
     ];
     for owner in &owners {
-        let s = settlement(owner, &effect("receipt-free"), UsageRunId::mint());
+        let s = settlement(owner, &effect("receipt-free"), UsageMeterId::mint());
         f.accounting.settle_usage(&s, 20).await.unwrap();
         let usage = f.accounting.load_owner_usage(owner).await.unwrap();
         assert_eq!(usage.rows[0].usage.input_tokens, 21);
@@ -804,22 +827,22 @@ pub async fn reads_select_by_owner_without_a_committed_turn(f: &UsageLedgerStore
         f.accounting.settle_usage(&extra, 21).await.unwrap();
         let first = f
             .accounting
-            .load_usage_run_page(owner, UsageRunFilter::All, None, limit(1))
+            .load_usage_meter_page(owner, UsageMeterFilter::All, None, limit(1))
             .await
             .unwrap();
         let cursor = first.next.unwrap();
         let second = f
             .accounting
-            .load_usage_run_page(owner, UsageRunFilter::All, Some(&cursor), limit(1))
+            .load_usage_meter_page(owner, UsageMeterFilter::All, Some(&cursor), limit(1))
             .await
             .unwrap();
-        assert_eq!(second.runs.len(), 1);
+        assert_eq!(second.meters.len(), 1);
         assert!(second.next.is_none());
         assert!(
             f.accounting
-                .load_usage_run_page(
+                .load_usage_meter_page(
                     &owners[usize::from(owner == &owners[0])],
-                    UsageRunFilter::All,
+                    UsageMeterFilter::All,
                     Some(&cursor),
                     limit(1)
                 )
@@ -831,7 +854,7 @@ pub async fn reads_select_by_owner_without_a_committed_turn(f: &UsageLedgerStore
 
 /// FIG-4405: the ledger attributes usage to the recorded model key. Two keys
 /// that share a requested wire model aggregate as two rows, an unreported
-/// attempt and its run name their key, and a served model is stored only as
+/// attempt and its meter name their key, and a served model is stored only as
 /// the provider reported it.
 pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
     f: &UsageLedgerStoreFixture,
@@ -871,18 +894,18 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
     .map(|(key, fact)| UsageSettlement {
         owner: owner.clone(),
         effect: effect(&format!("effect-{key}")),
-        run: UsageRunId::mint(),
+        meter: UsageMeterId::mint(),
         facts: vec![fact],
-        accounting: RunAccounting::Complete,
+        accounting: MeterAccounting::Complete,
     });
     for (index, s) in settlements.iter().enumerate() {
         let fact = &s.facts[0];
         f.accounting
-            .admit_usage_run(&UsageRunAdmission {
+            .admit_usage_meter(&UsageMeterAdmission {
                 owner: owner.clone(),
                 effect: s.effect.clone(),
                 execution_scope_key: "scope".into(),
-                run: s.run.clone(),
+                meter: s.meter.clone(),
                 source: fact.source.clone(),
                 profile_key: fact.profile_key.clone(),
                 requested_model: fact.requested_model.clone(),
@@ -956,26 +979,26 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
         ],
         "a served model is the provider's report, and absent where it reported none"
     );
-    let mut runs = f
+    let mut meters = f
         .accounting
-        .load_usage_run_page(&owner, UsageRunFilter::All, None, limit(16))
+        .load_usage_meter_page(&owner, UsageMeterFilter::All, None, limit(16))
         .await
         .unwrap()
-        .runs
+        .meters
         .into_iter()
-        .map(|run| {
-            let admission = run.admission.expect("dispatch admission");
+        .map(|meter| {
+            let admission = meter.admission.expect("dispatch admission");
             (
                 admission.profile_key.as_str().to_owned(),
                 admission.requested_model,
             )
         })
         .collect::<Vec<_>>();
-    runs.sort();
+    meters.sort();
     assert_eq!(
-        runs,
+        meters,
         ["key-a", "key-b", "key-c"].map(|key| (key.to_owned(), "shared-wire".to_owned())),
-        "each run names the key of its first dispatch"
+        "each meter names the key of its first dispatch"
     );
 
     // The key is part of a fact's payload: the same identity offered under

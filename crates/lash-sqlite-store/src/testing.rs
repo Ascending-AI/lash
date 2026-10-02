@@ -365,7 +365,7 @@ impl SqliteTransactionPause {
 ///
 /// Nothing is refused and no transaction is abandoned. The read simply waits
 /// inside its own snapshot while the test commits a competing write in that
-/// window, which is the only way to drive the window without load.
+/// window, which is the only way to execute the window without load.
 #[derive(Clone, Debug)]
 pub struct SqliteReadPause {
     state: Arc<PauseState>,

@@ -183,7 +183,7 @@ where
                         token,
                         lash_core::store::ObligationSettlement::Retry {
                             due_at_ms: 0,
-                            error: lash_core::drive::relay::plugin_delivery_error(
+                            error: lash_core::shift::relay::plugin_delivery_error(
                                 submit_error.clone(),
                             ),
                         },
@@ -264,7 +264,7 @@ where
                 } else {
                     lash_core::store::ObligationSettlement::Retry {
                         due_at_ms: 0,
-                        error: lash_core::drive::relay::plugin_delivery_error(submit_error.clone()),
+                        error: lash_core::shift::relay::plugin_delivery_error(submit_error.clone()),
                     }
                 };
                 settle_start_claim(starts, context, invocation, &process_id, token, settlement)

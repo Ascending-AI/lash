@@ -1,7 +1,7 @@
 //! The stored shape of the usage ledger's rows, and the one decoder both SQL
 //! backends run over them.
 //!
-//! `usage_facts` and `usage_runs` project their record columns in the order
+//! `usage_facts` and `usage_meters` project their record columns in the order
 //! `lash_store_sql`'s `RECORD_COLUMNS` lists them; each backend reads a row
 //! through its own driver into one of the `Stored*` shapes here, and this
 //! module owns every rule that is not row access: the enum spellings, the
@@ -11,8 +11,8 @@
 use crate::{
     LlmProfileKey, OutstandingUsageAttempt, OwnerUsageRow, RuntimeOwner, StoreError,
     UsageCompleteness, UsageEffectKey, UsageFactBody, UsageFactConflict, UsageFactIdentity,
-    UsageFactKind, UsageFactRecord, UsageRunDispatch, UsageRunId, UsageRunRecord,
-    UsageRunResolution, UsageRunState,
+    UsageFactKind, UsageFactRecord, UsageMeterDispatch, UsageMeterId, UsageMeterRecord,
+    UsageMeterResolution, UsageMeterState,
 };
 use lash_sansio::llm::types::LlmCallId;
 use lash_sansio::{ProcessId, SessionId, TokenUsage};
@@ -28,7 +28,7 @@ pub struct StoredUsageFact {
     pub provider_attempt: i64,
     pub fact_kind: String,
     pub disposition: String,
-    pub run_id: Option<String>,
+    pub meter_id: Option<String>,
     pub llm_call_id: String,
     pub source: String,
     pub profile_key: String,
@@ -39,10 +39,10 @@ pub struct StoredUsageFact {
     pub recorded_at_ms: i64,
 }
 
-/// One row of the `usage_runs` record projection.
-pub struct StoredUsageRun {
+/// One row of the `usage_meters` record projection.
+pub struct StoredUsageMeter {
     pub effect_key: String,
-    pub run_id: String,
+    pub meter_id: String,
     pub execution_scope_key: Option<String>,
     pub source: Option<String>,
     pub profile_key: Option<String>,
@@ -94,7 +94,7 @@ impl StoredUsageFact {
             provider_attempt,
             fact_kind,
             disposition,
-            run_id,
+            meter_id,
             llm_call_id,
             source,
             profile_key,
@@ -118,7 +118,7 @@ impl StoredUsageFact {
             body: UsageFactBody::from_stored(
                 &fact_kind,
                 &disposition,
-                run_id.map(UsageRunId::try_from).transpose()?,
+                meter_id.map(UsageMeterId::try_from).transpose()?,
                 usage,
                 generation_id,
             )?,
@@ -127,15 +127,15 @@ impl StoredUsageFact {
     }
 }
 
-impl StoredUsageRun {
+impl StoredUsageMeter {
     /// Decode the stored row into its domain record. `owner` is the row's
-    /// owner columns already decoded by the caller's query parameters: a run
+    /// owner columns already decoded by the caller's query parameters: a meter
     /// conflict's fact identity names it, and the columns are not part of
     /// the projection.
-    pub fn decode(self, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
-        let StoredUsageRun {
+    pub fn decode(self, owner: &RuntimeOwner) -> Result<UsageMeterRecord, StoreError> {
+        let StoredUsageMeter {
             effect_key,
-            run_id,
+            meter_id,
             execution_scope_key,
             source,
             profile_key,
@@ -165,14 +165,14 @@ impl StoredUsageRun {
                 Some(model),
                 Some(requested_model),
                 Some(at_ms),
-            ) => Some(UsageRunDispatch {
+            ) => Some(UsageMeterDispatch {
                 execution_scope_key,
                 source,
                 profile_key: LlmProfileKey::new(model),
                 requested_model,
                 admitted_at_ms: usage_unsigned(at_ms)?,
             }),
-            _ => return Err(usage_corrupt("partial usage run admission")),
+            _ => return Err(usage_corrupt("partial usage meter admission")),
         };
         let conflict = match (
             conflict_call_ordinal,
@@ -203,20 +203,20 @@ impl StoredUsageRun {
                 stored_payload_hash,
                 offered_payload_hash,
             }),
-            _ => return Err(usage_corrupt("partial usage run conflict")),
+            _ => return Err(usage_corrupt("partial usage meter conflict")),
         };
-        let state = UsageRunState::from_stored(
+        let state = UsageMeterState::from_stored(
             &state,
             unknown_reason.as_deref(),
             conflict,
             resolved_at_ms.map(usage_unsigned).transpose()?,
         )?;
-        if state == UsageRunState::Open && admission.is_none() {
-            return Err(usage_corrupt("open usage run has no admission"));
+        if state == UsageMeterState::Open && admission.is_none() {
+            return Err(usage_corrupt("open usage meter has no admission"));
         }
-        Ok(UsageRunRecord {
+        Ok(UsageMeterRecord {
             effect,
-            run: UsageRunId::try_from(run_id)?,
+            meter: UsageMeterId::try_from(meter_id)?,
             admission,
             state,
         })
@@ -271,7 +271,7 @@ impl StoredOutstandingAttempt {
     }
 }
 
-/// The `usage_runs.completeness` aggregate row plus the caller's unreported
+/// The `usage_meters.completeness` aggregate row plus the caller's unreported
 /// count and retirement read.
 pub fn decode_usage_completeness(
     open_runs: i64,
@@ -292,12 +292,12 @@ pub fn decode_usage_completeness(
 }
 
 /// The `(state, unknown_reason)` columns a resolution writes.
-pub fn usage_run_resolution_columns(
-    resolution: &UsageRunResolution,
+pub fn usage_meter_resolution_columns(
+    resolution: &UsageMeterResolution,
 ) -> (&'static str, Option<&'static str>) {
     match resolution {
-        UsageRunResolution::Settled => ("settled", None),
-        UsageRunResolution::Unknown(reason) => ("unknown", Some(reason.as_str())),
+        UsageMeterResolution::Settled => ("settled", None),
+        UsageMeterResolution::Unknown(reason) => ("unknown", Some(reason.as_str())),
     }
 }
 
@@ -343,7 +343,7 @@ pub fn usage_effect_key(value: String) -> Result<UsageEffectKey, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{UsageReporting, UsageRunOutcome, UsageUnknownReason};
+    use crate::{UsageMeterOutcome, UsageReporting, UsageUnknownReason};
 
     fn fact(overrides: impl FnOnce(&mut StoredUsageFact)) -> StoredUsageFact {
         let mut fact = StoredUsageFact {
@@ -355,7 +355,7 @@ mod tests {
             provider_attempt: 0,
             fact_kind: "attempt".into(),
             disposition: "reported".into(),
-            run_id: Some("run:00000000000040008000000000000001".into()),
+            meter_id: Some("run:00000000000040008000000000000001".into()),
             llm_call_id: "call".into(),
             source: "turn".into(),
             profile_key: "key".into(),
@@ -407,15 +407,15 @@ mod tests {
 
     #[test]
     fn fact_rows_reject_an_invalid_run_id() {
-        fact(|fact| fact.run_id = Some("run:nope".into()))
+        fact(|fact| fact.meter_id = Some("run:nope".into()))
             .decode()
-            .expect_err("a malformed run id is corrupt");
+            .expect_err("a malformed meter id is corrupt");
     }
 
-    fn run(overrides: impl FnOnce(&mut StoredUsageRun)) -> StoredUsageRun {
-        let mut run = StoredUsageRun {
+    fn meter(overrides: impl FnOnce(&mut StoredUsageMeter)) -> StoredUsageMeter {
+        let mut meter = StoredUsageMeter {
             effect_key: "effect".into(),
-            run_id: "run:00000000000040008000000000000001".into(),
+            meter_id: "run:00000000000040008000000000000001".into(),
             execution_scope_key: Some("scope".into()),
             source: Some("turn".into()),
             profile_key: Some("key".into()),
@@ -430,8 +430,8 @@ mod tests {
             conflict_offered_payload_hash: None,
             resolved_at_ms: None,
         };
-        overrides(&mut run);
-        run
+        overrides(&mut meter);
+        meter
     }
 
     fn owner() -> RuntimeOwner {
@@ -441,39 +441,39 @@ mod tests {
     #[test]
     fn open_runs_require_their_admission_evidence() {
         assert_eq!(
-            run(|_| {}).decode(&owner()).expect("open").state,
-            UsageRunState::Open
+            meter(|_| {}).decode(&owner()).expect("open").state,
+            UsageMeterState::Open
         );
-        run(|run| run.admitted_at_ms = None)
+        meter(|meter| meter.admitted_at_ms = None)
             .decode(&owner())
             .expect_err("a partial admission is corrupt");
-        run(|run| {
-            run.execution_scope_key = None;
-            run.source = None;
-            run.profile_key = None;
-            run.requested_model = None;
-            run.admitted_at_ms = None;
+        meter(|meter| {
+            meter.execution_scope_key = None;
+            meter.source = None;
+            meter.profile_key = None;
+            meter.requested_model = None;
+            meter.admitted_at_ms = None;
         })
         .decode(&owner())
-        .expect_err("an open run without any admission is corrupt");
+        .expect_err("an open meter without any admission is corrupt");
     }
 
     #[test]
     fn conflict_columns_decode_as_a_unit() {
-        let resolved = run(|run| {
-            run.state = "conflicted".into();
-            run.conflict_call_ordinal = Some(0);
-            run.conflict_provider_attempt = Some(1);
-            run.conflict_fact_kind = Some("attempt".into());
-            run.conflict_stored_payload_hash = Some("stored".into());
-            run.conflict_offered_payload_hash = Some("offered".into());
-            run.resolved_at_ms = Some(20);
+        let resolved = meter(|meter| {
+            meter.state = "conflicted".into();
+            meter.conflict_call_ordinal = Some(0);
+            meter.conflict_provider_attempt = Some(1);
+            meter.conflict_fact_kind = Some("attempt".into());
+            meter.conflict_stored_payload_hash = Some("stored".into());
+            meter.conflict_offered_payload_hash = Some("offered".into());
+            meter.resolved_at_ms = Some(20);
         })
         .decode(&owner())
-        .expect("a conflicted run decodes");
+        .expect("a conflicted meter decodes");
         match resolved.state {
-            UsageRunState::Resolved {
-                outcome: UsageRunOutcome::Conflicted(conflict),
+            UsageMeterState::Resolved {
+                outcome: UsageMeterOutcome::Conflicted(conflict),
                 ..
             } => {
                 assert_eq!(conflict.identity.kind, UsageFactKind::Attempt);
@@ -481,21 +481,21 @@ mod tests {
             }
             other => panic!("expected a conflicted outcome, got {other:?}"),
         }
-        run(|run| {
-            run.state = "conflicted".into();
-            run.conflict_call_ordinal = Some(0);
-            run.conflict_provider_attempt = Some(1);
-            run.conflict_fact_kind = Some("invented".into());
-            run.conflict_stored_payload_hash = Some("stored".into());
-            run.conflict_offered_payload_hash = Some("offered".into());
-            run.resolved_at_ms = Some(20);
+        meter(|meter| {
+            meter.state = "conflicted".into();
+            meter.conflict_call_ordinal = Some(0);
+            meter.conflict_provider_attempt = Some(1);
+            meter.conflict_fact_kind = Some("invented".into());
+            meter.conflict_stored_payload_hash = Some("stored".into());
+            meter.conflict_offered_payload_hash = Some("offered".into());
+            meter.resolved_at_ms = Some(20);
         })
         .decode(&owner())
         .expect_err("an unknown conflict fact kind is corrupt");
-        run(|run| {
-            run.state = "conflicted".into();
-            run.conflict_stored_payload_hash = Some("stored".into());
-            run.resolved_at_ms = Some(20);
+        meter(|meter| {
+            meter.state = "conflicted".into();
+            meter.conflict_stored_payload_hash = Some("stored".into());
+            meter.resolved_at_ms = Some(20);
         })
         .decode(&owner())
         .expect_err("a partial conflict is corrupt");
@@ -503,16 +503,18 @@ mod tests {
 
     #[test]
     fn unknown_runs_decode_their_reason() {
-        let resolved = run(|run| {
-            run.state = "unknown".into();
-            run.unknown_reason = Some("superseded_run".into());
-            run.resolved_at_ms = Some(30);
+        let resolved = meter(|meter| {
+            meter.state = "unknown".into();
+            meter.unknown_reason = Some("superseded_meter".into());
+            meter.resolved_at_ms = Some(30);
         })
         .decode(&owner())
-        .expect("an unknown run decodes");
+        .expect("an unknown meter decodes");
         assert!(matches!(
             resolved.state.outcome(),
-            Some(UsageRunOutcome::Unknown(UsageUnknownReason::SupersededRun))
+            Some(UsageMeterOutcome::Unknown(
+                UsageUnknownReason::SupersededMeter
+            ))
         ));
     }
 
@@ -580,11 +582,11 @@ mod tests {
     #[test]
     fn resolution_columns_stay_typed() {
         assert_eq!(
-            usage_run_resolution_columns(&UsageRunResolution::Settled),
+            usage_meter_resolution_columns(&UsageMeterResolution::Settled),
             ("settled", None)
         );
         assert_eq!(
-            usage_run_resolution_columns(&UsageRunResolution::Unknown(
+            usage_meter_resolution_columns(&UsageMeterResolution::Unknown(
                 UsageUnknownReason::ExecutionEnded
             )),
             ("unknown", Some("execution_ended"))

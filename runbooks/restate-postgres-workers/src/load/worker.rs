@@ -302,7 +302,7 @@ impl E2eLoadWorkflow for LoadWorker {
 
 impl LoadWorker {
     /// Primary turn `plan`: accept it, feed its queued inputs while it runs,
-    /// cancel what the plan cancels, await every root, then run its host
+    /// cancel what the plan cancels, await every run, then run its host
     /// process starts.
     async fn turn(
         &self,
@@ -334,14 +334,14 @@ impl LoadWorker {
             .id(lash::TurnId::parse(turn_id_for(&operation)).map_err(terminal)?)
             .accept_restate(ctx)
             .await?;
-        // A queued input or a cancel is meant for a running root: wait until
+        // A queued input or a cancel is meant for a running run: wait until
         // the provider has been asked for this turn's cell.
-        let needs_running_root = plan.cancel
+        let needs_active_run = plan.cancel
             || plan
                 .queued_inputs
                 .iter()
                 .any(|queued| queued.during_active_turn);
-        if needs_running_root {
+        if needs_active_run {
             super::provider_watch::wait_for_provider_receipt(
                 &self.core,
                 &self.witness,
@@ -374,7 +374,7 @@ impl LoadWorker {
             *cancel = self.cancel_queued(input, handle).await?;
         }
         let outcome = input_outcome(main.outcome_restate(ctx, RestateWait::new()).await?);
-        // Inputs that arrive once the session is idle run as their own roots.
+        // Inputs that arrive once the session is idle run as their own runs.
         for input in plan
             .queued_inputs
             .iter()
@@ -778,7 +778,7 @@ fn input_outcome(outcome: lash::SendOutcome) -> InputOutcome {
     };
     InputOutcome {
         status: (&outcome.status()).into(),
-        root: outcome.root().map(ToString::to_string),
+        run: outcome.run().map(ToString::to_string),
         final_value,
         outcome: settled,
     }

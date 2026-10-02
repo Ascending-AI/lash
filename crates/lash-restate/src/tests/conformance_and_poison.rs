@@ -308,7 +308,7 @@ lash_conformance::tool_child_turn_cancel_tests!(
 );
 
 // FIG-4376's execution-control laws on a live server: a redrive replays the
-// root's recorded config, turn budget included, from the server's journal.
+// run's recorded config, turn budget included, from the server's journal.
 mod recorded_execution_controls_live {
     use super::effect_group_conformance;
 
@@ -335,21 +335,21 @@ mod recorded_execution_controls_live {
         #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     ] {
         live_harness("recorded-controls-redrive").await
-    }; (a_redrive_runs_under_the_execution_controls_its_root_recorded, "turn-config-recorded-controls-redrive"));
+    }; (a_redrive_runs_under_the_execution_controls_its_run_recorded, "turn-config-recorded-controls-redrive"));
 
     // FIG-4389's recorded termination law beside it: the redrive assembles
-    // the terminal the root's recorded policy decides.
+    // the terminal the run's recorded policy decides.
     lash_conformance::turn_config_tests!(@law [
         #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     ] {
         live_harness("recorded-termination-redrive").await
-    }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+    }; (a_redrive_assembles_the_terminal_its_run_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
 
     lash_conformance::turn_config_tests!(@law [
         #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     ] {
         live_harness("recorded-request-defaults-redrive").await
-    }; (a_redrive_calls_the_model_with_the_request_defaults_its_root_recorded, "turn-config-recorded-request-defaults-redrive"));
+    }; (a_redrive_calls_the_model_with_the_request_defaults_its_run_recorded, "turn-config-recorded-request-defaults-redrive"));
 }
 
 // The turn runs inside a live handler: its tool call opens a real Restate
@@ -458,10 +458,10 @@ lash_conformance::frame_open_redrive_tests!(
     }
 );
 
-// FIG-4457's queued input roots law on a live endpoint: the first drive's
+// FIG-4457's queued input runs law on a live endpoint: the first shift's
 // death is a failed handler attempt Restate redelivers, and the second input
 // is accepted in between.
-lash_conformance::queued_input_roots_tests!(
+lash_conformance::queued_input_runs_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
         let harness =
@@ -471,7 +471,7 @@ lash_conformance::queued_input_roots_tests!(
         let stores = harness.law_stores();
         // Restate state outlives a run: each run names its own session.
         let prefix: &'static str = Box::leak(
-            format!("restate-queued-input-roots-{}", harness.run_nonce()).into_boxed_str(),
+            format!("restate-queued-input-runs-{}", harness.run_nonce()).into_boxed_str(),
         );
         (harness, prefix, effect_host, stores, turn_runner)
     }
@@ -556,7 +556,7 @@ lash_conformance::declared_start_tests!(
 // scenario's turn runs in a live handler, and every member of its step's tool
 // group — native calls, `batch` members and `Promise.all` leaves alike — is a
 // child invocation of one durable effect group. The process-bridge producer
-// drives its worker in the test process and stays on the in-process tiers.
+// executes its worker in the test process and stays on the in-process tiers.
 lash_conformance::tool_batch_parallelism_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
@@ -623,7 +623,7 @@ lash_conformance::batch_sugar_tests!(
 
 // FIG-4079's tool-call identity laws on the live endpoint: each turn runs in
 // a probe handler, and a crash is a failed handler attempt Restate
-// redelivers. The process-admission law drives its worker in the test
+// redelivers. The process-admission law executes its worker in the test
 // process and stays on the double's tiers.
 lash_conformance::tool_call_identity_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
@@ -644,7 +644,7 @@ lash_conformance::tool_call_identity_tests!(
 
 // FIG-4159's worker-broker laws on the live endpoint: each turn runs in a
 // probe handler, a lost worker fails the attempt retryably, and Restate
-// redelivers the invocation, replaying its journal into the re-drive.
+// redelivers the invocation, replaying its journal into the redrive.
 lash_conformance::vm_broker_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
@@ -657,7 +657,7 @@ lash_conformance::vm_broker_tests!(
     }
 );
 
-// FIG-3547's segment re-drive law on the live endpoint: the segments run in
+// FIG-3547's segment redrive law on the live endpoint: the segments run in
 // the endpoint's `LashProcessWorkflow`, a crash is a failed attempt Restate
 // delivers again, and a lost substrate is the invocation killed and purged
 // through the admin API, then submitted afresh.
@@ -791,7 +791,7 @@ impl lash_conformance::WakeRedeliveryFloorProbe for DoubleWakeRedeliveryFloors {
 }
 
 // The wake content-conflict law (FIG-4487) on the engine-driven path: the
-// wake driver asks the Restate engine for the later wake's drive, over the
+// wake driver asks the Restate engine for the later wake's shift, over the
 // server double's own store set and virtual clock.
 lash_conformance::wake_delivery_conflict_tests!({
     let backend = lash_restate_test::backend(0x4487, lash_restate_test::ServerConfig::default())
@@ -1345,7 +1345,7 @@ pub(super) async fn durable_trace_is_observed_once_across_a_redrive_and_adds_no_
                 ..lash_trace::TraceContext::default()
             }),
     );
-    // Each attempt of the handler drives through a controller of its own.
+    // Each attempt of the handler executes through a controller of its own.
     let attempt = || {
         lash_core::ScopedEffectController::borrowed(
             &controller,

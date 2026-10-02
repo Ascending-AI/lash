@@ -5,8 +5,8 @@
 //! Every case is one cell of {seam or obligation kind} × {crash point} ×
 //! {seed}. A case builds a [`world::CrashWorld`] — lash-restate's engine on
 //! the run's [`engine::Engine`] over a SQLite memory store set, with one
-//! deployment (a [`lash::LashCore`], its session driver and its recovery
-//! interval) — drives the seam's workload, and kills the deployment at the
+//! deployment (a [`lash::LashCore`], its `SessionShifts` and its recovery
+//! interval) — executes the seam's workload, and kills the deployment at the
 //! named crash point: the host process dies where it stands, every attempt
 //! the engine was running on it is dropped and replayed, and a fresh
 //! deployment comes up after a seeded outage. The recovery interval then
@@ -74,12 +74,12 @@ use std::time::Duration;
 /// inventory, named by the ADR 0109 obligation kind that will own it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Seam {
-    /// S-1–S-4: an accepted input and the drive that consumes it.
+    /// S-1–S-4: an accepted input and the shift that consumes it.
     Ingress,
     /// S-6, S-7, S-9: a control intent's engine half (the session close's
-    /// release of its roots).
+    /// release of its runs).
     ControlIntent,
-    /// S-8: a root's terminal and the close of its scope.
+    /// S-8: a run's terminal and the close of its scope.
     ScopeClose,
     /// S-10, S-11: a parent-end plan and its children's cancels.
     ParentEnd,
@@ -192,7 +192,7 @@ pub enum S8Slice {
     C,
     /// Parent-end plans: undecodable rows, head-of-line.
     P,
-    /// Scope close on the root row.
+    /// Scope close on the run row.
     S,
     /// Two-phase session delete.
     D,
@@ -229,10 +229,10 @@ pub enum Finding {
     /// The facade's resolved session-work port (`ResolvedQueuedWork`,
     /// `crates/lash/src/core/work_drivers.rs`) does not forward
     /// `SessionWorkEngine::control`, so every caller that reaches the engine's
-    /// control half through it — a session close's root release, the
+    /// control half through it — a session close's run release, the
     /// recovery tick's parks and intents arms — gets the trait default
     /// `NoEngineControl`: a release answers `NothingHeld` and kills nothing, a
-    /// parks pass reads nothing. On Restate a deleted session's running root
+    /// parks pass reads nothing. On Restate a deleted session's running run
     /// keeps running and its intent is acknowledged anyway.
     F1,
 }
@@ -448,23 +448,23 @@ const fn today(
 /// tests in `tests/crash_point_matrix.rs` are checked against it.
 pub const MATRIX: &[CaseSpec] = &[
     // --- Ingress (S-1..S-4) ------------------------------------------------
-    // An input's ingress obligation is delivered by the drive's claim of the
+    // An input's ingress obligation is delivered by the shift's claim of the
     // row, not by the engine accepting the ask (ADR 0109 §3): the relay's
     // claim covers the ask and the admission after it. A host that dies at
-    // the ask, or an engine that loses the drive before it admits the row,
+    // the ask, or an engine that loses the shift before it admits the row,
     // leaves that claim to lapse, and the relay asks again under the next
     // attempt: those cells are bounded by the lapsed claim.
     today(
         Seam::Ingress,
         CrashPoint::AfterStateCommit,
         DetectionBound::LapsedClaim,
-        "an accepted input whose drive ask never left the dead host is driven once by the recovery tick",
+        "an accepted input whose shift ask never left the dead host is executed once by the recovery tick",
     ),
     today(
         Seam::Ingress,
         CrashPoint::DuringEngineDelivery,
         DetectionBound::LostImmediateSqliteFailover,
-        "a drive the deployment died inside is replayed and consumes the input once",
+        "a shift the deployment died inside is replayed and consumes the input once",
     ),
     today(
         Seam::Ingress,
@@ -476,17 +476,17 @@ pub const MATRIX: &[CaseSpec] = &[
         Seam::Ingress,
         CrashPoint::MidJournalStep,
         DetectionBound::LostImmediateSqliteFailover,
-        "a root the deployment died inside at a seeded journal step commits its answer once",
+        "a run the deployment died inside at a seeded journal step commits its answer once",
     ),
     today(
         Seam::Ingress,
         CrashPoint::InvocationLost,
         DetectionBound::LapsedClaim,
-        "a drive whose invocation the engine lost before it admitted anything leaves the input to the recovery tick",
+        "a shift whose invocation the engine lost before it admitted anything leaves the input to the recovery tick",
     ),
     // --- Control intents (S-6, S-7, S-9) ----------------------------------
     // A closing session's in-flight input claim is not excluded: an input
-    // claimed before the close does not finish. The close ends its root
+    // claimed before the close does not finish. The close ends its run
     // (`Cancelled`, `SessionDeleted`) and the only close there is, a delete,
     // retires the claim with the session's storage through the
     // `SessionDelete` obligation (ADR 0109 §4). The ingress invariant reads
@@ -507,7 +507,7 @@ pub const MATRIX: &[CaseSpec] = &[
         Seam::ControlIntent,
         CrashPoint::DuringEngineDelivery,
         DetectionBound::LapsedClaim,
-        "a session close whose root release the host died inside is re-applied and acknowledged",
+        "a session close whose run release the host died inside is re-applied and acknowledged",
     ),
     // The acknowledgement the host died before is re-applied once the
     // close's claim lapses, so the end state is a lapsed claim's.
@@ -534,7 +534,7 @@ pub const MATRIX: &[CaseSpec] = &[
         Seam::ScopeClose,
         CrashPoint::AfterStateCommit,
         DetectionBound::LostImmediateSqliteFailover,
-        "a root that committed its terminal before the deployment died closes its scope and cancels its child",
+        "a run that committed its terminal before the deployment died closes its scope and cancels its child",
     ),
     today(
         Seam::ScopeClose,
@@ -558,7 +558,7 @@ pub const MATRIX: &[CaseSpec] = &[
         Seam::ScopeClose,
         CrashPoint::InvocationLost,
         DetectionBound::LostImmediateSqliteFailover,
-        "a root whose invocation the engine lost after its terminal commit has its scope closed by the recovery tick",
+        "a run whose invocation the engine lost after its terminal commit has its scope closed by the recovery tick",
     ),
     // --- Parent-end plans (S-10, S-11) ------------------------------------
     today(
@@ -681,20 +681,20 @@ pub const MATRIX: &[CaseSpec] = &[
         "a started process whose host job an operator killed, the kill cascading into its run, ends substrate-lost and answers its engine waiter",
     ),
     // --- Child cancel (ADR 0105 §4) ---------------------------------------
-    // A root is cancelled while its effect-group tool child runs an attempt
+    // A run is cancelled while its effect-group tool child runs an attempt
     // that ignores its token; the child's replay is immediate, so both cells
     // answer to the immediate bound.
     today(
         Seam::ChildCancel,
         CrashPoint::MidJournalStep,
         DetectionBound::LostImmediateSqliteFailover,
-        "a tool child the deployment died inside after its cancel ended its attempt replays its journal, never re-runs the tool, and its root ends cancelled once",
+        "a tool child the deployment died inside after its cancel ended its attempt replays its journal, never re-runs the tool, and its run ends cancelled once",
     ),
     today(
         Seam::ChildCancel,
         CrashPoint::DuringEngineDelivery,
         DetectionBound::LostImmediateSqliteFailover,
-        "a tool child the deployment died inside as its cancelled attempt's outcome reached the engine re-runs that unrecorded attempt once, which its cancel ends again, and its root ends cancelled once",
+        "a tool child the deployment died inside as its cancelled attempt's outcome reached the engine re-runs that unrecorded attempt once, which its cancel ends again, and its run ends cancelled once",
     ),
 ];
 

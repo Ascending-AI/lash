@@ -2,15 +2,15 @@
 //! recorded tool surface is installed, is the attempt's fault. It is never
 //! the turn's outcome.
 //!
-//! Two places sit between a root's work and its next model call:
+//! Two places sit between a run's work and its next model call:
 //!
 //! - **Installing a recorded tool surface.** An execution-environment sync
-//!   records the surface it built, and the drive installs what the sync
+//!   records the surface it built, and the shift installs what the sync
 //!   recorded. The install pins the live registry and runs the catalog
 //!   contributors again, outside any step, on the live pass and on every
 //!   replay that serves the sync from the journal.
 //! - **A checkpoint's store admission.** The checkpoint step admits the
-//!   root's pending work at the store before it runs its hooks.
+//!   run's pending work at the store before it runs its hooks.
 //!
 //! A contributor that reports a store that did not answer, and a store that
 //! did not answer the admission, are facts about this attempt. Each aborts
@@ -20,12 +20,12 @@
 //! A hook's own failure, and a deterministic catalog defect, are still the
 //! turn's outcome.
 //!
-//! The laws drive a real root through the tier's
+//! The laws execute a real run through the tier's
 //! [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
 
 use crate::admit;
 use lash_core::runtime::effect::{EffectLayer, LayeredEffectHost};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -97,7 +97,7 @@ impl crate::store::RuntimeStoreDecorator for FaultingAdmission {
     }
 }
 
-/// One root of a law: a session, the faults it can raise and what it saw.
+/// One run of a law: a session, the faults it can raise and what it saw.
 #[derive(Clone)]
 struct World {
     session_id: SessionId,
@@ -218,8 +218,8 @@ impl World {
         .expect("build the live-fault conformance runtime")
     }
 
-    /// One execution of the root: a fresh runtime, driven on the tier's
-    /// controller, reporting what its drive returned.
+    /// One execution of the run: a fresh runtime, executed on the tier's
+    /// controller, reporting what its shift returned.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
@@ -247,7 +247,7 @@ impl World {
                 let mut input = crate::TurnInput::text("answer");
                 input.trace_turn_id = Some(world.turn_id.clone());
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         input,
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
@@ -294,7 +294,7 @@ fn assert_aborted_on_live_fault(
     aborted
 }
 
-/// Law: a contributor's live fault while the drive installs the tool surface
+/// Law: a contributor's live fault while the shift installs the tool surface
 /// its sync recorded aborts the attempt as `store_commit_failed`. The engine
 /// retries the turn and rests it while the fault lasts, with the model never
 /// asked; once the fault clears, the retry serves the recorded sync and
@@ -303,7 +303,7 @@ fn assert_aborted_on_live_fault(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_root(
+pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_run(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -329,7 +329,7 @@ pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_root(
     );
     assert!(
         aborted > 0,
-        "the install runs in the drive, which reports its abort"
+        "the install runs in the shift, which reports its abort"
     );
     assert_eq!(
         parked.model_calls.load(Ordering::SeqCst),
@@ -391,7 +391,7 @@ pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_root(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_store_fault_at_checkpoint_admission_parks_the_root(
+pub async fn a_store_fault_at_checkpoint_admission_parks_the_run(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,

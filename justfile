@@ -256,11 +256,11 @@ effect-group-conformance-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
     --artifacts "$artifacts"
 
-  # Root-control's crash-gap laws run on both server legs (FIG-4516).
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite root-control --leg live \
+  # Run-control's crash-gap laws run on both server legs (FIG-4516).
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-control --leg live \
     --artifacts "$artifacts"
 
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite root-control --leg replay \
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite run-control --leg replay \
     --artifacts "$artifacts"
 
   # A paused group child parks, resumes or is released by what its group
@@ -304,10 +304,10 @@ effect-group-conformance-e2e:
 # outcome; and the host session law (FIG-4277): a host whose session was
 # deleted while it was parked replays its journal after its deployment dies.
 # The load workload's deletion and behavior evidence replay laws also run
-# here, through the production delete handler; and the session drive's
-# continuation law (FIG-4523): a drive crashed around its handoff redrives one
-# successor, in root-bound legs and, replayed, in legs of one root; and the
-# facade's recorded-root laws (FIG-4390's response-phase replay, FIG-4376's
+# here, through the production delete handler; and the session shift's
+# continuation law (FIG-4523): a shift crashed around its handoff redrives one
+# successor, in run-bound legs and, replayed, in legs of one run; and the
+# facade's recorded-run laws (FIG-4390's response-phase replay, FIG-4376's
 # deployment restart under a recorded turn budget). Suite wiring lives in
 # `scripts/restate-suites.toml`.
 server-double-e2e:
@@ -328,10 +328,10 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite workload-delete --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite load-behavior-replay --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-driver --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-driver --leg replay
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg live
-  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-shifts --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite session-shifts --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-runs --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-runs --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite refused-successor-drain --leg live
@@ -374,7 +374,7 @@ crash-matrix-restate-e2e:
 
   # The server redelivers a failed attempt within a quarter second of the
   # deployment coming back, and never kills or pauses one on its own: a cell
-  # judges a paused drive a wedge, so a retry budget must not decide it.
+  # judges a paused shift a wedge, so a retry budget must not decide it.
   set +e
   LASH_CRASH_MATRIX_ENGINE=live \
   LASH_CRASH_MATRIX_ENDPOINT_BIND="127.0.0.1:$((LASH_E2E_PORT_BASE + 33))" \
@@ -408,7 +408,7 @@ crash-matrix-restate-e2e:
     exit 1
   fi
 
-# The send-to-completion latency gate (FIG-3843): `send()` → Restate drive →
+# The send-to-completion latency gate (FIG-3843): `send()` → Restate shift →
 # `outcome()` measured end to end on a live `restate-server`, the same-process
 # fast fixture gated at overhead p50 < 50 ms / p99 < 250 ms over 10,000
 # samples, every other case (stream, tool, failure, busy, controlled

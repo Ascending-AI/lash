@@ -7,7 +7,7 @@ use super::*;
 const SEED: u64 = 0xf9_0007;
 
 /// Both halves of the derive-then-append fence the workbench annotator relies
-/// on, driven through real turns against a durable store.
+/// on, executed through real turns against a durable store.
 ///
 /// The annotator always writes a note back one commit late, so its base is
 /// never the head it lands on. That is fine and must stay fine — the summary is

@@ -207,7 +207,7 @@ async fn deferred_tool_await_inside_a_process_body_attaches_no_turn_cancel_gate(
     );
 }
 
-/// Drives the scalar production call site through a retry so the retry sleep
+/// Executes the scalar production call site through a retry so the retry sleep
 /// receives its trio from the owning turn execution.
 #[tokio::test]
 async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {

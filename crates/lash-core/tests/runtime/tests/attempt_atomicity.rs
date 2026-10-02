@@ -426,12 +426,12 @@ fn tool_context_with_provider<'run>(
             Some(TurnId::fixture(TURN.to_string())),
         );
     let direct_completions = if bind_direct_client_to_attempt {
-        // The attempt's usage run, begun as the tool-attempt runner begins it:
+        // The attempt's usage meter, begun as the tool-attempt runner begins it:
         // a direct completion inside an attempt is one call of that run
         // (ADR 0125).
         direct_completions
             .with_tool_attempt_parent_invocation(attempt_parent.clone())
-            .with_usage_run(
+            .with_usage_meter(
                 fixtures
                     .runtime
                     .host
@@ -1683,8 +1683,8 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             .expect("attempt-atomicity session manager")
             .direct_completion_client(scoped, Some(TurnId::fixture(TURN.to_string())))
             .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation())
-            // The attempt's usage run, as the tool-attempt runner begins it.
-            .with_usage_run(
+            // The attempt's usage meter, as the tool-attempt runner begins it.
+            .with_usage_meter(
                 fixtures
                     .runtime
                     .host
@@ -1908,7 +1908,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
 
 /// The prepared-attempt local runner (`RuntimeEffectLocalExecutor::
 /// prepared_tool_attempt`) derives its own attempt dispatch, and must bind the
-/// direct client the same way. Driven through the production coordinator so the
+/// direct client the same way. Executed through the production coordinator so the
 /// controller opens the recorded attempt itself.
 #[tokio::test]
 async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {

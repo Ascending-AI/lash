@@ -1,10 +1,10 @@
-//! `turn_parks`: the parked state of a driver-run turn (FIG-3586, FIG-3600,
+//! `turn_parks`: the parked state of an engine-executed turn (FIG-3586, FIG-3600,
 //! FIG-3659), one row per session whose turn aborted on a refusal that parks
 //! it.
 //!
-//! A park names a logical root and is live exactly while that root is: any
-//! commit of one of the root's physical turns clears it in the commit's
-//! transaction, as do an operator's cancel or fork of the root, a queued-run
+//! A park names a logical run and is live exactly while that run is: any
+//! commit of one of the run's physical turns clears it in the commit's
+//! transaction, as do an operator's cancel or fork of the run, a queued-run
 //! settlement, and the session's deletion.
 //! Every clear issues its delete with `RETURNING`, so the transition's feed
 //! event — written in the same transaction — names the park that closed.
@@ -34,7 +34,7 @@ crate::statements! {
         /// `?11` the build generation of the parked checkpoint
         /// (`park_build_generation`, NULL when the writer records
         /// none; FIG-3795), `?12` the JSON array of the engine's handles on
-        /// stopped work the root waits on (`child_engine_refs`, NULL when
+        /// stopped work the run waits on (`child_engine_refs`, NULL when
         /// the park records none; FIG-4630).
         insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation, child_engine_refs)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
@@ -92,8 +92,8 @@ crate::statements! {
              WHERE session_id = ?1
              RETURNING turn_id, park_id";
 
-        /// Clear session `?1`'s park when it is root `?2`'s: one of that
-        /// root's physical turns committed, or the root ended, so it is no
+        /// Clear session `?1`'s park when it is run `?2`'s: one of that
+        /// run's physical turns committed, or the run ended, so it is no
         /// longer parked. The returned row feeds the closing event.
         delete_for_turn_returning = "DELETE FROM turn_parks
              WHERE session_id = ?1 AND turn_id = ?2

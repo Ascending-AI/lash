@@ -755,14 +755,14 @@ pub async fn scopes_that_collide_in_rendering_share_no_ledger_key(
     turn_parent_end::scopes_that_collide_in_rendering_share_no_ledger_key(registry).await;
 }
 
-/// A turn scope that never became a root is closed by its session's close:
+/// A turn scope that never became a run is closed by its session's close:
 /// the session's row refuses every later start inside the session, and its
 /// plan cancels the live children of every scope inside it with no row of its
 /// own (FIG-3948).
-pub async fn a_session_close_reaps_the_turn_scopes_that_never_became_roots(
+pub async fn a_session_close_reaps_the_turn_scopes_that_never_became_runs(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    turn_parent_end::a_session_close_reaps_the_turn_scopes_that_never_became_roots(registry).await;
+    turn_parent_end::a_session_close_reaps_the_turn_scopes_that_never_became_runs(registry).await;
 }
 
 /// A turn that committed without its ledger row is a recovery candidate until

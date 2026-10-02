@@ -1,11 +1,11 @@
 //! The scenarios behind the matrix's cells, one module per seam, and the
 //! recovery loop they share.
 //!
-//! A seam's `stage` builds its world, drives the seam's workload up to the
+//! A seam's `stage` builds its world, executes the seam's workload up to the
 //! cell's crash point, and hands back a [`Staged`] world whose crash has
 //! happened (the deployment already restarted where the point kills it).
 //! [`run`] then ticks the recovery interval until the invariants hold, and
-//! checks the detection bound and that every live session still drives.
+//! checks the detection bound and that every live session still executes.
 
 mod child_cancel;
 mod definition;
@@ -49,11 +49,11 @@ pub(crate) struct Staged {
 }
 
 /// The one scripted model every case's deployments share: stateless, it
-/// answers the latest user message with `answer:<root>;` for every
-/// `input:<root>;` it carries, so a call a crash re-executes answers the
+/// answers the latest user message with `answer:<run>;` for every
+/// `input:<run>;` it carries, so a call a crash re-executes answers the
 /// same, and inputs an admission batched into one message are each answered once.
-/// A message naming a `held-` root is never answered: the call counts itself
-/// in `held` and waits forever, holding its root live.
+/// A message naming a `held-` run is never answered: the call counts itself
+/// in `held` and waits forever, holding its run live.
 fn scripted_provider(held: Arc<AtomicUsize>) -> lash_core::facade_support::ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("crash-matrix")
@@ -67,14 +67,14 @@ fn scripted_provider(held: Arc<AtomicUsize>) -> lash_core::facade_support::Provi
                     .find(|message| matches!(message.role, lash_core::llm::types::LlmRole::User))
                     .and_then(|message| serde_json::to_string(message).ok())
                     .unwrap_or_default();
-                let roots = invariants::input_roots(&latest_user);
-                if roots.iter().any(|root| root.starts_with("held-")) {
+                let runs = invariants::input_runs(&latest_user);
+                if runs.iter().any(|run| run.starts_with("held-")) {
                     held.fetch_add(1, Ordering::SeqCst);
                     std::future::pending::<()>().await;
                 }
-                let text: String = roots
+                let text: String = runs
                     .iter()
-                    .map(|root| invariants::answer_text(root))
+                    .map(|run| invariants::answer_text(run))
                     .collect();
                 Ok::<_, LlmTransportError>(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
@@ -146,37 +146,37 @@ pub(crate) async fn crash_and_restart(world: &CrashWorld) -> Result<Option<u64>,
     Ok(Some(tripped.at_ms))
 }
 
-/// Accept `root`'s input on `session` through the live deployment, as the
+/// Accept `run`'s input on `session` through the live deployment, as the
 /// host's own work, and wait for the acceptance (not the turn). A retryable
 /// refusal is retried, as a host retries it; a host that died inside the
 /// send answers `Ok`, since the crash is the case's.
 pub(crate) async fn send(
     world: &CrashWorld,
     session: &lash_core::SessionId,
-    root: &str,
+    run: &str,
 ) -> Result<(), String> {
-    send_text(world, session, root, &invariants::input_text(root)).await
+    send_text(world, session, run, &invariants::input_text(run)).await
 }
 
-/// [`send`] of `text` under the host id `root`.
+/// [`send`] of `text` under the host id `run`.
 async fn send_text(
     world: &CrashWorld,
     session: &lash_core::SessionId,
-    root: &str,
+    run: &str,
     text: &str,
 ) -> Result<(), String> {
     let mut last = String::new();
     for _ in 0..20 {
         let core = world.core()?;
         let session = session.clone();
-        let root = root.to_owned();
+        let run = run.to_owned();
         let text = text.to_owned();
         let sent = world
             .host_op(async move {
                 let session = crate::open_created_session(MODEL, &core, session).await?;
                 session
                     .send(lash::TurnInput::text(text))
-                    .id(lash_core::TurnId::fixture(root.clone()))
+                    .id(lash_core::TurnId::fixture(run.clone()))
                     .await
                     .map(|_| ())
             })
@@ -306,7 +306,7 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
     if spec.bound == super::DetectionBound::AttemptCeiling {
         // Hundreds of ticks, each awaiting its own relay pass: the wait for
         // the engine to settle only lets host work the pass handed off land,
-        // and the held root this world keeps open never settles.
+        // and the held run this world keeps open never settles.
         world.set_quiesce_budget(Duration::from_millis(20));
     }
     let min_tick = super::TICK - super::TICK / 10;
@@ -392,10 +392,10 @@ pub async fn lost_input_control(seed: u64) -> Result<Vec<String>, String> {
     Ok(violations)
 }
 
-/// The checker's red side, for an input driven twice: one input's text is
-/// accepted under two host ids, so two roots commit it. Answers the
+/// The checker's red side, for an input executed twice: one input's text is
+/// accepted under two host ids, so two runs commit it. Answers the
 /// violations the checker reports.
-pub async fn double_drive_control(seed: u64) -> Result<Vec<String>, String> {
+pub async fn double_shift_control(seed: u64) -> Result<Vec<String>, String> {
     let world = CrashWorld::new(seed, standard_core(), false).await?;
     world.restart().await?;
     let session = session_name(Seam::Ingress, seed);
@@ -407,7 +407,7 @@ pub async fn double_drive_control(seed: u64) -> Result<Vec<String>, String> {
     let expected = Expected {
         inputs: vec![invariants::AcceptedInput {
             session: session.clone(),
-            root: lash_core::TurnId::from("twice"),
+            run: lash_core::TurnId::from("twice"),
         }],
         live_sessions: vec![session],
         ..Expected::default()
@@ -536,7 +536,7 @@ mod tests {
 
     /// FIG-4161's ingress seed with the harness stalling 25 s before every
     /// tick: the claim lapses between the second and the third tick, the
-    /// third retakes it, and the input is driven once. The recovery lands
+    /// third retakes it, and the input is executed once. The recovery lands
     /// past the §1.8 bound in sim time only because the stalls moved the
     /// clock; in passes it meets the bound (FIG-4309).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

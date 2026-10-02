@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_e217;
 
@@ -158,7 +158,7 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut turn = Box::pin(runtime.drive_turn(
+    let mut turn = Box::pin(runtime.execute_turn(
         TurnInput::text("wait for host cancellation"),
         lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
     ));

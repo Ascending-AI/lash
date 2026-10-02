@@ -1,5 +1,5 @@
 //! Control intents (FIG-3600 S7, ADR 0104 O4, astra B6): an operator's
-//! decision about a logical root or a session, persisted as a versioned
+//! decision about a logical run or a session, persisted as a versioned
 //! record in the transaction that applies its store half.
 //!
 //! The engine half is a `ControlIntent` obligation (ADR 0109): the
@@ -9,7 +9,7 @@
 //! the obligation's claim token, so a claim another relay retook never
 //! settles the intent. A `CloseSession` intent outlives its session: it is
 //! the positive deletion tombstone the factory answers a deleted session's
-//! roots from.
+//! runs from.
 //!
 //! The ledger is [`ControlIntentStore`], carried by the session store
 //! factory rather than a session's own store: a `CloseSession` intent's engine
@@ -54,26 +54,26 @@ impl std::fmt::Display for ControlIntentId {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ControlIntentKind {
-    /// Resume the parked root's execution under the same fence, and the
+    /// Resume the parked run's execution under the same fence, and the
     /// stopped work `children` names: the handles its park recorded when the
     /// redrive was requested (FIG-4630). The engine half resumes exactly
     /// these.
     Redrive {
-        root: TurnId,
+        run: TurnId,
         park: ParkId,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         children: Vec<EnginePark>,
     },
-    /// End the parked root `Cancelled`.
-    Cancel { root: TurnId, park: ParkId },
-    /// End the parked root and drive its held inputs under `new_root`.
+    /// End the parked run `Cancelled`.
+    Cancel { run: TurnId, park: ParkId },
+    /// End the parked run and execute its held inputs under `new_run`.
     Fork {
-        root: TurnId,
+        run: TurnId,
         park: ParkId,
-        new_root: Option<TurnId>,
+        new_run: Option<TurnId>,
     },
-    /// Close the session: every listed root ends `Cancelled`.
-    CloseSession { roots: Vec<TurnId> },
+    /// Close the session: every listed run ends `Cancelled`.
+    CloseSession { runs: Vec<TurnId> },
 }
 
 impl ControlIntentKind {
@@ -143,7 +143,7 @@ pub struct ControlIntent {
     pub kind: ControlIntentKind,
     pub state: ControlIntentState,
     pub created_at_ms: u64,
-    /// The engine's handle on the root's stopped execution, copied from its
+    /// The engine's handle on the run's stopped execution, copied from its
     /// park by a verb whose store half deletes the park (a cancel or a
     /// fork), so the engine half can still find the execution to release.
     pub engine: Option<EnginePark>,
@@ -182,14 +182,14 @@ impl ControlIntent {
     }
 
     /// The deletion this intent records, when it is a session's
-    /// `CloseSession`: the terminal evidence every root of the deleted
+    /// `CloseSession`: the terminal evidence every run of the deleted
     /// session answers.
     #[must_use]
-    pub fn session_deleted_terminal(&self, root: &TurnId) -> Option<super::RootTerminal> {
-        matches!(self.kind, ControlIntentKind::CloseSession { .. }).then(|| super::RootTerminal {
+    pub fn session_deleted_terminal(&self, run: &TurnId) -> Option<super::RunTerminal> {
+        matches!(self.kind, ControlIntentKind::CloseSession { .. }).then(|| super::RunTerminal {
             session_id: self.session_id.clone(),
-            root: root.clone(),
-            cause: super::RootTerminalCause::SessionDeleted { intent: self.id },
+            run: run.clone(),
+            cause: super::RunTerminalCause::SessionDeleted { intent: self.id },
             head_revision: None,
             at_ms: self.created_at_ms,
         })
@@ -247,11 +247,11 @@ impl ControlIntent {
 }
 
 impl ControlIntent {
-    /// The roots a `CloseSession` intent closed; empty for every other kind.
+    /// The runs a `CloseSession` intent closed; empty for every other kind.
     #[must_use]
-    pub fn closed_roots(&self) -> &[TurnId] {
+    pub fn closed_runs(&self) -> &[TurnId] {
         match &self.kind {
-            ControlIntentKind::CloseSession { roots } => roots,
+            ControlIntentKind::CloseSession { runs } => runs,
             _ => &[],
         }
     }
@@ -293,8 +293,8 @@ impl IntentApplication {
 /// transaction read it. The answer carries the intent as it is to be stored:
 /// a store writes it when it differs from `stored`.
 ///
-/// A redrive applies only while its park still names it — the same root, the
-/// same park, and the park's `resume_intent` this redrive. Otherwise the root
+/// A redrive applies only while its park still names it — the same run, the
+/// same park, and the park's `resume_intent` this redrive. Otherwise the run
 /// ran past it: it committed (the park is gone), or it parked again (a
 /// re-park clears `resume_intent`), so resuming now would wake an execution
 /// that already re-decided, or one the store has ended. Such a redrive is
@@ -308,10 +308,10 @@ pub fn decide_intent_application(
     match stored.state {
         ControlIntentState::Pending => {
             if let ControlIntentKind::Redrive {
-                root, park: parked, ..
+                run, park: parked, ..
             } = &stored.kind
                 && !park.is_some_and(|park| {
-                    park.turn_id == *root
+                    park.turn_id == *run
                         && park.park_id == *parked
                         && park.resume_intent == Some(stored.id)
                 })
@@ -390,49 +390,49 @@ pub fn stored_intent_kind(kind: &ControlIntentKind) -> Result<String, super::Sto
     })
 }
 
-/// The verb an operator applies to a parked root (ADR 0104 O4).
+/// The verb an operator applies to a parked run (ADR 0104 O4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RootVerb {
-    /// Resume the root's stopped execution under the same fence.
+pub enum RunVerb {
+    /// Resume the run's stopped execution under the same fence.
     Redrive,
-    /// End the root `Cancelled`, settling the inputs it held.
+    /// End the run `Cancelled`, settling the inputs it held.
     Cancel,
-    /// End the root and drive the inputs it held under a new root.
+    /// End the run and execute the inputs it held under a new run.
     Fork,
 }
 
-/// An operator's verb on the parked root `root` of `session_id`, compared
+/// An operator's verb on the parked run `run` of `session_id`, compared
 /// against the park it saw (`park`, the CAS token).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RootIntentRequest {
+pub struct RunIntentRequest {
     pub session_id: SessionId,
-    pub root: TurnId,
+    pub run: TurnId,
     pub park: ParkId,
-    pub verb: RootVerb,
+    pub verb: RunVerb,
 }
 
-/// Why a root verb's store half refused: nothing was written.
+/// Why a run verb's store half refused: nothing was written.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum RootIntentRefused {
-    /// The root holds no park.
-    #[error("the root is not parked")]
+pub enum RunIntentRefused {
+    /// The run holds no park.
+    #[error("the run is not parked")]
     NotParked,
-    /// The root parked again since the caller read it: act on `current`.
+    /// The run parked again since the caller read it: act on `current`.
     #[error("the park was superseded by park {current}")]
     ParkSuperseded { current: ParkId },
-    /// A redrive of the root already runs, or is on its way: cancel the
-    /// running root cooperatively instead, or wait for it to park again.
-    #[error("the root is being redriven by intent {intent}")]
+    /// A redrive of the run already runs, or is on its way: cancel the
+    /// running run cooperatively instead, or wait for it to park again.
+    #[error("the run is being redriven by intent {intent}")]
     Redriving { intent: ControlIntentId },
-    /// A cancel or fork of the root is still open.
-    #[error("intent {intent} is still open on the root")]
+    /// A cancel or fork of the run is still open.
+    #[error("intent {intent} is still open on the run")]
     IntentOpen { intent: ControlIntentId },
     /// The session was deleted; its close intent remains durable.
     #[error("the session was deleted")]
     SessionDeleted,
-    /// The session is closing: its `CloseSession` intent ends every root.
+    /// The session is closing: its `CloseSession` intent ends every run.
     #[error("the session is closing")]
     SessionClosing,
     /// The store did not answer.
@@ -440,9 +440,9 @@ pub enum RootIntentRefused {
     Store(#[from] super::StoreError),
 }
 
-/// What a root verb's store transaction read, for [`decide_root_intent`].
+/// What a run verb's store transaction read, for [`decide_run_intent`].
 #[derive(Clone, Copy, Debug)]
-pub struct RootIntentFacts<'a> {
+pub struct RunIntentFacts<'a> {
     /// The session's `CloseSession` intent, when it is closing.
     pub closing: Option<ControlIntentId>,
     /// The session's park.
@@ -454,76 +454,76 @@ pub struct RootIntentFacts<'a> {
     pub resume: Option<&'a ControlIntent>,
 }
 
-/// What a root verb's store half writes besides its own intent.
+/// What a run verb's store half writes besides its own intent.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RootIntentPlan {
+pub struct RunIntentPlan {
     /// The park the verb acts on.
     pub park: super::TurnPark,
-    /// Open redrives of the root a cancel or fork supersedes.
+    /// Open redrives of the run a cancel or fork supersedes.
     pub supersede: Vec<ControlIntent>,
 }
 
 /// Decide `request` against what its transaction read (D2 §1.4, §2): the
-/// park must be the root's and the one the caller saw; no other cancel or
+/// park must be the run's and the one the caller saw; no other cancel or
 /// fork may be open; a cancel or fork refuses while the redrive the park
-/// names has resumed the root, and otherwise supersedes every redrive of the
-/// root still open — the one the park names and any older one a re-park left
-/// behind — so no redrive can resume the root after it ends.
+/// names has resumed the run, and otherwise supersedes every redrive of the
+/// run still open — the one the park names and any older one a re-park left
+/// behind — so no redrive can resume the run after it ends.
 ///
 /// # Errors
 /// The refusal the verb answers; nothing is written.
-pub fn decide_root_intent(
-    request: &RootIntentRequest,
-    facts: &RootIntentFacts<'_>,
-) -> Result<RootIntentPlan, RootIntentRefused> {
+pub fn decide_run_intent(
+    request: &RunIntentRequest,
+    facts: &RunIntentFacts<'_>,
+) -> Result<RunIntentPlan, RunIntentRefused> {
     if facts.closing.is_some() {
-        return Err(RootIntentRefused::SessionClosing);
+        return Err(RunIntentRefused::SessionClosing);
     }
-    let root_verb = |intent: &&ControlIntent| match &intent.kind {
-        ControlIntentKind::Redrive { root, .. }
-        | ControlIntentKind::Cancel { root, .. }
-        | ControlIntentKind::Fork { root, .. } => *root == request.root,
+    let run_verb = |intent: &&ControlIntent| match &intent.kind {
+        ControlIntentKind::Redrive { run, .. }
+        | ControlIntentKind::Cancel { run, .. }
+        | ControlIntentKind::Fork { run, .. } => *run == request.run,
         ControlIntentKind::CloseSession { .. } => false,
     };
-    if let Some(open) = facts.open_verbs.iter().filter(root_verb).find(|intent| {
+    if let Some(open) = facts.open_verbs.iter().filter(run_verb).find(|intent| {
         matches!(
             intent.kind,
             ControlIntentKind::Cancel { .. } | ControlIntentKind::Fork { .. }
         )
     }) {
-        return Err(RootIntentRefused::IntentOpen { intent: open.id });
+        return Err(RunIntentRefused::IntentOpen { intent: open.id });
     }
     let park = facts
         .park
-        .filter(|park| park.turn_id == request.root)
-        .ok_or(RootIntentRefused::NotParked)?;
+        .filter(|park| park.turn_id == request.run)
+        .ok_or(RunIntentRefused::NotParked)?;
     if park.park_id != request.park {
-        return Err(RootIntentRefused::ParkSuperseded {
+        return Err(RunIntentRefused::ParkSuperseded {
             current: park.park_id,
         });
     }
-    // A redrive the park names: owed means it has not resumed the root yet;
-    // acknowledged means it did, and the root runs until it parks again
+    // A redrive the park names: owed means it has not resumed the run yet;
+    // acknowledged means it did, and the run executes until it parks again
     // (which clears `resume_intent`) or commits (which clears the park).
     let redrive = facts.resume.filter(|intent| {
         intent.engine_half_owed() || matches!(intent.state, ControlIntentState::Acknowledged { .. })
     });
     match (request.verb, redrive) {
-        (RootVerb::Redrive, Some(redrive)) => {
-            return Err(RootIntentRefused::Redriving { intent: redrive.id });
+        (RunVerb::Redrive, Some(redrive)) => {
+            return Err(RunIntentRefused::Redriving { intent: redrive.id });
         }
         (_, Some(redrive)) if !redrive.engine_half_owed() => {
-            return Err(RootIntentRefused::Redriving { intent: redrive.id });
+            return Err(RunIntentRefused::Redriving { intent: redrive.id });
         }
         _ => {}
     }
-    let supersede = if request.verb == RootVerb::Redrive {
+    let supersede = if request.verb == RunVerb::Redrive {
         Vec::new()
     } else {
         let mut open: Vec<ControlIntent> = facts
             .open_verbs
             .iter()
-            .filter(root_verb)
+            .filter(run_verb)
             .filter(|intent| matches!(intent.kind, ControlIntentKind::Redrive { .. }))
             .cloned()
             .collect();
@@ -533,28 +533,28 @@ pub fn decide_root_intent(
         open.sort_by_key(|intent| intent.id);
         open
     };
-    Ok(RootIntentPlan {
+    Ok(RunIntentPlan {
         park: park.clone(),
         supersede,
     })
 }
 
-/// The root a fork of input root `root` drives its held inputs under:
-/// `{root}~fork{intent}` (D2 §1.4). The transaction reserves the intent id
+/// The run a fork of input run `run` executes its held inputs under:
+/// `{run}~fork{intent}` (D2 §1.4). The transaction reserves the intent id
 /// before binding the released members, so the name is unique and stable.
 #[must_use]
-pub fn forked_root(root: &TurnId, intent: ControlIntentId) -> TurnId {
-    root.with_suffix(format_args!("~fork{intent}"))
+pub fn forked_run(run: &TurnId, intent: ControlIntentId) -> TurnId {
+    run.with_suffix(format_args!("~fork{intent}"))
 }
 
 /// The deployment's control-intent ledger (FIG-3600 S7, ADR 0104 O4, astra
 /// B6), carried by the session store factory.
 ///
-/// Every method is required — [`open_root_intent`](Self::open_root_intent)
+/// Every method is required — [`open_run_intent`](Self::open_run_intent)
 /// excepted while the verb stores land: a factory states its answer, and a
 /// decorator forwards to the catalog it wraps. A factory with no ledger
 /// returns `StoreError::UnsupportedStoreOperation`, which fails a session
-/// deletion closed instead of deleting a session whose roots nothing closed.
+/// deletion closed instead of deleting a session whose runs nothing closed.
 #[async_trait::async_trait]
 pub trait ControlIntentStore: Send + Sync {
     /// Begin closing session `session_id`: the store half of its
@@ -562,15 +562,15 @@ pub trait ControlIntentStore: Send + Sync {
     ///
     /// - records the intent on the session (`session_meta.closing_intent`):
     ///   acceptance then refuses the session, and admission answers idle;
-    /// - raises the session's drive epoch, so every fence an earlier
+    /// - raises the session's shift epoch, so every fence an earlier
     ///   admission sealed is stale;
-    /// - ends every root without terminal evidence `Cancelled` with cause
-    ///   [`SessionDeleted`](super::RootTerminalCause::SessionDeleted), deletes
+    /// - ends every run without terminal evidence `Cancelled` with cause
+    ///   [`SessionDeleted`](super::RunTerminalCause::SessionDeleted), deletes
     ///   the session's park (feed `Cancelled{SessionDeleted}`) and settles its
     ///   open queued run;
     /// - supersedes every owed intent of the session;
-    /// - inserts the `CloseSession { roots }` intent, `Pending`, naming the
-    ///   roots it ended, with its `ControlIntent` obligation armed due now.
+    /// - inserts the `CloseSession { runs }` intent, `Pending`, naming the
+    ///   runs it ended, with its `ControlIntent` obligation armed due now.
     ///
     /// Idempotent: a retry finds the session's intent and answers it, also
     /// after the session is deleted (the intent is its tombstone). `None`
@@ -585,7 +585,7 @@ pub trait ControlIntentStore: Send + Sync {
     /// Decide the application of intent `id`'s engine half at `at_ms`:
     /// re-read its state, and for a redrive its session's park, in one
     /// transaction, and write what [`decide_intent_application`] decides — a
-    /// redrive the root ran past settled. An unknown id is
+    /// redrive the run ran past settled. An unknown id is
     /// `StoreError::ControlIntentUnknown`.
     async fn claim_intent_application(
         &self,
@@ -624,35 +624,35 @@ pub trait ControlIntentStore: Send + Sync {
         id: ControlIntentId,
     ) -> Result<Option<ControlIntent>, super::StoreError>;
 
-    /// Open an operator's verb on a parked root: the store half of its
-    /// intent, in one transaction, decided by [`decide_root_intent`].
+    /// Open an operator's verb on a parked run: the store half of its
+    /// intent, in one transaction, decided by [`decide_run_intent`].
     ///
     /// - **Redrive** records the intent on the park (`resume_intent`) and
-    ///   feeds `RedriveRequested`. The drive epoch does not move: the parked
-    ///   root's sealed fence stays current, so the resumed execution replays
+    ///   feeds `RedriveRequested`. The shift epoch does not move: the parked
+    ///   run's sealed fence stays current, so the resumed execution replays
     ///   under it.
-    /// - **Cancel** writes the root's terminal evidence
+    /// - **Cancel** writes the run's terminal evidence
     ///   (`OperatorCancelled`), settles the inputs it held `Cancelled` and
-    ///   hands its claims' other rows back open (a queued root's run settles
+    ///   hands its claims' other rows back open (a queued run's execution settles
     ///   with it), deletes the park (feed `Cancelled{Operator}`), supersedes
-    ///   an open redrive, and raises the drive epoch under admission
+    ///   an open redrive, and raises the shift epoch under admission
     ///   `intent:{id}`.
     /// - **Fork** is a cancel whose held inputs return open, bound to the
-    ///   new root [`forked_root`] (an input root) in their original order;
-    ///   a queued root's members return open unbound, and the next admission
-    ///   mints their root. The cause is `Forked`.
+    ///   new run [`forked_run`] (an input run) in their original order;
+    ///   a queued run's members return open unbound, and the next admission
+    ///   mints their run. The cause is `Forked`.
     ///
     /// The intent is `Pending`, carrying the park's engine handle for the
     /// engine half, with its `ControlIntent` obligation armed due now.
     ///
     /// A factory with no verb store answers `UnsupportedStoreOperation`.
-    async fn open_root_intent(
+    async fn open_run_intent(
         &self,
-        _request: &RootIntentRequest,
+        _request: &RunIntentRequest,
         _at_ms: u64,
-    ) -> Result<ControlIntent, RootIntentRefused> {
+    ) -> Result<ControlIntent, RunIntentRefused> {
         Err(super::StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::open_root_intent",
+            operation: "ControlIntentStore::open_run_intent",
         }
         .into())
     }
@@ -675,7 +675,7 @@ mod tests {
             session_id: SessionId::from("s"),
             format: CONTROL_INTENT_FORMAT,
             kind: ControlIntentKind::CloseSession {
-                roots: vec![TurnId::from("r")],
+                runs: vec![TurnId::from("r")],
             },
             state,
             created_at_ms: 1,
@@ -765,7 +765,7 @@ mod tests {
     fn redrive(state: ControlIntentState) -> ControlIntent {
         ControlIntent {
             kind: ControlIntentKind::Redrive {
-                root: TurnId::from("r"),
+                run: TurnId::from("r"),
                 park: super::super::ParkId::from_feed_sequence(3),
                 children: Vec::new(),
             },
@@ -792,7 +792,7 @@ mod tests {
     }
 
     /// H2 (FIG-3848): a redrive applies only while its park names it; one
-    /// the root ran past — the park gone, or re-parked without it — is
+    /// the run ran past — the park gone, or re-parked without it — is
     /// settled without resuming anything.
     #[test]
     fn a_redrive_applies_only_while_its_park_names_it() {
@@ -814,51 +814,51 @@ mod tests {
         }
     }
 
-    /// H2: a cancel or fork supersedes every owed redrive of its root, not
+    /// H2: a cancel or fork supersedes every owed redrive of its run, not
     /// only the one its park names.
     #[test]
-    fn a_cancel_supersedes_every_owed_redrive_of_its_root() {
+    fn a_cancel_supersedes_every_owed_redrive_of_its_run() {
         let orphaned = redrive(ControlIntentState::Pending);
-        let request = RootIntentRequest {
+        let request = RunIntentRequest {
             session_id: SessionId::from("s"),
-            root: TurnId::from("r"),
+            run: TurnId::from("r"),
             park: super::super::ParkId::from_feed_sequence(3),
-            verb: RootVerb::Cancel,
+            verb: RunVerb::Cancel,
         };
         let reparked = park(None);
-        let plan = decide_root_intent(
+        let plan = decide_run_intent(
             &request,
-            &RootIntentFacts {
+            &RunIntentFacts {
                 closing: None,
                 park: Some(&reparked),
                 open_verbs: std::slice::from_ref(&orphaned),
                 resume: None,
             },
         )
-        .expect("cancel of a re-parked root");
+        .expect("cancel of a re-parked run");
         assert_eq!(plan.supersede, vec![orphaned]);
     }
 
-    /// F09: a redrive whose obligation stalled owes nothing, so the root it
+    /// F09: a redrive whose obligation stalled owes nothing, so the run it
     /// would have resumed takes a new verb instead of answering `Redriving`
     /// until an operator re-arms the old one.
     #[test]
-    fn a_stalled_redrive_does_not_hold_its_root() {
+    fn a_stalled_redrive_does_not_hold_its_run() {
         let stalled = ControlIntent {
             obligation: armed(ObligationState::Stalled),
             ..redrive(ControlIntentState::Pending)
         };
         let named = park(Some(4));
-        for verb in [RootVerb::Redrive, RootVerb::Cancel, RootVerb::Fork] {
-            let request = RootIntentRequest {
+        for verb in [RunVerb::Redrive, RunVerb::Cancel, RunVerb::Fork] {
+            let request = RunIntentRequest {
                 session_id: SessionId::from("s"),
-                root: TurnId::from("r"),
+                run: TurnId::from("r"),
                 park: super::super::ParkId::from_feed_sequence(3),
                 verb,
             };
-            decide_root_intent(
+            decide_run_intent(
                 &request,
-                &RootIntentFacts {
+                &RunIntentFacts {
                     closing: None,
                     park: Some(&named),
                     open_verbs: &[],
@@ -906,7 +906,7 @@ mod tests {
             )
             .expect("decode");
             assert_eq!(decoded, stored);
-            assert_eq!(decoded.closed_roots(), &[TurnId::from("r")]);
+            assert_eq!(decoded.closed_runs(), &[TurnId::from("r")]);
         }
         let (_, json) = stored_intent_state(&refused()).expect("state");
         assert_eq!(

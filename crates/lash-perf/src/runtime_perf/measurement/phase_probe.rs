@@ -180,10 +180,10 @@ async fn deep_turn_session(
         .provider_control()?
         .before_next_completion(Box::new(move || {
             Box::pin(async move {
-                let root = durable.unfinished_root().await.map_err(|error| {
+                let run = durable.unfinished_run().await.map_err(|error| {
                     lash_core::llm::transport::LlmTransportError::new(error.to_string())
                 })?;
-                if !root.is_some_and(|root| root.root == turn_id) {
+                if !run.is_some_and(|run| run.run == turn_id) {
                     return Err(lash_core::llm::transport::LlmTransportError::new(
                         "deep composition ingress requires its durably running turn",
                     ));
@@ -419,9 +419,9 @@ async fn run_once_inner(
         .then(lash_core::perf_witness::Collector::install)
         .transpose()?;
 
-    let mut run = RunRecorder::start(scenario, chat_turns);
+    let mut executed = RunRecorder::start(scenario, chat_turns);
 
-    let (sqlite_root, mut runtime) = run
+    let (sqlite_root, mut runtime) = executed
         .build(async {
             let sqlite_root = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen)
                 || scenario.is_durable()
@@ -461,7 +461,8 @@ async fn run_once_inner(
         })
         .await?;
 
-    run.seed(async { seed_runtime_state(&mut runtime, scenario).await })
+    executed
+        .seed(async { seed_runtime_state(&mut runtime, scenario).await })
         .await?;
 
     if matches!(scenario, RuntimePerfScenario::RlmToolCatalogWarm) {
@@ -625,217 +626,220 @@ async fn run_once_inner(
         let observation_ref = &trigger_delivery_observation;
         let probe_ref = &phase_probe;
         let deep_session_ref = &deep_session;
-        run.turn_then(
-            turn_index,
-            async move {
-                let runtime = runtime_ref;
-                let extra_counters = counters_ref;
-                let trigger_delivery_observation = observation_ref;
-                let phase_probe = probe_ref;
-                let cancel = CancellationToken::new();
-                let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
-                    let turn_id =
-                        TurnId::fixture(format!("runtime-perf-scoped-{}", turn_index + 1));
-                    runtime_perf_timed(
-                        scenario,
-                        turn_index,
-                        "run_turn",
-                        Some(cancel.clone()),
-                        runtime.run_turn_with_id(turn_input, &turn_id, cancel),
-                    )
-                    .await
-                } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-                    let turn_id = TurnId::fixture(format!(
-                        "runtime-perf-cancel-round-trip-{}",
-                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-                    ));
-                    let (turn, duration) = runtime_perf_timed(
-                        scenario,
-                        turn_index,
-                        "run_turn",
-                        Some(cancel.clone()),
-                        runtime.run_cancel_round_trip(
-                            turn_input,
-                            &turn_id,
-                            cancel,
-                            &format!("runtime-perf-cancel-request-{}", turn_index + 1),
-                        ),
-                    )
-                    .await?;
-                    extra_phase_profile.insert(
-                        "turn_cancel.request_to_token_to_seal".to_string(),
-                        RuntimePerfPhaseRunResult {
-                            samples: 1,
-                            duration_ms: round3(duration.as_secs_f64() * 1000.0),
-                            allocations: zero_allocation_delta(),
-                            rss_growth_kb: None,
-                        },
-                    );
-                    Ok(turn)
-                } else if matches!(scenario, RuntimePerfScenario::IngressAdmissionProjection) {
-                    let turn_id = TurnId::fixture(format!(
-                        "runtime-perf-ingress-projection-{}",
-                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-                    ));
-                    let (turn, duration) = Box::pin(runtime_perf_timed(
-                        scenario,
-                        turn_index,
-                        "run_turn",
-                        Some(cancel.clone()),
-                        runtime.run_ingress_admission_projection(
-                            turn_input,
-                            &turn_id,
-                            cancel,
-                            &format!("runtime-perf-ingress-projection-{}", turn_index + 1),
-                        ),
-                    ))
-                    .await?;
-                    extra_phase_profile.insert(
-                        "turn_input_ingress.enqueue_to_admission_to_projection".to_string(),
-                        RuntimePerfPhaseRunResult {
-                            samples: 1,
-                            duration_ms: round3(duration.as_secs_f64() * 1000.0),
-                            allocations: zero_allocation_delta(),
-                            rss_growth_kb: None,
-                        },
-                    );
-                    Ok(turn)
-                } else if let (Some(turn_id), Some(session)) =
-                    (deep_turn_id.as_ref(), deep_session_ref.as_ref())
-                {
-                    runtime_perf_timed(
-                        scenario,
-                        turn_index,
-                        "run_turn",
-                        Some(cancel.clone()),
-                        Box::pin(runtime.turn_entry().run(
-                            session,
-                            turn_input,
-                            Some(turn_id),
-                            cancel,
-                        )),
-                    )
-                    .await
-                } else if trigger_end_to_end {
-                    let (turn, observation) = tokio::join!(
+        executed
+            .turn_then(
+                turn_index,
+                async move {
+                    let runtime = runtime_ref;
+                    let extra_counters = counters_ref;
+                    let trigger_delivery_observation = observation_ref;
+                    let phase_probe = probe_ref;
+                    let cancel = CancellationToken::new();
+                    let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
+                        let turn_id =
+                            TurnId::fixture(format!("runtime-perf-scoped-{}", turn_index + 1));
+                        runtime_perf_timed(
+                            scenario,
+                            turn_index,
+                            "run_turn",
+                            Some(cancel.clone()),
+                            runtime.run_turn_with_id(turn_input, &turn_id, cancel),
+                        )
+                        .await
+                    } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
+                        let turn_id = TurnId::fixture(format!(
+                            "runtime-perf-cancel-round-trip-{}",
+                            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+                        ));
+                        let (turn, duration) = runtime_perf_timed(
+                            scenario,
+                            turn_index,
+                            "run_turn",
+                            Some(cancel.clone()),
+                            runtime.run_cancel_round_trip(
+                                turn_input,
+                                &turn_id,
+                                cancel,
+                                &format!("runtime-perf-cancel-request-{}", turn_index + 1),
+                            ),
+                        )
+                        .await?;
+                        extra_phase_profile.insert(
+                            "turn_cancel.request_to_token_to_seal".to_string(),
+                            RuntimePerfPhaseRunResult {
+                                samples: 1,
+                                duration_ms: round3(duration.as_secs_f64() * 1000.0),
+                                allocations: zero_allocation_delta(),
+                                rss_growth_kb: None,
+                            },
+                        );
+                        Ok(turn)
+                    } else if matches!(scenario, RuntimePerfScenario::IngressAdmissionProjection) {
+                        let turn_id = TurnId::fixture(format!(
+                            "runtime-perf-ingress-projection-{}",
+                            lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+                        ));
+                        let (turn, duration) = Box::pin(runtime_perf_timed(
+                            scenario,
+                            turn_index,
+                            "run_turn",
+                            Some(cancel.clone()),
+                            runtime.run_ingress_admission_projection(
+                                turn_input,
+                                &turn_id,
+                                cancel,
+                                &format!("runtime-perf-ingress-projection-{}", turn_index + 1),
+                            ),
+                        ))
+                        .await?;
+                        extra_phase_profile.insert(
+                            "turn_input_ingress.enqueue_to_admission_to_projection".to_string(),
+                            RuntimePerfPhaseRunResult {
+                                samples: 1,
+                                duration_ms: round3(duration.as_secs_f64() * 1000.0),
+                                allocations: zero_allocation_delta(),
+                                rss_growth_kb: None,
+                            },
+                        );
+                        Ok(turn)
+                    } else if let (Some(turn_id), Some(session)) =
+                        (deep_turn_id.as_ref(), deep_session_ref.as_ref())
+                    {
+                        runtime_perf_timed(
+                            scenario,
+                            turn_index,
+                            "run_turn",
+                            Some(cancel.clone()),
+                            Box::pin(runtime.turn_entry().run(
+                                session,
+                                turn_input,
+                                Some(turn_id),
+                                cancel,
+                            )),
+                        )
+                        .await
+                    } else if trigger_end_to_end {
+                        let (turn, observation) = tokio::join!(
+                            runtime_perf_timed(
+                                scenario,
+                                turn_index,
+                                "run_turn",
+                                Some(cancel.clone()),
+                                runtime.run_turn(turn_input, cancel),
+                            ),
+                            runtime.observe_trigger_delivery_terminals(),
+                        );
+                        phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
+                        *trigger_delivery_observation.lock_recover() = Some(observation?);
+                        turn
+                    } else {
                         runtime_perf_timed(
                             scenario,
                             turn_index,
                             "run_turn",
                             Some(cancel.clone()),
                             runtime.run_turn(turn_input, cancel),
-                        ),
-                        runtime.observe_trigger_delivery_terminals(),
-                    );
-                    phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
-                    *trigger_delivery_observation.lock_recover() = Some(observation?);
-                    turn
-                } else {
+                        )
+                        .await
+                    }
+                    .with_context(|| {
+                        format!(
+                            "run runtime perf scenario {} turn {}",
+                            scenario.name(),
+                            turn_index + 1
+                        )
+                    })?;
+                    if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
+                        if !matches!(
+                            turn.outcome,
+                            TurnOutcome::Stopped(
+                                lash_core::facade_support::TurnStop::Cancelled { .. }
+                            )
+                        ) {
+                            anyhow::bail!(
+                                "cancel round-trip turn did not finish cancelled: {:?}",
+                                turn.outcome
+                            );
+                        }
+                    } else {
+                        validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                    }
+                    if let Some(variant) = catalog_variant {
+                        let observation = runtime.finish_tool_catalog_observation();
+                        extra_counters.lock_recover().insert(
+                            format!("tool_catalog.{variant}.cache_state"),
+                            observation.cache_state,
+                        );
+                        extra_counters.lock_recover().insert(
+                            format!("tool_catalog.{variant}.setup_recomposition_count"),
+                            observation.setup_recomposition_count,
+                        );
+                        extra_counters.lock_recover().insert(
+                            format!("tool_catalog.{variant}.recomposition_count"),
+                            observation.recomposition_count,
+                        );
+                    }
+                    Ok(TurnRun {
+                        value: (),
+                        tail: TurnTail {
+                            phase_profile: std::mem::take(&mut extra_phase_profile),
+                            turn_usage: turn.usage,
+                            ..TurnTail::default()
+                        },
+                    })
+                },
+                async {
                     runtime_perf_timed(
                         scenario,
                         turn_index,
-                        "run_turn",
-                        Some(cancel.clone()),
-                        runtime.run_turn(turn_input, cancel),
+                        "await_background_work",
+                        None,
+                        runtime.await_background_work(),
                     )
                     .await
-                }
-                .with_context(|| {
-                    format!(
-                        "run runtime perf scenario {} turn {}",
-                        scenario.name(),
-                        turn_index + 1
-                    )
-                })?;
-                if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-                    if !matches!(
-                        turn.outcome,
-                        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
-                    ) {
-                        anyhow::bail!(
-                            "cancel round-trip turn did not finish cancelled: {:?}",
-                            turn.outcome
+                    .with_context(|| {
+                        format!(
+                            "await background work for {} turn {}",
+                            scenario.name(),
+                            turn_index + 1
+                        )
+                    })?;
+                    if trigger_end_to_end {
+                        let observation = trigger_delivery_observation
+                            .lock_recover()
+                            .take()
+                            .context("trigger delivery observation was not collected")?;
+                        extra_counters.lock_recover().insert(
+                            "trigger.delivery_process_count".to_string(),
+                            observation.process_count,
+                        );
+                        extra_counters.lock_recover().insert(
+                            "trigger.delivery_durable_claim_count".to_string(),
+                            observation.durable_claim_count,
+                        );
+                        extra_counters.lock_recover().insert(
+                            "trigger.delivery_terminal_count".to_string(),
+                            observation.terminal_count,
                         );
                     }
-                } else {
-                    validate_runtime_perf_turn(scenario, turn_index, &turn)?;
-                }
-                if let Some(variant) = catalog_variant {
-                    let observation = runtime.finish_tool_catalog_observation();
-                    extra_counters.lock_recover().insert(
-                        format!("tool_catalog.{variant}.cache_state"),
-                        observation.cache_state,
-                    );
-                    extra_counters.lock_recover().insert(
-                        format!("tool_catalog.{variant}.setup_recomposition_count"),
-                        observation.setup_recomposition_count,
-                    );
-                    extra_counters.lock_recover().insert(
-                        format!("tool_catalog.{variant}.recomposition_count"),
-                        observation.recomposition_count,
-                    );
-                }
-                Ok(TurnRun {
-                    value: (),
-                    tail: TurnTail {
-                        phase_profile: std::mem::take(&mut extra_phase_profile),
-                        turn_usage: turn.usage,
-                        ..TurnTail::default()
-                    },
-                })
-            },
-            async {
-                runtime_perf_timed(
-                    scenario,
-                    turn_index,
-                    "await_background_work",
-                    None,
-                    runtime.await_background_work(),
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "await background work for {} turn {}",
-                        scenario.name(),
-                        turn_index + 1
-                    )
-                })?;
-                if trigger_end_to_end {
-                    let observation = trigger_delivery_observation
-                        .lock_recover()
-                        .take()
-                        .context("trigger delivery observation was not collected")?;
-                    extra_counters.lock_recover().insert(
-                        "trigger.delivery_process_count".to_string(),
-                        observation.process_count,
-                    );
-                    extra_counters.lock_recover().insert(
-                        "trigger.delivery_durable_claim_count".to_string(),
-                        observation.durable_claim_count,
-                    );
-                    extra_counters.lock_recover().insert(
-                        "trigger.delivery_terminal_count".to_string(),
-                        observation.terminal_count,
-                    );
-                }
-                Ok(())
-            },
-            |_, _, tail| {
-                let mut phase_profile = phase_probe.take_completed();
-                phase_profile.extend(std::mem::take(&mut tail.phase_profile));
-                tail.phase_profile = phase_profile;
-                Ok(())
-            },
-        )
-        .await?;
+                    Ok(())
+                },
+                |_, _, tail| {
+                    let mut phase_profile = phase_probe.take_completed();
+                    phase_profile.extend(std::mem::take(&mut tail.phase_profile));
+                    tail.phase_profile = phase_profile;
+                    Ok(())
+                },
+            )
+            .await?;
         let cumulative_usage = runtime.settled_usage_report().await?;
         let usage_delta =
             lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
                 .map_err(anyhow::Error::msg)?;
-        run.record_last_turn_usage(usage_delta, cumulative_usage);
+        executed.record_last_turn_usage(usage_delta, cumulative_usage);
     }
 
-    let (state, cumulative_usage) = run
+    let (state, cumulative_usage) = executed
         .export(async {
             let state = if let Some(session) = &deep_session {
                 session.admin().state().export().await
@@ -912,7 +916,7 @@ async fn run_once_inner(
         let _ = std::fs::remove_dir_all(root);
     }
 
-    Ok(run.finish(RunTail {
+    Ok(executed.finish(RunTail {
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state.read_view().messages().len(),
         extra_counters: std::mem::take(&mut extra_counters.lock_recover()),

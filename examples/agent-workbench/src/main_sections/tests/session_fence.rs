@@ -344,7 +344,7 @@ finish(await handle);
             Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
         )
         .await;
-    // The engine drives a session's roots on the most recent open of it, so
+    // The engine works a session's runs on the most recent open of it, so
     // the turn is sent from the session the probe is installed on, under a
     // claim as the send route would take.
     let turn_id = TurnId::fixture(format!("workbench-turn-{}", uuid::Uuid::new_v4()));

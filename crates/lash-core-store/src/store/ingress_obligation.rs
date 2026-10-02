@@ -1,5 +1,5 @@
 //! Ingress obligations (ADR 0109 §3, FIG-3851): every admitted turn input
-//! and queued-work batch owes its session a drive.
+//! and queued-work batch owes its session a shift.
 //!
 //! The admission transaction arms the row it inserts, under an id derived
 //! from the row's own id, so the producer attempts delivery right after its

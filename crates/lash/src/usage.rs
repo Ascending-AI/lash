@@ -17,11 +17,11 @@
 //!
 //! Model usage is engine-owned accounting (ADR 0125). Each spending effect
 //! (a turn's model call, a direct completion, a tool attempt) is one usage
-//! run: admitted to storage before its first provider attempt, and settled
+//! meter: admitted to storage before its first provider attempt, and settled
 //! with the facts of every attempt it dispatched once its outcome is
 //! journaled. Delivery survives the turn ending, forks, parks, deletion and
 //! a lost runtime. [`UsageCompleteness`] says how far the ledger can be
-//! trusted: an open run is delivery still pending, an unknown run dispatched
+//! trusted: an open meter is delivery still pending, an unknown meter dispatched
 //! and its amount will never be known.
 //!
 //! Absence is not zero (ADR 0031). A provider call the runtime aborted at an
@@ -46,8 +46,8 @@
 pub use lash_core::{
     OutstandingUsageAttempt, OwnerUsage, OwnerUsageRow, TokenUsage, TokenUsageOverflow,
     UsageCompleteness, UsageFactBody, UsageFactCursor, UsageFactPage, UsageFactRecord,
-    UsageOwnerRetired, UsageReporting, UsageRunCursor, UsageRunDispatch, UsageRunFilter,
-    UsageRunOutcome, UsageRunPage, UsageRunRecord, UsageRunState, UsageUnknownReason,
+    UsageMeterCursor, UsageMeterDispatch, UsageMeterFilter, UsageMeterOutcome, UsageMeterPage,
+    UsageMeterRecord, UsageMeterState, UsageOwnerRetired, UsageReporting, UsageUnknownReason,
     facade_support::ReconciledUsageAttempt, facade_support::SessionUsageReport,
     facade_support::UsageAttributionKey, facade_support::UsageReconciliationReport,
     facade_support::UsageReportRow, facade_support::UsageTotals,
@@ -68,5 +68,5 @@ pub mod sources {
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::usage_accounting::{
-    UsageEffectKey, UsageFactIdentity, UsageFactKind, UsageRunId,
+    UsageEffectKey, UsageFactIdentity, UsageFactKind, UsageMeterId,
 };

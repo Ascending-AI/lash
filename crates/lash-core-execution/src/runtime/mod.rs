@@ -3,10 +3,10 @@ pub use lash_core_store::turn_input_vocabulary::*;
 pub mod attachment_delivery;
 pub mod causal;
 pub(crate) use lash_core_ids::clock;
-pub mod drive;
 pub mod effect;
 pub mod host;
 mod owner;
+pub mod shift;
 #[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
 pub use owner::ExecutionOwner;
@@ -36,8 +36,8 @@ pub use lash_core_store::usage;
 pub(crate) use lash_core_store::usage;
 mod park;
 pub use park::{
-    StoreParkRecovery, TurnLaneHead, head_input, head_input_root, input_root, record_root_park,
-    root_park_recorded, turn_lane_head,
+    StoreParkRecovery, TurnLaneHead, head_input, head_input_run, input_run, record_run_park,
+    run_park_recorded, turn_lane_head,
 };
 mod deployment_store_decorator;
 #[cfg(any(test, feature = "testing"))]
@@ -146,7 +146,7 @@ pub use process::{
     abandoned_consumer_refusal, admitted_signal_wait, allocate_process_event_sequence,
     apply_parent_end_plan, apply_process_event_projection, artifact_referrer_ended,
     check_retained_start, check_trigger_delivery_start, current_epoch_ms, end_parent_scope,
-    end_session_roots, fold_process_record, lifetime, load_process_execution_env,
+    end_session_runs, fold_process_record, lifetime, load_process_execution_env,
     materialize_process_event_semantics, mint_process_id, parent_end_delivery_key,
     parent_end_requester, prepare_process_event_append, prepare_process_registration,
     prepare_process_start, prepare_process_transition, process_child_session_id,
@@ -206,7 +206,7 @@ pub use usage::{
 };
 pub use work::{
     NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
+    ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
     WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
 };
 

@@ -9,7 +9,7 @@
 //! retains another.
 
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use pretty_assertions::assert_eq;
 
 /// Commit a checkpoint whose tool state carries `generation`, returning its
@@ -76,13 +76,13 @@ async fn admit_on(
     session_id: &SessionId,
     base: &crate::store::SessionHeadRef,
 ) {
-    let lease = seal_drive_fence_for_test(store, session_id, "admission-base-retention").await;
+    let lease = seal_shift_fence_for_test(store, session_id, "admission-base-retention").await;
     store
         .retain_admission_base(&lease, base)
         .await
         .expect("retain the admission's base");
     store
-        .supersede_drive_epoch_for_test(&lease)
+        .supersede_shift_epoch_for_test(&lease)
         .await
         .expect("release the admission's lease");
 }

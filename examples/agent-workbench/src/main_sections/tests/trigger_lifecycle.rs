@@ -43,7 +43,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     register_test_trigger(&session).await;
     // The wakes the trigger's processes deliver stay queued while the host's
     // turn is active: the engine admits none of them during this test.
-    let _hold = double.hold_session_drive(&session_id).await;
+    let _hold = double.hold_session_shift(&session_id).await;
     let trigger_records = assert_remote_trigger_subscription_records_round_trip(
         double.stores().trigger_store().as_ref(),
         &session_id,

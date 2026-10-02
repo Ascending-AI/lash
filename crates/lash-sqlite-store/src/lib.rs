@@ -126,7 +126,7 @@ mod process_registry_completion;
 mod queued_work;
 mod recovery_leader;
 mod release_stamp;
-mod root_verbs;
+mod run_verbs;
 mod schema;
 mod schema_fragments;
 mod schema_layout;
@@ -134,7 +134,7 @@ mod session_delete_ledger;
 mod session_ingress;
 mod session_listing;
 mod session_meta;
-mod session_roots;
+mod session_runs;
 mod session_sql;
 #[cfg(test)]
 mod session_sql_tests;

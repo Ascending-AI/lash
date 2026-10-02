@@ -93,10 +93,10 @@ async fn resubmitted_terminal(
 }
 
 /// ADR 0101 §5.1: an input's submitted delivery is written once. An input
-/// addressed to a running root's turn that no checkpoint admitted keeps that
-/// address when the root ends: it is next-turn input by rule, at its own
+/// addressed to a running run's turn that no checkpoint admitted keeps that
+/// address when the run ends: it is next-turn input by rule, at its own
 /// sequence position, with no rewrite of its stored delivery, and the next
-/// root admits it ahead of later input.
+/// run admits it ahead of later input.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -105,39 +105,39 @@ pub async fn a_deferred_input_keeps_its_submitted_delivery(store: Arc<dyn Runtim
     let session = SessionId::from("ingress-immutable-delivery");
     let head = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&session, "head").with_source_key("delivery-root"),
+            pending_next_turn_input_draft(&session, "head").with_source_key("delivery-run"),
         )
         .await
         .expect("enqueue the head");
-    let fence = seal_drive_fence_for_test(&store, &session, "delivery-owner").await;
-    let admission = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session, "delivery-owner").await;
+    let admission = admitted_run(
         &store,
         &fence,
-        "delivery-root",
+        "delivery-run",
         AdmittedHead::Input(head.input_id.clone()),
     )
     .await;
-    let root_turn = TurnId::from("delivery-root");
+    let run_turn = TurnId::from("delivery-run");
     let addressed_draft = pending_active_turn_input_draft(
         &session,
-        &root_turn,
+        &run_turn,
         crate::TurnInputCheckpointBoundary::AfterWork,
-        "addressed to the running root",
+        "addressed to the running run",
     )
     .with_source_key("addressed-input");
     let addressed = store
         .enqueue_pending_turn_input(addressed_draft.clone())
         .await
-        .expect("an address to the running root is accepted");
+        .expect("an address to the running run is accepted");
     let submitted = addressed.state.ingress();
     let later = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session, "later"))
         .await
         .expect("enqueue later next-turn input");
-    end_root(
+    end_run(
         &store,
         &fence,
-        completing_admission("delivery-root", &admission),
+        completing_admission("delivery-run", &admission),
     )
     .await;
 
@@ -145,7 +145,7 @@ pub async fn a_deferred_input_keeps_its_submitted_delivery(store: Arc<dyn Runtim
     assert_eq!(
         after.input.state.ingress(),
         submitted,
-        "the root's end must not rewrite the input's submitted delivery"
+        "the run's end must not rewrite the input's submitted delivery"
     );
     assert!(
         matches!(after.status, crate::PendingTurnInputReadStatus::Open),
@@ -156,7 +156,7 @@ pub async fn a_deferred_input_keeps_its_submitted_delivery(store: Arc<dyn Runtim
         after.input.state.is_next_turn_input(None),
         "with no turn running the addressed input is next-turn input by rule"
     );
-    let next = admitted_root(
+    let next = admitted_run(
         &store,
         &fence,
         "delivery-next",
@@ -166,9 +166,9 @@ pub async fn a_deferred_input_keeps_its_submitted_delivery(store: Arc<dyn Runtim
     assert_eq!(
         next.input_ids(),
         vec![addressed.input_id.clone(), later.input_id.clone()],
-        "the next root admits the addressed input at its own position"
+        "the next run admits the addressed input at its own position"
     );
-    end_root(&store, &fence, completing_admission("delivery-next", &next)).await;
+    end_run(&store, &fence, completing_admission("delivery-next", &next)).await;
     let delivered = resubmitted_input(&store, addressed_draft, &addressed).await;
     assert_eq!(delivered.state.ingress(), submitted);
     assert_eq!(delivered.state.kind(), crate::TurnInputStateKind::Completed);
@@ -211,7 +211,7 @@ pub async fn an_unknown_turn_address_is_refused_without_a_row_or_sequence(
     };
     refused(session.clone(), "never-ran").await;
 
-    // Another session's running root is not this session's turn.
+    // Another session's running run is not this session's turn.
     store
         .admit_session(&lash_core::testing::store_fixtures::root_session_request(
             &other,
@@ -220,23 +220,23 @@ pub async fn an_unknown_turn_address_is_refused_without_a_row_or_sequence(
         .expect("admit the other session");
     let foreign_head = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&other, "other head").with_source_key("other-root"),
+            pending_next_turn_input_draft(&other, "other head").with_source_key("other-run"),
         )
         .await
         .expect("enqueue the other session's head");
-    let other_fence = seal_drive_fence_for_test(&store, &other, "other-owner").await;
-    admitted_root(
+    let other_fence = seal_shift_fence_for_test(&store, &other, "other-owner").await;
+    admitted_run(
         &store,
         &other_fence,
-        "other-root",
+        "other-run",
         AdmittedHead::Input(foreign_head.input_id.clone()),
     )
     .await;
-    refused(session.clone(), "other-root").await;
+    refused(session.clone(), "other-run").await;
 
     let first = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&session, "first").with_source_key("address-root"),
+            pending_next_turn_input_draft(&session, "first").with_source_key("address-run"),
         )
         .await
         .expect("enqueue the first input");
@@ -256,39 +256,39 @@ pub async fn an_unknown_turn_address_is_refused_without_a_row_or_sequence(
         "a refused address stored no row"
     );
 
-    let fence = seal_drive_fence_for_test(&store, &session, "address-owner").await;
-    let admission = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session, "address-owner").await;
+    let admission = admitted_run(
         &store,
         &fence,
-        "address-root",
+        "address-run",
         AdmittedHead::Input(first.input_id.clone()),
     )
     .await;
     let running = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session,
-            &TurnId::from("address-root"),
+            &TurnId::from("address-run"),
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "to the running root",
+            "to the running run",
         ))
         .await
-        .expect("an address to the running root is accepted");
+        .expect("an address to the running run is accepted");
     assert_eq!(running.enqueue_seq, 2);
-    end_root(
+    end_run(
         &store,
         &fence,
-        completing_admission("address-root", &admission),
+        completing_admission("address-run", &admission),
     )
     .await;
     let ended = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session,
-            &TurnId::from("address-root"),
+            &TurnId::from("address-run"),
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "to the ended root",
+            "to the ended run",
         ))
         .await
-        .expect("an address to an ended root is accepted");
+        .expect("an address to an ended run is accepted");
     assert!(
         ended.state.is_next_turn_input(None),
         "input addressed to an ended turn is next-turn input by rule"
@@ -425,7 +425,7 @@ pub async fn a_changed_resubmission_is_a_typed_conflict_for_every_kind(
 )]
 pub async fn every_terminal_ingress_item_leaves_a_tombstone(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("ingress-tombstones");
-    let fence = seal_drive_fence_for_test(&store, &session, "tombstone-owner").await;
+    let fence = seal_shift_fence_for_test(&store, &session, "tombstone-owner").await;
 
     // A withdrawn wake.
     let withdrawn = store
@@ -443,10 +443,10 @@ pub async fn every_terminal_ingress_item_leaves_a_tombstone(store: Arc<dyn Runti
         .enqueue_queued_work(wake(&session, "delivered-process", 1, "delivered"))
         .await
         .expect("enqueue the delivered wake");
-    drive_root_to_end(
+    execute_run_to_end(
         &store,
         &fence,
-        "tombstone-wake-root",
+        "tombstone-wake-run",
         AdmittedHead::Batch(delivered.batch_id.clone()),
     )
     .await;
@@ -553,7 +553,7 @@ pub async fn every_terminal_ingress_item_leaves_a_tombstone(store: Arc<dyn Runti
         .enqueue_pending_turn_input(delivered_draft.clone())
         .await
         .expect("enqueue the delivered input");
-    drive_root_to_end(
+    execute_run_to_end(
         &store,
         &fence,
         "delivered-input",
@@ -611,7 +611,7 @@ pub async fn a_settled_command_resubmitted_under_its_key_is_not_a_new_command(
     store: Arc<dyn RuntimeStore>,
 ) {
     let session = SessionId::from("ingress-command-resubmission");
-    let fence = seal_drive_fence_for_test(&store, &session, "command-owner").await;
+    let fence = seal_shift_fence_for_test(&store, &session, "command-owner").await;
     let command = store
         .enqueue_queued_work(keyed_command(&session, "host-command-1", "refresh"))
         .await
@@ -684,11 +684,11 @@ pub async fn composition_offers_mixed_authorities_and_merge_keys_as_one_prefix(
                 .expect("enqueue a wake"),
         );
     }
-    let fence = seal_drive_fence_for_test(&store, &session, "composition-owner").await;
-    let admission = admitted_root_with_policy(
+    let fence = seal_shift_fence_for_test(&store, &session, "composition-owner").await;
+    let admission = admitted_run_with_policy(
         &store,
         &fence,
-        "composition-root",
+        "composition-run",
         AdmittedHead::Batch(batches[0].batch_id.clone()),
         crate::testing::queued_work_admission_policy(64),
     )
@@ -718,7 +718,7 @@ pub async fn composition_offers_mixed_authorities_and_merge_keys_as_one_prefix(
 
 /// ADR 0101 §5.2: a host that keeps principals apart does so in its drain
 /// policy. A policy that stops at the first principal change admits only
-/// the head's run; the rest stays open for the next root, in order.
+/// the head's run; the rest stays open for the next run, in order.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -767,13 +767,13 @@ pub async fn a_host_drain_policy_keeps_principals_apart(store: Arc<dyn RuntimeSt
                 .expect("enqueue a wake"),
         );
     }
-    let fence = seal_drive_fence_for_test(&store, &session, "principal-owner").await;
+    let fence = seal_shift_fence_for_test(&store, &session, "principal-owner").await;
     let mut policy = crate::testing::queued_work_admission_policy(64);
     policy.drain_policy = Arc::new(OnePrincipalPerTurn);
-    let first = admitted_root_with_policy(
+    let first = admitted_run_with_policy(
         &store,
         &fence,
-        "principal-root-a",
+        "principal-run-a",
         AdmittedHead::Batch(batches[0].batch_id.clone()),
         policy.clone(),
     )
@@ -783,16 +783,16 @@ pub async fn a_host_drain_policy_keeps_principals_apart(store: Arc<dyn RuntimeSt
         vec![batches[0].batch_id.clone(), batches[1].batch_id.clone()],
         "the policy stops the drain at the principal change"
     );
-    end_root(
+    end_run(
         &store,
         &fence,
-        completing_admission("principal-root-a", &first),
+        completing_admission("principal-run-a", &first),
     )
     .await;
-    let second = admitted_root_with_policy(
+    let second = admitted_run_with_policy(
         &store,
         &fence,
-        "principal-root-b",
+        "principal-run-b",
         AdmittedHead::Batch(batches[2].batch_id.clone()),
         policy,
     )

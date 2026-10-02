@@ -4,7 +4,7 @@
 //! commits, the commit-identity and checkpoint vocabulary, the attachment
 //! layer, and the `SessionStore` trait family every backend implements. It
 //! sits directly above `lash-core-llm` and below everything in `lash-core`
-//! that drives a turn, so `lash-core` re-exports every module and item below
+//! that executes a turn, so `lash-core` re-exports every module and item below
 //! at its original path.
 
 #![expect(

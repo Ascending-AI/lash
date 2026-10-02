@@ -378,16 +378,16 @@ impl WakeDeliveryDriver {
             Ok(enqueue_outcome) => {
                 let enqueued = enqueue_outcome.batch();
                 // The batch's admission armed its ingress obligation
-                // (ADR 0109 §3); ask for its drive now, strictly after the
+                // (ADR 0109 §3); ask for its shift now, strictly after the
                 // commit, under the first attempt's request, which the
                 // relay's own first ask shares: the engine dedupes the
-                // two. The drive's claim of the batch settles the
+                // two. The shift's claim of the batch settles the
                 // obligation; an ask that does not reach the engine is
                 // the relay's to retry.
                 if let Err(refusal) = queued_work
-                    .request_drive(
+                    .request_shift(
                         &target_session_id,
-                        crate::engine::ingress_drive_request(
+                        crate::engine::ingress_shift_request(
                             enqueued.batch_id.as_str(),
                             crate::engine::FIRST_INGRESS_ATTEMPT,
                         ),
@@ -399,7 +399,7 @@ impl WakeDeliveryDriver {
                         target_session_id = %target_session_id,
                         batch_id = %enqueued.batch_id,
                         %refusal,
-                        "process wake's drive ask was not accepted; the ingress relay retries it"
+                        "process wake's shift ask was not accepted; the ingress relay retries it"
                     );
                 }
                 if enqueue_outcome.process_wake_was_absorbed() {

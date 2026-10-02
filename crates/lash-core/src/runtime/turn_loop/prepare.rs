@@ -1,11 +1,11 @@
 //! The prepare phase: refresh the resident graph, materialize the admitted
 //! input, normalize its items, and run the context transform that produces the
-//! message sequence the execute phase drives.
+//! message sequence the execute phase executes.
 
 use super::*;
 
 /// Everything the prepare phase needs to turn an admitted [`TurnInput`] into
-/// a driven physical turn.
+/// a executed physical turn.
 ///
 /// The accept phase builds one of these and the prepare phase consumes it; the
 /// fields are the phase's inputs in the order the phase reads them.
@@ -16,28 +16,24 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) local_stop: LocalTurnStop,
     pub(in crate::runtime) admissions: LogicalTurnAdmissions,
     pub(in crate::runtime) materialize_initial_admissions: bool,
-    pub(in crate::runtime) drive_fence: Option<&'sinks DriveFence>,
+    pub(in crate::runtime) shift_fence: Option<&'sinks ShiftFence>,
 }
 
 impl LashRuntime {
     /// Bring the resident session up to the durable head: reload invalidated
     /// resident state, then the graph.
     ///
-    /// Either adoption drops the running root's resident evidence (FIG-1875:
+    /// Either adoption drops the running run's resident evidence (FIG-1875:
     /// the head wins for every fact it carries) — but it also reverts the
-    /// root's recorded execution view, which the head does not carry. Whether
-    /// this refresh ran then changes what a later commit in the same root
+    /// run's recorded execution view, which the head does not carry. Whether
+    /// this refresh ran then changes what a later commit in the same run
     /// writes, which breaks redrive determinism (FIG-3877): a replay that
     /// skips the refresh hashes different commit content than the attempt
     /// that ran it. Re-installing the captured record afterwards makes the
-    /// outcome identical either way; between roots the record is absent and
+    /// outcome identical either way; between runs the record is absent and
     /// nothing is restored.
     pub(in crate::runtime) async fn refresh_resident_head(&mut self) -> Result<(), RuntimeError> {
-        let resolved_run = self
-            .state
-            .authority
-            .root_view()
-            .map(|view| view.run.clone());
+        let resolved_run = self.state.authority.run_view().map(|view| view.run.clone());
         self.reload_invalidated_resident_session().await?;
         self.refresh_session_graph_from_store()
             .await
@@ -70,7 +66,7 @@ impl LashRuntime {
             local_stop,
             mut admissions,
             materialize_initial_admissions,
-            drive_fence,
+            shift_fence,
         } = context;
         // A direct turn's admission already adopted the head it was admitted
         // on and recorded its index (FIG-3682): re-reading the live head here
@@ -163,7 +159,7 @@ impl LashRuntime {
                     admissions: &admissions,
                     scoped_effect_controller: &scoped_effect_controller,
                     honoured_cancel: None,
-                    drive_fence,
+                    shift_fence,
                     turn_control: &turn_control,
                     observer,
                 }))
@@ -175,14 +171,14 @@ impl LashRuntime {
             .trace_turn_id
             .clone()
             .expect("turn id is bound from the execution scope before normalization");
-        // A drive that is replaying its journal reconstructs the turn's start
+        // A shift that is replaying its journal reconstructs the turn's start
         // and reports nothing. No committed boundary record reports the start
         // as new yet, so it is observed as the work of the attempt that first
         // reaches it rather than as a logical transition.
         self.host
             .core
             .tracing
-            .turn_drive(
+            .turn_execution(
                 &self.state.session_id,
                 &trace_turn_id,
                 &scoped_effect_controller,
@@ -194,7 +190,7 @@ impl LashRuntime {
                     serde_json::json!(normalized.len()),
                 );
                 // The config this physical turn runs under (FIG-3600 S6): the
-                // root's recorded config, adopted on resident state at the
+                // run's recorded config, adopted on resident state at the
                 // funnel's `ResolveTurnConfig` step.
                 trace_metadata.insert(
                     "profile_key".to_string(),
@@ -313,7 +309,7 @@ impl LashRuntime {
                 trace_turn_id: &trace_turn_id,
                 previous_prompt_usage: previous_prompt_usage.clone(),
                 scoped_effect_controller: &scoped_effect_controller,
-                drive_fence,
+                shift_fence,
             })
             .await?;
         // After a frame opens, the old frame's usage is not the new frame's:
@@ -339,7 +335,7 @@ impl LashRuntime {
                 })?;
         }
         let manager = self
-            .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
+            .runtime_session_services_for_turn(shift_fence, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -419,7 +415,7 @@ impl LashRuntime {
                 scoped_effect_controller,
                 local_stop,
                 initial_admissions: admissions,
-                drive_fence,
+                shift_fence,
             },
             turn_graph_appends,
         ))

@@ -6,7 +6,7 @@
 //! The Restate deployment's live end-to-end test. The service binds no turn
 //! workflow of its own: a chat message goes through the session's `send()`,
 //! and lash's `LashSession`/`LashTurn` services, bound by
-//! `RestateEngine::endpoint_builder`, drive the turn.
+//! `RestateEngine::endpoint_builder`, execute the turn.
 
 #[cfg(test)]
 mod restate_tests {
@@ -147,7 +147,7 @@ mod restate_tests {
             .await
             .expect("create chat");
         // The chat route itself: the session's `send()` takes the message and
-        // `LashSession` drives the turn in a Restate handler.
+        // `LashSession` shifts the turn in a Restate handler.
         let request: SendMessageRequest = serde_json::from_value(json!({
             "text": "play the next move",
             "board": BoardState {

@@ -149,10 +149,10 @@ fn inspect_send(outcome: lash::remote::turn_result::RemoteSendOutcome) {
             let _ = report;
         }
         RemoteSendOutcome::Parked {
-            parked: RemoteParkedTurn { root, .. },
+            parked: RemoteParkedTurn { run, .. },
             ..
         } => {
-            let _ = root;
+            let _ = run;
         }
         RemoteSendOutcome::Stalled {
             stalled: RemoteStalledDelivery { reason, .. },

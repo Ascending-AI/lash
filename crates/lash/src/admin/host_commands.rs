@@ -1,6 +1,6 @@
 //! The facade's host head writes (FIG-4202): each is a session command on a
 //! store-backed session, submitted under the writer and settled by the
-//! drive at a turn boundary, and applied directly on a storeless one.
+//! shift at a turn boundary, and applied directly on a storeless one.
 
 use super::*;
 
@@ -9,7 +9,7 @@ impl SessionAdmin {
     /// settlement (FIG-4202).
     ///
     /// The bound turn owns a store-backed session's head, so the append is a
-    /// session command the drive applies at the next turn boundary: the
+    /// session command the shift applies at the next turn boundary: the
     /// writer is held only to submit it, and the request's `operation_id` is
     /// its idempotency key. A storeless session appends directly under the
     /// writer, which already serializes the append with every turn it runs.
@@ -54,7 +54,7 @@ impl SessionAdmin {
 
     /// Open `request`'s frame durably and await the open's settlement
     /// (FIG-4202): a session command on a store-backed session, applied and
-    /// committed by the drive at the next turn boundary, under
+    /// committed by the shift at the next turn boundary, under
     /// `idempotency_key`. A storeless session opens directly.
     pub(super) async fn open_agent_frame(
         &self,
@@ -116,10 +116,10 @@ impl SessionAdmin {
     ///
     /// On a store-backed session the operation is a session command: the
     /// writer is held only to submit it, and the plugin's code runs in the
-    /// drive at the next turn boundary, its events, state and queued turns
-    /// settling with the command. `cancellation` withdraws a command no drive
-    /// has admitted yet. A task a drive already admitted is cancelled through
-    /// its cancel signal (FIG-4391): its drive stops the task's code and
+    /// shift at the next turn boundary, its events, state and queued turns
+    /// settling with the command. `cancellation` withdraws a command no shift
+    /// has admitted yet. A task a shift already admitted is cancelled through
+    /// its cancel signal (FIG-4391): its shift stops the task's code and
     /// settles it cancelled, unless it already found the task's code returned
     /// (FIG-4453); an admitted plugin command runs to its settlement. A storeless session
     /// runs the operation directly under the writer.
@@ -259,11 +259,11 @@ impl SessionAdmin {
     }
 
     /// Await the settlement of the plugin `operation` `receipt` names; if
-    /// `cancellation` fires first, cancel it. A command no drive admitted is
+    /// `cancellation` fires first, cancel it. A command no shift admitted is
     /// withdrawn transactionally and answers `Cancelled` (FIG-4202). One a
-    /// drive already admitted is settled by that drive, and its settlement is
+    /// shift already admitted is settled by that execute, and its settlement is
     /// awaited: for a task, after its cancel signal was resolved cancelled, so
-    /// the drive stops the task's code and settles it cancelled unless it
+    /// the shift stops the task's code and settles it cancelled unless it
     /// already found the task's code returned (FIG-4391, FIG-4453).
     pub(super) async fn settle_or_withdraw(
         &self,
@@ -290,7 +290,7 @@ impl SessionAdmin {
     }
 
     /// Resolve the cancel signal of the admitted plugin task `receipt` names
-    /// (FIG-4391), without the runtime's writer, which the drive applying the
+    /// (FIG-4391), without the runtime's writer, which the shift applying the
     /// task holds. Whatever the cancel reached, the command's settlement says
     /// how it ended (FIG-4453).
     async fn cancel_admitted_plugin_task(
@@ -300,7 +300,7 @@ impl SessionAdmin {
         self.require_own_command(receipt)?;
         let observation = self.runtime.observe();
         // A storeless session runs its plugin operations under the writer:
-        // no drive holds a task of it.
+        // no shift holds a task of it.
         let Some(store) = observation.queue_store.as_ref() else {
             return Ok(lash_core::runtime::PluginTaskCancelRequest::Unavailable);
         };
@@ -334,11 +334,11 @@ impl SessionAdmin {
     }
 
     /// Withdraw the command `receipt` names (FIG-4202): transactionally,
-    /// while no drive has admitted it. A command a drive already read, or
+    /// while no shift has admitted it. A command a shift already read, or
     /// that already settled, answers
     /// [`SessionCommandWithdrawal::AlreadyAdmitted`] and settles as that
-    /// drive applies it. The withdrawal takes no runtime writer, so it never
-    /// waits for the drive applying the session's commands (FIG-4391).
+    /// shift applies it. The withdrawal takes no runtime writer, so it never
+    /// waits for the shift applying the session's commands (FIG-4391).
     pub(super) async fn withdraw_session_command(
         &self,
         receipt: &lash_core::runtime::SessionCommandReceipt,

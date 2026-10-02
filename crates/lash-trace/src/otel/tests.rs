@@ -84,7 +84,7 @@ fn context(flags: u8) -> TraceCarrier {
 }
 
 #[test]
-fn explicit_root_ignores_ambient_context() {
+fn explicit_run_ignores_ambient_context() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let host = provider.tracer("host").start("host");
     let host_id = host.span_context().trace_id();
@@ -698,7 +698,7 @@ fn every_admission_kind_has_registered_name_kind_and_first_writer_outcome() {
     let owners = [
         TraceScopeOwner::Run {
             session_id: "s".into(),
-            root: "r".into(),
+            run: "r".into(),
         },
         TraceScopeOwner::Turn {
             session_id: "s".into(),

@@ -2,7 +2,7 @@
 //!
 //! **Protocol-driver purity.** The `TurnProtocol` methods and the protocol
 //! projectors are synchronous, take `&self` and have no side effects. Any
-//! interior mutability in an implementor is a contract violation. A drive
+//! interior mutability in an implementor is a contract violation. A shift
 //! replays them over recorded inputs and must reach the same decisions.
 
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ pub use lash_core_store::build_generation::{
     GenerationUnbound,
 };
 
-use super::admission::DriveRequestId;
+use super::admission::ShiftRequestId;
 use crate::SessionId;
 
 /// How a durable format's stored bytes move to a newer build (ADR 0106 §2).
@@ -35,11 +35,11 @@ pub enum UpgradePolicy {
     Coexist,
 }
 
-/// One logical drive request.
+/// One logical shift request.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DriveRequest {
+pub struct ShiftRequest {
     pub session: SessionId,
-    pub request: DriveRequestId,
+    pub request: ShiftRequestId,
     /// The generation lane this request must use, or the stable lane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intended_lane: Option<BuildGeneration>,
@@ -51,18 +51,18 @@ mod tests {
 
     #[test]
     fn a_drive_request_carries_no_admitting_generation() {
-        let request = DriveRequest {
+        let request = ShiftRequest {
             session: SessionId::from("s"),
-            request: DriveRequestId::new("r"),
+            request: ShiftRequestId::new("r"),
             intended_lane: Some(BuildGeneration::for_test("sender")),
         };
-        let encoded = serde_json::to_value(&request).expect("encode drive request");
+        let encoded = serde_json::to_value(&request).expect("encode shift request");
         assert!(
             encoded.get("build_generation").is_none(),
             "a wire request cannot supply the admitting build's generation: {encoded}",
         );
         assert_eq!(
-            serde_json::from_value::<DriveRequest>(encoded).expect("decode drive request"),
+            serde_json::from_value::<ShiftRequest>(encoded).expect("decode shift request"),
             request
         );
     }

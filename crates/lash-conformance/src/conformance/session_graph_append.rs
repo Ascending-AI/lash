@@ -6,7 +6,7 @@
 //! work, and only a caller whose base has left the active path is refused. Both
 //! halves are load-bearing and both are asserted here, against every backend,
 //! for both public append entry points (a host's append, a session command
-//! the drive applies at a turn boundary (FIG-4202), and the plugin-facing
+//! the shift applies at a turn boundary (FIG-4202), and the plugin-facing
 //! [`SessionGraphService`](crate::plugin::SessionGraphService)).
 
 use super::*;

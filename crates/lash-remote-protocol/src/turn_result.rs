@@ -195,29 +195,29 @@ impl RemoteCausalRef {
     }
 }
 
-/// What a sent input's root answered: the remote form of a send's outcome
+/// What a sent input's run answered: the remote form of a send's outcome
 /// status. [`RemoteTurnReport::status`] derives the three terminal arms from
-/// a report; `Parked` has no report, because a parked root has not settled.
+/// a report; `Parked` has no report, because a parked run has not settled.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnStatus {
     Answered,
     Failed,
     Cancelled,
-    /// The root parked: durable and not terminal. It holds its claims until
+    /// The run parked: durable and not terminal. It holds its claims until
     /// an operator or a later build resolves the park.
     Parked {
-        root: TurnId,
+        run: TurnId,
         /// The park's id: the feed sequence it opened with.
         park_id: u64,
         reason: RemoteTurnParkReason,
         /// When the park opened, in milliseconds since the Unix epoch.
         since_ms: u64,
-        /// How many drives met the park's refusal.
+        /// How many shifts met the park's refusal.
         attempts: u32,
     },
     /// The input was accepted, but its delivery to the engine stalled: no
-    /// root took it, and none will until an operator re-arms it. Durable and
+    /// run took it, and none will until an operator re-arms it. Durable and
     /// not terminal.
     Stalled {
         /// Why it stalled: `attempts_exhausted`, `refused` or `undecodable`.
@@ -236,7 +236,7 @@ pub enum RemoteTurnStatus {
     },
 }
 
-/// The recorded answer to a sent input. Status and root are derived from
+/// The recorded answer to a sent input. Status and run are derived from
 /// the variant's report or park, never stored beside them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -273,7 +273,7 @@ pub enum RemoteSendOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteParkedTurn {
-    pub root: TurnId,
+    pub run: TurnId,
     pub park_id: u64,
     pub reason: RemoteTurnParkReason,
     pub since_ms: u64,
@@ -313,10 +313,10 @@ impl RemoteSendOutcome {
         }
     }
 
-    pub fn root(&self) -> Option<&TurnId> {
+    pub fn run(&self) -> Option<&TurnId> {
         match self {
             Self::Settled { report, .. } => Some(&report.turn_id),
-            Self::Parked { parked, .. } => Some(&parked.root),
+            Self::Parked { parked, .. } => Some(&parked.run),
             Self::Stalled { .. } | Self::Withdrawn { .. } => None,
         }
     }
@@ -341,7 +341,7 @@ impl RemoteSendOutcome {
         match self {
             Self::Settled { report, .. } => report.status(),
             Self::Parked { parked, .. } => RemoteTurnStatus::Parked {
-                root: parked.root.clone(),
+                run: parked.run.clone(),
                 park_id: parked.park_id,
                 reason: parked.reason.clone(),
                 since_ms: parked.since_ms,
@@ -393,7 +393,7 @@ impl RemoteSendOutcome {
                 }
                 Ok(())
             }
-            Self::Parked { parked, .. } => require_non_empty(TYPE, "parked.root", &parked.root),
+            Self::Parked { parked, .. } => require_non_empty(TYPE, "parked.run", &parked.run),
             Self::Stalled { stalled, .. } => {
                 if stalled.code.is_some() != stalled.last_error.is_some() {
                     return Err(RemoteProtocolError::InvalidEnvelope {
@@ -409,7 +409,7 @@ impl RemoteSendOutcome {
     }
 }
 
-/// Why a root parked.
+/// Why a run parked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnParkReason {
     /// The reason's code, as the park store keys it (`replay_divergence`,
@@ -417,7 +417,7 @@ pub struct RemoteTurnParkReason {
     pub code: String,
     /// The operator-facing refusal message.
     pub message: String,
-    /// The recorded model key the parked root could not bind, when that is
+    /// The recorded model key the parked run could not bind, when that is
     /// why its engine retries ran out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_key: Option<String>,

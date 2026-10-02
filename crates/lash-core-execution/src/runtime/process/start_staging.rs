@@ -464,7 +464,7 @@ async fn require_host_session_live(
 /// reservation stays owed, and its recovery starts it.
 ///
 /// A process already holding the key is this start, registered by an attempt
-/// that never recorded it or by the delivery's first drive. The restorer
+/// that never recorded it or by the delivery's first shift. The restorer
 /// serves new work only, so the retained start is served unasked.
 async fn restore_trigger_route(
     stores: &ProcessStartStores<'_>,

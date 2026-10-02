@@ -2,15 +2,15 @@
 //! records its protocol's prompt when it is created, from the spec its
 //! creator states: a core keeps no default (FIG-4594), so a host's default
 //! prompt is a `SessionSpec` value it keeps and passes. A prompt command
-//! changes it for the roots after it; and a run's options cannot state it.
+//! changes it for the runs after it; and a run's options cannot state it.
 //! So:
 //!
 //! - a session created from one deployment's default spec is served that
-//!   prompt on every later root, redrives included, whatever default spec the
+//!   prompt on every later run, redrives included, whatever default spec the
 //!   deployment reopening it passes to the sessions it creates, and keeps the
 //!   request defaults its model binding recorded beside it (FIG-4374,
 //!   FIG-4567);
-//! - a prompt command reaches the next root and never the running one;
+//! - a prompt command reaches the next run and never the running one;
 //! - a child created before its parent's prompt changed keeps the prompt it
 //!   recorded;
 //! - a run-options payload that carries a prompt is refused, typed.
@@ -65,9 +65,9 @@ type Served = Arc<std::sync::Mutex<Vec<LlmRequest>>>;
 /// What the laws' model does on a call, beside keeping its request.
 #[derive(Default)]
 struct Script {
-    /// The deployment whose next root handler dies under its model call.
+    /// The deployment whose next run handler dies under its model call.
     dies_on: std::sync::Mutex<Option<lash_restate_test::RestateTestBackend>>,
-    /// Set, the next call answers with a tool call, so its root makes a
+    /// Set, the next call answers with a tool call, so its run makes a
     /// second call.
     calls_a_tool: std::sync::atomic::AtomicBool,
     /// Set, the next call tells the law it is in flight and waits to be
@@ -87,9 +87,9 @@ fn scripted_provider(served: &Served, script: &Arc<Script>) -> ProviderHandle {
             let served = Arc::clone(&served);
             let script = Arc::clone(&script);
             if let Some(double) = script.dies_on.lock_recover().take() {
-                // The root's handler dies before this call's result is
+                // The run's handler dies before this call's result is
                 // journaled, so its redrive makes the call again.
-                double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
+                double.crash_run_execution(lash_restate_test::CrashPoint::BeforeRunResult {
                     name: None,
                 });
             }
@@ -227,19 +227,19 @@ async fn deployment(
     }
 }
 
-/// How long a root sent after a restart may take to answer. A root the
+/// How long a run sent after a restart may take to answer. A run the
 /// restarted deployment cannot run never answers: its attempts fail until
 /// the server pauses it. The bound turns that hang into a failure.
 const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// A session keeps the prompt and the request defaults it was created under
 /// (acceptance law a). It is created from the host's default spec A, and with a
-/// prompt of its own, and runs a root, so it restarts with history and the
-/// cancellation binding its first root recorded (FIG-4567). Then the
+/// prompt of its own, and executes a run, so it restarts with history and the
+/// cancellation binding its first run recorded (FIG-4567). Then the
 /// deployment's process goes away and a new one serves the same stores and
 /// the same Restate state with defaults B and other request defaults for the
-/// same model key. Each root after the restart, on the engine's reopen and on
-/// a host open, is served as its session recorded. So is a root whose first
+/// same model key. Each run after the restart, on the engine's reopen and on
+/// a host open, is served as its session recorded. So is a run whose first
 /// attempt dies under its model call: its redrive makes the call again with
 /// the recorded prompt. A session the new deployment creates records B.
 async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
@@ -295,7 +295,7 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
                 .await?;
             assert_served_as_recorded(id, intro, 1, "before the restart");
             first
-                .settle_session_drive(&lash_core::SessionId::from(id))
+                .settle_session_shift(&lash_core::SessionId::from(id))
                 .await;
         }
     }
@@ -316,11 +316,11 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
                 .output(),
         )
         .await
-        .unwrap_or_else(|_| panic!("{id}: a root sent after the restart answers"))?;
+        .unwrap_or_else(|_| panic!("{id}: a run sent after the restart answers"))?;
         assert_served_as_recorded(id, intro, 2, "on the engine's reopen after the restart");
 
         if crash_redrive {
-            // The next root's first attempt dies under its model call, and its
+            // The next run's first attempt dies under its model call, and its
             // redrive makes the call again.
             let crashes = second.server().stats().crashes;
             *script.dies_on.lock_recover() = Some(second.clone());
@@ -334,15 +334,15 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a(
                     .output(),
             )
             .await
-            .unwrap_or_else(|_| panic!("{id}: the redriven root answers"))?;
+            .unwrap_or_else(|_| panic!("{id}: the redriven run answers"))?;
             assert_eq!(
                 second.server().stats().crashes,
                 crashes + 1,
-                "{id}: the root's first attempt died under its model call"
+                "{id}: the run's first attempt died under its model call"
             );
             assert_served_as_recorded(id, intro, 4, "across the redrive");
             second
-                .settle_session_drive(&lash_core::SessionId::from(id))
+                .settle_session_shift(&lash_core::SessionId::from(id))
                 .await;
         }
         let opened = retry_when_claim_frees(|| redeployed.session(id).open()).await?;
@@ -393,8 +393,8 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a_on_sqli
     .await
 }
 
-/// Every await suspends and every resumption replays the root from its
-/// journal, on the restarted deployment as on the first: the replayed roots
+/// Every await suspends and every resumption replays the run from its
+/// journal, on the restarted deployment as on the first: the replayed runs
 /// are served as their sessions recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a_under_always_replay()
@@ -403,7 +403,7 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a_under_a
         Stores::SqliteMemory,
         0x4589_0003,
         lash_restate_test::ServerConfig::default().always_replay(true),
-        // Every await already replays the root from its journal here, so
+        // Every await already replays the run from its journal here, so
         // the law injects no crash of its own.
         false,
     )
@@ -435,12 +435,12 @@ async fn a_session_created_under_defaults_a_reopens_and_redrives_under_a_on_post
     .await
 }
 
-/// A prompt command applies to the next root, not the admitted one
-/// (acceptance law b). A root makes its first model call under prompt A and
+/// A prompt command applies to the next run, not the admitted one
+/// (acceptance law b). A run makes its first model call under prompt A and
 /// is held there while a prompt command is submitted; released, it calls a
 /// tool and makes a second model call, which still carries A, however far
-/// the command got meanwhile. The next root carries the commanded prompt.
-async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one(
+/// the command got meanwhile. The next run carries the commanded prompt.
+async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one(
     stores: Stores,
     seed: u64,
 ) -> Result<()> {
@@ -469,8 +469,8 @@ async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one(
                 prompt: prompt(COMMANDED),
             }
         )));
-        // Give the command time to settle while the root is mid-call, then
-        // let the root go on whether or not it has.
+        // Give the command time to settle while the run is mid-call, then
+        // let the run go on whether or not it has.
         let settled = tokio::select! {
             outcome = &mut configure => Some(outcome),
             () = tokio::time::sleep(std::time::Duration::from_millis(200)) => None,
@@ -490,33 +490,29 @@ async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one(
     assert_eq!(
         running.len(),
         2,
-        "the running root called the model, a tool, and the model again"
+        "the running run called the model, a tool, and the model again"
     );
     for request in &running {
-        assert_intro(request, DEFAULTS_A, "the root admitted before the command");
+        assert_intro(request, DEFAULTS_A, "the run admitted before the command");
     }
 
     session.send(TurnInput::text("second")).output().await?;
     let requests = requests_of(&served, ID);
     assert_eq!(requests.len(), 3);
-    assert_intro(&requests[2], COMMANDED, "the root after the command");
+    assert_intro(&requests[2], COMMANDED, "the run after the command");
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one_on_sqlite() -> Result<()> {
-    a_prompt_command_reaches_the_next_root_and_not_the_running_one(
-        Stores::SqliteMemory,
-        0x4589_0011,
-    )
-    .await
+async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one_on_sqlite() -> Result<()> {
+    a_prompt_command_reaches_the_next_run_and_not_the_running_one(Stores::SqliteMemory, 0x4589_0011)
+        .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one_on_postgres() -> Result<()>
-{
-    a_prompt_command_reaches_the_next_root_and_not_the_running_one(Stores::Postgres, 0x4589_0013)
+async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one_on_postgres() -> Result<()> {
+    a_prompt_command_reaches_the_next_run_and_not_the_running_one(Stores::Postgres, 0x4589_0013)
         .await
 }
 
@@ -525,7 +521,7 @@ async fn a_prompt_command_reaches_the_next_root_and_not_the_running_one_on_postg
 /// namespaces through its plugins' owners with the parent's recorded config
 /// beneath it: the standard owner copies the parent's prompt, whatever the
 /// creating host's defaults are. A prompt command on the parent afterwards
-/// reaches the parent's next root and never the child's.
+/// reaches the parent's next run and never the child's.
 async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
     stores: Stores,
     seed: u64,
@@ -689,7 +685,7 @@ fn assert_not_run_options(refused: &crate::EmbedError, what: &str) {
 
 /// A run states only the standard owner's run options (FIG-4589 acceptance
 /// law e, FIG-4652). A payload that carries the session's prompt or its
-/// behaviour is refused, typed: the root ends `RunShapeRefused` with the
+/// behaviour is refused, typed: the run ends `RunShapeRefused` with the
 /// owner and the unreadable run options as its cause, makes no model call,
 /// and leaves the recorded namespace as it was. That holds even when the
 /// payload restates the very value the session recorded.
@@ -755,7 +751,7 @@ async fn a_run_options_prompt_is_refused(stores: Stores, seed: u64) -> Result<()
         .await?;
     let requests = requests_of(&served, ID);
     assert_eq!(requests.len(), 1);
-    assert_intro(&requests[0], DEFAULTS_A, "the root after the refusals");
+    assert_intro(&requests[0], DEFAULTS_A, "the run after the refusals");
     Ok(())
 }
 

@@ -4,7 +4,7 @@ CREATE TABLE operator_model_calls (
 );
 CREATE TABLE operator_terminal_writes (
     session_id TEXT NOT NULL,
-    root TEXT NOT NULL,
+    run TEXT NOT NULL,
     terminal_kind TEXT NOT NULL
 );
 CREATE TABLE operator_child_cancels (process_id TEXT NOT NULL);
@@ -14,11 +14,11 @@ BEGIN
        ROW(OLD.terminal_kind, OLD.terminal_cause_json, OLD.terminal_at_ms, OLD.terminal_head_revision)
        IS DISTINCT FROM
        ROW(NEW.terminal_kind, NEW.terminal_cause_json, NEW.terminal_at_ms, NEW.terminal_head_revision) THEN
-        INSERT INTO operator_terminal_writes VALUES (NEW.session_id, NEW.root, NEW.terminal_kind);
+        INSERT INTO operator_terminal_writes VALUES (NEW.session_id, NEW.run, NEW.terminal_kind);
     END IF;
     RETURN NEW;
 END $$;
-CREATE TRIGGER operator_audit_terminal AFTER UPDATE ON lash_session_roots
+CREATE TRIGGER operator_audit_terminal AFTER UPDATE ON lash_session_runs
     FOR EACH ROW EXECUTE FUNCTION operator_audit_terminal();
 CREATE FUNCTION operator_audit_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

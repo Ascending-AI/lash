@@ -2,7 +2,7 @@
 //!
 //! `batch` is protocol sugar, not a tool: the standard driver expands each
 //! wrapper into the step's one tool group beside the response's native calls
-//! and folds the members' results back into one batch result. These laws drive
+//! and folds the members' results back into one batch result. These laws execute
 //! real turns on a tier, through its [`crate::ConformanceTurnRunner`], and pin
 //! what that means where a tier can get it wrong: member admission and
 //! identity, the fold's stability across replay and a crash, cancellation,
@@ -13,7 +13,7 @@
 //! does not construct protocols.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -398,7 +398,7 @@ impl SugarTurn {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn drive(
+    async fn shift(
         &self,
         scope: crate::ScopedEffectController<'_>,
     ) -> Option<Result<crate::AssembledTurn, crate::RuntimeError>> {
@@ -458,12 +458,12 @@ impl SugarTurn {
         let options = crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope);
         let mut input = crate::TurnInput::text("run the batch sugar law");
         input.trace_turn_id = Some(self.turn_id.clone());
-        tokio::time::timeout(TURN_BUDGET, runtime.drive_turn(input, options))
+        tokio::time::timeout(TURN_BUDGET, runtime.execute_turn(input, options))
             .await
             .ok()
     }
 
-    /// The attempt a runner drives: every execution builds its runtime afresh
+    /// The attempt a runner executes: every execution builds its runtime afresh
     /// and reports its turn on `turns`.
     fn attempt(
         &self,
@@ -476,7 +476,7 @@ impl SugarTurn {
             let turn = turn.clone();
             let turns = turns.clone();
             Box::pin(async move {
-                let Some(assembled) = turn.drive(scope).await else {
+                let Some(assembled) = turn.shift(scope).await else {
                     let _ = turns.send(None);
                     return crate::ConformanceTurnEnd::Settled;
                 };

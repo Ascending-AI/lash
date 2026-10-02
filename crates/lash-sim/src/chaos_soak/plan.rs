@@ -14,12 +14,12 @@ pub type SessionRef = usize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lane {
     /// Plain inputs, batches and commands. Inputs the engine admits together
-    /// batch into one root, so every input is answered but not every input
-    /// owns a root.
+    /// batch into one run, so every input is answered but not every input
+    /// owns a run.
     Plain,
-    /// One held root at a time, cancelled or deleted by the step that sent
+    /// One held run at a time, cancelled or deleted by the step that sent
     /// it: nothing else is ever queued beside it, so it is always the head of
-    /// its own root.
+    /// its own run.
     Held,
 }
 
@@ -33,31 +33,31 @@ pub enum Step {
         parent: Option<SessionRef>,
     },
     /// Accept one input.
-    Send { session: SessionRef, root: String },
+    Send { session: SessionRef, run: String },
     /// Accept several inputs as one request.
     SendBatch {
         session: SessionRef,
-        roots: Vec<String>,
+        runs: Vec<String>,
     },
     /// Submit a session command on the command lane.
     Command { session: SessionRef, key: String },
-    /// Send a root whose model call never answers, wait until it runs, and
-    /// cancel it. With `child`, a child process lives until the root ends.
+    /// Send a run whose model call never answers, wait until it runs, and
+    /// cancel it. With `child`, a child process lives until the run ends.
     CancelHeld {
         session: SessionRef,
-        root: String,
+        run: String,
         child: bool,
     },
-    /// Send a held root, wait until it runs, and delete its session.
+    /// Send a held run, wait until it runs, and delete its session.
     DeleteHeld {
         session: SessionRef,
-        root: String,
+        run: String,
         child: bool,
     },
-    /// Send a root whose every run fails live until the engine stops
+    /// Send a run whose every execution fails live until the engine stops
     /// retrying it, wait for its park, and redrive the park on a deployment
-    /// that runs the root again.
-    ParkAndRedrive { session: SessionRef, root: String },
+    /// that executes the run again.
+    ParkAndRedrive { session: SessionRef, run: String },
     /// Delete a session (its close intent, then its physical delete).
     Delete { session: SessionRef },
     /// Start a Lashlang process that sleeps and finishes, and arm an engine
@@ -130,7 +130,7 @@ pub const OPTIONAL_KINDS: [&str; 13] = [
 /// The services an engine cut draws from, with the journal commands each
 /// handler of the workload writes on its first attempt.
 const ENGINE_CUTS: [(&str, u64); 3] = [
-    (lash_restate_test::SESSION_DRIVER_SERVICE, 8),
+    (lash_restate_test::SESSION_SHIFT_SERVICE, 8),
     (lash_restate_test::TURN_DRIVER_SERVICE, 20),
     ("LashProcessWorkflow", 14),
 ];
@@ -139,9 +139,9 @@ const ENGINE_CUTS: [(&str, u64); 3] = [
 /// cuts, with the crash effect only (a refusal or a retryable failure
 /// forever is a stall surface the matrix owns, not a crash).
 const HOST_SITES: [HostSite; 7] = [
-    HostSite::DriveAsk,
-    HostSite::ReleaseRootBefore,
-    HostSite::ReleaseRootAfter,
+    HostSite::ShiftAsk,
+    HostSite::ReleaseRunBefore,
+    HostSite::ReleaseRunAfter,
     HostSite::AcknowledgeIntentBefore,
     HostSite::DeleteStorageBefore,
     HostSite::DeliverCancelBefore,
@@ -202,12 +202,12 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
         })
         .collect();
     let mut plan = opening();
-    // Park roots count on their own, and a park step takes no draw of its
+    // Park runs count on their own, and a park step takes no draw of its
     // own, so every other step of a seed's plan stands as it did before the
     // kind existed.
     let mut next_park = 0_u64;
     let mut next_input = 0_u64;
-    let mut root = |prefix: &str| {
+    let mut run = |prefix: &str| {
         next_input += 1;
         format!("{prefix}-{next_input}")
     };
@@ -229,23 +229,23 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
         let step = match draw {
             0..=23 if !plain.is_empty() => Step::Send {
                 session: pick(&mut rng, &plain),
-                root: root("in"),
+                run: run("in"),
             },
             24..=31 if !plain.is_empty() => {
                 let session = pick(&mut rng, &plain);
                 let count = rng.usize(2..5);
                 Step::SendBatch {
                     session,
-                    roots: (0..count).map(|_| root("batch")).collect(),
+                    runs: (0..count).map(|_| run("batch")).collect(),
                 }
             }
             32..=36 if !plain.is_empty() => Step::Command {
                 session: pick(&mut rng, &plain),
-                key: root("command"),
+                key: run("command"),
             },
             37..=42 if !held.is_empty() => Step::CancelHeld {
                 session: pick(&mut rng, &held),
-                root: root("held"),
+                run: run("held"),
                 child: rng.bool(),
             },
             43..=44 if held.len() > 1 => {
@@ -253,7 +253,7 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
                 sessions[session].open = false;
                 Step::DeleteHeld {
                     session,
-                    root: root("held"),
+                    run: run("held"),
                     child: rng.bool(),
                 }
             }
@@ -286,7 +286,7 @@ pub fn plan(seed: u64, steps: usize, without: &[String]) -> Vec<Step> {
                 next_park += 1;
                 Step::ParkAndRedrive {
                     session: plain[draw as usize % plain.len()],
-                    root: format!("park-{next_park}"),
+                    run: format!("park-{next_park}"),
                 }
             }
             72..=79 => Step::Quiesce,

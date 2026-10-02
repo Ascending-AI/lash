@@ -4,7 +4,7 @@
 //! cancel fact: the group index's record of the child, answered as the
 //! child's `ChildCancel` notice — `Cancel` once the index decided the child's
 //! cancel (a `close(Cancel)` or a retirement), `Settled` once the child's
-//! settlement is seated (FIG-4344). These laws drive the
+//! settlement is seated (FIG-4344). These laws execute the
 //! deployed `EffectGroupDispatch/child` handler through the endpoint protocol,
 //! with the index's answers scripted and the deployment's ingress replaced by
 //! a transport the law controls:
@@ -417,7 +417,7 @@ async fn a_transient_cancel_watch_fault_does_not_drop_an_atomic_childs_body() {
         .await
         .expect("the child ends")
         .expect("join the child")
-        .expect("drive the child invocation");
+        .expect("shift the child invocation");
     assert_eq!(
         restate_error_message(&output),
         None,
@@ -474,7 +474,7 @@ pub(super) async fn start_atomic_child(
         )
         .await
         .expect("atomic law exceeded its virtual-time budget")
-        .expect("drive the atomic child");
+        .expect("shift the atomic child");
         assert_eq!(restate_error_message(&output), None);
         assert!(
             restate_message_types(&output)

@@ -375,10 +375,10 @@ impl EffectHost for Integrator {
     ) -> Result<u64, RuntimeError> {
         unreachable!("external signature witness")
     }
-    async fn retire_closed_root_waits(
+    async fn retire_closed_run_waits(
         &self,
         _session_id: &SessionId,
-        _root: &TurnId,
+        _run: &TurnId,
         _committed_turn: Option<&TurnId>,
     ) -> Result<(), RuntimeError> {
         unreachable!("external signature witness")

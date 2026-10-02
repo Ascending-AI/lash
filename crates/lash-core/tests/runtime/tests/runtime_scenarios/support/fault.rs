@@ -10,8 +10,8 @@ impl RuntimeScenarioContext {
         }
     }
 
-    /// A completion of the scenario root's admitted work by any other root
-    /// is refused: an admitted row is settled only by its own root.
+    /// A completion of the scenario run's admitted work by any other run
+    /// is refused: an admitted row is settled only by its own run.
     async fn stale_queue_completion_fault(&mut self) {
         self.ensure_lease().await;
         let admission = self
@@ -19,12 +19,12 @@ impl RuntimeScenarioContext {
             .as_ref()
             .expect("stale queue-completion fault requires a prior TurnWorkAdmission phase");
         let mut foreign =
-            lash_core::store::IngressSettlement::new(TurnId::from("runtime-scenario-foreign-root"));
+            lash_core::store::IngressSettlement::new(TurnId::from("runtime-scenario-foreign-run"));
         foreign
             .completed_batches
             .extend(admission.queued.as_ref().map(|queued| queued.completion()));
         let mut commit = RuntimeCommit::persisted_state_for_test(&self.state);
-        commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
+        commit.shift_fence = Some(Box::new(self.owner_and_lease().1.clone()));
         commit.ingress = Some(foreign);
         let err = self
             .store()

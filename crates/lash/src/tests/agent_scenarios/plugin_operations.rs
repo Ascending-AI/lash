@@ -181,9 +181,9 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             ],
             "both owned events persist in operation order"
         );
-        // The task is running in the drive, so the cancel no longer
+        // The task is running in the shift, so the cancel no longer
         // withdraws it (FIG-4202): it reaches the task through its cancel
-        // signal, and the drive settles the command cancelled (FIG-4391).
+        // signal, and the shift settles the command cancelled (FIG-4391).
         let cancel = crate::CancellationToken::new();
         let task_cancel = cancel.clone();
         let running_ops = ops.clone();

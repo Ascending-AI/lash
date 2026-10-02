@@ -32,8 +32,8 @@ impl lash_core::facade_support::TraceSink for CompactorCrash {
 }
 
 /// An administrative compaction submitted to the command lane, then applied
-/// by a drive killed at `crash` and redriven. With `input_after`, an input
-/// queued behind the compaction runs in the same drive, after it.
+/// by a shift killed at `crash` and redriven. With `input_after`, an input
+/// queued behind the compaction runs in the same shift, after it.
 pub(super) async fn compaction_crash_case(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -81,7 +81,7 @@ pub(super) async fn compaction_crash_case_under(
             (protocol.answer("answer 2"), 1),
         ]
     } else {
-        // The first root's usage crosses the pressure hook's threshold: an
+        // The first run's usage crosses the pressure hook's threshold: an
         // input the compaction did not reset the prompt usage for would
         // compact again.
         vec![(protocol.answer("answer 1"), PRESSURE_THRESHOLD_TOKENS)]
@@ -106,12 +106,12 @@ pub(super) async fn compaction_crash_case_under(
     .await;
     law.parts.compaction.compactor = compactor;
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     if compactor == LawCompactor::Standard {
         // The production admin compactor keeps the latest user segment. Two
-        // committed roots give it an earlier segment to summarize.
+        // committed runs give it an earlier segment to summarize.
         law.enqueue("second question").await;
-        law.run_root("root-2").await;
+        law.execute_run("run-2").await;
     }
     let first = law.head().await;
     let first_frame = first
@@ -124,11 +124,11 @@ pub(super) async fn compaction_crash_case_under(
         law.enqueue("a question after the compaction").await;
     }
     model.arm(crash, &mut law.parts);
-    let drain = law.drive_crashed_at("compact", crash).await;
+    let drain = law.shift_crashed_at("compact", crash).await;
     if input_after {
         drain
             .ran()
-            .expect("the input queued behind the compaction runs in the redriven drive");
+            .expect("the input queued behind the compaction runs in the redriven shift");
     }
 
     let head = law.head().await;
@@ -153,7 +153,7 @@ pub(super) async fn compaction_crash_case_under(
     assert_eq!(
         head.head_revision,
         first.head_revision + 1 + u64::from(input_after),
-        "the compaction commits once, and the input's root once"
+        "the compaction commits once, and the input's run once"
     );
     let path = active_path(&head.graph);
     let seed_at = path
@@ -226,7 +226,7 @@ pub async fn compact_with_production_compactor_crash_matrix(
 }
 
 /// Where [`an_administrative_compaction_waits_for_the_bound_turn`] kills an
-/// execution: the bound turn's drive, or the drive that applies the
+/// execution: the bound turn's shift, or the shift that applies the
 /// compaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundTurnCrash {
@@ -235,7 +235,7 @@ pub enum BoundTurnCrash {
     PressureBeforeCommit,
     /// The bound turn's pressure frame committed; its turn has not.
     PressureAfterCommit,
-    /// The bound turn committed; its root has not ended.
+    /// The bound turn committed; its run has not ended.
     AfterTurnCommit,
     /// The compaction's base is recorded; its summarizer has not run.
     CompactionBeforeSummary,
@@ -243,13 +243,13 @@ pub enum BoundTurnCrash {
     CompactionAfterProviderAnswer,
     /// The compaction's summary is journaled; its commit is not.
     CompactionAfterSummary,
-    /// The compaction's commit settled its command; its drive has not gone
+    /// The compaction's commit settled its command; its shift has not gone
     /// on.
     CompactionAfterFrameCommit,
 }
 
 impl BoundTurnCrash {
-    /// The crash in the bound turn's own drive.
+    /// The crash in the bound turn's own shift.
     fn in_bound_turn(self) -> Option<FrameOpenCrash> {
         match self {
             Self::PressureBeforeCommit => Some(FrameOpenCrash::AfterSummary),
@@ -259,7 +259,7 @@ impl BoundTurnCrash {
         }
     }
 
-    /// The crash in the drive that applies the compaction.
+    /// The crash in the shift that applies the compaction.
     fn in_compaction(self) -> Option<FrameOpenCrash> {
         match self {
             Self::CompactionBeforeSummary => Some(FrameOpenCrash::BeforeSummary),
@@ -272,16 +272,16 @@ impl BoundTurnCrash {
 }
 
 /// The bound turn owns the session head (FIG-4201). An administrative
-/// compaction submitted while a root holds its journaled pressure summary
-/// never moves the head: it waits on the command lane. Released, the root
-/// commits its pressure frame and its turn, and the next drive applies the
+/// compaction submitted while a run holds its journaled pressure summary
+/// never moves the head: it waits on the command lane. Released, the run
+/// commits its pressure frame and its turn, and the next shift applies the
 /// compaction at the boundary, before the input queued after it. The chain
 /// is the first frame, the pressure frame, the compaction frame; each
 /// summary is requested once (twice only when a crash lost a paid answer
 /// before its journal record); the compaction reset the prompt usage, so
-/// the next root's pressure hook never compacts on the bound turn's usage;
+/// the next run's pressure hook never compacts on the bound turn's usage;
 /// and on a protocol with live execution state, a global the bound turn set
-/// in the pressure frame is gone from the interpreter the next root runs
+/// in the pressure frame is gone from the interpreter the next run executes
 /// in. Killed at `crash` and redriven, the session ends the same way.
 #[expect(
     clippy::expect_used,
@@ -303,10 +303,10 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     };
     let model = law_model(ModelScript {
         turns: vec![
-            // The first root's usage crosses the pressure hook's threshold,
+            // The first run's usage crosses the pressure hook's threshold,
             // so the bound turn opens a pressure frame.
             (set_global("answer 1"), PRESSURE_THRESHOLD_TOKENS),
-            // The bound turn's usage crosses it too: a root that saw it
+            // The bound turn's usage crosses it too: a run that saw it
             // after the compaction would compact again.
             (set_global("answer 2"), PRESSURE_THRESHOLD_TOKENS),
             (
@@ -331,7 +331,7 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     let hold = SummaryHold::default();
     law.parts.compaction.pressure_hold = Some(hold.clone());
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let before = law.head().await;
     let first_frame = before
         .current_frame_node_id
@@ -342,9 +342,9 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     let submitted = std::sync::OnceLock::new();
     let bound_turn = async {
         match crash.and_then(BoundTurnCrash::in_bound_turn) {
-            Some(crash) => law.run_root_crashed_at("root-2", crash).await,
+            Some(crash) => law.execute_run_crashed_at("run-2", crash).await,
             None => {
-                law.run_root("root-2").await;
+                law.execute_run("run-2").await;
             }
         }
     };
@@ -369,7 +369,7 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
         futures_util::future::join(bound_turn, while_held),
     )
     .await
-    .expect("the bound turn's drive ends");
+    .expect("the bound turn's shift ends");
     let receipt = submitted
         .into_inner()
         .expect("the compaction was submitted while the pressure summary was held");
@@ -387,13 +387,13 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     let outcome = match crash.and_then(BoundTurnCrash::in_compaction) {
         Some(crash) => {
             model.arm(crash, &mut law.parts);
-            law.drive_crashed_at("root-3", crash)
+            law.shift_crashed_at("run-3", crash)
                 .await
                 .ran()
-                .expect("the root queued after the compaction runs")
+                .expect("the run queued after the compaction runs")
                 .outcome
         }
-        None => law.run_root("root-3").await,
+        None => law.execute_run("run-3").await,
     };
 
     let head = law.head().await;
@@ -420,13 +420,13 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
     assert_eq!(
         head.head_revision,
         after_bound_turn.head_revision + 2,
-        "the compaction and the next root each commit once"
+        "the compaction and the next run each commit once"
     );
     assert_eq!(
         model.summary_calls.load(Ordering::SeqCst),
         2 + usize::from(crash == Some(BoundTurnCrash::CompactionAfterProviderAnswer)),
         "the pressure summary and the compaction's, each journaled once and never requested \
-         again; the next root saw no stale prompt usage"
+         again; the next run saw no stale prompt usage"
     );
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 3);
     let path = active_path(&head.graph);
@@ -443,7 +443,7 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
         path[compaction_seed_at..]
             .iter()
             .any(|text| text == "third question"),
-        "the root queued after the compaction runs in the compaction frame: {path:?}"
+        "the run queued after the compaction runs in the compaction frame: {path:?}"
     );
     if law.parts.protocol.execution_state().is_some() {
         assert!(
@@ -452,7 +452,7 @@ pub async fn an_administrative_compaction_waits_for_the_bound_turn(
                 crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { ref value })
                     if value == "undefined"
             ),
-            "the compaction restarted the live interpreter the next root runs in: {outcome:?}"
+            "the compaction restarted the live interpreter the next run executes in: {outcome:?}"
         );
     }
 }

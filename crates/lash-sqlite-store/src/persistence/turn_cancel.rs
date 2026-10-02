@@ -6,14 +6,14 @@ use lash_core_execution::store_backend_support::turn_cancel::*;
 
 /// Withdraw one row for the host at `now` (FIG-3927): an open row is
 /// cancelled, its ingress obligation settled in the same write (FIG-4098); a
-/// row a root admitted is that root's to settle or release, so the cancel
-/// changes nothing and answers the root that holds it.
+/// row a run admitted is that run's to settle or release, so the cancel
+/// changes nothing and answers the run that holds it.
 pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,
     now: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
-    let admitted_root = row.admitted_root.clone();
+    let admitted_run = row.admitted_run.clone();
     let mut input = pending_turn_input_from_row(row)?;
     match input.state.kind() {
         lash_core_execution::runtime::TurnInputStateKind::Cancelled => {
@@ -25,11 +25,11 @@ pub(super) fn cancel_pending_turn_input_row_conn(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
-            if let Some(root) = admitted_root {
+            if let Some(run) = admitted_run {
                 return Ok(
                     lash_core_execution::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
-                        root: TurnId::parse(root)?,
+                        run: TurnId::parse(run)?,
                     },
                 );
             }
@@ -86,16 +86,16 @@ pub(super) fn pending_follow_on_conn(
     )
 }
 
-/// Raise the owed follow-on's recovery count under the drive `fence` (ADR
+/// Raise the owed follow-on's recovery count under the shift `fence` (ADR
 /// 0101 §3), inside the caller's write transaction. The head revision does
 /// not move.
 pub(super) fn raise_pending_follow_on_conn(
     conn: &Connection,
-    fence: &lash_core_execution::store::DriveFence,
+    fence: &lash_core_execution::store::ShiftFence,
     follow_on_turn_id: &lash_core_execution::TurnId,
     recovering: &lash_core_execution::engine::BuildGeneration,
 ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-    require_drive_fence_conn(conn, fence)?;
+    require_shift_fence_conn(conn, fence)?;
     let session_id = fence.session();
     let not_pending = || StoreError::FollowOnNotPending {
         session_id: session_id.clone(),
@@ -124,17 +124,17 @@ pub(super) fn raise_pending_follow_on_conn(
     if updated != 1 {
         return Err(not_pending());
     }
-    // The recovering build holds the root from here on. A follow-on whose
-    // root was never admitted through a drive has no stamp to move.
+    // The recovering build holds the run from here on. A follow-on whose
+    // run was never admitted through a shift has no stamp to move.
     crate::conn::cached_execute(
         conn,
-        crate::session_roots::session_roots_sql()
-            .roots
+        crate::session_runs::session_runs_sql()
+            .runs
             .restamp_admitted_generation
             .sql(),
         params![
             session_id.as_str(),
-            raised.root_turn_id().as_str(),
+            raised.run_turn_id().as_str(),
             recovering.as_str(),
         ],
     )
@@ -142,13 +142,13 @@ pub(super) fn raise_pending_follow_on_conn(
     Ok(raised)
 }
 
-/// Refuse `fence` unless it is the session's current drive fence, read in the
+/// Refuse `fence` unless it is the session's current shift fence, read in the
 /// caller's transaction.
-pub(super) fn require_drive_fence_conn(
+pub(super) fn require_shift_fence_conn(
     conn: &Connection,
-    fence: &lash_core_execution::store::DriveFence,
+    fence: &lash_core_execution::store::ShiftFence,
 ) -> Result<(), StoreError> {
-    super::drive_epoch::require_fence_conn(conn, fence.session(), fence)
+    super::shift_epoch::require_fence_conn(conn, fence.session(), fence)
 }
 
 pub(crate) fn decode_stored_json<T: serde::de::DeserializeOwned>(

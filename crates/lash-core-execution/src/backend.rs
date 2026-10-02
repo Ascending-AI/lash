@@ -68,9 +68,9 @@ pub trait EffectEngine: Send + Sync {
     /// answer for an engine that is not the one running the processes.
     fn process_work(&self) -> ProcessWorkWiring;
 
-    /// The engine that runs the store set's session drives (FIG-3600):
-    /// Restate's session driver, or [`NoSessionWork`](crate::NoSessionWork)
-    /// for an engine that drives no sessions. Nothing drives a session in
+    /// The engine that runs the store set's session shifts (FIG-3600):
+    /// Restate's `SessionShifts`, or [`NoSessionWork`](crate::NoSessionWork)
+    /// for an engine that executes no sessions. Nothing works a session in
     /// process (ADR 0104).
     ///
     /// Required, with no default, for the same reason as

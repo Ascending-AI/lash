@@ -415,7 +415,7 @@ pub async fn trigger_route_unavailable_at_start(kind: StorageKind, live: bool) {
     );
 }
 
-/// Which surface a signal or cancel law drives.
+/// Which surface a signal or cancel law executes.
 #[derive(Clone, Copy, Debug)]
 pub enum Surface {
     /// The facade's global process commands (`LashCore::processes`).

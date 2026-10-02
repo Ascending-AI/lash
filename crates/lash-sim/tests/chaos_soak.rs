@@ -107,12 +107,12 @@ macro_rules! regressions {
 }
 
 regressions! {
-    s1_queued_command_wedges_the_head_root => "FIG-3873 S1";
-    s2_crashed_queued_work_root_diverges_on_replay => "FIG-3873 S2";
-    s3_delete_with_an_orphaned_root_stays_due => "FIG-3873 S3";
+    s1_queued_command_wedges_the_head_run => "FIG-3873 S1";
+    s2_crashed_queued_work_run_diverges_on_replay => "FIG-3873 S2";
+    s3_delete_with_an_orphaned_run_stays_due => "FIG-3873 S3";
     s4_interrupted_delete_leaks_the_cancel_gate_wait => "FIG-3873 S4";
-    s5_cancelled_root_scope_close_stays_claimed_after_a_kill => "FIG-3873 S5";
-    s6_a_redriven_command_roots_park_never_ends => "FIG-4718 S6";
+    s5_cancelled_run_scope_close_stays_claimed_after_a_kill => "FIG-3873 S5";
+    s6_a_redriven_command_runs_park_never_ends => "FIG-4718 S6";
 }
 
 /// The regression tests and the findings agree: one test per finding,

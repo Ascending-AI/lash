@@ -141,7 +141,7 @@ session key remains valid. Host owner keys use the existing trimmed nonempty/no-
 five execution-scope journal encodings remain byte-for-byte version 2.
 
 These surfaces move together at a cutover. **This runbook does not quote their values**: it
-is re-run every drive while the constants bump independently, and a table of numbers here is
+is re-run every shift while the constants bump independently, and a table of numbers here is
 stale the moment one of them moves. An operator who provisions from a frozen table provisions
 wrong. Read the value from the constant:
 

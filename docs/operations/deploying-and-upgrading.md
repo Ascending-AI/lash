@@ -170,7 +170,7 @@ state while investigating either refusal.
    the session admits nothing until the owning host repairs the stored
    data, clears the fault (`LashCore::clear_session_fault`) and re-arms the
    close. `LashCore::session_faults` lists every faulted session, including
-   one whose drive admission met the corruption with no obligation to stall.
+   one whose shift admission met the corruption with no obligation to stall.
 
 4. Retire N's Restate deployment only after the drain and the host's pinned
    invocation check both pass: remove every deployment that serves N's

@@ -9,7 +9,7 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
-use crate::schema_fragments::{SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES};
+use crate::schema_fragments::{SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES};
 pub(crate) use crate::trigger_schema::TRIGGER_SCHEMA;
 
 #[derive(Clone, Copy)]
@@ -64,7 +64,7 @@ impl SqliteDatabase {
             Self::DurableCore => SqliteDatabaseDefinition {
                 name: "durable core",
                 schema: SCHEMA,
-                fragments: &[SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES],
+                fragments: &[SESSION_INGRESS_TABLE, SESSION_RUNS_TABLES],
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
                 name: "process registry",
@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS usage_facts (
     provider_attempt         INTEGER NOT NULL CONSTRAINT ck_usage_facts_provider_attempt CHECK (provider_attempt >= 0),
     fact_kind                TEXT NOT NULL,
     disposition              TEXT NOT NULL,
-    run_id                   TEXT,
+    meter_id                   TEXT,
     llm_call_id              TEXT NOT NULL,
     source                   TEXT NOT NULL,
     profile_key                TEXT NOT NULL,
@@ -280,8 +280,8 @@ CREATE TABLE IF NOT EXISTS usage_facts (
     payload_hash             TEXT NOT NULL,
     recorded_at_ms           INTEGER NOT NULL,
     CONSTRAINT ck_usage_facts_kind CHECK (
-        (fact_kind = 'attempt' AND disposition IN ('reported', 'unreported') AND run_id IS NOT NULL)
-     OR (fact_kind = 'correction' AND disposition = 'reconciled' AND run_id IS NULL AND generation_id IS NOT NULL)),
+        (fact_kind = 'attempt' AND disposition IN ('reported', 'unreported') AND meter_id IS NOT NULL)
+     OR (fact_kind = 'correction' AND disposition = 'reconciled' AND meter_id IS NULL AND generation_id IS NOT NULL)),
     CONSTRAINT ck_usage_facts_unreported_zero CHECK (disposition <> 'unreported' OR (
         input_tokens = 0 AND output_tokens = 0 AND cache_read_input_tokens = 0
         AND cache_write_input_tokens = 0 AND reasoning_output_tokens = 0)),
@@ -293,11 +293,11 @@ CREATE INDEX IF NOT EXISTS idx_usage_facts_unreported
     ON usage_facts(owner_kind, owner_id, effect_key, call_ordinal, provider_attempt)
     WHERE disposition = 'unreported';
 
-CREATE TABLE IF NOT EXISTS usage_runs (
-    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_runs_owner_kind CHECK (owner_kind IN ('session', 'process')),
+CREATE TABLE IF NOT EXISTS usage_meters (
+    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_meters_owner_kind CHECK (owner_kind IN ('session', 'process')),
     owner_id TEXT NOT NULL,
     effect_key TEXT NOT NULL,
-    run_id TEXT NOT NULL,
+    meter_id TEXT NOT NULL,
     execution_scope_key TEXT,
     source TEXT,
     profile_key TEXT,
@@ -311,25 +311,25 @@ CREATE TABLE IF NOT EXISTS usage_runs (
     conflict_stored_payload_hash TEXT,
     conflict_offered_payload_hash TEXT,
     resolved_at_ms INTEGER,
-    PRIMARY KEY (owner_kind, owner_id, effect_key, run_id),
-    CONSTRAINT ck_usage_runs_admission CHECK (
+    PRIMARY KEY (owner_kind, owner_id, effect_key, meter_id),
+    CONSTRAINT ck_usage_meters_admission CHECK (
         (execution_scope_key IS NOT NULL AND source IS NOT NULL AND profile_key IS NOT NULL AND requested_model IS NOT NULL AND admitted_at_ms IS NOT NULL AND admitted_at_ms >= 0)
      OR (execution_scope_key IS NULL AND source IS NULL AND profile_key IS NULL AND requested_model IS NULL AND admitted_at_ms IS NULL AND state <> 'open')),
-    CONSTRAINT ck_usage_runs_state CHECK (
+    CONSTRAINT ck_usage_meters_state CHECK (
         (state = 'open' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NULL)
      OR (state = 'settled' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0)
      OR (state = 'unknown' AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0
-         AND unknown_reason IS NOT NULL AND unknown_reason IN ('superseded_run', 'call_without_record', 'facts_unjournalable', 'execution_ended', 'owner_retired'))
+         AND unknown_reason IS NOT NULL AND unknown_reason IN ('superseded_meter', 'call_without_record', 'facts_unjournalable', 'execution_ended', 'owner_retired'))
      OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_call_ordinal IS NOT NULL AND conflict_provider_attempt IS NOT NULL AND conflict_fact_kind IS NOT NULL AND conflict_stored_payload_hash IS NOT NULL AND conflict_offered_payload_hash IS NOT NULL
          AND conflict_call_ordinal BETWEEN 0 AND 4294967295 AND conflict_provider_attempt BETWEEN 0 AND 4294967295
          AND conflict_fact_kind IN ('attempt', 'correction') AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0))
 );
-CREATE INDEX IF NOT EXISTS idx_usage_runs_open_owner
-    ON usage_runs(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';
-CREATE INDEX IF NOT EXISTS idx_usage_runs_open_scope
-    ON usage_runs(owner_kind, owner_id, execution_scope_key) WHERE state = 'open';
-CREATE INDEX IF NOT EXISTS idx_usage_runs_unresolved
-    ON usage_runs(owner_kind, owner_id, effect_key, run_id) WHERE state IN ('unknown', 'conflicted');
+CREATE INDEX IF NOT EXISTS idx_usage_meters_open_owner
+    ON usage_meters(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_usage_meters_open_scope
+    ON usage_meters(owner_kind, owner_id, execution_scope_key) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS idx_usage_meters_unresolved
+    ON usage_meters(owner_kind, owner_id, effect_key, meter_id) WHERE state IN ('unknown', 'conflicted');
 
 CREATE TABLE IF NOT EXISTS usage_owner_retirements (
     owner_kind    TEXT NOT NULL CONSTRAINT ck_usage_owner_retirements_owner_kind CHECK (owner_kind IN ('session', 'process')),
@@ -359,9 +359,9 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    drive_epoch                       INTEGER NOT NULL DEFAULT 0,
-    drive_admission_id                TEXT,
-    drive_root_start                  TEXT,
+    shift_epoch                       INTEGER NOT NULL DEFAULT 0,
+    shift_admission_id                TEXT,
+    shift_run_start                  TEXT,
     admission_base_checkpoint_ref     TEXT,
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
@@ -379,10 +379,10 @@ CREATE TABLE IF NOT EXISTS session_meta (
     -- The session's standing fault (ADR 0109 §9) and when it was recorded.
     fault_json                       TEXT,
     fault_at_ms                      INTEGER CONSTRAINT ck_session_meta_fault CHECK ((fault_json IS NULL) = (fault_at_ms IS NULL)),
-    -- The drive authority holds exactly the states a raise writes: unraised,
+    -- The shift authority holds exactly the states a raise writes: unraised,
     -- sealed by an execution (its start marker), or raised by a control verb
     -- (no marker). A closing session was raised by its close.
-    CONSTRAINT ck_session_meta_drive_authority CHECK ((drive_epoch = 0 AND drive_admission_id IS NULL AND drive_root_start IS NULL AND closing_intent IS NULL) OR (drive_epoch > 0 AND drive_admission_id IS NOT NULL AND (drive_root_start IS NULL OR closing_intent IS NULL))),
+    CONSTRAINT ck_session_meta_shift_authority CHECK ((shift_epoch = 0 AND shift_admission_id IS NULL AND shift_run_start IS NULL AND closing_intent IS NULL) OR (shift_epoch > 0 AND shift_admission_id IS NOT NULL AND (shift_run_start IS NULL OR closing_intent IS NULL))),
     CONSTRAINT ck_session_meta_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
@@ -543,7 +543,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     enqueued_at_ms    INTEGER NOT NULL,
     submission_digest TEXT NOT NULL, -- Written once at admission (ADR 0101 §8).
     settled_operation_key TEXT, -- The original applying commit receipt; no separate completion marker.
-    admitted_root     TEXT, -- The root whose fenced admission holds the batch; NULL while open.
+    admitted_run     TEXT, -- The run whose fenced admission holds the batch; NULL while open.
     admitted_by       TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     terminal_cause    TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms    INTEGER,
@@ -560,8 +560,8 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     CONSTRAINT ck_queued_work_batches_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_queued_work_batches_work_kind CHECK ((json_valid(payload_json) AND json_type(payload_json) = 'object' AND ((work_kind = 'turn' AND json_extract(payload_json, '$.type') = 'process_wake') OR (work_kind = 'control' AND json_extract(payload_json, '$.type') = 'session_command'))) IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
-    CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
-    CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL)),
+    CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
+    CONSTRAINT ck_queued_work_batches_terminal CHECK ((terminal_cause IS NULL AND terminal_at_ms IS NULL) OR (terminal_cause IN ('delivered', 'applied', 'cancelled', 'stale_config_revision') AND terminal_at_ms IS NOT NULL AND admitted_run IS NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -592,7 +592,7 @@ CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
 
 DROP INDEX IF EXISTS idx_queued_work_admitted;
 CREATE INDEX IF NOT EXISTS idx_queued_work_admission_order
-    ON queued_work_batches(session_id, admitted_root, enqueue_seq)
+    ON queued_work_batches(session_id, admitted_run, enqueue_seq)
     WHERE terminal_cause IS NULL;
 
 CREATE TABLE IF NOT EXISTS pending_turn_inputs (
@@ -605,7 +605,7 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     input_json        TEXT NOT NULL,
     submission_digest TEXT NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
-    admitted_root     TEXT, -- The root whose fenced admission holds the input; NULL while open.
+    admitted_run     TEXT, -- The run whose fenced admission holds the input; NULL while open.
     admitted_by       TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash     TEXT,
     terminal_at_ms    INTEGER, -- When the input's tombstone was written; NULL until then.
@@ -622,8 +622,8 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
-    CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
-    CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_root IS NULL OR state NOT IN ('cancelled', 'completed')),
+    CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),
+    CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_run IS NULL OR state NOT IN ('cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_terminal_at CHECK ((state IN ('cancelled', 'completed')) = (terminal_at_ms IS NOT NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
@@ -644,7 +644,7 @@ DROP INDEX IF EXISTS idx_pending_turn_inputs_session;
 
 DROP INDEX IF EXISTS idx_pending_turn_input_order;
 
--- All undelivered inputs, including ones a root already holds. State is the
+-- All undelivered inputs, including ones a run already holds. State is the
 -- partial predicate, so settled rows cannot lengthen an open-input scan.
 -- Enqueue order in the key lets list_undelivered avoid a history scan or sort.
 DROP INDEX IF EXISTS idx_pending_turn_inputs_open;
@@ -657,9 +657,9 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_accepted_state
     WHERE state IN ('accepted');
 
 DROP INDEX IF EXISTS idx_pending_turn_inputs_admitted;
-CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_root
-    ON pending_turn_inputs(session_id, admitted_root)
-    WHERE admitted_root IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_run
+    ON pending_turn_inputs(session_id, admitted_run)
+    WHERE admitted_run IS NOT NULL;
 
 -- One row per run spec a session's inputs carry (FIG-3838), interned once per
 -- hash in the transaction that admits the input naming it, immutable, and
@@ -1456,7 +1456,7 @@ mod compat_tests {
 
     #[test]
     fn sqlite_refuses_a_partially_advanced_set() {
-        let root = tempfile::tempdir().expect("database root");
+        let root = tempfile::tempdir().expect("database run");
         let location = crate::location::SqliteLocation::File {
             root: root.path().to_path_buf(),
         };

@@ -70,9 +70,9 @@ pub(crate) fn retried_attempt_failure(failure: String) -> HandlerError {
 /// refused where it parks its opener and recorded nothing (FIG-3725): its
 /// tool drifted and it would run live, or its replay diverged. Its opener,
 /// suspended on the child's rank, cannot learn of a refusal that settles
-/// nothing, so the child writes its opener root's typed park through the
+/// nothing, so the child writes its opener run's typed park through the
 /// session's own store, where the parked-work surface shows it. `None` when
-/// the child's scope names no root (a process opener), or its session has no
+/// the child's scope names no run (a process opener), or its session has no
 /// store.
 pub(crate) async fn park_refused_group_child(
     sessions: &dyn lash_core::DeploymentStore,
@@ -128,7 +128,7 @@ impl std::error::Error for ParkedTurn {}
 ///
 /// A turn handler calls it when its turn fails with a generation refusal
 /// (the facade's `EmbedError::session_state_version_refusal`). A
-/// scope with a turn in flight — a driver-run root's unsettled run, a direct
+/// scope with a turn in flight — an engine-executed run's unsettled run, a direct
 /// turn's journaled acceptance — ran under an earlier execution whose journal
 /// already holds commands: the handler ends the attempt with
 /// [`parked_turn_failure`], so the invocation keeps its journal and pauses

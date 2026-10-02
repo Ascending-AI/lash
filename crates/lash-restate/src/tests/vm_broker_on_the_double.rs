@@ -4,7 +4,7 @@
 //! double answers every await in-stream; the replaying tier replays the
 //! handler at every await it cannot answer from its journal. A worker's loss
 //! fails the law's attempt retryably, and the double replays the invocation
-//! into the re-drive over its journal. The live tier is registered beside the
+//! into the redrive over its journal. The live tier is registered beside the
 //! other live laws in `conformance_and_poison.rs`.
 
 use std::sync::Arc;

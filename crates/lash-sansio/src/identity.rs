@@ -494,7 +494,7 @@ string_identity!(
     "turn"
 );
 
-/// The root of a drive that starts with an input the host gave no id of its
+/// The root of a shift that starts with an input the host gave no id of its
 /// own is named by the input's id.
 impl From<&InputId> for TurnId {
     fn from(input_id: &InputId) -> Self {
@@ -504,8 +504,8 @@ impl From<&InputId> for TurnId {
 
 /// The input that opened a root is addressed by the root's id.
 impl From<&TurnId> for InputId {
-    fn from(root: &TurnId) -> Self {
-        Self(root.as_str().to_string())
+    fn from(run: &TurnId) -> Self {
+        Self(run.as_str().to_string())
     }
 }
 
@@ -791,10 +791,10 @@ mod tests {
 
     #[test]
     fn a_derived_identity_extends_a_literal_or_an_existing_identity() {
-        assert_eq!(TurnId::prefixed("drive-run:", 7), "drive-run:7");
-        assert_eq!(TurnId::prefixed("drive-run:", ""), "drive-run:");
-        assert_eq!(TurnId::from("root").with_suffix(""), "root");
-        assert_eq!(TurnId::from("root").with_suffix("~fork1"), "root~fork1");
+        assert_eq!(TurnId::prefixed("shift-run:", 7), "shift-run:7");
+        assert_eq!(TurnId::prefixed("shift-run:", ""), "shift-run:");
+        assert_eq!(TurnId::from("run").with_suffix(""), "root");
+        assert_eq!(TurnId::from("run").with_suffix("~fork1"), "root~fork1");
     }
 
     #[test]

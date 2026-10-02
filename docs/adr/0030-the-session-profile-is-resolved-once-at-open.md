@@ -46,11 +46,11 @@ process start included; one that states none is refused typed
 (`SessionTurnStartUnspecified`). Everything else lash creates derives from a
 record: a child copies its parent's recorded config, a fork copies its fork
 point's recorded config in full, a process runs under its captured
-environment, and an open or a drive reads only the record. Each root
+environment, and an open or a shift reads only the record. Each run
 snapshots the configuration, controls included,
 in its recorded `ResolveTurnConfig` step (`ResolvedRun`). Its turns, redrives,
 replays and a recovered follow-on run under that snapshot, so a later
-configuration change reaches the next root, never a running or replayed one.
+configuration change reaches the next run, never a running or replayed one.
 An urgent stop is a recorded cancellation, not a configuration change.
 
 Remote process environments carry the recorded no-progress budget and charge
@@ -60,20 +60,20 @@ share the ceiling check and refuse `UnsafeRetriesAboveCeiling` before
 publishing a configuration. The provider handle applies the admitted retry
 limit without a separate clamp (FIG-4480).
 
-A root's `ResolvedRun` also carries the host's termination policy
-(`TerminationPolicy`) as it stood at the root's first execution. Terminal
+A run's `ResolvedRun` also carries the host's termination policy
+(`TerminationPolicy`) as it stood at the run's first execution. Terminal
 assembly reads the record,
 so a worker with another policy assembles the same terminal for a turn whose
 stream ended without `Done`. The policy stays host configuration: a change
-reaches roots that start after it.
+reaches runs that start after it.
 
 The system prompt is recorded the same way as the rest of the configuration.
 It is the protocol plugin's: core has no prompt type. A session's protocol
 namespace records its prompt config when the session is created, from the
 plugin creation options of the session's `SessionSpec` over the plugin's own
 built-in defaults, and the protocol's prompt commands change it for the
-roots after them (ADR 0126). The protocol renders the system prompt from the
-namespace the running root was admitted under, and the render is a recorded
+runs after them (ADR 0126). The protocol renders the system prompt from the
+namespace the running run was admitted under, and the render is a recorded
 step: a redrive is served the recorded text and renders nothing. A child
 created by its parent copies the parent's recorded prompt config, and a
 process carries the recorded plugin config of its starter. A run's options
@@ -111,9 +111,9 @@ proceed (FIG-4404).
 Input admission does not select a model. Child-session execution and direct
 LLM requests have explicit model selection at their own boundaries. An input
 may carry a `RunSpec` whose recorded overrides — route, model, generation,
-prompt layer, protocol turn options — run that input's root under them without
+prompt layer, protocol turn options — run that input's run under them without
 changing the session's recorded configuration (ADR 0101 §A5): the override is
-durable input data the root's admission fixes, not a mutable overlay on
+durable input data the run's admission fixes, not a mutable overlay on
 session policy.
 
 ## Bypass surfaces
@@ -139,8 +139,8 @@ current model.
 An overlay that lets a turn rewrite the recorded policy, host-wins reopen
 merging, per-open overrides of the execution controls and a plugin hook that
 rewrites the whole policy are rejected because each adds a second
-configuration authority. A `RunSpec`'s per-root overrides are not one: they
-are recorded input data fixed at admission that shape only their own root
+configuration authority. A `RunSpec`'s per-run overrides are not one: they
+are recorded input data fixed at admission that shape only their own run
 (ADR 0101 §A5). Structured child
 or direct requests remain explicit and do not change the parent session
 policy.
@@ -150,5 +150,5 @@ policy.
 - [Creation and open](../../crates/lash/src/session.rs), including recorded-state loading and recorded-model binding.
 - [Creation head contract](../../crates/lash-core-store/src/session_identity.rs).
 - [Session policy and immutable frames](../../crates/lash-core-store/src/session_state.rs).
-- [Durable configuration application and the per-root snapshot](../../crates/lash-core/src/runtime/drive/turn_config.rs).
+- [Durable configuration application and the per-run snapshot](../../crates/lash-core/src/runtime/shift/turn_config.rs).
 - [Recorded configuration and its typed commands](../../crates/lash-core-store/src/session_policy.rs).

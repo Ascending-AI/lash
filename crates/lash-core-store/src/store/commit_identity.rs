@@ -1420,7 +1420,7 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
 }
 
 /// The admitted rows a commit hands back or drops, in settlement order. The
-/// settling root and the disposition are not identity: the root is fixed by
+/// settling run and the disposition are not identity: the run is fixed by
 /// the operation's scope and the disposition by the cancellation evidence.
 fn undelivered_rows(commit: &RuntimeCommit) -> impl Iterator<Item = &super::IngressRowId> {
     commit

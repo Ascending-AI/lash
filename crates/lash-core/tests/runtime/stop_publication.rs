@@ -9,7 +9,7 @@
 use super::tests::*;
 use lash_core::TurnCancelMode;
 use lash_core::facade_support::{TurnCancelOutcome, TurnCancelRequest};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_0122;
 const STREAMED: &str = "the answer so far";
@@ -127,7 +127,7 @@ fn stalling_stream_provider() -> TestProvider {
         .build()
 }
 
-async fn drive(
+async fn shift(
     double: &lash_restate_test::RestateTestBackend,
     runtime: &mut LashRuntime,
     turn_id: &str,
@@ -141,7 +141,7 @@ async fn drive(
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("start"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(sink),
         )
@@ -165,7 +165,7 @@ async fn a_provider_failure_publishes_its_error_after_the_commit() {
     .await;
     let sink = CommitOrderSink::over(&store);
 
-    let turn = drive(&double, &mut runtime, "provider-failure", &sink)
+    let turn = shift(&double, &mut runtime, "provider-failure", &sink)
         .await
         .expect("the turn assembles");
 
@@ -213,7 +213,7 @@ async fn a_refused_commit_publishes_none_of_the_stopped_terminal() {
         message: "injected commit refusal".to_string(),
     });
 
-    let error = drive(&double, &mut runtime, "refused-commit", &sink)
+    let error = shift(&double, &mut runtime, "refused-commit", &sink)
         .await
         .expect_err("a refused commit fails the turn");
 
@@ -257,7 +257,7 @@ async fn an_immediate_cancel_publishes_its_stop_after_the_commit() {
     let turn = lash_core::task::spawn({
         let double = double.clone();
         let sink = sink.clone();
-        async move { drive(&double, &mut runtime, "immediate-cancel", &sink).await }
+        async move { shift(&double, &mut runtime, "immediate-cancel", &sink).await }
     });
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while !sink.snapshot().iter().any(|(event, _)| {

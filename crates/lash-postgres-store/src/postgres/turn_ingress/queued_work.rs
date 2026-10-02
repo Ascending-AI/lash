@@ -31,7 +31,7 @@ lash_store_sql::statements! {
         /// The facts the settlement verdict consults about live batch `?2`
         /// of session `?1`, locked for the caller's transaction: a tombstone
         /// answers nothing, as a missing row would.
-        settlement_facts = "SELECT admitted_root
+        settlement_facts = "SELECT admitted_run
              FROM queued_work_batches
              WHERE session_id = ?1 AND batch_id = ?2 AND terminal_cause IS NULL
              LIMIT 1 FOR UPDATE";
@@ -39,17 +39,17 @@ lash_store_sql::statements! {
         /// Batch `?2` of session `?1`, if it is open and not yet read by the
         /// command lane, locked for the caller's transaction.
         ///
-        /// The command lane takes no binding: a drive that reads a command
+        /// The command lane takes no binding: a shift that reads a command
         /// run delivers each row's obligation in its fenced read, and that
         /// read is the command's admission (FIG-4202). A delivered open
         /// command is being applied, so a withdrawal no longer reaches it.
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
+                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_root IS NULL AND terminal_cause IS NULL
+               AND admitted_run IS NULL AND terminal_cause IS NULL
                AND NOT (work_kind = 'control'
                    AND obligation_state IS NOT DISTINCT FROM 'delivered')
              FOR UPDATE";
@@ -64,24 +64,24 @@ lash_store_sql::statements! {
         admission_candidates_idle = "WITH queued_work_head_candidate AS (
                  SELECT enqueue_seq AS head_enqueue_seq, work_kind AS head_work_kind
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND admitted_root IS NULL AND terminal_cause IS NULL
+                 WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
                  ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
+                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
-               AND admitted_root IS NULL AND terminal_cause IS NULL
+               AND admitted_run IS NULL AND terminal_cause IS NULL
                AND enqueue_seq >= head_enqueue_seq
                AND work_kind = head_work_kind
              ORDER BY enqueue_seq ASC
              LIMIT ?2
              FOR UPDATE OF queued_work_batches";
 
-        /// Session `?1`'s open queued turn work a root's admission composes
+        /// Session `?1`'s open queued turn work a run's admission composes
         /// from at an idle boundary, up to `?2` of them (ADR 0101 §4, §5).
         ///
         /// The admission chose the turn lane at a boundary whose command
@@ -92,17 +92,17 @@ lash_store_sql::statements! {
         admission_candidates_turn_lane = "WITH queued_work_head_candidate AS (
                  SELECT enqueue_seq AS head_enqueue_seq
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL AND terminal_cause IS NULL
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
+                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
-               AND admitted_root IS NULL AND terminal_cause IS NULL
+               AND admitted_run IS NULL AND terminal_cause IS NULL
                AND enqueue_seq >= head_enqueue_seq
                AND NOT EXISTS (
                     SELECT 1 FROM queued_work_batches AS commands
@@ -122,17 +122,17 @@ lash_store_sql::statements! {
                  SELECT enqueue_seq AS head_enqueue_seq,
                         delivery_policy AS head_delivery_policy
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL AND terminal_cause IS NULL
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_run IS NULL AND terminal_cause IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
+                    admitted_run, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
-               AND admitted_root IS NULL AND terminal_cause IS NULL
+               AND admitted_run IS NULL AND terminal_cause IS NULL
                AND head_delivery_policy = 'earliest_safe_boundary'
                AND enqueue_seq >= head_enqueue_seq
              ORDER BY enqueue_seq ASC

@@ -4,9 +4,9 @@
 //! the caller read.
 //!
 //! On a store-backed session the transaction is a session command: the
-//! writer is held only to submit it, and the drive applies it once no root
-//! owns the head, so a running or parked root finishes under the config it
-//! was admitted with and the next root runs under the transaction's. A
+//! writer is held only to submit it, and the shift applies it once no run
+//! owns the head, so a running or parked run finishes under the config it
+//! was admitted with and the next run executes under the transaction's. A
 //! storeless session resolves and publishes it directly under the writer.
 
 use super::*;
@@ -35,10 +35,10 @@ pub enum ConfigSettlement {
     /// The transaction settled: applied with one revision step, stale, or
     /// refused by an owner.
     Settled(lash_core::ConfigTransactionOutcome),
-    /// The transaction is durable and waits for the drive; its receipt
+    /// The transaction is durable and waits for the shift; its receipt
     /// settles it later, on any runtime.
     Pending(lash_core::runtime::SessionCommandReceipt),
-    /// The transaction was withdrawn before a drive admitted it.
+    /// The transaction was withdrawn before a shift admitted it.
     Cancelled(lash_core::runtime::SessionCommandReceipt),
 }
 
@@ -71,7 +71,7 @@ impl SessionConfigAdmin {
 
     /// Submit `transaction` under `write` and wait for it to settle.
     ///
-    /// A transaction the drive has not settled by the wait's deadline is
+    /// A transaction the shift has not settled by the wait's deadline is
     /// refused [`SessionError::SessionCommandPending`] with its receipt; it
     /// stays durable, and [`Self::settle`] reads it later.
     pub async fn apply(

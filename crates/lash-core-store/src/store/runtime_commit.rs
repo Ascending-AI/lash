@@ -126,32 +126,32 @@ pub struct RuntimeCommit {
     pub commit_budget: super::CommitBudget,
     pub session_id: SessionId,
     pub expected_head_revision: u64,
-    /// The drive fence of the admission this commit's root was sealed under
+    /// The shift fence of the admission this commit's run was sealed under
     /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate, never commit
     /// content: the backend refuses the commit
-    /// [`StoreError::StaleDriveFence`](super::StoreError::StaleDriveFence)
-    /// unless it is still the session's current drive fence, checked in the
+    /// [`StoreError::StaleShiftFence`](super::StoreError::StaleShiftFence)
+    /// unless it is still the session's current shift fence, checked in the
     /// commit's own transaction before anything is written. `None` for a
-    /// commit no drive sealed (a runtime operation, a process-scoped turn).
+    /// commit no shift sealed (a runtime operation, a process-scoped turn).
     #[serde(skip)]
-    pub drive_fence: Option<Box<super::DriveFence>>,
-    /// The logical root's terminal evidence, present exactly on the commit of
-    /// the root's final physical turn (FIG-3600 S7): written in this commit's
-    /// transaction, refused [`StoreError::RootAlreadyTerminal`](super::StoreError::RootAlreadyTerminal)
-    /// when the root already ended otherwise. An instruction to the store
+    pub shift_fence: Option<Box<super::ShiftFence>>,
+    /// The logical run's terminal evidence, present exactly on the commit of
+    /// the run's final physical turn (FIG-3600 S7): written in this commit's
+    /// transaction, refused [`StoreError::RunAlreadyTerminal`](super::StoreError::RunAlreadyTerminal)
+    /// when the run already ended otherwise. An instruction to the store
     /// derived from the turn it commits, never commit content: like the
     /// fences, it is excluded from the commit's serialized form.
     #[serde(skip)]
-    pub root_terminal: Option<Box<super::RootTerminalWrite>>,
-    /// The logical root this commit's physical turn runs under, whose park
+    pub run_terminal: Option<Box<super::RunTerminalWrite>>,
+    /// The logical run this commit's physical turn runs under, whose park
     /// the commit clears in its own transaction (FIG-3600 S7, D2 §1.3 P3): a
-    /// root is parked by its logical root, so any commit of any of its
+    /// run is parked by its logical run, so any commit of any of its
     /// physical turns — a frame switch's follow-on, an S4 follow-on, the
     /// final turn — settles the park. `None` for a commit that runs under no
-    /// root; see [`RuntimeCommit::settled_park_root`]. Like the fences, a
+    /// run; see [`RuntimeCommit::settled_park_run`]. Like the fences, a
     /// store instruction excluded from the commit's serialized form.
     #[serde(skip)]
-    pub park_root: Option<crate::TurnId>,
+    pub park_run: Option<crate::TurnId>,
     /// The frame this commit ends and the frame it opens (ADR 0113 §3.1):
     /// present exactly on a commit that switches frames. The backend applies
     /// it in the commit's own transaction with the head CAS: it checks every
@@ -163,13 +163,13 @@ pub struct RuntimeCommit {
     #[serde(skip)]
     pub frame_transition: Option<FrameTransition>,
     pub config: crate::PersistedSessionConfig,
-    /// The config the committing root ran under, when it is not the config
-    /// the commit writes: a root runs under its recorded execution view and
+    /// The config the committing run ran under, when it is not the config
+    /// the commit writes: a run executes under its recorded execution view and
     /// writes the head's sticky config back (FIG-3841). The view is the
     /// commit's content, so the commit identity covers it in place of
     /// [`Self::config`]; the sticky config is the head's, not the operation's,
-    /// and may have moved since the root first committed, so a redrive that
-    /// replays the root's committed operation still answers its receipt. An
+    /// and may have moved since the run first committed, so a redrive that
+    /// replays the run's committed operation still answers its receipt. An
     /// input to the identity, never stored: `None` when the two agree.
     #[serde(skip)]
     pub execution_config: Option<Box<crate::PersistedSessionConfig>>,
@@ -188,9 +188,9 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<TurnCommitOutcome>,
     pub turn_commit: RuntimeTurnCommitStamp,
-    /// What this commit does with the rows its root admitted (FIG-3927):
+    /// What this commit does with the rows its run admitted (FIG-3927):
     /// completions, releases and drops, each predicated on the row still
-    /// being bound to the root. Requires [`Self::drive_fence`].
+    /// being bound to the run. Requires [`Self::shift_fence`].
     ///
     /// A cancelled turn hands the work it withheld from its terminal
     /// checkpoint to its cancellation here (FIG-3531, FIG-3543): withheld
@@ -203,7 +203,7 @@ pub struct RuntimeCommit {
     /// command lane takes no admission: each row must still exist and be
     /// open, or the whole commit is refused
     /// [`StoreError::SessionCommandWithdrawn`](super::StoreError::SessionCommandWithdrawn).
-    /// Requires [`Self::drive_fence`].
+    /// Requires [`Self::shift_fence`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_commands: Option<crate::QueuedWorkCompletion>,
     /// Each command's outcome, keyed by its batch, recorded atomically with
@@ -780,14 +780,14 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
-    /// The root whose park this commit clears: [`Self::park_root`], else the
-    /// root whose end it records, else the physical turn it commits (a turn
-    /// that runs under no root parks under its own id).
+    /// The run whose park this commit clears: [`Self::park_run`], else the
+    /// run whose end it records, else the physical turn it commits (a turn
+    /// that runs under no run parks under its own id).
     #[must_use]
-    pub fn settled_park_root(&self) -> Option<&crate::TurnId> {
-        self.park_root
+    pub fn settled_park_run(&self) -> Option<&crate::TurnId> {
+        self.park_run
             .as_ref()
-            .or_else(|| self.root_terminal.as_deref().map(|terminal| &terminal.root))
+            .or_else(|| self.run_terminal.as_deref().map(|terminal| &terminal.run))
             .or_else(|| self.turn_commit.operation.turn_id())
     }
 

@@ -118,7 +118,7 @@ async fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
 
 #[test]
 fn rlm_globals_runs_on_the_default_wiring() {
-    // Every benchmark core runs its session drive, so the RLM globals lane no
+    // Every benchmark core runs its session shift, so the RLM globals lane no
     // longer carves anything out of the default wiring.
     assert_eq!(
         RuntimePerfScenario::RlmGlobals.execution_mode(),

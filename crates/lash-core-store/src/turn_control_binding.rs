@@ -31,7 +31,7 @@ pub fn binding_id_admits_scope(binding_id: &str, scope: &crate::ExecutionScope) 
 }
 /// Select the scope persisted with a turn-closure authorization.
 ///
-/// Session-bound controllers may be driving a queue drain or another turn when
+/// Session-bound controllers may be working a queue drain or another turn when
 /// they discover an orphan. The durable input row's turn address is the
 /// canonical admission identity in that case. Process and runtime-operation
 /// controllers with a journal-bound cancellation authority instead carry the physical identity selected before

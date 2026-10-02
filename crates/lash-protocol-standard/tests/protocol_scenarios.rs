@@ -1,4 +1,4 @@
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
@@ -17,7 +17,7 @@ use lash_core::{
 use lash_protocol_standard::StandardDriver;
 
 /// Actor name pinned on every Standard Protocol Scenario transcript. The harness
-/// drives one sans-io machine for one session, so the whole transcript belongs to
+/// executes one sans-io machine for one session, so the whole transcript belongs to
 /// this actor.
 const STANDARD_TRANSCRIPT_ACTOR: &str = "standard";
 
@@ -1041,7 +1041,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("run durable follow-on work"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

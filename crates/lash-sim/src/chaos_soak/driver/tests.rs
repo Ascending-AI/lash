@@ -2,14 +2,14 @@ use super::*;
 use crate::crash_matrix::deployment::HostSite;
 
 /// A rolling deploy's drain charges its ticks to time, never to work
-/// (FIG-4624). One drive of the first build is calling a backlog of roots
-/// when the build is rolled, and each root takes wall time: more of it,
-/// in all, than thirty quiesce budgets. The drive needs no tick to end,
+/// (FIG-4624). One shift of the first build is calling a backlog of runs
+/// when the build is rolled, and each run takes wall time: more of it,
+/// in all, than thirty quiesce budgets. The shift needs no tick to end,
 /// so the generation drains within [`DRAIN_TICKS`] however long the
-/// roots take.
+/// runs take.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_drain_charges_no_tick_to_roots_the_old_build_is_still_driving() {
-    const ROOTS: usize = 32;
+async fn a_drain_charges_no_tick_to_runs_the_old_build_is_still_executing() {
+    const RUNS: usize = 32;
     let seed = 0x4624;
     let mut driver = Driver::new(seed).await.expect("world");
     driver
@@ -23,23 +23,23 @@ async fn a_drain_charges_no_tick_to_roots_the_old_build_is_still_driving() {
         )
         .await
         .expect("open the session");
-    for root in 0..ROOTS {
+    for run in 0..RUNS {
         driver
             .step(
                 seed,
                 &Step::Send {
                     session: 0,
-                    root: format!("slow-{root}"),
+                    run: format!("slow-{run}"),
                 },
             )
             .await
-            .expect("send a slow root");
+            .expect("send a slow run");
     }
     let old = driver.deployment.clone();
-    let drive = format!("LashSession/{}/drive running", driver.ledger.sessions[0].id);
+    let shift = format!("LashSession/{}/shift running", driver.ledger.sessions[0].id);
     assert!(
-        pinned_open(&driver.world, &old).contains(&drive),
-        "the first build's drive is still calling the backlog"
+        pinned_open(&driver.world, &old).contains(&shift),
+        "the first build's shift is still calling the backlog"
     );
 
     let rolled = driver
@@ -50,31 +50,31 @@ async fn a_drain_charges_no_tick_to_roots_the_old_build_is_still_driving() {
     assert!(pinned_open(&driver.world, &old).is_empty(), "{rolled}");
     assert_eq!(driver.ledger.retired.len(), 1, "{rolled}");
     let backend = driver.world.backend();
-    for root in 0..ROOTS {
-        let root = lash_core::TurnId::fixture(format!("slow-{root}"));
+    for run in 0..RUNS {
+        let run = lash_core::TurnId::fixture(format!("slow-{run}"));
         assert!(
             backend
                 .session_store_factory()
-                .root_terminal(&driver.ledger.sessions[0].id, &root)
+                .run_terminal(&driver.ledger.sessions[0].id, &run)
                 .await
-                .expect("read the root's terminal")
+                .expect("read the run's terminal")
                 .is_some(),
-            "`{root}` ran to its terminal before the build was removed"
+            "`{run}` ran to its terminal before the build was removed"
         );
     }
 }
 
-/// A drive attempt that replays while the root it called is still
-/// running waits for that root on the engine, as its first attempt did
-/// (FIG-4729). The drive's attempt is dropped under a held root, whose
-/// run goes on in the same process on the runtime the drive held. The
+/// A shift attempt that replays while the run it called is still
+/// running waits for that run on the engine, as its first attempt did
+/// (FIG-4729). The shift's attempt is dropped under a held run, whose
+/// run goes on in the same process on the runtime the shift held. The
 /// replay re-serves its recorded admission and waits on its recorded
-/// call; it does not wait in the process for the runtime the root runs
-/// on, which a root that never answers never gives back. So a rolling
+/// call; it does not wait in the process for the runtime the run executes
+/// on, which a run that never answers never gives back. So a rolling
 /// deploy's drain, which ticks once the engine's work has settled, ends
-/// the deleted session's root and retires the old build.
+/// the deleted session's run and retires the old build.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
+async fn a_shift_replayed_under_its_running_run_waits_on_the_engine() {
     let seed = 0x4729;
     let mut driver = Driver::new(seed).await.expect("world");
     driver
@@ -92,10 +92,10 @@ async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
     driver
         .send_held(&id, "held-0", false)
         .await
-        .expect("send the held root");
-    assert!(driver.reached("held-0"), "the root is in its model call");
-    let target = format!("LashSession/{id}/drive");
-    let drive = |driver: &Driver| {
+        .expect("send the held run");
+    assert!(driver.reached("held-0"), "the run is in its model call");
+    let target = format!("LashSession/{id}/shift");
+    let shift = |driver: &Driver| {
         driver
             .world
             .double()
@@ -104,20 +104,20 @@ async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
             .invocations()
             .into_iter()
             .find(|view| view.target == target)
-            .expect("the session's drive")
+            .expect("the session's shift")
     };
-    let first = drive(&driver);
+    let first = shift(&driver);
     assert_eq!((first.status, first.attempts), ("running", 1), "{first:?}");
     assert!(
         driver.world.drop_attempt(&first.id).expect("double"),
-        "the drive's first attempt was running"
+        "the shift's first attempt was running"
     );
 
     let settled = tokio::time::Instant::now() + Duration::from_secs(10);
     while driver.works().expect("double") && tokio::time::Instant::now() < settled {
         driver.world.quiesce().await;
     }
-    let replayed = drive(&driver);
+    let replayed = shift(&driver);
     assert_eq!(
         (
             replayed.status,
@@ -125,9 +125,9 @@ async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
             replayed.blocked_on_server
         ),
         ("running", 2, Some(true)),
-        "the replayed drive waits on the engine for the root it called: {replayed:?}"
+        "the replayed shift waits on the engine for the run it called: {replayed:?}"
     );
-    assert!(driver.reached("held-0"), "the root runs on");
+    assert!(driver.reached("held-0"), "the run executes on");
 
     let old = driver.deployment.clone();
     let deleted = driver.delete(0).await.expect("delete the session");
@@ -144,15 +144,15 @@ async fn a_drive_replayed_under_its_running_root_waits_on_the_engine() {
 }
 
 /// The same replay on a session a host holds open (FIG-4755). The host's
-/// open session is the runtime the drive's root runs on, and the root
-/// keeps that runtime's writer for as long as it runs. The drive's
-/// attempt is dropped under the held root: its replay re-serves the
+/// open session is the runtime the shift's run executes on, and the run
+/// keeps that runtime's writer for as long as it runs. The shift's
+/// attempt is dropped under the held run: its replay re-serves the
 /// recorded admission and waits on its recorded call. An admission reads
 /// the session's store and takes no runtime's writer, the host's
-/// included, so the replay does not wait in the process for a root that
+/// included, so the replay does not wait in the process for a run that
 /// never answers.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_drive_replayed_under_a_root_on_a_resident_session_waits_on_the_engine() {
+async fn a_shift_replayed_under_a_run_on_a_resident_session_waits_on_the_engine() {
     /// The server's inactivity timeout (its default, which the double
     /// keeps).
     const INACTIVITY: Duration = Duration::from_secs(60);
@@ -170,7 +170,7 @@ async fn a_drive_replayed_under_a_root_on_a_resident_session_waits_on_the_engine
         .await
         .expect("open the session");
     let id = driver.ledger.sessions[0].id.clone();
-    // The host holds the session open: the engine drives it on the
+    // The host holds the session open: the engine executes it on the
     // host's runtime from here on.
     let resident = driver
         .world
@@ -183,10 +183,10 @@ async fn a_drive_replayed_under_a_root_on_a_resident_session_waits_on_the_engine
     driver
         .send_held(&id, "held-0", false)
         .await
-        .expect("send the held root");
-    assert!(driver.reached("held-0"), "the root is in its model call");
-    let target = format!("LashSession/{id}/drive");
-    let drive = |driver: &Driver| {
+        .expect("send the held run");
+    assert!(driver.reached("held-0"), "the run is in its model call");
+    let target = format!("LashSession/{id}/shift");
+    let shift = |driver: &Driver| {
         driver
             .world
             .double()
@@ -195,20 +195,20 @@ async fn a_drive_replayed_under_a_root_on_a_resident_session_waits_on_the_engine
             .invocations()
             .into_iter()
             .find(|view| view.target == target)
-            .expect("the session's drive")
+            .expect("the session's shift")
     };
-    let first = drive(&driver);
+    let first = shift(&driver);
     assert_eq!((first.status, first.attempts), ("running", 1), "{first:?}");
     assert!(
         driver.world.drop_attempt(&first.id).expect("double"),
-        "the drive's first attempt was running"
+        "the shift's first attempt was running"
     );
 
     let settled = tokio::time::Instant::now() + Duration::from_secs(10);
     while driver.works().expect("double") && tokio::time::Instant::now() < settled {
         driver.world.quiesce().await;
     }
-    let replayed = drive(&driver);
+    let replayed = shift(&driver);
     assert_eq!(
         (
             replayed.status,
@@ -216,28 +216,28 @@ async fn a_drive_replayed_under_a_root_on_a_resident_session_waits_on_the_engine
             replayed.blocked_on_server
         ),
         ("running", 2, Some(true)),
-        "the replayed drive waits on the engine for the root it called: {replayed:?}"
+        "the replayed shift waits on the engine for the run it called: {replayed:?}"
     );
-    assert!(driver.reached("held-0"), "the root runs on");
+    assert!(driver.reached("held-0"), "the run executes on");
 
     // An attempt that waits on the engine is one the server suspends
     // when its inactivity timeout passes: no attempt fails, so however
-    // long the root runs, the wait never spends the drive's retries.
+    // long the run executes, the wait never spends the shift's retries.
     driver
         .world
         .engine()
         .advance(INACTIVITY + Duration::from_secs(1));
     driver.world.quiesce().await;
-    let suspended = drive(&driver);
+    let suspended = shift(&driver);
     assert_eq!(
         (suspended.status, suspended.attempts, suspended.retry_count),
         ("suspended", 2, 0),
-        "the waiting drive is suspended, not retried: {suspended:?}"
+        "the waiting shift is suspended, not retried: {suspended:?}"
     );
-    assert!(driver.reached("held-0"), "the root runs on");
+    assert!(driver.reached("held-0"), "the run executes on");
 
     // The host lets the session go and deletes it: the close ends the
-    // root, and the drive that waited for it on the engine ends with it.
+    // run, and the shift that waited for it on the engine ends with it.
     drop(resident);
     let old = driver.deployment.clone();
     let deleted = driver.delete(0).await.expect("delete the session");
@@ -333,7 +333,7 @@ async fn soak_history_a_refused_send_is_a_typed_host_fact() {
             seed,
             &Step::Send {
                 session: 0,
-                root: "refused".to_owned(),
+                run: "refused".to_owned(),
             },
         )
         .await
@@ -363,7 +363,7 @@ async fn soak_history_a_refused_send_is_a_typed_host_fact() {
             seed,
             &Step::Send {
                 session: 1,
-                root: "fenced".to_owned(),
+                run: "fenced".to_owned(),
             },
         )
         .await
@@ -382,12 +382,12 @@ async fn soak_history_a_refused_send_is_a_typed_host_fact() {
     let report = crate::invariants::check_with(&history, &[*admission]);
     driver.world.finish().await;
     assert!(report.passed(), "{}", report.failure());
-    for (root, code) in [("refused", "session_deleted"), ("fenced", "writer_fenced")] {
+    for (run, code) in [("refused", "session_deleted"), ("fenced", "writer_fenced")] {
         let refused = facts
             .as_array()
             .expect("fact array")
             .iter()
-            .find(|fact| fact["fact"] == "host_op" && fact["roots"] == serde_json::json!([root]))
+            .find(|fact| fact["fact"] == "host_op" && fact["runs"] == serde_json::json!([run]))
             .expect("a refused send is retained in history");
         assert_eq!(refused["outcome"]["refused"]["code"]["runtime"], code);
     }
@@ -421,20 +421,20 @@ async fn park_world(seed: u64) -> (Driver, SessionId) {
     (driver, id)
 }
 
-/// Tick recovery until `root` has its terminal, then judge the world's
+/// Tick recovery until `run` has its terminal, then judge the world's
 /// history as the soak's end does.
 async fn redriven_history(
     driver: &mut Driver,
     session: &SessionId,
-    root: &lash_core::TurnId,
+    run: &lash_core::TurnId,
 ) -> crate::invariants::Report {
     let store = driver.world.backend().session_store_factory();
     for _ in 0..8 {
         driver.world.quiesce().await;
         if store
-            .root_terminal(session, root)
+            .run_terminal(session, run)
             .await
-            .expect("read the root's terminal")
+            .expect("read the run's terminal")
             .is_some()
         {
             break;
@@ -443,11 +443,11 @@ async fn redriven_history(
     }
     assert!(
         store
-            .root_terminal(session, root)
+            .run_terminal(session, run)
             .await
-            .expect("read the root's terminal")
+            .expect("read the run's terminal")
             .is_some(),
-        "the redriven root `{root}` ran to its terminal"
+        "the redriven run `{run}` ran to its terminal"
     );
     let report = crate::invariants::report_crash_world(&driver.world, "chaos-soak")
         .await
@@ -474,13 +474,13 @@ fn redrives_observed(report: &crate::invariants::Report) -> usize {
         .1
 }
 
-/// FIG-4718: a root whose runs fail until the turn handler stops retrying
+/// FIG-4718: a run whose executions fail until the turn handler stops retrying
 /// them is parked by the recovery pass, and the host's redrive of that park
 /// resumes the execution the engine held: the store acknowledges the
-/// redrive's intent, the root commits, and its commit ends the park. The
+/// redrive's intent, the run commits, and its commit ends the park. The
 /// redrive checker judges that one redrive from the park feed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_parked_root_is_redriven_and_resumes() {
+async fn a_parked_run_is_redriven_and_resumes() {
     let seed = 0x4718;
     let (mut driver, id) = park_world(seed).await;
     let redriven = driver
@@ -489,13 +489,13 @@ async fn a_parked_root_is_redriven_and_resumes() {
         .expect("the park step");
     let Redriven {
         admission: Admission::Known,
-        park: Some((root, Admission::Known)),
+        park: Some((run, Admission::Known)),
     } = redriven.clone()
     else {
-        panic!("the root parked and its redrive was accepted: {redriven:?}");
+        panic!("the run parked and its redrive was accepted: {redriven:?}");
     };
     let facts = driver.world.history().facts();
-    let report = redriven_history(&mut driver, &id, &root).await;
+    let report = redriven_history(&mut driver, &id, &run).await;
     assert!(
         report.passed(),
         "{}\n{}",
@@ -506,9 +506,9 @@ async fn a_parked_root_is_redriven_and_resumes() {
     let resumes = facts_of(&facts, "resume");
     assert_eq!(resumes.len(), 1, "{resumes:?}");
     assert_eq!(
-        (&resumes[0]["root"], &resumes[0]["held"]),
+        (&resumes[0]["run"], &resumes[0]["held"]),
         (
-            &serde_json::json!(root.to_string()),
+            &serde_json::json!(run.to_string()),
             &serde_json::json!(true)
         ),
         "the engine resumed the execution it had stopped retrying"
@@ -524,18 +524,18 @@ async fn a_parked_root_is_redriven_and_resumes() {
         facts_of(&facts, "fault").iter().any(|fault| {
             fault["detail"]
                 .as_str()
-                .is_some_and(|detail| detail.contains("RunRootBefore"))
+                .is_some_and(|detail| detail.contains("ExecuteRunBefore"))
         }),
-        "the park came from the run-root seam"
+        "the park came from the execution-run seam"
     );
 }
 
-/// FIG-4718: a host that dies after the engine resumed the root and before
+/// FIG-4718: a host that dies after the engine resumed the run and before
 /// the store acknowledged the redrive's intent never hears the redrive
-/// accepted. The resumed root commits, which ends its park. The intent is
+/// accepted. The resumed run commits, which ends its park. The intent is
 /// durable, so the recovery pass of the next deployment claims it again,
-/// finds the root ran past it and settles it acknowledged without resuming
-/// the root a second time.
+/// finds the run ran past it and settles it acknowledged without resuming
+/// the run a second time.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_redrive_whose_host_dies_before_its_acknowledgement_is_delivered_again() {
     let seed = 0x4718_0002;
@@ -550,13 +550,13 @@ async fn a_redrive_whose_host_dies_before_its_acknowledgement_is_delivered_again
         .expect("the park step");
     let Redriven {
         admission: Admission::Known,
-        park: Some((root, Admission::Maybe)),
+        park: Some((run, Admission::Maybe)),
     } = redriven.clone()
     else {
         panic!("the host never heard its redrive accepted: {redriven:?}");
     };
     assert_eq!(driver.counts.crashes, 1, "the host died inside the redrive");
-    let report = redriven_history(&mut driver, &id, &root).await;
+    let report = redriven_history(&mut driver, &id, &run).await;
     let facts = driver.world.history().facts();
     assert!(
         report.passed(),
@@ -567,7 +567,7 @@ async fn a_redrive_whose_host_dies_before_its_acknowledgement_is_delivered_again
     assert_eq!(redrives_observed(&report), 1, "{}", report.summary());
     assert!(
         !facts_of(&facts, "resume").is_empty(),
-        "the engine was asked to resume the root"
+        "the engine was asked to resume the run"
     );
     let acknowledged = facts_of(&facts, "intent_ack");
     assert_eq!(
@@ -578,6 +578,6 @@ async fn a_redrive_whose_host_dies_before_its_acknowledgement_is_delivered_again
     assert_eq!(
         (&acknowledged[0]["verb"], &acknowledged[0]["applied"]),
         (&serde_json::json!("redrive"), &serde_json::json!(false)),
-        "the root ran past the redrive, so the store settled it without resuming again"
+        "the run ran past the redrive, so the store settled it without resuming again"
     );
 }

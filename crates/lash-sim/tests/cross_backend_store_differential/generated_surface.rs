@@ -34,7 +34,7 @@ const DEFAULT_SEED: u64 = 852;
 const OPS_PER_CASE: usize = 55;
 const SURFACE_SESSION: &str = "surface-session";
 /// The session the scenario's runtime store is bound to: the runtime ops the
-/// generated contract history drives all commit against it, so a turn park
+/// generated contract history executes all commit against it, so a turn park
 /// lands in a session the history already has.
 const SURFACE_RUNTIME_SESSION: &str = "prop-runtime-session";
 
@@ -159,7 +159,7 @@ struct SurfaceRunner {
     scenario: StoreContractScenario,
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
-    /// The session-bound runtime store the scenario drives; the turn-park
+    /// The session-bound runtime store the scenario executes; the turn-park
     /// ops apply to it directly.
     runtime: Arc<dyn RuntimeStore>,
     /// The `load_turn_park` answers this runner observed, in operation

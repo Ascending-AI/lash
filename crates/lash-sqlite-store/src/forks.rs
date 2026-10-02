@@ -278,7 +278,7 @@ pub(super) async fn fork_at_in_catalog(
                     ),
                     session_id: request.session_id.clone(),
                     config,
-                    published_by_drive: false,
+                    published_by_shift: false,
                 },
                 0,
                 checkpoint_ref.clone().map(Into::into),

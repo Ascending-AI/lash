@@ -23,9 +23,9 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, EXPECTED_TOOL_BATCH_TEXT,
     FRAME_CRASH_WORKFLOW_ID, ProcessSignalRequest, TRIGGER_EMIT_WORKFLOW_ID, TURN_WORKFLOW_NAME,
-    TurnRequest, TurnResponse, TurnScenario, build_e2e_core, driven_queued_roots, e2e_backend,
-    e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, expected_attachment_bytes,
-    reset_e2e_rows, s3_store_from_env, turn_session_id, witness,
+    TurnRequest, TurnResponse, TurnScenario, build_e2e_core, e2e_backend,
+    e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env, executed_queued_runs,
+    expected_attachment_bytes, reset_e2e_rows, s3_store_from_env, turn_session_id, witness,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};

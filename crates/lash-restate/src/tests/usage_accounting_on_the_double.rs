@@ -65,7 +65,7 @@ async fn usage_accounting_tier_on(
 
 lash_conformance::usage_accounting_engine_tests!({ usage_accounting_tier().await });
 
-async fn superseded_usage_root_completes_probe(always_replay: bool) {
+async fn superseded_run_completes_usage_probe(always_replay: bool) {
     let (harness, tier) = usage_accounting_tier_on(HarnessServer::InProcess {
         seed: 4759,
         always_replay,
@@ -83,9 +83,9 @@ async fn superseded_usage_root_completes_probe(always_replay: bool) {
     assert_eq!(probes.len(), 1, "the refused turn ran through one probe");
     assert_eq!(
         probes[0].status, "completed",
-        "a recorded root refusal must finish its probe: {probes:#?}"
+        "a recorded run refusal must finish its probe: {probes:#?}"
     );
-    assert_eq!(probes[0].retry_count, 0, "a refused root never retries");
+    assert_eq!(probes[0].retry_count, 0, "a refused run never retries");
     assert!(probes[0].last_failure.is_none(), "{probes:#?}");
     if always_replay {
         assert!(probes[0].suspensions > 0, "the probe actually replayed");
@@ -94,20 +94,20 @@ async fn superseded_usage_root_completes_probe(always_replay: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_superseded_usage_root_completes_its_probe() {
-    superseded_usage_root_completes_probe(false).await;
+async fn a_superseded_run_completes_its_usage_probe() {
+    superseded_run_completes_usage_probe(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_superseded_usage_root_completes_its_probe_under_always_replay() {
-    superseded_usage_root_completes_probe(true).await;
+async fn a_superseded_run_completes_its_usage_probe_under_always_replay() {
+    superseded_run_completes_usage_probe(true).await;
 }
 
 /// E1's facade read: another core opens no runtime and borrows no controller.
 pub(super) async fn read_parked_usage_from_second_core(
     tier: &lash_conformance::UsageAccountingTier,
 ) {
-    lash_conformance::usage_of_a_root_parked_forever_before_finalization_is_read_without_driving(
+    lash_conformance::usage_of_a_run_parked_forever_before_finalization_is_read_without_executing(
         tier,
     )
     .await;
@@ -121,7 +121,7 @@ pub(super) async fn read_parked_usage_from_second_core(
         .expect("parked head")
         .map(|head| head.head_revision);
     let factory = tier.stores.session_store_factory();
-    let fence = factory.drive_epoch(&session).await.expect("parked fence");
+    let fence = factory.shift_epoch(&session).await.expect("parked fence");
     let park = factory
         .load_turn_park(&session)
         .await
@@ -141,7 +141,7 @@ pub(super) async fn read_parked_usage_from_second_core(
         .serve_test_llm_profile(
             lash_core::testing::TestProvider::builder()
                 .kind("read-only-usage")
-                .complete(|_| async { panic!("the second core reads without driving") })
+                .complete(|_| async { panic!("the second core reads without executing") })
                 .build()
                 .into_handle(),
             lash_core::testing::test_llm_profile_metadata("mock-model"),
@@ -180,7 +180,7 @@ pub(super) async fn read_parked_usage_from_second_core(
     );
     assert_eq!(
         factory
-            .drive_epoch(&session)
+            .shift_epoch(&session)
             .await
             .expect("fence after facade read"),
         fence
@@ -222,10 +222,10 @@ mod live {
         };
         teardown |harness: LiveConformanceHarness, law: &'static str| async move {
             let reason = match law {
-                "usage_of_a_root_parked_forever_before_finalization_is_read_without_driving"
+                "usage_of_a_run_parked_forever_before_finalization_is_read_without_executing"
                 | "usage_crash_p1_parked_forever"
                 | "usage_crash_p2_parked_forever" => Some(
-                    "the usage law deliberately parks a paid root forever without finalization",
+                    "the usage law deliberately parks a paid run forever without finalization",
                 ),
                 "substrate_lost_keeps_each_paid_call_once" => Some(
                     "the usage law deliberately crashes a paid turn before recording substrate loss",

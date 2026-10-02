@@ -40,14 +40,14 @@ pub struct ParkedWork {
     pub(crate) work: Arc<crate::core::CoreWorkSlot>,
     pub(crate) scopes: Arc<dyn lash_core::engine::ScopeCloseSink>,
     /// The `ScopeClose` kind's relay (ADR 0109 §3): a cancelled or forked
-    /// root's scope close is its obligation's immediate delivery.
-    pub(crate) scope_close_obligations: Arc<dyn lash_core::runtime::drive::relay::ObligationRelay>,
+    /// run's scope close is its obligation's immediate delivery.
+    pub(crate) scope_close_obligations: Arc<dyn lash_core::runtime::shift::relay::ObligationRelay>,
     /// The store set's `ControlIntent` obligation ledger: a verb's engine
     /// half is delivered through it (ADR 0109).
     pub(crate) intents: Arc<dyn lash_core::store::ObligationLedger>,
     /// The relay policy a verb's immediate `deliver_intent` runs under: the
     /// host's configured attempt budget (FIG-4246).
-    pub(crate) relay_policy: lash_core::drive::relay::RelayPolicy,
+    pub(crate) relay_policy: lash_core::shift::relay::RelayPolicy,
 }
 
 impl std::fmt::Debug for ParkedWork {

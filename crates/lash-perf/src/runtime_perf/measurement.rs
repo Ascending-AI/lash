@@ -13,7 +13,7 @@ use lash_core::runtime::{
 use lash_core::sansio::{
     ChatContextProjector, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
-use lash_core::store::{AdmittedHead, GraphAppend, RootStore as _};
+use lash_core::store::{AdmittedHead, GraphAppend, RunStore as _};
 use lash_core::{
     AttachmentWrite, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
     LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part, ProtocolTurnOptions,
@@ -59,24 +59,24 @@ async fn load_runtime_perf_session_state(
     .map(|loaded| loaded.state))
 }
 
-async fn seal_perf_drive(
+async fn seal_perf_shift(
     store: &(impl lash_core::RuntimeStore + ?Sized),
     session_id: &lash_sansio::SessionId,
-) -> anyhow::Result<lash_core::store::DriveFence> {
-    use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
-    let stored = store.drive_epoch(session_id).await?;
+) -> anyhow::Result<lash_core::store::ShiftFence> {
+    use lash_core::store::{AdmissionId, RunStartNonce, ShiftEpochSeal};
+    let stored = store.shift_epoch(session_id).await?;
     let admission = AdmissionId::new(uuid::Uuid::new_v4().to_string());
     let seal = store
-        .seal_drive_epoch(
+        .seal_shift_epoch(
             session_id,
             &admission,
             stored.epoch,
-            &RootStartNonce::new(admission.as_str()),
+            &RunStartNonce::new(admission.as_str()),
             None,
         )
         .await?;
-    let DriveEpochSeal::Sealed(fence) = seal else {
-        anyhow::bail!("benchmark drive seal was superseded: {seal:?}");
+    let ShiftEpochSeal::Sealed(fence) = seal else {
+        anyhow::bail!("benchmark shift seal was superseded: {seal:?}");
     };
     Ok(fence)
 }

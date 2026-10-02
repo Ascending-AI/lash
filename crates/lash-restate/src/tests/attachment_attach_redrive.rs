@@ -7,7 +7,7 @@ use crate::durable_wait::{RestateDurableWaitAddress, durable_wait_index_object_k
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
 };
-use lash_core::runtime::drive::relay::relay_due;
+use lash_core::runtime::shift::relay::relay_due;
 use lash_core::{ArtifactReferrer, AttachmentReferrers, ReferrerClaim, StoreError, StoreSet};
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{CrashCount, CrashPoint, CrashRule, RestateTestBackend, ServerConfig};

@@ -84,7 +84,7 @@ pub trait DeploymentRegistry: Send + Sync {
     /// (FIG-4454): each one's drain runs, or is recovered, on that lane, so
     /// the generation's deployment cannot retire before it seats. The
     /// group's own record is the obligation of record, whoever opened the
-    /// group — a host-built opener has no root the store counts.
+    /// group — a host-built opener has no run the store counts.
     async fn undrained_group_children(
         &self,
         generation: &BuildGeneration,

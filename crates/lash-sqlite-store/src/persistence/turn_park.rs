@@ -1,9 +1,9 @@
-//! A session's park, root-addressed (FIG-3600 S7, D2 §1.3): the one record
-//! a parked root holds, read and written inside the caller's transaction.
+//! A session's park, run-addressed (FIG-3600 S7, D2 §1.3): the one record
+//! a parked run holds, read and written inside the caller's transaction.
 //!
 //! Every write is decided by [`decide_turn_park_write`] against the stored
-//! park, after the root's terminal evidence was found absent: a root with
-//! terminal evidence never parks (P2), so a zombie execution of a root an
+//! park, after the run's terminal evidence was found absent: a run with
+//! terminal evidence never parks (P2), so a zombie execution of a run an
 //! operator already ended leaves nothing behind.
 
 use lash_core_execution::store::{
@@ -68,7 +68,7 @@ pub(crate) fn turn_park_conn(
         .map_err(sqlite_error)?;
     row.map(
         |(
-            root,
+            run,
             park_id,
             reason_code,
             reason_json,
@@ -86,7 +86,7 @@ pub(crate) fn turn_park_conn(
             };
             TurnPark::decode(
                 session_id.clone(),
-                root.try_into()?,
+                run.try_into()?,
                 lash_core_execution::store::ParkId::from_feed_sequence(stored("park_id", park_id)?),
                 &reason_code,
                 &reason_json,
@@ -112,12 +112,12 @@ fn stored_head(
     park: &TurnPark,
 ) -> Result<(StoredTurnParkHead, Option<ControlIntent>), StoreError> {
     let redrive = match park.resume_intent {
-        Some(intent) => crate::session_roots::load_intent_conn(conn, intent)?,
+        Some(intent) => crate::session_runs::load_intent_conn(conn, intent)?,
         None => None,
     };
     Ok((
         StoredTurnParkHead {
-            root: park.turn_id.clone(),
+            run: park.turn_id.clone(),
             engine: park.engine.clone(),
             children: park.children.clone(),
             redrive: park.resume_intent.map(|intent| StoredParkRedrive {
@@ -156,7 +156,7 @@ fn record_child_conn(
 }
 
 /// Record `write` on `conn` (inside the caller's transaction): refuse a
-/// root with terminal evidence (P2), then open, supersede, re-park or attach
+/// run with terminal evidence (P2), then open, supersede, re-park or attach
 /// the engine's handle as [`decide_turn_park_write`] rules.
 pub(crate) fn record_turn_park_conn(
     conn: &Connection,
@@ -164,11 +164,11 @@ pub(crate) fn record_turn_park_conn(
 ) -> Result<TurnPark, StoreError> {
     let session_id = &write.session_id;
     if let Some(terminal) =
-        crate::session_roots::root_terminal_conn(conn, session_id, &write.turn_id)?
+        crate::session_runs::run_terminal_conn(conn, session_id, &write.turn_id)?
     {
-        return Err(StoreError::RootAlreadyTerminal {
+        return Err(StoreError::RunAlreadyTerminal {
             session_id: session_id.clone(),
-            root: write.turn_id.clone(),
+            run: write.turn_id.clone(),
             by: Box::new(terminal.cause),
         });
     }
@@ -176,7 +176,7 @@ pub(crate) fn record_turn_park_conn(
         .prepare(
             crate::turn_ingress::turn_ingress_sql()
                 .family_sqlite
-                .root_bound_input_states
+                .run_bound_input_states
                 .sql(),
         )
         .map_err(sqlite_error)?;
@@ -193,9 +193,9 @@ pub(crate) fn record_turn_park_conn(
             state == lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()
         })
     {
-        return Err(StoreError::RootInputWithdrawn {
+        return Err(StoreError::RunInputWithdrawn {
             session_id: session_id.clone(),
-            root: write.turn_id.clone(),
+            run: write.turn_id.clone(),
         });
     }
     let reason_code = write.reason.code().as_str();
@@ -239,7 +239,7 @@ pub(crate) fn record_turn_park_conn(
             return Ok(park);
         }
         (TurnParkWriteDecision::Repark, Some(mut park)) => {
-            // A same-root re-park keeps `park_id` and `since_ms`, refreshes
+            // A same-run re-park keeps `park_id` and `since_ms`, refreshes
             // the reason and `last_refused_ms`, counts the refusal and
             // clears a requested redrive — no feed event.
             crate::conn::cached_execute(
@@ -257,17 +257,17 @@ pub(crate) fn record_turn_park_conn(
                 ],
             )
             .map_err(sqlite_error)?;
-            // The root ran past a redrive the park still named open: its
+            // The run ran past a redrive the park still named open: its
             // resume reached the execution and only its acknowledgement was
-            // lost. Settle it here, so it never resumes the root again. Only
-            // the root's own refusal re-parks past an open redrive: a
+            // lost. Settle it here, so it never resumes the run again. Only
+            // the run's own refusal re-parks past an open redrive: a
             // reconcile write is decided `Unchanged` against one.
             if let Some(open) =
                 redrive.filter(|redrive| matches!(redrive.state, ControlIntentState::Pending))
             {
                 let mut settled = open.clone();
                 settled.state = ControlIntentState::Acknowledged { at_ms: write.at_ms };
-                if !crate::session_roots::write_intent_state_conn(conn, &open, &settled)? {
+                if !crate::session_runs::write_intent_state_conn(conn, &open, &settled)? {
                     return Err(StoreError::Contended);
                 }
             }
@@ -287,7 +287,7 @@ pub(crate) fn record_turn_park_conn(
             return Ok(park);
         }
         (TurnParkWriteDecision::Supersede, Some(superseded)) => {
-            // A different root's park supersedes the stored one: close it on
+            // A different run's park supersedes the stored one: close it on
             // the feed, then open the new park.
             let deleted: Option<(String, i64)> = conn
                 .query_row(
@@ -297,7 +297,7 @@ pub(crate) fn record_turn_park_conn(
                 )
                 .optional()
                 .map_err(sqlite_error)?;
-            let Some((superseded_root, superseded_park_id)) = deleted else {
+            let Some((superseded_run, superseded_park_id)) = deleted else {
                 return Err(StoreError::Backend(format!(
                     "turn park supersede of `{}` in session `{session_id}` deleted no row",
                     superseded.turn_id
@@ -306,7 +306,7 @@ pub(crate) fn record_turn_park_conn(
             log_turn_park_closed_conn(
                 conn,
                 session_id,
-                &superseded_root,
+                &superseded_run,
                 superseded_park_id,
                 &ParkEventKind::Unparked {
                     cause: UnparkCause::Superseded,
@@ -367,35 +367,35 @@ pub(crate) fn record_turn_park_conn(
     })
 }
 
-/// End `root`'s park on `conn` (inside the transaction that writes the
-/// root's terminal), with the feed event its end `cause` names (FIG-4780).
-/// A root's end is what ends its park, whatever kind of root it is: a
-/// command root commits no turn, so no commit would. A session parked on
-/// another root, or on none, is left as it is and appends nothing.
-pub(crate) fn end_root_park_conn(
+/// End `run`'s park on `conn` (inside the transaction that writes the
+/// run's terminal), with the feed event its end `cause` names (FIG-4780).
+/// A run's end is what ends its park, whatever kind of run it is: a
+/// command run commits no turn, so no commit would. A session parked on
+/// another run, or on none, is left as it is and appends nothing.
+pub(crate) fn end_run_park_conn(
     conn: &Connection,
     session_id: &SessionId,
-    root: &lash_sansio::TurnId,
-    cause: &lash_core_execution::store::RootTerminalCause,
+    run: &lash_sansio::TurnId,
+    cause: &lash_core_execution::store::RunTerminalCause,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let ended: Option<(String, i64)> = conn
         .query_row(
             turn_parks().delete_for_turn_returning.sql(),
-            params![session_id.as_str(), root.as_str()],
+            params![session_id.as_str(), run.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((ended_root, park_id)) = ended else {
+    let Some((ended_run, park_id)) = ended else {
         return Ok(());
     };
     log_turn_park_closed_conn(
         conn,
         session_id,
-        &ended_root,
+        &ended_run,
         park_id,
-        &ParkEventKind::ending_root_park(cause),
+        &ParkEventKind::ending_run_park(cause),
         crate::clamp_epoch_ms(at_ms),
     )
 }
@@ -404,7 +404,7 @@ pub(crate) fn end_root_park_conn(
 /// `conn` (inside the redrive's store half).
 #[expect(
     dead_code,
-    reason = "the redrive's store half lands with the parked-root verbs"
+    reason = "the redrive's store half lands with the parked-run verbs"
 )]
 pub(crate) fn set_resume_intent_conn(
     conn: &Connection,

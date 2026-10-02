@@ -1,17 +1,17 @@
 //! `generation_handoff_rollback` (ADR 0115 §6): journals and deployments
 //! across a generation hand-off and a rollback, over real processes.
 //!
-//! - **A foreign-`G` journal parks.** A root's journal is started by N and
+//! - **A foreign-`G` journal parks.** A run's journal is started by N and
 //!   held at the provider. N's process dies, and N+1 is started behind N's
 //!   URI without registering: the code behind N's deployment is swapped, the
-//!   operator mistake ADR 0043 forbids. Restate replays the root on N+1,
+//!   operator mistake ADR 0043 forbids. Restate replays the run on N+1,
 //!   whose sentinel parks it `RetiredGeneration`, naming N's `G`, and N+1
 //!   makes no model call. Swapped back, N resumes the kept journal and the
 //!   turn answers.
-//! - **A pinned drive's root runs on N+1.** A drive pinned to N holds its
-//!   first root while a second input arrives and N+1 registers. The drive
-//!   admits the second root, whose `LashTurn` runs on N+1: answered, with
-//!   no refusal and no `SubstrateLost`, and each root makes one model call.
+//! - **A pinned shift's run executes on N+1.** A shift pinned to N holds its
+//!   first run while a second input arrives and N+1 registers. The shift
+//!   admits the second run, whose `LashTurn` runs on N+1: answered, with
+//!   no refusal and no `SubstrateLost`, and each run makes one model call.
 //! - **Signals that race the hand-off are delivered once.** Four processes
 //!   wait for a signal on N. One is signalled and ends before N's
 //!   generation drains; the others are signalled as the drain hands their
@@ -43,7 +43,7 @@ use serde_json::json;
 
 use crate::support::{Leg, record};
 
-/// The root journal N starts parks on N+1 with zero effects, and completes
+/// The run journal N starts parks on N+1 with zero effects, and completes
 /// on N once N serves its URI again. Answers the restored N node.
 fn foreign_journal_parks(
     leg: &Leg,
@@ -55,11 +55,11 @@ fn foreign_journal_parks(
     let g_n = n_node.generation()?.to_owned();
     let session = case.session_id("foreign");
     let gate = "foreign-journal";
-    let pending = n.spawn_turn(case, &session, &format!("hold:{gate} a root N journals"))?;
+    let pending = n.spawn_turn(case, &session, &format!("hold:{gate} a run N journals"))?;
     let held_by = case.await_gate(gate)?;
     ensure!(
         held_by == g_n,
-        "the root was held by generation {held_by}, not N's {g_n}"
+        "the run was held by generation {held_by}, not N's {g_n}"
     );
 
     // N dies, and N+1 answers at N's URI unregistered.
@@ -77,7 +77,7 @@ fn foreign_journal_parks(
     // Restate reports an attempt's failure while the invocation backs off,
     // and pauses it once the turn handler's attempts are spent.
     let seen = std::cell::RefCell::new(Vec::new());
-    let (key, refused) = wait_for("N+1 to refuse the root's journal", || {
+    let (key, refused) = wait_for("N+1 to refuse the run's journal", || {
         let runs = block_on(view.invocations_like("LashTurn", &session, "run"))?;
         seen.replace(runs.clone());
         Ok(runs.into_iter().find(|(_, run)| {
@@ -86,7 +86,7 @@ fn foreign_journal_parks(
             })
         }))
     })
-    .with_context(|| format!("the root's runs: {:?}", seen.borrow()))?;
+    .with_context(|| format!("the run's runs: {:?}", seen.borrow()))?;
     record(
         leg,
         "foreign-journal-refused.json",
@@ -130,19 +130,19 @@ fn foreign_journal_parks(
     let turn = pending.wait()?;
     ensure!(
         turn.reply.as_deref() == Some(served_by(BuildLabel::N, &g_n).as_str()),
-        "the resumed root answered {turn:?}"
+        "the resumed run answered {turn:?}"
     );
     let effects = case.effects_of(gate)?;
     ensure!(
         !effects.is_empty() && effects.iter().all(|effect| effect.build == BuildLabel::N),
-        "the root's model calls were not all N's: {effects:?}"
+        "the run's model calls were not all N's: {effects:?}"
     );
     Ok(restored)
 }
 
-/// A drive pinned to N admits a root that runs on N+1. Answers the N+1
+/// A shift pinned to N admits a run that runs on N+1. Answers the N+1
 /// node it registered.
-fn pinned_drive_root(
+fn pinned_shift_run(
     leg: &Leg,
     case: &Case,
     view: &RestateView,
@@ -151,15 +151,15 @@ fn pinned_drive_root(
 ) -> Result<ServingNode> {
     let (n, next) = (&leg.builds.n, &leg.builds.next);
     let session = case.session_id("pinned");
-    let gate = "pinned-drive";
-    let first_marker = format!("hold:{gate} the drive's first root");
-    let second_marker = "the root the pinned drive admits next";
+    let gate = "pinned-shift";
+    let first_marker = format!("hold:{gate} the shift's first run");
+    let second_marker = "the run the pinned shift admits next";
     let first = n.spawn_turn(case, &session, &first_marker)?;
     case.await_gate(gate)?;
     let second = n.spawn_turn(case, &session, second_marker)?;
-    wait_for("the second input's drive request", || {
+    wait_for("the second input's shift request", || {
         Ok(
-            (block_on(view.invocations("LashSession", &session, "drive"))?.len() >= 2)
+            (block_on(view.invocations("LashSession", &session, "shift"))?.len() >= 2)
                 .then_some(()),
         )
     })?;
@@ -177,37 +177,37 @@ fn pinned_drive_root(
     let first = first.wait()?;
     ensure!(
         first.reply.as_deref() == Some(served_by(BuildLabel::N, g_n).as_str()),
-        "the first root answered {first:?}"
+        "the first run answered {first:?}"
     );
     let second = second.wait()?;
     ensure!(
         second.reply.as_deref() == Some(served_by(BuildLabel::Next, &g_next).as_str()),
-        "the second root was not answered by N+1: {second:?}"
+        "the second run was not answered by N+1: {second:?}"
     );
 
-    let drives = block_on(view.invocations("LashSession", &session, "drive"))?;
+    let shifts = block_on(view.invocations("LashSession", &session, "shift"))?;
     let runs = block_on(view.invocations_like("LashTurn", &session, "run"))?;
     record(
         leg,
-        "pinned-drive.json",
-        &format!("drives {drives:?}\nruns {runs:?}"),
+        "pinned-shift.json",
+        &format!("executes {shifts:?}\nruns {runs:?}"),
     )?;
-    let pinned = drives.first().context("no drive ran")?;
+    let pinned = shifts.first().context("no shift ran")?;
     ensure!(
         pinned.pinned_deployment_id.as_deref() == Some(n_deployment),
-        "the drive was not pinned to N: {drives:?}"
+        "the shift was not pinned to N: {shifts:?}"
     );
-    ensure!(runs.len() == 2, "expected two roots, ran {runs:?}");
+    ensure!(runs.len() == 2, "expected two runs, ran {runs:?}");
     let (_, first_run) = &runs[0];
     let (_, second_run) = &runs[1];
     ensure!(
         first_run.pinned_deployment_id.as_deref() == Some(n_deployment),
-        "the first root did not run on N: {runs:?}"
+        "the first run did not run on N: {runs:?}"
     );
     ensure!(
         second_run.pinned_deployment_id.as_deref() == Some(next_deployment.id.as_str())
             && second_run.invoked_by_id.as_deref() == Some(pinned.id.as_str()),
-        "the second root was not admitted by the drive pinned to N and run on N+1: {runs:?}"
+        "the second run was not admitted by the shift pinned to N and run on N+1: {runs:?}"
     );
     for marker in [first_marker.as_str(), second_marker] {
         let effects = case.effects_of(marker)?;
@@ -385,26 +385,30 @@ fn signals_race_the_hand_off(
     ] {
         let runs = segments(view, process)?;
         evidence.insert(name.to_owned(), json!(format!("{runs:?}")));
-        let root = process.to_string();
+        let run = process.to_string();
         let successor = format!("{process}#1");
-        let roots: Vec<_> = runs.iter().filter(|run| run.key == root).collect();
-        let successors: Vec<_> = runs.iter().filter(|run| run.key == successor).collect();
+        let runs: Vec<_> = runs.iter().filter(|executed| executed.key == run).collect();
+        let successors: Vec<_> = runs
+            .iter()
+            .filter(|executed| executed.key == successor)
+            .collect();
         ensure!(
-            roots.len() == 1
-                && roots[0].invocation.pinned_deployment_id.as_deref() == Some(n_deployment),
+            runs.len() == 1
+                && runs[0].invocation.pinned_deployment_id.as_deref() == Some(n_deployment),
             "{name}: the root segment did not run once on N: {runs:?}"
         );
         ensure!(
             successors.len() <= 1
-                && successors
-                    .iter()
-                    .all(|run| run.invocation.pinned_deployment_id.as_deref()
-                        == Some(next_deployment)),
+                && successors.iter().all(|executed| executed
+                    .invocation
+                    .pinned_deployment_id
+                    .as_deref()
+                    == Some(next_deployment)),
             "{name}: a hand-over ran more than one successor, or one off N+1: {runs:?}"
         );
         ensure!(
             runs.iter()
-                .all(|run| run.key == root || run.key == successor),
+                .all(|executed| executed.key == run || executed.key == successor),
             "{name}: a successor handed over again: {runs:?}"
         );
         match name {
@@ -474,7 +478,7 @@ fn continuation_stays_on_next(
 }
 
 /// A foreign-`G` journal dispatches zero effects and parks. Signals that
-/// race a hand-off are delivered exactly once. A root admitted by a drive
+/// race a hand-off are delivered exactly once. A run admitted by a shift
 /// pinned to N runs on N+1, with no refusal and no `SubstrateLost`. A
 /// continuation N cannot decode keeps N+1's deployment and routes there.
 /// Rollback registers N at a fresh URI. Registering at a URI that serves
@@ -497,8 +501,8 @@ fn generation_handoff_rollback() -> Result<()> {
     let n_restored =
         foreign_journal_parks(&leg, &case, &view, n_first).context("the foreign journal")?;
     let racers = start_racers(&case, n, &view, &n_deployment.id).context("the racers' start")?;
-    let mut next_node = pinned_drive_root(&leg, &case, &view, &n_deployment.id, &g_n)
-        .context("the pinned drive")?;
+    let mut next_node =
+        pinned_shift_run(&leg, &case, &view, &n_deployment.id, &g_n).context("the pinned shift")?;
     let g_next = next_node.generation()?.to_owned();
     let next_deployment = block_on(view.deployment_at(next_node.uri()?))?;
     signals_race_the_hand_off(

@@ -58,7 +58,7 @@
 //! A group's tool calls are admitted against the session's recorded
 //! `max_tool_calls` before anything of the group is journaled or dispatched
 //! (ADR 0099 §9, FIG-4546). The limit is read from the policy the execution
-//! recorded — a root's snapshot, a process's environment — so a replay, a
+//! recorded — a run's snapshot, a process's environment — so a replay, a
 //! redrive and a reopen all judge the same call against the same number.
 //!
 //! * A **cell** counts every tool call it makes: the limit is its total.

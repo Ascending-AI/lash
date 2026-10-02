@@ -173,7 +173,7 @@ finish(result);
 
 /// FIG-3293: a crash between the ledger write and the completion resolve
 /// leaves a decided row over an outstanding wait. The row no longer lists as
-/// pending, so the retry — and the boot reconcile — must re-drive `resolve`
+/// pending, so the retry — and the boot reconcile — must redrive `resolve`
 /// from the recorded decision instead of reporting "not pending".
 #[test]
 fn a_decided_but_unresolved_approval_repairs_on_retry() {
@@ -485,7 +485,7 @@ try {
             .unwrap(),
         lash::ResolveOutcome::Accepted
     );
-    // The resolution resumes the parked turn in the engine's drive; the
+    // The resolution resumes the parked turn in the engine's shift; the
     // session opens once that turn settled.
     core.turn_work_driver()
         .await_terminal(&lash::TurnAddress::new(
@@ -621,7 +621,7 @@ try {
         approvals,
     )
     .await;
-    // The engine's drive may still hold the session as the reopen lands.
+    // The engine's shift may still hold the session as the reopen lands.
     let session = crate::tests::open_session_once_released(&reopened, &session_id).await;
     assert_eq!(
         serde_json::to_value(session.read_view().active_events()).unwrap(),

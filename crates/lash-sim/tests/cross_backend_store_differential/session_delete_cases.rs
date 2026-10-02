@@ -1,7 +1,7 @@
 //! A session's two-phase delete (ADR 0109 §4) compared across the three
 //! backends: the close's acknowledgement arms the `SessionDelete` obligation
 //! on the session's catalog row, and the session-delete ledger counts exactly
-//! the session's undelivered cleanup — scope closes on its roots and
+//! the session's undelivered cleanup — scope closes on its runs and
 //! parent-end plans of the scopes it owns — and nothing another session owes;
 //! and a closed session counts as closing until its physical delete.
 //!
@@ -28,7 +28,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     let factory = stores.session_store_factory();
     let registry = stores.process_registry();
     let ledger = stores.session_delete_ledger();
-    let root = TurnId::from("delete-root");
+    let run = TurnId::from("delete-run");
     let mut sessions = Vec::new();
     for alias in ["own", "own:x"] {
         let session_id = SessionId::fixture(format!("{prefix}-delete-{alias}"));
@@ -50,9 +50,9 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         .await
         .expect("create the session");
         store
-            .bind_root_inputs(&session_id, &root, &[])
+            .bind_run_inputs(&session_id, &run, &[])
             .await
-            .expect("record the session's root");
+            .expect("record the session's run");
         sessions.push(session_id);
     }
     let (own, other) = (&sessions[0], &sessions[1]);
@@ -150,8 +150,8 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         "cleanup of an unarmed session",
         ledger.undelivered_cleanup(own).await.expect("cleanup"),
     ));
-    // The close ended `own`'s open root, and that terminal write armed its
-    // scope close (ADR 0109 §3); the other session's root is still open, so
+    // The close ended `own`'s open run, and that terminal write armed its
+    // scope close (ADR 0109 §3); the other session's run is still open, so
     // the ledger's repair arm arms it.
     let mut scope_closes = Vec::new();
     for session in [own, other] {
@@ -160,31 +160,31 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
             .arm(
                 &ObligationKey::ScopeClose {
                     session_id: session.clone(),
-                    root: root.clone(),
+                    run: run.clone(),
                 },
                 T0,
             )
             .await
             .expect("arm the scope close");
         out.push(format!(
-            "the repair arm arms the root of {} -> {}",
+            "the repair arm arms the run of {} -> {}",
             if session == own { "own" } else { "other" },
             armed.is_some()
         ));
         scope_closes.push(armed.unwrap_or_else(|| {
             lash_core::store::ObligationKey::ScopeClose {
                 session_id: session.clone(),
-                root: root.clone(),
+                run: run.clone(),
             }
             .id()
         }));
     }
     let plans = [
         ScopeId::session(own.clone()),
-        ScopeId::turn(own.clone(), root.clone()),
+        ScopeId::turn(own.clone(), run.clone()),
         ScopeId::session_operation(own.clone(), "delete-drain"),
         ScopeId::session(other.clone()),
-        ScopeId::turn(other.clone(), root.clone()),
+        ScopeId::turn(other.clone(), run.clone()),
     ];
     let mut plan_ids = Vec::new();
     for scope in &plans {
@@ -247,7 +247,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
             T0,
         )
         .await
-        .expect("deliver the root's scope close");
+        .expect("deliver the run's scope close");
     out.push(cleanup(
         "cleanup after two deliveries",
         ledger.undelivered_cleanup(own).await.expect("cleanup"),

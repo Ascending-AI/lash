@@ -4,7 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -363,7 +363,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
                     .expect("valid model"),
             ),
         )),
-        // Bounded, not unbounded: these fixtures drive a live runtime loop
+        // Bounded, not unbounded: these fixtures shift a live runtime loop
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of
         // failing. The budget is well above the iterations the scenario needs.
@@ -397,7 +397,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
 
     let turn_activities = RecordingTurnActivities::default();
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("exercise discovery refusal"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

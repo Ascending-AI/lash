@@ -1,4 +1,4 @@
-//! The park step: a root whose runs fail until the engine stops retrying
+//! The park step: a run whose executions fail until the engine stops retrying
 //! it, the park the recovery pass records, and the host's redrive of it.
 
 use std::num::NonZeroUsize;
@@ -11,39 +11,39 @@ use crate::crash_matrix::deployment::{ArmEffect, HostSite};
 use crate::invariants::{HostOp, HostRefusalCode, RedriveRefusal};
 
 /// The retry timers and recovery ticks a park step waits, at most, for its
-/// root's run to stop and the recovery pass to park it: the turn handler's
+/// run's execution to stop and the recovery pass to park it: the turn handler's
 /// eight attempts, and the ticks between them.
 const PARK_WAITS: usize = 48;
 
-/// What a park step did: the root's admission, and the park its session
+/// What a park step did: the run's admission, and the park its session
 /// took with how the host heard its redrive answered.
 #[derive(Clone, Debug)]
 pub struct Redriven {
     pub admission: Admission,
-    /// The root the session parked, and the redrive's outcome; `None` when
+    /// The run the session parked, and the redrive's outcome; `None` when
     /// nothing parked.
     pub park: Option<(lash_core::TurnId, Admission)>,
 }
 
 impl Driver {
-    /// Send `root` on `session` while every run of a root of that session
+    /// Send `run` on `session` while every execution of a run of that session
     /// fails live, wait until the engine stops retrying one and the recovery
-    /// pass parks it, let the deployment run roots again, and redrive the
+    /// pass parks it, let the deployment run executes again, and redrive the
     /// park. The fault enters at the session driver's trait seam
-    /// ([`HostSite::RunRootBefore`]); the redrive is the host's own verb.
+    /// ([`HostSite::ExecuteRunBefore`]); the redrive is the host's own verb.
     pub(in crate::chaos_soak) async fn park_and_redrive(
         &mut self,
         session: &SessionId,
-        root: &str,
+        run: &str,
     ) -> Result<Redriven, String> {
         let matching = format!("{session}/");
         self.world.faults().always_matching(
-            HostSite::RunRootBefore,
+            HostSite::ExecuteRunBefore,
             ArmEffect::FailRetryable,
             matching.clone(),
         );
-        self.phase = format!("park `{root}`: sending");
-        let parked = match self.send(session, vec![root.to_owned()]).await {
+        self.phase = format!("park `{run}`: sending");
+        let parked = match self.send(session, vec![run.to_owned()]).await {
             Ok(admission) if matches!(admission, Admission::Refused { .. }) => {
                 Ok((admission, None))
             }
@@ -51,10 +51,10 @@ impl Driver {
             Err(error) => Err(error),
         };
         // The deployment is fixed before the redrive, as an operator fixes
-        // one: the resumed root runs.
+        // one: the resumed run executes.
         self.world
             .faults()
-            .disarm_matching(HostSite::RunRootBefore, &matching);
+            .disarm_matching(HostSite::ExecuteRunBefore, &matching);
         let (admission, park) = parked?;
         let Some(park) = park else {
             return Ok(Redriven {
@@ -62,7 +62,7 @@ impl Driver {
                 park: None,
             });
         };
-        self.phase = format!("park `{root}`: redriving `{}`", park.turn_id);
+        self.phase = format!("park `{run}`: redriving `{}`", park.turn_id);
         let redrive = self.redrive(session, &park).await?;
         Ok(Redriven {
             admission,
@@ -125,7 +125,7 @@ impl Driver {
             session_id: session.clone(),
             turn_id: park.turn_id.clone(),
         };
-        let roots = vec![park.turn_id.to_string()];
+        let runs = vec![park.turn_id.to_string()];
         let park_id = park.park_id;
         let mut unanswered = 0;
         for _ in 0..20 {
@@ -149,10 +149,10 @@ impl Driver {
                     code: redrive_refusal(&error)?,
                 },
             };
-            self.record_host(HostOp::Redrive, session, roots, outcome.clone());
+            self.record_host(HostOp::Redrive, session, runs, outcome.clone());
             return Ok(outcome);
         }
-        self.record_host(HostOp::Redrive, session, roots, Admission::Maybe);
+        self.record_host(HostOp::Redrive, session, runs, Admission::Maybe);
         Err(format!(
             "the redrive of `{}` never answered: the host died inside {unanswered} attempt(s)",
             park.turn_id

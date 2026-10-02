@@ -28,7 +28,7 @@ pub(super) fn checked_turn_usage_from_llm_usage(
 /// when the prompt nearly filled the model's context window.
 ///
 /// Pure policy: the kernel owns the terminal-reason interpretation, so the
-/// provider's raw reason is refined here (before it drives the finish decision
+/// provider's raw reason is refined here (before it executes the finish decision
 /// in `handle_terminal_llm_response`) rather than in the host I/O layer. A
 /// `None` window disables the refinement. `prompt_input_tokens` is the
 /// prompt-side subtotal already validated by

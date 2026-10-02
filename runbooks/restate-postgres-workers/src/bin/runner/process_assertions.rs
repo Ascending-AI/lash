@@ -135,15 +135,15 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     Ok(())
 }
 
-/// Wait until the engine has driven `expected` queued roots on the E2E
-/// session. A process wake is driven the moment it is enqueued, under its
-/// queued run's `drive-run:` root, so it never waits queued for a host.
+/// Wait until the engine has executed `expected` queued runs on the E2E
+/// session. A process wake is executed the moment it is enqueued, under its
+/// queued run's `shift-run:` run, so it never waits queued for a host.
 pub(super) async fn wait_for_driven_wakes(pool: &sqlx::PgPool, expected: usize) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(120);
-    let mut driven = Vec::new();
+    let mut executed = Vec::new();
     while Instant::now() < deadline {
-        driven = driven_queued_roots(pool, DEFAULT_SESSION_ID).await?;
-        if driven.len() >= expected {
+        executed = executed_queued_runs(pool, DEFAULT_SESSION_ID).await?;
+        if executed.len() >= expected {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -155,8 +155,8 @@ pub(super) async fn wait_for_driven_wakes(pool: &sqlx::PgPool, expected: usize) 
             .await
             .context("count the E2E session's queued batches")?;
     anyhow::bail!(
-        "timed out waiting for the engine to drive process wake {expected}: \
-         {queued} queued batches, driven queued roots {driven:?}"
+        "timed out waiting for the engine to execute process wake {expected}: \
+         {queued} queued batches, executed queued runs {executed:?}"
     )
 }
 
@@ -442,7 +442,7 @@ pub(super) async fn assert_failover(
         // record the completion, on the premise that "the crash injector keeps
         // the marker's logical worker unavailable for this workflow even after
         // Compose restarts its container". That premise is false under journal
-        // replay: the peer drives the turn, loses the head CAS to the dead
+        // replay: the peer executes the turn, loses the head CAS to the dead
         // holder's claim, and cedes; the engine's retry then replays the
         // *journaled* `crash_once` call instead of re-invoking it, so the
         // reincarnated original worker never re-exits and routinely finishes the
@@ -450,7 +450,7 @@ pub(super) async fn assert_failover(
         // ruling ratified, so the witness is the durable one: exactly one
         // completion, against exactly one acceptance, settled once. The
         // failover residual is the engine's redelivery cadence: the re-invoked
-        // drive seals a new session drive epoch and supersedes the dead owner's
+        // shift seals a new session shift epoch and supersedes the dead owner's
         // claims (ADR 0101).
         //
         // The crash still has to happen — the marker read below fails the gate

@@ -626,48 +626,48 @@ impl RuntimeEffectController for SelfParkingKeyProbe {
     }
 }
 
-/// The drive loop polls each in-flight request at most once per task poll,
+/// The shift loop polls each in-flight request at most once per task poll,
 /// so a request that parks for the next task poll is next polled from the
-/// top, beside a root that is still running (FIG-3630).
+/// top, beside a run that is still running (FIG-3630).
 #[test]
-fn the_drive_loop_polls_each_request_once_per_task_poll() {
+fn the_shift_loop_polls_each_request_once_per_task_poll() {
     let task_polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let probe = SelfParkingKeyProbe {
         task_polls: Arc::clone(&task_polls),
         key_served: tokio::sync::Notify::new(),
     };
-    let scope = ExecutionScope::runtime_operation("drive-loop-poll-discipline");
+    let scope = ExecutionScope::runtime_operation("shift-loop-poll-discipline");
     let (requests, request_rx) = tokio::sync::mpsc::unbounded_channel();
     let (key_tx, _key_rx) = tokio::sync::oneshot::channel();
     requests
         .send(EffectControllerTaskRequest::AwaitEventKey {
             scope: scope.clone(),
             wait: AwaitEventWaitIdentity::process_signal(
-                crate::process_id_for_test("drive-loop-process"),
+                crate::process_id_for_test("shift-loop-process"),
                 "exit",
                 1,
             ),
             response: key_tx,
         })
         .expect("the request queues");
-    let drive = crate::runtime::effect::drive_effect_controller_task(
+    let shift = crate::runtime::effect::drive_effect_controller_task(
         &probe,
         scope.clone(),
-        sleep_envelope(scope, "drive-loop-root"),
+        sleep_envelope(scope, "shift-loop-root"),
         RuntimeEffectLocalExecutor::testing(
             |_envelope| async move { Ok(RuntimeEffectOutcome::Sleep) },
         ),
         request_rx,
     );
-    let mut drive = std::pin::pin!(drive);
+    let mut shift = std::pin::pin!(shift);
     let waker = std::task::Waker::noop();
     let mut cx = std::task::Context::from_waker(waker);
     for _ in 0..8 {
         task_polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if let std::task::Poll::Ready(outcome) = drive.as_mut().poll(&mut cx) {
+        if let std::task::Poll::Ready(outcome) = shift.as_mut().poll(&mut cx) {
             assert!(matches!(outcome, Ok(RuntimeEffectOutcome::Sleep)));
             return;
         }
     }
-    panic!("the root never settled after the parked request finished");
+    panic!("the run never settled after the parked request finished");
 }

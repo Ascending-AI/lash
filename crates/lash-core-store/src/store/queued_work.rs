@@ -1,7 +1,7 @@
 //! Dialect-independent queued-work composition shared by durable backends.
 //!
 //! The SQL backends (sqlite, postgres) load candidate batch rows ordered by
-//! `enqueue_seq` and pre-filtered to open batches no root admitted, then
+//! `enqueue_seq` and pre-filtered to open batches no run admitted, then
 //! apply the same pure state machine: a delivery-policy boundary gate and
 //! a delivery-policy prefix. That state machine lives here so
 //! the backends own only their SQL reads and writes while the composition
@@ -151,7 +151,7 @@ impl PendingSessionWorkOrdering {
 /// Decoded composition-relevant fields of one open queued-work batch row.
 ///
 /// Backends build these from their candidate rows, presented in
-/// `enqueue_seq` ascending order and already filtered to open rows no root
+/// `enqueue_seq` ascending order and already filtered to open rows no run
 /// admitted.
 #[derive(Clone, Debug)]
 pub struct TurnLaneCandidate {
@@ -374,7 +374,7 @@ pub fn select_turn_work_indices(
     // drains, the oversized row becomes the head of a later wake, and the head
     // check above refuses it there by name. Carrying it into this admission
     // instead would fail an admission that could have made progress, and the
-    // root's recorded admission would replay that doomed composition forever.
+    // run's recorded admission would replay that doomed composition forever.
     let selected = candidates[..selected]
         .iter()
         .position(|candidate| {

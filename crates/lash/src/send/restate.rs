@@ -1,6 +1,6 @@
 //! The Restate host's durable submit-and-wait binding (FIG-3837, D5).
 //!
-//! A host handler never runs a turn: the session's engine drives every root.
+//! A host handler never runs a turn: the session's engine executes every run.
 //! The handler journals what it needs to wait durably:
 //!
 //! 0. **Its session, reached inside the journal.** Restate re-runs a handler
@@ -22,7 +22,7 @@
 //!    died before its journal entry committed) resubmits the same id and the
 //!    same content, which the store answers with the original acceptance.
 //! 2. **A wait made of bounded probes.** [`SendHandle::outcome_restate`]
-//!    follows the input's root one probe window at a time. Each probe is a
+//!    follows the input's run one probe window at a time. Each probe is a
 //!    journaled step that answers the outcome, or where the follower stands
 //!    (its replay cursor) and the gaps that probe met, never the ones earlier
 //!    probes journaled. A replayed handler reads every finished probe back
@@ -62,12 +62,12 @@ use lash_restate::restate_sdk::errors::{HandlerResult, TerminalError};
 use lash_restate::restate_sdk::serde::Json;
 
 use super::follow::{self, Followed, Position, Subject, Tap};
-use super::{HandleShared, RootHandle, SendBuilder, SendHandle, SendOutcome, SendTarget};
+use super::{HandleShared, RunHandle, SendBuilder, SendHandle, SendOutcome, SendTarget};
 use crate::support::{EmbedError, TurnActivitySink};
 use crate::{DurableSession, SessionBuilder, SessionCreation};
 
 /// A Restate handler context that holds no exclusive object lock, and so may
-/// wait for a root (see the module docs on the dependency cycle).
+/// wait for a run (see the module docs on the dependency cycle).
 ///
 /// Implemented here for exactly the Restate SDK's non-exclusive contexts.
 /// The orphan rule keeps a host from marking the SDK's exclusive
@@ -92,7 +92,7 @@ wait_context!(
 /// asks it to suspend.
 const PROBE_WINDOW: Duration = Duration::from_secs(10);
 
-/// How a Restate handler waits for an accepted input's root.
+/// How a Restate handler waits for an accepted input's run.
 pub struct RestateWait<'a> {
     sink: Option<&'a dyn TurnActivitySink>,
     probe_window: Duration,
@@ -112,7 +112,7 @@ impl<'a> RestateWait<'a> {
         Self::default()
     }
 
-    /// Forward the root's live activity to `sink` while waiting. Activity a
+    /// Forward the run's live activity to `sink` while waiting. Activity a
     /// replayed probe already forwarded is not forwarded again, and the
     /// journaled outcome carries no activity list: the sink has it.
     pub fn sink(mut self, sink: &'a dyn TurnActivitySink) -> Self {
@@ -120,7 +120,7 @@ impl<'a> RestateWait<'a> {
         self
     }
 
-    /// The longest one journaled probe follows the root before it records
+    /// The longest one journaled probe follows the run before it records
     /// where it stands. Keep it below the deployment's inactivity timeout.
     pub fn probe_window(mut self, window: Duration) -> Self {
         self.probe_window = window;
@@ -202,7 +202,7 @@ impl SessionBuilder {
 }
 
 /// The target a journaled step reads through: no resident runtime is needed
-/// to follow a root from the store.
+/// to follow a run from the store.
 fn durable_target(target: &SendTarget) -> SendTarget {
     match target {
         SendTarget::Live(session) => SendTarget::Durable(session.durable()),
@@ -269,7 +269,7 @@ enum Probe {
 }
 
 impl SendHandle {
-    /// Wait for this input's root on a Restate handler's journal, in
+    /// Wait for this input's run on a Restate handler's journal, in
     /// journaled probes of at most the wait's window (see the module docs).
     /// No turn runs in this handler.
     ///
@@ -294,8 +294,8 @@ impl SendHandle {
     }
 }
 
-impl RootHandle {
-    /// Wait for this root on a Restate handler's journal, as
+impl RunHandle {
+    /// Wait for this run on a Restate handler's journal, as
     /// [`SendHandle::outcome_restate`] waits for an input's.
     pub fn outcome_restate<'ctx: 'a, 'a, C>(
         self,
@@ -308,7 +308,7 @@ impl RootHandle {
         wait_restate(
             ctx,
             durable_target(&self.target),
-            Subject::Root(self.root.clone()),
+            Subject::Run(self.run.clone()),
             self.cursor.clone(),
             wait,
         )

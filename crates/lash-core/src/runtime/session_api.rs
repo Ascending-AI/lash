@@ -104,13 +104,13 @@ impl LashRuntime {
         self.publish_resident_authority()
     }
 
-    /// Install a root's recorded [`ResolvedRun`](crate::ResolvedRun) as the
+    /// Install a run's recorded [`ResolvedRun`](crate::ResolvedRun) as the
     /// resident execution view. The view's config carries its own authority,
     /// which can differ from the resident one (a replay after a config
-    /// change, a recovered follow-on's inherited shape, a refresh the root
+    /// change, a recovered follow-on's inherited shape, a refresh the run
     /// re-installs its record over), so the install publishes it to the live
     /// plugin session just as a whole-state swap does (FIG-4022). This,
-    /// [`Self::uninstall_root_view`] and [`Self::install_resident_state`]
+    /// [`Self::uninstall_run_view`] and [`Self::install_resident_state`]
     /// are the only writers of the resident authority.
     pub(in crate::runtime) fn install_resolved_run(
         &mut self,
@@ -122,17 +122,17 @@ impl LashRuntime {
                 .host()
                 .decode_config(&resolved.config().plugin_config)?;
         }
-        self.state.install_root_view(resolved);
+        self.state.install_run_view(resolved);
         self.publish_resident_authority()
     }
 
-    /// Uninstall the recorded view of the root this runtime ran last and
+    /// Uninstall the recorded view of the run this runtime ran last and
     /// restore the sticky config under it, published to the live plugin
     /// session as the install was. Whatever resolves or publishes config
     /// over the resident state afterwards reads the session's, never a
-    /// root's overrides.
-    pub(in crate::runtime) fn uninstall_root_view(&mut self) -> Result<(), crate::FormatRefusal> {
-        if self.state.take_root_view().is_some() {
+    /// run's overrides.
+    pub(in crate::runtime) fn uninstall_run_view(&mut self) -> Result<(), crate::FormatRefusal> {
+        if self.state.take_run_view().is_some() {
             self.publish_resident_authority()?;
         }
         Ok(())
@@ -156,7 +156,7 @@ impl LashRuntime {
 
     /// Publish the resident authority to the live plugin session: its tool
     /// authority, and the plugin configuration its hooks run under — the
-    /// installed view's, which inside a root is the root's recorded
+    /// installed view's, which inside a run is the run's recorded
     /// admission (FIG-4379).
     pub(super) fn publish_resident_authority(&mut self) -> Result<(), crate::FormatRefusal> {
         let Some(session) = self.session.as_ref() else {
@@ -639,23 +639,23 @@ impl LashRuntime {
 
     pub(super) fn runtime_session_services_for_turn(
         &self,
-        held_drive_fence: Option<&DriveFence>,
+        held_shift_fence: Option<&ShiftFence>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::for_turn(
             self,
-            held_drive_fence,
+            held_shift_fence,
             turn_graph_appends,
         )?))
     }
 
     pub(super) fn runtime_session_services_after_commit(
         &self,
-        held_drive_fence: Option<&DriveFence>,
+        held_shift_fence: Option<&ShiftFence>,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
-            held_drive_fence,
+            held_shift_fence,
         )?))
     }
 
@@ -674,7 +674,7 @@ impl LashRuntime {
     }
 
     /// Returns a lane-less session graph service. Host head writes are
-    /// boundary session commands, applied by the drive at a turn boundary.
+    /// boundary session commands, applied by the shift at a turn boundary.
     /// A direct append while the bound turn owns the head returns the
     /// recoverable [`PluginError::SessionHeadOwned`] busy refusal, naming
     /// the session and its head owner, without writing anything.
@@ -693,9 +693,9 @@ impl LashRuntime {
     }
 
     /// The ingress relay of this runtime's backend, asking this runtime's
-    /// session work for drives (ADR 0109 §3).
-    pub(in crate::runtime) fn ingress_relay(&self) -> super::drive::IngressRelay {
-        super::drive::IngressRelay::over_backend(
+    /// session work for shifts (ADR 0109 §3).
+    pub(in crate::runtime) fn ingress_relay(&self) -> super::shift::IngressRelay {
+        super::shift::IngressRelay::over_backend(
             self.host.core.backend(),
             Arc::clone(self.host.queued_work()),
             Arc::clone(&self.host.core.clock),
@@ -866,8 +866,8 @@ impl LashRuntime {
             }
             Err(error) => return Err(super::runtime_error_from_store_commit(error).into()),
         };
-        // The command's batch owes its session a drive, armed at admission;
-        // deliver it now (ADR 0109 §3). The drive applies the command at its
+        // The command's batch owes its session a shift, armed at admission;
+        // deliver it now (ADR 0109 §3). The shift applies the command at its
         // next boundary, before any turn input (ADR 0101 §4).
         self.ingress_relay()
             .deliver_admitted(&session_id, enqueued.batch_id.as_str())
@@ -922,7 +922,7 @@ impl LashRuntime {
                 .await
                 .map_err(|error| {
                     RuntimeError::new(
-                        RuntimeErrorCode::SessionCommandPostDriveRefresh,
+                        RuntimeErrorCode::SessionCommandPostShiftRefresh,
                         error.to_string(),
                     )
                 })?;
@@ -960,10 +960,10 @@ impl LashRuntime {
 
     /// Submit `command` to the session's command lane and return as soon as
     /// it is durable: **before** it is applied (FIG-3600). The session's
-    /// drive applies it at its next turn boundary, in order; its outcome is
+    /// shift applies it at its next turn boundary, in order; its outcome is
     /// observed with [`Self::settle_session_command`].
     ///
-    /// The resident session state is marked stale: the drive commits the
+    /// The resident session state is marked stale: the shift commits the
     /// command over the durable head, so the next use of this runtime reloads
     /// the head instead of committing over a pre-command copy.
     pub async fn submit_session_command(
@@ -985,7 +985,7 @@ impl LashRuntime {
     /// Wait for the command `receipt` names to settle, and adopt the durable
     /// head it settled on. `Pending` when the engine has not settled it yet;
     /// the command stays durable and settles later. Callers that need a
-    /// settled result await the engine drive outside this runtime's writer lock.
+    /// settled result await the engine shift outside this runtime's writer lock.
     pub async fn settle_session_command(
         &mut self,
         receipt: crate::SessionCommandReceipt,
@@ -1013,7 +1013,7 @@ impl LashRuntime {
 
     pub async fn drain_next_session_command(
         &mut self,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         if self
             .session
@@ -1031,7 +1031,7 @@ impl LashRuntime {
             "session-command",
         ))?;
         self.drain_next_session_command_with_cancellation(
-            drive_fence,
+            shift_fence,
             tokio_util::sync::CancellationToken::new(),
             &controller,
         )
@@ -1040,17 +1040,17 @@ impl LashRuntime {
 
     pub async fn drain_next_session_command_with_cancellation(
         &mut self,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
-        self.drain_next_session_command_fenced(drive_fence, cancellation, effect_controller)
+        self.drain_next_session_command_fenced(shift_fence, cancellation, effect_controller)
             .await
             .map_err(CommandDrainStop::into_runtime_error)
     }
 
     /// Apply the session's leading open command run, its commit fenced by
-    /// `drive_fence` (ADR 0109 §7, FIG-3927 §2.7): a drive that sealed an
+    /// `shift_fence` (ADR 0109 §7, FIG-3927 §2.7): a shift that sealed an
     /// admission since the fence was read refuses the commit as superseded.
     ///
     /// The command lane takes no binding. The run's rows are read open and
@@ -1061,14 +1061,14 @@ impl LashRuntime {
     /// commit it refuses applies nothing and the lane is read again.
     ///
     /// The resident session is reloaded outside any recorded step, so its
-    /// outcome never decides what the root journals (FIG-4346): a reload that
+    /// outcome never decides what the run journals (FIG-4346): a reload that
     /// failed stops the drain [`CommandDrainStop::Headless`] before the next
-    /// recorded read, and the root reads on headless. So does a session that
-    /// retired under a run the root read, whose settlement and commit write
+    /// recorded read, and the run reads on headless. So does a session that
+    /// retired under an execution the run read, whose settlement and commit write
     /// nothing to the journal.
     pub(super) async fn drain_next_session_command_fenced(
         &mut self,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<Option<crate::SessionCommandReceipt>, CommandDrainStop> {
@@ -1089,7 +1089,7 @@ impl LashRuntime {
                 lash_core_execution::core_internal::owned_runner_executor(
                     Box::new(ReadSessionCommandRunRunner {
                         store: store.clone(),
-                        fence: drive_fence.clone(),
+                        fence: shift_fence.clone(),
                     }),
                     None,
                 ),
@@ -1131,7 +1131,7 @@ impl LashRuntime {
                 .into_iter()
                 .map(|(_, command)| command.clone())
                 .collect::<Vec<_>>();
-            // A replayed read may name a run this root already applied. An
+            // A replayed read may name a run this run already applied. An
             // administrative compaction or a config transaction runs again:
             // it replays the steps it journaled, then finds its command
             // settled and adopts the head its commit published without
@@ -1144,7 +1144,7 @@ impl LashRuntime {
             );
             // Only a compaction and a config transaction journal their
             // apply. Any other run settles and commits off the journal, so a
-            // session that retired under it leaves the root's next recorded
+            // session that retired under it leaves the run's next recorded
             // step the next read.
             let off_journal = |error: RuntimeError| {
                 if !journaled && error.is_session_retirement() {
@@ -1164,7 +1164,7 @@ impl LashRuntime {
             if Box::pin(self.apply_session_command(
                 commands,
                 run.completion(),
-                drive_fence,
+                shift_fence,
                 cancellation.clone(),
                 effect_controller,
             ))
@@ -1201,7 +1201,7 @@ impl LashRuntime {
         &mut self,
         commands: Vec<crate::SessionCommand>,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<bool, RuntimeError> {
@@ -1212,7 +1212,7 @@ impl LashRuntime {
                 return Box::pin(self.apply_compact_context_command(
                     instructions.clone(),
                     completion,
-                    drive_fence,
+                    shift_fence,
                     effect_controller,
                 ))
                 .await;
@@ -1221,7 +1221,7 @@ impl LashRuntime {
                 return Box::pin(self.apply_config_transaction_command(
                     transaction.as_ref().clone(),
                     completion,
-                    drive_fence,
+                    shift_fence,
                     effect_controller,
                 ))
                 .await;
@@ -1247,7 +1247,7 @@ impl LashRuntime {
                 return Box::pin(self.apply_append_session_nodes_command(
                     request.as_ref().clone(),
                     completion,
-                    drive_fence,
+                    shift_fence,
                 ))
                 .await;
             }
@@ -1257,7 +1257,7 @@ impl LashRuntime {
                     name.clone(),
                     args.clone(),
                     completion,
-                    drive_fence,
+                    shift_fence,
                 ))
                 .await;
             }
@@ -1267,7 +1267,7 @@ impl LashRuntime {
                     name.clone(),
                     args.clone(),
                     completion,
-                    drive_fence,
+                    shift_fence,
                 ))
                 .await;
             }
@@ -1275,7 +1275,7 @@ impl LashRuntime {
                 return Box::pin(self.apply_open_agent_frame_command(
                     request.as_ref().clone(),
                     completion,
-                    drive_fence,
+                    shift_fence,
                 ))
                 .await;
             }
@@ -1291,7 +1291,7 @@ impl LashRuntime {
             || !super::commit_admission::requires_local_commit_admission(effect_controller)
         {
             return self
-                .apply_session_command_after_admission(commands, Some((completion, drive_fence)))
+                .apply_session_command_after_admission(commands, Some((completion, shift_fence)))
                 .await;
         }
         let session_id = self.state.session_id.clone();
@@ -1318,7 +1318,7 @@ impl LashRuntime {
                     );
                     self.apply_session_command_after_admission(
                         commands,
-                        Some((completion, drive_fence)),
+                        Some((completion, shift_fence)),
                     )
                     .await
                     .map_err(RuntimeCommitAdmissionError)
@@ -1331,7 +1331,7 @@ impl LashRuntime {
     async fn apply_session_command_after_admission(
         &mut self,
         commands: Vec<crate::SessionCommand>,
-        applied: Option<(crate::QueuedWorkCompletion, &crate::store::DriveFence)>,
+        applied: Option<(crate::QueuedWorkCompletion, &crate::store::ShiftFence)>,
     ) -> Result<bool, RuntimeError> {
         self.refresh_session_graph_from_store()
             .await
@@ -1352,7 +1352,7 @@ impl LashRuntime {
                         )
                     })?;
                 }
-                // The drive's command lane applies a persisted command that
+                // The shift's command lane applies a persisted command that
                 // settles with an outcome before this point; only a storeless
                 // runtime's inline command reaches here, and a storeless
                 // runtime writes its head directly.
@@ -1380,10 +1380,10 @@ impl LashRuntime {
         else {
             return Ok(true);
         };
-        let Some((completion, drive_fence)) = applied else {
+        let Some((completion, shift_fence)) = applied else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
-                "persisted session commands are applied by the drive's command lane",
+                "persisted session commands are applied by the shift's command lane",
             ));
         };
         let operation = completion
@@ -1414,7 +1414,7 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(super::runtime_error_from_store_commit)?;
-        commit.drive_fence = Some(Box::new(drive_fence.clone()));
+        commit.shift_fence = Some(Box::new(shift_fence.clone()));
         commit.applied_commands = Some(completion);
         let result = match store.commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None).await {
             // A host withdrew a command since the lane was read: the commit
@@ -1424,7 +1424,7 @@ impl LashRuntime {
         }
         // A later admission may have sealed after the drain presented its
         // fence: nothing was written, the refusal is a superseded commit,
-        // and that admission's drive applies the command (ADR 0109 §7).
+        // and that admission's shift applies the command (ADR 0109 §7).
         .map_err(super::runtime_error_from_store_commit)?;
         commit_state.apply_persisted_commit_result(result);
         commit_state.mark_node_ids_persisted(persisted_node_ids);
@@ -1449,7 +1449,7 @@ fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeErr
         _ => None,
     };
     let runtime_error = RuntimeError::new(
-        RuntimeErrorCode::SessionCommandPostDriveRefresh,
+        RuntimeErrorCode::SessionCommandPostShiftRefresh,
         error.to_string(),
     );
     match deleted_session_id {
@@ -1468,13 +1468,13 @@ pub(in crate::runtime) fn queued_turn_input_store_required() -> RuntimeError {
 }
 
 /// The first execution of one `ReadSessionCommandRun` step: the live read of
-/// the command lane under the root's fence (FIG-4201).
+/// the command lane under the run's fence (FIG-4201).
 /// Why a fenced command drain stopped without an answer.
 pub(in crate::runtime) enum CommandDrainStop {
     /// The drain holds no current head for its next recorded read: the
     /// resident session could not be reloaded (a deleted session's reload
-    /// among them), or the session retired under a run the root read. The
-    /// root reads on headless from its next read.
+    /// among them), or the session retired under an execution the run read. The
+    /// run reads on headless from its next read.
     Headless(RuntimeError),
     /// Anything else the drain met.
     Failed(RuntimeError),
@@ -1494,11 +1494,11 @@ impl CommandDrainStop {
 /// `runner`.
 ///
 /// The first execution reads the lane live, acknowledging the run's
-/// obligations delivered under the drive fence. A replay of the root reads
+/// obligations delivered under the shift fence. A replay of the run reads
 /// back the run it recorded, even after the commit that applied it settled
 /// the lane: an administrative compaction replays the base and the summary
 /// it journaled and adopts its settled commit, and any other settled run is
-/// passed. The live lane would skip the settled command and run the root's
+/// passed. The live lane would skip the settled command and run the run's
 /// next steps where its journal holds the compaction's.
 pub(in crate::runtime) async fn execute_session_command_run_read(
     controller: &crate::ScopedEffectController<'_>,
@@ -1531,7 +1531,7 @@ pub(in crate::runtime) async fn execute_session_command_run_read(
 
 struct ReadSessionCommandRunRunner {
     store: crate::store::SessionStore,
-    fence: crate::store::DriveFence,
+    fence: crate::store::ShiftFence,
 }
 
 #[async_trait::async_trait]
@@ -1539,22 +1539,22 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ReadSessionC
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ReadSessionCommandRun { .. } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!(
-                    "session-command-run executor cannot execute {} command",
+                    "session-command-meter executor cannot execute {} command",
                     envelope.command.kind().as_str()
                 ),
             ));
         };
         match self.store.open_session_command_run(&self.fence).await {
             Ok(batches) => Ok(crate::RuntimeEffectOutcome::ReadSessionCommandRun { batches }),
-            // A superseded fence is the root's settled fact: every replay
+            // A superseded fence is the run's settled fact: every replay
             // decodes the same refusal.
-            Err(error @ crate::StoreError::StaleDriveFence { .. }) => {
+            Err(error @ crate::StoreError::StaleShiftFence { .. }) => {
                 Err(crate::RuntimeEffectControllerError::from(
                     super::runtime_error_from_store_commit(error),
                 ))

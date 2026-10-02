@@ -83,7 +83,7 @@ fn soak_history_host_admission_catches_unrequested_input_rows() {
             session: "s".to_owned(),
             id: "phantom".to_owned(),
             state: Some("completed".to_owned()),
-            admitted_root: Some("phantom".to_owned()),
+            admitted_run: Some("phantom".to_owned()),
             obligation_state: None,
         }],
         ..StoreSnapshot::default()
@@ -140,7 +140,7 @@ fn soak_history_host_admission_catches_unrequested_input_rows() {
     history.push(Fact::HostOp {
         op: HostOp::Delete,
         session: "s".to_owned(),
-        roots: Vec::new(),
+        runs: Vec::new(),
         outcome: HostOutcome::Known,
     });
     history.stores[0].inputs.clear();
@@ -409,7 +409,7 @@ fn an_input_left_open_or_settled_twice_breaks_input_settlement() {
     }
     assert!(check_with(&stalled, &[checker("input-settles-exactly-once")]).passed());
 
-    // Cancelled while the root that drives it still runs.
+    // Cancelled while the run that executes it still runs.
     let mut history = clean();
     let store = &mut history.stores[0];
     let input = store
@@ -420,15 +420,15 @@ fn an_input_left_open_or_settled_twice_breaks_input_settlement() {
     input.state = Some("cancelled".to_owned());
     let (session, id) = (input.session.clone(), input.id.clone());
     if !store
-        .root_inputs
+        .run_inputs
         .iter()
         .any(|(bound_session, bound, _)| *bound_session == session && *bound == id)
     {
-        let root = store.roots[0].root.clone();
-        store.root_inputs.push((session, id, root));
+        let run = store.runs[0].run.clone();
+        store.run_inputs.push((session, id, run));
     }
-    for root in &mut store.roots {
-        root.terminal_kind = None;
+    for run in &mut store.runs {
+        run.terminal_kind = None;
     }
     assert_caught(&history, "input-settles-exactly-once");
 }
@@ -695,11 +695,11 @@ fn soak_history_empty_history_cannot_pass_vacuously() {
 
 fn host_history() -> History {
     let mut history = History::new("chaos-soak", SEED);
-    for root in ["a", "b"] {
+    for run in ["a", "b"] {
         history.push(Fact::HostOp {
             op: HostOp::Send,
             session: "s".to_owned(),
-            roots: vec![root.to_owned()],
+            runs: vec![run.to_owned()],
             outcome: HostOutcome::Known,
         });
     }
@@ -711,16 +711,16 @@ fn host_history() -> History {
         label: "engine".to_owned(),
         inputs: ["a", "b"]
             .into_iter()
-            .map(|root| InputRow {
+            .map(|run| InputRow {
                 table: "pending_turn_inputs".to_owned(),
                 session: "s".to_owned(),
                 id: lash_core::PendingTurnInputDraft::keyed_input_id(
                     &lash_core::SessionId::from("s"),
-                    root,
+                    run,
                 )
                 .to_string(),
                 state: Some("completed".to_owned()),
-                admitted_root: Some(root.to_owned()),
+                admitted_run: Some(run.to_owned()),
                 obligation_state: None,
             })
             .collect(),
@@ -738,14 +738,14 @@ fn host_history() -> History {
     history
 }
 
-/// One parked root, redriven: the feed's three events and the facts the
+/// One parked run, redriven: the feed's three events and the facts the
 /// store and the engine answered, after the final recovery pass.
 fn redrive_history() -> History {
     let event = |seq: u64, kind: &str| ParkEventRow {
         seq,
         at_ms: 1_000 + seq,
         session: "s".to_owned(),
-        root: "root".to_owned(),
+        run: "root".to_owned(),
         park: 1,
         kind: kind.to_owned(),
         intent: (kind == "redrive_requested").then(|| "7".to_owned()),
@@ -763,21 +763,21 @@ fn redrive_history() -> History {
     });
     history.push(Fact::Resume {
         session: "s".to_owned(),
-        root: "root".to_owned(),
+        run: "root".to_owned(),
         held: true,
     });
     history.push(Fact::IntentAck {
         intent: "7".to_owned(),
         session: "s".to_owned(),
         verb: "redrive".to_owned(),
-        root: Some("root".to_owned()),
+        run: Some("root".to_owned()),
         park: Some(1),
         applied: true,
     });
     history.push(Fact::HostOp {
         op: HostOp::Redrive,
         session: "s".to_owned(),
-        roots: vec!["root".to_owned()],
+        runs: vec!["root".to_owned()],
         outcome: HostOutcome::Known,
     });
     history
@@ -790,7 +790,7 @@ fn soak_history_redrive_resumes_catches_a_redrive_that_never_resumed() {
     assert!(report.passed(), "{}", report.failure());
     assert_eq!(report.observed, [("redrive-resumes", 1)]);
 
-    // The redriven root never resumed, its intent was never acknowledged,
+    // The redriven run never resumed, its intent was never acknowledged,
     // or its park never ended.
     for fact in ["resume", "intent_ack"] {
         let mut history = clean.clone();
@@ -822,12 +822,12 @@ fn soak_history_redrive_resumes_catches_a_redrive_that_never_resumed() {
 #[test]
 fn soak_history_redrive_resumes_catches_a_redrive_no_park_names() {
     let clean = redrive_history();
-    // The request names a park no `parked` event opened for its root.
+    // The request names a park no `parked` event opened for its run.
     let mut history = clean.clone();
     history.park_events.remove(0);
     assert_caught(&history, "redrive-resumes");
     let mut history = clean.clone();
-    history.park_events[0].root = "another".to_owned();
+    history.park_events[0].run = "another".to_owned();
     assert_caught(&history, "redrive-resumes");
     // An acknowledgement, an accepted host redrive or a resume with no
     // request behind it: each alone is a spontaneous redrive.

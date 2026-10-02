@@ -14,10 +14,10 @@ pub(super) struct CoreWorkSetup {
     /// The backend's process work, which the core's sessions and host
     /// process APIs admit into.
     pub(super) process: ProcessWorkWiring,
-    /// The backend's session-work engine, with the core's driver installed.
+    /// The backend's session-work engine, with the core's `SessionShifts` installed.
     pub(super) session_work: Arc<dyn SessionWorkEngine>,
     pub(super) wake: WakeDeliveryDriverSetup,
-    /// The backend's store binding: the settled-root mailbox keys by it.
+    /// The backend's store binding: the settled-run mailbox keys by it.
     pub(super) store_binding: lash_core::StoreBindingId,
 }
 
@@ -62,7 +62,7 @@ impl ResolvedQueuedWork {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(wake);
     }
 
-    pub(crate) async fn drive_wake(
+    pub(crate) async fn shift_wake(
         &self,
     ) -> std::result::Result<facade_support::WakeDeliveryDriveReport, lash_core::PluginError> {
         let wake = self
@@ -94,39 +94,39 @@ impl Drop for ResolvedQueuedWork {
 
 #[async_trait]
 impl SessionWorkEngine for ResolvedQueuedWork {
-    fn schedule_drive(
+    fn schedule_shift(
         &self,
         session: &lash_core::SessionId,
-        request: lash_core::engine::DriveRequestId,
+        request: lash_core::engine::ShiftRequestId,
     ) {
-        self.port.schedule_drive(session, request);
+        self.port.schedule_shift(session, request);
     }
 
-    async fn request_drive(
+    async fn request_shift(
         &self,
         session: &lash_core::SessionId,
-        request: lash_core::engine::DriveRequestId,
+        request: lash_core::engine::ShiftRequestId,
     ) -> std::result::Result<(), lash_core::engine::EngineRefusal> {
-        self.port.request_drive(session, request).await
+        self.port.request_shift(session, request).await
     }
 
-    fn install_session_driver(
+    fn install_session_shifts(
         &self,
-        driver: Arc<dyn lash_core::SessionDriver>,
-    ) -> Arc<dyn lash_core::SessionDriver> {
-        self.port.install_session_driver(driver)
+        shifts: Arc<dyn lash_core::SessionShifts>,
+    ) -> Arc<dyn lash_core::SessionShifts> {
+        self.port.install_session_shifts(shifts)
     }
 
     fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
         self.port.control()
     }
 
-    async fn await_drive(
+    async fn await_shift(
         &self,
         session: &lash_core::SessionId,
-        request: &lash_core::engine::DriveRequestId,
-    ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-        self.port.await_drive(session, request).await
+        request: &lash_core::engine::ShiftRequestId,
+    ) -> std::result::Result<lash_core::engine::ShiftOutcome, lash_core::engine::ShiftAbort> {
+        self.port.await_shift(session, request).await
     }
 }
 

@@ -43,7 +43,7 @@ Each table declares insertion columns and named read projections. Narrow reads
 explain their omitted fields; call sites do not choose column subsets. A decoded
 row already owned by a shared driver stays there. A pure SQL shape shared by
 both backends belongs to the table module. Queued-batch settlement, for example,
-reads only `admitted_root`, avoiding the unbounded authority envelope.
+reads only `admitted_run`, avoiding the unbounded authority envelope.
 
 Evidence: `crates/lash-store-sql/src/turn_ingress/queued_batches.rs:12`, `:22`,
 and `crates/lash-store-sql/src/process/events.rs:1`.

@@ -149,7 +149,7 @@ rebuilt from a spelled id), one durable run (not a replacement), terminal
 success, the pre-restart process id, and a TypeScript cell in the resumed turn.
 "One durable run, not a replacement" is read off the **process count and id in
 `/api/work`** — one process row, same id across the restart — not off the number of cell
-executions: a wake legitimately re-drives the turn and runs another cell without creating
+executions: a wake legitimately redrives the turn and runs another cell without creating
 another process.
 Save `04-resumed-{dom,state,store,trace,judge}.json` and `04-resumed.png`.
 

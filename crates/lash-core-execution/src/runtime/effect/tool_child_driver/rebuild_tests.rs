@@ -263,7 +263,7 @@ fn every_unrecorded_source_is_a_typed_rebuild_refusal() {
 }
 
 /// A session read on a built context never answers; it fires the latch that
-/// abandons the child's drive.
+/// abandons the child's shift.
 #[tokio::test]
 async fn a_session_read_on_a_built_context_fires_the_refusal_latch() {
     let refusal = deployment_context::SessionServicesRefusal::default();

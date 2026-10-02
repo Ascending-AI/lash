@@ -190,7 +190,7 @@ table lash_parent_end_plans
   primary-key (parent_kind, parent_id)
 table lash_pending_turn_inputs
   column admitted_by text nullable
-  column admitted_root text nullable
+  column admitted_run text nullable
   column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
   column ingress_json text not-null
@@ -343,7 +343,7 @@ table lash_processes
   primary-key (process_id)
 table lash_queued_work_batches
   column admitted_by text nullable
-  column admitted_root text nullable
+  column admitted_run text nullable
   column authority_json text not-null
   column batch_id text not-null
   column delivery_policy text not-null
@@ -436,9 +436,6 @@ table lash_session_meta
   column caused_by_turn_id text nullable
   column closing_intent bigint nullable
   column created_at_ms bigint not-null default
-  column drive_admission_id text nullable
-  column drive_epoch bigint not-null default
-  column drive_root_start text nullable
   column fault_at_ms bigint nullable
   column fault_json text nullable
   column last_commit_at_ms bigint nullable
@@ -458,6 +455,9 @@ table lash_session_meta
   column retention_last_turns bigint nullable
   column session_id text not-null
   column session_state_version integer nullable
+  column shift_admission_id text nullable
+  column shift_epoch bigint not-null default
+  column shift_run_start text nullable
   column source_node_id text nullable
   column source_session_id text nullable
   unique (obligation_id)
@@ -476,12 +476,17 @@ table lash_session_revisions
   column leaf_node_id text nullable
   column session_id text not-null
   primary-key (session_id, head_revision)
-table lash_session_root_inputs
+table lash_session_run_inputs
   column input_id text not-null
-  column root text not-null
+  column run text not-null
   column session_id text not-null
   primary-key (session_id, input_id)
-table lash_session_roots
+table lash_session_run_specs
+  column session_id text not-null
+  column spec_hash text not-null
+  column spec_json text not-null
+  primary-key (session_id, spec_hash)
+table lash_session_runs
   column admission_json text nullable
   column admitted_generation text nullable
   column executor_json text nullable
@@ -494,7 +499,7 @@ table lash_session_roots
   column obligation_settled_at_ms bigint nullable
   column obligation_stall_reason text nullable
   column obligation_state text nullable
-  column root text not-null
+  column run text not-null
   column session_id text not-null
   column terminal_at_ms bigint nullable
   column terminal_cause_json text nullable
@@ -502,12 +507,7 @@ table lash_session_roots
   column terminal_kind text nullable
   unique (obligation_id)
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
-  primary-key (session_id, root)
-table lash_session_run_specs
-  column session_id text not-null
-  column spec_hash text not-null
-  column spec_json text not-null
-  primary-key (session_id, spec_hash)
+  primary-key (session_id, run)
 table lash_tool_intent_submissions
   column execution_scope_id text not-null
   column intent_index bigint not-null
@@ -667,6 +667,7 @@ table lash_usage_facts
   column generation_id text nullable
   column input_tokens bigint not-null
   column llm_call_id text not-null
+  column meter_id text nullable
   column output_tokens bigint not-null
   column owner_id text not-null
   column owner_kind text not-null
@@ -676,18 +677,12 @@ table lash_usage_facts
   column reasoning_output_tokens bigint not-null
   column recorded_at_ms bigint not-null
   column requested_model text not-null
-  column run_id text nullable
   column seq bigint not-null default
   column served_model text nullable
   column source text not-null
   unique (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
   primary-key (seq)
-table lash_usage_owner_retirements
-  column owner_id text not-null
-  column owner_kind text not-null
-  column retired_at_ms bigint not-null
-  primary-key (owner_kind, owner_id)
-table lash_usage_runs
+table lash_usage_meters
   column admitted_at_ms bigint nullable
   column conflict_call_ordinal bigint nullable
   column conflict_fact_kind text nullable
@@ -696,16 +691,21 @@ table lash_usage_runs
   column conflict_stored_payload_hash text nullable
   column effect_key text not-null
   column execution_scope_key text nullable
+  column meter_id text not-null
   column owner_id text not-null
   column owner_kind text not-null
   column profile_key text nullable
   column requested_model text nullable
   column resolved_at_ms bigint nullable
-  column run_id text not-null
   column source text nullable
   column state text not-null
   column unknown_reason text nullable
-  primary-key (owner_kind, owner_id, effect_key, run_id)
+  primary-key (owner_kind, owner_id, effect_key, meter_id)
+table lash_usage_owner_retirements
+  column owner_id text not-null
+  column owner_kind text not-null
+  column retired_at_ms bigint not-null
+  primary-key (owner_kind, owner_id)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null
   column process_id text not-null

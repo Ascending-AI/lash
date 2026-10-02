@@ -505,7 +505,7 @@ impl StateMachinePlanner {
         // The three classes above are required across all four provider parsers
         // by the coverage and protocol-terminal-state oracles, so they stay
         // anchored. Beyond them, seed-select one transport/HTTP perturbation
-        // class so every generated run also drives a socket disconnect, a
+        // class so every generated run also executes a socket disconnect, a
         // response-start/chunk timeout, or a retryable 5xx through a live
         // provider request.
         let transport_mutation =

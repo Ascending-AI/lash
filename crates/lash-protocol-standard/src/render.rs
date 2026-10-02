@@ -443,7 +443,7 @@ async fn render_present(
     if recorded.renderer_id != renderer.0.id() {
         return Err(renderer_unavailable(Some(recorded), renderer.0.id()));
     }
-    // The root recorded these parameters from this protocol's own resolved
+    // The run recorded these parameters from this protocol's own resolved
     // type: unreadable, they are corrupt stored data, never a refused shape.
     let resolved: ResolvedStandardRenderConfig = serde_json::from_value(recorded.params.clone())
         .map_err(|error| lash_core::StoreError::StoredDataCorrupt {
@@ -973,7 +973,7 @@ mod tests {
     }
 
     /// FIG-4652: recorded render parameters this renderer cannot read are
-    /// corrupt stored data. They are never the root's refused shape: no
+    /// corrupt stored data. They are never the run's refused shape: no
     /// shape was refused, and the presentation renders and retains nothing.
     #[tokio::test]
     async fn unreadable_recorded_render_parameters_are_corrupt_stored_data() {

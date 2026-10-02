@@ -1,5 +1,5 @@
 //! Journal cuts on the Restate server double: the runner-supplied crash point
-//! of the turn-driving laws that cut a turn at a named effect (FIG-3587).
+//! of the turn-executing laws that cut a turn at a named effect (FIG-3587).
 //!
 //! lash-restate journals every effect as a `ctx.run` named `lash:` plus the
 //! effect's replay key, so a [`JournalCut`] names a run of the invocation's

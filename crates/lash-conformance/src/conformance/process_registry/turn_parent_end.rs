@@ -301,37 +301,37 @@ pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
     );
 }
 
-/// A turn scope that never became a root — the turn id of an input that
-/// joined an earlier root — has no terminal, so no root close ever records
+/// A turn scope that never became a run — the turn id of an input that
+/// joined an earlier run — has no terminal, so no run close ever records
 /// its row. Its session's close is the proof that it can no longer become a
-/// root (FIG-3948): from the session's row on, a start naming any scope
+/// run (FIG-3948): from the session's row on, a start naming any scope
 /// inside the session is refused, and the session's plan owes a cancel to
 /// every live `Until` child of a scope inside it that has no row of its own.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_roots(
+pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_runs(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let session = SessionId::from("never-root-session");
+    let session = SessionId::from("never-run-session");
     let originator = SessionScope::new(session.clone());
     let session_scope = lash_core::ScopeId::session(session.clone());
-    let root = turn_scope(&session, "never-root-admitted");
-    let joined = turn_scope(&session, "never-root-joined");
-    let drain = lash_core::ScopeId::session_operation(session.clone(), "never-root-drain");
-    let other_session = SessionId::from("never-root-session-other");
-    let foreign = turn_scope(&other_session, "never-root-joined");
+    let run = turn_scope(&session, "never-run-admitted");
+    let joined = turn_scope(&session, "never-run-joined");
+    let drain = lash_core::ScopeId::session_operation(session.clone(), "never-run-drain");
+    let other_session = SessionId::from("never-run-session-other");
+    let foreign = turn_scope(&other_session, "never-run-joined");
 
-    let root_child = register_child(&registry, &originator, &root, Lives::Until)
+    let root_child = register_child(&registry, &originator, &run, Lives::Until)
         .await
-        .expect("register a child under the admitted root");
+        .expect("register a child under the admitted run");
     let joined_child = register_child(&registry, &originator, &joined, Lives::Until)
         .await
         .expect("an open session admits a start under a turn it may still admit");
     let joined_detached = register_child(&registry, &originator, &joined, Lives::Detached)
         .await
-        .expect("register a detached child the never-root turn started");
+        .expect("register a detached child the never-run turn started");
     let drain_child = register_child(&registry, &originator, &drain, Lives::Until)
         .await
         .expect("register a child under a drain that recorded no end");
@@ -345,7 +345,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
     .expect("register a child under another session's turn");
 
     // What the session's close intent does through a record-only scope
-    // owner: the admitted roots' rows, then the session's own.
+    // owner: the admitted runs' rows, then the session's own.
     lash_core::engine::ScopeCloseSink::close_session_scope(
         &crate::RegistryScopeClose::new(
             Arc::clone(&registry),
@@ -353,7 +353,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
         ),
         &session,
         lash_core::store::ControlIntentId::from_sequence(1),
-        &[crate::TurnId::from("never-root-admitted")],
+        &[crate::TurnId::from("never-run-admitted")],
     )
     .await
     .expect("close the session's scope");
@@ -362,9 +362,9 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
         registry
             .get_parent_end_plan(&joined)
             .await
-            .expect("read the never-root turn's ledger row")
+            .expect("read the never-run turn's ledger row")
             .is_none(),
-        "no root close ever records a row for a turn that never became a root"
+        "no run close ever records a row for a turn that never became a run"
     );
     let owed = registry
         .get_parent_end_plan(&session_scope)
@@ -374,7 +374,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
     assert!(
         owed.settled_at_ms.is_none()
             && owed.obligation_state == lash_core::store::ObligationState::Due,
-        "the session's plan owes the never-root turn's child its cancel, so it is \
+        "the session's plan owes the never-run turn's child its cancel, so it is \
          not settled as childless: {owed:?}"
     );
     let mut expected = vec![joined_child.id.clone(), drain_child.id.clone()];
@@ -389,14 +389,14 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
             .collect::<Vec<_>>(),
         expected,
         "the session's plan owes every live Until child of a scope inside it with no \
-         row of its own: not the root's child, which the root's own row owes; not the \
+         row of its own: not the run's child, which the run's own row owes; not the \
          detached child; not another session's"
     );
 
     for (scope, lives) in [
         (&joined, Lives::Until),
         (&joined, Lives::Detached),
-        (&turn_scope(&session, "never-root-late"), Lives::Until),
+        (&turn_scope(&session, "never-run-late"), Lives::Until),
     ] {
         match register_child(&registry, &originator, scope, lives).await {
             Err(crate::PluginError::ParentEnded { parent, .. }) => assert_eq!(
@@ -470,7 +470,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
             .expect("page unrecorded opener parents")
             .iter()
             .any(|scope| scope == &joined || scope == &drain),
-        "a reaped never-root scope owes recovery nothing"
+        "a reaped never-run scope owes recovery nothing"
     );
 }
 

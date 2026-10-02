@@ -20,7 +20,7 @@ pub(crate) async fn run_turn_through_the_workbench_open_path(
         .ensure_session(session_id)
         .await
         .expect("create the session through the workbench path");
-    // The previous turn's drive can still hold the session's execution lease a
+    // The previous turn's shift can still hold the session's execution lease a
     // moment after its terminal is observable, so the open goes through the
     // same bounded retry every route applies.
     let session = retry_session_open(
@@ -511,7 +511,7 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
 // ADR 0096: the fixtures that resolved a recorded dialect from the session bag
 // and refused a malformed one are gone with `RlmDialect`.
 
-// The workbench, driven end to end.
+// The workbench, executed end to end.
 
 /// A served turn must reach the model with the TypeScript prompt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -850,10 +850,10 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
             "bind it",
         )
         .await;
-        // The first process's drive outlives its answer while it closes the
-        // root's scope (FIG-3979), and would admit an input sent meanwhile on
+        // The first process's shift outlives its answer while it closes the
+        // run's scope (FIG-3979), and would admit an input sent meanwhile on
         // that process's driver.
-        double.settle_session_drive(&session_id).await;
+        double.settle_session_shift(&session_id).await;
         session_id
     };
 

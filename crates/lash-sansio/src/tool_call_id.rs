@@ -119,11 +119,11 @@ impl<'a> ToolCallRoot<'a> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ToolCallAdmission {
     namespace: String,
-    root: AdmittedRoot,
+    root: AdmittedRun,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum AdmittedRoot {
+enum AdmittedRun {
     Turn(String),
     HostSubmission(String),
     Process(ProcessId),
@@ -139,7 +139,7 @@ impl ToolCallAdmission {
         ToolCallRoot::handle(&handle)?;
         Ok(Self {
             namespace: namespace.into(),
-            root: AdmittedRoot::Turn(handle),
+            root: AdmittedRun::Turn(handle),
         })
     }
 
@@ -153,7 +153,7 @@ impl ToolCallAdmission {
         ToolCallRoot::handle(&handle)?;
         Ok(Self {
             namespace: namespace.into(),
-            root: AdmittedRoot::HostSubmission(handle),
+            root: AdmittedRun::HostSubmission(handle),
         })
     }
 
@@ -161,16 +161,16 @@ impl ToolCallAdmission {
     pub fn process(namespace: impl Into<String>, process_id: ProcessId) -> Self {
         Self {
             namespace: namespace.into(),
-            root: AdmittedRoot::Process(process_id),
+            root: AdmittedRun::Process(process_id),
         }
     }
 
     /// The root this admission names.
     pub fn root(&self) -> ToolCallRoot<'_> {
         ToolCallRoot(match &self.root {
-            AdmittedRoot::Turn(handle) => RootKind::Turn(handle),
-            AdmittedRoot::HostSubmission(handle) => RootKind::HostSubmission(handle),
-            AdmittedRoot::Process(process_id) => RootKind::Process(process_id),
+            AdmittedRun::Turn(handle) => RootKind::Turn(handle),
+            AdmittedRun::HostSubmission(handle) => RootKind::HostSubmission(handle),
+            AdmittedRun::Process(process_id) => RootKind::Process(process_id),
         })
     }
 

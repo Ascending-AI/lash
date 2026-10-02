@@ -107,8 +107,8 @@ pub struct ParkRefused {
 }
 
 impl ParkRefused {
-    /// The drive that owns the session head, when the refusal is a busy
-    /// one: a dirty park's flush met a bound root, an owed follow-on or an
+    /// The shift that owns the session head, when the refusal is a busy
+    /// one: a dirty park's flush met a bound run, an owed follow-on or an
     /// open session command (FIG-4202). The same park succeeds once that
     /// owner's boundary passes.
     #[must_use]
@@ -160,7 +160,7 @@ impl RuntimeEnvironmentBuilder {
     }
 
     /// Every runtime built from this environment carries the wiring's registry
-    /// and process-work port, so process starts can drive pending work.
+    /// and process-work port, so process starts can work pending work.
     pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
         self.env.work = self.env.work.with_process_wiring(wiring);
         self

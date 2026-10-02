@@ -104,7 +104,7 @@ pub(crate) async fn ensure_session_not_deleted_tx(
 }
 
 /// Reclaim the ancestry prefix with no live child, session-head root, or
-/// explicit anchor. Every writer that adds an edge or root locks the target
+/// explicit anchor. Every writer that adds an edge or run locks the target
 /// node first, so the reachability query runs from a fresh snapshot after
 /// concurrent additions have either committed or failed.
 /// Carries one complete child/head/anchor check and the node lock it ran under.
@@ -296,7 +296,7 @@ async fn enqueue_queued_work_with_outcome_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    // The admitted batch owes its session a drive (ADR 0109 §3), armed in
+    // The admitted batch owes its session a shift (ADR 0109 §3), armed in
     // the transaction that admits it.
     crate::ingress_obligation::arm_queued_batch_tx(tx, &batch.session_id, &batch_id, now).await?;
     let queued = load_queued_batch(tx, &batch_id)
@@ -345,7 +345,7 @@ async fn lock_process_wake_source_tx(
 /// for a wake whose row is leaving the queue in this transaction.
 ///
 /// The one home of the invariant that every terminal transition of a wake —
-/// settlement by its root, host cancel and a content conflict's refusal —
+/// settlement by its run, host cancel and a content conflict's refusal —
 /// raises the floor with the row's removal or the refusal (FIG-1065,
 /// FIG-3545, FIG-4487). The wake source's advisory lock serializes
 /// the fence against a concurrent enqueue of the same source, which takes
@@ -414,10 +414,10 @@ async fn read_session_state_version_tx(
 
 mod admission;
 pub(crate) use admission::{
-    admit_at_checkpoint_postgres, admit_root_postgres, open_session_command_run_postgres,
+    admit_at_checkpoint_postgres, admit_run_postgres, open_session_command_run_postgres,
 };
-pub(crate) mod drive_epoch;
 mod history;
+pub(crate) mod shift_epoch;
 pub(crate) use history::read_tx;
 mod ingress_settlement;
 mod maintenance;

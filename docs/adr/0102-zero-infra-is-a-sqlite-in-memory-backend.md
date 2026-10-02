@@ -91,7 +91,7 @@ in-process Restate server double over the same storage contracts.
 
 Storage laws cover SQLite file, SQLite memory and PostgreSQL. Execution hosts
 are the in-process Restate server double, live Restate and lash-sim's
-in-process effect host. Lash-sim's `SimEngine` drives the production Restate
+in-process effect host. Lash-sim's `SimEngine` executes the production Restate
 handlers on the double over SQLite memory storage.
 
 Evidence: `crates/lash/Cargo.toml:61`,

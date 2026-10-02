@@ -19,7 +19,7 @@
 //!   rusqlite's `Connection::transaction` opens `BEGIN DEFERRED`, which only
 //!   takes the write lock on the first write statement. Every read-then-write
 //!   path the crate promises to serialise cross-process (head-revision CAS,
-//!   lease fencing, a root's admission) must therefore use
+//!   lease fencing, a run's admission) must therefore use
 //!   [`SqliteConnection::write`], which opens `BEGIN IMMEDIATE` so the write
 //!   lock is acquired up front and a contending writer waits on the busy
 //!   timeout instead of reading a stale snapshot. In-process writers never
@@ -69,7 +69,7 @@ use crate::location::DatabaseTarget;
 /// Outcome a write flow returns to decide commit vs rollback while still
 /// handing a value back to the caller. Used for paths that compute a result
 /// *and* may discover mid-transaction that the work must not be persisted
-/// (e.g. a contended root admission, where partially bound rows must be
+/// (e.g. a contended run admission, where partially bound rows must be
 /// rolled back and the caller told nothing was admitted).
 pub(crate) enum TxOutcome<T> {
     Commit(T),

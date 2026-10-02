@@ -14,11 +14,11 @@ pub(super) struct ProjectionStore {
 
 #[async_trait::async_trait]
 impl UsageAccountingStore for ProjectionStore {
-    async fn admit_usage_run(
+    async fn admit_usage_meter(
         &self,
-        admission: &UsageRunAdmission,
-    ) -> Result<UsageRunAdmitted, UsageAdmissionError> {
-        self.inner.admit_usage_run(admission).await
+        admission: &UsageMeterAdmission,
+    ) -> Result<UsageMeterAdmitted, UsageAdmissionError> {
+        self.inner.admit_usage_meter(admission).await
     }
     async fn settle_usage(
         &self,
@@ -94,15 +94,15 @@ impl UsageAccountingStore for ProjectionStore {
     ) -> Result<UsageFactPage, StoreError> {
         self.inner.load_usage_fact_page(owner, after, limit).await
     }
-    async fn load_usage_run_page(
+    async fn load_usage_meter_page(
         &self,
         owner: &RuntimeOwner,
-        filter: UsageRunFilter,
-        after: Option<&UsageRunCursor>,
+        filter: UsageMeterFilter,
+        after: Option<&UsageMeterCursor>,
         limit: NonZeroU32,
-    ) -> Result<UsageRunPage, StoreError> {
+    ) -> Result<UsageMeterPage, StoreError> {
         self.inner
-            .load_usage_run_page(owner, filter, after, limit)
+            .load_usage_meter_page(owner, filter, after, limit)
             .await
     }
 }

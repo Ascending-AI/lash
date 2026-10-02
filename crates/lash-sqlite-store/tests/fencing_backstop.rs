@@ -22,11 +22,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_core_execution::store::{AdmittedHead, DriveFence, RootAdmission, RootStore as _};
+use lash_core_execution::store::{AdmittedHead, RunAdmission, RunStore as _, ShiftFence};
 use lash_core_execution::store_backend_support::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
 };
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt;
 use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore, StoreError, TurnId};
 use lash_sansio::SessionId;
 use lash_sqlite_store::SqliteStore;
@@ -142,7 +142,7 @@ fn suppress_queued_work_bind(path: &Path, batch_id: &str) {
         .expect("open the bind-suppression connection")
         .execute_batch(&format!(
             "CREATE TRIGGER lash_test_queued_bind_backstop
-             BEFORE UPDATE OF admitted_root ON queued_work_batches
+             BEFORE UPDATE OF admitted_run ON queued_work_batches
              WHEN OLD.batch_id = '{batch_id}'
              BEGIN
                  SELECT RAISE(IGNORE);
@@ -195,34 +195,34 @@ async fn enqueue_one(store: &SqliteStore, session_id: &SessionId) -> lash_core_e
 
 #[expect(
     clippy::expect_used,
-    reason = "test fixture wiring: a failed drive epoch setup must fail the test"
+    reason = "test fixture wiring: a failed shift epoch setup must fail the test"
 )]
-async fn sealed_drive_fence(
+async fn sealed_shift_fence(
     store: &SqliteStore,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     executor_id: &str,
-) -> DriveFence {
+) -> ShiftFence {
     store
-        .seal_drive_epoch_for_test(session_id, owner, executor_id, 0)
+        .seal_shift_epoch_for_test(session_id, owner, executor_id, 0)
         .await
-        .expect("seal drive epoch")
+        .expect("seal shift epoch")
         .acquired()
-        .expect("drive epoch sealed")
+        .expect("shift epoch sealed")
 }
 
-/// Admit `root` headed by the batch `head` under `fence`.
+/// Admit `run` headed by the batch `head` under `fence`.
 async fn admit(
     store: &SqliteStore,
-    fence: &DriveFence,
-    root: &str,
+    fence: &ShiftFence,
+    run: &str,
     head: &lash_core_execution::BatchId,
-) -> Result<Option<RootAdmission>, StoreError> {
+) -> Result<Option<RunAdmission>, StoreError> {
     store
-        .admit_root(
-            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+        .admit_run(
+            &lash_core_execution::testing::store_fixtures::admit_run_request_for_test(
                 fence,
-                &TurnId::fixture(root),
+                &TurnId::fixture(run),
                 AdmittedHead::Batch(head.clone()),
             ),
         )
@@ -244,10 +244,10 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
     let session_id = SessionId::from("admission-backstop-lost-write");
     let owner = LeaseOwnerIdentity::opaque("queued-owner", "queued-incarnation");
     let batch_id = enqueue_one(&store, &session_id).await;
-    let fence = sealed_drive_fence(&store, &session_id, &owner, "queued-executor").await;
+    let fence = sealed_shift_fence(&store, &session_id, &owner, "queued-executor").await;
 
     suppress_queued_work_bind(&path, batch_id.as_str());
-    let outcome = admit(&store, &fence, "backstop-root", &batch_id).await;
+    let outcome = admit(&store, &fence, "backstop-run", &batch_id).await;
     restore_queued_work_bind(&path);
 
     // Obligation one: the admission fails closed.
@@ -273,7 +273,7 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
     assert_eq!(event.field("outcome"), "fenced_write_lost");
 
     // Failing closed means nothing was published: the row is still admissible.
-    let admitted = admit(&store, &fence, "backstop-root", &batch_id)
+    let admitted = admit(&store, &fence, "backstop-run", &batch_id)
         .await
         .expect("the retried admission succeeds")
         .expect("the rolled-back row is still admissible");
@@ -281,8 +281,8 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_admission_the_unfinished_root_refuses_never_reaches_the_write() {
-    // The companion law: while one root is unfinished the session admits no
+async fn an_admission_the_unfinished_run_refuses_never_reaches_the_write() {
+    // The companion law: while one run is unfinished the session admits no
     // other (FIG-3927), and refusing that is not a disagreement. The refusal
     // comes before any bind, so an empty capture is the evidence that no
     // conditional write was attempted at all.
@@ -295,20 +295,20 @@ async fn an_admission_the_unfinished_root_refuses_never_reaches_the_write() {
     let session_id = SessionId::from("admission-backstop-refused-first");
     let owner = LeaseOwnerIdentity::opaque("queued-verdict-owner", "queued-verdict-incarnation");
     let batch_id = enqueue_one(&store, &session_id).await;
-    let fence = sealed_drive_fence(&store, &session_id, &owner, "queued-verdict-executor").await;
+    let fence = sealed_shift_fence(&store, &session_id, &owner, "queued-verdict-executor").await;
 
     assert!(
-        admit(&store, &fence, "first-root", &batch_id)
+        admit(&store, &fence, "first-run", &batch_id)
             .await
             .expect("the first admission succeeds")
             .is_some(),
-        "the first root takes the row",
+        "the first run takes the row",
     );
-    let second = admit(&store, &fence, "second-root", &batch_id).await;
+    let second = admit(&store, &fence, "second-run", &batch_id).await;
 
     assert!(
-        matches!(second, Err(StoreError::UnfinishedRootConflict { .. })),
-        "a second root must not take a row the first holds, got {second:?}"
+        matches!(second, Err(StoreError::UnfinishedRunConflict { .. })),
+        "a second run must not take a row the first holds, got {second:?}"
     );
     assert!(
         capture.disagreements_for(batch_id.as_str()).is_empty(),

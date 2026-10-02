@@ -1,7 +1,7 @@
 use super::*;
 
-mod drive_fixtures;
-use drive_fixtures::{drive_envelope, execute_drive, registered};
+mod shift_fixtures;
+use shift_fixtures::{execute_shift, registered, shift_envelope};
 
 /// A terminal process run's suspension tail: the terminal pair, then the
 /// `lash.process.parent-end` pair applied right after terminal completion
@@ -669,7 +669,7 @@ pub(super) fn a_diverged_group_reopen_parks_under_the_group_head() {
 /// durable suspension. `RestateContextFuture` must fuse that resolved inner
 /// future and yield so the SDK's handler-state wrapper writes the suspension.
 ///
-/// This drives the real Restate endpoint, context, VM, and `ctx.sleep()`
+/// This executes the real Restate endpoint, context, VM, and `ctx.sleep()`
 /// future. The invocation body is complete (no further frames), so the VM's
 /// input is closed; `DoProgress` then hits its suspension condition, the sleep
 /// resolves as `Err(Suspended)`, `DurableFutureImpl` records the state, wakes
@@ -2287,7 +2287,7 @@ pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_p
         .expect("completed durable timer replay should finish without panicking");
 }
 
-/// Drives one process up to a real segment boundary: the start's segment-0
+/// Executes one process up to a real segment boundary: the start's segment-0
 /// reference is recorded, the boundary names segment 1's owner and persists
 /// the segment-1 handover, and the attempt then suspends on the successor
 /// send.
@@ -2457,22 +2457,22 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
 
 /// The inputs an execution under `live_generation` would compose: the
 /// enqueue instant stands in for everything a live read could observe.
-/// FIG-3532: the initial drive set of an accepted turn input is a journaled
-/// Restate run. A replay under a later drive epoch returns the admission the
+/// FIG-3532: the initial shift set of an accepted turn input is a journaled
+/// Restate run. A replay under a later shift epoch returns the admission the
 /// first execution journaled and never runs the live admission again.
 #[tokio::test]
-async fn accepted_turn_input_drive_replays_the_journaled_admission() {
+async fn accepted_turn_input_shift_replays_the_journaled_admission() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let local_runs = Arc::new(AtomicUsize::new(0));
-    let first = execute_drive(&context, 3, &local_runs).await;
+    let first = execute_shift(&context, 3, &local_runs).await;
     assert_eq!(local_runs.load(Ordering::SeqCst), 1);
 
     context.start_replay();
-    let replayed = execute_drive(&context, 4, &local_runs).await;
+    let replayed = execute_shift(&context, 4, &local_runs).await;
     assert_eq!(
         local_runs.load(Ordering::SeqCst),
         1,
-        "replay returns the journaled drive without admitting live rows"
+        "replay returns the journaled shift without admitting live rows"
     );
     // The admission's base head and turn index are the first execution's,
     // never re-read from the replaying execution's live head (FIG-3682).
@@ -2495,19 +2495,19 @@ async fn accepted_turn_input_drive_replays_the_journaled_admission() {
     );
 }
 
-/// FIG-3532: nothing about the drive that performs the admission enters the
-/// drive envelope, so the journaled entry hashes identically for every drive
+/// FIG-3532: nothing about the shift that performs the admission enters the
+/// shift envelope, so the journaled entry hashes identically for every shift
 /// epoch that replays it.
 #[test]
-fn accepted_turn_input_drive_envelope_hash_is_independent_of_lease_generation() {
-    let envelope = drive_envelope();
-    let canonical = serde_json::to_value(envelope.canonical_form().expect("canonical drive"))
-        .expect("encode canonical drive");
+fn accepted_turn_input_shift_envelope_hash_is_independent_of_lease_generation() {
+    let envelope = shift_envelope();
+    let canonical = serde_json::to_value(envelope.canonical_form().expect("canonical shift"))
+        .expect("encode canonical shift");
     let encoded = canonical.to_string();
     for lease_field in ["generation", "fencing", "lease", "owner", "claim_token"] {
         assert!(
             !encoded.contains(lease_field),
-            "the drive envelope must not carry `{lease_field}`: {encoded}"
+            "the shift envelope must not carry `{lease_field}`: {encoded}"
         );
     }
 }

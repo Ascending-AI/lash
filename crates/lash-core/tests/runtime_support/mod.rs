@@ -76,10 +76,10 @@ pub(crate) async fn kernel_double(
         .expect("build the Restate server double")
 }
 
-/// Apply `transaction` to a store-backed `runtime`'s config as the drive does
+/// Apply `transaction` to a store-backed `runtime`'s config as the shift does
 /// (FIG-4379): submit it under `request`, written against the runtime's
-/// current config revision, run the runtime's own next drive on `double`,
-/// which applies it once no root owns the head, and answer how it settled.
+/// current config revision, run the runtime's own next shift on `double`,
+/// which applies it once no run owns the head, and answer how it settled.
 pub(crate) async fn apply_config(
     runtime: &mut lash_core::runtime::LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
@@ -91,7 +91,7 @@ pub(crate) async fn apply_config(
         .submit_config_transaction(request, revision, &transaction)
         .await
         .expect("submit the config transaction");
-    match Box::pin(drive_submitted_command(runtime, double, receipt, request)).await {
+    match Box::pin(execute_submitted_command(runtime, double, receipt, request)).await {
         lash_core::runtime::SessionCommandOutcome::ConfigTransaction { outcome } => outcome,
         other => panic!("a config transaction settles with its own outcome: {other:?}"),
     }
@@ -140,8 +140,8 @@ pub(crate) async fn configure_storeless(
     );
 }
 
-/// Apply a host head write as the session's drive does (FIG-4202): submit
-/// `command` to `runtime`'s command lane, run the runtime's own next drive
+/// Apply a host head write as the session's shift does (FIG-4202): submit
+/// `command` to `runtime`'s command lane, run the runtime's own next shift
 /// on `double`, which applies it at the turn boundary, and answer the typed
 /// outcome it settled with.
 pub(crate) async fn apply_host_command(
@@ -150,24 +150,24 @@ pub(crate) async fn apply_host_command(
     command: lash_core::runtime::SessionCommand,
     request: &str,
 ) -> lash_core::runtime::SessionCommandOutcome {
-    use lash_core::testing::TestTurnDrive as _;
+    use lash_core::testing::TestTurnExecution as _;
 
     let receipt = runtime
         .submit_session_command(command, request)
         .await
         .expect("submit the host command");
-    Box::pin(drive_submitted_command(runtime, double, receipt, request)).await
+    Box::pin(execute_submitted_command(runtime, double, receipt, request)).await
 }
 
-/// Run `runtime`'s own next drive on `double`, which applies the command
+/// Run `runtime`'s own next shift on `double`, which applies the command
 /// `receipt` names at the turn boundary, and answer its typed outcome.
-async fn drive_submitted_command(
+async fn execute_submitted_command(
     runtime: &mut lash_core::runtime::LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
     receipt: lash_core::runtime::SessionCommandReceipt,
     request: &str,
 ) -> lash_core::runtime::SessionCommandOutcome {
-    use lash_core::testing::TestTurnDrive as _;
+    use lash_core::testing::TestTurnExecution as _;
 
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn(
@@ -175,9 +175,9 @@ async fn drive_submitted_command(
             lash_core::TurnId::fixture(request),
         ))
         .await
-        .expect("open the host command's drive handler");
+        .expect("open the host command's shift handler");
     runtime
-        .drive_next_root(
+        .execute_next_run(
             request,
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -185,11 +185,11 @@ async fn drive_submitted_command(
             ),
         )
         .await
-        .expect("the drive applies the host command");
+        .expect("the shift applies the host command");
     handler
         .close()
         .await
-        .expect("close the host command's drive handler");
+        .expect("close the host command's shift handler");
     match runtime
         .settle_session_command(receipt)
         .await

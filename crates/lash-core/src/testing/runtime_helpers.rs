@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub use super::layered_backend::{LayeredBackend, LayeredStores};
-pub use super::recording_store::{EndRefusedRootHook, RecordingDeploymentStore, RecordingStore};
+pub use super::recording_store::{EndRefusedRunHook, RecordingDeploymentStore, RecordingStore};
 
 pub struct FixedAttachmentRoots(pub std::collections::BTreeSet<crate::AttachmentId>);
 
@@ -32,18 +32,18 @@ impl crate::AttachmentRootSet for FixedAttachmentRoots {
         after: Option<&crate::AttachmentId>,
     ) -> Result<crate::attachments::AttachmentRootPage, crate::StoreError> {
         use crate::attachments::{AttachmentRootPage, AttachmentRootSource};
-        let roots =
-            if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session) {
-                self.0
-                    .iter()
-                    .filter(|id| after.is_none_or(|after| *id > after))
-                    .take(AttachmentRootPage::QUERY_LIMIT)
-                    .cloned()
-                    .collect()
-            } else {
-                Vec::new()
-            };
-        AttachmentRootPage::from_rows(roots)
+        let runs = if source == AttachmentRootSource::Referrer(crate::ArtifactReferrerKind::Session)
+        {
+            self.0
+                .iter()
+                .filter(|id| after.is_none_or(|after| *id > after))
+                .take(AttachmentRootPage::QUERY_LIMIT)
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        AttachmentRootPage::from_rows(runs)
     }
 
     async fn has_live_attachment_ref(
@@ -65,7 +65,7 @@ pub fn default_state() -> RuntimeSessionState {
 
 /// Admits `admitted` on a runtime host's own effect host.
 ///
-/// A turn-driving test must bind its scope to the host the turn runs on: the
+/// A turn-executing test must bind its scope to the host the turn runs on: the
 /// driver publishes the live opener to that host's `ToolChildHost` registry,
 /// the execution context publishes recorded envs to that host's env store,
 /// and group children resolve both through the executors registered on the
@@ -177,10 +177,10 @@ pub fn append_message(state: &mut impl ReadModelStateMut, message: Message) {
     state.append_message(message);
 }
 
-/// Apply a host head write as a session's drive does (FIG-4202), for a test
+/// Apply a host head write as a session's shift does (FIG-4202), for a test
 /// that runs no engine: enqueue `command` on the session's command lane in
 /// `store` under `idempotency_key`, seal a fresh admission on `store` as a
-/// command root's seal does, drain the command lane under that fence on
+/// command run's seal does, drain the command lane under that fence on
 /// `runtime`, and answer the typed outcome the command settled with.
 ///
 /// # Errors
@@ -205,7 +205,7 @@ pub async fn apply_host_command(
 /// Submit a host's session command as its submission records it (FIG-4202),
 /// for a test that runs no engine: enqueue `command` on session
 /// `session_id`'s command lane in `store` under `idempotency_key`, and seal
-/// a fresh admission as a command root's seal does. Answers the command's
+/// a fresh admission as a command run's seal does. Answers the command's
 /// receipt and the sealed fence its drain presents.
 ///
 /// # Errors
@@ -216,7 +216,7 @@ pub async fn submit_host_command(
     session_id: &SessionId,
     command: SessionCommand,
     idempotency_key: &str,
-) -> Result<(crate::SessionCommandReceipt, crate::store::DriveFence), RuntimeError> {
+) -> Result<(crate::SessionCommandReceipt, crate::store::ShiftFence), RuntimeError> {
     // Enqueued through the store: a test that runs no engine has no ingress
     // relay to deliver it.
     let source_key = command.source_key(idempotency_key);
@@ -238,7 +238,7 @@ pub async fn submit_host_command(
         batch_id: batch.batch_id,
         source_key,
     };
-    let observed = store.drive_epoch(session_id).await.map_err(|error| {
+    let observed = store.shift_epoch(session_id).await.map_err(|error| {
         RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
     })?;
     let admission = crate::store::AdmissionId::new(format!(
@@ -246,18 +246,18 @@ pub async fn submit_host_command(
         uuid::Uuid::new_v4()
     ));
     match store
-        .seal_drive_epoch(
+        .seal_shift_epoch(
             session_id,
             &admission,
             observed.epoch,
-            &crate::store::RootStartNonce::new(uuid::Uuid::new_v4().to_string()),
+            &crate::store::RunStartNonce::new(uuid::Uuid::new_v4().to_string()),
             None,
         )
         .await
         .map_err(|error| {
             RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
         })? {
-        crate::store::DriveEpochSeal::Sealed(fence) => Ok((receipt, fence)),
+        crate::store::ShiftEpochSeal::Sealed(fence) => Ok((receipt, fence)),
         other => Err(RuntimeError::new(
             RuntimeErrorCode::StoreCommitSuperseded,
             format!("the host command's seal did not land: {other:?}"),
@@ -266,7 +266,7 @@ pub async fn submit_host_command(
 }
 
 /// Drain the session's command lane on `runtime` under `fence` until it is
-/// empty, as a command root does, on `controller` when one is given: the
+/// empty, as a command run does, on `controller` when one is given: the
 /// controller a tier's handler lends, for an effect host that runs effects
 /// only in a handler. A replay of that handler reads back the runs its
 /// journal recorded. Answers the batches each drain applied.
@@ -276,7 +276,7 @@ pub async fn submit_host_command(
 /// A drain failed.
 pub async fn drain_host_commands(
     runtime: &mut LashRuntime,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     controller: Option<&crate::ScopedEffectController<'_>>,
 ) -> Result<Vec<crate::BatchId>, RuntimeError> {
     let mut drained = Vec::new();
@@ -654,11 +654,11 @@ pub async fn advance_session_head(
     advance_session_head_fenced(store, change, true).await
 }
 
-/// [`advance_session_head`], except the commit presents no drive fence: the
-/// way a writer outside every drive moves the head. The head-ownership check
+/// [`advance_session_head`], except the commit presents no shift fence: the
+/// way a writer outside every shift moves the head. The head-ownership check
 /// admits a lane-less write only onto a head no commit has published over yet
-/// (FIG-4202), so this is a first commit racing a bound root; the published
-/// head is not `published_by_drive`, and a resumed root's head inspection
+/// (FIG-4202), so this is a first commit racing a bound run; the published
+/// head is not `published_by_shift`, and a resumed run's head inspection
 /// meets it as another writer's, `Overtaken` (FIG-4200).
 pub async fn advance_session_head_unfenced(
     store: &RecordingStore,
@@ -705,15 +705,15 @@ async fn advance_session_head_fenced(
     };
     change(&mut state);
     // The bound turn owns the head (FIG-4202): a writer that moves it once
-    // a commit has published over the created head must present the root's
-    // own drive fence, as a second execution of that root would. Over the
+    // a commit has published over the created head must present the run's
+    // own shift fence, as a second execution of that run would. Over the
     // created head a lane-less write is still admitted, which is what an
     // unfenced advance exercises. Before the first seal nothing owns it.
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
-    commit.drive_fence = if fenced {
-        crate::store::current_drive_fence(store, &session_id)
+    commit.shift_fence = if fenced {
+        crate::store::current_shift_fence(store, &session_id)
             .await
-            .expect("read the session's drive fence")
+            .expect("read the session's shift fence")
             .map(Box::new)
     } else {
         None

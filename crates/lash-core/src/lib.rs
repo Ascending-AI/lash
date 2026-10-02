@@ -44,13 +44,13 @@ pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::surface_format;
-/// The session drive (FIG-3600): admission as recorded steps, then the
-/// admitted root's turns.
-pub use runtime::drive;
 /// A session's durable close, the point of no return of its deletion
 /// (FIG-3600 S7).
 pub use runtime::session_close;
 pub use runtime::session_delete;
+/// The session shift (FIG-3600): admission as recorded steps, then the
+/// admitted run's turns.
+pub use runtime::shift;
 /// Re-exported so every `RuntimeEffectController` implementation can spell
 /// `await_next_settlement`'s cancellation parameter without taking a direct
 /// `tokio-util` dependency of its own (FIG-2266).
@@ -127,7 +127,7 @@ pub mod facade_support {
         UnrecordedSessionSources, opener_for_execution_scope, scope_status,
     };
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
-    /// The drive-tracing seam a durable substrate implements against (the trace runtime,
+    /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
         JournalFrontier, LiveStep, StepIssue, TraceRuntime, TraceStanding, effect_trace_scope,
@@ -598,7 +598,7 @@ pub use lash_core_execution::{
     TurnMachine, TurnMachineConfig,
 };
 pub use lash_core_execution::{
-    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_roots,
+    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_runs,
     parent_end_delivery_key, parent_end_requester,
 };
 pub use lash_sansio::{
@@ -681,7 +681,7 @@ pub use runtime::ProcessRegistryTestSupport;
 pub use runtime::TestProcessRegistryWriteExt;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::fail_parent_end_once;
-pub use runtime::{ObservationSource, drive_with_observations};
+pub use runtime::{ObservationSource, work_with_observations};
 
 // This block includes the effect / process-control types consumed by external
 // effect hosts (e.g. lash-restate's workflows) and their integration tests —
@@ -765,25 +765,25 @@ pub use runtime::{
     ScopeBoundController, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, ScopedEffectController,
     SegmentHandover, SegmentProgress, SegmentStartMarker, ServedOnly, ServedOnlyRange,
     SessionAdministration, SessionCreationHead, SessionCursor, SessionCursorError,
-    SessionDeleteContext, SessionDeleteExecution, SessionDriver, SessionEntry, SessionId,
-    SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
-    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
-    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView,
-    SessionWorkEngine, SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization,
-    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
-    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelGatePair,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
-    TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnCancellationAuthority, TurnContext,
-    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, WaitKind, WaitState, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
-    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
+    SessionDeleteContext, SessionDeleteExecution, SessionEntry, SessionId, SessionListFilter,
+    SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
+    SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope, SessionShifts,
+    SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SessionWorkEngine,
+    SleepSpec, SlotId, StartCx, StartCxError, StartKey, StoreRealization, StoredDataCorruption,
+    Target, ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelAffectedWake, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelGatePair, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelRequestRecord, TurnCancelUndeliveredInputPolicy, TurnCancelWait,
+    TurnCancellationAuthority, TurnContext, TurnControlAttachment, TurnControlBinding,
+    TurnControlBindingId, TurnControlBindingIdError, TurnEvent, TurnFailureCause,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
+    TurnLaneAdmissionPolicy, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
+    WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
     artifact_store_plugin_error, effect_groups_unsupported, lifetime, mint_process_id,
     park_turn_of_refused_group_child, park_turn_refused_by_generation, retry_cancel_watch,
     tool_failure_code,
@@ -899,7 +899,7 @@ mod tests {
 }
 
 /// Engine-owned usage accounting (ADR 0125): the store's ledger vocabulary
-/// and the kernel's usage run, under one path.
+/// and the kernel's usage meter, under one path.
 pub mod usage_accounting {
     pub use lash_core_execution::usage_accounting::*;
     pub use lash_core_store::usage_accounting::*;

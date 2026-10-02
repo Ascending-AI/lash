@@ -104,7 +104,7 @@ pub use observer_intent::{
 };
 pub use op_scope::ProcessOpScope;
 pub use parent_end::{
-    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_roots,
+    ParentEndApplication, apply_parent_end_plan, end_parent_scope, end_session_runs,
     parent_end_delivery_key, parent_end_requester,
 };
 pub use references::ProcessLiveReferenceView;

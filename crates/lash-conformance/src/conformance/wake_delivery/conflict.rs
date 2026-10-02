@@ -139,7 +139,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
         fail_next: AtomicBool::new(false),
     });
     let sender = ProcessRegistryFaults::new(Arc::clone(&registry));
-    let drive = || {
+    let shift = || {
         crate::WakeDeliveryDriver::drive_pending_once(
             Arc::new(sender.clone()) as Arc<dyn crate::ProcessRegistry>,
             Arc::clone(&receiver) as Arc<dyn crate::DeploymentStore>,
@@ -193,7 +193,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
     // A transient fault before the receiver's transaction: nothing commits,
     // the delivery stays pending, and the later wake waits behind it.
     receiver.fail_next.store(true, Ordering::SeqCst);
-    let transient = drive().await.expect("drive through a transient fault");
+    let transient = shift().await.expect("shift through a transient fault");
     assert_eq!(transient.inspected, 1, "{transient:?}");
     assert_eq!(transient.retryable_failures, 1, "{transient:?}");
     assert_eq!(transient.discarded_content_conflict, 0, "{transient:?}");
@@ -216,7 +216,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
     sender.fail_next_wake_discard(crate::PluginError::Session(
         "injected lost discard acknowledgement".to_string(),
     ));
-    let unacknowledged = drive().await.expect("drive through a lost acknowledgement");
+    let unacknowledged = shift().await.expect("shift through a lost acknowledgement");
     assert_eq!(unacknowledged.inspected, 1, "{unacknowledged:?}");
     assert_eq!(unacknowledged.retryable_failures, 1, "{unacknowledged:?}");
     assert_eq!(
@@ -238,7 +238,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
     // The retry converges on the same terminal: a typed conflict discard
     // that does not hold the ordering group.
     clock.advance(1_000);
-    let discarded = drive().await.expect("drive the conflict to its terminal");
+    let discarded = shift().await.expect("shift the conflict to its terminal");
     assert_eq!(discarded.inspected, 1, "{discarded:?}");
     assert_eq!(discarded.discarded_content_conflict, 1, "{discarded:?}");
     assert_eq!(discarded.retryable_failures, 0, "{discarded:?}");
@@ -269,7 +269,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
 
     // The later wake is admitted exactly once, and the conflict is never
     // retried.
-    let progressed = drive().await.expect("drive the later wake");
+    let progressed = shift().await.expect("shift the later wake");
     assert_eq!(progressed.inspected, 1, "{progressed:?}");
     assert_eq!(progressed.enqueued, 1, "{progressed:?}");
     assert_eq!(progressed.floor_absorbed, 0, "{progressed:?}");
@@ -279,7 +279,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
         crate::WakeDeliveryLifecycle::Enqueued
     );
     clock.advance(1_000);
-    let quiet = drive().await.expect("drive a settled outbox");
+    let quiet = shift().await.expect("shift a settled outbox");
     assert_eq!(quiet, crate::WakeDeliveryDriveReport::default());
     let later_draft = crate::process_wake_batch_draft(later.clone());
     let mut expected = vec![

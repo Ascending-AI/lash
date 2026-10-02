@@ -757,7 +757,7 @@ pub struct SessionStoreCreateRequest {
 pub enum SessionCreationHead {
     /// Creation bakes the request's config in: the store writes it as the
     /// session's initial config head in the same transaction as the catalog
-    /// row, so every later open — and the engine's own drive-open — runs with
+    /// row, so every later open — and the engine's own shift-open — runs with
     /// the config the creator stated. The host API's one creating verb,
     /// `create`, states this (FIG-4112), and so does the session manager's
     /// create, whose first commit publishes over this head (FIG-4553). It is

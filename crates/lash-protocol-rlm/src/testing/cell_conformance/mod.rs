@@ -96,7 +96,7 @@ fn assert_not_inherited(outcome: &CellOutcome, context: &str) {
 /// an earlier cell's program. A scenario therefore never has to restate the
 /// cross-cell laws it is not about, and a sequence written for one axis catches
 /// a violation of another.
-fn drive(mode: HarnessMode, cells: &[Cell]) -> (Session, SessionModel) {
+fn shift(mode: HarnessMode, cells: &[Cell]) -> (Session, SessionModel) {
     let mut session = Session::open(mode);
     let mut model = SessionModel::new();
     for (index, cell) in cells.iter().enumerate() {

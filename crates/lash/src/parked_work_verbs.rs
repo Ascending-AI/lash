@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use lash_core::store::{
     ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState, ParkId,
-    RootIntentRefused, RootIntentRequest, RootTerminal, RootVerb,
+    RunIntentRefused, RunIntentRequest, RunTerminal, RunVerb,
 };
 use lash_sansio::{SessionId, TurnId};
 
@@ -13,11 +13,11 @@ use crate::parked_work::{ParkedWork, ParkedWorkRef};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ParkVerbRefused {
-    #[error("the root is not parked")]
+    #[error("the run is not parked")]
     NotParked,
     #[error("the park was superseded by {current}")]
     ParkSuperseded { current: ParkId },
-    #[error("the root is being redriven by {intent}")]
+    #[error("the run is being redriven by {intent}")]
     Redriving { intent: ControlIntentId },
     #[error("intent {intent} is still open")]
     IntentOpen { intent: ControlIntentId },
@@ -27,7 +27,7 @@ pub enum ParkVerbRefused {
     SessionClosing,
     #[error(transparent)]
     Store(#[from] lash_core::StoreError),
-    #[error("fork requires a turn root")]
+    #[error("fork requires a turn run")]
     ForkRequiresTurn,
     #[error("{code}: {message}")]
     SubstrateRefused {
@@ -36,16 +36,16 @@ pub enum ParkVerbRefused {
     },
 }
 
-impl From<RootIntentRefused> for ParkVerbRefused {
-    fn from(error: RootIntentRefused) -> Self {
+impl From<RunIntentRefused> for ParkVerbRefused {
+    fn from(error: RunIntentRefused) -> Self {
         match error {
-            RootIntentRefused::NotParked => Self::NotParked,
-            RootIntentRefused::ParkSuperseded { current } => Self::ParkSuperseded { current },
-            RootIntentRefused::Redriving { intent } => Self::Redriving { intent },
-            RootIntentRefused::IntentOpen { intent } => Self::IntentOpen { intent },
-            RootIntentRefused::SessionDeleted => Self::SessionDeleted,
-            RootIntentRefused::SessionClosing => Self::SessionClosing,
-            RootIntentRefused::Store(error) => Self::Store(error),
+            RunIntentRefused::NotParked => Self::NotParked,
+            RunIntentRefused::ParkSuperseded { current } => Self::ParkSuperseded { current },
+            RunIntentRefused::Redriving { intent } => Self::Redriving { intent },
+            RunIntentRefused::IntentOpen { intent } => Self::IntentOpen { intent },
+            RunIntentRefused::SessionDeleted => Self::SessionDeleted,
+            RunIntentRefused::SessionClosing => Self::SessionClosing,
+            RunIntentRefused::Store(error) => Self::Store(error),
             other => Self::SubstrateRefused {
                 code: lash_core::RuntimeErrorCode::PluginSessionManager,
                 message: other.to_string(),
@@ -54,10 +54,10 @@ impl From<RootIntentRefused> for ParkVerbRefused {
     }
 }
 
-/// A root redrive committed to the ledger. The park stays until execution progresses.
+/// A run redrive committed to the ledger. The park stays until execution progresses.
 #[derive(Clone, Debug)]
 pub enum RedriveAccepted {
-    Root(RootRedriveAccepted),
+    Run(RunRedriveAccepted),
     Process {
         process: lash_sansio::ProcessId,
         park: ParkId,
@@ -65,24 +65,24 @@ pub enum RedriveAccepted {
 }
 
 #[derive(Clone, Debug)]
-pub struct RootRedriveAccepted {
+pub struct RunRedriveAccepted {
     pub intent: ControlIntentId,
     pub applied: bool,
-    pub root: TurnId,
+    pub run: TurnId,
 }
 
 #[derive(Clone, Debug)]
 pub struct ParkCancelled {
     pub intent: ControlIntentId,
-    pub terminal: RootTerminal,
+    pub terminal: RunTerminal,
     pub applied: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct ForkedTurn {
     pub intent: ControlIntentId,
-    pub cancelled: RootTerminal,
-    pub new_root: Option<TurnId>,
+    pub cancelled: RunTerminal,
+    pub new_run: Option<TurnId>,
     pub applied: bool,
 }
 
@@ -128,12 +128,12 @@ impl ParkedWork {
             }
         };
         let (intent, applied) = self
-            .root_verb(session_id, turn_id, park, RootVerb::Redrive)
+            .run_verb(session_id, turn_id, park, RunVerb::Redrive)
             .await?;
-        Ok(RedriveAccepted::Root(RootRedriveAccepted {
+        Ok(RedriveAccepted::Run(RunRedriveAccepted {
             intent: intent.id,
             applied,
-            root: turn_id.clone(),
+            run: turn_id.clone(),
         }))
     }
 
@@ -153,7 +153,7 @@ impl ParkedWork {
             });
         };
         let (intent, applied) = self
-            .root_verb(session_id, turn_id, park, RootVerb::Cancel)
+            .run_verb(session_id, turn_id, park, RunVerb::Cancel)
             .await?;
         Ok(ParkCancelled {
             intent: intent.id,
@@ -165,17 +165,17 @@ impl ParkedWork {
     pub async fn fork(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         park: ParkId,
     ) -> Result<ForkedTurn, ParkVerbRefused> {
-        let (intent, applied) = self.root_verb(session, root, park, RootVerb::Fork).await?;
-        let ControlIntentKind::Fork { new_root, .. } = intent.kind else {
+        let (intent, applied) = self.run_verb(session, run, park, RunVerb::Fork).await?;
+        let ControlIntentKind::Fork { new_run, .. } = intent.kind else {
             return Err(lash_core::StoreError::Contended.into());
         };
         Ok(ForkedTurn {
             intent: intent.id,
-            cancelled: self.terminal(session, root).await?,
-            new_root,
+            cancelled: self.terminal(session, run).await?,
+            new_run,
             applied,
         })
     }
@@ -195,26 +195,26 @@ impl ParkedWork {
         Ok(ControlIntentPage { intents, next })
     }
 
-    async fn root_verb(
+    async fn run_verb(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         park: ParkId,
-        verb: RootVerb,
+        verb: RunVerb,
     ) -> Result<(ControlIntent, bool), ParkVerbRefused> {
         let intent = self
             .store_factory
-            .open_root_intent(
-                &RootIntentRequest {
+            .open_run_intent(
+                &RunIntentRequest {
                     session_id: session.clone(),
-                    root: root.clone(),
+                    run: run.clone(),
                     park,
                     verb,
                 },
                 self.clock.timestamp_ms(),
             )
             .await?;
-        let state = lash_core::runtime::drive::ControlIntentRelay::new(
+        let state = lash_core::runtime::shift::ControlIntentRelay::new(
             Arc::clone(&self.intents),
             Arc::clone(&self.store_factory),
             self.work.ports().await.queued_port(),
@@ -234,10 +234,10 @@ impl ParkedWork {
     async fn terminal(
         &self,
         session: &SessionId,
-        root: &TurnId,
-    ) -> Result<RootTerminal, ParkVerbRefused> {
+        run: &TurnId,
+    ) -> Result<RunTerminal, ParkVerbRefused> {
         self.store_factory
-            .root_terminal(session, root)
+            .run_terminal(session, run)
             .await?
             .ok_or_else(|| lash_core::StoreError::Contended.into())
     }

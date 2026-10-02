@@ -3,7 +3,7 @@ use std::task::{Context, Poll};
 
 use super::{LAG_BUDGET, ObservationSource, RuntimeStreamEvent, TurnObservations, TurnObserver};
 use crate::engine::{
-    DriveObservation, ObservationCursor, ObservationSink, ObservedEvent, ReplayKey,
+    ObservationCursor, ObservationSink, ObservedEvent, ReplayKey, ShiftObservation,
 };
 use crate::llm::types::StreamBlockIdentity;
 use crate::session_model::SessionStreamEvent;
@@ -313,7 +313,7 @@ fn an_abandoned_terminal_publishes_nothing() {
 #[test]
 fn keyed_observations_take_their_ids_from_key_and_ordinal() {
     let (observer, mut observations) = TurnObserver::unread();
-    observer.observe(DriveObservation {
+    observer.observe(ShiftObservation {
         key: ReplayKey::new("root:t1:1:0:llm_call:1"),
         ordinal: 3,
         event: ObservedEvent::Activity {
@@ -323,7 +323,7 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
             },
         },
     });
-    observer.observe(DriveObservation {
+    observer.observe(ShiftObservation {
         key: ReplayKey::new("root:t1:1:0:llm_call:1"),
         ordinal: 4,
         event: ObservedEvent::Activity {
@@ -333,7 +333,7 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
             },
         },
     });
-    observer.observe(DriveObservation {
+    observer.observe(ShiftObservation {
         key: ReplayKey::new("root:t1:1:0:tool:2"),
         ordinal: 0,
         event: ObservedEvent::Session(SessionStreamEvent::Error {

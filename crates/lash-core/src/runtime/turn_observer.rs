@@ -1,9 +1,9 @@
 //! The turn's observation sink (ADR 0105 §1: observation never decides).
 //!
-//! Drive code publishes every host-facing event through a [`TurnObserver`]: a
+//! Shift code publishes every host-facing event through a [`TurnObserver`]: a
 //! synchronous hand-off onto the turn's observation queue that never waits and
-//! never wakes the drive. What reaches the host sinks, and when, cannot change
-//! anything the drive decides or commits: commit content comes from the
+//! never wakes the shift. What reaches the host sinks, and when, cannot change
+//! anything the shift decides or commits: commit content comes from the
 //! driver's recorded state ([`RecordedTurnAssembly`](super::RecordedTurnAssembly)),
 //! never from this stream.
 //!
@@ -28,15 +28,15 @@
 //!   commit that fails publishes none of it
 //!   ([`TurnObserver::abandon_terminal`]).
 //! - **"Finished" comes after the last event.** The turn commits inside the
-//!   drive and never waits on the host to do so. The turn's terminal
+//!   shift and never waits on the host to do so. The turn's terminal
 //!   publication to waiters (turn attach, await-event resolution) and the turn
 //!   call's return both happen only after every event the turn queued,
 //!   including its final deltas and `Done`, has been published to the host
 //!   ([`TurnObserver::published`]).
 //!
 //! The host end is published by
-//! [`drive_with_observations`](super::drive_with_observations), outside the
-//! drive.
+//! [`work_with_observations`](super::work_with_observations), outside the
+//! shift.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -48,7 +48,7 @@ use lash_sansio::sync::MutexExt;
 
 use super::RuntimeStreamEvent;
 use super::observation_publisher::ObservationSource;
-use crate::engine::{DriveObservation, ObservationSink, ObservedEvent};
+use crate::engine::{ObservationSink, ObservedEvent, ShiftObservation};
 use crate::session_model::SessionStreamEvent;
 use crate::{TurnActivity, TurnActivityId, TurnEvent, TurnId};
 
@@ -94,7 +94,7 @@ struct QueueState {
     events: VecDeque<Observation>,
     /// The publisher has taken an event and not yet finished publishing it.
     publishing: bool,
-    /// The drive is over: later publications are dropped.
+    /// The shift is over: later publications are dropped.
     closed: bool,
     publisher: Option<Waker>,
     published_waiter: Option<Waker>,
@@ -150,7 +150,7 @@ impl TurnObserver {
         }
     }
 
-    /// Publish one event as it is, with no projection. After the drive is
+    /// Publish one event as it is, with no projection. After the shift is
     /// over the event is dropped: nothing depends on its delivery.
     pub(in crate::runtime) fn publish(&self, event: RuntimeStreamEvent) {
         let turn = match &event {
@@ -216,7 +216,7 @@ impl TurnObserver {
         self.queue.state.lock_recover().held = None;
     }
 
-    /// Whether the drive is over and publications are dropped.
+    /// Whether the shift is over and publications are dropped.
     pub(in crate::runtime) fn is_closed(&self) -> bool {
         self.queue.state.lock_recover().closed
     }
@@ -307,8 +307,8 @@ impl TurnObservations {
 /// is published synchronously, and every activity it yields takes its id from
 /// its `(replay key, ordinal)`, never from a random source.
 impl ObservationSink for TurnObserver {
-    fn observe(&self, observation: DriveObservation) {
-        let DriveObservation {
+    fn observe(&self, observation: ShiftObservation) {
+        let ShiftObservation {
             key,
             ordinal,
             event,
@@ -345,7 +345,7 @@ impl ObservationSink for TurnObserver {
     }
 }
 
-/// Drive code that takes a host `EventSink` publishes through the observer:
+/// Shift code that takes a host `EventSink` publishes through the observer:
 /// the event is queued as it is, and the call never waits on the host.
 #[async_trait::async_trait]
 impl crate::EventSink for TurnObserver {
@@ -358,7 +358,7 @@ impl crate::EventSink for TurnObserver {
     }
 }
 
-/// Drive code that takes a host `TurnActivitySink` publishes through the
+/// Shift code that takes a host `TurnActivitySink` publishes through the
 /// observer. The observer belongs to one turn, whose publisher addresses
 /// every activity to that turn.
 #[async_trait::async_trait]

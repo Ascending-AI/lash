@@ -5,10 +5,10 @@ pub(crate) use std::collections::HashMap;
 
 pub(crate) use helpers::RecordingStore;
 pub(crate) use lash_core::store::{
-    AdmittedHead, CheckpointAdmission, DriveFence, QueuedWorkStore, RootAdmission, RootStore,
-    SessionCommitStore, TurnInputStore,
+    AdmittedHead, CheckpointAdmission, QueuedWorkStore, RunAdmission, RunStore, SessionCommitStore,
+    ShiftFence, TurnInputStore,
 };
-pub(crate) use lash_core::testing::RuntimeStoreTestDriveExt;
+pub(crate) use lash_core::testing::RuntimeStoreTestShiftExt;
 pub(crate) use lash_core::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit, StoreError,
     TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
@@ -143,14 +143,14 @@ struct RuntimeScenarioContext {
     /// turn-cancellation promises a deferral fixture settles.
     turn_control: lash_core::TurnCancellationAuthority,
     owner: Option<LeaseOwnerIdentity>,
-    lease: Option<DriveFence>,
+    lease: Option<ShiftFence>,
     state: RuntimeSessionState,
     enqueued_turn_inputs: HashMap<&'static str, PendingTurnInput>,
     /// The session-command run the scenario opened, settled bindlessly.
     commands: Vec<QueuedWorkBatch>,
-    /// The scenario root's admission, settled by its final commit.
-    admission: Option<RootAdmission>,
-    /// What the scenario root admitted at its checkpoint.
+    /// The scenario run's admission, settled by its final commit.
+    admission: Option<RunAdmission>,
+    /// What the scenario run admitted at its checkpoint.
     checkpoint_admission: Option<CheckpointAdmission>,
     lease_released: bool,
 }
@@ -246,16 +246,16 @@ impl RuntimeScenarioContext {
         let owner = lease_owner(self.host_behavior.lease_owner_id);
         let lease = self
             .store()
-            .seal_drive_epoch_for_test(&self.session_id, &owner, "scenario-drive", 0)
+            .seal_shift_epoch_for_test(&self.session_id, &owner, "scenario-shift", 0)
             .await
-            .expect("seal scenario drive epoch")
+            .expect("seal scenario shift epoch")
             .acquired()
-            .expect("scenario drive epoch sealed");
+            .expect("scenario shift epoch sealed");
         self.owner = Some(owner);
         self.lease = Some(lease);
     }
 
-    fn owner_and_lease(&self) -> (&LeaseOwnerIdentity, &DriveFence) {
+    fn owner_and_lease(&self) -> (&LeaseOwnerIdentity, &ShiftFence) {
         (
             self.owner
                 .as_ref()
@@ -280,10 +280,10 @@ impl RuntimeScenarioContext {
         })
     }
 
-    /// The settlement completing every row the scenario root admitted.
+    /// The settlement completing every row the scenario run admitted.
     fn root_settlement(&self) -> lash_core::store::IngressSettlement {
         let mut settlement =
-            lash_core::store::IngressSettlement::new(TurnId::from(admission::SCENARIO_ROOT));
+            lash_core::store::IngressSettlement::new(TurnId::from(admission::SCENARIO_RUN));
         if let Some(admission) = &self.admission {
             settlement
                 .completed_inputs
@@ -661,10 +661,10 @@ pub(crate) enum RuntimeTurnInputIngress {
         min_boundary: TurnInputCheckpointBoundary,
         text: &'static str,
     },
-    /// Start the scenario's root, headed by a next-turn input, so input may
+    /// Start the scenario's run, headed by a next-turn input, so input may
     /// address its turn while it runs (ADR 0101 §5.1). The final commit
     /// settles it.
-    StartScenarioRoot {
+    StartScenarioRun {
         alias: &'static str,
         text: &'static str,
     },

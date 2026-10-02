@@ -1,7 +1,7 @@
 //! Possession conservation oracle (FIG-3429, ADR 0099 §1).
 //!
 //! Run-local possession is the set of process ids a `RuntimeExecutionContext`
-//! may drive without borrowing session-level visibility: `authorize_handle`
+//! may execute without borrowing session-level visibility: `authorize_handle`
 //! answers `RunLocalPossession` for ids in `started_process_ids` before it ever
 //! asks the observer edges. Possession is *conferred*, not ambient — a start
 //! that realizes a child must land the id in the realizing run's set:
@@ -23,7 +23,7 @@
 //! authority leak outright. The third — possession of a never-realized id —
 //! is the phantom half of the same boundary.
 //!
-//! The oracle drives a two-opener world over one registry and checks the
+//! The oracle executes a two-opener world over one registry and checks the
 //! invariant after every step: direct starts, intent starts, refused and
 //! protocol-refused intent outcomes, an executed non-start intent whose result
 //! echoes a live handle (a result is data, not authority — it must grant

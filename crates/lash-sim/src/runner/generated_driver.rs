@@ -14,7 +14,7 @@ pub(crate) async fn run_generated_workload_for_fixture(
     Ok(trace)
 }
 
-/// Drive a generated workload through the scheduler-driven, concurrency-faithful
+/// Execute a generated workload through the scheduler-driven, concurrency-faithful
 /// runtime world and return the delivered boundary log plus the abstract world
 /// summary.
 pub(super) async fn drive_generated_workload(
@@ -151,7 +151,7 @@ pub(super) async fn run_generated_workload(
     // and carries provider-emitted wire content, so it is evaluated here, not
     // from the serialized trace (see `RUN_ONLY_ORACLES`).
     let mut content = world.content_evidence().await?;
-    content.extend(drive_attempt_usage_probe(workload.seed).await?);
+    content.extend(execute_attempt_usage_probe(workload.seed).await?);
     // The global invariants judge the finished history: the trace and every
     // engine's final store (FIG-4086).
     let history = world

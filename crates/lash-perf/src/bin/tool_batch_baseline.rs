@@ -1,7 +1,7 @@
 //! `tool-batch-baseline` — the FIG-3398 pre-cutover measurement.
 //!
 //! For every (producer, width) cell it
-//! drives the FIG-3400 conformance producers' batch through
+//! executes the FIG-3400 conformance producers' batch through
 //! [`lash_conformance::measure_tool_batch`] `reps` times and emits one JSONL
 //! row per rep: the turn's wall time, the leaf window (first leaf start to
 //! last leaf answer), the journal rows the batch wrote, and the box's load

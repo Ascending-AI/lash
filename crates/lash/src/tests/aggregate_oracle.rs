@@ -80,7 +80,7 @@ impl JournaledTier {
     }
 
     /// A fresh backend for one run: its own sessions and its own process
-    /// registry, driven by a fresh Restate double over SQLite stores.
+    /// registry, executed by a fresh Restate double over SQLite stores.
     async fn backend(&self) -> lash_core::Backend {
         double_backend().await
     }
@@ -592,7 +592,7 @@ impl DrivenOracle {
     async fn finish_within(self, budget: std::time::Duration) -> Result<OracleRun> {
         let result = tokio::time::timeout(budget, self.turn)
             .await
-            .expect("the driven turn must report")
+            .expect("the executed turn must report")
             .expect("turn task")?;
         let tool_calls = self.theatre.completed_calls.load(Ordering::SeqCst);
         let requests = self.requests.lock_recover().clone();
@@ -789,7 +789,7 @@ finish(await Promise.all(ids.map(async (id) => await oracle.step({ id: id }))));
 /// leaf settled first. The rejecting leaf is written first and settles last, so
 /// an implementation that reported settlement order would swap them.
 async fn all_settled_reports_every_leaf_in_input_order(tier: &JournaledTier) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-all-settled",
         vec![typescript_block(
@@ -801,17 +801,17 @@ async fn all_settled_reports_every_leaf_in_input_order(tier: &JournaledTier) -> 
     )
     .await?;
 
-    driven
+    executed
         .theatre
         .settle_deferred(
-            &driven.core,
+            &executed.core,
             "early",
             lash_core::Resolution::Ok(serde_json::json!({ "id": "early" })),
         )
         .await?;
-    driven.theatre.await_settled("early").await;
-    driven.theatre.release("late");
-    let run = driven.finish().await?;
+    executed.theatre.await_settled("early").await;
+    executed.theatre.release("late");
+    let run = executed.finish().await?;
 
     assert_eq!(
         run.theatre.settled(),
@@ -879,7 +879,7 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
                 "hold: true"
             },
         );
-        let driven = drive_cells(
+        let executed = drive_cells(
             tier,
             "aggregate-oracle-first-settled",
             vec![typescript_block(&catching_cell(&cell))],
@@ -889,17 +889,17 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
         // Both leaves are dispatched before either settles: a group child is
         // dispatched on its own, so the held leaf is waited into its attempt
         // rather than raced against the turn's end.
-        driven.theatre.await_started(second).await;
-        driven
+        executed.theatre.await_started(second).await;
+        executed
             .theatre
-            .settle_deferred(&driven.core, first, OracleTheatre::rejection(first))
+            .settle_deferred(&executed.core, first, OracleTheatre::rejection(first))
             .await?;
-        driven.theatre.await_settled(first).await;
+        executed.theatre.await_settled(first).await;
         // The held leaf cannot commit, so the first consumed settlement is
         // the parked leaf's: its rank precedes the held leaf's by construction.
-        driven.theatre.await_consumed(1).await;
-        driven.theatre.release(second);
-        let run = driven.finish().await?;
+        executed.theatre.await_consumed(1).await;
+        executed.theatre.release(second);
+        let run = executed.finish().await?;
 
         // `Promise.all` resumes at its first consumed rejection, so the held
         // leaf is a loser the turn's end may cancel before it ever settles.
@@ -939,7 +939,7 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
 async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
     tier: &JournaledTier,
 ) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-head-of-line",
         vec![typescript_block(&catching_cell(
@@ -957,11 +957,11 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
     let deadline = tokio::time::Instant::now() + RENDEZVOUS_BUDGET;
     while tokio::time::Instant::now() < deadline {
         probe.tick().await;
-        if driven.theatre.started().len() == 2 {
+        if executed.theatre.started().len() == 2 {
             break;
         }
-        if driven.turn.is_finished() {
-            let run = driven.finish().await?;
+        if executed.turn.is_finished() {
+            let run = executed.finish().await?;
             panic!(
                 "{}: the turn finished with no leaf ever started; started: {:?}, \
                  final value: {:?}, provider requests: {:?}",
@@ -975,24 +975,24 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
 
     // Both leaves' attempts have run; the held source-first leaf no longer
     // blocks the later terminal leaf's settlement.
-    driven.theatre.await_started("second").await;
-    driven.theatre.await_started("first").await;
-    driven.theatre.await_settled("second").await;
+    executed.theatre.await_started("second").await;
+    executed.theatre.await_started("first").await;
+    executed.theatre.await_settled("second").await;
     assert_eq!(
-        driven.theatre.settled(),
+        executed.theatre.settled(),
         vec!["second"],
         "{}: a terminal leaf settles ahead of an unfinished source-earlier leaf, saw {:?}",
         tier.name,
-        driven.theatre.settled()
+        executed.theatre.settled()
     );
     // Consumed, not merely presented: the later leaf's rank is fixed before
     // the held leaf can commit.
-    driven.theatre.await_consumed(1).await;
+    executed.theatre.await_consumed(1).await;
 
     // `Promise.all` resumed at that first consumed rejection (ADR 0099 §10
     // L2); the held source-first leaf is a loser the turn's end cancels.
-    driven.theatre.release("first");
-    let run = driven.finish().await?;
+    executed.theatre.release("first");
+    let run = executed.finish().await?;
 
     assert_eq!(
         run.theatre.settled().first().map(String::as_str),
@@ -1058,7 +1058,7 @@ async fn a_preparation_failure_leads_the_settlement_order(tier: &JournaledTier) 
 async fn a_rejected_promise_all_resumes_at_its_first_consumed_rejection(
     tier: &JournaledTier,
 ) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-deviation-15",
         vec![typescript_block(
@@ -1076,24 +1076,24 @@ async fn a_rejected_promise_all_resumes_at_its_first_consumed_rejection(
     )
     .await?;
 
-    driven
+    executed
         .theatre
         .settle_deferred(
-            &driven.core,
+            &executed.core,
             "rejecting",
             OracleTheatre::rejection("rejecting"),
         )
         .await?;
-    driven.theatre.await_started("after-rejection").await;
+    executed.theatre.await_started("after-rejection").await;
     assert!(
-        !driven.theatre.settled().contains(&"held".to_string()),
+        !executed.theatre.settled().contains(&"held".to_string()),
         "{}: the aggregate resumed while the held leaf was still in flight, saw {:?}",
         tier.name,
-        driven.theatre.settled()
+        executed.theatre.settled()
     );
 
-    driven.theatre.release("held");
-    let run = driven.finish().await?;
+    executed.theatre.release("held");
+    let run = executed.finish().await?;
     assert!(
         reason(&run).contains("step rejecting rejected"),
         "{}: the first consumed rejection is the reported one, got {}",

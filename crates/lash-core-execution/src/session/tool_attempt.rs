@@ -19,7 +19,7 @@ impl RuntimeExecutionContext<'_> {
         attempt_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
         completion_key: Option<crate::AwaitEventKey>,
-        usage_run: Option<crate::UsageRun>,
+        usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut attempt_dispatch = (*self.dispatch).clone();
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
@@ -29,7 +29,7 @@ impl RuntimeExecutionContext<'_> {
         attempt_dispatch.direct_completions = attempt_dispatch
             .direct_completions
             .with_tool_attempt_parent_invocation(attempt_invocation.clone())
-            .with_usage_run(usage_run);
+            .with_usage_meter(usage_meter);
         attempt_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         // Attempt-local: what this attempt commits is journaled on its

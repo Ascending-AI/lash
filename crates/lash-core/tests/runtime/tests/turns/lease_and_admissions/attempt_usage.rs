@@ -4,7 +4,7 @@
 //! than an `include!`, so `cargo fmt` keeps walking it.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn failed_attempt_partial_usage_is_a_fact() {
@@ -93,7 +93,7 @@ pub(super) async fn failed_attempt_partial_usage_is_a_fact() {
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -107,7 +107,7 @@ pub(super) async fn failed_attempt_partial_usage_is_a_fact() {
     // The failed attempt's billed usage and the successful retry's usage are
     // two facts of the owner's accounting, and the report sums both.
     let report = settled_runtime_usage(&runtime).await.report();
-    let deltas = root_usage_facts(&runtime).await;
+    let deltas = run_usage_facts(&runtime).await;
     assert_eq!(deltas.len(), 2, "one fact per reported attempt: {deltas:?}");
     assert_eq!(
         deltas
@@ -197,7 +197,7 @@ pub(super) async fn all_attempts_failed_partial_usage_are_facts() {
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("every attempt fails"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -216,7 +216,7 @@ pub(super) async fn all_attempts_failed_partial_usage_are_facts() {
     // No response was ever counted into the turn's cumulative usage, and
     // each failed attempt's reported partial usage is its own fact.
     let report = settled_runtime_usage(&runtime).await.report();
-    let deltas = root_usage_facts(&runtime).await;
+    let deltas = run_usage_facts(&runtime).await;
     assert_eq!(deltas.len(), 2, "one fact per reported attempt: {deltas:?}");
     assert_eq!(
         deltas
@@ -230,7 +230,7 @@ pub(super) async fn all_attempts_failed_partial_usage_are_facts() {
 }
 
 /// The root session's reported usage facts, once delivery has settled.
-async fn root_usage_facts(runtime: &LashRuntime) -> Vec<lash_core::UsageFactRecord> {
+async fn run_usage_facts(runtime: &LashRuntime) -> Vec<lash_core::UsageFactRecord> {
     settled_runtime_usage(runtime).await;
     runtime
         .host

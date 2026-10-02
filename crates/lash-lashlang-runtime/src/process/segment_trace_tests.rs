@@ -1056,7 +1056,7 @@ fn process_graph_replay_uses_the_shared_runtime_without_exporting_again() {
     .expect("the process controller");
     graphs.clear();
     trace.tracing = lash_core::plugin::PluginExecutionTrace::new(
-        runtime.drive(Some(scope.clone()), &controller),
+        runtime.shift(Some(scope.clone()), &controller),
     );
     trace.emit_observation(observation());
     assert_eq!(trace.tracing.trace_scope(), Some(&scope));

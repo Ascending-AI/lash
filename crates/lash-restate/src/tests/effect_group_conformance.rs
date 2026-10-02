@@ -83,7 +83,7 @@ impl RestateProcessRunner for ToolChildProcessRunner {
     }
 }
 
-/// The endpoint's process runner for the turn-driving laws: a law that runs
+/// The endpoint's process runner for the turn-executing laws: a law that runs
 /// real process segments (a `spawn_agent` child session) installs its own
 /// [`DurableProcessWorker`](lash_core_worker::DurableProcessWorker) here,
 /// which is what a deployment's `RestateCoreProcessRunner` serves; until one
@@ -381,7 +381,7 @@ impl GroupExecutors for WitnessExecutors {
 type GroupHostFactory =
     Box<dyn Fn(Option<Arc<dyn GroupExecutors>>) -> Arc<dyn lash_core::EffectHost> + Send + Sync>;
 
-/// Which Restate server a harness drives its endpoint through.
+/// Which Restate server a harness executes its endpoint through.
 #[derive(Clone)]
 pub(super) enum HarnessServer {
     /// A live `restate-server` (the `just effect-group-conformance-e2e`
@@ -420,7 +420,7 @@ pub(super) use admin::HarnessAdmin;
 pub(super) struct LiveConformanceHarness {
     connection: RestateConnection,
     admin: HarnessAdmin,
-    session_driver: crate::RestateSessionDriverSlot,
+    session_shifts: crate::RestateSessionShiftsSlot,
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
     /// The storage the endpoint's process workflow and a law's runtime share.
@@ -586,7 +586,7 @@ impl LiveConformanceHarness {
         // binds a deployment's (ADR 0125).
         host.bind_usage_accounting(stores.usage_accounting());
         let process_runner = Arc::new(LawProcessRunner::default());
-        let session_driver = crate::RestateSessionDriverSlot::new();
+        let session_shifts = crate::RestateSessionShiftsSlot::new();
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {
@@ -601,8 +601,8 @@ impl LiveConformanceHarness {
                     stores.process_continuations(),
                 ),
                 // The laws run their turns in the probe's handler; no core
-                // installs a session driver on this endpoint.
-                session_driver: session_driver.clone(),
+                // installs a session `SessionShifts` on this endpoint.
+                session_shifts: session_shifts.clone(),
                 build_generation: lash_core::engine::BuildGeneration::for_test(HARNESS_BUILD),
             namespace: crate::RestateNamespace::default(),
             fleet: crate::object_state::FleetView::default(),
@@ -654,7 +654,7 @@ impl LiveConformanceHarness {
         Self {
             connection,
             admin,
-            session_driver,
+            session_shifts,
             host,
             executors,
             stores,
@@ -685,14 +685,14 @@ impl LiveConformanceHarness {
     pub(super) fn session_work(&self) -> crate::RestateSessionWork {
         crate::RestateSessionWork::new(
             crate::RestateIngressClient::new(self.connection.clone()),
-            self.session_driver.clone(),
+            self.session_shifts.clone(),
             lash_core::engine::EngineGeneration::fixed(
                 lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
             ),
             crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
                 lost_processes: Default::default(),
-                lost_roots: Default::default(),
+                lost_runs: Default::default(),
                 admin: self.admin_client(),
                 ingress: crate::RestateIngressClient::new(self.connection.clone()),
                 namespace: crate::RestateNamespace::default(),
@@ -763,7 +763,7 @@ impl LiveConformanceHarness {
                         stores.process_registry(),
                         stores.process_continuations(),
                     ),
-                    session_driver: crate::RestateSessionDriverSlot::new(),
+                    session_shifts: crate::RestateSessionShiftsSlot::new(),
                     build_generation: super::effect_group_committed_recovery::newer_build(),
                     namespace: crate::RestateNamespace::default(),
                     fleet: crate::object_state::FleetView::default(),

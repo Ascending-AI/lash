@@ -99,7 +99,7 @@ impl std::fmt::Debug for EffectGroupDispatchImpl {
 }
 
 impl EffectGroupDispatchImpl {
-    /// Ends a tool child whose drive refused where it parks its opener,
+    /// Ends a tool child whose shift refused where it parks its opener,
     /// recording nothing (FIG-3725).
     ///
     /// - A group its opener closed or retired no longer needs the child: only
@@ -259,7 +259,7 @@ impl EffectGroupDispatchImpl {
                 // the index retains a different invocation id, or the
                 // position's final is committed and the invocation that
                 // committed it is gone (FIG-4454). The idempotency-keyed
-                // dispatch minted this successor. The child is never driven
+                // dispatch minted this successor. The child is never executed
                 // again: it seats a final the original committed, drained by
                 // this child's own driver, or its typed failure where none is
                 // committed.
@@ -389,7 +389,7 @@ impl EffectGroupDispatchImpl {
 
         if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
             return self
-                .run_tool_child(ctx, request, child, child_cancel, ToolChildTerminal::Drive)
+                .run_tool_child(ctx, request, child, child_cancel, ToolChildTerminal::Shift)
                 .await;
         }
 
@@ -603,7 +603,7 @@ impl EffectGroupDispatchImpl {
     /// recovery both take (ADR 0065): there is no second route and no caller
     /// closure.
     ///
-    /// `terminal` says how the child reaches its final: it drives its own
+    /// `terminal` says how the child reaches its final: it executes its own
     /// attempts, or it drains the final an earlier invocation committed. Both
     /// run on the same controller and settle through the same seat.
     async fn run_tool_child(
@@ -658,16 +658,16 @@ impl EffectGroupDispatchImpl {
             .map_err(TerminalError::from_error)?;
         // Routed through the host's stack before its first effect. A
         // failed route is the child's outcome, as any failure of its
-        // drive is, so the opener's rank wait always learns of it.
+        // shift is, so the opener's rank wait always learns of it.
         let routed = self.executors.route_handler_child_controller(scoped);
         let address = request.envelope.invocation.address.clone();
-        // The drive runs to its own end: the child's cancel ends it at a
+        // The shift runs to its own end: the child's cancel ends it at a
         // journaled peek, a journaled wait arm or an attempt's recorded
         // outcome, each of which a replay takes as the first execution
         // did, and never by dropping it mid-journal.
-        let (driven, drained_rank) = match (routed, terminal) {
-            (Ok(scoped), ToolChildTerminal::Drive) => {
-                (driver.drive(child, address, scoped).await, None)
+        let (executed, drained_rank) = match (routed, terminal) {
+            (Ok(scoped), ToolChildTerminal::Shift) => {
+                (driver.shift(child, address, scoped).await, None)
             }
             (Ok(scoped), ToolChildTerminal::DrainCommitted(committed)) => {
                 let rank = committed.rank;
@@ -676,7 +676,7 @@ impl EffectGroupDispatchImpl {
                     Some(rank),
                 )
             }
-            (Err(error), ToolChildTerminal::Drive) => (
+            (Err(error), ToolChildTerminal::Shift) => (
                 Err(lash_core::RuntimeEffectControllerError::from(error)),
                 None,
             ),
@@ -685,9 +685,9 @@ impl EffectGroupDispatchImpl {
                 Some(committed.rank),
             ),
         };
-        let outcome = child_run_outcome(driven);
+        let outcome = child_run_outcome(executed);
         // The rank this invocation's §4 answer reserved, if it has one: the
-        // drive's own commit of this child, or the earlier commit whose final
+        // shift's own commit of this child, or the earlier commit whose final
         // it drained. The seat publishes it without committing again
         // (FIG-4308).
         let receipt = drained_rank.or_else(|| {
@@ -1292,12 +1292,12 @@ fn refuse_unrecorded_abort(
     }
 }
 
-/// A driven child's run outcome: the typed end of a child its cancel fact
-/// ended is `Cancelled`, and anything else is what the drive produced.
+/// A executed child's run outcome: the typed end of a child its cancel fact
+/// ended is `Cancelled`, and anything else is what the shift produced.
 fn child_run_outcome(
-    driven: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+    executed: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
 ) -> EffectGroupChildRunOutcome {
-    match driven {
+    match executed {
         Err(error) if error.code == RuntimeErrorCode::RuntimeEffectGroupChildCancelled => {
             EffectGroupChildRunOutcome::Cancelled
         }
@@ -1311,14 +1311,14 @@ fn child_run_outcome(
 /// The context is a parameter because the two callers hold it differently: an
 /// atomic child's `ctx` is still free after its `ctx.run` completes, while a
 /// tool child's `ctx` lives inside the runtime controller the driver was
-/// bound to and comes back through `context()` once the drive is over. The
+/// bound to and comes back through `context()` once the shift is over. The
 /// protocol is identical either way — and a `Cancelled` terminal deliberately
 /// writes no payload: settlement is the index-serialized arbitration point,
 /// so a loser cancelled before its outcome landed leaves nothing for the
 /// group to read.
 ///
 /// `receipt` is the rank this invocation's own §4 answer reserved, when it
-/// has one (FIG-4308): the drive's own commit, which already waited at the §5
+/// has one (FIG-4308): the shift's own commit, which already waited at the §5
 /// barrier if the child had intents to drain, or the earlier commit whose
 /// final this invocation drained. The seat publishes that rank without
 /// re-reading the commit. The receipt is not proof of a drain; it only says
@@ -1485,7 +1485,7 @@ enum PointAnswer {
 }
 
 /// The §4 boundary for a final this invocation offers from dispatch — an
-/// atomic or wait child's outcome, a tool child whose drive never reached its
+/// atomic or wait child's outcome, a tool child whose shift never reached its
 /// boundary, or the refusal of a child this invocation cannot run: the index
 /// decides the child's final before its payload and settlement exist. A final
 /// the cancel disposition beat is refused by name, and its payload and
@@ -1579,7 +1579,7 @@ impl UnrunChild {
 /// How a tool child reaches its final in this invocation.
 enum ToolChildTerminal {
     /// Its driver runs its attempts and commits its own final.
-    Drive,
+    Shift,
     /// It drains the final an earlier invocation committed, from the drain
     /// input the point retained.
     DrainCommitted(lash_core::facade_support::CommittedGroupChildFinal),

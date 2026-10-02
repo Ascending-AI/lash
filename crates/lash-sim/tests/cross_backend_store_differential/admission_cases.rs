@@ -1,9 +1,9 @@
 use super::*;
 
-/// A root admitted under one drive fence settles only under the fence that
+/// A run admitted under one shift fence settles only under the fence that
 /// is live when it ends (FIG-3927). After a handoff the superseded fence's
-/// final commit is refused `StaleDriveFence` with no durable write; the
-/// successor re-admits the same root, reads back the recorded admission, and
+/// final commit is refused `StaleShiftFence` with no durable write; the
+/// successor re-admits the same run, reads back the recorded admission, and
 /// its final commit settles the rows.
 fn admission_after_handoff(
     name: CaseName,
@@ -18,7 +18,7 @@ fn admission_after_handoff(
                 slot: LeaseSlot::First,
                 owner: "first-owner",
             },
-            StoreOperation::AdmitRoot {
+            StoreOperation::AdmitRun {
                 lease: LeaseSlot::First,
                 head,
             },
@@ -29,15 +29,15 @@ fn admission_after_handoff(
                 slot: LeaseSlot::Successor,
                 owner: "successor-owner",
             },
-            StoreOperation::EndRootCompleting {
+            StoreOperation::EndRunCompleting {
                 lease: LeaseSlot::First,
                 expected_head_revision: 0,
             },
-            StoreOperation::AdmitRoot {
+            StoreOperation::AdmitRun {
                 lease: LeaseSlot::Successor,
                 head,
             },
-            StoreOperation::EndRootCompleting {
+            StoreOperation::EndRunCompleting {
                 lease: LeaseSlot::Successor,
                 expected_head_revision: 0,
             },
@@ -45,9 +45,9 @@ fn admission_after_handoff(
     }
 }
 
-/// The input half of the handoff law also drives `pending_turn_input`, the
+/// The input half of the handoff law also executes `pending_turn_input`, the
 /// keyed point read (FIG-3976): `Open` after the enqueue and `none` for an id
-/// no case enqueued, `Admitted` naming the differential root once it is
+/// no case enqueued, `Admitted` naming the differential run once it is
 /// admitted and still after the stale fence's refused settle, and `none` once
 /// the successor's commit completes it.
 pub(super) fn turn_input_admission_after_handoff() -> GeneratedCase {
@@ -64,7 +64,7 @@ pub(super) fn turn_input_admission_after_handoff() -> GeneratedCase {
                 slot: LeaseSlot::First,
                 owner: "first-owner",
             },
-            StoreOperation::AdmitRoot {
+            StoreOperation::AdmitRun {
                 lease: LeaseSlot::First,
                 head: HeadKind::Input,
             },
@@ -76,17 +76,17 @@ pub(super) fn turn_input_admission_after_handoff() -> GeneratedCase {
                 slot: LeaseSlot::Successor,
                 owner: "successor-owner",
             },
-            StoreOperation::EndRootCompleting {
+            StoreOperation::EndRunCompleting {
                 lease: LeaseSlot::First,
                 expected_head_revision: 0,
             },
-            // The refused settle moved nothing: the row is still the root's.
+            // The refused settle moved nothing: the row is still the run's.
             pending_input(true),
-            StoreOperation::AdmitRoot {
+            StoreOperation::AdmitRun {
                 lease: LeaseSlot::Successor,
                 head: HeadKind::Input,
             },
-            StoreOperation::EndRootCompleting {
+            StoreOperation::EndRunCompleting {
                 lease: LeaseSlot::Successor,
                 expected_head_revision: 0,
             },
@@ -105,7 +105,7 @@ pub(super) fn queued_work_admission_after_handoff() -> GeneratedCase {
     )
 }
 
-/// A root that ends handing its admitted batch back leaves it open at its
+/// A run that ends handing its admitted batch back leaves it open at its
 /// own position, identically on every backend.
 pub(super) fn queued_work_admission_released() -> GeneratedCase {
     GeneratedCase {
@@ -116,22 +116,22 @@ pub(super) fn queued_work_admission_released() -> GeneratedCase {
                 slot: LeaseSlot::First,
                 owner: "queued-work-owner",
             },
-            StoreOperation::AdmitRoot {
+            StoreOperation::AdmitRun {
                 lease: LeaseSlot::First,
                 head: HeadKind::Batch,
             },
-            StoreOperation::EndRootReleasing {
+            StoreOperation::EndRunReleasing {
                 lease: LeaseSlot::First,
             },
         ],
     }
 }
 
-/// At most one unfinished root per session: a second root's admission is
+/// At most one unfinished run per session: a second run's admission is
 /// refused identically on every backend, with no durable mutation.
-pub(super) fn unfinished_root_refuses_rival() -> GeneratedCase {
+pub(super) fn unfinished_run_refuses_rival() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::UnfinishedRootRefusesRival,
+        name: CaseName::UnfinishedRunRefusesRival,
         operations: vec![
             StoreOperation::EnqueueAdmittableQueuedWork,
             StoreOperation::EnqueueNextTurnInput,
@@ -139,11 +139,11 @@ pub(super) fn unfinished_root_refuses_rival() -> GeneratedCase {
                 slot: LeaseSlot::First,
                 owner: "queued-work-owner",
             },
-            StoreOperation::AdmitRoot {
+            StoreOperation::AdmitRun {
                 lease: LeaseSlot::First,
                 head: HeadKind::Batch,
             },
-            StoreOperation::AdmitRivalRoot {
+            StoreOperation::AdmitRivalRun {
                 lease: LeaseSlot::First,
             },
         ],
@@ -190,7 +190,7 @@ pub(super) fn backend_neutral_commit_hash(commit: &RuntimeCommit) -> Option<(Str
     Some((
         commit
             .turn_commit_hash()
-            .expect("hash the differential root's commit"),
+            .expect("hash the differential run's commit"),
         neutral
             .turn_commit_hash()
             .expect("hash the backend-neutral differential commit"),

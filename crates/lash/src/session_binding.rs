@@ -16,8 +16,8 @@ pub(crate) struct BoundSession {
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
     work: Arc<crate::core::ResolvedQueuedWork>,
-    /// The owner core's open sessions: the core whose driver serves `work`
-    /// runs a drive on the runtime registered here.
+    /// The owner core's open sessions: the core whose `SessionShifts` serves `work`
+    /// runs a shift on the runtime registered here.
     residents: Arc<crate::core::residents::ResidentSessions>,
     backend: lash_core::Backend,
     attachment_store: Arc<lash_core::facade_support::RuntimeAttachmentStore>,
@@ -28,7 +28,7 @@ pub(crate) struct BoundSession {
     /// The owner core's relay policy: every immediate delivery this binding
     /// runs — an ingress ask, a close's engine half — honors the host's
     /// configured attempt budget (FIG-4246).
-    relay_policy: lash_core::drive::relay::RelayPolicy,
+    relay_policy: lash_core::shift::relay::RelayPolicy,
     clock: Arc<dyn lash_core::Clock>,
     models: Arc<dyn lash_core::LlmProfiles>,
     /// The owner core's telemetry adapter: what a send through this
@@ -110,9 +110,9 @@ impl BoundSession {
 
     /// The ingress relay an acceptance through this binding delivers with
     /// (ADR 0109 §3): the backend's ingress ledger asking the binding's
-    /// owner-issued queued-work port for drives.
-    pub(crate) fn ingress_relay(&self) -> lash_core::drive::IngressRelay {
-        lash_core::drive::IngressRelay::over_backend(
+    /// owner-issued queued-work port for shifts.
+    pub(crate) fn ingress_relay(&self) -> lash_core::shift::IngressRelay {
+        lash_core::shift::IngressRelay::over_backend(
             &self.backend,
             self.queued(),
             Arc::clone(&self.clock),
@@ -121,19 +121,19 @@ impl BoundSession {
     }
 
     /// The same port as [`queued`](Self::queued), with how a send waits on
-    /// its drive.
+    /// its shift.
     pub(crate) fn work(&self) -> Arc<crate::core::ResolvedQueuedWork> {
         Arc::clone(&self.work)
     }
 
     /// Record `handle` as this session's open runtime with the owner core,
-    /// whose driver then runs the session's drives on it (FIG-3600 S5b). A
+    /// whose `SessionShifts` then runs the session's shifts on it (FIG-3600 S5b). A
     /// resumed session keeps its owner, so a resume registers here too.
     pub(crate) fn register_resident(&self, handle: &lash_core::facade_support::RuntimeHandle) {
         self.residents.register(&self.session_id, handle);
     }
 
-    /// Withdraw `handle` from the owner core's open sessions and let a drive
+    /// Withdraw `handle` from the owner core's open sessions and let a shift
     /// running on it stop: a close or park then owns the runtime alone.
     pub(crate) async fn release_resident(
         &self,
@@ -166,7 +166,7 @@ impl BoundSession {
                 work: self.queued(),
                 scopes: Arc::clone(&self.scope_close),
                 scope_close_obligations: Arc::new(
-                    lash_core::runtime::drive::ScopeCloseRelay::over_backend(
+                    lash_core::runtime::shift::ScopeCloseRelay::over_backend(
                         &self.backend,
                         self.catalog(),
                         Arc::clone(&self.scope_close),

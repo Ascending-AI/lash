@@ -5,7 +5,7 @@ use lash::TurnId;
 // Where one turn's committed transcript ends and the next one's begins, for
 // the rule that admits a turn's protocol-authored reply (FIG-1406).
 //
-// These probes are message sequences rather than driven turns because the
+// These probes are message sequences rather than executed turns because the
 // shapes they pin — a cause-only wake, an input injected into a running turn,
 // a stale active-turn entry that outlived its process — are properties of the
 // committed sequence, and the rule reads nothing else.

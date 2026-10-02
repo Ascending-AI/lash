@@ -97,7 +97,7 @@ impl RlmRecordedConfig {
 #[cfg(any(test, feature = "testing"))]
 impl RlmRecordedConfig {
     /// The recorded namespace of a session that stated `options`, for a
-    /// test that drives the protocol without creating a session: an
+    /// test that executes the protocol without creating a session: an
     /// unbounded cell-channel behaviour without process lifecycle, and the
     /// built-in prompt.
     #[expect(
@@ -174,7 +174,7 @@ impl std::fmt::Display for RlmConfigRefusal {
     }
 }
 
-/// Why the RLM protocol resolved no render for a root.
+/// Why the RLM protocol resolved no render for a run.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -215,7 +215,7 @@ impl ConfigOwner for RlmConfigOwner {
     type Refusal = RlmConfigRefusal;
     type RunOptions = RlmRunOptions;
 
-    /// The creator's stated facts, the presentation format a root or child
+    /// The creator's stated facts, the presentation format a run or child
     /// session defaults to, this host's channel and dialect, and the
     /// session's behaviour. A child inherits its parent's recorded behaviour,
     /// whatever the host creating it is configured with (FIG-4527); a session
@@ -482,14 +482,14 @@ mod tests {
     /// and every session records this host's channel and dialect.
     #[test]
     fn creation_defaults_the_format_by_lineage_and_records_the_pins() {
-        let root = created(None, true);
+        let run = created(None, true);
         assert_eq!(
-            root.final_answer_format,
+            run.final_answer_format,
             Some(RlmFinalAnswerFormat::Markdown)
         );
-        assert_eq!(root.channel, Some(RlmChannel::Cell));
-        assert_eq!(root.dialect.as_deref(), Some("typescript"));
-        assert_eq!(root.behaviour, config().recorded_behaviour(false));
+        assert_eq!(run.channel, Some(RlmChannel::Cell));
+        assert_eq!(run.dialect.as_deref(), Some("typescript"));
+        assert_eq!(run.behaviour, config().recorded_behaviour(false));
         assert_eq!(
             created(None, false).final_answer_format,
             Some(RlmFinalAnswerFormat::RawFinalValue)
@@ -920,13 +920,13 @@ mod tests {
 
     /// FIG-4588: the prompt commands resolve through the registry the
     /// factory registers. Each applies as one config transaction: the config
-    /// a root was admitted under keeps its revision and its prompt, and the
-    /// published config, which the next root is admitted under, carries the
+    /// a run was admitted under keeps its revision and its prompt, and the
+    /// published config, which the next run is admitted under, carries the
     /// next revision and the new prompt. `SetRlmPrompt` replaces the prompt
     /// whole; `SetRlmPromptContext` replaces its context and nothing else.
     /// Neither touches another recorded fact.
     #[test]
-    fn the_prompt_commands_change_the_next_roots_prompt() {
+    fn the_prompt_commands_change_the_next_runs_prompt() {
         let factory = crate::RlmProtocolPluginFactory::new(
             config(),
             std::sync::Arc::new(crate::TypescriptDialect),
@@ -989,7 +989,7 @@ mod tests {
         let base = recorded(&config);
         assert_eq!(base.prompt, RlmPrompt::default());
 
-        // The config the running root was admitted under.
+        // The config the running run was admitted under.
         let admitted = config.clone();
         apply(
             &registry,

@@ -1,4 +1,4 @@
-//! The provider watchdog starts at the bound root's first journaled admission.
+//! The provider watchdog starts at the bound run's first journaled admission.
 //! Reading that timestamp also preserves its 120-second budget after replay.
 
 use anyhow::{Context, Result};
@@ -14,7 +14,7 @@ const PROVIDER_WATCHDOG_MS: i64 = 120_000;
 
 struct Sample {
     now_ms: i64,
-    root_started_at_ms: Option<i64>,
+    run_started_at_ms: Option<i64>,
     asked_at_ms: Option<i64>,
 }
 
@@ -29,26 +29,26 @@ struct LoadProviderProbe<'a> {
     receipt: &'a TurnInputAcceptanceReceipt,
     operation: &'a str,
     admin: RestateAdminClient,
-    root: Option<TurnId>,
+    run: Option<TurnId>,
     started_at_ms: Option<i64>,
     enqueued_at_ms: Option<u64>,
 }
 
 impl LoadProviderProbe<'_> {
-    async fn root_start(&mut self) -> Result<Option<i64>> {
+    async fn run_start(&mut self) -> Result<Option<i64>> {
         if self.started_at_ms.is_some() {
             return Ok(self.started_at_ms);
         }
-        if self.root.is_none() {
-            self.root = self
+        if self.run.is_none() {
+            self.run = self
                 .store
-                .root_of_input(&self.receipt.session_id, &self.receipt.input_id)
+                .run_of_input(&self.receipt.session_id, &self.receipt.input_id)
                 .await?;
         }
-        let Some(root) = &self.root else {
+        let Some(run) = &self.run else {
             return Ok(None);
         };
-        let key = lash_restate::turn_workflow_key(&self.receipt.session_id, root);
+        let key = lash_restate::turn_workflow_key(&self.receipt.session_id, run);
         let literal = |value: &str| format!("'{}'", value.replace('\'', "''"));
         #[derive(serde::Deserialize)]
         struct Invocation {
@@ -70,20 +70,20 @@ impl LoadProviderProbe<'_> {
             }
             Err(error) => return Err(error.into()),
         };
-        // The admission command was emitted while this root executed. Its
+        // The admission command was emitted while this run executed. Its
         // first append survives retries, unlike an observer's current time.
         #[derive(serde::Deserialize)]
-        struct RootStart {
+        struct RunStart {
             appended_at: DateTime<Utc>,
         }
         for invocation in invocations {
             let starts = self
                 .admin
-                .query_json::<RootStart>(&format!(
+                .query_json::<RunStart>(&format!(
                     "SELECT appended_at FROM sys_journal WHERE id = {} \
                      AND name = {} ORDER BY index LIMIT 1",
                     literal(&invocation.id),
-                    literal(&format!("lash:drive-admit:{root}")),
+                    literal(&format!("lash:shift-admit:{run}")),
                 ))
                 .await;
             match starts {
@@ -99,7 +99,7 @@ impl LoadProviderProbe<'_> {
                             "load provider-start {}",
                             serde_json::json!({
                                 "operation": self.operation,
-                                "root": root.as_str(),
+                                "run": run.as_str(),
                                 "enqueued_at_ms": self.enqueued_at_ms,
                                 "started_at_ms": started_at_ms,
                                 "queue_latency_ms": queue_latency_ms,
@@ -127,7 +127,7 @@ impl ProviderProbe for LoadProviderProbe<'_> {
         .await
         .with_context(|| format!("poll the provider receipt of `{}`", self.operation))?;
         Ok(Sample {
-            root_started_at_ms: self.root_start().await?,
+            run_started_at_ms: self.run_start().await?,
             now_ms: Utc::now().timestamp_millis(),
             asked_at_ms: asked_at_us.map(|at| at / 1_000),
         })
@@ -151,7 +151,7 @@ pub(super) async fn wait_for_provider_receipt(
         receipt,
         operation,
         admin: RestateAdminClient::new(crate::restate_admin_url()),
-        root: None,
+        run: None,
         started_at_ms: None,
         enqueued_at_ms,
     };
@@ -162,7 +162,7 @@ async fn wait(probe: &mut impl ProviderProbe, operation: &str) -> Result<()> {
     loop {
         let sample = probe.sample().await?;
         let deadline = sample
-            .root_started_at_ms
+            .run_started_at_ms
             .map(|started| started.saturating_add(PROVIDER_WATCHDOG_MS));
         if let Some(asked) = sample.asked_at_ms
             && deadline.is_none_or(|deadline| asked <= deadline)
@@ -190,10 +190,10 @@ mod tests {
         }
     }
 
-    fn sample(now_ms: i64, root_started_at_ms: Option<i64>, asked_at_ms: Option<i64>) -> Sample {
+    fn sample(now_ms: i64, run_started_at_ms: Option<i64>, asked_at_ms: Option<i64>) -> Sample {
         Sample {
             now_ms,
-            root_started_at_ms,
+            run_started_at_ms,
             asked_at_ms,
         }
     }
@@ -208,7 +208,7 @@ mod tests {
         ]));
         wait(&mut probe, "queued-input")
             .await
-            .expect("running root has 120 seconds");
+            .expect("running run has 120 seconds");
         assert!(
             probe.0.is_empty(),
             "the waiter must observe the actual provider receipt"
@@ -216,16 +216,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_started_root_that_never_asks_expires_at_120_seconds() {
+    async fn a_started_run_that_never_asks_expires_at_120_seconds() {
         let mut probe = ScriptedProbe(VecDeque::from([
             sample(0, None, None),
             sample(112_000, Some(112_000), None),
             sample(231_999, Some(112_000), None),
             sample(232_000, Some(112_000), None),
         ]));
-        let error = wait(&mut probe, "unresponsive-root")
+        let error = wait(&mut probe, "unresponsive-run")
             .await
-            .expect_err("root must time out");
+            .expect_err("run must time out");
         assert!(error.to_string().contains("provider was never asked"));
         assert!(
             probe.0.is_empty(),

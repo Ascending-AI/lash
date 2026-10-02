@@ -298,7 +298,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
     );
 }
 
-/// Drive one externally owned process to a terminal outcome.
+/// Execute one externally owned process to a terminal outcome.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

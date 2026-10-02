@@ -47,7 +47,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                     scoped_effect_controller.admitted_scope().clone(),
                 )
                 .map_err(RuntimeEffectControllerError::from)?;
-            // The proxy issues this same drive's steps: one frontier.
+            // The proxy issues this same shift's steps: one frontier.
             let task_controller = task_controller.in_drive_of(&scoped_effect_controller);
             let local_executor = super::local_effects::turn_effect_executor(
                 self,

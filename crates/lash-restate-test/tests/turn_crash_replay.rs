@@ -2,10 +2,10 @@
 //!
 //! A real lash turn — one LLM call that asks for a tool, the tool, a second
 //! LLM call that answers — is accepted through the session's durable ingress
-//! and driven by the engine: the session's `LashSession` drive admits it and
-//! runs its root in a `LashTurn` workflow. A clean run fixes the reference:
-//! its journals and its answer. Then, for every journal point of the drive,
-//! of the root's workflow and of the tool child's dispatch handler, a fresh
+//! and executed by the engine: the session's `LashSession` shift admits it and
+//! executes its run in a `LashTurn` workflow. A clean run fixes the reference:
+//! its journals and its answer. Then, for every journal point of the shift,
+//! of the run's workflow and of the tool child's dispatch handler, a fresh
 //! backend under the same seed drops the handler just before the server
 //! stores that frame on the first attempt that reaches it, including after
 //! suspension, and replays the invocation. Every crash must reach the
@@ -23,13 +23,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use lash_core::engine::RootOutcome;
+use lash_core::engine::RunOutcome;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::protocol::generated::CallCommandMessage;
 use lash_restate_test::{
-    CrashPoint, CrashRule, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig,
+    CrashPoint, CrashRule, RestateTestBackend, SESSION_SHIFT_SERVICE, ServerConfig,
     TURN_DRIVER_SERVICE,
 };
 use prost::Message as _;
@@ -178,24 +178,24 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
         .expect("accept the turn input")
         .receipt()
         .clone();
-    // The acceptance scheduled the drive under the input's own request; the
-    // attach names the same request, so it waits on that one drive.
-    let request = lash_core::drive::ingress_drive_request(
+    // The acceptance scheduled the shift under the input's own request; the
+    // attach names the same request, so it waits on that one shift.
+    let request = lash_core::shift::ingress_shift_request(
         receipt.input_id.as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     tool_gate.reached(1).await;
-    let root = server
+    let run = server
         .invocations()
         .into_iter()
         .find(|view| {
             view.target.starts_with(&format!("{TURN_DRIVER_SERVICE}/"))
                 && view.target.ends_with("/run")
         })
-        .expect("the held tool has a root invocation");
+        .expect("the held tool has a run invocation");
     tokio::time::timeout(std::time::Duration::from_secs(8), async {
         while !server
-            .journal(&root.id)
+            .journal(&run.id)
             .unwrap_or_default()
             .into_iter()
             .any(|entry| {
@@ -213,20 +213,20 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
     .expect("the opener registers its wait while the tool is held");
     assert_eq!(tool_executions.load(Ordering::SeqCst), 0);
     tool_gate.open_all();
-    let drive = tokio::time::timeout(
+    let shift = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        backend.attach_drive(&session_id, request),
+        backend.attach_shift(&session_id, request),
     )
     .await;
-    let answer = match drive {
+    let answer = match shift {
         Ok(Ok(outcome)) => match outcome.ran.as_slice() {
-            [RootOutcome::Committed { outcome, .. }] => match outcome {
+            [RunOutcome::Committed { outcome, .. }] => match outcome {
                 lash_core::facade_support::TurnOutcome::Finished(
                     lash_core::facade_support::TurnFinish::AssistantMessage { text },
                 ) => text.clone(),
                 other => format!("no message: {other:?}"),
             },
-            other => format!("drive ran {other:?}, stopped {:?}", outcome.stop),
+            other => format!("shift ran {other:?}, stopped {:?}", outcome.stop),
         },
         Ok(Err(error)) => format!("stuck: {error}"),
         Err(_) => {
@@ -365,7 +365,7 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
                 .flatten();
             points.push((rule(CrashPoint::BeforeCommand { index }), lost_on_command));
             if *ty == MessageType::RunCommand {
-                // By position: a drive's admission and seal names embed the
+                // By position: a shift's admission and seal names embed the
                 // accepted input's id, which each execution mints afresh.
                 points.push((rule(CrashPoint::BeforeRunResultAt { index }), name.clone()));
             }
@@ -390,12 +390,12 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
         .find(|(_, service, _, _, _)| service == TURN_DRIVER_SERVICE)
     {
         for (index, entry) in entries.iter().filter(|(ty, _)| ty.is_command()).enumerate() {
-            println!("root workflow command {index}: {entry:?}");
+            println!("run workflow command {index}: {entry:?}");
         }
     }
     let mut cases = 0;
     let mut violations = Vec::new();
-    for service in [SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE, DISPATCH] {
+    for service in [SESSION_SHIFT_SERVICE, TURN_DRIVER_SERVICE, DISPATCH] {
         let points = crash_points(&reference, service);
         assert!(!points.is_empty(), "{service} has journal points");
         for (rule, lost_run) in points {

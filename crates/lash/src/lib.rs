@@ -49,7 +49,7 @@
 //! Every public name has exactly one home. The crate root carries the daily
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],
 //! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
-//! vocabulary. [`prelude`] is the curated daily-use subset of that root.
+//! vocabulary. [`prelude`] is the curated daily-use subset of that run.
 //!
 //! # Every type a facade signature names is nameable here
 //!
@@ -79,7 +79,7 @@ mod parked_work;
 mod parked_work_verbs;
 pub use parked_work_verbs::{
     ControlIntentPage, ControlIntentQuery, ForkedTurn, ParkCancelled, ParkVerbRefused,
-    RedriveAccepted, RootRedriveAccepted,
+    RedriveAccepted, RunRedriveAccepted,
 };
 pub mod preflight;
 pub(crate) mod process_admin;
@@ -144,7 +144,7 @@ pub mod config {
 /// a core keeps no default, so a host that wants every session to state the
 /// same prompt keeps the spec value and passes it to each creation.
 /// After creation the prompt changes only through [`SetStandardPrompt`] and
-/// [`SetStandardPromptContext`], which reach the next root. A run's options
+/// [`SetStandardPromptContext`], which reach the next run. A run's options
 /// are [`StandardRunOptions`]: they cannot state the prompt.
 pub mod standard {
     pub use lash_protocol_standard::{
@@ -201,7 +201,7 @@ pub use crate::parked_work::{
     ParkedWorkReport,
 };
 pub use crate::send::{
-    BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle,
+    BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RunHandle,
     SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, StalledDelivery, TurnEvents,
     TurnStatus,
 };
@@ -217,8 +217,6 @@ pub use crate::turn::{
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
 pub use lash_core::async_trait;
-/// The immediate delivery verdict carried by a session deletion's wait.
-pub use lash_core::drive::relay::RelayVerdict;
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// effect host from: one [`EffectEngine`] over one store set (ADR 0104).
 /// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
@@ -237,6 +235,8 @@ pub use lash_core::facade_support::{
     TurnCancelUndeliveredInputPolicy,
 };
 pub use lash_core::runtime::ExternalCompletionError;
+/// The immediate delivery verdict carried by a session deletion's wait.
+pub use lash_core::shift::relay::RelayVerdict;
 pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
@@ -298,11 +298,11 @@ pub use tokio_util::sync::CancellationToken;
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::ConfigTransactionRecord;
 pub use lash_core::SessionPluginInit;
-pub use lash_core::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
-pub use lash_core::drive::{ObligationRelayUnavailable, RelayNeed};
 pub use lash_core::runtime::ConfigTransactionSubmitError;
 pub use lash_core::session_close::SessionCloseServices;
 pub use lash_core::session_delete::SessionDeleteStores;
+pub use lash_core::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+pub use lash_core::shift::{ObligationRelayUnavailable, RelayNeed};
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::build_generation::BuildGenerationParseError;
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
@@ -522,9 +522,9 @@ pub mod direct {
 pub mod persistence {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::usage_accounting::{
-        AttemptFactOutcome, RunAccounting, UsageAdmissionError, UsageAppendError,
+        AttemptFactOutcome, MeterAccounting, UsageAdmissionError, UsageAppendError,
         UsageAppendReceipt, UsageAttemptFact, UsageCorrection, UsageFactConflict,
-        UsageRunAdmission, UsageRunAdmitted, UsageRunResolution, UsageSettleReceipt,
+        UsageMeterAdmission, UsageMeterAdmitted, UsageMeterResolution, UsageSettleReceipt,
         UsageSettlement,
     };
     pub use lash_core_store::PersistedNodeIds;
@@ -544,12 +544,12 @@ pub mod persistence {
         SessionObserverIntent,
     };
     pub use lash_core_store::session_state::{
-        InstalledRootView, RuntimeSessionAuthority, SessionPluginStateSource,
+        InstalledRunView, RuntimeSessionAuthority, SessionPluginStateSource,
     };
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
     pub use lash_core_store::store::{
         EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
-        StoredRootTerminal, SurfaceFormat, WriterPin,
+        StoredRunTerminal, SurfaceFormat, WriterPin,
     };
     /// The protocol-generic form [`SessionHistoryRecord`] specializes.
     pub use lash_sansio::SessionHistoryRecord as GenericSessionHistoryRecord;
@@ -564,12 +564,12 @@ pub mod persistence {
     pub use lash_core::attachments::{
         AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
     };
-    /// The engine's evidence that a root's execution is lost, which
-    /// `DeploymentStore::end_lost_root` ends the root on.
-    pub use lash_core::engine::RootRunLoss;
-    /// Logical root references returned by a root store, and an open root
+    /// The engine's evidence that a run's execution is lost, which
+    /// `DeploymentStore::end_lost_run` ends the run on.
+    pub use lash_core::engine::RunLoss;
+    /// Logical run references returned by a root store, and an open run
     /// as the store's recovery page lists it.
-    pub use lash_core::engine::{OpenRoot, RootRef};
+    pub use lash_core::engine::{OpenRun, RunRef};
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
@@ -637,21 +637,21 @@ pub mod persistence {
         AdmittedPlugin, PluginAdmission, PluginPublication, PluginWriterRanges,
         PluginWriterRegistration, PluginWriterStamp,
     };
-    /// The drive epoch a session drive's seal raises (FIG-3600): one segment
-    /// of [`RuntimeStore`], implemented by every store a runtime drives,
-    /// and the fence it yields, the one authority every drive write presents.
+    /// The shift epoch a session shift's seal raises (FIG-3600): one segment
+    /// of [`RuntimeStore`], implemented by every store a runtime executes,
+    /// and the fence it yields, the one authority every shift write presents.
     pub use lash_core::store::{
-        AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, DriveRaise, RootHold,
-        RootStartNonce, StoredDriveEpoch,
+        AdmissionId, RunHold, RunStartNonce, ShiftEpochSeal, ShiftEpochStore, ShiftFence,
+        ShiftRaise, StoredShiftEpoch,
     };
-    /// A root's recorded admission of the turn-lane run it drives and the
+    /// A run's recorded admission of the turn-lane run it executes and the
     /// execution that runs it, what its checkpoints admit, how a commit
-    /// settles the rows its root holds, and the session's one unfinished
-    /// root (FIG-3927, FIG-4403).
+    /// settles the rows its run holds, and the session's one unfinished
+    /// run (FIG-3927, FIG-4403).
     pub use lash_core::store::{
-        AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
-        IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, RootAdmission, RootAdmissionAnswer,
-        RootAdmissionRefusal, RootExecutor, UnfinishedRoot,
+        AdmitRunRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
+        IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, RunAdmission, RunAdmissionAnswer,
+        RunAdmissionRefusal, RunExecutor, UnfinishedRun,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).
@@ -675,14 +675,14 @@ pub mod persistence {
         TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
         commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
-    /// A logical root's durable terminal evidence and the store segment that
-    /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the
-    /// control intents a session's close and a parked root's verbs record.
+    /// A logical run's durable terminal evidence and the store segment that
+    /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the
+    /// control intents a session's close and a parked run's verbs record.
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
         ControlIntentState, ControlIntentStore, EnginePark, IntentApplication, IntentObligation,
-        IntentSettle, RootCommittedOutcome, RootEnd, RootIntentRefused, RootIntentRequest,
-        RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite, RootVerb,
+        IntentSettle, RunCommittedOutcome, RunEndOutcome, RunIntentRefused, RunIntentRequest,
+        RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite, RunVerb,
         TurnCommitId,
     };
     /// Test-only store hooks and the conformance-suite handle types that
@@ -986,11 +986,11 @@ pub mod secrets {
     pub use lash_sansio::Redacted;
 }
 
-/// Wire-format DTOs for driving lash across a process boundary, sub-namespaced
+/// Wire-format DTOs for executing lash across a process boundary, sub-namespaced
 /// by protocol domain. Only the cross-cutting envelope
 /// ([`Envelope`](remote::Envelope),
 /// [`REMOTE_PROTOCOL_VERSION`](remote::REMOTE_PROTOCOL_VERSION)) and the
-/// protocol error type live at this root; everything else has exactly one
+/// protocol error type live at this run; everything else has exactly one
 /// home in a domain sub-namespace.
 pub mod remote {
     pub use lash_remote_protocol::{
@@ -1273,7 +1273,7 @@ pub mod process {
     pub use lash_core::{ProcessEventSemanticsSpec, ProcessValueSelector};
     /// Wake redelivery. A host that owns its own [`ProcessRegistry`] also owns
     /// the redelivery loop that turns pending wakes into queued work; an
-    /// embedded core drives one for you.
+    /// embedded core executes one for you.
     /// [`process_wake_source_key`] is the queued-work source key a delivered
     /// wake lands under, so a host can correlate the two.
     pub use lash_core::{
@@ -1329,11 +1329,10 @@ pub mod durability {
 pub mod runtime {
     pub use lash_core::IngressReservedSourceKeyRefusal;
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::drive::relay::RelayPolicy;
     pub use lash_core::engine::{
-        AdmitRequest, AdmitVerdict, DriveAbort, EngineAck, EngineCursor, EnginePage,
-        EngineParkRecorded, EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef,
-        ParkTarget, RefusalClass, ScopeCloseSink, SealRefusal, SealVerdict, SessionControlEngine,
+        AdmitRequest, AdmitVerdict, EngineAck, EngineCursor, EnginePage, EngineParkRecorded,
+        EngineRefusal, ParkReconcileReport, ParkRecoveryWriter, ParkRef, ParkTarget, RefusalClass,
+        ScopeCloseSink, SealRefusal, SealVerdict, SessionControlEngine, ShiftAbort,
         StalledExecution,
     };
     pub use lash_core::facade_support::CommittedGroupChildFinal;
@@ -1348,10 +1347,11 @@ pub mod runtime {
         AdmittedHeadVerdict, CompactionBase, ToolChildAdmission, ToolChildCompletionRouting,
         ToolChildScope, ToolPresentation,
     };
+    pub use lash_core::shift::relay::RelayPolicy;
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
     pub use lash_core::triggers::TriggerDeliveryAdmission;
     pub use lash_core::usage_accounting::{
-        EffectUsage, RecordedEffectExecution, UsageCall, UsageRun, UsageRunError,
+        EffectUsage, RecordedEffectExecution, UsageCall, UsageMeter, UsageMeterError,
     };
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
     pub use lash_core::{
@@ -1555,10 +1555,10 @@ pub mod s3 {
 #[cfg(feature = "restate")]
 pub mod restate {
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::SessionDriver;
+    pub use lash_core::SessionShifts;
     pub use lash_core::engine::{
-        Admitted, AdmittedWork, DriveHold, DriveLoop, DriveOutcome, DriveRequest, DriveRequestId,
-        DriveStop, ReconcileCursor, RootOutcome, RootRunEnd,
+        Admitted, AdmittedWork, ReconcileCursor, RunEnd, RunOutcome, ShiftHold, ShiftLoop,
+        ShiftOutcome, ShiftRequest, ShiftRequestId, ShiftStop,
     };
     pub use lash_core_store::compat::ComponentId;
     pub use lash_core_store::store::fleet_finalize::{

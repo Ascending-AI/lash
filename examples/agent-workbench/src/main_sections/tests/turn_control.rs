@@ -201,15 +201,15 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(
         session
             .durable()
-            .unfinished_root()
+            .unfinished_run()
             .await
             .expect("read durable turn admission")
             .expect("the turn is durably running")
-            .root,
+            .run,
         turn_id
     );
     // Keep later inputs pending while the host settles the admitted turn.
-    let _hold = double.hold_session_drive(&session_id).await;
+    let _hold = double.hold_session_shift(&session_id).await;
 
     state.track_turn_prompt(
         &session_id,
@@ -267,7 +267,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(pending[0].input.input_id, turn.receipt().input_id);
     assert!(matches!(
         &pending[0].status,
-        lash::PendingTurnInputReadStatus::Admitted { root } if root == turn_id
+        lash::PendingTurnInputReadStatus::Admitted { run } if run == turn_id
     ));
     assert_eq!(pending[1].input.input_id, injected.input_id);
     assert_eq!(pending[2].input.input_id, queued.input_id);
@@ -309,7 +309,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(after_settle[0].input.input_id, turn.receipt().input_id);
     assert_eq!(after_settle[1].input.input_id, queued.input_id);
 
-    // Host settlement removes tracking, while the parked durable root remains
+    // Host settlement removes tracking, while the parked durable run remains
     // running. Restore its tracking to exercise the route-check/settle race.
     state.track_turn(&session_id, &turn_id);
     let checked_ingress = lash::persistence::TurnInputIngress::active_turn(
@@ -783,7 +783,7 @@ finish(await handle);
             Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
         )
         .await;
-    // The engine drives a session's roots on the most recent open of it, so
+    // The engine works a session's runs on the most recent open of it, so
     // the turn is sent from the session the probe is installed on, under a
     // claim as the send route would take.
     let turn_id = TurnId::fixture(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
@@ -1325,7 +1325,7 @@ fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep() {
 /// `session_fence_tests::deleting_a_session_with_a_running_turn_cancels_it_before_retiring`
 /// fail its `active_turns` assertion 4-7 times in 30 runs: the cancel's
 /// terminal attach is bounded, and whether the route survived the delete was
-/// decided by whether the box met that bound. The ordering here is driven by
+/// decided by whether the box met that bound. The ordering here is executed by
 /// the `TurnAttach` seam instead, so the branch is reached every run.
 async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
     let data_dir = std::env::temp_dir().join(format!(
@@ -1484,17 +1484,17 @@ async fn spawn_restate_admin_recording_probes(
 }
 
 #[test]
-fn a_pending_cancel_probes_the_roots_lash_turn() {
+fn a_pending_cancel_probes_the_runs_lash_turn() {
     run_async_test_on_stack_budget("workbench-turn-probe-lash-turn", || {
-        a_pending_cancel_probes_the_roots_lash_turn_inner()
+        a_pending_cancel_probes_the_runs_lash_turn_inner()
     });
 }
 
 /// A cancel whose terminal is still pending keeps the turn's claim only while
-/// its root still runs, and the root runs in lash's `LashTurn` invocation,
-/// keyed by the session and the root. Asking about any other invocation
+/// its run still runs, and the run executes in lash's `LashTurn` invocation,
+/// keyed by the session and the run. Asking about any other invocation
 /// answers "no such invocation" and drops a turn that is still running.
-async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
+async fn a_pending_cancel_probes_the_runs_lash_turn_inner() {
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-turn-probe-{}",
         uuid::Uuid::new_v4()
@@ -1542,7 +1542,7 @@ async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
     assert_eq!(
         probed.lock_recover().as_slice(),
         [key],
-        "the liveness probe asks the root's LashTurn"
+        "the liveness probe asks the run's LashTurn"
     );
     assert!(
         state.active_turns.for_session(&session_id).is_some(),

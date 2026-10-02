@@ -70,7 +70,7 @@ impl RunSpecAdmission {
 
 /// The turn a steering draft addresses, when its explicit spec must be
 /// checked against that turn's: `None` for a next-turn input and for an
-/// omitted spec, which inherits the running root's shape.
+/// omitted spec, which inherits the running run's shape.
 pub fn steering_run_spec_target(draft: &PendingTurnInputDraft) -> Option<&TurnId> {
     if draft.run_spec.is_default() {
         return None;
@@ -107,15 +107,15 @@ pub fn check_steering_run_spec(
     })
 }
 
-/// The steering verdict over `turn_id` when the running root resolved under
+/// The steering verdict over `turn_id` when the running run resolved under
 /// spec hash `running` (`None` = the default spec), read in the admitting
-/// transaction for the root kinds whose starting input is not filed under
+/// transaction for the run kinds whose starting input is not filed under
 /// the turn's id as a source key (FIG-3877): the follow-on the head owes,
 /// which runs under the shape its fact recorded at the switch, and the
 /// current position of a queued run, which resolves under the spec its
 /// member inputs carry. The turn is running, so a steering spec must equal
 /// the recorded shape — there is no delivered escape.
-pub fn check_running_root_run_spec(
+pub fn check_running_run_spec(
     session_id: &SessionId,
     turn_id: &TurnId,
     admission: &RunSpecAdmission,

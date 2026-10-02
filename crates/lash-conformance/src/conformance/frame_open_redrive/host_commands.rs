@@ -1,29 +1,29 @@
 //! FIG-4202: a host's head write from outside a turn is a session command
-//! the drive applies at a turn boundary.
+//! the shift applies at a turn boundary.
 //!
 //! The bound turn owns the session head. A host's append, plugin command,
 //! plugin task and durable frame open are each submitted to the session's
-//! command lane while a root holds its journaled pressure summary: none of
+//! command lane while a run holds its journaled pressure summary: none of
 //! them moves the head, none of a plugin's code runs, and a lane-less write
 //! that tries to go around the lane is refused typed. Released, the bound
-//! turn commits its pressure frame and its turn, and the next drive applies
+//! turn commits its pressure frame and its turn, and the next shift applies
 //! each command at the boundary, before the input queued after it, and
 //! settles it with its typed outcome in the commit that makes its head
-//! write. Killed after the drive read the command, before its commit, or
+//! write. Killed after the shift read the command, before its commit, or
 //! after it, and redriven, the command applies once.
 //!
 //! Beside the command laws: a terminal callback's append, made under the
-//! ended root's fence, never waits on a command settlement and never
-//! deadlocks its drive; a dirty park while the bound turn owns the head is
+//! ended run's fence, never waits on a command settlement and never
+//! deadlocks its shift; a dirty park while the bound turn owns the head is
 //! refused busy, keeps its runtime and loses nothing, and lands once the
 //! boundary passed, while a clean park writes nothing; a plugin-state-dirty
 //! park re-parks from the recorded head once the bound turn moved it
-//! (FIG-4392); and a command withdrawn before the drive read it never
-//! applies, while one the drive already read is no longer withdrawn. A
-//! host's cancel still reaches a plugin task the drive admitted, through the
-//! task's cancel signal: the drive stops the task's code and settles the
+//! (FIG-4392); and a command withdrawn before the shift read it never
+//! applies, while one the shift already read is no longer withdrawn. A
+//! host's cancel still reaches a plugin task the shift admitted, through the
+//! task's cancel signal: the shift stops the task's code and settles the
 //! command cancelled, with nothing of the task committed (FIG-4391), and a
-//! task whose drive died after its code returned and before its settlement
+//! task whose shift died after its code returned and before its settlement
 //! runs again under a signal the cancel still reaches (FIG-4453).
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -38,15 +38,15 @@ use super::{
 use crate::admit;
 use crate::plugin::PluginFactory;
 
-/// Where a host-command law kills the drive that applies the command.
+/// Where a host-command law kills the shift that applies the command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostCommandCrash {
-    /// The drive read the command; nothing of it ran.
+    /// The shift read the command; nothing of it ran.
     AfterLaneRead,
     /// The command applied in resident state (a plugin's code ran); its
     /// settling commit has not run.
     BeforeCommit,
-    /// The command's settling commit landed; its command root has not gone
+    /// The command's settling commit landed; its command run has not gone
     /// on.
     AfterCommit,
 }
@@ -178,8 +178,8 @@ pub async fn plugin_queued_turns_preserve_reserved_source_key_refusals(
                 &format!("refused-{index}"),
             )
             .await;
-        law.enqueue("drive after refusal").await;
-        law.run_root(&format!("refused-{index}")).await;
+        law.enqueue("shift after refusal").await;
+        law.execute_run(&format!("refused-{index}")).await;
         let outcome = law
             .command_outcome(&receipt)
             .await
@@ -212,7 +212,7 @@ pub async fn plugin_queued_turns_preserve_reserved_source_key_refusals(
             "generated-key",
         )
         .await;
-    law.run_root("generated-key").await;
+    law.execute_run("generated-key").await;
     let Some(crate::SessionCommandOutcome::PluginOperation {
         outcome:
             crate::PluginOperationCommandOutcome::Completed {
@@ -451,13 +451,13 @@ fn append_command(text: &str) -> crate::SessionCommand {
     }
 }
 
-/// One attempt at a drive of the law's session, killed at `crash` when it
+/// One attempt at a shift of the law's session, killed at `crash` when it
 /// names one. A crashing attempt must die at its crash point; the others
-/// send back how their drive ended.
+/// send back how their shift ended.
 fn command_attempt(
     law: &LawSession,
     crash: Option<HostCommandCrash>,
-    result_tx: Option<super::DriveResultTx>,
+    result_tx: Option<super::ShiftResultTx>,
 ) -> crate::ConformanceTurnAttempt {
     let parts = law.parts.clone();
     Arc::new(move |scope| {
@@ -468,7 +468,7 @@ fn command_attempt(
             if let Some(crash) = crash {
                 runtime.set_turn_phase_probe(Arc::new(CommandCrashProbe { crash }));
             }
-            let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+            let shift = Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scope,
             )))
@@ -476,25 +476,25 @@ fn command_attempt(
             let Some(result_tx) = result_tx else {
                 panic!(
                     "the crash at {crash:?} did not fire: {:?}",
-                    drive.map(crate::facade_support::QueuedTurnDrain::ran)
+                    shift.map(crate::facade_support::QueuedTurnDrain::ran)
                 );
             };
-            let end = crate::ConformanceTurnEnd::of(&drive);
-            let _ = result_tx.send(drive);
+            let end = crate::ConformanceTurnEnd::of(&shift);
+            let _ = result_tx.send(shift);
             end
         })
     })
 }
 
-/// Runs the law's next drive, killing it at `crash` and redriving it, and
-/// answers the turn outcome of the root the redrive ran.
+/// Runs the law's next shift, killing it at `crash` and redriving it, and
+/// answers the turn outcome of the run the redrive ran.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn drive_crashed_at(
+async fn shift_crashed_at(
     law: &LawSession,
-    drive: &str,
+    shift: &str,
     crash: HostCommandCrash,
 ) -> crate::TurnOutcome {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -503,7 +503,7 @@ async fn drive_crashed_at(
         law.runner.run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(
                 &law.session_id,
-                crate::TurnId::fixture(format!("{}-{drive}", law.prefix)),
+                crate::TurnId::fixture(format!("{}-{shift}", law.prefix)),
             )),
             command_attempt(law, Some(crash), None),
             command_attempt(law, None, Some(tx)),
@@ -513,22 +513,22 @@ async fn drive_crashed_at(
     .unwrap_or_else(|_| panic!("the redrive after {crash:?} ends"));
     rx.recv()
         .await
-        .expect("the tier's runner ran the redriven drive")
+        .expect("the tier's runner ran the redriven shift")
         .unwrap_or_else(|error| panic!("the redrive after {crash:?} replays: {error:?}"))
         .ran()
-        .expect("the redriven drive runs the root queued after the command")
+        .expect("the redriven shift executes the run queued after the command")
         .outcome
 }
 
-/// Runs the law's next drive to its end, killed at `crash` and redriven when
+/// Runs the law's next shift to its end, killed at `crash` and redriven when
 /// it names one.
-async fn drive_next(law: &LawSession, drive: &str, crash: Option<HostCommandCrash>) {
+async fn work_next(law: &LawSession, shift: &str, crash: Option<HostCommandCrash>) {
     match crash {
         Some(crash) => {
-            drive_crashed_at(law, drive, crash).await;
+            shift_crashed_at(law, shift, crash).await;
         }
         None => {
-            law.run_root(drive).await;
+            law.execute_run(shift).await;
         }
     }
 }
@@ -559,19 +559,19 @@ async fn a_lane_less_write_is_refused(law: &LawSession) {
         .expect_err("the bound turn owns the head");
     let bound = law
         .store
-        .unfinished_root(&law.session_id)
+        .unfinished_run(&law.session_id)
         .await
-        .expect("read the bound root")
-        .expect("a root is bound")
-        .root;
+        .expect("read the bound run")
+        .expect("a run is bound")
+        .run;
     assert!(
         matches!(
             &refused,
             crate::PluginError::SessionHeadOwned { session_id, owner }
                 if *session_id == law.session_id
-                    && *owner == crate::store::SessionHeadOwner::Root { root: bound }
+                    && *owner == crate::store::SessionHeadOwner::Run { run: bound }
         ),
-        "the typed refusal names the session and the bound root: {refused:?}"
+        "the typed refusal names the session and the bound run: {refused:?}"
     );
     assert_eq!(
         law.head().await.head_revision,
@@ -581,7 +581,7 @@ async fn a_lane_less_write_is_refused(law: &LawSession) {
 }
 
 /// A lane-less append during a bound turn returns the typed ownership
-/// refusal with the exact session and root, without changing the head.
+/// refusal with the exact session and run, without changing the head.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the bound turn is released once the refusal is checked"
@@ -604,7 +604,7 @@ pub async fn a_lane_less_append_names_the_bound_head_owner(
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         futures_util::future::join(
-            law.run_root("root-2"),
+            law.execute_run("run-2"),
             hold.while_held(a_lane_less_write_is_refused(&law)),
         ),
     )
@@ -625,8 +625,8 @@ fn position_of_once(path: &[String], text: &str) -> usize {
     positions[0]
 }
 
-/// A session whose first root committed usage over the pressure threshold,
-/// and a second input queued, so the next root's pressure hook compacts and
+/// A session whose first run committed usage over the pressure threshold,
+/// and a second input queued, so the next run's pressure hook compacts and
 /// holds its journaled summary.
 async fn bound_turn_session(
     prefix: &str,
@@ -639,7 +639,7 @@ async fn bound_turn_session(
     let protocol = StandardFrameLawProtocol::shared();
     let model = law_model(ModelScript {
         turns: vec![
-            // The first root's usage crosses the pressure hook's threshold,
+            // The first run's usage crosses the pressure hook's threshold,
             // so the bound turn opens a pressure frame.
             (protocol.answer("answer 1"), PRESSURE_THRESHOLD_TOKENS),
             (protocol.answer("answer 2"), 1),
@@ -660,7 +660,7 @@ async fn bound_turn_session(
     law.parts.compaction.pressure_hold = Some(hold.clone());
     law.parts.host_plugins.push(host_plugin(probe));
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     law.enqueue("second question").await;
     (law, model, hold)
 }
@@ -704,10 +704,10 @@ async fn submit_while_bound(
     });
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        futures_util::future::join(law.run_root("root-2"), while_held),
+        futures_util::future::join(law.execute_run("run-2"), while_held),
     )
     .await
-    .expect("the bound turn's drive ends");
+    .expect("the bound turn's shift ends");
     let receipts = submitted
         .into_inner()
         .expect("the commands were submitted while the pressure summary was held");
@@ -727,8 +727,8 @@ async fn submit_while_bound(
 }
 
 /// The bound turn owns the head (FIG-4202): a host's append submitted while
-/// a root holds its pressure summary waits on the command lane, and a
-/// lane-less write around the lane is refused typed. The next drive applies
+/// a run holds its pressure summary waits on the command lane, and a
+/// lane-less write around the lane is refused typed. The next shift applies
 /// the append at the boundary, after everything the bound turn committed and
 /// before the input queued after it, and settles it `Appended` in the one
 /// commit that lands its node. Killed at `crash` and redriven, the append
@@ -759,7 +759,7 @@ pub async fn host_append_waits_for_the_bound_turn(
     .await;
 
     law.enqueue("third question").await;
-    drive_next(&law, "root-3", crash).await;
+    work_next(&law, "run-3", crash).await;
 
     let head = law.head().await;
     let Some(crate::SessionCommandOutcome::AppendSessionNodes {
@@ -772,7 +772,7 @@ pub async fn host_append_waits_for_the_bound_turn(
     assert_eq!(
         head.head_revision,
         after_bound_turn + 2,
-        "the append and the next root each commit once"
+        "the append and the next run each commit once"
     );
     let path = active_path(&head.graph);
     let note = position_of_once(&path, HOST_APPEND_NOTE);
@@ -785,8 +785,8 @@ pub async fn host_append_waits_for_the_bound_turn(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 3);
 }
 
-/// A host's plugin command and plugin task submitted while a root holds its
-/// pressure summary run none of their plugin's code: the next drive admits
+/// A host's plugin command and plugin task submitted while a run holds its
+/// pressure summary run none of their plugin's code: the next shift admits
 /// them at the boundary, runs each, and settles each `Completed` with its
 /// output in the commit that lands what its services appended. Killed at
 /// `crash` and redriven, each settles once; a crash before the commit runs
@@ -848,11 +848,11 @@ pub async fn host_plugin_command_applies_at_the_boundary(
     assert_eq!(
         probe.command_runs.load(Ordering::SeqCst),
         0,
-        "the bound turn's drive runs no command"
+        "the bound turn's shift runs no command"
     );
 
     law.enqueue("third question").await;
-    drive_next(&law, "root-3", crash).await;
+    work_next(&law, "run-3", crash).await;
 
     for (receipt, text) in receipts.iter().zip([PLUGIN_COMMAND_NOTE, PLUGIN_TASK_NOTE]) {
         match law.command_outcome(receipt).await {
@@ -887,7 +887,7 @@ pub async fn host_plugin_command_applies_at_the_boundary(
     assert_eq!(
         head.head_revision,
         after_bound_turn + 3,
-        "each operation and the next root commit once"
+        "each operation and the next run commit once"
     );
     let path = active_path(&head.graph);
     let answer = position_of_once(&path, "answer 2");
@@ -902,10 +902,10 @@ pub async fn host_plugin_command_applies_at_the_boundary(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 3);
 }
 
-/// A host's durable frame open submitted while a root holds its pressure
-/// summary waits on the command lane. The next drive opens the frame at the
+/// A host's durable frame open submitted while a run holds its pressure
+/// summary waits on the command lane. The next shift opens the frame at the
 /// boundary, after the bound turn's pressure frame, in the commit that
-/// settles it `Opened` with the frame it opened, and the root queued after
+/// settles it `Opened` with the frame it opened, and the run queued after
 /// it runs in that frame, from its seed. Killed at `crash` and redriven, the
 /// frame opens once.
 #[expect(
@@ -947,7 +947,7 @@ pub async fn host_frame_open_applies_at_the_boundary(
     assert_eq!(chain.len(), 2, "the bound turn's pressure frame: {chain:?}");
 
     law.enqueue("third question").await;
-    drive_next(&law, "root-3", crash).await;
+    work_next(&law, "run-3", crash).await;
 
     let head = law.head().await;
     let chain = frame_chain(&head, &law.session_id);
@@ -975,7 +975,7 @@ pub async fn host_frame_open_applies_at_the_boundary(
     assert_eq!(
         head.head_revision,
         after_bound_turn + 2,
-        "the open and the next root each commit once"
+        "the open and the next run each commit once"
     );
     let path = active_path(&head.graph);
     let frame_at = path
@@ -986,14 +986,14 @@ pub async fn host_frame_open_applies_at_the_boundary(
     let next = position_of_once(&path, "third question");
     assert!(
         frame_at < seed && seed < next,
-        "the root queued after the open runs in its frame, from its seed: {path:?}"
+        "the run queued after the open runs in its frame, from its seed: {path:?}"
     );
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 1);
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 3);
 }
 
 /// A terminal callback's append never waits on a command settlement: it
-/// writes under the ended root's own fence (FIG-4202), so each root's drive
+/// writes under the ended run's own fence (FIG-4202), so each run's shift
 /// ends, and each callback's note lands after its turn and before the next.
 pub async fn terminal_callback_append_does_not_deadlock(
     prefix: &str,
@@ -1023,9 +1023,9 @@ pub async fn terminal_callback_append_does_not_deadlock(
     law.parts.host_plugins.push(host_plugin(&probe));
 
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     law.enqueue("second question").await;
-    law.run_root("root-2").await;
+    law.execute_run("run-2").await;
 
     let appends = probe.terminal_appends();
     assert!(
@@ -1037,7 +1037,7 @@ pub async fn terminal_callback_append_does_not_deadlock(
             append,
             Ok(crate::AppendSessionNodesOutcome::Appended { .. })
         )),
-        "every callback append landed under its root's fence: {appends:?}"
+        "every callback append landed under its run's fence: {appends:?}"
     );
     let path = active_path(&law.head().await.graph);
     let first = position_of_once(&path, &terminal_note(1));
@@ -1051,9 +1051,9 @@ pub async fn terminal_callback_append_does_not_deadlock(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }
 
-/// A park is recoverable (FIG-4202). While a root holds its pressure
+/// A park is recoverable (FIG-4202). While a run holds its pressure
 /// summary, a clean host runtime parks without writing anything, and one
-/// holding a pending note is refused busy, naming the bound root as the
+/// holding a pending note is refused busy, naming the bound run as the
 /// head's owner, with nothing written: the refusal hands its runtime back.
 /// Once the bound turn's boundary passed, the same runtime parks, and
 /// everything the bound turn committed stands. A host runtime holds no
@@ -1112,15 +1112,15 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
         };
         let bound = law
             .store
-            .unfinished_root(&law.session_id)
+            .unfinished_run(&law.session_id)
             .await
-            .expect("read the bound root")
-            .expect("a root is bound")
-            .root;
+            .expect("read the bound run")
+            .expect("a run is bound")
+            .run;
         assert_eq!(
             refused.busy_owner(),
-            Some(&crate::store::SessionHeadOwner::Root { root: bound }),
-            "the refusal names the bound root: {:?}",
+            Some(&crate::store::SessionHeadOwner::Run { run: bound }),
+            "the refusal names the bound run: {:?}",
             refused.error
         );
         assert_eq!(
@@ -1135,10 +1135,10 @@ pub async fn dirty_park_while_busy_is_recoverable_and_loses_nothing(
     });
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        futures_util::future::join(law.run_root("root-2"), while_held),
+        futures_util::future::join(law.execute_run("run-2"), while_held),
     )
     .await
-    .expect("the bound turn's drive ends");
+    .expect("the bound turn's shift ends");
 
     let runtime = refused_runtime
         .into_inner()
@@ -1239,15 +1239,15 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
         };
         let bound = law
             .store
-            .unfinished_root(&law.session_id)
+            .unfinished_run(&law.session_id)
             .await
-            .expect("read the bound root")
-            .expect("a root is bound")
-            .root;
+            .expect("read the bound run")
+            .expect("a run is bound")
+            .run;
         assert_eq!(
             refused.busy_owner(),
-            Some(&crate::store::SessionHeadOwner::Root { root: bound }),
-            "the refusal names the bound root: {:?}",
+            Some(&crate::store::SessionHeadOwner::Run { run: bound }),
+            "the refusal names the bound run: {:?}",
             refused.error
         );
         assert_eq!(
@@ -1262,10 +1262,10 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     });
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        futures_util::future::join(law.run_root("root-2"), while_held),
+        futures_util::future::join(law.execute_run("run-2"), while_held),
     )
     .await
-    .expect("the bound turn's drive ends");
+    .expect("the bound turn's shift ends");
 
     let runtime = refused_runtime
         .into_inner()
@@ -1353,11 +1353,11 @@ pub async fn plugin_state_dirty_park_reparks_from_the_recorded_head(
     assert_eq!(model.turn_calls.load(Ordering::SeqCst), 2);
 }
 
-/// A host withdraws a command transactionally until the drive admits it
+/// A host withdraws a command transactionally until the shift admits it
 /// (FIG-4202): an append submitted while the bound turn holds its pressure
-/// summary, and withdrawn before any drive read it, never applies, and a
+/// summary, and withdrawn before any shift read it, never applies, and a
 /// host runtime settles it `Cancelled`. A
-/// plugin command the drive already read is being applied: while its code
+/// plugin command the shift already read is being applied: while its code
 /// runs, a withdrawal no longer reaches it, and it settles `Completed`.
 #[expect(
     clippy::expect_used,
@@ -1419,15 +1419,15 @@ pub async fn command_cancellation_before_admission_withdraws_it(
                 .await
                 .expect("try to withdraw the admitted command")
                 .is_none(),
-            "a command the drive read is no longer withdrawn"
+            "a command the shift read is no longer withdrawn"
         );
     });
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        futures_util::future::join(law.run_root("root-3"), during),
+        futures_util::future::join(law.execute_run("run-3"), during),
     )
     .await
-    .expect("the drive applying the admitted command ends");
+    .expect("the shift applying the admitted command ends");
 
     assert!(
         law.command_outcome(&withdrawn).await.is_none(),
@@ -1461,16 +1461,16 @@ pub async fn command_cancellation_before_admission_withdraws_it(
     position_of_once(&path, PLUGIN_COMMAND_NOTE);
 }
 
-/// FIG-4391: a host's cancel reaches a plugin task a drive already admitted.
-/// The task runs until its cancellation; once the drive runs its code, a
+/// FIG-4391: a host's cancel reaches a plugin task a shift already admitted.
+/// The task runs until its cancellation; once the shift runs its code, a
 /// withdrawal no longer reaches it, and the host's cancel resolves the
-/// task's cancel signal instead. The drive stops the task's code through its
+/// task's cancel signal instead. The shift stops the task's code through its
 /// cancellation token and settles the command `Cancelled` in the one commit
 /// that makes its settlement, with nothing of the task committed (the note
 /// it appends after its cancellation never lands), and a submitter reads
 /// that settlement back by the command's receipt; a later cancel finds that
 /// settlement. The lane goes on: the input queued after the task runs in the
-/// same drive. Killed at `crash` and redriven, the task settles cancelled
+/// same shift. Killed at `crash` and redriven, the task settles cancelled
 /// once, and a redrive that finds the cancel already requested runs none of
 /// the task's code again.
 #[expect(
@@ -1505,7 +1505,7 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     .await;
     law.parts.host_plugins.push(host_plugin(&probe));
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let before = law.head().await.head_revision;
 
     let receipt = law
@@ -1527,7 +1527,7 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
                 .await
                 .expect("try to withdraw the admitted task")
                 .is_none(),
-            "a task the drive admitted is no longer withdrawn"
+            "a task the shift admitted is no longer withdrawn"
         );
         assert_eq!(
             lash_core::runtime::request_plugin_task_cancel(
@@ -1543,10 +1543,10 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     };
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        futures_util::future::join(drive_next(&law, "root-2", crash), cancel),
+        futures_util::future::join(work_next(&law, "run-2", crash), cancel),
     )
     .await
-    .expect("the drive applying the cancelled task ends");
+    .expect("the shift applying the cancelled task ends");
 
     assert!(
         matches!(
@@ -1587,7 +1587,7 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
     assert_eq!(
         head.head_revision,
         before + 2,
-        "the cancelled task's settlement and the next root each commit once"
+        "the cancelled task's settlement and the next run each commit once"
     );
     let path = active_path(&head.graph);
     assert!(
@@ -1605,14 +1605,14 @@ pub async fn host_cancel_settles_an_admitted_plugin_task_cancelled(
 /// cancelled.
 const RERUN_TASK_NOTE: &str = "a note the host's plugin task appended after its rerun";
 
-/// FIG-4453: a host's cancel reaches a plugin task whose drive died after
+/// FIG-4453: a host's cancel reaches a plugin task whose shift died after
 /// the task's code returned and before the commit that settles it. Nothing
-/// of that return, nor of the drive's decision to keep it, is durable: the
+/// of that return, nor of the shift's decision to keep it, is durable: the
 /// redrive runs the task's code again under a live cancel signal, and a
 /// host's cancel during that run answers `Requested`, stops the task's code
 /// and settles the command `Cancelled`, with nothing of either run
 /// committed. The lane goes on: the input queued after the task runs in the
-/// same drive.
+/// same shift.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1644,7 +1644,7 @@ pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_se
     .await;
     law.parts.host_plugins.push(host_plugin(&probe));
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let before = law.head().await.head_revision;
 
     let receipt = law
@@ -1674,7 +1674,7 @@ pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_se
     tokio::time::timeout(
         std::time::Duration::from_secs(90),
         futures_util::future::join(
-            drive_crashed_at(&law, "root-2", HostCommandCrash::BeforeCommit),
+            shift_crashed_at(&law, "run-2", HostCommandCrash::BeforeCommit),
             cancel,
         ),
     )
@@ -1699,7 +1699,7 @@ pub async fn host_cancel_reaches_a_plugin_task_rerun_after_a_crash_before_its_se
     assert_eq!(
         head.head_revision,
         before + 2,
-        "the cancelled task's settlement and the next root each commit once"
+        "the cancelled task's settlement and the next run each commit once"
     );
     let path = active_path(&head.graph);
     assert!(

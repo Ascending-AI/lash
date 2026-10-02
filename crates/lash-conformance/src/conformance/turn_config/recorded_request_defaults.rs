@@ -1,11 +1,11 @@
-//! A model's request defaults are recorded with the root's model binding
+//! A model's request defaults are recorded with the run's model binding
 //! (FIG-4374), the response-metadata capture allowlists included (FIG-4397):
-//! a root's model call carries the defaults the root recorded, never those of
+//! a run's model call carries the defaults the run recorded, never those of
 //! the worker that runs it.
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// The request defaults the root records: the crashing execution's binding.
+/// The request defaults the run records: the crashing execution's binding.
 fn recorded_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
     lash_core::provider::LlmProfileRequestDefaults {
         response_metadata_headers: vec!["x-recorded-cost".to_string()],
@@ -65,8 +65,8 @@ fn policy_with_request_defaults(
     }
 }
 
-/// A model call made on a redrive carries the request defaults its root
-/// recorded (FIG-4567, ADR 0105 §1). The root's first execution records its
+/// A model call made on a redrive carries the request defaults its run
+/// recorded (FIG-4567, ADR 0105 §1). The run's first execution records its
 /// config, its model binding's request defaults included, and dies before its
 /// model call. The redrive opens the session on a worker whose creation
 /// default states other defaults for the same model key, capture allowlists
@@ -75,7 +75,7 @@ fn policy_with_request_defaults(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_recorded(
+pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_run_recorded(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -99,16 +99,16 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
         Vec::new(),
     )
     .await;
-    let root = TurnId::fixture(format!(
-        "{prefix}-turn-config-recorded-request-defaults-root"
+    let run = TurnId::fixture(format!(
+        "{prefix}-turn-config-recorded-request-defaults-run"
     ));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let crashing: crate::ConformanceTurnAttempt = {
         let parts = parts.clone();
-        let root = root.clone();
+        let run = run.clone();
         Arc::new(move |scope| {
             let parts = parts.clone();
-            let root = root.clone();
+            let run = run.clone();
             Box::pin(async move {
                 let mut runtime = build_runtime_under(
                     parts,
@@ -120,21 +120,21 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
                 .await;
                 runtime.set_turn_phase_probe(Arc::new(CrashBeforeFirstModelCall));
                 let _ = runtime
-                    .drive_turn(
-                        text_input(&root, "answer once"),
+                    .execute_turn(
+                        text_input(&run, "answer once"),
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
                     .await;
-                panic!("the crash fires before the root's model call");
+                panic!("the crash fires before the run's model call");
             })
         })
     };
     let redriven: crate::ConformanceTurnAttempt = {
         let parts = parts.clone();
-        let root = root.clone();
+        let run = run.clone();
         Arc::new(move |scope| {
             let parts = parts.clone();
-            let root = root.clone();
+            let run = run.clone();
             let turn_tx = turn_tx.clone();
             Box::pin(async move {
                 let mut runtime = build_runtime_under(
@@ -146,8 +146,8 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
                 )
                 .await;
                 let turn = runtime
-                    .drive_turn(
-                        text_input(&root, "answer once"),
+                    .execute_turn(
+                        text_input(&run, "answer once"),
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     )
                     .await;
@@ -159,7 +159,7 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
     };
     runner
         .run_crashed_then_redriven_turn(
-            admit(crate::ExecutionScope::turn(&parts.session_id, &root)),
+            admit(crate::ExecutionScope::turn(&parts.session_id, &run)),
             crashing,
             redriven,
         )
@@ -167,15 +167,15 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
     let turn = turn_rx
         .recv()
         .await
-        .expect("the tier's runner redrove the root")
-        .unwrap_or_else(|error| panic!("the redriven root runs: {error:?}"));
+        .expect("the tier's runner redrove the run")
+        .unwrap_or_else(|error| panic!("the redriven run executes: {error:?}"));
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
-        "the redriven root answers: {:?}",
+        "the redriven run answers: {:?}",
         turn.outcome
     );
     let requests = lash_sansio::sync::MutexExt::lock_recover(&*requests).clone();
-    assert_eq!(requests.len(), 1, "the root made exactly one model call");
+    assert_eq!(requests.len(), 1, "the run made exactly one model call");
     assert_eq!(
         requests[0]
             .model
@@ -190,6 +190,6 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
     assert_eq!(
         requests[0].model.metadata().request_defaults,
         recorded_defaults(),
-        "the redriven call carries the request defaults its root recorded, capture allowlists included"
+        "the redriven call carries the request defaults its run recorded, capture allowlists included"
     );
 }

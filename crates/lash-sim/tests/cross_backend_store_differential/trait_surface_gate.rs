@@ -4,36 +4,36 @@
 //! operation" if its operation inventory actually covers the fallible store
 //! trait surface. This module reads the trait definitions out of the real
 //! sources, reads the harness's own sources back, and refuses any fallible
-//! trait method that is neither driven by the harness nor named in an
+//! trait method that is neither executed by the harness nor named in an
 //! explicit exclusion list with a reason.
 //!
 //! Adding a fallible method to one of the gated traits therefore fails this
-//! test until the method is either driven or excluded on the record.
+//! test until the method is either executed or excluded on the record.
 
 /// Trait sources that define the gated surface.
 const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/mod.rs");
 const SESSION_CATALOG_SOURCE: &str = include_str!("../../../lash-core-store/src/store/catalog.rs");
 const SESSION_HISTORY_SOURCE: &str = include_str!("../../../lash-core-store/src/store/history.rs");
-const DRIVE_EPOCH_SOURCE: &str = include_str!("../../../lash-core-store/src/store/drive_fence.rs");
-const ROOT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/root.rs");
+const SHIFT_EPOCH_SOURCE: &str = include_str!("../../../lash-core-store/src/store/shift_fence.rs");
+const RUN_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/run.rs");
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
 const ATTACHMENT_REFERRERS_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/attachment_referrers.rs");
-/// The factory's control-intent ledger (FIG-3600 S7): every method is driven,
+/// The factory's control-intent ledger (FIG-3600 S7): every method is executed,
 /// none is excluded.
 const CONTROL_INTENT_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/control_intent.rs");
 /// The obligation ledgers and the recovery leader lease (ADR 0109 §1): every
-/// method is driven by `obligation_cases`, none is excluded.
+/// method is executed by `obligation_cases`, none is excluded.
 const OBLIGATION_SOURCE: &str = include_str!("../../../lash-core-store/src/store/obligation.rs");
 const RECOVERY_LEADER_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/recovery_leader.rs");
-/// A session's two-phase delete reads (ADR 0109 §4): every method is driven
+/// A session's two-phase delete reads (ADR 0109 §4): every method is executed
 /// by `session_delete_cases`, none is excluded.
 const SESSION_DELETE_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/session_delete.rs");
 
-/// The build-generation drain (FIG-3799): every method is driven by
+/// The build-generation drain (FIG-3799): every method is executed by
 /// `generation_drain_cases`, none is excluded.
 const GENERATION_DRAIN_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/generation_drain.rs");
@@ -80,12 +80,12 @@ const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
     (SESSION_HISTORY_SOURCE, "SessionHistoryStore"),
     (SESSION_STORE_SOURCE, "TurnInputStore"),
     (SESSION_STORE_SOURCE, "QueuedWorkStore"),
-    (DRIVE_EPOCH_SOURCE, "DriveEpochStore"),
-    (ROOT_STORE_SOURCE, "RootStore"),
+    (SHIFT_EPOCH_SOURCE, "ShiftEpochStore"),
+    (RUN_STORE_SOURCE, "RunStore"),
     (SESSION_STORE_SOURCE, "StoreMaintenance"),
 ];
 
-/// Fallible session-store methods the harness deliberately does not drive.
+/// Fallible session-store methods the harness deliberately does not shift.
 ///
 /// Every entry is a method this differential cannot reach with the fixture it
 /// builds, together with the suite that does own it. Removing a method from
@@ -196,7 +196,7 @@ const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Every `AttachmentReferrers` method is driven. The trait is part of the
+/// Every `AttachmentReferrers` method is executed. The trait is part of the
 /// runtime store contract, with no excluded attachment-referrer methods.
 const ATTACHMENT_REFERRERS_EXCLUSIONS: &[(&str, &str)] = &[];
 
@@ -295,8 +295,8 @@ fn store_trait_surface_is_fully_gated() {
             let exclusion = SESSION_STORE_EXCLUSIONS
                 .iter()
                 .find(|(name, _)| *name == method);
-            let driven = harness_drives(&sources, &method);
-            match (driven, exclusion) {
+            let executed = harness_drives(&sources, &method);
+            match (executed, exclusion) {
                 (true, None) => covered += 1,
                 (false, Some((_, reason))) => {
                     assert!(
@@ -315,8 +315,8 @@ fn store_trait_surface_is_fully_gated() {
         let exclusion = ATTACHMENT_REFERRERS_EXCLUSIONS
             .iter()
             .find(|(name, _)| *name == method);
-        let driven = harness_drives(&sources, &method);
-        match (driven, exclusion) {
+        let executed = harness_drives(&sources, &method);
+        match (executed, exclusion) {
             (true, None) => covered += 1,
             (false, Some((_, reason))) => {
                 assert!(
@@ -388,19 +388,19 @@ fn store_trait_surface_is_fully_gated() {
     assert!(
         missing.is_empty(),
         "fallible store-trait methods are in neither the differential's operation inventory \
-         nor its exclusion list: {missing:?}. Drive the method from the harness, or add it to \
+         nor its exclusion list: {missing:?}. Shift the method from the harness, or add it to \
          SESSION_STORE_EXCLUSIONS / ATTACHMENT_STORE_EXCLUSIONS with the suite that owns it."
     );
     assert!(
         stale_exclusions.is_empty(),
-        "these methods are excluded but the harness now drives them; delete their exclusions: \
+        "these methods are excluded but the harness now executes them; delete their exclusions: \
          {stale_exclusions:?}"
     );
     // A floor, not a pin: covering more methods must never fail the gate, but
     // silently dropping drivers until the inventory is a token sample must.
     assert!(
         covered >= 39,
-        "the differential drives only {covered} fallible store-trait methods; \
+        "the differential executes only {covered} fallible store-trait methods; \
          the inventory has been narrowed"
     );
     assert_eq!(

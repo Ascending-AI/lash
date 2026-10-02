@@ -263,7 +263,7 @@ async fn summary_log(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId
     }
 }
 
-/// One drive of the looping, waiting process to its stored terminal.
+/// One shift of the looping, waiting process to its stored terminal.
 struct SummaryDrive {
     registry: Arc<dyn ProcessRegistry>,
     process_id: ProcessId,
@@ -277,7 +277,7 @@ struct SummaryDrive {
     faults: Arc<lash_core::EffectSummaryAppendFaults>,
 }
 
-/// Drive the looping, waiting process segment by segment, each segment its
+/// Execute the looping, waiting process segment by segment, each segment its
 /// own invocation over its own journal, `budget` effects per segment, every
 /// write through `faults` (built over the plain registry). An invocation that
 /// fails is the crash it stands for: the journal keeps what it settled, loses
@@ -374,7 +374,7 @@ async fn drive_to_terminal(
             Err(crashed) => {
                 assert!(
                     crashed.contains("injected crash before the"),
-                    "only the injected crash interrupts the drive: {crashed}"
+                    "only the injected crash interrupts the shift: {crashed}"
                 );
                 interrupted += 1;
                 retry(&context);
@@ -458,23 +458,23 @@ fn plain(registry: Arc<dyn ProcessRegistry>) -> lash_core::EffectSummaryAppendFa
 /// last occurrence and the omission record commit with the terminal.
 #[tokio::test]
 async fn a_run_commits_its_summary_once_per_boundary() {
-    let drive = Box::pin(drive_to_terminal(4, plain)).await;
-    assert_eq!(drive.executions, 11, "every effect ran once");
+    let shift = Box::pin(drive_to_terminal(4, plain)).await;
+    assert_eq!(shift.executions, 11, "every effect ran once");
     assert!(
-        drive.boundaries >= 2,
+        shift.boundaries >= 2,
         "the budget cut the run into segments"
     );
     assert_eq!(
-        drive.logged_at_first_boundary,
+        shift.logged_at_first_boundary,
         Some(0),
         "a segment boundary commits nothing: the pending occurrences ride its handover"
     );
     assert_eq!(
-        drive.faults.summary_writes(),
+        shift.faults.summary_writes(),
         2,
         "one write per boundary that had a summary: the wait's enter and the terminal"
     );
-    let log = summary_log(&drive.registry, &drive.process_id).await;
+    let log = summary_log(&shift.registry, &shift.process_id).await;
     assert_eq!(
         log.occurrences.len(),
         9,
@@ -499,9 +499,9 @@ async fn a_run_commits_its_summary_once_per_boundary() {
     // The eight loop occurrences commit in the wait's batch, ahead of its
     // `process.waiting`; the terminal batch closes with the omission record
     // and the terminal.
-    let events = drive
+    let events = shift
         .registry
-        .full_event_window(&drive.process_id, 0)
+        .full_event_window(&shift.process_id, 0)
         .await
         .expect("read the process log");
     let kinds = events
@@ -547,7 +547,7 @@ async fn an_interrupted_boundary_commits_the_uninterrupted_summary() {
         "segment boundaries do not move the summary"
     );
     for flush_point in 0..uninterrupted.faults.summary_writes() {
-        let drive = Box::pin(drive_to_terminal(4, |registry| {
+        let shift = Box::pin(drive_to_terminal(4, |registry| {
             lash_core::EffectSummaryAppendFaults::new(
                 registry,
                 lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
@@ -557,18 +557,18 @@ async fn an_interrupted_boundary_commits_the_uninterrupted_summary() {
         }))
         .await;
         assert_eq!(
-            drive.faults.injected(),
+            shift.faults.injected(),
             1,
             "flush point {flush_point} was interrupted"
         );
-        assert_eq!(drive.interrupted, 1);
+        assert_eq!(shift.interrupted, 1);
         assert_eq!(
-            drive.executions, 11,
+            shift.executions, 11,
             "flush point {flush_point}: the retry replayed its effects from the journal"
         );
-        assert_eq!(drive.stored, uninterrupted.stored);
+        assert_eq!(shift.stored, uninterrupted.stored);
         assert_eq!(
-            summary_log(&drive.registry, &drive.process_id).await,
+            summary_log(&shift.registry, &shift.process_id).await,
             expected,
             "flush point {flush_point}: the summary equals the uninterrupted run's"
         );

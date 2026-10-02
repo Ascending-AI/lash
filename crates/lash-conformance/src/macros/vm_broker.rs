@@ -4,7 +4,7 @@
 /// opening, and slot release. The fixture hands back a guard, a prefix that
 /// names this run's sessions apart from every other, and the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), which must run a
-/// turn and crash and re-drive one.
+/// turn and crash and redrive one.
 ///
 /// The worker is the in-process fake behind the protocol types; its effects
 /// journal on the tier's own controller.

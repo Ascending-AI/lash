@@ -588,11 +588,11 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::SessionCommandIdempotencyKey
         )
     });
-    // W0176: lash::runtime::RuntimeErrorCode::SessionCommandPostDriveRefresh [variant]
+    // W0176: lash::runtime::RuntimeErrorCode::SessionCommandPostShiftRefresh [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
             value,
-            lash::runtime::RuntimeErrorCode::SessionCommandPostDriveRefresh
+            lash::runtime::RuntimeErrorCode::SessionCommandPostShiftRefresh
         )
     });
     // W0177: lash::runtime::RuntimeErrorCode::SessionCommandRefresh [variant]

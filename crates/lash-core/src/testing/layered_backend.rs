@@ -163,7 +163,7 @@ impl LayeredBackend {
         self
     }
 
-    /// Drive the backend's processes through `wire`, which receives the
+    /// Execute the backend's processes through `wire`, which receives the
     /// (possibly decorated) registry the wiring must be built over.
     pub fn wire_process_work(
         mut self,
@@ -188,7 +188,7 @@ impl LayeredBackend {
         self
     }
 
-    /// Drive the backend's sessions on `session_work` (`None`: in process).
+    /// Execute the backend's sessions on `session_work` (`None`: in process).
     pub fn with_session_work(mut self, session_work: Arc<dyn crate::SessionWorkEngine>) -> Self {
         self.session_work = session_work;
         self
@@ -534,13 +534,14 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "map_process_registry cannot decorate")]
     async fn map_process_registry_refuses_an_engine_with_its_own_process_work() {
-        let engine_driven = LayeredBackend::over(crate::testing::sqlite_recording_backend().await)
-            .wire_process_work(crate::testing::process_work_wiring_for_registry)
-            .into_backend();
+        let engine_executed =
+            LayeredBackend::over(crate::testing::sqlite_recording_backend().await)
+                .wire_process_work(crate::testing::process_work_wiring_for_registry)
+                .into_backend();
         assert!(
-            engine_driven.process_work().runs_processes(),
+            engine_executed.process_work().runs_processes(),
             "the fixture's engine runs its own processes"
         );
-        let _ = LayeredBackend::over(engine_driven).map_process_registry(|registry| registry);
+        let _ = LayeredBackend::over(engine_executed).map_process_registry(|registry| registry);
     }
 }

@@ -10,7 +10,7 @@ use crate::{LlmResponse, PluginError, RuntimeEffectOutcome, TokenUsage};
 /// methods project from this single result.
 ///
 /// The usage it reports is the response's, for the caller; the ledger was
-/// written by the effect's usage run when the effect was recorded (ADR 0125).
+/// written by the effect's usage meter when the effect was recorded (ADR 0125).
 /// The call's trace records were made by the effect's body when it ran: this
 /// projection runs on every replay and reports nothing.
 pub(crate) fn apply_direct_outcome(

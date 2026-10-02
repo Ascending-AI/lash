@@ -1,0 +1,269 @@
+//! `session_runs`: one row per `(session, run)` a shift sealed an
+//! admission for or admitted work under, holding the run's terminal evidence
+//! once it has one. The row lives until its session is deleted.
+
+/// The table's unprefixed name.
+pub const TABLE: &str = "session_runs";
+
+crate::statements! {
+    /// `session_runs` statements both backends issue verbatim.
+    pub struct SessionRunStatements @ "session_run" {
+        /// Open run `?2` of session `?1` if it has no row yet.
+        insert_open = "INSERT INTO session_runs (session_id, run) VALUES (?1, ?2)
+             ON CONFLICT (session_id, run) DO NOTHING";
+
+        /// The admission is the answer of record for this run. A retry must
+        /// never widen it by looking at rows that arrived after admission.
+        select_admission = "SELECT admission_json FROM session_runs
+             WHERE session_id = ?1 AND run = ?2";
+
+        /// Record the admission in the same transaction as its row bindings.
+        write_admission = "UPDATE session_runs
+             SET admission_json = ?3, admitted_generation = ?4
+             WHERE session_id = ?1 AND run = ?2 AND admission_json IS NULL";
+
+        /// What run `?2` of session `?1` holds, as a seal reads it: the
+        /// executor a seal recorded for it, its admission, and whether it
+        /// has terminal evidence.
+        select_hold = "SELECT executor_json, admission_json, terminal_kind IS NOT NULL
+             FROM session_runs
+             WHERE session_id = ?1 AND run = ?2";
+
+        /// Record `?3` as the executor of run `?2`, in the transaction of
+        /// the seal that raises the shift epoch for it. A run's admission
+        /// records its executor from then on, so an admitted or ended run
+        /// keeps what it has.
+        write_hold = "UPDATE session_runs
+             SET executor_json = ?3
+             WHERE session_id = ?1 AND run = ?2
+               AND admission_json IS NULL AND terminal_kind IS NULL";
+
+        /// Release the executor a seal recorded for run `?2`, which never
+        /// recorded its admission: the engine holds no run of it.
+        release_hold = "UPDATE session_runs
+             SET executor_json = NULL
+             WHERE session_id = ?1 AND run = ?2
+               AND admission_json IS NULL AND terminal_kind IS NULL";
+
+        /// Restamp unfinished run `?2` of session `?1` with generation `?3`:
+        /// the build whose follow-on recovery runs the rest of the run holds
+        /// it from here on (FIG-4739).
+        restamp_admitted_generation = "UPDATE session_runs
+             SET admitted_generation = ?3
+             WHERE session_id = ?1 AND run = ?2 AND admission_json IS NOT NULL
+               AND terminal_kind IS NULL";
+
+        /// The one admitted run of session `?1` without terminal evidence,
+        /// with its recorded admission.
+        select_unfinished = "SELECT run, admission_json FROM session_runs
+             WHERE session_id = ?1 AND admission_json IS NOT NULL
+               AND terminal_kind IS NULL";
+
+        /// The unfinished runs generation `?1` admitted, input-headed and
+        /// queued-headed alike (FIG-3884, FIG-3927). Each dialect's partial
+        /// index on `admitted_generation` serves the read.
+        count_unfinished_by_admitted_generation = "SELECT COUNT(*) FROM session_runs
+             WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
+               AND admitted_generation = ?1";
+
+        /// The sessions holding an unfinished run generation `?1` admitted,
+        /// strictly after session `?2` (`''` from the start), at most `?3`,
+        /// in session order: the page the drain's turn hand-over wakes
+        /// (FIG-4739). The same partial index serves the read.
+        list_unfinished_sessions_by_admitted_generation = "SELECT DISTINCT session_id FROM session_runs
+             WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
+               AND admitted_generation = ?1
+               AND session_id > ?2
+             ORDER BY session_id
+             LIMIT ?3";
+
+        /// The terminal evidence of run `?2` of session `?1`: all three
+        /// columns NULL while the run has none.
+        select_terminal = "SELECT terminal_cause_json, terminal_head_revision, terminal_at_ms
+             FROM session_runs
+             WHERE session_id = ?1 AND run = ?2";
+
+        /// Write run `?2`'s terminal evidence (kind `?3`, cause `?4`, head
+        /// revision `?5`, instant `?6`) unless it already has one: the
+        /// caller decided the write against the stored evidence in the same
+        /// transaction, and a zero row count means another writer won.
+        write_terminal = "UPDATE session_runs
+             SET terminal_kind = ?3, terminal_cause_json = ?4,
+                 terminal_head_revision = ?5, terminal_at_ms = ?6
+             WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NULL";
+
+        /// The runs of session `?1` without terminal evidence, in run
+        /// order: what its close ends.
+        select_open_runs = "SELECT run FROM session_runs
+             WHERE session_id = ?1 AND terminal_kind IS NULL
+             ORDER BY run";
+
+        /// Bounded recovery page after the `(session_id, run)` cursor, with
+        /// each run's recorded admission and the executor its seal
+        /// recorded: recovery reads its executor.
+        select_open_page = "SELECT session_id, run, admission_json, executor_json
+             FROM session_runs
+             WHERE terminal_kind IS NULL
+               AND (session_id > ?1 OR (session_id = ?1 AND run > ?2))
+             ORDER BY session_id, run LIMIT ?3";
+
+        /// Every run of session `?1`: its deletion.
+        delete_by_session = "DELETE FROM session_runs WHERE session_id = ?1";
+    }
+}
+
+/// Rendered statements used by a parked-run control transaction.
+pub struct RunVerbStatements {
+    pub bound_inputs: crate::Rendered,
+    pub rebind: crate::Rendered,
+    pub unbind: crate::Rendered,
+    pub set_kind: crate::Rendered,
+    pub raise_epoch: crate::Rendered,
+    pub cancel_input: crate::Rendered,
+    pub reopen_input: crate::Rendered,
+    pub cancel_batch: crate::Rendered,
+    pub intents: crate::Rendered,
+}
+
+impl RunVerbStatements {
+    /// Render each statement through its table owner.
+    #[must_use]
+    pub fn render(dialect: crate::Dialect) -> Self {
+        let group0 = crate::session_runs::run_inputs::RunInputVerbStatements::render(dialect);
+        let group1 = crate::session_runs::control_intents::ControlVerbStatements::render(dialect);
+        let group2 = crate::session::meta::MetaRunVerbStatements::render(dialect);
+        let group3 = crate::turn_ingress::pending_inputs::PendingRunVerbStatements::render(dialect);
+        let group4 = crate::turn_ingress::queued_batches::BatchRunVerbStatements::render(dialect);
+        Self {
+            bound_inputs: group0.bound_inputs,
+            rebind: group0.rebind,
+            unbind: group0.unbind,
+            set_kind: group1.set_kind,
+            intents: group1.intents,
+            raise_epoch: group2.raise_epoch,
+            cancel_input: group3.cancel_input,
+            reopen_input: group3.reopen_input,
+            cancel_batch: group4.cancel_batch,
+        }
+    }
+}
+
+/// The obligation columns a claim reads back (ADR 0109 §1.3): the id, the
+/// attempt count after the claim, then the row's key.
+pub const OBLIGATION_CLAIM_COLUMNS: &str = "obligation_id, obligation_attempts, session_id, run";
+
+crate::statements! {
+    /// `session_runs` obligation statements (ADR 0109): a terminal run owes its scope close. Both backends issue
+    /// them verbatim; every settling write compares the state and, while
+    /// claimed, the claim token.
+    pub struct SessionRunObligationStatements @ "session_run" {
+        /// Arm the row keyed `?1`, `?2` as obligation `?3`, due at
+        /// `?4`, if it owes nothing.
+        obligation_arm = "UPDATE session_runs
+             SET obligation_id = ?3, obligation_state = 'due', obligation_attempts = 0,
+                 obligation_due_at_ms = ?4, obligation_claim_token = NULL,
+                 obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
+                 obligation_settled_at_ms = NULL
+             WHERE session_id = ?1 AND run = ?2 AND obligation_state IS NULL";
+
+        /// At most `?2` obligations due at `?1`, a lapsed claim included,
+        /// oldest due first.
+        obligation_select_due = "SELECT obligation_id FROM session_runs
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2";
+
+        /// Claim obligation `?1` under token `?2` until `?3` if it is still
+        /// due at `?4`.
+        obligation_claim_due_row = "UPDATE session_runs
+             SET obligation_state = 'claimed', obligation_claim_token = ?2,
+                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state IN ('due', 'claimed')
+               AND obligation_due_at_ms <= ?4
+             RETURNING obligation_id, obligation_attempts, session_id, run";
+
+        /// Claim obligation `?1` under token `?2` until `?3`: a `due` row
+        /// whatever its backoff (a producer's own immediate attempt), or a
+        /// claim `?2` already holds, its claimant re-deriving it after an
+        /// interruption, which keeps its attempt count.
+        obligation_claim = "UPDATE session_runs
+             SET obligation_state = 'claimed', obligation_claim_token = ?2,
+                 obligation_attempts = obligation_attempts + CASE WHEN obligation_state = 'due' THEN 1 ELSE 0 END, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND (obligation_state = 'due'
+                  OR (obligation_state = 'claimed' AND obligation_claim_token = ?2))
+             RETURNING obligation_id, obligation_attempts, session_id, run";
+
+        /// Settle claim `?2` on obligation `?1` delivered at `?3`.
+        obligation_settle_delivered = "UPDATE session_runs
+             SET obligation_state = 'delivered', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
+                 obligation_settled_at_ms = ?3
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
+        /// error `?4` under code `?5`.
+        obligation_settle_retry = "UPDATE session_runs
+             SET obligation_state = 'due', obligation_claim_token = NULL,
+                 obligation_due_at_ms = ?3, obligation_last_error = ?4, obligation_last_error_code = ?5
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Stall claim `?2` on obligation `?1` for reason `?3` with error
+        /// `?4` under code `?6` at `?5`.
+        obligation_settle_stall = "UPDATE session_runs
+             SET obligation_state = 'stalled', obligation_claim_token = NULL,
+                 obligation_due_at_ms = NULL, obligation_stall_reason = ?3,
+                 obligation_last_error = ?4, obligation_last_error_code = ?6, obligation_settled_at_ms = ?5
+             WHERE obligation_id = ?1 AND obligation_state = 'claimed'
+               AND obligation_claim_token = ?2";
+
+        /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
+        obligation_rearm = "UPDATE session_runs
+             SET obligation_state = 'due', obligation_attempts = 0, obligation_due_at_ms = ?2,
+                 obligation_stall_reason = NULL, obligation_settled_at_ms = NULL
+             WHERE obligation_id = ?1 AND obligation_state = 'stalled'";
+
+        /// At most `?2` stalled obligations after id `?1`, in id order.
+        obligation_select_stalled = "SELECT obligation_id, obligation_attempts, obligation_stall_reason, obligation_last_error, obligation_last_error_code, obligation_settled_at_ms, session_id, run
+             FROM session_runs
+             WHERE obligation_state = 'stalled' AND obligation_id > ?1
+             ORDER BY obligation_id
+             LIMIT ?2";
+
+        /// How many obligations are stalled.
+        obligation_count_stalled = "SELECT COUNT(*) FROM session_runs WHERE obligation_state = 'stalled'";
+
+        /// Obligation `?1`'s state and the claims taken since it was armed.
+        obligation_select_standing = "SELECT obligation_state, obligation_attempts FROM session_runs WHERE obligation_id = ?1";
+    }
+}
+
+impl crate::obligation::ObligationStatementSet for SessionRunObligationStatements {
+    fn obligation_sql(&self) -> crate::obligation::ObligationSql<'_> {
+        crate::obligation::ObligationSql {
+            key_columns: 2,
+            arm: &self.obligation_arm,
+            select_due: &self.obligation_select_due,
+            claim_due_row: &self.obligation_claim_due_row,
+            claim: &self.obligation_claim,
+            settle_delivered: &self.obligation_settle_delivered,
+            settle_retry: &self.obligation_settle_retry,
+            settle_stall: &self.obligation_settle_stall,
+            rearm: &self.obligation_rearm,
+            select_stalled: &self.obligation_select_stalled,
+            count_stalled: &self.obligation_count_stalled,
+            select_standing: &self.obligation_select_standing,
+        }
+    }
+}
+
+crate::statements! {
+    /// `session_runs` reads of a session's two-phase delete (ADR 0109 §4).
+    pub struct SessionRunCleanupStatements @ "session_run" {
+        /// How many of session `?1`'s runs owe a scope close not yet
+        /// delivered: due, claimed, or stalled.
+        count_undelivered_scope_close = "SELECT COUNT(*) FROM session_runs
+             WHERE session_id = ?1 AND obligation_state IN ('due', 'claimed', 'stalled')";
+    }
+}

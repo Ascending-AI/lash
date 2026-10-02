@@ -397,7 +397,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
 /// ADR 0117 §2: a host submission's call is rooted at the handle the host
 /// admitted it under. A redelivery that holds no key re-derives it from the
 /// handle alone and lands on the call the first delivery named; another handle
-/// is another call; the same handle under a turn root is another call; and a
+/// is another call; the same handle under a turn run is another call; and a
 /// blank handle roots nothing.
 #[tokio::test]
 async fn a_host_submission_names_its_call_by_its_handle_across_redelivery() -> Result<()> {

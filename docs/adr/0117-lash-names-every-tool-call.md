@@ -69,7 +69,7 @@ and completion order do not renumber members.
 
 | Ingress | Identity inputs |
 |---|---|
-| Model call | Admitted root, continuation, iteration, effect ordinal, full content index |
+| Model call | Admitted run, continuation, iteration, effect ordinal, full content index |
 | Batch member | Wrapper id and original member index |
 | RLM cell command | Opener admission, code opener, cell replay key, command ordinal, and aggregate index for a leaf |
 | Process-body command | Process admission, code opener, command ordinal, and aggregate index for a leaf |

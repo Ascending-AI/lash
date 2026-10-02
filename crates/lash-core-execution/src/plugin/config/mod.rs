@@ -26,7 +26,7 @@
 //!   [`behavior_revision`](super::PluginDeclaration::behavior_revision),
 //!   which the build generation hashes. They have no identity of their own
 //!   and a transaction records none: the build whose lane admits its command
-//!   root resolves it, and a redrive of that root stays on that lane.
+//!   run resolves it, and a redrive of that run stays on that lane.
 //!
 //! The [`ConfigRegistry`] holds every registration: the one list the
 //! resolver, the ingress check and the [catalog](ConfigRegistry::catalog)
@@ -1152,7 +1152,7 @@ impl ConfigRegistry {
             .apply_run_options(protocol, recorded, &options.payload)
     }
 
-    /// Validate a root's config that a run override derived from the
+    /// Validate a run's config that a run override derived from the
     /// session's `base`: every namespace the override changed is judged by
     /// its owner against its recorded value, so an overlay cannot set what
     /// the owner does not admit.

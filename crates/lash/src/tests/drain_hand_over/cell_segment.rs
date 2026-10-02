@@ -16,7 +16,7 @@
 //!   made before it stopped. The model is asked once and the process is
 //!   started once.
 //! - **crash**: the hand-over law again, with one invocation dying once on
-//!   either side of a durable record of the hand-over: N's root while it is
+//!   either side of a durable record of the hand-over: N's run while it is
 //!   parked and before the wake, after the wake and before its boundary
 //!   commit is recorded, and after that commit; N+1's continuation before
 //!   its first step, while it is parked inside the resumed cell, and after
@@ -111,9 +111,9 @@ struct CellRoll {
     _keep: Keep,
 }
 
-/// The continuation's recovery root, at the recovery count its drive
+/// The continuation's recovery run, at the recovery count its shift
 /// admission recorded.
-const CONTINUATION: &str = "follow-on:run-root:agent-frame:1#0";
+const CONTINUATION: &str = "follow-on:run-run:agent-frame:1#0";
 
 impl CellRoll {
     async fn start(storage: Storage, session: &str) -> Result<Self> {
@@ -141,7 +141,7 @@ impl CellRoll {
             .open()
             .await?
             .send(TurnInput::text("start the job and wait for it"))
-            .id("run-root")
+            .id("run-run")
             .await?;
         let process = waiting_process(&core, &signal).await;
         let next = BuildGeneration::for_test("cell-segment-next");
@@ -192,11 +192,11 @@ impl CellRoll {
             .in_flight_turns
     }
 
-    /// The root invocation whose key ends with `key`, once it is parked on
+    /// The run invocation whose key ends with `key`, once it is parked on
     /// the cell's await: the process's terminal has `attaches` waits armed
-    /// on it, and the root waits on the server with a journal that has
+    /// on it, and the run waits on the server with a journal that has
     /// stopped growing.
-    async fn parked_root(&self, key: &str, attaches: usize) -> lash_restate_test::InvocationView {
+    async fn parked_run(&self, key: &str, attaches: usize) -> lash_restate_test::InvocationView {
         let target = format!("{key}/run");
         let deadline = tokio::time::Instant::now() + WEDGE;
         let mut seen = None;
@@ -222,7 +222,7 @@ impl CellRoll {
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "the root `{key}` never parked: {:#?}",
+                "the run `{key}` never parked: {:#?}",
                 self.server().invocations()
             );
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -233,7 +233,7 @@ impl CellRoll {
     /// holds none of it: the tick wakes the parked turn, and the turn's
     /// boundary commit and the continuation's admission follow it.
     async fn hand_over(&self) -> Result<()> {
-        let driver = Arc::clone(&self.core._session_driver);
+        let driver = Arc::clone(&self.core._session_shifts);
         let page = std::num::NonZeroUsize::new(16).expect("non-zero page");
         let deadline = tokio::time::Instant::now() + WEDGE;
         loop {
@@ -371,33 +371,33 @@ async fn waiting_process(core: &LashCore, signal: &str) -> lash_core::ProcessId 
 /// Where an invocation of the mid-cell hand-over dies, once.
 #[derive(Clone, Copy, Debug)]
 enum Crash {
-    /// N's root dies while it is parked inside the cell, before the drain
+    /// N's run dies while it is parked inside the cell, before the drain
     /// wakes it: its replay runs the cell to the same await and parks again.
-    OldRootWhileParked,
-    /// N's root dies after the wake is journaled, before the first command
+    OldRunWhileParked,
+    /// N's run dies after the wake is journaled, before the first command
     /// that follows it: its replay stops the cell at the same await and
     /// commits the boundary.
-    OldRootAfterTheWake,
-    /// N's root dies after its boundary commit, with its outcome unrecorded.
-    OldRootAfterItsBoundaryCommit,
-    /// N+1's continuation root dies before its first step is recorded.
+    OldRunAfterTheWake,
+    /// N's run dies after its boundary commit, with its outcome unrecorded.
+    OldRunAfterItsBoundaryCommit,
+    /// N+1's continuation run dies before its first step is recorded.
     ContinuationBeforeItsFirstStep,
-    /// N+1's continuation root dies while it is parked inside the resumed
+    /// N+1's continuation run dies while it is parked inside the resumed
     /// cell: its replay resumes the cell again from the committed capture.
     ContinuationWhileParked,
-    /// N+1's continuation root dies after its final commit, with its outcome
+    /// N+1's continuation run dies after its final commit, with its outcome
     /// unrecorded.
     ContinuationAfterItsCommit,
 }
 
 impl Crash {
     /// The crash the server plans for this point, if it is a planned one.
-    /// `parked_commands` is the number of commands N's root journaled before
+    /// `parked_commands` is the number of commands N's run journaled before
     /// it parked.
     fn rule(self, parked_commands: usize) -> Option<lash_restate_test::CrashRule> {
         use lash_restate_test::protocol::MessageType;
         use lash_restate_test::{CrashPoint, CrashRule, TURN_DRIVER_SERVICE};
-        let root_run = |point, key: &str| {
+        let run_execution = |point, key: &str| {
             CrashRule::new(point)
                 .service(TURN_DRIVER_SERVICE)
                 .handler("run")
@@ -407,19 +407,19 @@ impl Crash {
             ty: MessageType::OutputCommand,
         };
         match self {
-            Self::OldRootWhileParked | Self::ContinuationWhileParked => None,
-            Self::OldRootAfterTheWake => Some(root_run(
+            Self::OldRunWhileParked | Self::ContinuationWhileParked => None,
+            Self::OldRunAfterTheWake => Some(run_execution(
                 CrashPoint::BeforeCommand {
                     index: parked_commands,
                 },
-                "run-root",
+                "run-run",
             )),
-            Self::OldRootAfterItsBoundaryCommit => Some(root_run(before_output(), "run-root")),
-            Self::ContinuationBeforeItsFirstStep => Some(root_run(
+            Self::OldRunAfterItsBoundaryCommit => Some(run_execution(before_output(), "run-run")),
+            Self::ContinuationBeforeItsFirstStep => Some(run_execution(
                 CrashPoint::BeforeRunResult { name: None },
                 CONTINUATION,
             )),
-            Self::ContinuationAfterItsCommit => Some(root_run(before_output(), CONTINUATION)),
+            Self::ContinuationAfterItsCommit => Some(run_execution(before_output(), CONTINUATION)),
         }
     }
 }
@@ -433,22 +433,22 @@ async fn a_run_parked_inside_a_cell_hands_over_and_resumes_mid_cell(
         None => "cell-segment-hand-over".to_owned(),
     };
     let mut roll = CellRoll::start(storage, &session).await?;
-    let parked = roll.parked_root("run-root", 1).await;
+    let parked = roll.parked_run("run-run", 1).await;
     let crashes = lash_restate_test::CrashCount::new();
     assert!(
         roll.server().on_crash(crashes.listener()),
         "the law's crash listener is the engine's only one"
     );
     match crash {
-        Some(Crash::OldRootWhileParked) => {
-            assert!(roll.server().crash(&parked.id), "crash N's parked root");
-            roll.parked_root("run-root", 1).await;
+        Some(Crash::OldRunWhileParked) => {
+            assert!(roll.server().crash(&parked.id), "crash N's parked run");
+            roll.parked_run("run-run", 1).await;
         }
         Some(crash) => {
             let parked_commands = roll
                 .server()
                 .journal(&parked.id)
-                .expect("the parked root's journal")
+                .expect("the parked run's journal")
                 .iter()
                 .filter(|entry| entry.ty.is_command())
                 .count();
@@ -464,13 +464,13 @@ async fn a_run_parked_inside_a_cell_hands_over_and_resumes_mid_cell(
     // process, and the model was not asked for the cell again.
     assert_eq!(roll.started().await, 1, "the cell started its process once");
     assert_eq!(roll.requests.lock_recover().len(), 1);
-    let resumed = roll.parked_root(CONTINUATION, 1).await;
+    let resumed = roll.parked_run(CONTINUATION, 1).await;
     if matches!(crash, Some(Crash::ContinuationWhileParked)) {
         assert!(
             roll.server().crash(&resumed.id),
-            "crash the continuation's parked root"
+            "crash the continuation's parked run"
         );
-        roll.parked_root(CONTINUATION, 1).await;
+        roll.parked_run(CONTINUATION, 1).await;
     }
 
     roll.release_process().await?;
@@ -508,9 +508,9 @@ async fn a_cancel_after_the_hand_over_reaches_the_resumed_cell(
     (): (),
 ) -> Result<()> {
     let mut roll = CellRoll::start(storage, "cell-segment-cancel").await?;
-    roll.parked_root("run-root", 1).await;
+    roll.parked_run("run-run", 1).await;
     roll.hand_over().await?;
-    roll.parked_root(CONTINUATION, 1).await;
+    roll.parked_run(CONTINUATION, 1).await;
     let receipt = roll
         .handle
         .as_ref()
@@ -519,16 +519,16 @@ async fn a_cancel_after_the_hand_over_reaches_the_resumed_cell(
         .origin("cell-segment-law")
         .await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Requested { root, .. } if root.as_str() == "run-root"),
-        "the cancel reaches the running root: {receipt:?}"
+        matches!(&receipt, crate::CancelReceipt::Requested { run, .. } if run.as_str() == "run-run"),
+        "the cancel reaches the running run: {receipt:?}"
     );
     let outcome = tokio::time::timeout(WEDGE, roll.sent().outcome())
         .await
         .expect("the cancelled run answers")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
-        outcome.root().map(lash_core::TurnId::as_str),
-        Some("run-root")
+        outcome.run().map(lash_core::TurnId::as_str),
+        Some("run-run")
     );
     assert_eq!(roll.requests.lock_recover().len(), 1);
     assert_eq!(roll.started().await, 1);
@@ -556,27 +556,27 @@ cell_segment_laws! {
     cell_hands_over_sqlite_file: hands_over, Storage::SqliteFile, None;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     cell_hands_over_postgres: hands_over, Storage::Postgres, None;
-    cell_crash_old_root_while_parked_sqlite_memory:
-        hands_over, Storage::SqliteMemory, Some(Crash::OldRootWhileParked);
-    cell_crash_old_root_while_parked_sqlite_file:
-        hands_over, Storage::SqliteFile, Some(Crash::OldRootWhileParked);
+    cell_crash_old_run_while_parked_sqlite_memory:
+        hands_over, Storage::SqliteMemory, Some(Crash::OldRunWhileParked);
+    cell_crash_old_run_while_parked_sqlite_file:
+        hands_over, Storage::SqliteFile, Some(Crash::OldRunWhileParked);
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    cell_crash_old_root_while_parked_postgres:
-        hands_over, Storage::Postgres, Some(Crash::OldRootWhileParked);
-    cell_crash_old_root_after_the_wake_sqlite_memory:
-        hands_over, Storage::SqliteMemory, Some(Crash::OldRootAfterTheWake);
-    cell_crash_old_root_after_the_wake_sqlite_file:
-        hands_over, Storage::SqliteFile, Some(Crash::OldRootAfterTheWake);
+    cell_crash_old_run_while_parked_postgres:
+        hands_over, Storage::Postgres, Some(Crash::OldRunWhileParked);
+    cell_crash_old_run_after_the_wake_sqlite_memory:
+        hands_over, Storage::SqliteMemory, Some(Crash::OldRunAfterTheWake);
+    cell_crash_old_run_after_the_wake_sqlite_file:
+        hands_over, Storage::SqliteFile, Some(Crash::OldRunAfterTheWake);
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    cell_crash_old_root_after_the_wake_postgres:
-        hands_over, Storage::Postgres, Some(Crash::OldRootAfterTheWake);
-    cell_crash_old_root_after_boundary_commit_sqlite_memory:
-        hands_over, Storage::SqliteMemory, Some(Crash::OldRootAfterItsBoundaryCommit);
-    cell_crash_old_root_after_boundary_commit_sqlite_file:
-        hands_over, Storage::SqliteFile, Some(Crash::OldRootAfterItsBoundaryCommit);
+    cell_crash_old_run_after_the_wake_postgres:
+        hands_over, Storage::Postgres, Some(Crash::OldRunAfterTheWake);
+    cell_crash_old_run_after_boundary_commit_sqlite_memory:
+        hands_over, Storage::SqliteMemory, Some(Crash::OldRunAfterItsBoundaryCommit);
+    cell_crash_old_run_after_boundary_commit_sqlite_file:
+        hands_over, Storage::SqliteFile, Some(Crash::OldRunAfterItsBoundaryCommit);
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-    cell_crash_old_root_after_boundary_commit_postgres:
-        hands_over, Storage::Postgres, Some(Crash::OldRootAfterItsBoundaryCommit);
+    cell_crash_old_run_after_boundary_commit_postgres:
+        hands_over, Storage::Postgres, Some(Crash::OldRunAfterItsBoundaryCommit);
     cell_crash_continuation_before_first_step_sqlite_memory:
         hands_over, Storage::SqliteMemory, Some(Crash::ContinuationBeforeItsFirstStep);
     cell_crash_continuation_before_first_step_sqlite_file:

@@ -1038,7 +1038,7 @@ AUDITED_GUARDS = {
     ),
     "crates/lash-core-store/src/compat.rs:POSTGRES_SCHEMA_VERSION": ("TurnCancelUndeliveredInputPolicy",),
     "crates/lash-core-store/src/compat.rs:SQLITE_CORE_SCHEMA_VERSION": (
-        "TurnCancelUndeliveredInputPolicy", "SESSION_INGRESS_TABLE", "SESSION_ROOTS_TABLES",
+        "TurnCancelUndeliveredInputPolicy", "SESSION_INGRESS_TABLE", "SESSION_RUNS_TABLES",
     ),
     "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
         "TraceAttemptUsageOutcome", "TraceLashlangNodeTerminalRecord", "TraceLashlangNodeReport",
@@ -1079,14 +1079,14 @@ AUDITED_GUARDS = {
         "VersionRange", "RestateCompatError", "EffectGroupOpenRequest",
         "EffectGroupCommitChildResponse", "EffectGroupChildRequest", "EffectGroupNotice",
         "RestateDurableWaitAwaitRequest", "RestateProcessWorkflowInput",
-        "RestateSessionDriveRequest", "UsageAccountingSettle", "ObjectUpgradeResponse",
+        "RestateSessionShiftRequest", "UsageAccountingSettle", "ObjectUpgradeResponse",
         "BuildGeneration", "AwaitEventKey",
     ),
-    "crates/lash-restate/src/session_driver.rs:LASH_TURN_OUTCOME_FORMAT_VERSION": (
-        "SealVerdict", "DriveFence", "AdmissionId", "TurnOutcome", "TurnStop", "FailureCode",
+    "crates/lash-restate/src/session_shifts.rs:LASH_TURN_OUTCOME_FORMAT_VERSION": (
+        "SealVerdict", "ShiftFence", "AdmissionId", "TurnOutcome", "TurnStop", "FailureCode",
     ),
     "crates/lash-restate/src/usage_accounting.rs:USAGE_ACCOUNTING_WIRE_VERSION": (
-        "UsageSettlement", "UsageAttemptFact", "RunAccounting", "LlmProfileKey", "TokenUsage",
+        "UsageSettlement", "UsageAttemptFact", "MeterAccounting", "LlmProfileKey", "TokenUsage",
     ),
     "crates/lash-vm-protocol/src/version.rs:WORKER_PROTOCOL_VERSION": (
         "StateDigest", "Serialize for StateDigest", "FRAME_MAGIC", "encode_parent", "WorkerLimit",

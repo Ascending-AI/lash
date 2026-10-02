@@ -4,7 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_a501;
@@ -169,7 +169,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .await
         .expect("open the turn's handler");
     let artifact_turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("fetch the workspace badge"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -187,7 +187,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .await
         .expect("open the turn's handler");
     let text_turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("answer this text-only follow-up"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -268,7 +268,7 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("fetch the accepted image"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -420,7 +420,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         .await
         .expect("open the turn's handler");
     let turn_one = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("return the array"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -460,7 +460,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         lash_core::facade_support::TurnAddress::new(&persisted_state.session_id, turn_id);
     let turn = lash_core::task::spawn(async move {
         let assembled = runtime
-            .drive_turn(
+            .execute_turn(
                 TurnInput::text("turn two input"),
                 lash_core::facade_support::TurnOptions::new(
                     CancellationToken::new(),

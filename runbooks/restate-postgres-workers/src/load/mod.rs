@@ -239,7 +239,7 @@ pub fn turn_id_for(key: &str) -> String {
     format!("load-{}", key.replace('/', "-"))
 }
 
-/// How a root that took an input stood once it stopped moving.
+/// How a run that took an input stood once it stopped moving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReportedStatus {
@@ -269,8 +269,8 @@ impl From<&lash::TurnStatus> for ReportedStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputOutcome {
     pub status: ReportedStatus,
-    pub root: Option<String>,
-    /// The cell's `finish` value; `null` when the root ran no finishing cell.
+    pub run: Option<String>,
+    /// The cell's `finish` value; `null` when the run ran no finishing cell.
     pub final_value: Value,
     /// The settled turn's typed outcome, for a failure's diagnosis.
     pub outcome: Value,

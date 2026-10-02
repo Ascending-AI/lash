@@ -817,7 +817,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         wake_delivery_config,
                         fleet_format,
                     )?;
-                    // The root admission's build-generation stamp projects
+                    // The run admission's build-generation stamp projects
                     // onto the process row in the same transaction (FIG-3795
                     // S2): the drain's live-generation index reads it without
                     // unfolding the event.

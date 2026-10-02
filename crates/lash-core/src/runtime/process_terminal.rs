@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use crate::runtime::drive::relay::{
+use crate::runtime::shift::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy,
 };
 use crate::store::{ObligationKey, ObligationKind, ObligationLedger};

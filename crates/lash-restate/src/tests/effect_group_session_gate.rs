@@ -5,7 +5,7 @@
 //! work to the latest deployment. A turn the pre-cutover build started, still
 //! pinned to the old deployment, can open a tool batch after the new
 //! deployment registers; its children then run on the new build. These tests
-//! drive the deployed `EffectGroupDispatch/child` handler through the endpoint
+//! shift the deployed `EffectGroupDispatch/child` handler through the endpoint
 //! protocol against a session store whose marker names the previous
 //! generation, and pin that the child settles with the typed refusal before it
 //! admits, records membership, runs anything, or dispatches its tool.
@@ -212,7 +212,7 @@ async fn a_pre_cutover_sessions_group_child_is_refused_before_its_tool_is_dispat
         ],
     )
     .await
-    .expect("drive the child invocation");
+    .expect("shift the child invocation");
 
     let calls = restate_call_parameters(&output).expect("decode the child's calls");
     assert_eq!(
@@ -279,7 +279,7 @@ async fn a_current_sessions_group_child_passes_the_gate_to_admission() {
         Vec::new(),
     )
     .await
-    .expect("drive the child invocation");
+    .expect("shift the child invocation");
 
     let calls = restate_call_parameters(&output).expect("decode the child's calls");
     assert_eq!(

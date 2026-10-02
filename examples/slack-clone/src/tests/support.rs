@@ -479,7 +479,7 @@ impl BotHost {
     /// down; the gate is released only once nothing of that boot is left to
     /// answer it. Returns once the dead boot's session driver is released,
     /// so the next [`start`](Self::start) installs its own. Dropping the
-    /// returned [`DeadBoot`] brings the deployment back: the server re-drives
+    /// returned [`DeadBoot`] brings the deployment back: the server redrives
     /// the held invocations on the boot running by then.
     pub async fn kill_boot_mid_turn(
         &self,
@@ -530,7 +530,7 @@ impl BotHost {
         let _ = turn.await;
         drop(bot);
         script.release_gate();
-        let slot = self.double.restate().session_work_engine().driver_slot();
+        let slot = self.double.restate().session_work_engine().shifts_slot();
         tokio::time::timeout(Duration::from_secs(30), async {
             while slot.installed().is_some() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -584,7 +584,7 @@ impl BotHost {
 
 /// A boot [`BotHost::kill_boot_mid_turn`] killed: the server holds back the
 /// invocations its deployment was running until this drops.
-#[must_use = "dropping a dead boot lets the server re-drive its invocations"]
+#[must_use = "dropping a dead boot lets the server redrive its invocations"]
 pub struct DeadBoot {
     _holds: Vec<lash_restate_test::Hold>,
 }

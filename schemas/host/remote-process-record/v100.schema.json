@@ -298,7 +298,7 @@
           "type": "object"
         },
         {
-          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one drive request. It has no\nlogical root, and no logical turn runs under it.",
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request. It has no\nlogical root, and no logical turn runs under it.",
           "properties": {
             "operation_id": {
               "type": "string"
@@ -2971,13 +2971,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "An admitted root and the run it drives.",
+          "description": "An admitted run, the owner of its execution.",
           "properties": {
             "kind": {
               "const": "run",
               "type": "string"
             },
-            "root": {
+            "run": {
               "minLength": 1,
               "type": "string"
             },
@@ -2989,7 +2989,7 @@
           "required": [
             "kind",
             "session_id",
-            "root"
+            "run"
           ],
           "type": "object"
         },

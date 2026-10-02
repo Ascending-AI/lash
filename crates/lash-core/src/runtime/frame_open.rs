@@ -14,7 +14,7 @@
 //!   is accepted: after its commit when it commits, at once on a storeless
 //!   runtime, which has nothing to commit.
 //!
-//! A store-backed session's host opens are session commands its drive
+//! A store-backed session's host opens are session commands its shift
 //! applies at a turn boundary and commits with their settlement (FIG-4202).
 //!
 //! Initial-frame construction (`ensure_agent_frame_initialized_with_clock`,
@@ -80,7 +80,7 @@ impl LashRuntime {
     /// after every accepted open (FIG-4134, F5). A store-backed session's
     /// head is owned by its bound turn, so its host opens are
     /// [`SessionCommand::OpenAgentFrame`](crate::SessionCommand::OpenAgentFrame)
-    /// commands its drive applies and commits at a turn boundary (FIG-4202);
+    /// commands its shift applies and commits at a turn boundary (FIG-4202);
     /// calling this on one is refused with
     /// [`RuntimeErrorCode::SessionCommandRequired`].
     ///

@@ -5,7 +5,7 @@
 //! plugin-session failure, a store blip behind a plugin service — records
 //! nothing, so the turn handler fails its attempt retryably and the engine
 //! retries it: the retry replays the journaled model call and commits the
-//! root once. A refusal over the turn is an outcome: the root ends terminal
+//! run once. A refusal over the turn is an outcome: the run ends terminal
 //! with its typed failure after one attempt, and a redrive of the same turn
 //! id answers that failure without running the turn again. A failure the
 //! journal already holds is an outcome on every attempt, whatever its code.
@@ -137,21 +137,21 @@ fn minted_refusal() -> lash_core::PluginError {
 
 /// F1: a live fault in the finalize hook fails the turn handler's attempt
 /// retryably. The engine retries it, the retry replays the journaled model
-/// call and runs the hook again, and the root commits exactly once.
+/// call and runs the hook again, and the run commits exactly once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_live_finalize_fault_is_retried_by_the_engine_to_one_committed_root() -> Result<()> {
-    retried_to_one_committed_root("finalize-live-fault", session_blip).await
+async fn a_live_finalize_fault_is_retried_by_the_engine_to_one_committed_run() -> Result<()> {
+    retried_to_one_committed_run("finalize-live-fault", session_blip).await
 }
 
 /// F1 for a fault the plugin classes itself: a plugin-minted code it marks
 /// a live fault is retried the same way.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_minted_live_finalize_fault_is_retried_by_the_engine_to_one_committed_root() -> Result<()>
+async fn a_minted_live_finalize_fault_is_retried_by_the_engine_to_one_committed_run() -> Result<()>
 {
-    retried_to_one_committed_root("finalize-minted-live-fault", minted_live_fault).await
+    retried_to_one_committed_run("finalize-minted-live-fault", minted_live_fault).await
 }
 
-async fn retried_to_one_committed_root(
+async fn retried_to_one_committed_run(
     session_id: &'static str,
     fault: fn() -> lash_core::PluginError,
 ) -> Result<()> {
@@ -198,7 +198,7 @@ async fn retried_to_one_committed_root(
     assert_eq!(
         applications.len(),
         1,
-        "exactly one root committed: {applications:?}"
+        "exactly one run committed: {applications:?}"
     );
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
 
@@ -215,12 +215,12 @@ async fn retried_to_one_committed_root(
 }
 
 /// A live fault that recurs on every attempt spends the turn handler's
-/// retry policy: after `TURN_HANDLER_MAX_ATTEMPTS` the root's run pauses with
-/// the fault as its last failure, and the root is stalled. No attempt
+/// retry policy: after `TURN_HANDLER_MAX_ATTEMPTS` the run's execution pauses with
+/// the fault as its last failure, and the run is stalled. No attempt
 /// committed it or recorded a failure, and every retry replayed the journaled
 /// model call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_finalize_fault_on_every_attempt_pauses_the_root_run() -> Result<()> {
+async fn a_finalize_fault_on_every_attempt_pauses_the_run_execution() -> Result<()> {
     const SESSION: &str = "finalize-fault-pauses";
     const TURN: &str = "finalize-always-fails";
     let attempts = u32::try_from(lash_restate::TURN_HANDLER_MAX_ATTEMPTS)
@@ -261,7 +261,7 @@ async fn a_finalize_fault_on_every_attempt_pauses_the_root_run() -> Result<()> {
         }
     })
     .await
-    .expect("the root's run pauses once its attempts are spent");
+    .expect("the run's execution pauses once its attempts are spent");
 
     assert_eq!(paused.attempts, attempts);
     let (_, last_failure) = paused
@@ -283,23 +283,23 @@ async fn a_finalize_fault_on_every_attempt_pauses_the_root_run() -> Result<()> {
             .turn_input_applications()
             .await?
             .is_empty(),
-        "no attempt committed the root"
+        "no attempt committed the run"
     );
     Ok(())
 }
 
-/// A refusal in the finalize hook is an outcome: the root ends terminal
+/// A refusal in the finalize hook is an outcome: the run ends terminal
 /// after one attempt with the typed finalize failure, and a redrive of the
 /// same turn id answers that failure without running the turn again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_finalize_refusal_ends_the_root_terminal_with_its_typed_failure() -> Result<()> {
+async fn a_finalize_refusal_ends_the_run_terminal_with_its_typed_failure() -> Result<()> {
     refused_terminal("finalize-refusal", finalize_refusal).await
 }
 
 /// The same for a refusal the plugin classes itself: a plugin-minted code it
-/// marks an outcome ends the root terminal, never retried.
+/// marks an outcome ends the run terminal, never retried.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_minted_finalize_refusal_ends_the_root_terminal_with_its_typed_failure() -> Result<()> {
+async fn a_minted_finalize_refusal_ends_the_run_terminal_with_its_typed_failure() -> Result<()> {
     refused_terminal("finalize-minted-refusal", minted_refusal).await
 }
 
@@ -328,7 +328,7 @@ async fn refused_terminal(
         .id(TURN)
         .output()
         .await
-        .expect_err("a finalize refusal ends the root terminal");
+        .expect_err("a finalize refusal ends the run terminal");
     assert_finalize_refusal(&refused);
     assert_eq!(finalize_calls.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
@@ -377,9 +377,9 @@ fn assert_finalize_refusal(error: &EmbedError) {
 /// plugin-session fault, which the checkpoint's journaled outcome records;
 /// the first attempt is then interrupted by a live finalize fault. The
 /// engine's retry replays the recorded checkpoint failure and settles it as
-/// the root's failed turn, and a redrive of the same turn id answers it.
+/// the run's failed turn, and a redrive of the same turn id answers it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault() -> Result<()> {
+async fn a_journaled_failure_settles_the_run_failed_after_a_live_finalize_fault() -> Result<()> {
     const SESSION: &str = "finalize-journaled-failure";
     const TURN: &str = "journaled-failure";
     let checkpoint_calls = Arc::new(AtomicUsize::new(0));
@@ -430,9 +430,9 @@ async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault
         .await?;
     assert_journaled_failure(&redriven, false);
     assert_eq!(
-        redriven.root().cloned(),
-        settled.root().cloned(),
-        "the redrive answers the same root"
+        redriven.run().cloned(),
+        settled.run().cloned(),
+        "the redrive answers the same run"
     );
     assert_eq!(
         checkpoint_calls.load(Ordering::SeqCst),
@@ -445,7 +445,7 @@ async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault
     Ok(())
 }
 
-/// The root settled failed on the recorded checkpoint failure. The live
+/// The run settled failed on the recorded checkpoint failure. The live
 /// report names it; a report rebuilt from the store for a redrive is thin
 /// (D1 §1.5 3b) and carries the typed stop alone.
 #[track_caller]
@@ -453,11 +453,11 @@ fn assert_journaled_failure(settled: &crate::SendOutcome, live: bool) {
     assert_eq!(
         settled.status(),
         crate::TurnStatus::Failed,
-        "the journaled checkpoint failure settles the root failed: {settled:?}"
+        "the journaled checkpoint failure settles the run failed: {settled:?}"
     );
     let report = &settled
         .output()
-        .expect("a failed root carries its settled turn")
+        .expect("a failed run carries its settled turn")
         .result;
     assert!(
         matches!(

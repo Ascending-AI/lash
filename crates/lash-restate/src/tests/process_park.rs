@@ -1,7 +1,7 @@
 //! A diverged Restate process body parks the process (FIG-3674, R0b; the
 //! Restate leg of the engine obligation L-E6).
 //!
-//! The laws drive the real `LashProcessWorkflow/run` handler through the
+//! The laws execute the real `LashProcessWorkflow/run` handler through the
 //! Restate protocol on the in-tree Endpoint double, with Restate's own retry:
 //! each retry replays the journal the runtime acknowledged
 //! ([`encode_journal_retry`]). A body that refuses to replay its journal

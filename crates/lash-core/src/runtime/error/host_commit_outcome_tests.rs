@@ -62,8 +62,8 @@ fn park_and_close_preserve_store_contention_as_typed_store_error() {
 }
 
 #[test]
-fn a_superseded_drive_fence_is_a_superseded_commit_on_every_commit_path() {
-    let stale = || StoreError::StaleDriveFence {
+fn a_superseded_shift_fence_is_a_superseded_commit_on_every_commit_path() {
+    let stale = || StoreError::StaleShiftFence {
         session_id: crate::SessionId::from("fenced"),
         fence_epoch: 1,
         current_epoch: 2,
@@ -74,7 +74,7 @@ fn a_superseded_drive_fence_is_a_superseded_commit_on_every_commit_path() {
     ] {
         assert_eq!(mapped.code, RuntimeErrorCode::StoreCommitSuperseded);
         assert!(!mapped.is_retryable());
-        assert!(!crate::runtime::drive::engine_retries(&mapped));
+        assert!(!crate::runtime::shift::engine_retries(&mapped));
         assert!(mapped.message.contains("fenced"), "{mapped:?}");
     }
 }

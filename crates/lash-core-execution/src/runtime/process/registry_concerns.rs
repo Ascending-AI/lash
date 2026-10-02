@@ -545,7 +545,7 @@ pub trait ProcessLifecycle: Send + Sync {
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
-    /// This is the single durable scope-close fact, written for a turn root,
+    /// This is the single durable scope-close fact, written for a turn run,
     /// a session operation, a process or a session. The row carries no action list. On the SQL tiers the write
     /// must ride the same transaction as the fact that ended the scope, so a
     /// child either commits before the row and is swept, or after it and is
@@ -603,7 +603,7 @@ pub trait ProcessLifecycle: Send + Sync {
     ///
     /// A session's plan also owes every such child of a turn or session-operation
     /// scope inside the session that has no ledger row of its own (FIG-3948).
-    /// Such a scope is a turn the session never admitted as a root: no root
+    /// Such a scope is a turn the session never admitted as a root: no run
     /// close records its row, and the session's close is the proof that it
     /// can no longer become one. A scope inside the session that has its own
     /// row is its own plan's to sweep.

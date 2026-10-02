@@ -31,8 +31,8 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) state: String,
     pub(crate) input_json: String,
     pub(crate) enqueued_at_ms: u64,
-    /// The root whose admission holds the row; `None` while it is open.
-    pub(crate) admitted_root: Option<String>,
+    /// The run whose admission holds the row; `None` while it is open.
+    pub(crate) admitted_run: Option<String>,
     pub(crate) run_spec_hash: Option<String>,
     /// When the row's tombstone was written; `None` until it is terminal.
     pub(crate) terminal_at_ms: Option<u64>,
@@ -51,7 +51,7 @@ pub(crate) fn pending_turn_input_row_from_sql(
         state: row.get(5)?,
         input_json: row.get(6)?,
         enqueued_at_ms: u64_from_sql("PendingTurnInput", "enqueued_at_ms", row.get(7)?)?,
-        admitted_root: row.get(8)?,
+        admitted_run: row.get(8)?,
         run_spec_hash: row.get(10)?,
         terminal_at_ms: row
             .get::<_, Option<i64>>(11)?
@@ -86,12 +86,12 @@ pub(crate) fn pending_turn_input_from_row(
 pub(crate) fn pending_turn_input_read_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
-    let admitted_root = row.admitted_root.clone();
+    let admitted_run = row.admitted_run.clone();
     let input = pending_turn_input_from_row(row)?;
-    Ok(match admitted_root {
-        Some(root) => lash_core_execution::PendingTurnInputRead::admitted(
+    Ok(match admitted_run {
+        Some(run) => lash_core_execution::PendingTurnInputRead::admitted(
             input,
-            lash_core_execution::TurnId::parse(root)?,
+            lash_core_execution::TurnId::parse(run)?,
         ),
         None => lash_core_execution::PendingTurnInputRead::open(input),
     })

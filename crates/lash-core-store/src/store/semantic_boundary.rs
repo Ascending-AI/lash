@@ -100,12 +100,12 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         commit_budget: _, // host operational policy
         session_id,
         expected_head_revision: _, // CAS is excluded from replay identity
-        drive_fence: _,            // transaction predicate, not content
-        root_terminal: _,          // a turn root's end; no boundary carries one
-        park_root: _,              // a store instruction, not content
+        shift_fence: _,            // transaction predicate, not content
+        run_terminal: _,           // a turn run's end; no boundary carries one
+        park_run: _,               // a store instruction, not content
         frame_transition: _,       // a store instruction derived from the graph
         config,
-        execution_config, // the root's view: the identity's config when present
+        execution_config, // the run's view: the identity's config when present
         graph,
         graph_base_leaf_node_id: _, // resident head fact, not request content
         checkpoint: _,              // rebuilt baseline, not the request

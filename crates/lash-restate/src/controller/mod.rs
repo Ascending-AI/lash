@@ -80,8 +80,8 @@ struct RestateTraceObserver {
 
 #[derive(Clone)]
 struct CurrentEffectTrace {
-    /// What the drive that issued the effect lent it: the controller's own
-    /// records stand where that drive stands.
+    /// What the shift that issued the effect lent it: the controller's own
+    /// records stand where that shift stands.
     issue: lash_core::facade_support::StepIssue,
     standing: lash_core::facade_support::TraceStanding,
     context: lash_trace::TraceContext,
@@ -155,16 +155,16 @@ pub struct RestateEffectControllerOptions {
     run_retry_policy: Option<RunRetryPolicy>,
     segment_effect_budget: u64,
     journaled_effect_byte_budget: Option<u64>,
-    /// Whether this controller drives a process segment, whose waits that
+    /// Whether this controller executes a process segment, whose waits that
     /// observe no turn race the segment's durable cancel promise and whose
     /// cancel peeks read it (FIG-3673).
     process_cancel: context::ProcessCancelRace,
-    /// The generation that admitted the segment this controller drives: its
+    /// The generation that admitted the segment this controller executes: its
     /// signal waits also race the segment's hand-over promise, and hand over
     /// to a drain wake naming this generation (FIG-3799). Shared, so every
     /// controller future that holds the options stays a pointer wider.
     segment_generation: Option<Arc<lash_core::engine::BuildGeneration>>,
-    /// The cancel fact of the effect-group child this controller drives
+    /// The cancel fact of the effect-group child this controller executes
     /// (FIG-3904): a wait that observes no turn races it as a journaled arm,
     /// [`observe_group_child_cancel`](RuntimeEffectController::observe_group_child_cancel)
     /// is a journaled peek of it, and a recorded step body watches it live.
@@ -238,7 +238,7 @@ impl RestateEffectControllerOptions {
         self
     }
 
-    /// Mark the controller as a process segment's drive (FIG-3673): a wait
+    /// Mark the controller as a process segment's shift (FIG-3673): a wait
     /// it issues that observes no turn races the segment's durable cancel
     /// promise, and [`observe_process_cancel`](RuntimeEffectController::observe_process_cancel)
     /// is a journaled peek of that promise. Only the process workflow sets
@@ -248,7 +248,7 @@ impl RestateEffectControllerOptions {
         self
     }
 
-    /// Mark a process segment's drive as admitted under `generation`
+    /// Mark a process segment's shift as admitted under `generation`
     /// (FIG-3799): its signal waits race the segment's hand-over promise as
     /// well as its cancel promise, and hand the wait to a successor when the
     /// drain wakes this generation. Only the process workflow sets it.
@@ -1121,8 +1121,8 @@ where
     }
 
     /// A journaled peek of the segment workflow's own cancel promise, for a
-    /// process segment's drive, which never reads `lent_stop`. Any other
-    /// controller drives no process segment and records no process
+    /// process segment's shift, which never reads `lent_stop`. Any other
+    /// controller executes no process segment and records no process
     /// cancellation fact, so it answers from the stop (FIG-3673).
     async fn observe_process_cancel(
         &self,
@@ -1634,7 +1634,7 @@ fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWa
     }
 }
 
-/// Run a journaled effect's body, beginning a spending body's usage run: the
+/// Run a journaled effect's body, beginning a spending body's usage meter: the
 /// answer carries what the controller journals beside the outcome.
 async fn execute_restate_journaled_effect(
     envelope: RuntimeEffectEnvelope,

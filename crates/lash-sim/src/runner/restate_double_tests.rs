@@ -53,7 +53,7 @@ async fn pending_tool_completion_proof_runs_on_the_restate_server_double() {
 /// The sim's engine installs no wall-clock reconcile interval: a
 /// deployment's own interval would relay due obligations wherever its store
 /// reads happened to finish. A scenario
-/// reconciles through `SessionDriver::reconcile` when it wants a pass; one
+/// reconciles through `SessionShifts::reconcile` when it wants a pass; one
 /// that never asks sees no reconcile ask.
 #[tokio::test]
 async fn the_server_double_runs_no_wall_clock_reconcile() {

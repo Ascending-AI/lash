@@ -29,7 +29,7 @@ fn cancel_request(request_id: &str, mode: TurnCancelMode) -> TurnCancelRequest {
     TurnCancelRequest::new(TurnAddress::new(SESSION, TURN), request_id, None).mode(mode)
 }
 
-fn driver_for<C>(context: Arc<C>) -> TurnWorkDriver
+fn shifts_for<C>(context: Arc<C>) -> TurnWorkDriver
 where
     Arc<C>: RestateControllerContext<'static>,
     C: Send + Sync + 'static,
@@ -98,7 +98,7 @@ async fn after_step_during_a_parked_sleep_lets_the_timer_finish() {
         .await
         .expect("the configured owner starts the parked sleep");
 
-    let receipt = driver_for(Arc::clone(&context))
+    let receipt = shifts_for(Arc::clone(&context))
         .request_cancel(cancel_request("stop-in-sleep", TurnCancelMode::AfterStep))
         .await
         .expect("request an after-step stop during the sleep");
@@ -137,7 +137,7 @@ async fn immediate_during_a_parked_sleep_still_aborts_at_wake() {
         .await
         .expect("the configured owner starts the parked sleep");
 
-    let receipt = driver_for(Arc::clone(&context))
+    let receipt = shifts_for(Arc::clone(&context))
         .request_cancel(cancel_request("abort-in-sleep", TurnCancelMode::Immediate))
         .await
         .expect("request an immediate abort during the sleep");
@@ -170,7 +170,7 @@ async fn escalating_a_deferred_stop_aborts_the_parked_sleep() {
     tokio::time::timeout(Duration::from_secs(10), context.await_sleep_started())
         .await
         .expect("the configured owner starts the parked sleep");
-    let driver = driver_for(Arc::clone(&context));
+    let driver = shifts_for(Arc::clone(&context));
 
     let receipt = driver
         .request_cancel(cancel_request("stop-first", TurnCancelMode::AfterStep))
@@ -239,7 +239,7 @@ async fn after_step_during_a_parked_await_event_keeps_waiting_for_the_event() {
     };
     await_gate_registration(&context.turn_cancel_gate).await;
 
-    let receipt = driver_for(Arc::clone(&context))
+    let receipt = shifts_for(Arc::clone(&context))
         .request_cancel(cancel_request("stop-in-await", TurnCancelMode::AfterStep))
         .await
         .expect("request an after-step stop during the await-event");
@@ -301,7 +301,7 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
             .with_turn_cancel_scope(admitted_scope),
     )
     .await
-    .expect_err("a root cancellation scope must not guard a follow-on physical turn");
+    .expect_err("a run cancellation scope must not guard a follow-on physical turn");
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::EngineTurnCancelScopeMismatch
@@ -347,7 +347,7 @@ async fn after_step_during_a_parked_process_await_lets_the_process_finish() {
     };
     await_gate_registration(&context.turn_cancel_gate).await;
 
-    let receipt = driver_for(Arc::clone(&context))
+    let receipt = shifts_for(Arc::clone(&context))
         .request_cancel(cancel_request("stop-in-process", TurnCancelMode::AfterStep))
         .await
         .expect("request an after-step stop during the process await");
@@ -396,7 +396,7 @@ async fn gate_resolutions_carry_the_request_mode_into_the_wake() {
         ),
     ] {
         let context = Arc::new(RecordingContext::default());
-        driver_for(Arc::clone(&context))
+        shifts_for(Arc::clone(&context))
             .request_cancel(cancel_request("pin-wake-mode", mode))
             .await
             .expect("request a stop against an idle turn");

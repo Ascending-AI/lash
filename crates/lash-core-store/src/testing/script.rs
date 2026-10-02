@@ -14,7 +14,7 @@
 //! A rule that never fired fails the law when its script drops, so a law
 //! cannot pass without exercising what it armed.
 use super::gate::{GATE_DEADLINE, Gate};
-use crate::store::{MaintenanceFailure, RootIntentRefused, StoreError};
+use crate::store::{MaintenanceFailure, RunIntentRefused, StoreError};
 use lash_sansio::sync::MutexExt as _;
 use std::future::Future;
 use std::sync::{Arc, Mutex, Weak};
@@ -157,7 +157,7 @@ impl<R: Default> ScriptedError for MaintenanceFailure<R> {
     }
 }
 
-impl ScriptedError for RootIntentRefused {
+impl ScriptedError for RunIntentRefused {
     fn from_store_fault(error: StoreError) -> Self {
         Self::Store(error)
     }
@@ -688,11 +688,11 @@ mod tests {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         script
-            .on(StoreOp::admit_root)
+            .on(StoreOp::admit_run)
             .nth(2)
             .before()
             .fail(permanent);
-        let call = || store.call(StoreOp::admit_root, store.inner().work());
+        let call = || store.call(StoreOp::admit_run, store.inner().work());
         assert_eq!(call().await.expect("the first call passes"), 1);
         assert!(matches!(
             call().await,
@@ -702,23 +702,23 @@ mod tests {
         assert_eq!(
             rendered(&script),
             [
-                "a:admit_root#1 before entered",
-                "a:admit_root#1 after returned",
-                "a:admit_root#2 before fail(permanent)",
-                "a:admit_root#3 before entered",
-                "a:admit_root#3 after returned",
+                "a:admit_run#1 before entered",
+                "a:admit_run#1 after returned",
+                "a:admit_run#2 before fail(permanent)",
+                "a:admit_run#3 before entered",
+                "a:admit_run#3 after returned",
             ]
         );
-        assert_eq!(script.calls(StoreOp::admit_root), 3);
+        assert_eq!(script.calls(StoreOp::admit_run), 3);
     }
 
     #[tokio::test]
     async fn a_lost_reply_keeps_the_stores_work_and_answers_a_transient_fault() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
-        script.on(StoreOp::admit_root).after().lose_reply();
+        script.on(StoreOp::admit_run).after().lose_reply();
         let lost = store
-            .call(StoreOp::admit_root, store.inner().work())
+            .call(StoreOp::admit_run, store.inner().work())
             .await
             .expect_err("the reply is lost");
         assert!(matches!(lost, StoreError::StorageFailure { .. }));
@@ -731,8 +731,8 @@ mod tests {
         assert_eq!(
             rendered(&script),
             [
-                "a:admit_root#1 before entered",
-                "a:admit_root#1 after fail(transient)",
+                "a:admit_run#1 before entered",
+                "a:admit_run#1 after fail(transient)",
             ]
         );
     }
@@ -810,7 +810,7 @@ mod tests {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         let held = script
-            .on_each(&[StoreOp::load_turn_park.into(), StoreOp::admit_root.into()])
+            .on_each(&[StoreOp::load_turn_park.into(), StoreOp::admit_run.into()])
             .by("a")
             .before()
             .pause();
@@ -820,7 +820,7 @@ mod tests {
             .call(StoreOp::lookup_session, store.inner().work())
             .await
             .expect("an operation the rule does not name passes");
-        for (op, arrivals) in [(StoreOp::load_turn_park, 1), (StoreOp::admit_root, 2)] {
+        for (op, arrivals) in [(StoreOp::load_turn_park, 1), (StoreOp::admit_run, 2)] {
             let mut call = std::pin::pin!(store.call(op, store.inner().work()));
             held.reached_by(&mut call, arrivals).await;
             held.open_one();
@@ -890,8 +890,8 @@ mod tests {
     async fn dropping_the_script_lets_every_held_call_through() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
-        let held = script.on(StoreOp::admit_root).before().pause();
-        let mut call = std::pin::pin!(store.call(StoreOp::admit_root, store.inner().work()));
+        let held = script.on(StoreOp::admit_run).before().pause();
+        let mut call = std::pin::pin!(store.call(StoreOp::admit_run, store.inner().work()));
         held.reached_by(&mut call, 1).await;
         drop(script);
         assert_eq!(call.await.expect("the call passes"), 1);
@@ -899,14 +899,14 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(
-        expected = "rule `admit_root#2 before fail(transient)`, `b:load_turn_park#1.. after pause` \
-                    never fired; trace: a:admit_root#1 before entered, a:admit_root#1 after returned"
+        expected = "rule `admit_run#2 before fail(transient)`, `b:load_turn_park#1.. after pause` \
+                    never fired; trace: a:admit_run#1 before entered, a:admit_run#1 after returned"
     )]
     async fn a_rule_that_never_fired_fails_the_law_with_the_trace() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         script
-            .on(StoreOp::admit_root)
+            .on(StoreOp::admit_run)
             .nth(2)
             .before()
             .fail(transient);
@@ -917,33 +917,33 @@ mod tests {
             .after()
             .pause();
         store
-            .call(StoreOp::admit_root, store.inner().work())
+            .call(StoreOp::admit_run, store.inner().work())
             .await
             .expect("the first call passes");
     }
 
     #[tokio::test(start_paused = true)]
     #[should_panic(
-        expected = "`admit_root` was called 1 of 2 times within 10s; trace: a:admit_root#1 before entered"
+        expected = "`admit_run` was called 1 of 2 times within 10s; trace: a:admit_run#1 before entered"
     )]
     async fn waiting_for_a_call_that_never_comes_fails_at_the_deadline_with_the_trace() {
         let script = Script::new();
         let store = script.wrap("a", Arc::new(Counter::default()));
         store
-            .call(StoreOp::admit_root, store.inner().work())
+            .call(StoreOp::admit_run, store.inner().work())
             .await
             .expect("the call passes");
-        script.called(StoreOp::admit_root, 1).await;
-        script.called(StoreOp::admit_root, 2).await;
+        script.called(StoreOp::admit_run, 1).await;
+        script.called(StoreOp::admit_run, 2).await;
     }
 
     #[tokio::test(start_paused = true)]
     #[should_panic(
-        expected = "gate `admit_root#1 before pause`: 0 of 1 arrivals within 10s; trace: (no calls)"
+        expected = "gate `admit_run#1 before pause`: 0 of 1 arrivals within 10s; trace: (no calls)"
     )]
     async fn a_script_gate_nothing_reaches_fails_with_its_rule_and_the_trace() {
         let script = Script::new();
-        let held = script.on(StoreOp::admit_root).before().pause();
+        let held = script.on(StoreOp::admit_run).before().pause();
         held.reached(1).await;
     }
 
@@ -956,7 +956,7 @@ mod tests {
             .before()
             .fail(|| StoreError::Contended);
         script
-            .on(StoreOp::open_root_intent)
+            .on(StoreOp::open_run_intent)
             .before()
             .fail(|| StoreError::Contended);
         let vacuum = store
@@ -971,14 +971,14 @@ mod tests {
         ));
         assert_eq!(vacuum.partial, VacuumReport::default());
         let verb = store
-            .call(StoreOp::open_root_intent, async {
-                Ok::<(), RootIntentRefused>(())
+            .call(StoreOp::open_run_intent, async {
+                Ok::<(), RunIntentRefused>(())
             })
             .await
             .expect_err("the verb fails");
         assert!(matches!(
             verb,
-            RootIntentRefused::Store(StoreError::Contended)
+            RunIntentRefused::Store(StoreError::Contended)
         ));
     }
 }

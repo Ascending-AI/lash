@@ -10,7 +10,7 @@
 //!
 //! Arming runs on the first park **and on every redrive of the parked turn**.
 //! It has to: a recorded attempt body does not re-run when its turn is
-//! re-driven, so the tool that named the resolver never gets a second chance to
+//! redriven, so the tool that named the resolver never gets a second chance to
 //! arm it, and an in-process watcher does not survive a crash. Because the
 //! declaration is journaled with the pending launch, the redrive re-derives the
 //! identical arming from the identical bytes, and the boundary's own idempotence

@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 #[path = "lease_and_admissions/acceptance_window.rs"]
 mod acceptance_window;
@@ -51,7 +51,7 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
         .expect("open the turn's handler");
     let turn = lash_core::task::spawn(async move {
         let assembled = runtime
-            .drive_turn(
+            .execute_turn(
                 TurnInput::text("cancel after partial stream"),
                 TurnOptions::new(turn_cancel, handler.scoped())
                     .with_turn_events(&turn_events_for_task),
@@ -184,7 +184,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -268,7 +268,7 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("retry a pre-response transport failure"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -364,7 +364,7 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("defer to a provider retry-after"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -487,7 +487,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("retry after paid output"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -601,7 +601,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         .await
         .expect("open the follow-up handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("follow up after the failed generation"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -687,7 +687,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .await
         .expect("open the first worker's handler");
     let first_error = first_worker
-        .drive_turn(
+        .execute_turn(
             input.clone(),
             TurnOptions::new(
                 CancellationToken::new(),
@@ -724,7 +724,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .await
         .expect("open the replacement handler");
     let replayed = Box::pin(
-        replacement.drive_turn(
+        replacement.execute_turn(
             input,
             TurnOptions::new(
                 CancellationToken::new(),
@@ -779,7 +779,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .await
         .expect("open the late-input handler");
     let drained = Box::pin(
-        next_turn_worker.drive_one_admitted_queued_root(TurnOptions::new(
+        next_turn_worker.execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             lash_core::testing::LayeredEffectHost::layer_scoped(
                 handler.scoped(),

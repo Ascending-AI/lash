@@ -39,7 +39,7 @@
 //! started on. [`LaneClass`] states which names a service binds:
 //!
 //! - A **pinned** service bears a journal that only its own build may
-//!   replay. The process segment workflow and the session driver's
+//!   replay. The process segment workflow and the `SessionShifts`'s
 //!   `LashSession` and `LashTurn` bind twice: under their **stable** name
 //!   (`LashProcessWorkflow`), which Restate
 //!   hands to the newest build, and under its **generation** name
@@ -64,7 +64,7 @@
 //! by service name, so a recomputed name would start the work a second time.
 //!
 //! A host's own services are named once, under their stable names. A host
-//! submits work to the engine and never drives it (ADR 0104): no host handler
+//! submits work to the engine and never executes it (ADR 0104): no host handler
 //! runs a lash turn, so no host service carries a journal that needs a
 //! generation lane. A controller or effect host a host builds still names its
 //! build's generation (FIG-4454): an effect group it opens dispatches on that
@@ -96,8 +96,8 @@ use crate::ingress::RestateIngressClient;
 use crate::object_state::FleetView;
 use crate::process::{LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateProcessRunner};
 use crate::process_attach::{LashProcessAttach as _, LashProcessAttachImpl};
-use crate::session_driver::{
-    LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionDriverSlot,
+use crate::session_shifts::{
+    LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionShiftsSlot,
 };
 use crate::usage_accounting::LashUsageAccounting as _;
 
@@ -385,10 +385,10 @@ lash_services! {
     EffectGroupPayload => "EffectGroupPayload", Shared, object(crate::effect_group::EFFECT_GROUP_PAYLOAD_FAMILY);
     /// Sends an effect group's children and runs each one.
     EffectGroupDispatch => "EffectGroupDispatch", GenerationOnly;
-    /// One session's drive: admits roots and runs each in its `LashTurn`
+    /// One session's shift: admits runs and runs each in its `LashTurn`
     /// (FIG-3600).
-    SessionDriver => "LashSession", Pinned;
-    /// One admitted root: its seal, turns and commits (FIG-3600).
+    SessionShifts => "LashSession", Pinned;
+    /// One admitted run: its seal, turns and commits (FIG-3600).
     TurnDriver => "LashTurn", Pinned;
     /// One usage owner's accounting continuation: projects each spending
     /// effect's settlement, and drains the owner (ADR 0125).
@@ -808,7 +808,7 @@ pub(crate) struct LashServiceParts<'a, R> {
     /// The process workflow over the deployment's process worker.
     pub(crate) process_workflow: LashProcessWorkflowImpl<R>,
     /// Where the session handlers find the driver the core installs.
-    pub(crate) session_driver: RestateSessionDriverSlot,
+    pub(crate) session_shifts: RestateSessionShiftsSlot,
     /// The deployment's drain generation: every journal-bearing handler
     /// records it as its journal's first command, and each pinned service is
     /// bound under its lane.
@@ -849,7 +849,7 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
         sessions,
         attachments,
         process_workflow,
-        session_driver,
+        session_shifts,
         build_generation,
         namespace,
         fleet,
@@ -866,17 +866,17 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
     let run_options = HandlerOptions::new()
         .retry_policy_max_attempts(process_workflow.retry_max_attempts())
         .retry_policy_pause_on_max_attempts();
-    // Both session services run lash turns: a parked root fails its attempt
+    // Both session services run lash turns: a parked run fails its attempt
     // retryably, and the handler pauses after its attempt budget with its
     // journal kept.
     let session = LashSessionImpl::new(
-        session_driver.clone(),
+        session_shifts.clone(),
         effect_host.authority_id().clone(),
         build_generation.clone(),
         &namespace,
     );
     let turn = LashTurnImpl::new(
-        session_driver,
+        session_shifts,
         effect_host.authority_id().clone(),
         build_generation.clone(),
         &namespace,
@@ -967,11 +967,11 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                     claimed(),
                     &wire,
                 ),
-                LashService::SessionDriver => bind_as(
+                LashService::SessionShifts => bind_as(
                     builder,
                     session.on_route(route.clone()).serve(),
                     &name,
-                    claimed().handler("drive", crate::turn_handler_options()),
+                    claimed().handler("shift", crate::turn_handler_options()),
                     &wire,
                 ),
                 LashService::TurnDriver => bind_as(

@@ -13,13 +13,13 @@
 //!
 //! This module holds the backend-neutral decisions every store and the
 //! runtime apply: which admissions the fact blocks, which head writes it refuses,
-//! and whether a recovering drive may still run it.
+//! and whether a recovering shift may still run it.
 
 use crate::{FrameNodeId, TurnId};
 
 use super::{PhysicalTurn, StoreError};
 
-/// How many times a drive may recover a pending follow-on before the
+/// How many times a shift may recover a pending follow-on before the
 /// follow-on is committed as failed instead (ADR 0101 §3, recovery bound).
 pub const DEFAULT_MAX_FOLLOW_ON_RECOVERIES: u32 = 3;
 
@@ -33,7 +33,7 @@ pub const DEFAULT_MAX_FOLLOW_ON_RECOVERIES: u32 = 3;
 #[serde(deny_unknown_fields)]
 pub struct PendingFollowOn {
     /// The follow-on's turn id: the logical run's root turn plus the
-    /// follow-on's physical-turn index, so the root is recoverable from it.
+    /// follow-on's physical-turn index, so the run is recoverable from it.
     pub follow_on_turn_id: TurnId,
     /// The frame the follow-on runs in. Every head write keeps it current.
     pub frame_id: FrameNodeId,
@@ -47,7 +47,7 @@ pub struct PendingFollowOn {
     /// on from the history that turn committed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation: Option<RunContinuation>,
-    /// The shape the logical run's root resolved under, recorded at the
+    /// The shape the logical run's run resolved under, recorded at the
     /// switch so a recovered follow-on runs under it — its protocol turn
     /// options included — rather than resolving the session's current
     /// defaults fresh (FIG-3877). It also carries the logical run's
@@ -57,7 +57,7 @@ pub struct PendingFollowOn {
     /// Frame switches in this chain so far, carried across a crash so the
     /// chain bound does not restart at zero.
     pub chain_depth: u32,
-    /// Recoveries so far. Raised once per recovering drive, never reset.
+    /// Recoveries so far. Raised once per recovering shift, never reset.
     pub attempts: u32,
 }
 
@@ -103,13 +103,13 @@ pub struct SuspendedCell {
 }
 
 impl PendingFollowOn {
-    /// The continuation the turn of `physical_ordinal` of `root` owes its run
+    /// The continuation the turn of `physical_ordinal` of `run` owes its execution
     /// after ending at a segment boundary in `frame_id`, the frame it ran in
     /// (FIG-4739). A boundary is no frame switch: `chain_depth` is the depth
-    /// the owing turn itself ran at. `resolved` is the shape the run's root
+    /// the owing turn itself ran at. `resolved` is the shape the execution's run
     /// resolved under, as for a switch.
     pub fn after_boundary(
-        root: &TurnId,
+        run: &TurnId,
         physical_ordinal: u64,
         frame_id: FrameNodeId,
         continuation: RunContinuation,
@@ -119,7 +119,7 @@ impl PendingFollowOn {
         let next =
             StoreError::checked_monotonic_increment("follow_on_physical_index", physical_ordinal)?;
         Ok(Self {
-            follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
+            follow_on_turn_id: PhysicalTurn::derive_turn_id(run, next),
             frame_id,
             task: String::new(),
             continuation: Some(continuation),
@@ -129,13 +129,13 @@ impl PendingFollowOn {
         })
     }
 
-    /// The follow-on of physical turn `physical_ordinal` of `root` switching to
+    /// The follow-on of physical turn `physical_ordinal` of `run` switching to
     /// `frame_id` with `task`. `chain_depth` counts this switch; `resolved`
-    /// is the shape the logical run's root resolved under, recorded so a
+    /// is the shape the logical run's run resolved under, recorded so a
     /// recovered follow-on inherits it (FIG-3877) and is recovered under
     /// its bound.
     pub fn after_switch(
-        root: &TurnId,
+        run: &TurnId,
         physical_ordinal: u64,
         frame_id: FrameNodeId,
         task: impl Into<String>,
@@ -145,7 +145,7 @@ impl PendingFollowOn {
         let next =
             StoreError::checked_monotonic_increment("follow_on_physical_index", physical_ordinal)?;
         Ok(Self {
-            follow_on_turn_id: PhysicalTurn::derive_turn_id(root, next),
+            follow_on_turn_id: PhysicalTurn::derive_turn_id(run, next),
             frame_id,
             task: task.into(),
             continuation: None,
@@ -156,25 +156,25 @@ impl PendingFollowOn {
     }
 
     /// The root turn of the logical run this follow-on continues.
-    pub fn root_turn_id(&self) -> TurnId {
+    pub fn run_turn_id(&self) -> TurnId {
         PhysicalTurn::split_turn_id(&self.follow_on_turn_id).0
     }
 
-    /// The root a drive admits this follow-on's recovery under: named by
+    /// The run a shift admits this follow-on's recovery under: named by
     /// its recovery count, so every recovery runs as an execution of its
-    /// own. Its evidence and its park name [`Self::root_turn_id`], the
-    /// logical root the follow-on continues.
-    pub fn recovery_root(&self) -> TurnId {
+    /// own. Its evidence and its park name [`Self::run_turn_id`], the
+    /// logical run the follow-on continues.
+    pub fn recovery_run(&self) -> TurnId {
         TurnId::prefixed(
             "follow-on:",
             format_args!("{}#{}", self.follow_on_turn_id, self.attempts),
         )
     }
 
-    /// Whether `root` is the admitted root of one of this follow-on's
-    /// recoveries ([`Self::recovery_root`] at any recovery count).
-    pub fn names_recovery(&self, root: &TurnId) -> bool {
-        root.as_str()
+    /// Whether `run` is the admitted run of one of this follow-on's
+    /// recoveries ([`Self::recovery_run`] at any recovery count).
+    pub fn names_recovery(&self, run: &TurnId) -> bool {
+        run.as_str()
             .strip_prefix("follow-on:")
             .and_then(|rest| rest.strip_prefix(self.follow_on_turn_id.as_str()))
             .and_then(|rest| rest.strip_prefix('#'))
@@ -200,9 +200,9 @@ impl PendingFollowOn {
         }
     }
 
-    /// What a drive that recovers this fact may do: raise `attempts` and run
+    /// What a shift that recovers this fact may do: raise `attempts` and run
     /// the follow-on, or, once the raised count would pass the bound its
-    /// root recorded, commit it failed with [`FollowOnRecovery::Exhausted`].
+    /// run recorded, commit it failed with [`FollowOnRecovery::Exhausted`].
     pub fn recovery(&self) -> Result<FollowOnRecovery, StoreError> {
         let raised = self.raised()?;
         Ok(
@@ -214,7 +214,7 @@ impl PendingFollowOn {
         )
     }
 
-    /// This fact with `attempts` raised by one: what a recovering drive
+    /// This fact with `attempts` raised by one: what a recovering shift
     /// writes before the follow-on's first effect.
     pub fn raised(&self) -> Result<Self, StoreError> {
         let attempts = u32::try_from(StoreError::checked_monotonic_increment(
@@ -232,7 +232,7 @@ impl PendingFollowOn {
     }
 }
 
-/// A recovering drive's decision over a pending follow-on.
+/// A recovering shift's decision over a pending follow-on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FollowOnRecovery {
     /// Run the follow-on; the value carries the raised attempt count.
@@ -242,21 +242,21 @@ pub enum FollowOnRecovery {
     Exhausted(PendingFollowOn),
 }
 
-/// What a follow-on recovery root records before its turn, as its
-/// `drive-follow-on` step (FIG-4361): the recovery its decision took on the
+/// What a follow-on recovery run records before its turn, as its
+/// `shift-follow-on` step (FIG-4361): the recovery its decision took on the
 /// fact the head owed, or that the head owed the follow-on no longer. The
-/// root drives the recorded answer, so a replay never decides from the head
+/// run executes the recorded answer, so a replay never decides from the head
 /// it finds.
 ///
 /// A run or an exhaustion also records the head its follow-on's turn runs
 /// on, `base`, and that turn's index, `turn_index` (FIG-4380). The step's
-/// body retains the base as the session's latest admission's, as a root's
-/// admission retains its own (FIG-3682), and the root adopts it and pins the
+/// body retains the base as the session's latest admission's, as a run's
+/// admission retains its own (FIG-3682), and the run adopts it and pins the
 /// index before its turn, so a replay after the follow-on's own commit moved
 /// the head runs the turn it recorded.
 ///
 /// The decision is also the admission of the follow-on's turn by the build
-/// that recovers it, so it records `plugins` as a root's admission does
+/// that recovers it, so it records `plugins` as a run's admission does
 /// (FIG-4747, FIG-4739): that build's plugin composition and the writer
 /// format chosen for each plugin. A run that crossed a segment boundary
 /// adopts the plugins of the build its continuation is admitted on, and
@@ -279,15 +279,15 @@ pub enum FollowOnRecoveryAnswer {
         turn_index: u64,
         plugins: super::plugin_writers::PluginAdmission,
     },
-    /// The head owed the follow-on no longer: another driver answered it,
-    /// and the root runs nothing.
+    /// The head owed the follow-on no longer: another shift answered it,
+    /// and the run executes nothing.
     Ceded,
 }
 
 /// The admission a store is asked to make while it reads the head's fact.
 #[derive(Clone, Copy, Debug)]
 pub enum FollowOnAdmission<'a> {
-    /// An admission outside any running turn: a root's own admission.
+    /// An admission outside any running turn: a run's own admission.
     Idle,
     /// A checkpoint admission of the running physical turn `turn_id`.
     Checkpoint { turn_id: &'a TurnId },
@@ -423,7 +423,7 @@ pub fn decode_pending_follow_on(
 mod tests {
     use super::*;
 
-    /// A default-spec root's record under recovery bound `recoveries`.
+    /// A default-spec run's record under recovery bound `recoveries`.
     fn resolved(recoveries: u32) -> crate::run_spec::ResolvedRun {
         crate::run_spec::ResolvedRun::snapshot(
             crate::PersistedSessionConfig::new(
@@ -451,34 +451,34 @@ mod tests {
         super::super::OperationId::turn("s", turn, TURN_TERMINAL_OPERATION_KEY)
     }
 
-    /// A recovery's admitted root names its follow-on and count, and maps
-    /// back to the logical root the follow-on continues.
+    /// A recovery's admitted run names its follow-on and count, and maps
+    /// back to the logical run the follow-on continues.
     #[test]
-    fn a_recovery_root_names_its_follow_on_at_any_count() {
-        let mut owed = fact("root:agent-frame:1", "f");
+    fn a_recovery_run_names_its_follow_on_at_any_count() {
+        let mut owed = fact("run:agent-frame:1", "f");
         assert_eq!(
-            owed.recovery_root(),
-            TurnId::from("follow-on:root:agent-frame:1#0")
+            owed.recovery_run(),
+            TurnId::from("follow-on:run:agent-frame:1#0")
         );
         owed.attempts = 3;
-        assert!(owed.names_recovery(&TurnId::from("follow-on:root:agent-frame:1#0")));
-        assert!(owed.names_recovery(&owed.recovery_root()));
+        assert!(owed.names_recovery(&TurnId::from("follow-on:run:agent-frame:1#0")));
+        assert!(owed.names_recovery(&owed.recovery_run()));
         for other in [
-            "root",
-            "follow-on:root:agent-frame:2#0",
-            "follow-on:root:agent-frame:1#",
-            "follow-on:root:agent-frame:1#01",
-            "follow-on:root:agent-frame:1#x",
+            "run",
+            "follow-on:run:agent-frame:2#0",
+            "follow-on:run:agent-frame:1#",
+            "follow-on:run:agent-frame:1#01",
+            "follow-on:run:agent-frame:1#x",
         ] {
             assert!(!owed.names_recovery(&TurnId::from(other)), "{other}");
         }
-        assert_eq!(owed.root_turn_id(), TurnId::from("root"));
+        assert_eq!(owed.run_turn_id(), TurnId::from("run"));
     }
 
     #[test]
-    fn follow_on_ids_count_physical_turns_from_the_root() {
+    fn follow_on_ids_count_physical_turns_from_the_run() {
         let first = PendingFollowOn::after_switch(
-            &TurnId::from("root"),
+            &TurnId::from("run"),
             0,
             FrameNodeId::new("f").expect("frame"),
             "t",
@@ -486,9 +486,9 @@ mod tests {
             resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
         )
         .expect("first");
-        assert_eq!(first.follow_on_turn_id, TurnId::from("root:agent-frame:1"));
+        assert_eq!(first.follow_on_turn_id, TurnId::from("run:agent-frame:1"));
         let second = PendingFollowOn::after_switch(
-            &TurnId::from("root"),
+            &TurnId::from("run"),
             1,
             FrameNodeId::new("g").expect("frame"),
             "t",
@@ -496,22 +496,22 @@ mod tests {
             resolved(DEFAULT_MAX_FOLLOW_ON_RECOVERIES),
         )
         .expect("second");
-        assert_eq!(second.follow_on_turn_id, TurnId::from("root:agent-frame:2"));
-        assert_eq!(second.root_turn_id(), TurnId::from("root"));
+        assert_eq!(second.follow_on_turn_id, TurnId::from("run:agent-frame:2"));
+        assert_eq!(second.run_turn_id(), TurnId::from("run"));
         assert_eq!(second.physical_index(), 2);
     }
 
     #[test]
-    fn suffix_shaped_host_roots_keep_their_follow_on_identity() {
+    fn suffix_shaped_host_runs_keep_their_follow_on_identity() {
         for host in [
             "job",
             "job:agent-frame:1",
             "job:agent-frame:01",
             "job:agent-frame:+1",
         ] {
-            let root = TurnId::from(host);
+            let run = TurnId::from(host);
             let first = PendingFollowOn::after_switch(
-                &root,
+                &run,
                 0,
                 FrameNodeId::new("f").expect("frame"),
                 "t",
@@ -521,16 +521,16 @@ mod tests {
             .expect("switch");
             assert_eq!(
                 first.follow_on_turn_id,
-                PhysicalTurn::derive_turn_id(&root, 1),
+                PhysicalTurn::derive_turn_id(&run, 1),
                 "{host}"
             );
-            assert_eq!(first.root_turn_id(), root);
+            assert_eq!(first.run_turn_id(), run);
         }
     }
 
     #[test]
     fn only_the_follow_on_admits_while_it_is_pending() {
-        let pending = fact("root:agent-frame:1", "f");
+        let pending = fact("run:agent-frame:1", "f");
         assert!(follow_on_blocks_admission(Some(&pending), FollowOnAdmission::Idle).is_some());
         assert!(
             follow_on_blocks_admission(
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn head_writes_keep_the_fact_until_its_own_terminal_commit() {
         let session = crate::SessionId::from("s");
-        let pending = fact("root:agent-frame:1", "f");
+        let pending = fact("run:agent-frame:1", "f");
         let frame = pending.frame_id.clone();
         // Another turn's terminal commit is refused, whatever it writes.
         assert!(matches!(
@@ -590,7 +590,7 @@ mod tests {
             validate_follow_on_head_write(
                 &session,
                 Some(&pending),
-                &terminal("root:agent-frame:1"),
+                &terminal("run:agent-frame:1"),
                 None,
                 Some(&frame)
             )
@@ -617,7 +617,7 @@ mod tests {
             validate_follow_on_head_write(
                 &session,
                 None,
-                &terminal("root"),
+                &terminal("run"),
                 Some(&pending),
                 Some(&frame)
             )
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn recovery_is_bounded_and_never_resets() {
-        let mut pending = fact("root:agent-frame:1", "f");
+        let mut pending = fact("run:agent-frame:1", "f");
         for expected in 1..=DEFAULT_MAX_FOLLOW_ON_RECOVERIES {
             match pending.recovery().expect("recovery") {
                 FollowOnRecovery::Run(raised) => {
@@ -643,11 +643,11 @@ mod tests {
         ));
     }
 
-    /// The bound a recovery decides on is the one the fact's root recorded,
+    /// The bound a recovery decides on is the one the fact's run recorded,
     /// whatever bound the recovering host is configured with.
     #[test]
-    fn recovery_decides_on_the_bound_its_root_recorded() {
-        let mut pending = fact("root:agent-frame:1", "f");
+    fn recovery_decides_on_the_bound_its_run_recorded() {
+        let mut pending = fact("run:agent-frame:1", "f");
         *pending.resolved_run = resolved(0);
         assert!(matches!(
             pending.recovery(),
@@ -661,12 +661,12 @@ mod tests {
         ));
     }
 
-    /// The head column's fact always carries its root's record: a fact
+    /// The head column's fact always carries its run's record: a fact
     /// without one is not the supported shape.
     #[test]
-    fn a_fact_without_its_roots_record_does_not_decode() {
+    fn a_fact_without_its_runs_record_does_not_decode() {
         let session = crate::SessionId::from("s");
-        let pending = fact("root:agent-frame:1", "f");
+        let pending = fact("run:agent-frame:1", "f");
         let encoded = encode_pending_follow_on(Some(&pending))
             .expect("encode")
             .expect("a fact");

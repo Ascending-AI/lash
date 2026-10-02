@@ -22,7 +22,7 @@ use lash_core::{
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse,
-    RestateDurableWaitRootRequest, RestateTurnCancelClosureParticipantRequest, WaitObserver,
+    RestateDurableWaitRunRequest, RestateTurnCancelClosureParticipantRequest, WaitObserver,
     durable_wait_index_key_for_scope, durable_wait_index_object_key, observe_durable_wait,
     restate_await_event_key_for_authority, restate_await_event_key_is_valid,
     restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
@@ -397,10 +397,10 @@ impl EffectHost for RestateEffectHost {
         })
     }
 
-    async fn retire_closed_root_waits(
+    async fn retire_closed_run_waits(
         &self,
         session_id: &SessionId,
-        root: &lash_core::TurnId,
+        run: &lash_core::TurnId,
         committed_turn: Option<&lash_core::TurnId>,
     ) -> Result<(), RuntimeError> {
         let await_event_ingress = &self.controller.await_event_ingress;
@@ -409,10 +409,10 @@ impl EffectHost for RestateEffectHost {
             .call_lash_object::<_, ()>(
                 &await_event_ingress.service(LashService::DurableWaitRegistry),
                 session_id,
-                "retire_root",
-                &RestateDurableWaitRootRequest {
+                "retire_run",
+                &RestateDurableWaitRunRequest {
                     session_id: session_id.clone(),
-                    root: root.clone(),
+                    run: run.clone(),
                     committed_turn: committed_turn.cloned(),
                 },
             )

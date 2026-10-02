@@ -384,7 +384,7 @@ jobs:
           path: target/functional-e2e-artifacts/crash-matrix-restate
           if-no-files-found: warn
 
-  # The send-to-completion latency gate (FIG-3843): `send()` → Restate drive →
+  # The send-to-completion latency gate (FIG-3843): `send()` → Restate shift →
   # `outcome()` measured on a live restate-server; the same-process fast
   # fixture fails the release when added overhead reaches p50 >= 50 ms or
   # p99 >= 250 ms. Every other case is measured and reported in the uploaded

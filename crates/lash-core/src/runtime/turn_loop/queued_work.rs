@@ -1,4 +1,4 @@
-//! The queued-work drain: the drive entry a drain identity names, and why a
+//! The queued-work drain: the shift entry a drain identity names, and why a
 //! drain ran no turn.
 
 use super::*;
@@ -34,7 +34,7 @@ impl EmptyQueuedDrainReason {
 /// One automatic queued-turn drain: the turn it ran, or why it ran none.
 #[derive(Clone, Debug)]
 pub enum QueuedTurnDrain<T> {
-    /// The drain admitted a root and ran its turn.
+    /// The drain admitted a run and ran its turn.
     Ran(T),
     /// The drain ran no turn, for the named reason.
     Empty(EmptyQueuedDrainReason),
@@ -68,14 +68,14 @@ impl<T> QueuedTurnDrain<T> {
     }
 }
 
-/// What a drain answers when the seal refused the root it admitted. A
-/// superseded admission lost the lane to the drive that sealed first, which
-/// is retryable. A lost execution is not: another execution of the root
+/// What a drain answers when the seal refused the run it admitted. A
+/// superseded admission lost the lane to the shift that sealed first, which
+/// is retryable. A lost execution is not: another execution of the run
 /// sealed it, and this one must never run it, so the drain stops as it does
-/// on [`DriveStop::SubstrateLost`](crate::engine::DriveStop::SubstrateLost).
-fn refused_root_drain<T>(
-    request: &crate::engine::DriveRequestId,
-    root: &crate::TurnId,
+/// on [`ShiftStop::SubstrateLost`](crate::engine::ShiftStop::SubstrateLost).
+fn refused_run_drain<T>(
+    request: &crate::engine::ShiftRequestId,
+    run: &crate::TurnId,
     refusal: crate::engine::SealRefusal,
 ) -> Result<QueuedTurnDrain<T>, RuntimeError> {
     match refusal {
@@ -85,7 +85,7 @@ fn refused_root_drain<T>(
         crate::engine::SealRefusal::ExecutionLost => Err(RuntimeError::new(
             RuntimeErrorCode::QueuedWork,
             format!(
-                "queued drain `{}` stopped: root `{root}` was sealed by another execution, \
+                "queued drain `{}` stopped: run `{run}` was sealed by another execution, \
                  whose history this one cannot read",
                 request.as_str()
             ),
@@ -94,16 +94,16 @@ fn refused_root_drain<T>(
 }
 
 impl LashRuntime {
-    /// Drain the session's next work through the session drive (FIG-3600):
-    /// one drive, named by the drain's identity, run until its first root has
+    /// Drain the session's next work through the session shift (FIG-3600):
+    /// one shift, named by the drain's identity, run until its first run has
     /// run, answered in the automatic drain's contract.
     ///
-    /// The drain's identity is its drive request, so a redrive of the same
-    /// drain replays that drive's recorded admissions and the root it
+    /// The drain's identity is its shift request, so a redrive of the same
+    /// drain replays that shift's recorded admissions and the run it
     /// admitted replays at the head it was admitted on (FIG-3748). A drain
     /// with no identity is refused. Queued work and idle next-turn input run
-    /// as the roots the drive admits for them.
-    pub async fn drive_next_queued_root<'a>(
+    /// as the runs the shift admits for them.
+    pub async fn execute_next_queued_run<'a>(
         &mut self,
         opts: impl Into<QueuedTurnOptions<'a>>,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
@@ -118,44 +118,44 @@ impl LashRuntime {
                 EmptyQueuedDrainReason::NoDurableQueue,
             ));
         }
-        // The drain's identity names its drive: a redrive of the drain must
+        // The drain's identity names its shift: a redrive of the drain must
         // name the same one, so an anonymous drain has none to replay.
         let identity = opts.source.identity().ok_or_else(|| {
             RuntimeError::new(
                 RuntimeErrorCode::QueuedWork,
-                "the drive entry needs a drain identity to name its drive request",
+                "the shift entry needs a drain identity to name its shift request",
             )
         })?;
         let bound = opts.bind(identity)?;
         let controller = bound.scoped_effect_controller();
-        let request = crate::engine::DriveRequest {
+        let request = crate::engine::ShiftRequest {
             session: self.state.session_id.clone(),
-            request: crate::engine::DriveRequestId::new(controller.scope_id()),
+            request: crate::engine::ShiftRequestId::new(controller.scope_id()),
             intended_lane: None,
         };
-        let sinks = crate::runtime::drive::DriveSinks {
+        let sinks = crate::runtime::shift::ShiftSinks {
             events: bound.events_or_noop(),
             turn_events: bound.turn_events_or_noop(),
             local_stop: bound.local_stop().clone(),
-            settled: &crate::runtime::drive::NoopRootSettledSink,
+            settled: &crate::runtime::shift::NoopRunSettledSink,
         };
-        let drive = Box::pin(self.drive_until(
+        let shift = Box::pin(self.work_until(
             &controller,
             &request,
             &sinks,
             None,
-            crate::runtime::drive::DriveLimits {
-                follow_on: crate::runtime::drive::FollowOnRecovery::Recover,
-                max_roots: None,
+            crate::runtime::shift::ShiftLimits {
+                follow_on: crate::runtime::shift::FollowOnRecovery::Recover,
+                max_runs: None,
                 acceptor: false,
             },
             // The command lane applies first and runs no turn: the drain
-            // answers the first root that took turn-lane work.
-            |run| !matches!(run.outcome, crate::engine::RootOutcome::Applied { .. }),
+            // answers the first run that took turn-lane work.
+            |executed| !matches!(executed.outcome, crate::engine::RunOutcome::Applied { .. }),
         ))
         .await;
-        let crate::runtime::drive::DriveRun { outcome, runs, .. } = match drive {
-            Ok(drive) => drive,
+        let crate::runtime::shift::ShiftLoopEnd { outcome, runs, .. } = match shift {
+            Ok(shift) => shift,
             Err(abort) => {
                 let error = abort.into_error();
                 if error.code == RuntimeErrorCode::SessionExecutionLaneBusy {
@@ -166,37 +166,41 @@ impl LashRuntime {
                 return Err(error);
             }
         };
-        if let Some(run) = runs
+        if let Some(executed) = runs
             .into_iter()
-            .find(|run| !matches!(run.outcome, crate::engine::RootOutcome::Applied { .. }))
+            .find(|executed| !matches!(executed.outcome, crate::engine::RunOutcome::Applied { .. }))
         {
-            return Ok(match (run.outcome, run.run, run.empty_drain) {
-                (_, Some(run), _) => match run.into_final_turn() {
-                    Some(turn) => QueuedTurnDrain::Ran(turn),
-                    None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
-                        crate::AdmissionRefusal::AdmissionRaceLost,
-                    )),
+            return Ok(
+                match (executed.outcome, executed.run, executed.empty_drain) {
+                    (_, Some(executed), _) => match executed.into_final_turn() {
+                        Some(turn) => QueuedTurnDrain::Ran(turn),
+                        None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
+                            crate::AdmissionRefusal::AdmissionRaceLost,
+                        )),
+                    },
+                    (_, None, Some(reason)) => QueuedTurnDrain::Empty(reason),
+                    (crate::engine::RunOutcome::Refused { run, refusal }, None, _) => {
+                        return refused_run_drain(&request.request, &run, refusal);
+                    }
+                    // The run's rows were answered by another driver.
+                    (_, None, _) => {
+                        QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
+                            crate::AdmissionRefusal::AdmissionRaceLost,
+                        ))
+                    }
                 },
-                (_, None, Some(reason)) => QueuedTurnDrain::Empty(reason),
-                (crate::engine::RootOutcome::Refused { root, refusal }, None, _) => {
-                    return refused_root_drain(&request.request, &root, refusal);
-                }
-                // The root's rows were answered by another driver.
-                (_, None, _) => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
-                    crate::AdmissionRefusal::AdmissionRaceLost,
-                )),
-            });
+            );
         }
         match outcome.stop {
-            crate::engine::DriveStop::Idle => Ok(QueuedTurnDrain::Empty(
+            crate::engine::ShiftStop::Idle => Ok(QueuedTurnDrain::Empty(
                 EmptyQueuedDrainReason::AdmissionRefused(self.idle_drain_refusal().await?),
             )),
-            crate::engine::DriveStop::Parked(park) => Err(RuntimeError::new(
-                RuntimeErrorCode::SessionRootPending,
+            crate::engine::ShiftStop::Parked(park) => Err(RuntimeError::new(
+                RuntimeErrorCode::SessionRunPending,
                 format!(
-                    "queued work on session `{}` waits behind parked root `{}` (park {}); it \
-                     is driven once that park is resolved",
-                    self.state.session_id, park.root, park.park
+                    "queued work on session `{}` waits behind parked run `{}` (park {}); it \
+                     is executed once that park is resolved",
+                    self.state.session_id, park.run, park.park
                 ),
             )),
             stop => Err(RuntimeError::new(
@@ -209,7 +213,7 @@ impl LashRuntime {
         }
     }
 
-    /// Why an idle drive ran nothing: no work at all, or work that appeared
+    /// Why an idle shift ran nothing: no work at all, or work that appeared
     /// after admission read the queue and is therefore another admission's to
     /// take.
     async fn idle_drain_refusal(&self) -> Result<crate::AdmissionRefusal, RuntimeError> {
@@ -235,22 +239,22 @@ impl LashRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{DriveRequestId, SealRefusal};
+    use crate::engine::{SealRefusal, ShiftRequestId};
 
     /// F75 (FIG-4648): a seal another admission superseded leaves the lane
-    /// busy and the work retryable; a seal another execution of the root took
+    /// busy and the work retryable; a seal another execution of the run took
     /// is a lost execution, never a busy lane.
     #[test]
     fn a_lost_execution_is_never_answered_as_a_busy_lane() {
-        let request = DriveRequestId::new("drain-1");
-        let root = crate::TurnId::from("r");
+        let request = ShiftRequestId::new("drain-1");
+        let run = crate::TurnId::from("r");
         assert!(matches!(
-            refused_root_drain::<()>(&request, &root, SealRefusal::Superseded { epoch: 3 }),
+            refused_run_drain::<()>(&request, &run, SealRefusal::Superseded { epoch: 3 }),
             Ok(QueuedTurnDrain::Empty(
                 EmptyQueuedDrainReason::ExecutionLaneBusy
             ))
         ));
-        let lost = refused_root_drain::<()>(&request, &root, SealRefusal::ExecutionLost)
+        let lost = refused_run_drain::<()>(&request, &run, SealRefusal::ExecutionLost)
             .expect_err("a lost execution stops the drain");
         assert_eq!(lost.code, RuntimeErrorCode::QueuedWork);
     }

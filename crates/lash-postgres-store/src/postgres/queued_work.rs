@@ -120,7 +120,7 @@ pub(crate) fn queued_work_batch_from_row(
     Ok(batch)
 }
 
-/// Settle batch `batch_id` of session `session_id`, which root `root` must
+/// Settle batch `batch_id` of session `session_id`, which run `run` must
 /// hold, in the commit that completed it (FIG-3927).
 ///
 /// The verdict is taken over the row under `FOR UPDATE`; then the consumed
@@ -131,7 +131,7 @@ pub(crate) fn queued_work_batch_from_row(
 pub(crate) async fn complete_admitted_batch_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    root: &lash_core_execution::TurnId,
+    run: &lash_core_execution::TurnId,
     batch_id: &lash_core_execution::BatchId,
     terminal: lash_core_execution::store::IngressTerminal,
 ) -> Result<(), StoreError> {
@@ -144,20 +144,20 @@ pub(crate) async fn complete_admitted_batch_tx(
             .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-    lash_core_execution::store_backend_support::require_admitted_to_root(
+    lash_core_execution::store_backend_support::require_admitted_to_run(
         session_id,
-        root,
+        run,
         &row,
         observed.as_ref().map(Option::as_deref),
     )?;
     // The wake identity a settled batch contributes to its redelivery fence:
     // the source key (advisory-lock identity) and the sole payload, both
-    // root-keyed reads over the locked row.
+    // run-keyed reads over the locked row.
     let source_key: Option<String> =
         sqlx::query_scalar(sql.family_postgres.select_admitted_batch_source_key.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
-            .bind(root.as_str())
+            .bind(run.as_str())
             .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
@@ -166,7 +166,7 @@ pub(crate) async fn complete_admitted_batch_tx(
         sqlx::query_scalar(sql.queued_batches.select_admitted_batch_payload.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
-            .bind(root.as_str())
+            .bind(run.as_str())
             .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -183,14 +183,14 @@ pub(crate) async fn complete_admitted_batch_tx(
     let settled = sqlx::query(sql.queued_batches.settle_admitted.sql())
         .bind(session_id.as_str())
         .bind(batch_id.as_str())
-        .bind(root.as_str())
+        .bind(run.as_str())
         .bind(terminal.cause.as_str())
         .bind(crate::support::clamp_epoch_ms(terminal.at_ms))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
-    // Backstop: the verdict above was taken under the row lock, so the root
+    // Backstop: the verdict above was taken under the row lock, so the run
     // predicate cannot legitimately miss.
     lash_core_execution::store_backend_support::require_fenced_write_applied(
         lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
@@ -199,9 +199,9 @@ pub(crate) async fn complete_admitted_batch_tx(
         settled,
         || StoreError::IngressRowNotAdmitted {
             session_id: session_id.clone(),
-            root: root.clone(),
+            run: run.clone(),
             row: Box::new(row.clone()),
-            admitted_root: None,
+            admitted_run: None,
         },
     )
 }
@@ -209,7 +209,7 @@ pub(crate) async fn complete_admitted_batch_tx(
 /// Settle open session command `batch_id` of session `session_id`, in the
 /// commit that applied it (FIG-3927): the command lane takes no admission,
 /// so the predicate is the row's presence and openness. A command withdrawn
-/// since the drive read it refuses the whole commit.
+/// since the shift read it refuses the whole commit.
 pub(crate) async fn settle_open_command_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     commit: &lash_core_execution::store::RuntimeCommit,

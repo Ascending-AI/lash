@@ -2,7 +2,7 @@
 //! or `AssistantResponseHooks` step is the attempt's fault, never the step's
 //! recorded outcome (FIG-3726).
 //!
-//! Each law drives one effect through `execute_effect` inside a
+//! Each law executes one effect through `execute_effect` inside a
 //! `LashTestHandlerHost` handler on the in-process Restate double, with a test
 //! executor whose first run returns the fault the real executor marks
 //! retryable and whose next run answers the step's outcome. The contract each
@@ -22,7 +22,7 @@ use lash_restate_test::protocol::MessageType;
 type EffectAnswer =
     Arc<dyn Fn(usize) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> + Send + Sync>;
 
-/// One journaled effect driven through a handler on the server double.
+/// One journaled effect executed through a handler on the server double.
 struct DrivenEffect {
     backend: lash_restate_test::RestateTestBackend,
     /// The local executor's run count: one per attempt that reached it.
@@ -155,7 +155,7 @@ fn handler_journal(
     (view, journal)
 }
 
-/// The one journaled `ctx.run` of the driven effect: its command entry and
+/// The one journaled `ctx.run` of the executed effect: its command entry and
 /// its decoded completion record.
 fn journaled_run(
     journal: &[lash_restate_test::JournalEntryView],

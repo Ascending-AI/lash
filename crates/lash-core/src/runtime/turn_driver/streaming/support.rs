@@ -55,14 +55,14 @@ pub(super) fn assistant_stream_finish_reason(
     }
 }
 
-/// Which of the recorded step's drive sources resolved first in one poll.
+/// Which of the recorded step's shift sources resolved first in one poll.
 pub(super) enum DrivePollOutcome<J> {
     Cancelled,
     Stream(Box<Option<LlmStreamEvent>>),
     Joined(J),
 }
 
-/// Poll the drive's three in-step sources once, in written order: a ready
+/// Poll the shift's three in-step sources once, in written order: a ready
 /// cancellation is never shadowed by a randomly polled stream event, and the
 /// branch futures drop with the call so the caller's handlers can borrow the
 /// task and receiver again. A drained stream channel stays dormant — the same

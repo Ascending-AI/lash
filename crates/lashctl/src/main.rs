@@ -588,8 +588,8 @@ fn stalled_row(key: &ObligationKey) -> Value {
             item_id,
         } => json!({"session_id":session_id.as_str(),"item_id":item_id}),
         ObligationKey::ControlIntent { intent_id } => json!({"intent_id":intent_id.sequence()}),
-        ObligationKey::ScopeClose { session_id, root } => {
-            json!({"session_id":session_id.as_str(),"root":root.as_str()})
+        ObligationKey::ScopeClose { session_id, run } => {
+            json!({"session_id":session_id.as_str(),"root":run.as_str()})
         }
         ObligationKey::ParentEnd {
             parent_kind,

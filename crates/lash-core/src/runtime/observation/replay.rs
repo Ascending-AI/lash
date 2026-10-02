@@ -760,7 +760,7 @@ struct LiveReplaySessionBuffer {
     unavailable_through: u64,
     reservations: BTreeMap<u64, ReservedPublication>,
     /// Delivered `TurnActivity` identities (`{replay key}#{ordinal}`) with
-    /// the live position each holds in `events`. A replayed drive region or
+    /// the live position each holds in `events`. A replayed shift region or
     /// a journaled step re-executed after a mid-run suspension re-publishes
     /// the observations its first attempt already delivered; `prepare_publication`
     /// collapses those redeliveries into the stored copy (FIG-3753).

@@ -10,14 +10,14 @@ use crate::conformance::DeploymentViewExt as _;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use lash_core::drive::relay::{
-    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
-    relay_due,
-};
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
 };
 use lash_core::session_delete::SessionDeleteRelay;
+use lash_core::shift::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
+    relay_due,
+};
 use lash_core::store::session_delete::SessionCleanup;
 use lash_core::store::{
     ControlIntentState, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
@@ -137,7 +137,7 @@ pub async fn a_close_acknowledgement_arms_the_session_delete_obligation(
 }
 
 /// L-D8: a session's delete waits on exactly its own undelivered cleanup —
-/// scope-close obligations on its roots, parent-end obligations on the plans
+/// scope-close obligations on its runs, parent-end obligations on the plans
 /// of its own scope, its turns' and its session operations' — whether due, claimed
 /// or stalled, and on nothing another session owes, even one whose id
 /// extends its own.
@@ -156,15 +156,15 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
     let now = stores.clock().timestamp_ms();
     let (id, store) = session(&stores, prefix, "delete-cleanup").await;
     let (other, other_store) = session(&stores, prefix, "delete-cleanup:x").await;
-    let root = TurnId::from("cleanup-root");
+    let run = TurnId::from("cleanup-run");
     store
-        .bind_root_inputs(&id, &root, &[])
+        .bind_run_inputs(&id, &run, &[])
         .await
-        .expect("record the session's root");
+        .expect("record the session's run");
     other_store
-        .bind_root_inputs(&other, &root, &[])
+        .bind_run_inputs(&other, &run, &[])
         .await
-        .expect("record the other session's root");
+        .expect("record the other session's run");
     assert_eq!(
         ledger
             .undelivered_cleanup(&id)
@@ -178,7 +178,7 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
         &stores,
         ObligationKey::ScopeClose {
             session_id: id.clone(),
-            root: root.clone(),
+            run: run.clone(),
         },
         now,
     )
@@ -187,19 +187,19 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
         &stores,
         ObligationKey::ScopeClose {
             session_id: other.clone(),
-            root: root.clone(),
+            run: run.clone(),
         },
         now,
     )
     .await;
     let own = [
         ScopeId::session(id.clone()),
-        ScopeId::turn(id.clone(), root.clone()),
+        ScopeId::turn(id.clone(), run.clone()),
         ScopeId::session_operation(id.clone(), "cleanup-drain"),
     ];
     let foreign = [
         ScopeId::session(other.clone()),
-        ScopeId::turn(other.clone(), root.clone()),
+        ScopeId::turn(other.clone(), run.clone()),
         ScopeId::session_operation(other.clone(), "cleanup-drain"),
     ];
     // Recording a plan arms its `ParentEnd` obligation in the same
@@ -314,16 +314,16 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
     let factory = stores.session_store_factory();
     let clock = stores.clock();
     let (id, store) = session(&stores, prefix, "delete-finalizer").await;
-    let root = TurnId::from("finalizer-root");
+    let run = TurnId::from("finalizer-run");
     store
-        .bind_root_inputs(&id, &root, &[])
+        .bind_run_inputs(&id, &run, &[])
         .await
-        .expect("record the session's root");
+        .expect("record the session's run");
     let scope_close = arm(
         &stores,
         ObligationKey::ScopeClose {
             session_id: id.clone(),
-            root,
+            run,
         },
         clock.timestamp_ms(),
     )
@@ -403,7 +403,7 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
 }
 
 /// L-D11 (FIG-3873 S3): the physical delete retires the turn-cancel closure
-/// pins of the closing session it deletes. The close ended every root the
+/// pins of the closing session it deletes. The close ended every run the
 /// session had, so a pin is a turn's whose final commit the close cut short:
 /// no activation of a closing session will drain it, and a delete that
 /// refused it would stay owed for good.
@@ -496,7 +496,7 @@ impl ObligationRelay for DyingPass {
 }
 
 /// L-D12 (FIG-4129, ADR 0109 §1.4, ADR 0113 §2.5): the frame cleanup a
-/// session delete with an orphaned root arms outlives the claimant that dies
+/// session delete with an orphaned run arms outlives the claimant that dies
 /// inside its delivery. The dead claimant's claim holds the row until it
 /// lapses, and nobody retakes it before then; the first pass at the lapse
 /// retakes it and settles it, delivered (its row deleted) or stalled with a
@@ -538,7 +538,7 @@ pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_set
             ),
         ),
     };
-    // The orphaned root: a turn whose final commit the close cuts short.
+    // The orphaned run: a turn whose final commit the close cuts short.
     pin_a_turn_cancel_closure(store.as_ref(), &id).await;
     let intent = factory
         .begin_session_close(&id, clock.timestamp_ms())

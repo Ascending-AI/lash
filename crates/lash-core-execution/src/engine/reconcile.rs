@@ -2,10 +2,10 @@
 //! decisions 69–70): what an engine's schedule carries from one tick to the
 //! next, and what a tick reports.
 //!
-//! The tick itself is engine-neutral kernel code (`lash_core::drive::
+//! The tick itself is engine-neutral kernel code (`lash_core::shift::
 //! reconcile_once`); an engine only schedules it, through
-//! [`SessionDriver::reconcile`](crate::SessionDriver::reconcile). Each
-//! engine runs the tick on an interval inside the driver's deployment and
+//! [`SessionShifts::reconcile`](crate::SessionShifts::reconcile). Each
+//! engine runs the tick on an interval inside the `SessionShifts`'s deployment and
 //! carries the [`ReconcileCursor`] forward.
 
 use serde::{Deserialize, Serialize};
@@ -72,7 +72,7 @@ pub struct RelayPass {
     pub delivered: usize,
     /// Claims whose delivery asked the engine and left the claim for the
     /// kind's consumer to settle in its own transaction (ADR 0109 §3,
-    /// ingress: the drive's admission); a claim nobody settles lapses and
+    /// ingress: the shift's admission); a claim nobody settles lapses and
     /// the relay asks again.
     pub requested: usize,
     /// Claims handed back for a later attempt.
@@ -116,7 +116,7 @@ pub struct ReconcileTick {
 pub struct RecoveryPassBudget {
     /// The longest one obligation delivery attempt runs before it is
     /// abandoned and retried
-    /// ([`RelayPolicy::attempt_budget_ms`](crate::runtime::drive::relay::RelayPolicy::attempt_budget_ms)).
+    /// ([`RelayPolicy::attempt_budget_ms`](crate::runtime::shift::relay::RelayPolicy::attempt_budget_ms)).
     /// Default 30 s. Keep it below the relay's 60 s claim TTL, so a claim
     /// never lapses under an attempt still running.
     pub attempt: std::time::Duration,
@@ -132,7 +132,7 @@ impl Default for RecoveryPassBudget {
     fn default() -> Self {
         Self {
             attempt: std::time::Duration::from_millis(
-                crate::runtime::drive::relay::RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
+                crate::runtime::shift::relay::RelayPolicy::DEFAULT_ATTEMPT_BUDGET_MS,
             ),
             tick_wait: std::time::Duration::from_secs(1),
         }

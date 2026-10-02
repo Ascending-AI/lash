@@ -43,7 +43,7 @@ pub enum ParkedPerformed {
 }
 
 /// A fault of the parent's own journal or store: nothing about the worker or
-/// the guest. The run stops and the owning invocation is re-driven.
+/// the guest. The run stops and the owning invocation is redriven.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("the parent could not journal the operation: {0}")]
 pub struct ParentFault(pub String);

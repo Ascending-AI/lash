@@ -77,7 +77,7 @@ impl PendingAnnouncement {
 /// shape). A call that parks on a *runtime-owned* fact names that fact here
 /// instead, and the runtime arms the resolver itself — at the park and again on
 /// every redrive of the parked turn, because a recorded attempt body does not
-/// re-run when the turn is re-driven and an armed watcher does not survive a
+/// re-run when the turn is redriven and an armed watcher does not survive a
 /// crash.
 ///
 /// The declaration is journaled with the pending launch, so the arming is

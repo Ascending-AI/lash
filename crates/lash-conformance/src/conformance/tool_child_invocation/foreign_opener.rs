@@ -11,7 +11,7 @@ use super::*;
 ///
 /// `an_unregistered_opener_leaves_the_child_accepted` proves the absent half:
 /// no live opener, no run. This proves the mismatched half — a live opener
-/// that is *not* the recorded one still cannot drive the child, whichever way
+/// that is *not* the recorded one still cannot execute the child, whichever way
 /// the pair is arranged — because a child's context is reconstructed from its
 /// retained request, not lent from whichever opener happens to be registered.
 /// The leak this closes is the one where "an opener is live" was authority
@@ -28,7 +28,7 @@ use super::*;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_foreign_opener_cannot_drive_another_openers_child(
+pub async fn a_foreign_opener_cannot_execute_another_openers_child(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {

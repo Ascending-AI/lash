@@ -79,7 +79,7 @@ async fn wake_page(
     }
 }
 
-async fn drive(
+async fn shift(
     factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
@@ -164,7 +164,7 @@ pub async fn bad_wake_source_does_not_strand_claimed_siblings(
         registry.get_process(&page.bad.process_id).await.is_err(),
         "the first source must fail permanently"
     );
-    let report = drive(factory, Arc::clone(&registry), clock)
+    let report = shift(factory, Arc::clone(&registry), clock)
         .await
         .expect("a bad source must not abort the claimed page");
     assert_eq!(report.inspected, 2);
@@ -250,7 +250,7 @@ pub async fn expired_wakes_settle_without_reading_bad_sources(
     faults.set_process_read_error(Some(crate::PluginError::attempt_fault(
         "source unavailable",
     )));
-    let report = drive(factory, faults.clone(), clock)
+    let report = shift(factory, faults.clone(), clock)
         .await
         .expect("expiry must not depend on source reads");
     assert_eq!(report.inspected, 2);
@@ -291,7 +291,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
         0,
         crate::PluginError::attempt_fault("connection temporarily closed"),
     );
-    let report = drive(Arc::clone(&factory), faults.clone(), Arc::clone(&clock))
+    let report = shift(Arc::clone(&factory), faults.clone(), Arc::clone(&clock))
         .await
         .expect("transient source error must release only its claim");
     assert_eq!(report.enqueued, 1);
@@ -313,7 +313,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
     let expiry = bad.expires_at_ms;
     clock.set(expiry - 1);
     faults.set_process_read_error_after(0, crate::PluginError::attempt_fault("still unavailable"));
-    let retry = drive(Arc::clone(&factory), faults.clone(), Arc::clone(&clock))
+    let retry = shift(Arc::clone(&factory), faults.clone(), Arc::clone(&clock))
         .await
         .expect("retry near expiry");
     assert_eq!(retry.retryable_failures, 1);
@@ -332,7 +332,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
     assert_eq!(bad.expires_at_ms, expiry);
     clock.set(expiry);
     faults.set_process_read_error(Some(crate::PluginError::attempt_fault("still unavailable")));
-    let expired = drive(factory, faults, clock)
+    let expired = shift(factory, faults, clock)
         .await
         .expect("expire deferred source");
     assert_eq!(expired.discarded_expired, 1);
@@ -357,7 +357,7 @@ pub async fn wake_defer_failure_does_not_strand_claimed_siblings(
     faults.set_wake_defer_error(Some(crate::PluginError::attempt_fault(
         "defer write unavailable",
     )));
-    let report = drive(Arc::clone(&factory), faults, Arc::clone(&clock))
+    let report = shift(Arc::clone(&factory), faults, Arc::clone(&clock))
         .await
         .expect("a failed retry write must not abort the page");
     assert_eq!(report.inspected, 2);
@@ -392,7 +392,7 @@ pub async fn wake_defer_failure_does_not_strand_claimed_siblings(
     );
     clock.set(bad.next_attempt_at_ms);
     assert_eq!(
-        drive(factory, Arc::clone(&registry), clock)
+        shift(factory, Arc::clone(&registry), clock)
             .await
             .expect("recover failed retry after claim lapse")
             .enqueued,
@@ -436,7 +436,7 @@ pub async fn bad_wake_source_page_recovers_after_restart(
             .max()
             .expect("claim lapse"),
     );
-    let report = drive(factory, Arc::clone(&registry), clock)
+    let report = shift(factory, Arc::clone(&registry), clock)
         .await
         .expect("restart must recover the full claimed page");
     assert_eq!(report.enqueued, 1);
@@ -487,7 +487,7 @@ pub async fn lost_bad_source_claim_does_not_settle_the_new_owner(
     for row in &stale {
         faults.inject_claimed_wake(row.clone());
     }
-    let report = drive(factory, faults, clock)
+    let report = shift(factory, faults, clock)
         .await
         .expect("lost source claim is a benign fenced settlement");
     assert_eq!(report.inspected, 2);

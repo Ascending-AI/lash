@@ -6,8 +6,8 @@
 //! store set and admin API as a deployment binds it, for each scope kind's
 //! verdict: a wait retirement alone never settles a journal, a quiescent
 //! runtime operation does, a session delete always is, a process the registry
-//! no longer holds was pruned, and a turn whose root has no terminal evidence
-//! may still replay. A completed root drive answering `Settled` is the
+//! no longer holds was pruned, and a turn whose run has no terminal evidence
+//! may still replay. A completed run shift answering `Settled` is the
 //! evidence suite's first case, which waits for it before the turn's
 //! execution edge goes (`//crates/lash:artifact_referrers_evidence__test`).
 
@@ -102,11 +102,11 @@ async fn restate_answers_settled_only_for_a_journal_nothing_can_replay() {
         JournalReplay::Settled
     );
 
-    // A turn whose root has no terminal evidence may still replay.
+    // A turn whose run has no terminal evidence may still replay.
     assert_eq!(
         verdict(
             host.as_ref(),
-            &ExecutionScope::turn(SESSION, "journal-verdict-root")
+            &ExecutionScope::turn(SESSION, "journal-verdict-run")
         )
         .await,
         JournalReplay::MayReplay

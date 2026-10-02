@@ -195,7 +195,7 @@ async fn native_listener() -> tokio::net::TcpListener {
 }
 
 /// Wait out the namespace's open invocations while its endpoint still
-/// serves them: a turn's close and the root's retirement are invocations of
+/// serves them: a turn's close and the run's retirement are invocations of
 /// their own, and one still queued when the endpoint dies keeps retrying a
 /// dead address, which the suite runner counts as a leftover.
 async fn settle_native(admin: &lash_restate::RestateAdminClient, namespace: &str) {
@@ -538,7 +538,7 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
             .expect("replayed output");
             assert_eq!(replayed.outcome, record.output.outcome);
         }
-        // The turn's close and the root's retirement are invocations of
+        // The turn's close and the run's retirement are invocations of
         // their own, and the deployment serves them through the session
         // driver the core installs: drop the handle that owes them, wait the
         // namespace out while that driver still answers, and only then

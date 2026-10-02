@@ -11,13 +11,13 @@
 //! or emitted under an anchor that lost.
 //!
 //! The law walks every owning row through the stores under test: a turn
-//! input, the root that admits it, a queued process wake, a process start, a
+//! input, the run that admits it, a queued process wake, a process start, a
 //! signal, a trigger occurrence and a host-submitted tool intent.
 
 use std::sync::Arc;
 
 use lash_core::store::AdmittedHead;
-use lash_core::testing::store_fixtures::{admit_root_request_for_test, seal_drive_fence_for_test};
+use lash_core::testing::store_fixtures::{admit_run_request_for_test, seal_shift_fence_for_test};
 use lash_core::{
     DurableTraceScope, TraceAnchor, TraceCarrier, TraceCause, TraceScopeAdmission, TraceScopeId,
     TraceScopeOffer, TraceScopeOwner,
@@ -25,7 +25,7 @@ use lash_core::{
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
-use super::drive_admission::DriveParts;
+use super::shift_admission::ShiftParts;
 
 /// The context of producer `producer`: a sampled span of its own trace.
 #[expect(
@@ -56,7 +56,7 @@ const FIRST_ANCHOR: u8 = 0xa1;
 const SECOND_ANCHOR: u8 = 0xa2;
 
 /// Law P2: the first admission's cause and anchor are retained across
-/// retried inputs, roots, queued wakes, process starts, signals, trigger
+/// retried inputs, runs, queued wakes, process starts, signals, trigger
 /// occurrences and host tool intents, without changing a business hash, key
 /// or typed conflict, and a retained read yields no emission permit.
 pub async fn first_admission_wins_without_changing_business_identity(
@@ -65,9 +65,9 @@ pub async fn first_admission_wins_without_changing_business_identity(
     stores: Arc<dyn crate::StoreSet>,
     _: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let parts = DriveParts::new(prefix, "trace-first-writer", &host, &stores, 4).await;
+    let parts = ShiftParts::new(prefix, "trace-first-writer", &host, &stores, 4).await;
     a_retried_input_keeps_its_first_cause(&parts).await;
-    a_root_keeps_the_anchor_its_first_admission_offered(&parts).await;
+    a_run_keeps_the_anchor_its_first_admission_offered(&parts).await;
     a_redelivered_wake_keeps_its_first_cause(&parts).await;
     a_retried_start_keeps_its_first_scope(prefix, &stores).await;
     a_redelivered_signal_keeps_its_first_cause(prefix, &stores).await;
@@ -76,7 +76,7 @@ pub async fn first_admission_wins_without_changing_business_identity(
 }
 
 fn input_draft(
-    parts: &DriveParts,
+    parts: &ShiftParts,
     key: &str,
     text: &str,
     cause: TraceCause,
@@ -95,8 +95,8 @@ fn input_draft(
     clippy::panic,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn a_retried_input_keeps_its_first_cause(parts: &DriveParts) {
-    let draft = |cause| input_draft(parts, "traced-root", "the accepted words", cause);
+async fn a_retried_input_keeps_its_first_cause(parts: &ShiftParts) {
+    let draft = |cause| input_draft(parts, "traced-run", "the accepted words", cause);
     let digest = |draft: crate::PendingTurnInputDraft| {
         draft
             .submission_digest()
@@ -146,7 +146,7 @@ async fn a_retried_input_keeps_its_first_cause(parts: &DriveParts) {
         .store
         .enqueue_pending_turn_input(input_draft(
             parts,
-            "traced-root",
+            "traced-run",
             "other words",
             linked(FIRST),
         ))
@@ -157,7 +157,7 @@ async fn a_retried_input_keeps_its_first_cause(parts: &DriveParts) {
     }
 
     // Absence is retained too: an untraced acceptance stays untraced.
-    let untraced = |cause| input_draft(parts, "untraced-root", "words nobody traced", cause);
+    let untraced = |cause| input_draft(parts, "untraced-run", "words nobody traced", cause);
     let accepted = parts
         .store
         .enqueue_pending_turn_input(untraced(TraceCause::Root))
@@ -181,39 +181,39 @@ async fn a_retried_input_keeps_its_first_cause(parts: &DriveParts) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn a_root_keeps_the_anchor_its_first_admission_offered(parts: &DriveParts) {
-    let root = TurnId::from("traced-root");
+async fn a_run_keeps_the_anchor_its_first_admission_offered(parts: &ShiftParts) {
+    let run = TurnId::from("traced-run");
     let head = parts
         .store
         .list_pending_turn_inputs(&parts.session_id)
         .await
         .expect("list the pending inputs")
         .into_iter()
-        .find(|read| read.input.source_key.as_deref() == Some("traced-root"))
+        .find(|read| read.input.source_key.as_deref() == Some("traced-run"))
         .expect("the traced input is pending")
         .input
         .input_id;
-    let request = |fence: &crate::store::DriveFence, candidate: u8| {
+    let request = |fence: &crate::store::ShiftFence, candidate: u8| {
         let mut request =
-            admit_root_request_for_test(fence, &root, AdmittedHead::Input(head.clone()));
-        // One input per root, so the root's cause is its head's.
+            admit_run_request_for_test(fence, &run, AdmittedHead::Input(head.clone()));
+        // One input per run, so the run's cause is its head's.
         request.max_inputs = 1;
         request.trace_anchor = TraceAnchor::Context(context(candidate));
         request
     };
-    let first = seal_drive_fence_for_test(&parts.store, &parts.session_id, "first").await;
+    let first = seal_shift_fence_for_test(&parts.store, &parts.session_id, "first").await;
     let won = parts
         .store
-        .admit_root(&request(&first, FIRST_ANCHOR))
+        .admit_run(&request(&first, FIRST_ANCHOR))
         .await
-        .expect("the first admission records the root")
+        .expect("the first admission records the run")
         .expect("the first admission reaches its head");
     let scope = won.trace.clone().expect("the admission retains a scope");
     assert_eq!(
         scope.scope,
         TraceScopeId::admission(TraceScopeOwner::Run {
             session_id: parts.session_id.clone(),
-            root: root.clone(),
+            run: run.clone(),
         })
     );
     assert_eq!(
@@ -226,14 +226,14 @@ async fn a_root_keeps_the_anchor_its_first_admission_offered(parts: &DriveParts)
     assert_eq!(admission, TraceScopeAdmission::Inserted(scope.clone()));
     assert!(
         admission.permit().is_some(),
-        "the admission that recorded the root may emit it"
+        "the admission that recorded the run may emit it"
     );
 
     // A competing admission, under a later fence and another candidate, is
     // answered the winner: it dispatches under no anchor of its own.
-    let later = seal_drive_fence_for_test(&parts.store, &parts.session_id, "later").await;
+    let later = seal_shift_fence_for_test(&parts.store, &parts.session_id, "later").await;
     for fence in [&first, &later] {
-        let Ok(lost) = parts.store.admit_root(&request(fence, SECOND_ANCHOR)).await else {
+        let Ok(lost) = parts.store.admit_run(&request(fence, SECOND_ANCHOR)).await else {
             // A superseded fence is refused before anything is read.
             continue;
         };
@@ -249,7 +249,7 @@ async fn a_root_keeps_the_anchor_its_first_admission_offered(parts: &DriveParts)
     // A worker that died after the commit and before its journal took the
     // outcome leaves a successor the recorded admission: read back from a
     // journal or from the row, it is retained, never fresh.
-    let journaled: crate::store::RootAdmission =
+    let journaled: crate::store::RunAdmission =
         serde_json::from_value(serde_json::to_value(&won).expect("journal the admission"))
             .expect("replay the journaled admission");
     assert_eq!(
@@ -263,7 +263,7 @@ async fn a_root_keeps_the_anchor_its_first_admission_offered(parts: &DriveParts)
     clippy::panic,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn a_redelivered_wake_keeps_its_first_cause(parts: &DriveParts) {
+async fn a_redelivered_wake_keeps_its_first_cause(parts: &ShiftParts) {
     let wake = |cause| {
         super::process_wake_work(
             &parts.session_id,
@@ -531,7 +531,7 @@ async fn a_redelivered_occurrence_keeps_its_first_scope(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn a_resubmitted_intent_keeps_its_first_scope(
-    parts: &DriveParts,
+    parts: &ShiftParts,
     stores: &Arc<dyn crate::StoreSet>,
 ) {
     let registry = stores.process_registry();

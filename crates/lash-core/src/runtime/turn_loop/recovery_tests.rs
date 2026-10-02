@@ -30,7 +30,7 @@ fn closure_authorization(
         key(AwaitEventWaitIdentity::TurnTerminal, "terminal"),
         TurnCancelClosureProposal::CompletionSealed,
         TurnCancelIntentSnapshot::Absent,
-        &crate::store_backend_support::sealed_drive_fence(
+        &crate::store_backend_support::sealed_shift_fence(
             "recovery-session".into(),
             fencing_token,
             crate::store::AdmissionId::new("old-admission"),

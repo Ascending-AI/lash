@@ -45,7 +45,7 @@ pub(crate) fn recorded_profile_key(model: &Option<crate::LlmProfileConfig>) -> &
         .map_or("<no model>", |model| model.key().as_str())
 }
 
-/// The record of a default-spec root over a fresh session's config, under
+/// The record of a default-spec run over a fresh session's config, under
 /// the default host policies: what a fixture's pending follow-on carries
 /// when the law does not turn on the shape.
 pub(crate) fn default_resolved_run() -> Box<crate::ResolvedRun> {
@@ -354,7 +354,7 @@ pub(crate) fn started_detached(
 
 /// One due-obligation pass over `stores`' `ParentEnd` ledger, built the way
 /// the deployment's reconcile tick wires it (ADR 0109 §1.5): a
-/// [`ParentEndRelay`](lash_core::runtime::drive::ParentEndRelay) over the
+/// [`ParentEndRelay`](lash_core::runtime::shift::ParentEndRelay) over the
 /// store set's ledger, the registry the claims name rows in, and a native
 /// process port — the same `deliver_cancel` the law's native executions read
 /// their cancel request from.
@@ -372,13 +372,13 @@ pub(crate) async fn deliver_due_parent_end_obligations(
 ) -> lash_core::engine::RelayPass {
     let registry = stores.process_registry();
     let clock = stores.clock();
-    let relay = lash_core::runtime::drive::ParentEndRelay::new(
+    let relay = lash_core::runtime::shift::ParentEndRelay::new(
         stores.obligation_ledger(crate::store::ObligationKind::ParentEnd),
         Arc::clone(&registry),
         Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
         Arc::clone(&clock),
     );
-    lash_core::runtime::drive::relay::relay_due(
+    lash_core::runtime::shift::relay::relay_due(
         &relay,
         clock.as_ref(),
         std::num::NonZeroUsize::new(256).expect("parent-end page bound is non-zero"),
@@ -396,8 +396,8 @@ pub(crate) async fn deliver_due_parent_end_obligations(
 /// pass the tick outwaited is reported under no kind, and dropping the lanes
 /// aborts it under the claim it took.
 #[must_use]
-pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::drive::RelayLanes {
-    lash_core::runtime::drive::RelayLanes::new(
+pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::shift::RelayLanes {
+    lash_core::runtime::shift::RelayLanes::new(
         clock,
         lash_core::engine::RecoveryPassBudget {
             tick_wait: std::time::Duration::from_secs(3_600),
@@ -413,15 +413,15 @@ pub fn law_tick_lanes(clock: Arc<dyn crate::Clock>) -> lash_core::runtime::drive
 pub fn deployment_tick_lanes(
     clock: Arc<dyn crate::Clock>,
     budget: lash_core::engine::RecoveryPassBudget,
-) -> lash_core::runtime::drive::RelayLanes {
-    lash_core::runtime::drive::RelayLanes::new(clock, budget)
+) -> lash_core::runtime::shift::RelayLanes {
+    lash_core::runtime::shift::RelayLanes::new(clock, budget)
 }
 
 #[cfg(test)]
 mod law_tick_tests {
     use super::*;
     use lash_core::engine::{RecoveryPassBudget, RelayPass};
-    use lash_core::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+    use lash_core::runtime::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
     use lash_core::store::{ObligationKey, ObligationKind, ObligationLedger};
 
     /// A delivery that takes `takes` to answer: a store or an engine under
@@ -445,7 +445,7 @@ mod law_tick_tests {
 
     /// FIG-4505: a law's tick reports the pass it started even when the
     /// pass's delivery outlasts the wait a deployment's tick gives it. The
-    /// laws assert on that report (`root_control`'s and `root_terminal`'s
+    /// laws assert on that report (`run_control`'s and `run_terminal`'s
     /// reconcile ticks), and under load on PostgreSQL a pass ran past the
     /// deployment's wait: the tick named no pass for its kind and the law
     /// failed with "the tick claimed control-intent obligations".

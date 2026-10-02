@@ -4,7 +4,7 @@
 //! commands; a replaying owner honours the same request at the same identity.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_e279;
 
@@ -24,7 +24,7 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
     .await;
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("cancel while the model is running"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -116,7 +116,7 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
     .await;
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the tool, then stop after the step"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -193,7 +193,7 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
     .await;
 
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the tool, then escalate"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -254,7 +254,7 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     )
     .await;
     let first = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the tool, then crash before the stop commits"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -287,7 +287,7 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     )
     .await;
     let replayed = replayed_runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the tool, then crash before the stop commits"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),

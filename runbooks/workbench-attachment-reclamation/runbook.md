@@ -16,7 +16,7 @@ swept one on a host they can throw away, *before* running it on one they cannot.
 over `lash::persistence::{AttachmentReclamationPolicy, EmptyRootSetPolicy,
 AttachmentRootSet, MaintenanceSweep, AttachmentGcFence, VacuumReport}`.
 
-Four facts drive every judgment below:
+Four facts shift every judgment below:
 
 1. **The root set is the mark phase.** Every blob not reachable from the session
    store factory this host supplies is deleted. Pointing the sweep at the wrong

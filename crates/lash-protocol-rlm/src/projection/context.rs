@@ -274,7 +274,7 @@ impl ProjectedHostDescriptor for HistoryProjectedValue {
                 }
                 // `Empty`, `Truthy`, `Keys` and `Contains` below are reachable
                 // through the lashlang intrinsics (`empty`, truthiness, `keys`,
-                // `contains`) and through any host that drives the descriptor
+                // `contains`) and through any host that executes the descriptor
                 // directly. TypeScript source reaches none of them: it has no
                 // `empty`, its array methods lower to their own operations
                 // rather than these hooks, and `Object.keys` materializes

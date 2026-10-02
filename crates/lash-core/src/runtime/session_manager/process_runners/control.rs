@@ -1069,7 +1069,7 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// process with no row is refused rather than recorded as a root.
 ///
 /// A turn or drain of a session a process runs as its own — a subagent's
-/// session, driven by the host or the session's engine rather than lent the
+/// session, executed by the host or the session's engine rather than lent the
 /// live body's lineage — reads its owner from the session's metadata
 /// (`owning_process_id`, recorded when the owner's start created the session)
 /// and that owner's lineage from its row, so the start records the owner

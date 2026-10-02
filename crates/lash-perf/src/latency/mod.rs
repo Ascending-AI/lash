@@ -1,6 +1,6 @@
 //! The `send()`-to-completion latency gate (FIG-3843).
 //!
-//! Hosts no longer run turns inline: a host calls `send()`, Restate drives
+//! Hosts no longer run turns inline: a host calls `send()`, Restate executes
 //! the session, and `SendHandle::outcome()` follows live replay and durable
 //! state to the answer. This module measures that path end to end on a live
 //! `restate-server` and gates the added overhead — host-visible completion
@@ -8,13 +8,13 @@
 //! p99 < 250 ms on the same-process fast fixture.
 //!
 //! Every sample records the five spans the ticket names: request to durable
-//! acceptance, acceptance to drive admission, drive admission to first visible
-//! delta, drive admission to root settlement, and root settlement to
+//! acceptance, acceptance to shift admission, shift admission to first visible
+//! delta, shift admission to run settlement, and run settlement to
 //! host-visible completion. Failures land in the same ledger. The
 //! `poll` and `grace` cases isolate the send follower's two tail
 //! behaviours — the 25 ms..1 s polling backoff and the 5 s live-report
 //! grace, which binds only while a run in the host may still deposit a
-//! report — by fixing the drive-attach wake the follower waits on.
+//! report — by fixing the shift-attach wake the follower waits on.
 
 mod provider;
 mod restate;
@@ -25,7 +25,7 @@ mod worker;
 use crate::perf_support::dhat;
 pub(crate) use provider::LatencyProviderKind;
 use runner::{CaseSpec, Topology};
-use work_engine::AwaitDriveMode;
+use work_engine::AwaitShiftMode;
 
 /// The gate's budget, fixed before measurement (FIG-3843): same-process,
 /// no-tool, deterministic fast-provider fixture.
@@ -47,7 +47,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: GATE_CASE,
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Text,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: fast_samples,
             // The gated fixture is the *idle* path: pinned at 16 lanes so the
             // measured latency is the send path itself, not server-side
@@ -60,7 +60,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "stream",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Stream,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: 500,
             lanes,
             busy: false,
@@ -69,7 +69,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "tool",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Tool,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: 500,
             lanes,
             busy: false,
@@ -78,7 +78,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "failure",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Fail,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: 200,
             lanes,
             busy: false,
@@ -87,7 +87,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "busy",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Text,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: 300,
             lanes,
             busy: true,
@@ -96,7 +96,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "provider-http",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::OpenAiCompat,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: 200,
             lanes,
             busy: false,
@@ -105,12 +105,12 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "cross-worker",
             topology: Topology::CrossWorker,
             provider: LatencyProviderKind::Text,
-            await_drive: AwaitDriveMode::Real,
+            await_shift: AwaitShiftMode::Real,
             samples: 500,
             lanes,
             busy: false,
         },
-        // The follower's polling regime isolated: the drive-attach wake is
+        // The follower's polling regime isolated: the shift-attach wake is
         // answered immediately, so the store poll alone carries settlement
         // detection and the 25 ms..1 s backoff bounds the settle→complete
         // tail. Runs cross-worker so no live replay or mailbox shortcuts it.
@@ -118,13 +118,13 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "poll",
             topology: Topology::CrossWorker,
             provider: LatencyProviderKind::Text,
-            await_drive: AwaitDriveMode::Answered,
+            await_shift: AwaitShiftMode::Answered,
             samples: 300,
             lanes,
             busy: false,
         },
-        // The 5 s live-report grace's reach: the drive-attach wake never
-        // resolves, as for a drive that outlives the root. The root ran in
+        // The 5 s live-report grace's reach: the shift-attach wake never
+        // resolves, as for a shift that outlives the run. The run ran in
         // the worker, so no run in this process can deposit its report and
         // the handle answers from the store without waiting the grace.
         // Runs cross-worker for the same reason.
@@ -132,7 +132,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "grace",
             topology: Topology::CrossWorker,
             provider: LatencyProviderKind::Text,
-            await_drive: AwaitDriveMode::Pending,
+            await_shift: AwaitShiftMode::Pending,
             samples: 16,
             lanes: 16,
             busy: false,
@@ -164,7 +164,7 @@ pub struct LatencyRun {
 }
 
 /// The `lash-perf latency-worker` side: the second process a cross-worker
-/// case drives.
+/// case executes.
 pub struct LatencyWorkerArgs {
     /// The store directory the host opened this worker for.
     pub store_dir: std::path::PathBuf,
@@ -295,16 +295,16 @@ fn print_summary(report: &runner::LatencyReport) {
         let phases = &case.phases_ms;
         row("request→accept ms", &phases.request_to_accept);
         row(
-            "accept→drive admission ms",
-            &phases.accept_to_drive_admission,
+            "accept→shift admission ms",
+            &phases.accept_to_shift_admission,
         );
         row(
             "admission→first delta ms",
-            &phases.drive_admission_to_first_delta,
+            &phases.shift_admission_to_first_delta,
         );
         row(
-            "admission→root settled ms",
-            &phases.drive_admission_to_root_settled,
+            "admission→run settled ms",
+            &phases.shift_admission_to_run_settled,
         );
         row("settled→completion ms", &phases.root_settled_to_completion);
         row("send→completion ms", &phases.send_to_completion);

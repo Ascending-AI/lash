@@ -543,8 +543,8 @@ impl TraceCause {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceScopeOwner {
-    /// An admitted root and the run it drives.
-    Run { session_id: SessionId, root: TurnId },
+    /// An admitted run, the owner of its execution.
+    Run { session_id: SessionId, run: TurnId },
     /// One logical agent turn.
     Turn {
         session_id: SessionId,
@@ -734,7 +734,7 @@ struct TraceScopeOfferWire {
     anchor: TraceAnchor,
 }
 
-static ROOT_CAUSE: TraceCause = TraceCause::Root;
+static RUN_CAUSE: TraceCause = TraceCause::Root;
 static UNTRACED_ANCHOR: TraceAnchor = TraceAnchor::Untraced;
 
 impl TraceScopeOffer {
@@ -752,7 +752,7 @@ impl TraceScopeOffer {
 
     /// The cause the caller was given.
     pub fn cause(&self) -> &TraceCause {
-        self.0.as_ref().map_or(&ROOT_CAUSE, |offer| &offer.cause)
+        self.0.as_ref().map_or(&RUN_CAUSE, |offer| &offer.cause)
     }
 
     /// The anchor the caller's admission candidate proposed.

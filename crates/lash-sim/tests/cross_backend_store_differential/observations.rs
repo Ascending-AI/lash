@@ -206,7 +206,7 @@ pub(super) struct RawDurableState {
     pub(super) session_meta: Option<SessionMetaObservation>,
     pub(super) pending_turn_inputs: Vec<PendingTurnInputObservation>,
     pub(super) queued_work: Vec<QueuedWorkObservation>,
-    /// `session_roots` rows carrying terminal evidence or a scope-close
+    /// `session_runs` rows carrying terminal evidence or a scope-close
     /// obligation (ADR 0109 §3): armed ⇒ evidence ⇒ derived id, and the due
     /// index's bound the §1.8 assertion checks at read time.
     pub(super) scope_close_obligations: Vec<ScopeCloseObligationObservation>,
@@ -265,18 +265,18 @@ pub(super) enum FreshnessHeadObservation {
 pub(super) struct PendingTurnInputObservation {
     pub(super) input_id: String,
     pub(super) state: TurnInputStateKind,
-    pub(super) admitted_root: Option<String>,
+    pub(super) admitted_run: Option<String>,
     pub(super) admitted_by: Option<String>,
 }
 
-/// One `session_roots` row's terminal evidence and scope-close obligation
+/// One `session_runs` row's terminal evidence and scope-close obligation
 /// (ADR 0109 §3). Every timestamp on this row is stamped from the harness's
 /// injected clock — the terminal transaction's own `at_ms` and the armed
 /// obligation's `due_at` alike — so the whole row is cross-backend
 /// comparable, unlike a column the database stamps itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ScopeCloseObligationObservation {
-    pub(super) root: String,
+    pub(super) run: String,
     pub(super) terminal_kind: Option<String>,
     pub(super) terminal_at_ms: Option<u64>,
     pub(super) obligation_id: Option<String>,
@@ -299,7 +299,7 @@ pub(super) struct QueuedWorkObservation {
     authority: QueuedWorkAuthority,
     merge_key: Option<String>,
     payload: serde_json::Value,
-    admitted_root: Option<String>,
+    admitted_run: Option<String>,
     admitted_by: Option<String>,
 }
 
@@ -324,7 +324,7 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     work_kind,
                     authority_json,
                     merge_key,
-                    admitted_root,
+                    admitted_run,
                     admitted_by,
                     payload_json,
                 ),
@@ -341,7 +341,7 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     merge_key,
                     payload: serde_json::from_str(&payload_json)
                         .expect("decode queued-work payload"),
-                    admitted_root,
+                    admitted_run,
                     admitted_by,
                 }
             },

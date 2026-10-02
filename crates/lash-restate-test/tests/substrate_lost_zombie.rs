@@ -271,7 +271,7 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
         .into_iter()
         .find(|view| view.target == format!("LashProcessWorkflow/{process_id}/run"))
         .expect("the root segment's invocation");
-    let input = root_input(&restate, &root.id);
+    let input = run_input(&restate, &root.id);
     // Restate's kill does not wait for the deployment's attempt to stop.
     assert_eq!(server.kill(&root.id), Some(true), "the kill lands");
     assert_eq!(server.purge(&root.id), Some(true), "retention purges it");
@@ -371,7 +371,7 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
 
 /// The input the killed invocation was submitted with: its journal's input
 /// command carries it, the JSON after the protobuf envelope.
-fn root_input(restate: &RestateTestBackend, invocation: &str) -> serde_json::Value {
+fn run_input(restate: &RestateTestBackend, invocation: &str) -> serde_json::Value {
     let journal = restate
         .server()
         .journal(invocation)

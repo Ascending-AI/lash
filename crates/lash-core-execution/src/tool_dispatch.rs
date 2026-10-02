@@ -38,7 +38,7 @@ pub use execution::finalize_tool_result_with_execution_context;
 pub use intent_executor::execute_final_tool_intents;
 #[cfg(not(feature = "testing"))]
 pub(crate) use intent_executor::execute_final_tool_intents;
-// The store-backed dispatch tests (`tests/store_backed`) drive a single call
+// The store-backed dispatch tests (`tests/store_backed`) shift a single call
 // and the directive fold the way a turn does; nothing in the runtime calls
 // these outside a turn.
 #[cfg(any(test, feature = "testing"))]

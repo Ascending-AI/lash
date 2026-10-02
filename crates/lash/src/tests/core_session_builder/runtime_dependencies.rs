@@ -316,7 +316,7 @@ async fn backend_process_work_configures_the_core_registry() -> Result<()> {
 }
 
 #[tokio::test]
-async fn external_process_port_composes_the_engine_session_work_and_drives_the_command()
+async fn external_process_port_composes_the_engine_session_work_and_executes_the_command()
 -> Result<()> {
     let core = explicit_ephemeral_facets(peer_coherence_builder_over(
         backend_with_external_process_work().await.into(),
@@ -340,7 +340,7 @@ async fn external_process_port_composes_the_engine_session_work_and_drives_the_c
         "engine-work-refresh",
     ))
     .await?;
-    // The command drains asynchronously: the backend's engine drives the
+    // The command drains asynchronously: the backend's engine executes the
     // session and applies it (FIG-3600).
     let _ = cursor_before;
     let mut settled = false;
@@ -351,7 +351,7 @@ async fn external_process_port_composes_the_engine_session_work_and_drives_the_c
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    assert!(settled, "the engine drives the command to its settlement");
+    assert!(settled, "the engine executes the command to its settlement");
     Ok(())
 }
 

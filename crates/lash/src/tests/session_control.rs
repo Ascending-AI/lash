@@ -1,13 +1,13 @@
 //! Laws of the resolved session-work port's control half (FIG-3871,
 //! FIG-3849 F1): the facade's resolved port forwards
 //! `SessionWorkEngine::control` to the deployment's engine, so a session
-//! close's engine half releases a running root's execution instead of
+//! close's engine half releases a running run's execution instead of
 //! answering `NothingHeld` while the turn runs on.
 //!
 //! It runs facade-built on lash-restate's engine over the Restate server
 //! double — the engine whose release kills an invocation. On the bug the
 //! port answers the trait default `NoEngineControl`: the close's
-//! `release_root` reads `NothingHeld`, the intent is acknowledged anyway,
+//! `release_run` reads `NothingHeld`, the intent is acknowledged anyway,
 //! and the held model call runs on.
 
 use super::*;
@@ -35,7 +35,7 @@ impl Drop for HeldUntilKill {
 }
 
 /// A model that answers every input but a `hold` one's: that call counts
-/// itself held and never answers, keeping its root's invocation running.
+/// itself held and never answers, keeping its run's invocation running.
 fn hold_provider(calls: Arc<HeldCall>) -> ProviderHandle {
     crate::testing::TestProvider::builder()
         .kind("session-control-law")
@@ -118,12 +118,12 @@ async fn delete_in_handler(
 }
 
 /// A session close's engine half is the engine's own control (ADR 0104 O4):
-/// `CloseSession`'s `release_root` reaches the deployment's engine through
-/// the resolved port, so deleting a session whose root is held inside its
+/// `CloseSession`'s `release_run` reaches the deployment's engine through
+/// the resolved port, so deleting a session whose run is held inside its
 /// model call kills the running invocation — observed here by the held
 /// call's drop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
+async fn a_session_close_releases_its_running_runs_execution() -> Result<()> {
     let double = restate_double(SEED).await;
     let calls = Arc::new(HeldCall::default());
     let core = LashCore::standard_builder(double.lash_backend())
@@ -133,7 +133,7 @@ async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("held-close").created().await.open().await?;
     let session_id = session.session_id().clone();
-    session.send(TurnInput::text("hold this root")).await?;
+    session.send(TurnInput::text("hold this run")).await?;
 
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         while calls.held.load(Ordering::SeqCst) == 0 {
@@ -141,7 +141,7 @@ async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
         }
     })
     .await
-    .expect("the sent root reached its held model call");
+    .expect("the sent run reached its held model call");
 
     delete_in_handler(&double, core.session_administration().await, &session_id).await;
 
@@ -151,6 +151,6 @@ async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
         }
     })
     .await
-    .expect("the close's engine half released the running root's invocation");
+    .expect("the close's engine half released the running run's invocation");
     Ok(())
 }

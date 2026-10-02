@@ -198,7 +198,7 @@ impl World {
                     registry.clone(),
                     stores.process_continuations(),
                 ),
-                session_driver: crate::RestateSessionDriverSlot::new(),
+                session_shifts: crate::RestateSessionShiftsSlot::new(),
                 build_generation: lash_core::engine::BuildGeneration::for_test("terminal-await"),
                 namespace: crate::RestateNamespace::default(),
                 fleet: crate::object_state::FleetView::default(),

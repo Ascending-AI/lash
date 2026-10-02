@@ -1,12 +1,12 @@
-//! Ingress (S-1–S-4): an accepted input and the drive that consumes it.
+//! Ingress (S-1–S-4): an accepted input and the shift that consumes it.
 //!
-//! The workload accepts one or two inputs on one session, each its own root;
+//! The workload accepts one or two inputs on one session, each its own run;
 //! the seed picks which one the crash cuts. Inputs before the target settle
 //! first, inputs after it are accepted by the restarted deployment.
 
 use lash_core::TurnId;
 use lash_restate_test::{
-    CrashPoint as EngineCut, CrashRule, SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE,
+    CrashPoint as EngineCut, CrashRule, SESSION_SHIFT_SERVICE, TURN_DRIVER_SERVICE,
 };
 
 use super::{Staged, crash_and_restart, send, session_name, standard_core};
@@ -15,15 +15,15 @@ use crate::crash_matrix::invariants::{self, AcceptedInput, Expected};
 use crate::crash_matrix::world::CrashWorld;
 use crate::crash_matrix::{CrashPoint, Seam};
 
-/// The journal commands of a text-only root's `LashTurn` invocation the
-/// mid-journal cut draws from: after the input command (0) come the root
+/// The journal commands of a text-only run's `LashTurn` invocation the
+/// mid-journal cut draws from: after the input command (0) come the run
 /// start, the seal, the admission, the head, the turn config, the start gate's
 /// peek, the environment sync, the model call's two steps, the post-model
 /// gate's peek, the checkpoint, the gate's teardown peek and settlement, the
 /// terminal's one-way publication, the scope close, the state write and the
 /// output — 17 more. A cut past the journal's end never fires, so this
 /// follows the journal's length.
-const ROOT_JOURNAL_CUTS: u64 = 17;
+const RUN_JOURNAL_CUTS: u64 = 17;
 
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
     let world = CrashWorld::new(seed, standard_core(), false).await?;
@@ -38,59 +38,59 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
     let mut origin_ms = None;
     let mut notes = vec![format!("inputs={inputs} target=in-{target}")];
     for index in 0..inputs {
-        let root = format!("in-{index}");
+        let run = format!("in-{index}");
         expected.inputs.push(AcceptedInput {
             session: session.clone(),
-            root: TurnId::fixture(root.as_str()),
+            run: TurnId::fixture(run.as_str()),
         });
         if index != target {
-            send(&world, &session, &root).await?;
+            send(&world, &session, &run).await?;
             world.quiesce().await;
             continue;
         }
         origin_ms = match point {
             CrashPoint::AfterStateCommit => {
-                world.faults().crash_once(HostSite::DriveAsk);
-                send(&world, &session, &root).await?;
+                world.faults().crash_once(HostSite::ShiftAsk);
+                send(&world, &session, &run).await?;
                 crash_and_restart(&world).await?
             }
             CrashPoint::DuringEngineDelivery => {
                 world.crash_on(
                     CrashRule::new(EngineCut::BeforeCommand { index: 1 })
-                        .service(SESSION_DRIVER_SERVICE)
+                        .service(SESSION_SHIFT_SERVICE)
                         .key(session.as_str())
                         .within_attempts(1),
                 );
-                send(&world, &session, &root).await?;
+                send(&world, &session, &run).await?;
                 crash_and_restart(&world).await?
             }
             CrashPoint::AfterDeliveryBeforeSettle => {
                 world.crash_on(
                     CrashRule::new(EngineCut::BeforeRunResult { name: None })
-                        .service(SESSION_DRIVER_SERVICE)
+                        .service(SESSION_SHIFT_SERVICE)
                         .key(session.as_str())
                         .within_attempts(1),
                 );
-                send(&world, &session, &root).await?;
+                send(&world, &session, &run).await?;
                 crash_and_restart(&world).await?
             }
             CrashPoint::MidJournalStep => {
-                let index = 1 + world.draw(0..ROOT_JOURNAL_CUTS) as usize;
+                let index = 1 + world.draw(0..RUN_JOURNAL_CUTS) as usize;
                 notes.push(format!("cut=command {index}"));
                 world.crash_on(
                     CrashRule::new(EngineCut::BeforeCommand { index })
                         .service(TURN_DRIVER_SERVICE)
                         .within_attempts(1),
                 );
-                send(&world, &session, &root).await?;
+                send(&world, &session, &run).await?;
                 crash_and_restart(&world).await?
             }
             CrashPoint::InvocationLost => {
-                // The drive the acceptance asked for is lost by the engine
+                // The shift the acceptance asked for is lost by the engine
                 // before it admits anything; the host lives on.
-                let hold = world.hold_session_drive(&session).await;
-                send(&world, &session, &root).await?;
-                let prefix = format!("{SESSION_DRIVER_SERVICE}/{session}/");
+                let hold = world.hold_session_shift(&session).await;
+                send(&world, &session, &run).await?;
+                let prefix = format!("{SESSION_SHIFT_SERVICE}/{session}/");
                 // The acceptance's ask is fire-and-forget: wait until it lands.
                 let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
                 let lost = loop {
@@ -107,7 +107,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
                         break lost;
                     }
                     if tokio::time::Instant::now() > deadline {
-                        return Err("the acceptance's drive never reached the engine".to_owned());
+                        return Err("the acceptance's shift never reached the engine".to_owned());
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 };
@@ -129,17 +129,17 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
     })
 }
 
-/// Kill every invocation of `session`'s drive the engine holds once the
+/// Kill every invocation of `session`'s shift the engine holds once the
 /// engine accepted the ask `request`: the engine loses that ask before it
 /// admits anything.
-async fn lose_session_drive(
+async fn lose_session_shift(
     world: &CrashWorld,
     session: &lash_core::SessionId,
     request: &str,
 ) -> Result<(), String> {
-    let prefix = format!("{SESSION_DRIVER_SERVICE}/{session}/");
+    let prefix = format!("{SESSION_SHIFT_SERVICE}/{session}/");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !world.drives().asked().iter().any(|asked| asked == request) {
+    while !world.shifts().asked().iter().any(|asked| asked == request) {
         if tokio::time::Instant::now() > deadline {
             return Err(format!("the engine never accepted the ask `{request}`"));
         }
@@ -157,7 +157,7 @@ async fn lose_session_drive(
             break lost;
         }
         if tokio::time::Instant::now() > deadline {
-            return Err("the acceptance's drive never reached the engine".to_owned());
+            return Err("the acceptance's shift never reached the engine".to_owned());
         }
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     };
@@ -168,45 +168,45 @@ async fn lose_session_drive(
 }
 
 /// FIG-3879: a waiter on an accepted input attaches to its first attempt's
-/// drive, and when the engine loses that drive before it admits anything (an
+/// shift, and when the engine loses that shift before it admits anything (an
 /// operator kill) the waiter follows the relay's ask under the next attempt,
-/// `ingress:{input}:{attempt}`, to the input's answer. The session's drive is
+/// `ingress:{input}:{attempt}`, to the input's answer. The session's shift is
 /// held until the waiter attached to the re-asked one, so the waiter cannot
 /// answer from the store before it follows. Answers what the case found
-/// wrong: empty when the waiter awaited the re-asked drive and answered.
+/// wrong: empty when the waiter awaited the re-asked shift and answered.
 pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec<String>, String> {
     let world = CrashWorld::new(seed, standard_core(), false).await?;
     world.restart().await?;
-    // A held drive never settles: wait on the engine briefly per tick.
+    // A held shift never settles: wait on the engine briefly per tick.
     world.set_quiesce_budget(std::time::Duration::from_millis(100));
     let session = session_name(Seam::Ingress, seed);
-    let root = "followed";
-    let hold = world.hold_session_drive(&session).await;
+    let run = "followed";
+    let hold = world.hold_session_shift(&session).await;
     let core = world.core()?;
     let accepted = {
         let session = session.clone();
-        let text = invariants::input_text(root);
+        let text = invariants::input_text(run);
         world
             .host_op(async move {
                 let session = crate::open_created_session(super::MODEL, &core, session).await?;
-                session.send(lash::TurnInput::text(text)).id(root).await
+                session.send(lash::TurnInput::text(text)).id(run).await
             })
             .await
             .ok_or_else(|| "the host died inside the send".to_owned())?
             .map_err(|error| format!("the send was refused: {error}"))?
     };
-    let item = lash_core::PendingTurnInputDraft::keyed_input_id(&session, root);
-    let ask = |attempt| lash_core::drive::ingress_drive_request(&item, attempt);
-    let first = ask(lash_core::drive::FIRST_INGRESS_ATTEMPT);
-    let next = ask(lash_core::drive::FIRST_INGRESS_ATTEMPT + 1);
+    let item = lash_core::PendingTurnInputDraft::keyed_input_id(&session, run);
+    let ask = |attempt| lash_core::shift::ingress_shift_request(&item, attempt);
+    let first = ask(lash_core::shift::FIRST_INGRESS_ATTEMPT);
+    let next = ask(lash_core::shift::FIRST_INGRESS_ATTEMPT + 1);
     let waiter = world.spawn_host(async move { accepted.outcome().await });
-    lose_session_drive(&world, &session, first.as_str()).await?;
+    lose_session_shift(&world, &session, first.as_str()).await?;
     let mut violations = Vec::new();
     // The lost ask's claim lapses and the relay asks again, a claim TTL and a
-    // tick later; its drive is held.
+    // tick later; its shift is held.
     for _ in 0..12 {
         if world
-            .drives()
+            .shifts()
             .asked()
             .iter()
             .any(|asked| asked == next.as_str())
@@ -217,17 +217,17 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
         world.quiesce().await;
     }
     if !world
-        .drives()
+        .shifts()
         .asked()
         .iter()
         .any(|asked| asked == next.as_str())
     {
         violations.push(format!("the relay never asked `{}`", next.as_str()));
     }
-    // The waiter follows the re-asked drive while it cannot yet run.
+    // The waiter follows the re-asked shift while it cannot yet run.
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while !world
-        .drives()
+        .shifts()
         .awaited()
         .iter()
         .any(|awaited| awaited == next.as_str())
@@ -235,14 +235,14 @@ pub async fn a_waiter_follows_its_input_past_a_lost_ask(seed: u64) -> Result<Vec
     {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    let awaited = world.drives().awaited();
+    let awaited = world.shifts().awaited();
     if !awaited.iter().any(|request| request == next.as_str()) {
         violations.push(format!(
             "the waiter never followed the relay's ask `{}` past the lost `{}`: it awaited \
              {awaited:?}; the engine accepted the asks {:?}",
             next.as_str(),
             first.as_str(),
-            world.drives().asked()
+            world.shifts().asked()
         ));
     }
     hold.release();
@@ -283,13 +283,13 @@ pub async fn a_turn_outlasts_an_outage_past_its_attempt_budget(
     world.double()?;
     world.restart().await?;
     let session = session_name(Seam::Ingress, seed);
-    let root = "outage";
+    let run = "outage";
     world.crash_on(
         CrashRule::new(EngineCut::BeforeCommand { index: 3 })
             .service(TURN_DRIVER_SERVICE)
             .within_attempts(1),
     );
-    send(&world, &session, root).await?;
+    send(&world, &session, run).await?;
     if world.trip().wait(super::TRIP_WAIT).await.is_none() {
         world.finish().await;
         return Err("the turn's journal cut never fired".to_owned());
@@ -331,7 +331,7 @@ pub async fn a_turn_outlasts_an_outage_past_its_attempt_budget(
         live_sessions: vec![session.clone()],
         inputs: vec![AcceptedInput {
             session,
-            root: TurnId::from(root),
+            run: TurnId::from(run),
         }],
         ..Expected::default()
     };

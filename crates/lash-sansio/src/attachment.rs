@@ -36,7 +36,7 @@ const MAX_ATTACHMENT_ID_LEN: usize = 128;
 /// control — a filesystem path component, an object-store key segment, a SQL
 /// identifier column. An id therefore has to be a *single* namespace component:
 /// non-empty, bounded, printable ASCII, free of path separators, not a relative
-/// directory reference, and not a drive-qualified path. Ids arrive from places
+/// directory reference, and not a shift-qualified path. Ids arrive from places
 /// Lash does not control (remote-protocol peers, host HTTP routes, model
 /// output), so the check lives at construction: there is no way to obtain an
 /// `AttachmentId` that a backend would have to defend itself against, and no

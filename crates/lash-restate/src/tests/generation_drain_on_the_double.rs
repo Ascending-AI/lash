@@ -1,6 +1,6 @@
 //! The build-generation drain laws (FIG-3799, FIG-3884) on the in-process
 //! server double: the store set the endpoint's own handlers read, so the
-//! queued-run count the law drives is the one a Restate deployment's drain
+//! queued-run count the law executes is the one a Restate deployment's drain
 //! status would compose.
 
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};

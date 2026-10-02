@@ -24,13 +24,13 @@ intent and receipt projections, not a stop channel or a second arbitration
 result. No waiter polls those rows to discover cancellation.
 
 Closing the reserved cancel, escalation and terminal promises is a
-crash-completable protocol. Before closure, the current drive fence authorizes
+crash-completable protocol. Before closure, the current shift fence authorizes
 one non-overwritable operation containing the control binding, admitted scope,
 keys, proposed base terminal and observed intent revision. An identical retry
 adopts it; a different operation conflicts. A successor may finish its exact
 promise resolutions. Final publication depends on the session-head CAS,
 settled cancellation facts and the authorization, not the authorizing fence's
-epoch. Activation repair validates its current drive fence and drains pending
+epoch. Activation repair validates its current shift fence and drains pending
 closures before doing new work.
 
 Promise resolution and SQL mutation are separate authority domains. The

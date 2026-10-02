@@ -1,4 +1,4 @@
-//! The cancel fact of the effect-group child a controller drives (ADR 0105
+//! The cancel fact of the effect-group child a controller executes (ADR 0105
 //! §4, FIG-3904).
 //!
 //! Group dispatch binds a child's controller to the child's cancel fact, which
@@ -13,7 +13,7 @@ use super::*;
 use crate::durable_wait::RestateDurableWaitAwaitRequest;
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
-    /// Bind this controller to the effect-group child it drives, whose cancel
+    /// Bind this controller to the effect-group child it executes, whose cancel
     /// fact is `cancel`. Only group dispatch sets it.
     pub(crate) fn with_group_child_cancel(
         mut self,
@@ -24,7 +24,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     }
 
     /// Whether `terminal` is the engine's cancellation of the group child this
-    /// controller drives, surfacing at one of the child's awaits. The engine
+    /// controller executes, surfacing at one of the child's awaits. The engine
     /// journals its signal, so a replay meets it at the same await.
     pub(super) fn is_group_child_engine_cancel(&self, terminal: &TerminalError) -> bool {
         self.options.group_child_cancel.is_some() && terminal.code() == 409
@@ -86,7 +86,7 @@ where
     C: RestateControllerContext<'ctx>,
 {
     /// A journaled read of the bound child's cancel fact from its group
-    /// index; `false` for a controller that drives no group child.
+    /// index; `false` for a controller that executes no group child.
     pub(super) async fn peek_group_child_cancel(
         &self,
     ) -> Result<bool, RuntimeEffectControllerError> {

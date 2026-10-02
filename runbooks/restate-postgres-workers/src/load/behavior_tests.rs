@@ -171,12 +171,12 @@ fn a_batched_turn_keeps_full_tool_coverage_and_zero_violations() {
         })
         .unwrap();
     let key = turn.operation.key();
-    let root = crate::load::turn_id_for(&key);
-    answer(&mut snapshot, &key, &root, &queued.idempotency_key);
+    let run = crate::load::turn_id_for(&key);
+    answer(&mut snapshot, &key, &run, &queued.idempotency_key);
     answer(
         &mut snapshot,
         &queued.idempotency_key,
-        &root,
+        &run,
         &queued.idempotency_key,
     );
     for event in &mut snapshot.events {

@@ -167,7 +167,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             self.fence.fleet(),
         )
         .await?;
-        // The root admission's build-generation stamp projects onto the
+        // The run admission's build-generation stamp projects onto the
         // process row in the same transaction (FIG-3795 S2): the drain's
         // live-generation index reads it without unfolding the event.
         sqlx::query(process_sql().process.set_segment_generation.sql())

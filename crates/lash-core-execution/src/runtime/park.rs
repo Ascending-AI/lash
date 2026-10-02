@@ -1,56 +1,56 @@
-//! Persistence entry points shared by aborting roots and engine recovery.
+//! Persistence entry points shared by aborting runs and engine recovery.
 use crate::StoreError;
 
-/// Woken once per root park this process records, after the write committed.
-static ROOT_PARK_RECORDED: std::sync::LazyLock<tokio::sync::Notify> =
+/// Woken once per run park this process records, after the write committed.
+static RUN_PARK_RECORDED: std::sync::LazyLock<tokio::sync::Notify> =
     std::sync::LazyLock::new(tokio::sync::Notify::new);
 
-/// The next root park this process records, in any session: a wake, never an
-/// answer. Whoever waits on a root reads its park from the store; enable the
+/// The next run park this process records, in any session: a wake, never an
+/// answer. Whoever waits on a run reads its park from the store; enable the
 /// wake before that read, so a park committed between the read and the wait
 /// is not missed. A park recorded in another process wakes nothing here.
-pub fn root_park_recorded() -> tokio::sync::futures::Notified<'static> {
-    ROOT_PARK_RECORDED.notified()
+pub fn run_park_recorded() -> tokio::sync::futures::Notified<'static> {
+    RUN_PARK_RECORDED.notified()
 }
 
-/// Record a root park through the store's terminal-aware transaction, and
-/// wake whoever waits on [`root_park_recorded`] once it committed.
-pub async fn record_root_park(
+/// Record a run park through the store's terminal-aware transaction, and
+/// wake whoever waits on [`run_park_recorded`] once it committed.
+pub async fn record_run_park(
     store: &dyn crate::store::RuntimeStore,
     write: &crate::store::TurnParkWrite,
 ) -> Result<crate::store::TurnPark, StoreError> {
     let park = store.record_turn_park(write).await?;
-    ROOT_PARK_RECORDED.notify_waiters();
+    RUN_PARK_RECORDED.notify_waiters();
     Ok(park)
 }
 
 /// The store-backed [`ParkRecoveryWriter`](crate::engine::ParkRecoveryWriter):
-/// what an engine's park reconcile records a stalled root through.
+/// what an engine's park reconcile records a stalled run through.
 ///
-/// A root is parked in its session's store, by the same write the aborting
+/// A run is parked in its session's store, by the same write the aborting
 /// execution itself uses, so the two converge: a divergence park the
 /// execution recorded first keeps its reason and gains the engine's handle,
 /// and a second reconcile pass over the same stalled execution writes
-/// nothing. A root with terminal evidence answers `TargetTerminal`, and a
+/// nothing. A run with terminal evidence answers `TargetTerminal`, and a
 /// deleted session `TargetGone`: the engine releases the execution instead.
 ///
-/// The engine names the execution by the root its drive admitted; a
+/// The engine names the execution by the run its shift admitted; a
 /// follow-on's recovery is admitted under a name of its own, and is parked
-/// under the logical root it continues, as its own abort would park it.
+/// under the logical run it continues, as its own abort would park it.
 ///
 /// A park that names a redrive which already resumed the execution is
 /// re-parked only when the engine confirms, after the park was read, that
 /// the execution is still stopped: an engine listing read before the resume
-/// is stale, and re-parking from it would clear the redrive while the root
+/// is stale, and re-parking from it would clear the redrive while the run
 /// runs.
 ///
-/// Stopped work a root waits on ([`ParkTarget::RootChild`](crate::engine::ParkTarget::RootChild))
-/// parks its root and is recorded on the park by its engine handle
-/// (FIG-4630). A root already parked keeps its park and gains the handle, so
-/// any number of stopped children of one root, over any number of passes,
+/// Stopped work a run waits on ([`ParkTarget::RunChild`](crate::engine::ParkTarget::RunChild))
+/// parks its run and is recorded on the park by its engine handle
+/// (FIG-4630). A run already parked keeps its park and gains the handle, so
+/// any number of stopped children of one run, over any number of passes,
 /// write one park that names each of them once. A redrive resumes the
 /// children its park recorded when it was requested, and owns them until it
-/// did; a child still stopped after a settled redrive re-parks the root, so
+/// did; a child still stopped after a settled redrive re-parks the run, so
 /// the operator can act again.
 ///
 /// Every write here is a reconcile write
@@ -86,11 +86,11 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
         execution: &dyn crate::engine::StalledExecution,
     ) -> Result<crate::engine::EngineParkRecorded, StoreError> {
         use crate::engine::{EngineParkRecorded, ParkTarget};
-        let (session, root, engine, child) = match target {
-            ParkTarget::Root { session, root } => (session, root, Some(engine), None),
-            ParkTarget::RootChild { session, root } => (session, root, None, Some(engine)),
-            ParkTarget::Drive { session } => {
-                return self.record_drive_park(session, reason, execution).await;
+        let (session, run, engine, child) = match target {
+            ParkTarget::Run { session, run } => (session, run, Some(engine), None),
+            ParkTarget::RunChild { session, run } => (session, run, None, Some(engine)),
+            ParkTarget::Shift { session } => {
+                return self.record_shift_park(session, reason, execution).await;
             }
             ParkTarget::Process { .. } => {
                 return Err(StoreError::UnsupportedStoreOperation {
@@ -100,7 +100,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
         };
         if !super::session_is_live(self.sessions, session).await? {
             return Ok(
-                if self.sessions.root_terminal(session, root).await?.is_some() {
+                if self.sessions.run_terminal(session, run).await?.is_some() {
                     EngineParkRecorded::TargetTerminal
                 } else {
                     EngineParkRecorded::TargetGone
@@ -108,17 +108,17 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             );
         }
         let store = self.sessions;
-        let root = match store.load_pending_follow_on(session).await? {
-            Some(owed) if owed.names_recovery(root) => owed.root_turn_id(),
-            _ => root.clone(),
+        let run = match store.load_pending_follow_on(session).await? {
+            Some(owed) if owed.names_recovery(run) => owed.run_turn_id(),
+            _ => run.clone(),
         };
-        if self.sessions.root_terminal(session, &root).await?.is_some() {
+        if self.sessions.run_terminal(session, &run).await?.is_some() {
             return Ok(EngineParkRecorded::TargetTerminal);
         }
         let held = store
             .load_turn_park(session)
             .await?
-            .filter(|park| park.turn_id == root);
+            .filter(|park| park.turn_id == run);
         let still_stopped = || async {
             execution
                 .still_stopped()
@@ -148,7 +148,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                         after_redrive = Some(intent);
                     }
                 }
-                // The root is parked and no redrive ran since: a child the
+                // The run is parked and no redrive ran since: a child the
                 // park already records adds nothing to it, and the store
                 // adds the handle of one it does not.
                 None if child
@@ -160,7 +160,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 None => {}
             },
             // A listing read before an operator resumed the child is stale:
-            // parking from it would park a running root.
+            // parking from it would park a running run.
             None if child.is_some() && !still_stopped().await? => {
                 return Ok(EngineParkRecorded::Redriven);
             }
@@ -170,7 +170,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
         let write = match child {
             Some(child) => crate::store::TurnParkWrite::reconcile_child(
                 session.clone(),
-                root.clone(),
+                run.clone(),
                 reason,
                 at_ms,
                 child,
@@ -178,7 +178,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             ),
             None => crate::store::TurnParkWrite::reconcile(
                 session.clone(),
-                root.clone(),
+                run.clone(),
                 reason,
                 at_ms,
                 engine,
@@ -186,7 +186,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
             ),
         };
         let held = held.map(|park| park.park_id);
-        match record_root_park(store, &write).await {
+        match record_run_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) if held == Some(park.park_id) || !records(&park, &write) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
@@ -200,17 +200,17 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 );
                 tracing::warn!(
                     session_id = %session,
-                    root = %root,
+                    run = %run,
                     park_id = %park.park_id,
                     reason_code = park.reason.code().as_str(),
                     event = "turn.parked",
-                    "a root whose engine stopped retrying is parked; redrive it, cancel it, or \
+                    "a run whose engine stopped retrying is parked; redrive it, cancel it, or \
                      fork from before it"
                 );
                 Ok(EngineParkRecorded::Parked(park.park_id))
             }
-            Err(StoreError::RootAlreadyTerminal { .. }) => Ok(EngineParkRecorded::TargetTerminal),
-            Err(StoreError::RootInputWithdrawn { .. }) => Ok(EngineParkRecorded::TargetGone),
+            Err(StoreError::RunAlreadyTerminal { .. }) => Ok(EngineParkRecorded::TargetTerminal),
+            Err(StoreError::RunInputWithdrawn { .. }) => Ok(EngineParkRecorded::TargetGone),
             Err(StoreError::SessionDeleted { .. }) => Ok(EngineParkRecorded::TargetGone),
             Err(error) => Err(error),
         }
@@ -226,22 +226,22 @@ fn records(park: &crate::store::TurnPark, write: &crate::store::TurnParkWrite) -
 }
 
 impl StoreParkRecovery<'_> {
-    /// Park a session's stopped drive (ADR 0109 §3): a drive the engine
+    /// Park a session's stopped shift (ADR 0109 §3): a shift the engine
     /// stopped retrying in its admission is never resumed blindly. It waits
     /// on the session's park, and the park's operator verb resumes it.
     ///
-    /// A session already parked keeps its park: the drive stopped behind it,
-    /// and the verb that resolves it resumes the drive too. A redrive still
-    /// open owns the session. A drive whose every attempt was refused only
+    /// A session already parked keeps its park: the shift stopped behind it,
+    /// and the verb that resolves it resumes the shift too. A redrive still
+    /// open owns the session. A shift whose every attempt was refused only
     /// because that redrive had not settled (D15) waited on the redrive, not
     /// on an operator: once the redrive settles — its park still held, or
-    /// already cleared by its root's commit — the engine resumes the drive.
-    /// Any other drive still stopped after a settled redrive re-parks its
-    /// root, so the operator can act again. Otherwise the root the session's
+    /// already cleared by its run's commit — the engine resumes the shift.
+    /// Any other shift still stopped after a settled redrive re-parks its
+    /// run, so the operator can act again. Otherwise the run the session's
     /// next admission names is parked, with no engine handle: the engine
-    /// finds the stopped drive by its session. A drive whose next work names
-    /// no root is released: its session's ingress obligations ask again.
-    async fn record_drive_park(
+    /// finds the stopped shift by its session. A shift whose next work names
+    /// no run is released: its session's ingress obligations ask again.
+    async fn record_shift_park(
         &self,
         session: &crate::SessionId,
         reason: crate::store::ParkReason,
@@ -259,7 +259,7 @@ impl StoreParkRecovery<'_> {
                 .map_err(|refusal| StoreError::Backend(refusal.to_string()))
         };
         let behind_redrive = reason.stopped_behind_unsettled_redrive();
-        let (root, after_redrive) = match store.load_turn_park(session).await? {
+        let (run, after_redrive) = match store.load_turn_park(session).await? {
             Some(park) => match park.resume_intent {
                 None => return Ok(EngineParkRecorded::AttachedToExisting(park.park_id)),
                 Some(intent) => {
@@ -272,41 +272,41 @@ impl StoreParkRecovery<'_> {
                         return Ok(EngineParkRecorded::Redriven);
                     }
                     if behind_redrive {
-                        return Ok(EngineParkRecorded::ResumeDrive);
+                        return Ok(EngineParkRecorded::ResumeShift);
                     }
                     (park.turn_id, Some(intent))
                 }
             },
-            // The redrive the drive stopped behind settled, and its root's
+            // The redrive the shift stopped behind settled, and its run's
             // commit already cleared the park.
             None if behind_redrive => {
                 return Ok(if still_stopped().await? {
-                    EngineParkRecorded::ResumeDrive
+                    EngineParkRecorded::ResumeShift
                 } else {
                     EngineParkRecorded::Redriven
                 });
             }
             None => {
-                let Some(root) = next_admission_root(store, session).await? else {
+                let Some(run) = next_admission_run(store, session).await? else {
                     return Ok(EngineParkRecorded::NothingToPark);
                 };
-                // A listing read before an operator resumed the drive is
+                // A listing read before an operator resumed the shift is
                 // stale: parking from it would park a running session.
                 if !still_stopped().await? {
                     return Ok(EngineParkRecorded::Redriven);
                 }
-                (root, None)
+                (run, None)
             }
         };
         let write = crate::store::TurnParkWrite::reconcile(
             session.clone(),
-            root.clone(),
+            run.clone(),
             reason,
             self.clock.timestamp_ms(),
             None,
             after_redrive,
         );
-        match record_root_park(store, &write).await {
+        match record_run_park(store, &write).await {
             Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) if !records(&park, &write) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
@@ -320,38 +320,38 @@ impl StoreParkRecovery<'_> {
                 );
                 tracing::warn!(
                     session_id = %session,
-                    root = %root,
+                    run = %run,
                     park_id = %park.park_id,
                     reason_code = park.reason.code().as_str(),
-                    event = "session.drive.parked",
-                    "a session drive the engine stopped retrying is parked on its next root; \
+                    event = "session.shift.parked",
+                    "a session shift the engine stopped retrying is parked on its next run; \
                      redrive it, cancel it, or fork from before it"
                 );
                 Ok(EngineParkRecorded::Parked(park.park_id))
             }
-            Err(StoreError::RootAlreadyTerminal { .. }) => Ok(EngineParkRecorded::NothingToPark),
-            Err(StoreError::RootInputWithdrawn { .. }) => Ok(EngineParkRecorded::NothingToPark),
+            Err(StoreError::RunAlreadyTerminal { .. }) => Ok(EngineParkRecorded::NothingToPark),
+            Err(StoreError::RunInputWithdrawn { .. }) => Ok(EngineParkRecorded::NothingToPark),
             Err(StoreError::SessionDeleted { .. }) => Ok(EngineParkRecorded::TargetGone),
             Err(error) => Err(error),
         }
     }
 }
 
-/// The root the session's next admission names, when its next work carries
-/// one: an owed follow-on's recovery, then the unfinished root, then the head
+/// The run the session's next admission names, when its next work carries
+/// one: an owed follow-on's recovery, then the unfinished run, then the head
 /// turn input — unless an open session command or earlier queued work comes
-/// first, whose root is named by the admission that mints it. Mirrors the
-/// drive's own admission order (ADR 0101 §4, §5), so a park written here is
-/// cleared by the commit of the root the resumed drive runs.
-async fn next_admission_root(
+/// first, whose run is named by the admission that mints it. Mirrors the
+/// shift's own admission order (ADR 0101 §4, §5), so a park written here is
+/// cleared by the commit of the run the resumed shift runs.
+async fn next_admission_run(
     store: &dyn crate::store::RuntimeStore,
     session: &crate::SessionId,
 ) -> Result<Option<crate::TurnId>, StoreError> {
     if let Some(owed) = store.load_pending_follow_on(session).await? {
-        return Ok(Some(owed.recovery_root()));
+        return Ok(Some(owed.recovery_run()));
     }
-    if let Some(unfinished) = store.unfinished_root(session).await? {
-        return Ok(Some(unfinished.root));
+    if let Some(unfinished) = store.unfinished_run(session).await? {
+        return Ok(Some(unfinished.run));
     }
     if store
         .pending_session_work_ordering(session)
@@ -365,8 +365,8 @@ async fn next_admission_root(
     let Some(TurnLaneHead::Input(head)) = turn_lane_head(&open, &queued) else {
         return Ok(None);
     };
-    let bound = store.root_binding(session, &head.input.input_id).await?;
-    Ok(Some(head_input_root(head, bound)))
+    let bound = store.run_binding(session, &head.input.input_id).await?;
+    Ok(Some(head_input_run(head, bound)))
 }
 
 /// What the session's turn lane admits next once no session command is open
@@ -378,7 +378,7 @@ async fn next_admission_root(
 pub enum TurnLaneHead<'a> {
     /// The head of the accepted next-turn input.
     Input(&'a crate::PendingTurnInputRead),
-    /// The earliest pending queued turn work, which heads a queued root.
+    /// The earliest pending queued turn work, which heads a queued run.
     Queued(&'a crate::QueuedWorkBatch),
 }
 
@@ -415,21 +415,21 @@ pub fn head_input(open: &[crate::PendingTurnInputRead]) -> Option<&crate::Pendin
         .min_by_key(|read| read.input.enqueue_seq)
 }
 
-/// The root the head input `head` runs under, given the root its store
-/// binding names (`bound`): that root (the root whose admission took it, or the
-/// new root a fork bound it to, FIG-3600 S7), else [`input_root`].
+/// The run the head input `head` runs under, given the run its store
+/// binding names (`bound`): that run (the run whose admission took it, or the
+/// new run a fork bound it to, FIG-3600 S7), else [`input_run`].
 #[must_use]
-pub fn head_input_root(
+pub fn head_input_run(
     head: &crate::PendingTurnInputRead,
     bound: Option<crate::TurnId>,
 ) -> crate::TurnId {
-    bound.unwrap_or_else(|| input_root(&head.input))
+    bound.unwrap_or_else(|| input_run(&head.input))
 }
 
-/// The root of a drive that starts with `input`: the host's id for it (its
+/// The run of a shift that starts with `input`: the host's id for it (its
 /// source key) when it has one, else its input id (FIG-3600, ruling Q4).
 #[must_use]
-pub fn input_root(input: &crate::PendingTurnInput) -> crate::TurnId {
+pub fn input_run(input: &crate::PendingTurnInput) -> crate::TurnId {
     input
         .source_key
         .as_deref()

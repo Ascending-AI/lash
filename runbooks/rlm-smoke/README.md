@@ -1,7 +1,7 @@
 # RLM smoke runbooks
 
 These three live-model scenarios belong to the scripted deterministic layer governed by
-[`../RULES.md`](../RULES.md). A real OpenRouter-backed RLM turn drives each fresh fixture,
+[`../RULES.md`](../RULES.md). A real OpenRouter-backed RLM turn executes each fresh fixture,
 then the checked-in shell oracle alone decides pass or fail. They are not browser journeys
 and receive no agent judgement.
 
@@ -26,12 +26,12 @@ just rlm-smoke-e2e
 The runner executes every scenario once: TypeScript is the sole RLM language
 ([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)). Every row gets a fresh workspace copy, durable data
 directory, session id, reserved port, trace offset, and artifact directory. Ports come from
-the gate's own `LASH_E2E_PORT_BASE` allocation, not from a band a drive pins for its rows.
+the gate's own `LASH_E2E_PORT_BASE` allocation, not from a band a shift pins for its rows.
 Each row's host runs beside its own local `restate-server`
 (`scripts/ci/with-service.sh restate`, the zero-infra effect engine of
 [ADR 0104](../../docs/adr/0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)): the host builds the Restate
 engine over its SQLite store set and serves the engine's endpoint on the row's reserved
-port, and the server drives the turn.
+port, and the server executes the turn.
 
 ## What the row's trace proves
 

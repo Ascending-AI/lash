@@ -23,13 +23,13 @@ impl LashRuntime {
         returned_turn: &AssembledTurn,
         scoped_effect_controller: &ScopedEffectController<'_>,
         trace_turn_id: &TurnId,
-        drive_fence: Option<&DriveFence>,
+        shift_fence: Option<&ShiftFence>,
     ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {
             return Ok(None);
         };
         let manager = self
-            .runtime_session_services_after_commit(drive_fence)
+            .runtime_session_services_after_commit(shift_fence)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;

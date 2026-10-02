@@ -43,7 +43,7 @@ impl PerfBackend {
         }
     }
 
-    /// Drive sessions through `session_work` in place of the backend's
+    /// Shift sessions through `session_work` in place of the backend's
     /// engine.
     pub(super) fn with_session_work(self, session_work: Arc<dyn SessionWorkEngine>) -> Self {
         Self {
@@ -81,7 +81,7 @@ pub(crate) async fn restate_backend_over(
 }
 
 /// A fresh SQLite memory store set: storage only, for the store-level
-/// scenarios that drive no engine.
+/// scenarios that execute no engine.
 pub(crate) async fn sqlite_memory_stores() -> anyhow::Result<lash_sqlite_store::SqliteStoreSet> {
     lash_sqlite_store::SqliteStoreSet::memory()
         .await

@@ -1,5 +1,5 @@
 //! ADR 0109 §1.8 for the ingress obligation (FIG-3851): the detection bounds
-//! of an accepted input's drive, on the virtual clock over the SQLite store.
+//! of an accepted input's shift, on the virtual clock over the SQLite store.
 //!
 //! A reconcile tick runs every `T` = 10 s ± 10 %; each law steps the clock by
 //! the slowest tick, so every bound is asserted at its worst case.
@@ -9,15 +9,15 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use lash_core::engine::{
-    DriveRequestId, EngineRefusal, NoScopeClose, ReconcileCursor, ReconcileTick,
+    EngineRefusal, NoScopeClose, ReconcileCursor, ReconcileTick, ShiftRequestId,
 };
-use lash_core::runtime::drive::relay::{ObligationRelay, RelayPolicy};
-use lash_core::runtime::drive::{IngressRelay, ReconcileParts, reconcile_once};
 use lash_core::runtime::recovery_lease::RecoveryDuties;
+use lash_core::runtime::shift::relay::{ObligationRelay, RelayPolicy};
+use lash_core::runtime::shift::{IngressRelay, ReconcileParts, reconcile_once};
 
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::{
-    InputId, RuntimeStore, SessionCatalogStore as _, SessionDriver, SessionId, SessionStore,
+    InputId, RuntimeStore, SessionCatalogStore as _, SessionId, SessionShifts, SessionStore,
     SessionWorkEngine, StoreSet as _,
 };
 
@@ -32,7 +32,7 @@ fn now_ms(clock: &SimClock) -> u64 {
 /// The slowest reconcile tick: `T` = 10 s plus its 10 % jitter.
 const TICK_MS: u64 = 11_000;
 
-/// The engine a relay asks for drives: it records every ask, and refuses the
+/// The engine a relay asks for shifts: it records every ask, and refuses the
 /// asks its script names.
 struct Engine {
     clock: Arc<SimClock>,
@@ -43,14 +43,14 @@ struct Engine {
 
 #[async_trait::async_trait]
 impl SessionWorkEngine for Engine {
-    fn schedule_drive(&self, _: &SessionId, _: DriveRequestId) {
-        panic!("ingress asks for its drive through request_drive");
+    fn schedule_shift(&self, _: &SessionId, _: ShiftRequestId) {
+        panic!("ingress asks for its shift through request_shift");
     }
 
-    async fn request_drive(
+    async fn request_shift(
         &self,
         _: &SessionId,
-        request: DriveRequestId,
+        request: ShiftRequestId,
     ) -> Result<(), EngineRefusal> {
         self.asks
             .lock()
@@ -64,7 +64,7 @@ impl SessionWorkEngine for Engine {
         {
             return Err(EngineRefusal::permanent(
                 lash_core::RuntimeErrorCode::SessionWorkUnavailable,
-                "the engine refuses this drive",
+                "the engine refuses this shift",
             ));
         }
         if *self.retry.lock().expect("retry") {
@@ -76,8 +76,8 @@ impl SessionWorkEngine for Engine {
         Ok(())
     }
 
-    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        driver
+    fn install_session_shifts(&self, shifts: Arc<dyn SessionShifts>) -> Arc<dyn SessionShifts> {
+        shifts
     }
 }
 
@@ -232,19 +232,19 @@ impl World {
 }
 
 fn ask(input: &InputId) -> String {
-    ask_at(input, lash_core::drive::FIRST_INGRESS_ATTEMPT)
+    ask_at(input, lash_core::shift::FIRST_INGRESS_ATTEMPT)
 }
 
-/// The drive the `attempt`th claim of `input`'s obligation asks for.
+/// The shift the `attempt`th claim of `input`'s obligation asks for.
 fn ask_at(input: &InputId, attempt: u32) -> String {
-    lash_core::drive::ingress_drive_request(input.as_str(), attempt)
+    lash_core::shift::ingress_shift_request(input.as_str(), attempt)
         .as_str()
         .to_owned()
 }
 
-/// Immediate: an accepted input's drive is asked for before its producer's
+/// Immediate: an accepted input's shift is asked for before its producer's
 /// call returns, at the instant of its admission. The engine accepting the
-/// ask does not deliver the obligation: its claim holds for the drive's
+/// ask does not deliver the obligation: its claim holds for the shift's
 /// admission, which settles it.
 #[tokio::test]
 async fn an_accepted_input_is_attempted_before_its_producer_returns() {
@@ -288,7 +288,7 @@ async fn a_lost_immediate_attempt_is_claimed_within_one_tick() {
     );
 }
 
-/// Lapsed claim: the engine accepted the ask and lost the drive before it
+/// Lapsed claim: the engine accepted the ask and lost the shift before it
 /// admitted the row (an operator kill). Nothing settles the claim, so it is
 /// retaken by `claimed_at + claim_ttl + T` and asked again under its next
 /// attempt: the engine would answer the first attempt's request from the
@@ -297,7 +297,7 @@ async fn a_lost_immediate_attempt_is_claimed_within_one_tick() {
 async fn an_ask_nothing_admitted_is_asked_again_under_its_next_attempt() {
     let world = world().await;
     let claimed_at = now_ms(&world.clock);
-    let input = world.accept("lost drive").await;
+    let input = world.accept("lost shift").await;
     assert_eq!(world.asks(), vec![(claimed_at, ask(&input))]);
     let bound = claimed_at + RelayPolicy::default().claim_ttl_ms + TICK_MS;
     while world.asks().len() == 1 {
@@ -378,7 +378,7 @@ async fn a_retryable_refusal_backs_off_and_stalls_at_the_ceiling() {
     );
 }
 
-/// Refused: a drive the engine refuses for good stalls in the attempt that
+/// Refused: a shift the engine refuses for good stalls in the attempt that
 /// claimed it, and the rows behind it in the same page are still asked for.
 #[tokio::test]
 async fn a_refused_ingress_stalls_in_the_pass_that_claims_it() {

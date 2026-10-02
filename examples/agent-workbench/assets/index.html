@@ -4090,10 +4090,10 @@
       const kind = document.createElement("div");
       kind.className = "ingress-kind";
       kind.textContent = scope === "active_turn" ? "injected now" : "queued next";
-      if (receipt.status?.kind === "held" && receipt.status.drive_epoch != null) {
-        const driveEpoch = String(receipt.status.drive_epoch);
-        node.dataset.driveEpoch = driveEpoch;
-        kind.textContent += ` · held under epoch ${driveEpoch}`;
+      if (receipt.status?.kind === "held" && receipt.status.shift_epoch != null) {
+        const shiftEpoch = String(receipt.status.shift_epoch);
+        node.dataset.shiftEpoch = shiftEpoch;
+        kind.textContent += ` · held under epoch ${shiftEpoch}`;
       }
       const body = document.createElement("div");
       body.className = "ingress-text";
@@ -6302,7 +6302,7 @@
       return cleanErrorText(error?.message || "the workbench did not answer");
     }
 
-    /* The hand-off, driven by the one probe the gate still lets through. A
+    /* The hand-off, executed by the one probe the gate still lets through. A
        "retiring" refusal only quiets the page; the delete is still running and
        the reset request that started it may yet return the replacement. Once
        the refusal says "retired" the delete has settled, this id will never

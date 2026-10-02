@@ -8,9 +8,9 @@
 //! with one deployment — and runs the seeded [`plan`] of its seed:
 //!
 //! - **Workload.** Sends and batched sends on plain sessions, session
-//!   commands, held roots that are cancelled or whose session is deleted
-//!   (some with a child process that lives until the root ends), session
-//!   deletes, child sessions, roots whose runs fail until the engine stops
+//!   commands, held runs that are cancelled or whose session is deleted
+//!   (some with a child process that lives until the run ends), session
+//!   deletes, child sessions, runs whose executions fail until the engine stops
 //!   retrying them, which park and are redriven, and Lashlang processes
 //!   that sleep and finish with an engine waiter on their terminal.
 //! - **Faults.** The deployment killed where it stands, a first attempt of a
@@ -26,12 +26,12 @@
 //! After its last step an epoch clears every armed fault and ticks recovery
 //! until the end state holds ([`checks`]): the crash matrix's
 //! [`invariants`](crate::crash_matrix::invariants) — every admitted input
-//! driven exactly once, every obligation settled or stalled typed, no orphaned
-//! child, every closed scope settled, every deleted session deleted, no drive
+//! executed exactly once, every obligation settled or stalled typed, no orphaned
+//! child, every closed scope settled, every deleted session deleted, no shift
 //! wedged — plus the soak's own: an admission the host never saw answered
-//! took effect at most once, every engine waiter was answered, every root's
+//! took effect at most once, every engine waiter was answered, every run's
 //! scope close delivered, and every retired generation holds nothing. A live
-//! session must then still drive a fresh input.
+//! session must then still shift a fresh input.
 //! Each epoch also completes one real deferred tool through `ToolProvider`.
 //! The smoke law requires evidence for every registered global checker;
 //! host outcomes and fault facts remain in its diagnostic history.
@@ -499,9 +499,9 @@ async fn finish_with_progress(
         report
             .notes
             .push("phase: live-session probes and global invariants".to_owned());
-        // A held root the soak never released keeps its session's lane by
+        // A held run the soak never released keeps its session's lane by
         // design, so a probe input there would queue behind it: the probe
-        // asks only the live sessions that hold no held root.
+        // asks only the live sessions that hold no held run.
         let probed = invariants::Expected {
             live_sessions: expected
                 .live_sessions
@@ -639,7 +639,7 @@ pub async fn run(config: SoakConfig) -> SoakReport {
 }
 
 #[cfg(test)]
-mod lost_root_tests;
+mod lost_run_tests;
 
 #[cfg(test)]
 mod tests {
@@ -795,13 +795,13 @@ mod tests {
     }
 
     /// FIG-3948: the soak shape of FIG-3943, with the child registered under
-    /// the turn id of an input withdrawn while the session's drive was held,
-    /// which no root's admission ever binds and so never becomes a root. An
-    /// input that joins an earlier root is not such a turn: its scope closes
-    /// with its admitting root (FIG-4023). The session's delete closes its
+    /// the turn id of an input withdrawn while the session's shift was held,
+    /// which no run's admission ever binds and so never becomes a run. An
+    /// input that joins an earlier run is not such a turn: its scope closes
+    /// with its admitting run (FIG-4023). The session's delete closes its
     /// scope, and that close reaps the child: nothing else ever would.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_child_under_a_turn_that_never_became_a_root_is_reaped_by_its_session_close() {
+    async fn a_child_under_a_turn_that_never_became_a_run_is_reaped_by_its_session_close() {
         let seed = 0x3948;
         let mut driver = driver::Driver::new(seed).await.expect("world");
         driver
@@ -816,7 +816,7 @@ mod tests {
             .await
             .expect("open held session");
         let session = driver.ledger.sessions[0].id.clone();
-        let hold = driver.world.hold_session_drive(&session).await;
+        let hold = driver.world.hold_session_shift(&session).await;
         let durable = driver
             .world
             .core()
@@ -838,9 +838,9 @@ mod tests {
             vec!["held-first".to_owned()],
             driver::Admission::Known,
         );
-        driver.ledger.held.push(driver::HeldRoot {
+        driver.ledger.held.push(driver::HeldRun {
             session: session.clone(),
-            root: "held-first".to_owned(),
+            run: "held-first".to_owned(),
             admission: driver::Admission::Known,
         });
         durable
@@ -870,12 +870,12 @@ mod tests {
         );
         assert!(
             matches!(receipt, lash::CancelReceipt::Withdrawn(_)),
-            "the input is withdrawn while the drive is held: {receipt:?}"
+            "the input is withdrawn while the shift is held: {receipt:?}"
         );
         hold.release();
         assert!(
             driver.wait_reached("held-first").await,
-            "the first input reaches the model under its root"
+            "the first input reaches the model under its run"
         );
         let store = driver.world.backend().session_store_factory();
         assert!(matches!(
@@ -884,15 +884,15 @@ mod tests {
         ));
         assert_eq!(
             store
-                .root_of_input(&session, &withdrawn)
+                .run_of_input(&session, &withdrawn)
                 .await
                 .expect("resolve the withdrawn input"),
             None,
-            "no root admitted the withdrawn input, so its turn id is never a root"
+            "no run admitted the withdrawn input, so its turn id is never a run"
         );
-        let never_root =
+        let never_run =
             lash_core::ScopeId::turn(session.clone(), lash_core::TurnId::from("held-withdrawn"));
-        let child = driver::register_child(&driver.world, &session, &never_root)
+        let child = driver::register_child(&driver.world, &session, &never_run)
             .await
             .expect("an open session admits a child under a turn it may still admit");
         // Only the child: its scope records no row of its own, so it is not
@@ -902,12 +902,12 @@ mod tests {
             .children
             .push(crate::crash_matrix::invariants::ChildOf {
                 child: child.clone(),
-                parent: never_root,
+                parent: never_run,
             });
         let receipt = driver
             .cancel(&session, "held-first")
             .await
-            .expect("cancel the first input's root");
+            .expect("cancel the first input's run");
         assert_eq!(receipt, "requested");
         driver.delete(0).await.expect("delete the session");
         let mut report = EpochReport {
@@ -925,7 +925,7 @@ mod tests {
             .expect("read the child")
             .expect("the child is retained")
             .cancel_request
-            .expect("the session's close reaps the child of a turn that never became a root");
+            .expect("the session's close reaps the child of a turn that never became a run");
         assert_eq!(
             (cancel.origin, cancel.requester),
             (
@@ -937,7 +937,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_second_held_input_uses_and_closes_its_admitted_root_scope() {
+    async fn a_second_held_input_uses_and_closes_its_admitted_run_scope() {
         let seed = 0x3943;
         let mut driver = driver::Driver::composing(seed).await.expect("world");
         driver
@@ -952,7 +952,7 @@ mod tests {
             .await
             .expect("open held session");
         let session = driver.ledger.sessions[0].id.clone();
-        let hold = driver.world.hold_session_drive(&session).await;
+        let hold = driver.world.hold_session_shift(&session).await;
         let durable = driver
             .world
             .core()
@@ -975,16 +975,16 @@ mod tests {
                 vec![input.to_owned()],
                 driver::Admission::Known,
             );
-            driver.ledger.held.push(driver::HeldRoot {
+            driver.ledger.held.push(driver::HeldRun {
                 session: session.clone(),
-                root: input.to_owned(),
+                run: input.to_owned(),
                 admission: driver::Admission::Known,
             });
         }
         hold.release();
         assert!(
             driver.wait_reached("held-second").await,
-            "both inputs reach the model under the held root"
+            "both inputs reach the model under the held run"
         );
         let factory = driver.world.backend().session_store_factory();
         assert!(matches!(
@@ -996,23 +996,23 @@ mod tests {
         ));
         let store = factory;
         let second = lash_core::PendingTurnInputDraft::keyed_input_id(&session, "held-second");
-        let root = store
-            .root_of_input(&session, &second)
+        let run = store
+            .run_of_input(&session, &second)
             .await
             .expect("resolve second input");
-        assert_eq!(root, Some(lash_core::TurnId::from("held-first")));
+        assert_eq!(run, Some(lash_core::TurnId::from("held-first")));
         let scope = driver
             .register_held_child(&session, "held-second")
             .await
             .expect("register child");
         assert_eq!(
             scope,
-            lash_core::ScopeId::turn(session.clone(), root.expect("root"))
+            lash_core::ScopeId::turn(session.clone(), run.expect("root"))
         );
         let receipt = driver
             .cancel(&session, "held-second")
             .await
-            .expect("cancel second input's root");
+            .expect("cancel second input's run");
         assert_eq!(receipt, "requested");
         let mut report = EpochReport {
             seed,
@@ -1024,7 +1024,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn cancelled_child_root_closes_after_engine_loss() {
+    async fn cancelled_child_run_closes_after_engine_loss() {
         let seed = 0x3942;
         let mut driver = driver::Driver::new(seed).await.expect("world");
         for step in [
@@ -1042,11 +1042,8 @@ mod tests {
             driver.step(seed, &step).await.expect("open session");
         }
         let child = driver.ledger.sessions[1].id.clone();
-        let root = "held-child";
-        driver
-            .send_held(&child, root, true)
-            .await
-            .expect("held root");
+        let run = "held-child";
+        driver.send_held(&child, run, true).await.expect("held run");
         let invocation = driver
             .world
             .invocations()
@@ -1055,16 +1052,16 @@ mod tests {
             .find(|view| {
                 view.target
                     .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
-                    && view.target.contains(root)
+                    && view.target.contains(run)
                     && view.status != "completed"
             })
-            .expect("running root invocation");
+            .expect("running run invocation");
         driver
             .world
             .kill_invocation(&invocation.id)
             .await
-            .expect("lose root invocation");
-        driver.cancel(&child, root).await.expect("request cancel");
+            .expect("lose run invocation");
+        driver.cancel(&child, run).await.expect("request cancel");
         driver.delete(0).await.expect("delete parent");
         let mut report = EpochReport {
             seed,
@@ -1076,12 +1073,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn lost_root_scan_pages_all_roots_and_keeps_active_root() {
+    async fn lost_run_scan_pages_all_runs_and_keeps_active_run() {
         let seed = 0x3943;
         let mut driver = driver::Driver::new(seed).await.expect("world");
-        let roots = ["held-lost-first", "held-lost-second", "held-still-active"];
+        let runs = ["held-lost-first", "held-lost-second", "held-still-active"];
         let mut sessions = Vec::new();
-        for (session, root) in roots.iter().copied().enumerate() {
+        for (session, run) in runs.iter().copied().enumerate() {
             driver
                 .step(
                     seed,
@@ -1094,7 +1091,7 @@ mod tests {
                 .await
                 .expect("open session");
             let id = driver.ledger.sessions[session].id.clone();
-            driver.send_held(&id, root, true).await.expect("held root");
+            driver.send_held(&id, run, true).await.expect("held run");
             sessions.push(id.clone());
             if session < 2 {
                 let invocations = driver.world.invocations().await;
@@ -1103,16 +1100,16 @@ mod tests {
                     .find(|view| {
                         view.target
                             .starts_with(lash_restate_test::TURN_DRIVER_SERVICE)
-                            && view.target.contains(root)
+                            && view.target.contains(run)
                             && view.status != "completed"
                     })
-                    .unwrap_or_else(|| panic!("running root invocation: {invocations:?}"));
+                    .unwrap_or_else(|| panic!("running run invocation: {invocations:?}"));
                 driver
                     .world
                     .kill_invocation(&invocation.id)
                     .await
-                    .expect("lose root invocation");
-                driver.cancel(&id, root).await.expect("cancel lost root");
+                    .expect("lose run invocation");
+                driver.cancel(&id, run).await.expect("cancel lost run");
             }
         }
         for _ in 0..4 {
@@ -1120,31 +1117,31 @@ mod tests {
                 .world
                 .tick_with_page(std::num::NonZeroUsize::MIN)
                 .await
-                .expect("reconcile one-root pages");
+                .expect("reconcile one-run pages");
         }
         let factory = driver.world.backend().session_store_factory();
-        for (session, root) in sessions.iter().zip(roots).take(2) {
+        for (session, run) in sessions.iter().zip(runs).take(2) {
             assert!(
                 factory
-                    .root_terminal(session, &lash_core::TurnId::from(root))
+                    .run_terminal(session, &lash_core::TurnId::from(run))
                     .await
                     .expect("terminal read")
                     .is_some(),
-                "lost root {root} was skipped by the paged pass"
+                "lost run {run} was skipped by the paged pass"
             );
         }
         assert!(
             factory
-                .root_terminal(&sessions[2], &lash_core::TurnId::from(roots[2]))
+                .run_terminal(&sessions[2], &lash_core::TurnId::from(runs[2]))
                 .await
                 .expect("active terminal read")
                 .is_none(),
-            "the active root is still owned by its workflow"
+            "the active run is still owned by its workflow"
         );
         driver
-            .cancel(&sessions[2], roots[2])
+            .cancel(&sessions[2], runs[2])
             .await
-            .expect("cancel active root");
+            .expect("cancel active run");
         let mut report = EpochReport {
             seed,
             ..EpochReport::default()

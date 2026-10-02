@@ -150,9 +150,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    // A row is open or admitted to a root by a recorded step: a root without
-    // its step, or a step without its root, is unrepresentable (FIG-3927).
-    for (fields, values) in [("admitted_root", "'root'"), ("admitted_by", "'admit'")] {
+    // A row is open or admitted to a run by a recorded step: a run without
+    // its step, or a step without its run, is unrepresentable (FIG-3927).
+    for (fields, values) in [("admitted_run", "'root'"), ("admitted_by", "'admit'")] {
         assert_check_rejects(
             &mut connection,
             &format!(
@@ -178,13 +178,13 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         )
         .await;
     }
-    // A settled input is answered, so no root holds it.
+    // A settled input is answered, so no run holds it.
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
              submission_digest, enqueued_at_ms,
-             admitted_root, admitted_by
+             admitted_run, admitted_by
          ) VALUES (1, 'settled', 'session', '{\"scope\":\"next_turn\"}',
                    'completed', '{}', 'digest', 0, 'root', 'admit')",
         "ck_pending_turn_inputs_settled_unadmitted",
@@ -274,7 +274,7 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         &mut connection,
         "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind,
                                         caused_by_session_id, caused_by_turn_id)
-         VALUES ('caused-root', 'root', 'turn', 'cause-session', 'cause-turn')",
+         VALUES ('caused-run', 'root', 'turn', 'cause-session', 'cause-turn')",
         "ck_session_meta_relation_family",
     )
     .await;
@@ -587,10 +587,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         .expect("drop Postgres CHECK fixture schema");
 }
 
-/// The drive-authority columns as `(drive_epoch, drive_admission_id,
-/// drive_root_start, closing_intent)` literals: every combination no raise
+/// The shift-authority columns as `(shift_epoch, shift_admission_id,
+/// shift_run_start, closing_intent)` literals: every combination no raise
 /// writes, and every one a raise does.
-const UNREAL_DRIVE_STATES: &[(&str, &str)] = &[
+const UNREAL_SHIFT_STATES: &[(&str, &str)] = &[
     (
         "an unraised epoch naming an admission",
         "0, 'a', NULL, NULL",
@@ -605,7 +605,7 @@ const UNREAL_DRIVE_STATES: &[(&str, &str)] = &[
     ("a closing session no close raised", "0, NULL, NULL, 1"),
     ("a closing session an execution sealed", "1, 'a', 'n', 1"),
 ];
-const REAL_DRIVE_STATES: &[(&str, &str)] = &[
+const REAL_SHIFT_STATES: &[(&str, &str)] = &[
     ("unraised", "0, NULL, NULL, NULL"),
     ("sealed by an execution", "1, 'a', 'n', NULL"),
     ("raised by a control verb", "1, 'a', NULL, NULL"),
@@ -613,16 +613,16 @@ const REAL_DRIVE_STATES: &[(&str, &str)] = &[
 ];
 
 #[tokio::test]
-async fn postgres_drive_authority_check_admits_only_real_drive_states_when_configured() {
-    const SCHEMA: &str = "lash_fig4661_drive_authority";
+async fn postgres_shift_authority_check_admits_only_real_shift_states_when_configured() {
+    const SCHEMA: &str = "lash_fig4661_shift_authority";
     let Some(url) = database_url() else {
-        eprintln!("skipping Postgres drive-authority CHECK witnesses: database URL is not set");
+        eprintln!("skipping Postgres shift-authority CHECK witnesses: database URL is not set");
         return;
     };
     let _database_lock = SharedDatabaseLock::acquire(&url).await;
     let mut connection = PgConnection::connect(&url)
         .await
-        .expect("connect Postgres drive-authority fixture");
+        .expect("connect Postgres shift-authority fixture");
     sqlx::raw_sql(&format!(
         "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
          CREATE SCHEMA {SCHEMA};
@@ -630,44 +630,44 @@ async fn postgres_drive_authority_check_admits_only_real_drive_states_when_confi
     ))
     .execute(&mut connection)
     .await
-    .expect("create isolated Postgres drive-authority fixture schema");
+    .expect("create isolated Postgres shift-authority fixture schema");
     sqlx::raw_sql(PostgresStorage::schema_ddl())
         .execute(&mut connection)
         .await
-        .expect("apply Postgres schema DDL to drive-authority fixture");
+        .expect("apply Postgres schema DDL to shift-authority fixture");
     sqlx::query("BEGIN")
         .execute(&mut connection)
         .await
-        .expect("begin drive-authority witness transaction");
+        .expect("begin shift-authority witness transaction");
     let insert = |case: &str, values: &str| {
         format!(
-            "INSERT INTO lash_session_meta (session_id, relation_kind, drive_epoch,
-                 drive_admission_id, drive_root_start, closing_intent)
+            "INSERT INTO lash_session_meta (session_id, relation_kind, shift_epoch,
+                 shift_admission_id, shift_run_start, closing_intent)
              VALUES ('{case}', 'root', {values})"
         )
     };
-    for (case, values) in UNREAL_DRIVE_STATES {
+    for (case, values) in UNREAL_SHIFT_STATES {
         assert_check_rejects(
             &mut connection,
             &insert(case, values),
-            "ck_session_meta_drive_authority",
+            "ck_session_meta_shift_authority",
         )
         .await;
     }
-    for (case, values) in REAL_DRIVE_STATES {
+    for (case, values) in REAL_SHIFT_STATES {
         sqlx::query(&insert(case, values))
             .execute(&mut connection)
             .await
-            .unwrap_or_else(|error| panic!("{case} is a real drive state: {error}"));
+            .unwrap_or_else(|error| panic!("{case} is a real shift state: {error}"));
     }
     sqlx::query("ROLLBACK")
         .execute(&mut connection)
         .await
-        .expect("roll the drive-authority witnesses back");
+        .expect("roll the shift-authority witnesses back");
     sqlx::raw_sql(&format!("DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
         .execute(&mut connection)
         .await
-        .expect("drop the drive-authority fixture schema");
+        .expect("drop the shift-authority fixture schema");
 }
 
 #[path = "support/obligation_constraint_cases.rs"]

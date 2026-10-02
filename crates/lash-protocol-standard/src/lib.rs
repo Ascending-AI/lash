@@ -1,4 +1,4 @@
-//! Standard protocol stack: the model drives tools via the native
+//! Standard protocol stack: the model executes tools via the native
 //! function-calling envelope of its LLM transport.
 //!
 //! This crate owns:
@@ -165,7 +165,7 @@ pub struct StandardRecordedBehaviour {
     /// with, or `None` when every tool is inline.
     pub discovery_operation: Option<String>,
     pub batch: BatchSugar,
-    /// The render the creating deployment configured: the base a root's
+    /// The render the creating deployment configured: the base a run's
     /// render is resolved over, under the session's own render options
     /// (FIG-4527).
     pub render: StandardRenderConfig,
@@ -286,7 +286,7 @@ pub enum StandardConfigRefusal {
     BehaviourChanged { recorded: String, candidate: String },
 }
 
-/// Why the standard protocol resolved no render for a root.
+/// Why the standard protocol resolved no render for a run.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -584,8 +584,8 @@ impl ProtocolSessionPlugin for StandardProtocolSession {
     }
 
     /// The prompt renders from the standard namespace the given plugin
-    /// config recorded: the admitted root's, so a prompt command applied
-    /// while a root runs reaches the next root (FIG-4589).
+    /// config recorded: the admitted run's, so a prompt command applied
+    /// while a run executes reaches the next run (FIG-4589).
     async fn render_system_prompt(
         &self,
         ctx: lash_core::plugin::SystemPromptContext<'_>,

@@ -84,7 +84,7 @@ fn a_deterministic_store_error_is_redrivable_only_when_it_names_its_successor() 
     assert_eq!(
         redrivable,
         [
-            "RootHeldByAnotherExecutor",
+            "RunHeldByAnotherExecutor",
             "FollowOnPending",
             "FollowOnFrameNotCurrent",
             "FollowOnNotPending",
@@ -93,7 +93,7 @@ fn a_deterministic_store_error_is_redrivable_only_when_it_names_its_successor() 
             "TurnCancelIntentChanged",
             "StaleWritePermit",
             "SessionCommandWithdrawn",
-            "StaleDriveFence",
+            "StaleShiftFence",
             "SessionExecutionLeaseExpired",
             "CheckpointRootMissing",
         ]

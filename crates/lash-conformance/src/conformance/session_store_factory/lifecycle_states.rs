@@ -101,8 +101,8 @@ pub async fn a_control_raise_answers_no_seal_as_sealed(
         .await
         .expect("create the session");
     assert_eq!(
-        store.drive_epoch().await.expect("read the unraised epoch"),
-        crate::store::StoredDriveEpoch::unraised()
+        store.shift_epoch().await.expect("read the unraised epoch"),
+        crate::store::StoredShiftEpoch::unraised()
     );
 
     let intent = factory
@@ -111,12 +111,12 @@ pub async fn a_control_raise_answers_no_seal_as_sealed(
         .expect("begin the close")
         .expect("the session exists");
     let raised_by = crate::store::close_admission(intent.id);
-    let stored = store.drive_epoch().await.expect("read the raised epoch");
+    let stored = store.shift_epoch().await.expect("read the raised epoch");
     assert_eq!(
         stored,
-        crate::store::StoredDriveEpoch {
+        crate::store::StoredShiftEpoch {
             epoch: 1,
-            last_raise: Some(crate::store::DriveRaise::Control {
+            last_raise: Some(crate::store::ShiftRaise::Control {
                 admission: raised_by.clone(),
             }),
             closing: Some(intent.id),
@@ -127,24 +127,24 @@ pub async fn a_control_raise_answers_no_seal_as_sealed(
 
     for observed in [0, stored.epoch] {
         let seal = store
-            .seal_drive_epoch(
+            .seal_shift_epoch(
                 &raised_by,
                 observed,
-                &crate::store::RootStartNonce::new("a-fresh-execution"),
+                &crate::store::RunStartNonce::new("a-fresh-execution"),
                 None,
             )
             .await
             .expect("decide the seal");
         assert_eq!(
             seal,
-            crate::store::DriveEpochSeal::Superseded {
+            crate::store::ShiftEpochSeal::Superseded {
                 epoch: stored.epoch
             },
             "observed epoch {observed}: no execution sealed a control raise"
         );
     }
     assert_eq!(
-        store.drive_epoch().await.expect("re-read the epoch"),
+        store.shift_epoch().await.expect("re-read the epoch"),
         stored,
         "the refused seal wrote nothing"
     );

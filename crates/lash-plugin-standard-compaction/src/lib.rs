@@ -54,7 +54,7 @@ const COMPACTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted during compa
 /// Maximum summarization attempts one open context-overflow recovery may
 /// spend before the third context policy records an explicit recoverable
 /// failure. Only deterministic refusals spend attempts; invocation faults
-/// leave recovery pending for a healthy drive.
+/// leave recovery pending for a healthy shift.
 pub const OVERFLOW_RECOVERY_MAX_ATTEMPTS: usize = 3;
 /// Approximate token size above which a single part is elided before an
 /// out-of-band summarization request so the summarizer prompt itself fits the

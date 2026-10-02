@@ -2087,7 +2087,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                 workflow_key_authority(&process_id),
             )
             .await
-            .expect("write root terminal");
+            .expect("write run terminal");
         let attach_after_retention = lash_core::NoProcessWork::for_registry(Arc::clone(&registry));
         assert_eq!(
             attach_after_retention
@@ -2105,7 +2105,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                 .filter(|event| event.semantics.terminal.is_some())
                 .count(),
             1,
-            "root terminal is durable and exactly once"
+            "run terminal is durable and exactly once"
         );
     }
 }

@@ -189,7 +189,7 @@ pub async fn coordinate_tool_invocation<'run>(
 
     for attempt in 1..=max_attempts {
         // A group child reads its cancel fact at each attempt boundary, as a
-        // recorded peek (ADR 0105 §4, FIG-3904): the child's drive never races
+        // recorded peek (ADR 0105 §4, FIG-3904): the child's shift never races
         // it, so a replay reads the answer its first execution read.
         if group_child.is_some() {
             match group_child_cancel_boundary(context, &call).await {
@@ -267,7 +267,7 @@ pub async fn coordinate_tool_invocation<'run>(
         let outcome = match outcome {
             Ok(outcome) => outcome,
             // A group child's attempt its cancel ended, live or recorded, ends
-            // the child's drive as that cancel: the attempt's body was dropped,
+            // the child's shift as that cancel: the attempt's body was dropped,
             // and nothing it did is a result.
             Err(err)
                 if group_child.is_some()
@@ -473,7 +473,7 @@ pub async fn coordinate_tool_invocation<'run>(
 
 /// A group child's recorded peek of its cancel fact at an attempt boundary: a
 /// decided cancel is the typed [`RuntimeEffectGroupChildCancelled`] refusal
-/// that ends the child's drive.
+/// that ends the child's shift.
 ///
 /// [`RuntimeEffectGroupChildCancelled`]: crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
 async fn group_child_cancel_boundary(

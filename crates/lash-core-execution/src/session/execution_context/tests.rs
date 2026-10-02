@@ -406,7 +406,7 @@ async fn a_child_started_from_a_queued_drain_is_started_by_the_drain() {
 struct ObservationIds(std::sync::Mutex<Vec<String>>);
 
 impl crate::engine::ObservationSink for ObservationIds {
-    fn observe(&self, observation: crate::engine::DriveObservation) {
+    fn observe(&self, observation: crate::engine::ShiftObservation) {
         self.0
             .lock()
             .expect("observation ids")

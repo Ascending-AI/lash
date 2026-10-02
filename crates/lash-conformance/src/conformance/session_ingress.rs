@@ -1,24 +1,24 @@
 //! The session ingress's store laws (ADR 0101 §5 and ADR 0105 §2, as
 //! amended): the one per-session sequence both admission tables draw from,
-//! and the drive-epoch seal that fences every drive's admissions and commits.
+//! and the shift-epoch seal that fences every shift's admissions and commits.
 
 use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
-use lash_core::store::{AdmissionId, DriveEpochSeal, DriveEpochStore};
+use lash_core::store::{AdmissionId, ShiftEpochSeal, ShiftEpochStore};
 use lash_sansio::SessionId;
 
 /// The session every ingress law runs in, on a fresh fixture per law.
 pub const SESSION_INGRESS_SESSION_ID: &str = "session-ingress";
 
-/// The two handles an ingress law drives: the runtime store bound to
+/// The two handles an ingress law executes: the runtime store bound to
 /// [`SESSION_INGRESS_SESSION_ID`], which owns the admission tables, and the
-/// drive-epoch store over the same database.
+/// shift-epoch store over the same database.
 #[derive(Clone)]
 pub struct SessionIngressHandles {
     pub runtime: Arc<dyn crate::RuntimeStore>,
-    pub ingress: Arc<dyn DriveEpochStore>,
+    pub ingress: Arc<dyn ShiftEpochStore>,
     pub admission_snapshot: IngressAdmissionProbe,
 }
 
@@ -267,8 +267,8 @@ fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWake
 
 /// The start marker the store-level laws seal under: one execution per
 /// admission (ADR 0105 L-S8).
-fn root_start() -> lash_core::store::RootStartNonce {
-    lash_core::store::RootStartNonce::new("conformance-root-start")
+fn run_start() -> lash_core::store::RunStartNonce {
+    lash_core::store::RunStartNonce::new("conformance-run-start")
 }
 
 /// Inputs, commands and wakes share the session's allocation counter: the
@@ -354,24 +354,24 @@ pub async fn every_ingress_producer_shares_the_session_sequence(handles: Session
 pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
     let observed = handles
         .ingress
-        .drive_epoch(&session())
+        .shift_epoch(&session())
         .await
-        .expect("read the drive epoch")
+        .expect("read the shift epoch")
         .epoch;
     let spawn_seal = |admission: &'static str| {
         let handles = handles.clone();
         tokio::spawn(async move {
             handles
                 .ingress
-                .seal_drive_epoch(
+                .seal_shift_epoch(
                     &session(),
                     &AdmissionId::new(admission),
                     observed,
-                    &root_start(),
+                    &run_start(),
                     None,
                 )
                 .await
-                .expect("seal a drive epoch")
+                .expect("seal a shift epoch")
         })
     };
     let (left, right) = (spawn_seal("concurrent-a"), spawn_seal("concurrent-b"));
@@ -382,92 +382,92 @@ pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
     let winners = outcomes
         .iter()
         .filter_map(|outcome| match outcome {
-            DriveEpochSeal::Sealed(fence) => Some(fence.clone()),
-            DriveEpochSeal::Superseded { .. }
-            | DriveEpochSeal::ExecutionLost
-            | DriveEpochSeal::HeldByAnotherExecutor { .. } => None,
+            ShiftEpochSeal::Sealed(fence) => Some(fence.clone()),
+            ShiftEpochSeal::Superseded { .. }
+            | ShiftEpochSeal::ExecutionLost
+            | ShiftEpochSeal::HeldByAnotherExecutor { .. } => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(winners.len(), 1, "exactly one seal wins: {outcomes:?}");
     assert_eq!(winners[0].epoch(), observed + 1);
     assert!(
-        outcomes.contains(&DriveEpochSeal::Superseded {
+        outcomes.contains(&ShiftEpochSeal::Superseded {
             epoch: observed + 1
         }),
         "the other seal is superseded at the winner's epoch: {outcomes:?}"
     );
     let stored = handles
         .ingress
-        .drive_epoch(&session())
+        .shift_epoch(&session())
         .await
-        .expect("read the drive epoch");
+        .expect("read the shift epoch");
     assert_eq!(stored.epoch, observed + 1);
     assert_eq!(stored.admission(), Some(winners[0].admission()));
 }
 
-/// The drive-epoch seal is a compare-and-set on the session's `session_meta`
+/// The shift-epoch seal is a compare-and-set on the session's `session_meta`
 /// row, idempotent per admission: a retried seal answers the fence it already
 /// raised, and a seal from a stale observation is superseded without writing.
 /// The seal stores the start marker of the execution that sealed it: the same
-/// admission sealed under another marker, a fresh execution of a root that
+/// admission sealed under another marker, a fresh execution of a run that
 /// already started, is `ExecutionLost` and writes nothing (L-S8).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIngressHandles) {
+pub async fn the_shift_epoch_seal_is_idempotent_per_admission(handles: SessionIngressHandles) {
     let seal_at = |admission: &'static str, observed: u64| {
         let handles = handles.clone();
         async move {
             handles
                 .ingress
-                .seal_drive_epoch(
+                .seal_shift_epoch(
                     &session(),
                     &AdmissionId::new(admission),
                     observed,
-                    &root_start(),
+                    &run_start(),
                     None,
                 )
                 .await
-                .expect("seal a drive epoch")
+                .expect("seal a shift epoch")
         }
     };
     let start = handles
         .ingress
-        .drive_epoch(&session())
+        .shift_epoch(&session())
         .await
-        .expect("read the drive epoch");
+        .expect("read the shift epoch");
     let observed = start.epoch;
-    let DriveEpochSeal::Sealed(first) = seal_at("seal-a", observed).await else {
+    let ShiftEpochSeal::Sealed(first) = seal_at("seal-a", observed).await else {
         panic!("a seal at the stored epoch is granted");
     };
     assert_eq!(first.epoch(), observed + 1);
     assert_eq!(first.admission(), &AdmissionId::new("seal-a"));
     assert_eq!(
         seal_at("seal-a", observed).await,
-        DriveEpochSeal::Sealed(first.clone()),
+        ShiftEpochSeal::Sealed(first.clone()),
         "a retried seal answers the same fence"
     );
     assert_eq!(
         handles
             .ingress
-            .seal_drive_epoch(
+            .seal_shift_epoch(
                 &session(),
                 &AdmissionId::new("seal-a"),
                 observed,
-                &lash_core::store::RootStartNonce::new("another execution"),
+                &lash_core::store::RunStartNonce::new("another execution"),
                 None,
             )
             .await
-            .expect("seal a drive epoch"),
-        DriveEpochSeal::ExecutionLost,
+            .expect("seal a shift epoch"),
+        ShiftEpochSeal::ExecutionLost,
         "the sealed admission under another start marker is a lost execution"
     );
     let sealed = handles
         .ingress
-        .drive_epoch(&session())
+        .shift_epoch(&session())
         .await
-        .expect("read the drive epoch");
+        .expect("read the shift epoch");
     assert_eq!(
         sealed.epoch,
         first.epoch(),
@@ -475,39 +475,39 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
     );
     assert_eq!(
         sealed.last_raise,
-        Some(lash_core::store::DriveRaise::Sealed {
+        Some(lash_core::store::ShiftRaise::Sealed {
             admission: AdmissionId::new("seal-a"),
-            root_start: root_start(),
+            run_start: run_start(),
         })
     );
     assert_eq!(
         seal_at("seal-b", observed).await,
-        DriveEpochSeal::Superseded {
+        ShiftEpochSeal::Superseded {
             epoch: first.epoch()
         },
         "another admission at the old observation is superseded"
     );
     assert_eq!(
         seal_at("seal-a", first.epoch()).await,
-        DriveEpochSeal::Sealed(first.clone()),
+        ShiftEpochSeal::Sealed(first.clone()),
         "a retry that re-read the epoch it raised answers the same fence without raising"
     );
-    let DriveEpochSeal::Sealed(second) = seal_at("seal-b", first.epoch()).await else {
+    let ShiftEpochSeal::Sealed(second) = seal_at("seal-b", first.epoch()).await else {
         panic!("a seal at the new epoch is granted");
     };
     assert_eq!(second.epoch(), first.epoch() + 1);
     assert_eq!(
         seal_at("seal-a", observed).await,
-        DriveEpochSeal::Superseded {
+        ShiftEpochSeal::Superseded {
             epoch: second.epoch()
         },
         "a retry after a later seal no longer answers"
     );
     let stored = handles
         .ingress
-        .drive_epoch(&session())
+        .shift_epoch(&session())
         .await
-        .expect("read the drive epoch");
+        .expect("read the shift epoch");
     assert_eq!(stored.epoch, second.epoch());
     assert_eq!(stored.admission(), Some(&AdmissionId::new("seal-b")));
 }

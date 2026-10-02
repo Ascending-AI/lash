@@ -148,9 +148,9 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
         stores.clock(),
     );
     for id in [&ext_first_id, &ext_second_id] {
-        let failure = lash_core::runtime::drive::relay::ObligationRelay::deliver(
+        let failure = lash_core::runtime::shift::relay::ObligationRelay::deliver(
             &relay,
-            lash_core::runtime::drive::relay::ObligationDelivery {
+            lash_core::runtime::shift::relay::ObligationDelivery {
                 id: &lash_core::store::ObligationKey::ProcessStart {
                     process_id: id.clone(),
                 }
@@ -168,7 +168,7 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
         assert!(
             matches!(
                 failure,
-                lash_core::runtime::drive::relay::DeliveryFailure::Refused(_)
+                lash_core::runtime::shift::relay::DeliveryFailure::Refused(_)
             ),
             "the refusal is the typed terminal one: {failure:?}"
         );
@@ -504,7 +504,7 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
 
     let session_id = SessionId::from("restate-authority-reopen");
     let store = memory_session_store(session_id.as_str()).await;
-    let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+    let lease = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
         store.store(),
         &session_id,
         "restate-authority-reopen",

@@ -1,6 +1,6 @@
 //! Attachment-layer tests.
 //!
-//! The attachment layer moved to `lash-core-store`; these cases drive it
+//! The attachment layer moved to `lash-core-store`; these cases shift it
 //! through a SQLite memory backend's session catalog and attachment store.
 
 use crate::SessionId;
@@ -1059,7 +1059,7 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
 // is stale in both the `list` snapshot AND the `head` re-stat (so the freshness
 // gate does not spare it), but a session records a fresh intent for the same
 // content id in the delete window. A backend whose `head` reports a stale mtime
-// and a root set scripted to answer the single-id probe drive the two branches:
+// and a root set scripted to answer the single-id probe shift the two branches:
 // (b) a ref present before delete spares the blob; (d) a ref that appears only
 // after delete is detected and alarmed via `deleted_while_referenced`.
 struct StaleHeadStore {
@@ -2267,7 +2267,7 @@ fn a_manifest_write_leaves_the_caller_runtime_running() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let before = observed.load(Ordering::SeqCst);
         // The write has to run on a worker thread, which is where every real
-        // manifest call runs. Driving it from the `block_on` thread instead
+        // manifest call runs. Executing it from the `block_on` thread instead
         // would leave the worker free and prove nothing.
         let worker = crate::task::spawn(async move {
             let session = RuntimeAttachmentStore::new(

@@ -14,7 +14,7 @@ const clone = (doc) => structuredClone($state.snapshot(doc));
 
 export class History {
   // The stack itself is not reactive (it is only read on undo/redo); `index`
-  // and `size` are reactive so `canUndo`/`canRedo` drive button state.
+  // and `size` are reactive so `canUndo`/`canRedo` shift button state.
   #stack = [];
   index = $state(-1);
   size = $state(0);

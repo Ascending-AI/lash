@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lash_core::StoreError;
-use lash_core::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
+use lash_core::shift::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
 use lash_core::store::{
     ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
     ObligationSettlement, ObligationStanding, SettleOutcome, StalledObligation,
@@ -127,7 +127,7 @@ impl ObligationLedger for Settlements {
             .await?;
         assert_eq!(result, SettleOutcome::Applied);
         // On the law's current-thread executor, the pass returns in this
-        // poll before the driver can receive the completed settlement.
+        // poll before the `SessionShifts` can receive the completed settlement.
         self.settled
             .send(Progress::Settled(settlement))
             .expect("settlement observer");

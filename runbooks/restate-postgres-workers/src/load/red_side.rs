@@ -1,5 +1,5 @@
 //! Plant verifier violations in copies of the real witness, preserving the
-//! observed run. Every newly driven class must reject its own mutation.
+//! observed run. Every newly executed class must reject its own mutation.
 use super::{LoadContext, behavior, verify};
 use anyhow::{Result, ensure};
 use serde_json::json;

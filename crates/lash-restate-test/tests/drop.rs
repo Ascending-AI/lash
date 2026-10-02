@@ -155,7 +155,7 @@ impl lash_core::ToolProvider for CountingTool {
 }
 
 /// One lash turn — a model call that asks for a tool, the tool as an effect
-/// group child, a model call that answers — driven by the engine on a fresh
+/// group child, a model call that answers — executed by the engine on a fresh
 /// backend, which is dropped when the turn is done. Returns the watch on its
 /// server.
 async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
@@ -223,23 +223,23 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
         .expect("accept the turn input")
         .receipt()
         .clone();
-    // The engine drives the accepted input: its LashSession drive admits it
-    // and its root runs in a LashTurn workflow.
+    // The engine executes the accepted input: its LashSession shift admits it
+    // and its run executes in a LashTurn workflow.
     let outcome = tokio::time::timeout(
         Duration::from_secs(20),
-        backend.attach_drive(
+        backend.attach_shift(
             &lash_core::SessionId::from("drop"),
-            lash_core::drive::ingress_drive_request(
+            lash_core::shift::ingress_shift_request(
                 receipt.input_id.as_str(),
-                lash_core::drive::FIRST_INGRESS_ATTEMPT,
+                lash_core::shift::FIRST_INGRESS_ATTEMPT,
             ),
         ),
     )
     .await
     .expect("the turn finishes")
-    .expect("the drive answers");
+    .expect("the shift answers");
     match outcome.ran.as_slice() {
-        [lash_core::engine::RootOutcome::Committed { outcome, .. }] => assert!(
+        [lash_core::engine::RunOutcome::Committed { outcome, .. }] => assert!(
             matches!(
                 outcome,
                 lash_core::facade_support::TurnOutcome::Finished(
@@ -248,7 +248,7 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
             ),
             "the turn answers: {outcome:?}"
         ),
-        other => panic!("the drive runs the one root: {other:?}"),
+        other => panic!("the shift runs the one run: {other:?}"),
     }
     watch
 }

@@ -31,13 +31,13 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAfterSwitchCommit {
     fn begin_named(&self, _phase: &str) {}
 }
 
-type DriveReport = tokio::sync::mpsc::UnboundedSender<
+type ShiftReport = tokio::sync::mpsc::UnboundedSender<
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>,
 >;
 
 /// One attempt at the queued root: the crashing one dies after the switch
-/// commit, the redrive reports how its drive ended.
-fn root_attempt(world: &World, report: Option<DriveReport>) -> crate::ConformanceTurnAttempt {
+/// commit, the redrive reports how its shift ended.
+fn run_attempt(world: &World, report: Option<ShiftReport>) -> crate::ConformanceTurnAttempt {
     let world = world.clone();
     Arc::new(move |scope| {
         let world = world.clone();
@@ -47,7 +47,7 @@ fn root_attempt(world: &World, report: Option<DriveReport>) -> crate::Conformanc
                 .is_none()
                 .then(|| Arc::new(PanicAfterSwitchCommit) as Arc<_>);
             let mut runtime = world.runtime(probe).await;
-            let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+            let shift = Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scope,
             )))
@@ -55,11 +55,11 @@ fn root_attempt(world: &World, report: Option<DriveReport>) -> crate::Conformanc
             let Some(report) = report else {
                 panic!(
                     "the crash probe did not fire after the switch commit: {:?}",
-                    drive.map(crate::facade_support::QueuedTurnDrain::ran)
+                    shift.map(crate::facade_support::QueuedTurnDrain::ran)
                 );
             };
-            let end = crate::ConformanceTurnEnd::of(&drive);
-            let _ = report.send(drive);
+            let end = crate::ConformanceTurnEnd::of(&shift);
+            let _ = report.send(shift);
             end
         })
     })
@@ -111,18 +111,18 @@ pub async fn frames_keep_identity_and_distinguish_fresh_calls(tier: ToolCallIden
         .run_crashed_then_redriven_turn(
             crate::admit(crate::ExecutionScope::turn(
                 &world.session_id,
-                crate::TurnId::fixture(format!("{}-drive", world.session_id)),
+                crate::TurnId::fixture(format!("{}-shift", world.session_id)),
             )),
-            root_attempt(&world, None),
-            root_attempt(&world, Some(report)),
+            run_attempt(&world, None),
+            run_attempt(&world, Some(report)),
         )
         .await;
-    let drive = reported
+    let shift = reported
         .recv()
         .await
         .expect("the tier's runner ran the redriven root")
         .unwrap_or_else(|error| panic!("the redriven root runs: {error:?}"));
-    let turn = drive.ran().expect("the redrive ran the root to its end");
+    let turn = shift.ran().expect("the redrive ran the root to its end");
     assert_finished("the redriven root", &turn);
     let before = only(&world, "frame-one");
     assert_one_identity("frame-two", &world.witness.of("frame-two"));
@@ -153,7 +153,7 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
     );
     assert_finished("the turn before the compaction", &world.run(&before).await);
 
-    // The compaction is a session command the next drive applies at its
+    // The compaction is a session command the next shift applies at its
     // turn boundary (FIG-4201).
     let store = world.store().await;
     let command = crate::SessionCommand::CompactContext { instructions: None };
@@ -176,7 +176,7 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
             let compacted = compacted.clone();
             Box::pin(async move {
                 let mut runtime = world.runtime(None).await;
-                let drained = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+                let drained = Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     scope,
                 )))
@@ -202,9 +202,9 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
         compaction
             .recv()
             .await
-            .expect("the tier's runner ran the compaction's drive"),
+            .expect("the tier's runner ran the compaction's shift"),
         Ok(true),
-        "the drive applies only the command lane"
+        "the shift applies only the command lane"
     );
     assert!(
         matches!(
@@ -236,7 +236,7 @@ pub async fn compaction_keeps_identity_and_distinguishes_fresh_calls(tier: ToolC
             let after = after.clone();
             Box::pin(async move {
                 let ended = world
-                    .drive(&after, scope, Some(Arc::new(PanicBeforeTurnCommit)))
+                    .shift(&after, scope, Some(Arc::new(PanicBeforeTurnCommit)))
                     .await;
                 panic!("the crash probe did not fire before the turn commit: {ended:?}");
             })

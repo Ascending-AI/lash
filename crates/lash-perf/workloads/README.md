@@ -108,7 +108,7 @@ measurement lane owns clocks, counters and proof of model-code pool execution.
 The FIG-4241 smoke prefill uses two turns. The live driver adds a bounded
 operation workflow for administrative and pressure compaction, an auxiliary
 request, external occurrences, trigger edits and promotion discovery.
-`admitted_response` combines the plans of every input admitted by a root into
+`admitted_response` combines the plans of every input admitted by a run into
 one cell, with one finish value listing all input keys. Each turn's tool,
 attachment and child-process plan still executes when it is batched with a
 queued input. The provider implements the generated chunk deadlines with SSE.

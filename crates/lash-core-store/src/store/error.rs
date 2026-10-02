@@ -275,23 +275,23 @@ impl std::error::Error for StoreFault {}
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
-    #[error("session {session_id} already has unfinished root {root}")]
-    UnfinishedRootConflict {
+    #[error("session {session_id} already has unfinished run {run}")]
+    UnfinishedRunConflict {
         session_id: crate::SessionId,
-        root: crate::TurnId,
+        run: crate::TurnId,
     },
-    /// The root's admission is recorded under an executor whose engine holds
+    /// The run's admission is recorded under an executor whose engine holds
     /// its run, and another execution asked to admit it (FIG-4765). The
-    /// recorded executor runs the root; the asker waits for its end.
+    /// recorded executor executes the run; the asker waits for its end.
     #[error(
-        "root {root} of session {session_id} is run by {recorded:?}; {admitting:?} does not \
+        "run {run} of session {session_id} is run by {recorded:?}; {admitting:?} does not \
          admit it"
     )]
-    RootHeldByAnotherExecutor {
+    RunHeldByAnotherExecutor {
         session_id: crate::SessionId,
-        root: crate::TurnId,
-        recorded: Box<super::RootExecutor>,
-        admitting: Box<super::RootExecutor>,
+        run: crate::TurnId,
+        recorded: Box<super::RunExecutor>,
+        admitting: Box<super::RunExecutor>,
     },
     /// A pending follow-on owns the session (ADR 0101 §3, FIG-3542): no other
     /// turn commits and no other head write changes the fact until the
@@ -322,7 +322,7 @@ pub enum StoreError {
         session_id: crate::SessionId,
         reason: String,
     },
-    /// A recovering drive named a follow-on the head no longer owes.
+    /// A recovering shift named a follow-on the head no longer owes.
     #[error("session {session_id} no longer owes follow-on turn `{follow_on_turn_id}`")]
     FollowOnNotPending {
         session_id: crate::SessionId,
@@ -336,7 +336,7 @@ pub enum StoreError {
     ExecutionStateCaptureFailed { message: String },
     /// The runtime refused execution-state capture or the turn's final commit:
     /// its state or finalized outcome could not be materialized into resident state, or a replayed journaled
-    /// drive set was superseded and the turn ceded (ADR 0069 §6). Nothing was
+    /// shift set was superseded and the turn ceded (ADR 0069 §6). Nothing was
     /// written. The typed runtime refusal travels unchanged: the turn's caller
     /// classifies it by its own code, never by this wrapper. Boxed so the
     /// carried error does not grow every `Result` that returns a store error.
@@ -386,7 +386,7 @@ pub enum StoreError {
     /// Admission reads the recorded relation and refuses the conflict instead
     /// of absorbing it as a plain [`SessionAdmission::Rebound`](crate::SessionAdmission::Rebound):
     /// the relation is a durable fact, so a binding that renames a parent — or
-    /// claims one for a session recorded as a root — is answered, never
+    /// claims one for a session recorded as a run — is answered, never
     /// smoothed. A binding that declares no lineage still rebinds.
     #[error(
         "session `{session_id}` is durably recorded as {} and cannot be rebound as {}",
@@ -689,17 +689,17 @@ pub enum StoreError {
     },
     #[error("runtime commit leaf {:?} does not resolve to a live graph node", .leaf_node_id.as_deref())]
     InvalidGraphLeaf { leaf_node_id: Option<NodeId> },
-    /// The fork target's root has not finished, or nothing has recorded the
+    /// The fork target's run has not finished, or nothing has recorded the
     /// target yet. The previous head is never forked in its place.
     #[error("{target} of session `{session_id}` has not finished; there is no state to fork yet")]
     ForkTargetPending {
         session_id: SessionId,
         target: crate::session_store_factory_types::Target,
     },
-    /// The fork target names no state: its root ended without a commit, or
+    /// The fork target names no state: its run ended without a commit, or
     /// its input was withdrawn.
     #[error(
-        "{target} of session `{session_id}` names no state: its root ended without a commit \
+        "{target} of session `{session_id}` names no state: its run ended without a commit \
          or its input was withdrawn"
     )]
     ForkTargetUnavailable {
@@ -735,41 +735,41 @@ pub enum StoreError {
         "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
     )]
     MissingFrameOpenAncestor { leaf_node_id: NodeId },
-    /// A commit's ingress settlement named a row its root did not admit:
-    /// the row is open, bound to another root, or gone (FIG-3927). Nothing
-    /// was written; a row is only ever answered by the root that admitted
+    /// A commit's ingress settlement named a row its run did not admit:
+    /// the row is open, bound to another run, or gone (FIG-3927). Nothing
+    /// was written; a row is only ever answered by the run that admitted
     /// it.
     #[error(
-        "root `{root}` of session `{session_id}` did not admit {row}; the row is bound to {admitted_root:?}"
+        "run `{run}` of session `{session_id}` did not admit {row}; the row is bound to {admitted_run:?}"
     )]
     IngressRowNotAdmitted {
         session_id: SessionId,
-        root: crate::TurnId,
+        run: crate::TurnId,
         row: Box<super::IngressRowId>,
-        admitted_root: Option<crate::TurnId>,
+        admitted_run: Option<crate::TurnId>,
     },
     /// A commit's ingress settlement named one row twice.
-    #[error("root `{root}` of session `{session_id}` settles {row} twice in one commit")]
+    #[error("run `{run}` of session `{session_id}` settles {row} twice in one commit")]
     IngressSettlementDuplicate {
         session_id: SessionId,
-        root: crate::TurnId,
+        run: crate::TurnId,
         row: Box<super::IngressRowId>,
     },
     /// A commit that settles admitted rows or applies session commands
-    /// presented no drive fence: only a sealed drive's fenced commit may
+    /// presented no shift fence: only a sealed shift's fenced commit may
     /// (FIG-3927).
-    #[error("a commit of session `{session_id}` settles ingress rows without a drive fence")]
+    #[error("a commit of session `{session_id}` settles ingress rows without a shift fence")]
     IngressSettlementUnfenced { session_id: SessionId },
-    /// A commit carries both a root's ingress settlement and a
-    /// session-command run (ADR 0101 §4): a root's turn commit settles the
+    /// A commit carries both a run's ingress settlement and a
+    /// session-command run (ADR 0101 §4): a run's turn commit settles the
     /// rows it admitted, and a command run's applying commit settles its
     /// command rows — never both in one commit. Nothing was written.
     #[error(
-        "runtime commit of session `{session_id}` cannot settle root `{root}`'s ingress and a session-command run together"
+        "runtime commit of session `{session_id}` cannot settle run `{run}`'s ingress and a session-command run together"
     )]
     IngressAndSessionCommandRun {
         session_id: SessionId,
-        root: crate::TurnId,
+        run: crate::TurnId,
     },
     /// The command lane's applying commit found one of its command rows
     /// withdrawn or admitted since it read them (design §2.7). Nothing was
@@ -779,48 +779,48 @@ pub enum StoreError {
         session_id: SessionId,
         batch_id: BatchId,
     },
-    /// A head write that presented no drive fence found the session head
-    /// owned by a drive (FIG-4202): a bound root, an owed follow-on, or an
-    /// open session command a drive applies at its next boundary. Nothing
+    /// A head write that presented no shift fence found the session head
+    /// owned by a shift (FIG-4202): a bound run, an owed follow-on, or an
+    /// open session command a shift applies at its next boundary. Nothing
     /// was written. A host moves the head through a session command instead,
     /// and a dirty park answers busy and keeps its runtime.
     #[error(
-        "session `{session_id}`'s head is owned by {owner}; a head write outside the drive is refused"
+        "session `{session_id}`'s head is owned by {owner}; a head write outside the shift is refused"
     )]
     SessionHeadOwned {
         session_id: SessionId,
         owner: super::SessionHeadOwner,
     },
-    /// A storage operation fenced by a drive presented a fence that is not
-    /// the session's current drive epoch: a later admission superseded it
+    /// A storage operation fenced by a shift presented a fence that is not
+    /// the session's current shift epoch: a later admission superseded it
     /// (ADR 0105 §2). Nothing was written.
     #[error(
-        "drive fence epoch {fence_epoch} for session `{session_id}` is stale; the session is at drive epoch {current_epoch}"
+        "shift fence epoch {fence_epoch} for session `{session_id}` is stale; the session is at shift epoch {current_epoch}"
     )]
-    StaleDriveFence {
+    StaleShiftFence {
         session_id: SessionId,
         fence_epoch: u64,
         current_epoch: u64,
     },
-    /// A terminal write named a logical root that already has a different
+    /// A terminal write named a logical run that already has a different
     /// terminal. The stored terminal stands and nothing was written (ADR 0105
-    /// law L-S6): a later execution adopts it instead of ending the root
+    /// law L-S6): a later execution adopts it instead of ending the run
     /// twice.
-    #[error("root `{root}` of session `{session_id}` is already terminal ({by:?})")]
-    RootAlreadyTerminal {
+    #[error("run `{run}` of session `{session_id}` is already terminal ({by:?})")]
+    RunAlreadyTerminal {
         session_id: SessionId,
-        root: crate::TurnId,
-        by: Box<super::RootTerminalCause>,
+        run: crate::TurnId,
+        by: Box<super::RunTerminalCause>,
     },
-    /// Withdrawal settled every input bound to this root before its stale
+    /// Withdrawal settled every input bound to this run before its stale
     /// execution tried to park. No park was written.
-    #[error("root `{root}` of session `{session_id}` has only withdrawn inputs")]
-    RootInputWithdrawn {
+    #[error("run `{run}` of session `{session_id}` has only withdrawn inputs")]
+    RunInputWithdrawn {
         session_id: SessionId,
-        root: crate::TurnId,
+        run: crate::TurnId,
     },
     /// The session is closing: its `CloseSession` intent committed, so it
-    /// accepts no input and admits no root. Deletion only retries from here
+    /// accepts no input and admits no run. Deletion only retries from here
     /// (FIG-3600 S7).
     #[error("session `{session_id}` is closing under control intent {intent}")]
     SessionClosing {
@@ -830,15 +830,15 @@ pub enum StoreError {
     /// No control intent has this id.
     #[error("control intent {intent} is unknown")]
     ControlIntentUnknown { intent: super::ControlIntentId },
-    /// A drive-fenced storage operation found no `session_meta` row for its
-    /// session, so the session has no drive epoch to fence against (ADR 0105
+    /// A shift-fenced storage operation found no `session_meta` row for its
+    /// session, so the session has no shift epoch to fence against (ADR 0105
     /// §2). Nothing was written.
-    #[error("session `{session_id}` has no drive epoch: no session_meta row")]
-    DriveEpochUnavailable { session_id: SessionId },
-    /// A drive-fenced storage operation named a session other than the one
-    /// its drive fence authorizes. Nothing was written.
-    #[error("drive fence for session `{fence_session_id}` cannot act on session `{session_id}`")]
-    DriveFenceSessionMismatch {
+    #[error("session `{session_id}` has no shift epoch: no session_meta row")]
+    ShiftEpochUnavailable { session_id: SessionId },
+    /// A shift-fenced storage operation named a session other than the one
+    /// its shift fence authorizes. Nothing was written.
+    #[error("shift fence for session `{fence_session_id}` cannot act on session `{session_id}`")]
+    ShiftFenceSessionMismatch {
         session_id: SessionId,
         fence_session_id: SessionId,
     },
@@ -920,17 +920,17 @@ pub enum StoreError {
     #[error("run spec `{hash}` of session `{session_id}` is already interned with different bytes")]
     RunSpecHashCollision { session_id: SessionId, hash: String },
     /// An input addressed to running turn `turn_id` carried an explicit run
-    /// spec that differs from the one that turn's root runs under
-    /// (FIG-3838). Steering joins the running root's shape: omit the spec to
+    /// spec that differs from the one that turn's run executes under
+    /// (FIG-3838). Steering joins the running run's shape: omit the spec to
     /// inherit it. Nothing was stored.
     #[error(
-        "input addressed to running turn `{turn_id}` of session `{session_id}` carries a run spec that differs from the turn's; omit the spec to inherit the running root's shape"
+        "input addressed to running turn `{turn_id}` of session `{session_id}` carries a run spec that differs from the turn's; omit the spec to inherit the running run's shape"
     )]
     PendingTurnInputRunSpecMismatch {
         session_id: SessionId,
         turn_id: crate::TurnId,
     },
-    /// A root named run spec `hash`, which its session does not hold.
+    /// A run named run spec `hash`, which its session does not hold.
     #[error("run spec `{hash}` of session `{session_id}` is not interned")]
     RunSpecMissing { session_id: SessionId, hash: String },
     #[error(
@@ -993,7 +993,7 @@ pub enum StoreError {
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
     /// return this instead of surfacing a backend foreign-key failure when
-    /// concurrent reclaim wins publication of an already-persisted root.
+    /// concurrent reclaim wins publication of an already-persisted run.
     #[error("checkpoint root `{blob_ref}` is not present in the store")]
     CheckpointRootMissing {
         /// Content address of the checkpoint root removed before publication.
@@ -1037,7 +1037,7 @@ pub enum StoreError {
     /// The resident execution-state bodies were released after their commit
     /// and no accepted snapshot is retained in process, so this resident state
     /// cannot supply the execution a same-frame restore rebuilds from. Hydrate
-    /// the durable checkpoint instead: reading the released root as "no
+    /// the durable checkpoint instead: reading the released run as "no
     /// execution" would rebuild an empty session over committed globals
     /// (FIG-2521).
     #[error(
@@ -1118,7 +1118,7 @@ impl StoreError {
     }
 
     /// Whether the identical operation may succeed when it is made again: the
-    /// storage substrate faulted, or another drive holds the session until
+    /// storage substrate faulted, or another shift holds the session until
     /// its own boundary. Every other variant is the store's deterministic
     /// answer to the request, and making it again is refused the same way.
     ///
@@ -1133,7 +1133,7 @@ impl StoreError {
             | Self::StorageFailure { .. }
             | Self::Backend(_)
             | Self::SessionHeadOwned { .. }
-            | Self::UnfinishedRootConflict { .. } => true,
+            | Self::UnfinishedRunConflict { .. } => true,
             Self::ExecutionStateCaptureFailed { .. }
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
@@ -1158,7 +1158,7 @@ impl StoreError {
             | Self::BlankIdentity(_)
             | Self::SessionDeleted { .. }
             | Self::UnsupportedStoreOperation { .. }
-            | Self::RootHeldByAnotherExecutor { .. }
+            | Self::RunHeldByAnotherExecutor { .. }
             | Self::FollowOnPending { .. }
             | Self::FollowOnFrameNotCurrent { .. }
             | Self::FollowOnHeadInvariant { .. }
@@ -1200,13 +1200,13 @@ impl StoreError {
             | Self::IngressSettlementUnfenced { .. }
             | Self::IngressAndSessionCommandRun { .. }
             | Self::SessionCommandWithdrawn { .. }
-            | Self::StaleDriveFence { .. }
-            | Self::RootAlreadyTerminal { .. }
-            | Self::RootInputWithdrawn { .. }
+            | Self::StaleShiftFence { .. }
+            | Self::RunAlreadyTerminal { .. }
+            | Self::RunInputWithdrawn { .. }
             | Self::SessionClosing { .. }
             | Self::ControlIntentUnknown { .. }
-            | Self::DriveEpochUnavailable { .. }
-            | Self::DriveFenceSessionMismatch { .. }
+            | Self::ShiftEpochUnavailable { .. }
+            | Self::ShiftFenceSessionMismatch { .. }
             | Self::IngressReservedSourceKey { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
@@ -1241,10 +1241,10 @@ impl StoreError {
     /// every boundary that classifies a store error reads, so a store error
     /// is retried, redriven or terminal the same way on each of them.
     ///
-    /// - A fault of the substrate, or a session another drive holds, is
+    /// - A fault of the substrate, or a session another shift holds, is
     ///   retryable ([`Self::is_transient`]).
     /// - A refusal that names what superseded the attempt (a later head, a
-    ///   later drive, a new lease holder, the follow-on the session owes) is
+    ///   later shift, a new lease holder, the follow-on the session owes) is
     ///   redrivable: the identical call is refused again, and a redrive under
     ///   fresh authority is not.
     /// - Every other refusal is terminal, under its own code when it has one
@@ -1261,14 +1261,14 @@ impl StoreError {
             | Self::StorageFailure { .. }
             | Self::Backend(_) => Code::RuntimeStore,
             Self::SessionHeadOwned { .. } => Code::SessionHeadOwned,
-            Self::UnfinishedRootConflict { .. } => Code::SessionRootPending,
+            Self::UnfinishedRunConflict { .. } => Code::SessionRunPending,
 
             Self::HeadRevisionConflict { .. }
             | Self::TurnCancelIntentChanged { .. }
-            | Self::StaleDriveFence { .. }
+            | Self::StaleShiftFence { .. }
             | Self::SessionCommandWithdrawn { .. }
             | Self::CheckpointRootMissing { .. }
-            | Self::RootHeldByAnotherExecutor { .. }
+            | Self::RunHeldByAnotherExecutor { .. }
             | Self::StaleWritePermit { .. } => Code::StoreCommitSuperseded,
             Self::SessionExecutionLeaseExpired { .. } => Code::SessionExecutionLeaseLost,
             Self::FollowOnPending { .. }
@@ -1353,11 +1353,11 @@ impl StoreError {
             | Self::IngressSettlementDuplicate { .. }
             | Self::IngressSettlementUnfenced { .. }
             | Self::IngressAndSessionCommandRun { .. }
-            | Self::RootAlreadyTerminal { .. }
-            | Self::RootInputWithdrawn { .. }
+            | Self::RunAlreadyTerminal { .. }
+            | Self::RunInputWithdrawn { .. }
             | Self::ControlIntentUnknown { .. }
-            | Self::DriveEpochUnavailable { .. }
-            | Self::DriveFenceSessionMismatch { .. }
+            | Self::ShiftEpochUnavailable { .. }
+            | Self::ShiftFenceSessionMismatch { .. }
             | Self::PendingTurnInputBatchForeignSession { .. }
             | Self::RunSpecMissing { .. }
             | Self::ProcessWakeSequenceRewound { .. }
@@ -1481,8 +1481,8 @@ impl StoreError {
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
 
-            Self::UnfinishedRootConflict { .. } => "UnfinishedRootConflict",
-            Self::RootHeldByAnotherExecutor { .. } => "RootHeldByAnotherExecutor",
+            Self::UnfinishedRunConflict { .. } => "UnfinishedRunConflict",
+            Self::RunHeldByAnotherExecutor { .. } => "RunHeldByAnotherExecutor",
             Self::FollowOnPending { .. } => "FollowOnPending",
             Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",
             Self::FollowOnHeadInvariant { .. } => "FollowOnHeadInvariant",
@@ -1529,13 +1529,13 @@ impl StoreError {
             Self::IngressAndSessionCommandRun { .. } => "IngressAndSessionCommandRun",
             Self::SessionCommandWithdrawn { .. } => "SessionCommandWithdrawn",
             Self::SessionHeadOwned { .. } => "SessionHeadOwned",
-            Self::StaleDriveFence { .. } => "StaleDriveFence",
-            Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
-            Self::RootInputWithdrawn { .. } => "RootInputWithdrawn",
+            Self::StaleShiftFence { .. } => "StaleShiftFence",
+            Self::RunAlreadyTerminal { .. } => "RunAlreadyTerminal",
+            Self::RunInputWithdrawn { .. } => "RunInputWithdrawn",
             Self::SessionClosing { .. } => "SessionClosing",
             Self::ControlIntentUnknown { .. } => "ControlIntentUnknown",
-            Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
-            Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
+            Self::ShiftEpochUnavailable { .. } => "ShiftEpochUnavailable",
+            Self::ShiftFenceSessionMismatch { .. } => "ShiftFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",

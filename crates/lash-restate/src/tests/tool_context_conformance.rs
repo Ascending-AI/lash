@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::{Script, StoreOp};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -211,7 +211,7 @@ impl ProductionToolCell {
             .scoped(durable_admission(&turn_scope))
             .expect("scope production tool cell");
         runtime
-            .drive_turn(
+            .execute_turn(
                 replay_test_input(&self.turn_id),
                 lash_core::facade_support::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
@@ -254,7 +254,7 @@ impl ProductionToolCell {
         );
 
         // The replay is the same handler redriven against the same store: it
-        // drives the journaled acceptance and drive set (ADR 0069 §6), replays
+        // executes the journaled acceptance and shift set (ADR 0069 §6), replays
         // every journaled effect, and commits the turn the live pass could not.
         start_replay();
         let mut replay = replay_test_runtime_with_plugins(
@@ -466,7 +466,7 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
     let mut crashed = cell.runtime_on(crashing.clone()).await;
     let turn_scope = crashed.export_persistence_state().turn_scope(&cell.turn_id);
     let crashed_turn = crashed
-        .drive_turn(
+        .execute_turn(
             replay_test_input(&cell.turn_id),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -597,7 +597,7 @@ finish(second);
     .await;
 }
 
-async fn drive_drain(
+async fn execute_drain(
     runtime: &mut lash_core::facade_support::LashRuntime,
     host: &dyn EffectHost,
     drain_scope: &lash_core::ExecutionScope,
@@ -606,7 +606,7 @@ async fn drive_drain(
         .scoped(durable_admission(drain_scope))
         .expect("scope the drain");
     runtime
-        .drive_one_admitted_queued_root(lash_core::facade_support::TurnOptions::new(
+        .execute_one_admitted_queued_run(lash_core::facade_support::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scope,
         ))
@@ -670,7 +670,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     seed_drain_input(&control).await;
     let control_scope = lash_core::ExecutionScope::turn(control.session_id.clone(), drain_id);
     let mut control_runtime = control.runtime_on(control.runtime_store.clone()).await;
-    drive_drain(
+    execute_drain(
         &mut control_runtime,
         control_host.effect_host(),
         &control_scope,
@@ -695,7 +695,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     let crashed_host = Arc::clone(&host);
     let crashed_scope = drain_scope.clone();
     let worker = tokio::spawn(async move {
-        let _ = drive_drain(&mut crashed, crashed_host.effect_host(), &crashed_scope).await;
+        let _ = execute_drain(&mut crashed, crashed_host.effect_host(), &crashed_scope).await;
     });
     tokio::time::timeout(std::time::Duration::from_secs(60), committed.notified())
         .await
@@ -722,21 +722,21 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
         .scoped(durable_admission(&drain_scope))
         .expect("scope the redriven drain");
     let drain = redrive
-        .drive_one_admitted_queued_root(lash_core::facade_support::TurnOptions::new(
+        .execute_one_admitted_queued_run(lash_core::facade_support::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scope,
         ))
         .await
         .expect("the after-commit redrive completes");
     let lash_core::facade_support::QueuedTurnDrain::Ran(turn) = drain else {
-        panic!("the engine redrives the committed root");
+        panic!("the engine redrives the committed run");
     };
     assert!(
         matches!(
             turn.outcome,
             lash_core::facade_support::TurnOutcome::Finished(_)
         ),
-        "the redriven root finishes from its durable record: {:?}",
+        "the redriven run finishes from its durable record: {:?}",
         turn.outcome
     );
     drop(redrive);

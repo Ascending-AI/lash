@@ -51,9 +51,9 @@ async fn fixture(batch: usize) -> Result<Fixture> {
     fixture_over(batch, |backend| backend).await
 }
 
-/// [`fixture`] whose drain takes every eligible input into one root
-/// (`DrainMode::All`), for the laws about an input another input's root
-/// answers: the default drain gives each input its own root (FIG-4457).
+/// [`fixture`] whose drain takes every eligible input into one run
+/// (`DrainMode::All`), for the laws about an input another input's run
+/// answers: the default drain gives each input its own run (FIG-4457).
 async fn composing_fixture() -> Result<Fixture> {
     fixture_over_with_batching(
         crate::QueuedWorkBatchingConfig::new(4).with_drain_mode(crate::DrainMode::All),
@@ -110,10 +110,10 @@ async fn reaches(counter: &AtomicUsize, count: usize, what: &str) {
     .expect(what);
 }
 
-/// A root whose live report is gone from this process answers the report
+/// A run whose live report is gone from this process answers the report
 /// rebuilt from the store: the same outcome, state and acceptance, marked
 /// Durable (D1 §1.5 3b, risk R1).
-async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
+async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
@@ -125,7 +125,7 @@ async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result
 
     let handle = session
         .send(TurnInput::text("report me"))
-        .id("durable-report-root")
+        .id("durable-report-run")
         .await?;
     let input_id = handle.input_id().clone();
     let live = handle.output().await?;
@@ -155,55 +155,55 @@ async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result
     Ok(())
 }
 
-/// An engine whose drives never answer that they stopped, as a drive that
-/// outlives the root a handle follows does: every other call goes to the
+/// An engine whose shifts never answer that they stopped, as a shift that
+/// outlives the run a handle follows does: every other call goes to the
 /// engine underneath.
-struct UnstoppedDrives(Arc<dyn SessionWorkEngine>);
+struct UnstoppedShifts(Arc<dyn SessionWorkEngine>);
 
 #[async_trait]
-impl SessionWorkEngine for UnstoppedDrives {
-    fn schedule_drive(&self, session: &SessionId, request: lash_core::engine::DriveRequestId) {
-        self.0.schedule_drive(session, request);
+impl SessionWorkEngine for UnstoppedShifts {
+    fn schedule_shift(&self, session: &SessionId, request: lash_core::engine::ShiftRequestId) {
+        self.0.schedule_shift(session, request);
     }
 
-    async fn request_drive(
+    async fn request_shift(
         &self,
         session: &SessionId,
-        request: lash_core::engine::DriveRequestId,
+        request: lash_core::engine::ShiftRequestId,
     ) -> std::result::Result<(), lash_core::engine::EngineRefusal> {
-        self.0.request_drive(session, request).await
+        self.0.request_shift(session, request).await
     }
 
-    fn install_session_driver(
+    fn install_session_shifts(
         &self,
-        driver: Arc<dyn lash_core::SessionDriver>,
-    ) -> Arc<dyn lash_core::SessionDriver> {
-        self.0.install_session_driver(driver)
+        shifts: Arc<dyn lash_core::SessionShifts>,
+    ) -> Arc<dyn lash_core::SessionShifts> {
+        self.0.install_session_shifts(shifts)
     }
 
     fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
         self.0.control()
     }
 
-    async fn await_drive(
+    async fn await_shift(
         &self,
         _session: &SessionId,
-        _request: &lash_core::engine::DriveRequestId,
-    ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+        _request: &lash_core::engine::ShiftRequestId,
+    ) -> std::result::Result<lash_core::engine::ShiftOutcome, lash_core::engine::ShiftAbort> {
         std::future::pending().await
     }
 }
 
-/// A settled root whose report no run in this process can still deposit
-/// answers from the store at once, although its drive never says it
+/// A settled run whose report no execution in this process can still deposit
+/// answers from the store at once, although its shift never says it
 /// stopped: the follower waits for a live report only while a run here may
-/// still deposit one, never on a root that ran elsewhere or whose report is
+/// still deposit one, never on a run that ran elsewhere or whose report is
 /// gone (FIG-3843). Before, it waited out the 5 s live-report grace.
-async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
+async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<()> {
     let fixture = fixture_over(1, |backend| {
         let work = backend.session_work();
         crate::testing::LayeredBackend::over(backend)
-            .with_session_work(Arc::new(UnstoppedDrives(work)))
+            .with_session_work(Arc::new(UnstoppedShifts(work)))
             .into_backend()
     })
     .await?;
@@ -217,7 +217,7 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text("report me once"))
-        .id("no-grace-root")
+        .id("no-grace-run")
         .await?;
     let input_id = handle.input_id().clone();
     let live = handle.output().await?;
@@ -225,7 +225,7 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
 
     // The live report is taken and no run of this session is under way here,
     // so nothing can deposit another: a handle attached now answers from the
-    // store without waiting on the drive that never says it stopped.
+    // store without waiting on the shift that never says it stopped.
     let started = std::time::Instant::now();
     let durable = session.attach(input_id).output().await?;
     let waited = started.elapsed();
@@ -233,7 +233,7 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
     assert_eq!(durable.assistant_message(), Some("echo: report me once"));
     assert!(
         waited < std::time::Duration::from_secs(2),
-        "a root no run here can report answers at once, not after the live-report grace: waited {waited:?}"
+        "a run no execution here can report answers at once, not after the live-report grace: waited {waited:?}"
     );
     Ok(())
 }
@@ -255,7 +255,7 @@ async fn fixture_with_stores(batch: usize, map: StoreMap) -> Result<Fixture> {
     .await
 }
 
-/// The reads one input's followers make while its root binding is awaited:
+/// The reads one input's followers make while its run binding is awaited:
 /// keyed reads of the binding, and full store polls (each reads the input's
 /// open row).
 #[derive(Default)]
@@ -291,7 +291,7 @@ impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
         self.inner.as_ref()
     }
 
-    async fn root_of_input(
+    async fn run_of_input(
         &self,
         session_id: &SessionId,
         input: &lash_core::InputId,
@@ -299,7 +299,7 @@ impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
         if self.reads.watches(input) {
             self.reads.keyed.fetch_add(1, Ordering::SeqCst);
         }
-        self.inner.root_of_input(session_id, input).await
+        self.inner.run_of_input(session_id, input).await
     }
 
     async fn pending_turn_input(
@@ -314,9 +314,9 @@ impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
     }
 }
 
-/// A follower with no resident runtime learns its input's root by one keyed
+/// A follower with no resident runtime learns its input's run by one keyed
 /// read of the binding at the poll floor, while its full store poll backs
-/// off as before: a root that runs on another worker announces its binding
+/// off as before: a run that runs on another worker announces its binding
 /// to no event this process sees (FIG-3981). Waking on the probe delays
 /// neither the probe nor the poll. Before, the follower read the binding
 /// only on the backed-off poll.
@@ -336,17 +336,17 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
     .await?;
     let session = fixture
         .core
-        .session("send-root-probe")
+        .session("send-run-probe")
         .created()
         .await
         .open()
         .await?;
 
-    // The held root keeps the second input queued, bound to no root.
+    // The held run keeps the second input queued, bound to no run.
     let held = session.send(TurnInput::text(HELD)).await?;
     provider_called(&fixture, 1).await;
     let queued = session
-        .send(TurnInput::text("queued behind the held root"))
+        .send(TurnInput::text("queued behind the held run"))
         .await?;
     reads.watch(queued.input_id());
     let following = tokio::spawn(
@@ -363,7 +363,7 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
     assert_eq!(held.outcome().await?.status(), crate::TurnStatus::Answered);
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), following)
         .await
-        .expect("the queued input's follower answers once its root runs")
+        .expect("the queued input's follower answers once its run executes")
         .expect("the follower task completes")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Answered);
 
@@ -373,7 +373,7 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
     let probes = keyed.saturating_sub(2 * polls);
     assert!(
         (4..=20).contains(&polls),
-        "the store poll backs off, and a probe that found no root delays it: {polls} polls"
+        "the store poll backs off, and a probe that found no run delays it: {polls} polls"
     );
     assert!(
         probes >= 20,
@@ -383,7 +383,7 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
 }
 
 /// A scope-close ledger that holds every claim until released, as a close
-/// the scope owner is slow to take: the root's recorded close step waits on
+/// the scope owner is slow to take: the run's recorded close step waits on
 /// its claim, and so does a reconcile pass. It counts the closes settled.
 struct HeldScopeCloses {
     inner: Arc<dyn lash_core::store::ObligationLedger>,
@@ -475,12 +475,12 @@ impl lash_core::store::ObligationLedger for HeldScopeCloses {
     }
 }
 
-/// A root's report is handed to its handle at the root's final commit,
-/// before the root's scope closes (FIG-3979): the handle answers the live
+/// A run's report is handed to its handle at the run's final commit,
+/// before the run's scope closes (FIG-3979): the handle answers the live
 /// report while the close is still held, and the close runs after. Before,
 /// the report was deposited only once the close returned, so the handle
 /// waited out the live-report grace and answered the durable report.
-async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
+async fn a_send_answers_before_its_runs_scope_closes() -> Result<()> {
     let (release, released) = tokio::sync::watch::channel(false);
     let settled = Arc::new(AtomicUsize::new(0));
     let fixture = fixture_over(1, {
@@ -512,26 +512,26 @@ async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text("answer me"))
-        .id("before-close-root")
+        .id("before-close-run")
         .await?;
     let output = tokio::time::timeout(std::time::Duration::from_secs(3), handle.output())
         .await
-        .expect("the handle answers while its root's scope close is held")?;
+        .expect("the handle answers while its run's scope close is held")?;
     assert_eq!(output.result.source, crate::ReportSource::Live);
     assert_eq!(output.assistant_message(), Some("echo: answer me"));
     assert_eq!(
         settled.load(Ordering::SeqCst),
         0,
-        "the root's scope had not closed when its handle answered"
+        "the run's scope had not closed when its handle answered"
     );
 
     release.send_replace(true);
-    reaches(&settled, 1, "the root's scope closes once released").await;
+    reaches(&settled, 1, "the run's scope closes once released").await;
     Ok(())
 }
 
-/// A send under a host id whose root already settled commits nothing and
-/// answers from that root's evidence (D2 Q6).
+/// A send under a host id whose run already settled commits nothing and
+/// answers from that run's evidence (D2 Q6).
 async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
@@ -544,7 +544,7 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let first = session
         .send(TurnInput::text("only once"))
-        .id("settled-root")
+        .id("settled-run")
         .output()
         .await?;
     assert_eq!(first.assistant_message(), Some("echo: only once"));
@@ -557,26 +557,26 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
         .store
         .vacuum()
         .await
-        .expect("vacuum retains the settled root's retry evidence");
+        .expect("vacuum retains the settled run's retry evidence");
 
     let again = session
         .send(TurnInput::text("only once"))
-        .id("settled-root")
+        .id("settled-run")
         .await?;
     assert_eq!(again.input_id(), &applied[0].input_id);
     assert_eq!(
-        session.attach_id("settled-root").input_id(),
+        session.attach_id("settled-run").input_id(),
         again.input_id(),
         "a retry answers the original acceptance, which its id alone addresses"
     );
     let outcome = again.outcome().await?;
     assert_eq!(outcome.status(), crate::TurnStatus::Answered);
-    let output = outcome.output().expect("a settled root has a report");
+    let output = outcome.output().expect("a settled run has a report");
     assert_eq!(output.assistant_message(), Some("echo: only once"));
 
     let conflicting = session
         .send(TurnInput::text("different semantic input"))
-        .id("settled-root")
+        .id("settled-run")
         .await;
     assert!(
         conflicting.is_err(),
@@ -601,11 +601,11 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
     provider_called(&fixture, 1).await;
     let waiting = session
         .send(TurnInput::text("withdraw me"))
-        .id("withdrawn-root")
+        .id("withdrawn-run")
         .await?;
     let input_id = waiting.input_id().clone();
     let receipt = waiting.cancel().await?;
@@ -626,9 +626,9 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
         "no turn applied a withdrawn input"
     );
     assert_eq!(
-        outcome.root().cloned(),
+        outcome.run().cloned(),
         None,
-        "no root took a withdrawn input"
+        "no run took a withdrawn input"
     );
     outcome
         .to_remote(&session.session_id(), &input_id)
@@ -658,29 +658,29 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     Ok(())
 }
 
-/// An input a drive answers inside another input's root resolves Answered
-/// with that root's turn: the handle reads which root applied it, never
-/// "my drive ran it", so it neither ceded nor refused (review of #2290,
+/// An input a shift answers inside another input's run resolves Answered
+/// with that run's turn: the handle reads which run applied it, never
+/// "my shift ran it", so it neither ceded nor refused (review of #2290,
 /// MEDIUM-4).
-async fn an_input_answered_inside_another_root_resolves_answered_with_that_root() -> Result<()> {
+async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() -> Result<()> {
     let fixture = composing_fixture().await?;
     let session = fixture
         .core
-        .session("send-shared-root")
+        .session("send-shared-run")
         .created()
         .await
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id("second-root")
+        .id("second-run")
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id("third-root")
+        .id("third-run")
         .await?;
     let third_input = third.input_id().clone();
     fixture.release.notify_one();
@@ -690,15 +690,15 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
     let third = third.outcome().await?;
     assert_eq!(third.status(), crate::TurnStatus::Answered);
     assert_eq!(
-        third.root().cloned(),
-        Some(lash_core::TurnId::from("second-root"))
+        third.run().cloned(),
+        Some(lash_core::TurnId::from("second-run"))
     );
     let remote = third.to_remote(&session.session_id(), &third_input);
     remote.validate().expect("the remote outcome is consistent");
     assert_eq!(
-        remote.root().cloned(),
-        Some(lash_core::TurnId::from("second-root")),
-        "a transport re-attaches through the root that answered"
+        remote.run().cloned(),
+        Some(lash_core::TurnId::from("second-run")),
+        "a transport re-attaches through the run that answered"
     );
     let third = third.output().expect("an answered input has a report");
     // One turn applied both inputs, so both handles answer its reply.
@@ -718,7 +718,7 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
         .find(|application| application.input_id == third_input)
         .map(|application| application.turn_id)
         .expect("the third input was applied");
-    assert_eq!(applied_by, lash_core::TurnId::from("second-root"));
+    assert_eq!(applied_by, lash_core::TurnId::from("second-run"));
     assert_eq!(
         fixture.calls.load(Ordering::SeqCst),
         2,
@@ -730,7 +730,7 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
 /// A session a host opened and dropped without closing leaves nothing of
 /// itself with the core's open-session registry: the registry holds the
 /// session's runtime weakly, all of it, so once the host lets go of the core
-/// too, the registry, and the core's driver that holds it, are released.
+/// too, the registry, and the core's `SessionShifts` that holds it, are released.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
     let fixture = fixture(1).await?;
@@ -744,7 +744,7 @@ async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
         .await?;
     session
         .send(TurnInput::text("one turn"))
-        .id("dropped-unclosed-root")
+        .id("dropped-unclosed-run")
         .output()
         .await?;
     drop(session);
@@ -759,12 +759,12 @@ async fn a_dropped_session_leaves_nothing_with_its_core() -> Result<()> {
     Ok(())
 }
 
-/// A drive never runs on a runtime a host opened to read
+/// A shift never runs on a runtime a host opened to read
 /// ([`observe_with_state`](crate::SessionBuilder::observe_with_state)): that
-/// open admitted nothing under the session's lease, and the session's drives
+/// open admitted nothing under the session's lease, and the session's shifts
 /// stay on the host's admitted open.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
+async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     let fixture = fixture(1).await?;
     let session_id = lash_core::SessionId::from("send-observed");
     let host = fixture
@@ -816,12 +816,12 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     assert_eq!(
         host.read_view().turn_index(),
         2,
-        "the drive ran on the host's open"
+        "the shift ran on the host's open"
     );
     assert_eq!(
         observer.read_view().turn_index(),
         1,
-        "no drive ran on the observer's runtime"
+        "no shift ran on the observer's runtime"
     );
     Ok(())
 }
@@ -855,30 +855,30 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
         .await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
-        .id("engine-first-root")
+        .id("engine-first-run")
         .output()
         .await?;
     drop(durable);
 
     // The engine lane releases the session's writer claim when the sent
-    // root settles; the host's open races that release under Restate.
+    // run settles; the host's open races that release under Restate.
     let session = retry_when_claim_frees(|| core.session("engine-first").open()).await?;
     let again = session
         .send(TurnInput::text("and a host opens it after"))
-        .id("host-after-root")
+        .id("host-after-run")
         .output()
         .await?;
     assert_eq!(again.status(), crate::TurnStatus::Answered);
     Ok(())
 }
 
-/// A cancel through a send's handle reaches its root past a frame switch:
-/// the input was applied, and its turn committed, by the root's first
-/// physical turn, but the root runs on in its follow-on turn, so the cancel
-/// is placed on that turn and the root answers Cancelled.
+/// A cancel through a send's handle reaches its run past a frame switch:
+/// the input was applied, and its turn committed, by the run's first
+/// physical turn, but the run executes on in its follow-on turn, so the cancel
+/// is placed on that turn and the run answers Cancelled.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
+async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
@@ -913,23 +913,23 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
         .await?;
     let handle = session
         .send(TurnInput::text("switch frames, then wait"))
-        .id("cancel-past-switch-root")
+        .id("cancel-past-switch-run")
         .await?;
     reaches(&calls, 2, "the follow-on turn calls the provider").await;
 
     let receipt = handle.cancel().origin("send-handle-law").await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Requested { root, .. } if root.as_str() == "cancel-past-switch-root"),
-        "the cancel reaches the running root: {receipt:?}"
+        matches!(&receipt, crate::CancelReceipt::Requested { run, .. } if run.as_str() == "cancel-past-switch-run"),
+        "the cancel reaches the running run: {receipt:?}"
     );
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), handle.outcome())
         .await
-        .expect("the cancelled root answers")?;
+        .expect("the cancelled run answers")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     Ok(())
 }
 
-async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
+async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
     let fixture = composing_fixture().await?;
     let session = fixture
         .core
@@ -938,11 +938,11 @@ async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
         .await
         .open()
         .await?;
-    let first = session.send(TurnInput::text(HELD)).id("first-root").await?;
+    let first = session.send(TurnInput::text(HELD)).id("first-run").await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text(HELD))
-        .id("consuming-root")
+        .id("consuming-run")
         .await?;
     let third = session
         .send(TurnInput::text("batched input"))
@@ -953,8 +953,8 @@ async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
     let input_id = third.input_id().clone();
     let parts = session.durable().send_parts().await?;
     assert_eq!(
-        parts.store.root_binding(&input_id).await?,
-        Some(lash_core::TurnId::from("consuming-root")),
+        parts.store.run_binding(&input_id).await?,
+        Some(lash_core::TurnId::from("consuming-run")),
         "the controlled barrier must hold after binding"
     );
     assert!(
@@ -968,14 +968,14 @@ async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
     );
     let receipt = session.attach(input_id).cancel().await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Requested { root, .. }
-        if root.as_str() == "consuming-root"),
+        matches!(&receipt, crate::CancelReceipt::Requested { run, .. }
+        if run.as_str() == "consuming-run"),
         "{receipt:?}"
     );
     fixture.release.notify_one();
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), second.outcome())
         .await
-        .expect("the consuming root settles")?;
+        .expect("the consuming run settles")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
         third.outcome().await?.status(),
@@ -994,7 +994,7 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
         .await
         .open()
         .await?;
-    let handle = session.send(TurnInput::text(HELD)).id("gap-root").await?;
+    let handle = session.send(TurnInput::text(HELD)).id("gap-run").await?;
     provider_called(&fixture, 1).await;
     drop(
         fixture
@@ -1029,13 +1029,13 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
             .map(|outcome| (outcome, sink))
     });
     fixture.release.notify_one();
-    // The stream goes on past its gap and ends once the root settles.
+    // The stream goes on past its gap and ends once the run settles.
     let mut after_gap = 0;
     while let Some(item) = tokio::time::timeout(std::time::Duration::from_secs(20), events.next())
         .await
-        .expect("the stream ends once the root settles")
+        .expect("the stream ends once the run settles")
     {
-        item.expect("one gap, then the root's activity");
+        item.expect("one gap, then the run's activity");
         after_gap += 1;
     }
     assert!(after_gap > 0, "the stream observes on past its gap");
@@ -1055,7 +1055,7 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
 
 /// A host re-attaches to its input with nothing but the id it sent under,
 /// on a durable session with no resident state, and follows the input into
-/// the root that answered it: a keyed input's id is derived from its session
+/// the run that answered it: a keyed input's id is derived from its session
 /// and key.
 async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     let fixture = fixture(4).await?;
@@ -1067,20 +1067,20 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
         .open()
         .await?;
 
-    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    let running = session.send(TurnInput::text(HELD)).id("held-run").await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id("second-root")
+        .id("second-run")
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id("third-root")
+        .id("third-run")
         .await?;
     let durable = fixture.core.session("send-attach-id").durable().await?;
-    let attached = durable.attach_id("third-root");
+    let attached = durable.attach_id("third-run");
     assert_eq!(attached.input_id(), third.input_id());
-    assert_eq!(attached.id(), Some(&lash_core::TurnId::from("third-root")));
+    assert_eq!(attached.id(), Some(&lash_core::TurnId::from("third-run")));
     fixture.release.notify_one();
     running.outcome().await?;
     second.outcome().await?;
@@ -1095,7 +1095,7 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
         "{output:?}"
     );
     assert_eq!(
-        session.attach_id("third-root").outcome().await?.status(),
+        session.attach_id("third-run").outcome().await?.status(),
         crate::TurnStatus::Answered
     );
     // An id nothing was accepted under answers like a withdrawn input.
@@ -1105,14 +1105,14 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     Ok(())
 }
 
-/// A root this follower never observed live answers with a reported
-/// Unavailable gap, so its (empty) activity list is not taken for the root's
+/// A run this follower never observed live answers with a reported
+/// Unavailable gap, so its (empty) activity list is not taken for the run's
 /// history; a follower that watched it run reports none.
-async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
+async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
-        .session("send-unobserved-root")
+        .session("send-unobserved-run")
         .created()
         .await
         .open()
@@ -1120,7 +1120,7 @@ async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text("watch me"))
-        .id("watched-root")
+        .id("watched-run")
         .await?;
     let input_id = handle.input_id().clone();
     let watched = handle.outcome().await?;
@@ -1129,14 +1129,14 @@ async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
     assert!(
         !watched
             .output()
-            .expect("an answered root has a report")
+            .expect("an answered run has a report")
             .activities
             .is_empty()
     );
 
     let unobserved = session.attach(input_id).outcome().await?;
     assert_eq!(unobserved.status(), crate::TurnStatus::Answered);
-    let output = unobserved.output().expect("an answered root has a report");
+    let output = unobserved.output().expect("an answered run has a report");
     assert!(output.activities.is_empty());
     assert!(
         matches!(
@@ -1195,13 +1195,13 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     assert_eq!(
         fixture.calls.load(Ordering::SeqCst),
         0,
-        "a refused batch drives nothing"
+        "a refused batch executes nothing"
     );
     Ok(())
 }
 
 /// One batch answers one handle per input, in request order, and each input
-/// is answered by the root that applied it (FIG-3842). Resending the batch
+/// is answered by the run that applied it (FIG-3842). Resending the batch
 /// answers the same inputs and runs nothing again. A batch naming an
 /// accepted id with other content, or one id twice, accepts nothing.
 async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Result<()> {
@@ -1245,14 +1245,14 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         let outcome = handle.outcome().await?;
         assert_eq!(outcome.status(), crate::TurnStatus::Answered);
         assert!(
-            outcome.root().is_some() && outcome.output().is_some(),
+            outcome.run().is_some() && outcome.output().is_some(),
             "{outcome:?}"
         );
     }
     let calls = fixture.calls.load(Ordering::SeqCst);
     assert_eq!(
         calls, 3,
-        "the configured input cap drives one input per root"
+        "the configured input cap executes one input per run"
     );
 
     let resent = session.send_batch(batch()).await?;
@@ -1348,7 +1348,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     assert_eq!(
         pending.len(),
         4,
-        "held root and three uncancelled admissions remain"
+        "held run and three uncancelled admissions remain"
     );
     for (entry, snapshot) in entries.iter().zip(&snapshots) {
         assert_eq!(
@@ -1437,18 +1437,18 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
         .await?;
     let input_id = first.input_id().clone();
     assert_eq!(
-        first.outcome().await?.root().cloned(),
+        first.outcome().await?.run().cloned(),
         Some(host_id.parse().unwrap())
     );
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         session
-            .root(lash_core::TurnId::fixture(host_id.to_string()))
+            .run(lash_core::TurnId::fixture(host_id.to_string()))
             .outcome(),
     )
     .await
-    .expect("the exact host root settles")?;
-    assert_eq!(durable.root().cloned(), Some(host_id.parse().unwrap()));
+    .expect("the exact host run settles")?;
+    assert_eq!(durable.run().cloned(), Some(host_id.parse().unwrap()));
     assert_eq!(durable.status(), crate::TurnStatus::Answered);
     let retry = session
         .send(input)
@@ -1458,16 +1458,16 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let retried = tokio::time::timeout(std::time::Duration::from_secs(2), retry.outcome())
         .await
         .expect("the settled host id answers its retry")?;
-    assert_eq!(retried.root().cloned(), Some(host_id.parse().unwrap()));
+    assert_eq!(retried.run().cloned(), Some(host_id.parse().unwrap()));
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     assert!(
-        matches!(session.attach_id(lash_core::TurnId::fixture(host_id.to_string())).cancel().await?, crate::CancelReceipt::AlreadySettled { root } if root.as_str() == host_id)
+        matches!(session.attach_id(lash_core::TurnId::fixture(host_id.to_string())).cancel().await?, crate::CancelReceipt::AlreadySettled { run } if run.as_str() == host_id)
     );
     Ok(())
 }
 
 #[cfg(feature = "rlm")]
-async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()> {
+async fn exact_host_run_frame_switch(host_id: &str, cancel: bool) -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let release = Arc::new(Notify::new());
     let double = restate_double(SEED).await;
@@ -1505,30 +1505,30 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
         .await
         .open()
         .await?;
-    let root_handle = session.root(lash_core::TurnId::fixture(host_id.to_string()));
+    let run_handle = session.run(lash_core::TurnId::fixture(host_id.to_string()));
     let handle = session
         .send(TurnInput::text("switch frames"))
         .id(lash_core::TurnId::fixture(host_id))
         .await?;
     let input_id = handle.input_id().clone();
-    reaches(&calls, 2, "the root runs its second physical turn").await;
-    let root = lash_core::TurnId::fixture(host_id);
-    let follow_on = lash_core::store::PhysicalTurn::derive_turn_id(&root, 1);
+    reaches(&calls, 2, "the run executes its second physical turn").await;
+    let run = lash_core::TurnId::fixture(host_id);
+    let follow_on = lash_core::store::PhysicalTurn::derive_turn_id(&run, 1);
     assert_eq!(
         session
             .durable()
             .send_parts()
             .await?
             .store
-            .root_of_input(&input_id)
+            .run_of_input(&input_id)
             .await?,
-        Some(root.clone())
+        Some(run.clone())
     );
 
-    // Publish distinguishable activity on both of this root's turns and on
+    // Publish distinguishable activity on both of this run's turns and on
     // spellings that a suffix parser could confuse with them.
     let markers = [
-        root.clone(),
+        run.clone(),
         follow_on.clone(),
         "unrelated".into(),
         if host_id == "job" {
@@ -1563,13 +1563,13 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
                 })
                 .collect(),
         )
-        .expect("prepare root membership markers");
+        .expect("prepare run membership markers");
     core.live_replay_store
         .publish_prepared(prepared)
-        .expect("publish root membership markers");
+        .expect("publish run membership markers");
 
     let mut input_events = handle.events();
-    let mut root_events = root_handle.events();
+    let mut run_events = run_handle.events();
     let input_stream = tokio::spawn(async move {
         let mut events = Vec::new();
         while let Some(event) = input_events.next().await {
@@ -1577,17 +1577,17 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
         }
         events
     });
-    let root_stream = tokio::spawn(async move {
+    let run_stream = tokio::spawn(async move {
         let mut events = Vec::new();
-        while let Some(event) = root_events.next().await {
-            events.push(event.expect("root activity"));
+        while let Some(event) = run_events.next().await {
+            events.push(event.expect("run activity"));
         }
         events
     });
     let expected_status = if cancel {
-        let receipt = handle.cancel().origin("exact-host-root-law").await?;
+        let receipt = handle.cancel().origin("exact-host-run-law").await?;
         assert!(
-            matches!(&receipt, crate::CancelReceipt::Requested { root: requested, .. } if requested == root),
+            matches!(&receipt, crate::CancelReceipt::Requested { run: requested, .. } if requested == run),
             "{receipt:?}"
         );
         crate::TurnStatus::Cancelled
@@ -1597,13 +1597,13 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
     };
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), handle.outcome())
         .await
-        .expect("the exact root answers across the frame switch")?;
-    assert_eq!(outcome.root().cloned(), Some(root.clone()));
+        .expect("the exact run answers across the frame switch")?;
+    assert_eq!(outcome.run().cloned(), Some(run.clone()));
     assert_eq!(outcome.status(), expected_status);
-    for stream in [input_stream, root_stream] {
+    for stream in [input_stream, run_stream] {
         let events = tokio::time::timeout(std::time::Duration::from_secs(3), stream)
             .await
-            .expect("the root's activity stream finishes")
+            .expect("the run's activity stream finishes")
             .expect("stream task");
         for (index, activity) in activities.iter().enumerate() {
             assert_eq!(
@@ -1612,7 +1612,7 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
                     .filter(|event| event.id == activity.id)
                     .count(),
                 usize::from(index < 2),
-                "only the exact root's physical turns contribute activity: {host_id}, {}",
+                "only the exact run's physical turns contribute activity: {host_id}, {}",
                 markers[index]
             );
         }
@@ -1623,21 +1623,21 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
                 _ => None,
             })
             .collect();
-        assert!(started.contains(&&root));
+        assert!(started.contains(&&run));
         assert!(started.contains(&&follow_on));
     }
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(3),
-        session.root(root.clone()).outcome(),
+        session.run(run.clone()).outcome(),
     )
     .await
-    .expect("durable resolution follows the exact root's follow-on")?;
-    assert_eq!(durable.root().cloned(), Some(root));
+    .expect("durable resolution follows the exact run's follow-on")?;
+    assert_eq!(durable.run().cloned(), Some(run));
     assert_eq!(durable.status(), expected_status);
     Ok(())
 }
 
-macro_rules! exact_host_root_laws {
+macro_rules! exact_host_run_laws {
     ($name:ident, $host:literal) => {
         mod $name {
             use super::*;
@@ -1648,23 +1648,23 @@ macro_rules! exact_host_root_laws {
             #[cfg(feature = "rlm")]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn frame_switch() -> Result<()> {
-                exact_host_root_frame_switch($host, false).await
+                exact_host_run_frame_switch($host, false).await
             }
             #[cfg(feature = "rlm")]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn cancellation() -> Result<()> {
-                exact_host_root_frame_switch($host, true).await
+                exact_host_run_frame_switch($host, true).await
             }
         }
     };
 }
 
-mod exact_host_roots {
+mod exact_host_runs {
     use super::*;
-    exact_host_root_laws!(plain, "job");
-    exact_host_root_laws!(canonical_suffix, "job:agent-frame:1");
-    exact_host_root_laws!(leading_zero_suffix, "job:agent-frame:01");
-    exact_host_root_laws!(signed_suffix, "job:agent-frame:+1");
+    exact_host_run_laws!(plain, "job");
+    exact_host_run_laws!(canonical_suffix, "job:agent-frame:1");
+    exact_host_run_laws!(leading_zero_suffix, "job:agent-frame:01");
+    exact_host_run_laws!(signed_suffix, "job:agent-frame:+1");
 }
 
 macro_rules! send_handle_laws {
@@ -1673,13 +1673,13 @@ macro_rules! send_handle_laws {
             use super::*;
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_root_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
-                super::a_root_whose_live_report_is_gone_answers_its_durable_report().await
+            async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {
+                super::a_run_whose_live_report_is_gone_answers_its_durable_report().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
-                super::a_settled_root_no_run_here_can_report_answers_at_once().await
+            async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<()> {
+                super::a_settled_run_no_execution_here_can_report_answers_at_once().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1690,8 +1690,8 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
-                super::a_send_answers_before_its_roots_scope_closes().await
+            async fn a_send_answers_before_its_runs_scope_closes() -> Result<()> {
+                super::a_send_answers_before_its_runs_scope_closes().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1701,8 +1701,8 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
-                super::cancel_finds_the_consuming_root_before_application().await
+            async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
+                super::cancel_finds_the_consuming_run_before_application().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1721,8 +1721,8 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
-                super::an_unobserved_root_answers_with_a_reported_gap().await
+            async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
+                super::an_unobserved_run_answers_with_a_reported_gap().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1736,9 +1736,9 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn an_input_answered_inside_another_root_resolves_answered_with_that_root()
+            async fn an_input_answered_inside_another_run_resolves_answered_with_that_run()
             -> Result<()> {
-                super::an_input_answered_inside_another_root_resolves_answered_with_that_root()
+                super::an_input_answered_inside_another_run_resolves_answered_with_that_run()
                     .await
             }
         }
@@ -1750,10 +1750,10 @@ send_handle_laws!(restate);
 #[test]
 fn a_journaled_send_outcome_requires_the_data_owned_by_its_variant() {
     let invalid = serde_json::json!({
-        "status": "Answered", "root": null, "output": null, "gaps": []
+        "status": "Answered", "run": null, "output": null, "gaps": []
     });
     assert!(
         serde_json::from_value::<crate::SendOutcome>(invalid).is_err(),
-        "a journaled answered send cannot exist without its root and output"
+        "a journaled answered send cannot exist without its run and output"
     );
 }

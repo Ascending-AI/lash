@@ -278,7 +278,7 @@ pub enum ToolSourcePolicy {
 /// recording every tool as orphaned or dropping it.
 ///
 /// The declaration is enforced, not advisory: every turn-execution entry —
-/// direct turns, queued and prepared drives, and the shared logical-turn
+/// direct turns, queued and prepared shifts, and the shared logical-turn
 /// funnel — refuses a `PreservePersisted` open with
 /// `RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface` before
 /// admission, because the surface was never reconciled and no

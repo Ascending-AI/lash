@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
 
 /// Metadata written through the store round-trips.
 ///
-/// The fixture admitted this session as a root, and the recorded lineage is
+/// The fixture admitted this session as a run, and the recorded lineage is
 /// write-once (FIG-3045), so this law rewrites exactly what the production
 /// caller rewrites: the same relation with its pending observer intents
 /// settled. Child and fork relations round-trip through
@@ -331,7 +331,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
     .expect("commit state");
     state.head_revision = initial_commit.head_revision;
 
-    let application_lease = seal_drive_fence_for_test(
+    let application_lease = seal_shift_fence_for_test(
         &factory.open,
         &SessionId::from("root"),
         "reopen-applications",
@@ -360,14 +360,14 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
             .expect("list the reopen application")
             .remove(0)
             .input;
-        let admission = admitted_root(
+        let admission = admitted_run(
             &factory.open,
             &application_lease,
             turn_id,
             lash_core::store::AdmittedHead::Input(head.input_id),
         )
         .await;
-        let mut admitted = *admission.inputs.expect("the root admits its input");
+        let mut admitted = *admission.inputs.expect("the run admits its input");
         admitted.record_initial_turn_application(
             &crate::TurnId::from(turn_id),
             &format!("reopen-application-message-{turn_index}"),
@@ -478,7 +478,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimeStore) {
 pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
     store: Arc<dyn RuntimeStore>,
 ) {
-    let wake = root_process_wake(7);
+    let wake = run_process_wake(7);
     let malformed = QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         DeliveryPolicy::EarliestSafeBoundary,
@@ -516,24 +516,24 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
     );
 
     let session_lease =
-        seal_drive_fence_for_test(&store, &SessionId::from("root"), "wake-owner").await;
-    let admission = admitted_root(
+        seal_shift_fence_for_test(&store, &SessionId::from("root"), "wake-owner").await;
+    let admission = admitted_run(
         &store,
         &session_lease,
-        "wake-root",
+        "wake-run",
         lash_core::store::AdmittedHead::Batch(first.batch_id.clone()),
     )
     .await;
-    let admitted = admission.queued.as_ref().expect("the root admits the wake");
+    let admitted = admission.queued.as_ref().expect("the run admits the wake");
     assert_eq!(admitted.batches.len(), 1);
     assert!(matches!(
         admitted.batches[0].payload,
         QueuedWorkPayload::ProcessWake { .. }
     ));
-    end_root(
+    end_run(
         &store,
         &session_lease,
-        completing_admission("wake-root", &admission),
+        completing_admission("wake-run", &admission),
     )
     .await;
     assert!(
@@ -581,8 +581,8 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_admitted_once(
     );
 }
 
-/// A process wake from `process-1` to `root` at `sequence`.
-fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
+/// A process wake from `process-1` to `run` at `sequence`.
+fn run_process_wake(sequence: u64) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
@@ -613,7 +613,7 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
 pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root");
     let queued = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))
+        .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(7)))
         .await
         .expect("enqueue wake");
     store
@@ -623,7 +623,7 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>
         .expect("an unadmitted wake is cancelled");
 
     let answered = store
-        .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(root_process_wake(7)))
+        .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(run_process_wake(7)))
         .await
         .expect("a redelivery answers the cancelled tombstone");
     assert!(
@@ -649,7 +649,7 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>
         .await
         .expect("vacuum the cancelled tombstone");
     let redelivery = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))
+        .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(7)))
         .await
         .expect_err("redelivery of a vacuumed host-cancelled wake must trip the receiver floor");
     match redelivery {
@@ -676,7 +676,7 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>
     );
 
     let later = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(8)))
+        .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(8)))
         .await
         .expect("a later sequence stays above the floor");
     assert_eq!(
@@ -719,11 +719,11 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .expect("first commit hash");
 
     let _session_lease =
-        seal_drive_fence_for_test(&store, &SessionId::from("root"), "provider-turn").await;
+        seal_shift_fence_for_test(&store, &SessionId::from("root"), "provider-turn").await;
     let first = store
         .commit_runtime_state(stamped_commit.clone())
         .await
-        .expect("first final commit uses the sealed drive epoch");
+        .expect("first final commit uses the sealed shift epoch");
     let mut replay_state = state.clone();
     let replay_graph_data = replay_state.session_graph.data_mut();
     std::sync::Arc::make_mut(&mut replay_graph_data.nodes.make_mut()[0]).timestamp =
@@ -1049,7 +1049,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
             crate::MaxToolCalls::new(1024),
         ))
     };
-    let first = sample_session_node(&SessionId::from("root"), "append-root", None);
+    let first = sample_session_node(&SessionId::from("root"), "append-run", None);
     let second = sample_session_node(
         &SessionId::from("root"),
         "append-leaf",

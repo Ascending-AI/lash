@@ -126,13 +126,13 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         "fixture A must retain its journaled process before transport interruption: {lash_drain:#?}"
     );
     let a_session_id = harness_a.state.current_session_id();
-    let drive_epoch_before = session_drive_epoch(&a_path, "sqlite", &a_session_id).await;
+    let shift_epoch_before = session_shift_epoch(&a_path, "sqlite", &a_session_id).await;
 
     endpoint_a.stop().await;
     // A and B are two deployments of one lash service, so they share one
     // durable store, as every real fleet's deployments do: B, and A when it is
     // rebuilt, run over the store set A opened. A session A created is B's
-    // session too, so a call Restate routes to B for it — a drive of A's
+    // session too, so a call Restate routes to B for it — a shift of A's
     // session is a new invocation, which goes to the newest deployment —
     // finds it rather than creating a phantom in a store of its own
     // (FIG-4112).
@@ -300,8 +300,8 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
     .await;
     assert!(completed_a.completed_successfully());
     assert!(
-        session_drive_epoch(&a_path, "sqlite", &a_session_id).await >= drive_epoch_before,
-        "fixture A retry must not roll back the interrupted host's drive epoch"
+        session_shift_epoch(&a_path, "sqlite", &a_session_id).await >= shift_epoch_before,
+        "fixture A retry must not roll back the interrupted host's shift epoch"
     );
     let process_after = harness_a
         .state

@@ -105,9 +105,9 @@ fn ingress_admission_binding_must_be_all_or_none() {
     connection
         .execute_batch(crate::schema::SCHEMA)
         .expect("apply SQLite schema to CHECK witness");
-    // A row is open or admitted to a root by a recorded step: a root without
-    // its step, or a step without its root, is unrepresentable (FIG-3927).
-    for (fields, values) in [("admitted_root", "'root'"), ("admitted_by", "'admit'")] {
+    // A row is open or admitted to a run by a recorded step: a run without
+    // its step, or a step without its run, is unrepresentable (FIG-3927).
+    for (fields, values) in [("admitted_run", "'root'"), ("admitted_by", "'admit'")] {
         let error = connection
             .execute(
                 &format!(
@@ -145,18 +145,18 @@ fn ingress_admission_binding_must_be_all_or_none() {
             "SQLite reported the wrong CHECK: {error}"
         );
     }
-    // A settled input is answered, so no root holds it.
+    // A settled input is answered, so no run holds it.
     let error = connection
         .execute(
             "INSERT INTO pending_turn_inputs (enqueue_seq,
                  input_id, session_id, ingress_json, state, input_json,
                  submission_digest, enqueued_at_ms,
-                 admitted_root, admitted_by
+                 admitted_run, admitted_by
              ) VALUES (1, 'settled', 'session', '{\"scope\":\"next_turn\"}',
                        'completed', '{}', 'digest', 0, 'root', 'admit')",
             [],
         )
-        .expect_err("a settled input still bound to a root must be rejected");
+        .expect_err("a settled input still bound to a run must be rejected");
     assert!(
         error
             .to_string()
@@ -641,7 +641,7 @@ async fn live_attachment_refs_reads_the_catalog() {
 
     let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&store)
         .await
-        .expect("root discovery");
+        .expect("run discovery");
     assert!(
         refs.contains(&attachment_id),
         "the catalog's committed ref must be discovered"

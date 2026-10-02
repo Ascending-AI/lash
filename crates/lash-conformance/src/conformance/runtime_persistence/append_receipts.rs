@@ -963,7 +963,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
         attempts: 0,
     });
     let _failing_lease =
-        seal_drive_fence_for_test(&store, &SessionId::from("root"), "atomic-append-failing").await;
+        seal_shift_fence_for_test(&store, &SessionId::from("root"), "atomic-append-failing").await;
     let error = store
         .commit_runtime_state(failing)
         .await

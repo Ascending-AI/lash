@@ -3,16 +3,16 @@
 //!
 //! A *spending effect* is a journaled effect whose body may dispatch a
 //! provider call (`LlmCall`, `Direct`, `ToolAttempt`). One execution of that
-//! body is a [`UsageRun`]. The engine's controller begins the run when the
+//! body is a [`UsageMeter`]. The engine's controller begins the meter when the
 //! body starts and hands it to the body's dispatch sites; each dispatch takes a
-//! [`UsageCall`] from it, which admits the run to storage before the first
+//! [`UsageCall`] from it, which admits the meter to storage before the first
 //! provider attempt (the accounting obligation exists before anything can be
 //! billed) and seals the call's attempt facts when its record is sealed.
 //!
-//! The controller journals the run's [`EffectUsage`] beside the effect's
+//! The controller journals the meter's [`EffectUsage`] beside the effect's
 //! outcome and delivers its settlement to storage through
 //! [`project_usage_settlement`], the only production writer of settled usage.
-//! Nothing in the drive, the turn loop or a commit carries usage.
+//! Nothing in the shift, the turn loop or a commit carries usage.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -22,38 +22,38 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::{DispatchAdmission, DispatchRefused, ProviderDispatch};
 use crate::{
-    AttemptFactOutcome, AttemptUsageOutcome, Clock, LlmCallRecord, RunAccounting,
+    AttemptFactOutcome, AttemptUsageOutcome, Clock, LlmCallRecord, MeterAccounting,
     RuntimeEffectControllerError, RuntimeOwner, StoreError, UsageAccountingStore,
     UsageAdmissionError, UsageAppendError, UsageAttemptFact, UsageEffectKey, UsageFactConflict,
-    UsageRunAdmission, UsageRunId, UsageSettleReceipt, UsageSettlement,
+    UsageMeterAdmission, UsageMeterId, UsageSettleReceipt, UsageSettlement,
 };
 
 /// One execution of a spending effect's body.
 ///
 /// Created by the engine's controller when the body starts and cloned into
 /// every dispatch site of the body. Each provider attempt checks the durable
-/// owner-retirement fence through the run's idempotent storage admission.
+/// owner-retirement fence through the meter's idempotent storage admission.
 #[derive(Clone)]
-pub struct UsageRun {
-    inner: Arc<UsageRunInner>,
+pub struct UsageMeter {
+    inner: Arc<UsageMeterInner>,
 }
 
-struct UsageRunInner {
+struct UsageMeterInner {
     effect: UsageEffectKey,
     execution_scope_key: String,
-    run: UsageRunId,
+    meter: UsageMeterId,
     store: Arc<dyn UsageAccountingStore>,
     clock: Arc<dyn Clock>,
     /// Serializes dispatch admission and retains a permanent refusal or fault.
-    admission: tokio::sync::Mutex<RunAdmission>,
-    progress: Mutex<RunProgress>,
-    /// Tripped when a call of the run latches the attempt's fault: the body
+    admission: tokio::sync::Mutex<MeterAdmission>,
+    progress: Mutex<MeterProgress>,
+    /// Tripped when a call of the meter latches the attempt's fault: the body
     /// is raced against it, so the attempt ends where the fault was met.
     attempt_ended: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Clone)]
-enum RunAdmission {
+enum MeterAdmission {
     Pending,
     Admitted,
     Refused(DispatchRefused),
@@ -61,7 +61,7 @@ enum RunAdmission {
 }
 
 #[derive(Default)]
-struct RunProgress {
+struct MeterProgress {
     owner: Option<RuntimeOwner>,
     next_call_ordinal: u32,
     calls: BTreeMap<u32, CallProgress>,
@@ -79,19 +79,19 @@ struct CallProgress {
     recorded: bool,
 }
 
-/// A dispatch site asked a run for a call it cannot own.
+/// A dispatch site asked a meter for a call it cannot own.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum UsageRunError {
-    /// One run is attributed to one owner; a call under another owner would
+pub enum UsageMeterError {
+    /// One meter is attributed to one owner; a call under another owner would
     /// split one effect's spend across two ledgers.
-    #[error("usage run for {run_owner} cannot account a call owned by {call_owner}")]
+    #[error("usage meter for {meter_owner} cannot account a call owned by {call_owner}")]
     OwnerMismatch {
-        run_owner: RuntimeOwner,
+        meter_owner: RuntimeOwner,
         call_owner: RuntimeOwner,
     },
 }
 
-impl UsageRun {
+impl UsageMeter {
     pub fn begin(
         effect: UsageEffectKey,
         execution_scope_key: String,
@@ -99,14 +99,14 @@ impl UsageRun {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            inner: Arc::new(UsageRunInner {
+            inner: Arc::new(UsageMeterInner {
                 effect,
                 execution_scope_key,
-                run: UsageRunId::mint(),
+                meter: UsageMeterId::mint(),
                 store,
                 clock,
-                admission: tokio::sync::Mutex::new(RunAdmission::Pending),
-                progress: Mutex::new(RunProgress::default()),
+                admission: tokio::sync::Mutex::new(MeterAdmission::Pending),
+                progress: Mutex::new(MeterProgress::default()),
                 attempt_ended: tokio_util::sync::CancellationToken::new(),
             }),
         }
@@ -116,12 +116,12 @@ impl UsageRun {
         &self.inner.effect
     }
 
-    pub fn run_id(&self) -> &UsageRunId {
-        &self.inner.run
+    pub fn meter_id(&self) -> &UsageMeterId {
+        &self.inner.meter
     }
 
     /// A call slot: its `call_ordinal` is the next one, and `owner` must
-    /// equal every other call's owner in this run. The call is attributed to
+    /// equal every other call's owner in this meter. The call is attributed to
     /// `profile_key`, the recorded key it runs under, and `requested_model`,
     /// the wire model its request names.
     pub fn call(
@@ -130,12 +130,12 @@ impl UsageRun {
         source: impl Into<String>,
         profile_key: crate::LlmProfileKey,
         requested_model: impl Into<String>,
-    ) -> Result<UsageCall, UsageRunError> {
+    ) -> Result<UsageCall, UsageMeterError> {
         let mut progress = self.inner.progress.lock_recover();
         match &progress.owner {
-            Some(run_owner) if *run_owner != owner => {
-                return Err(UsageRunError::OwnerMismatch {
-                    run_owner: run_owner.clone(),
+            Some(meter_owner) if *meter_owner != owner => {
+                return Err(UsageMeterError::OwnerMismatch {
+                    meter_owner: meter_owner.clone(),
                     call_owner: owner,
                 });
             }
@@ -147,7 +147,7 @@ impl UsageRun {
         progress.calls.insert(call_ordinal, CallProgress::default());
         Ok(UsageCall {
             inner: Arc::new(UsageCallInner {
-                run: self.clone(),
+                meter: self.clone(),
                 owner,
                 source: source.into(),
                 profile_key,
@@ -157,23 +157,23 @@ impl UsageRun {
         })
     }
 
-    /// A store fault met by this run's admission: nothing in the run
+    /// A store fault met by this meter's admission: nothing in the meter
     /// dispatched. The controller ends the attempt retryably and journals
     /// nothing: a fault is never a recorded outcome.
     pub fn admission_fault(&self) -> Option<String> {
         self.inner.progress.lock_recover().admission_fault.clone()
     }
 
-    /// The typed fault that ended this run's attempt ([`Self::fault_attempt`]).
-    /// Calls of the run may have dispatched before it, so the run's usage is
+    /// The typed fault that ended this meter's attempt ([`Self::fault_attempt`]).
+    /// Calls of the meter may have dispatched before it, so the meter's usage is
     /// still delivered; the attempt is failed with this error and journals
     /// nothing.
     pub fn attempt_fault(&self) -> Option<RuntimeEffectControllerError> {
         self.inner.progress.lock_recover().attempt_fault.clone()
     }
 
-    /// End this run's attempt with `fault` (FIG-4404, FIG-4632): the recorded
-    /// model of a direct completion inside this run's effect could not be
+    /// End this meter's attempt with `fault` (FIG-4404, FIG-4632): the recorded
+    /// model of a direct completion inside this meter's effect could not be
     /// bound on this worker. The body is dropped where it stands
     /// ([`Self::attempt_faulted`]); it is not run past the fault. The first
     /// fault is kept.
@@ -186,8 +186,8 @@ impl UsageRun {
         self.inner.attempt_ended.cancel();
     }
 
-    /// Resolves with the attempt's fault once a call of this run latched one.
-    /// The executor races the run's body against it.
+    /// Resolves with the attempt's fault once a call of this meter latched one.
+    /// The executor races the meter's body against it.
     pub async fn attempt_faulted(&self) -> RuntimeEffectControllerError {
         loop {
             self.inner.attempt_ended.cancelled().await;
@@ -214,12 +214,12 @@ impl UsageRun {
         facts.sort_by_key(|fact| (fact.call_ordinal, fact.provider_attempt));
         Some(EffectUsage {
             owner,
-            run: self.inner.run.clone(),
+            meter: self.inner.meter.clone(),
             facts,
             accounting: if calls_without_record == 0 {
-                RunAccounting::Complete
+                MeterAccounting::Complete
             } else {
-                RunAccounting::CallWithoutRecord {
+                MeterAccounting::CallWithoutRecord {
                     calls: u32::try_from(calls_without_record).unwrap_or(u32::MAX),
                 }
             },
@@ -229,30 +229,30 @@ impl UsageRun {
     async fn admit(&self, call: &UsageCallInner) -> Result<(), DispatchRefused> {
         let mut admission = self.inner.admission.lock().await;
         match &*admission {
-            RunAdmission::Refused(refused) | RunAdmission::Faulted(refused) => {
+            MeterAdmission::Refused(refused) | MeterAdmission::Faulted(refused) => {
                 return Err(refused.clone());
             }
-            RunAdmission::Pending | RunAdmission::Admitted => {}
+            MeterAdmission::Pending | MeterAdmission::Admitted => {}
         }
-        let request = UsageRunAdmission {
+        let request = UsageMeterAdmission {
             owner: call.owner.clone(),
             effect: self.inner.effect.clone(),
             execution_scope_key: self.inner.execution_scope_key.clone(),
-            run: self.inner.run.clone(),
+            meter: self.inner.meter.clone(),
             source: call.source.clone(),
             profile_key: call.profile_key.clone(),
             requested_model: call.requested_model.clone(),
             admitted_at_ms: self.inner.clock.timestamp_ms(),
         };
-        let verdict = match self.inner.store.admit_usage_run(&request).await {
+        let verdict = match self.inner.store.admit_usage_meter(&request).await {
             Ok(_) => {
                 self.inner.progress.lock_recover().admitted = true;
-                RunAdmission::Admitted
+                MeterAdmission::Admitted
             }
             Err(UsageAdmissionError::OwnerRetired {
                 owner,
                 retired_at_ms,
-            }) => RunAdmission::Refused(DispatchRefused {
+            }) => MeterAdmission::Refused(DispatchRefused {
                 code: crate::TurnFailureCode::UsageOwnerRetired,
                 message: format!(
                     "usage owner {owner} was retired at {retired_at_ms} ms; no provider \
@@ -261,9 +261,9 @@ impl UsageRun {
                 retryable: false,
             }),
             Err(UsageAdmissionError::Store(error)) => {
-                let message = format!("usage run admission failed: {error}");
+                let message = format!("usage meter admission failed: {error}");
                 self.inner.progress.lock_recover().admission_fault = Some(message.clone());
-                RunAdmission::Faulted(DispatchRefused {
+                MeterAdmission::Faulted(DispatchRefused {
                     code: crate::TurnFailureCode::from_wire(
                         crate::RuntimeErrorCode::UsageAdmissionFault.as_str(),
                     ),
@@ -274,14 +274,14 @@ impl UsageRun {
         };
         *admission = verdict.clone();
         match verdict {
-            RunAdmission::Admitted => Ok(()),
-            RunAdmission::Refused(refused) | RunAdmission::Faulted(refused) => Err(refused),
-            RunAdmission::Pending => unreachable!("an admission verdict is never pending"),
+            MeterAdmission::Admitted => Ok(()),
+            MeterAdmission::Refused(refused) | MeterAdmission::Faulted(refused) => Err(refused),
+            MeterAdmission::Pending => unreachable!("an admission verdict is never pending"),
         }
     }
 }
 
-/// One provider call of a run: the dispatch gate its attempts pass, and the
+/// One provider call of a meter: the dispatch gate its attempts pass, and the
 /// seal of its record.
 ///
 /// Clones share one call, so a provider task can hold the gate while the
@@ -292,7 +292,7 @@ pub struct UsageCall {
 }
 
 struct UsageCallInner {
-    run: UsageRun,
+    meter: UsageMeter,
     owner: RuntimeOwner,
     source: String,
     profile_key: crate::LlmProfileKey,
@@ -303,8 +303,8 @@ struct UsageCallInner {
 #[async_trait::async_trait]
 impl DispatchAdmission for UsageCall {
     async fn admit_dispatch(&self, dispatch: &ProviderDispatch<'_>) -> Result<(), DispatchRefused> {
-        self.inner.run.admit(&self.inner).await?;
-        let mut progress = self.inner.run.inner.progress.lock_recover();
+        self.inner.meter.admit(&self.inner).await?;
+        let mut progress = self.inner.meter.inner.progress.lock_recover();
         progress
             .calls
             .entry(self.inner.call_ordinal)
@@ -328,7 +328,7 @@ impl UsageCall {
     /// may be billed, so it is an unreported fact.
     pub fn record(self, record: &LlmCallRecord) {
         let call = &self.inner;
-        let mut progress = call.run.inner.progress.lock_recover();
+        let mut progress = call.meter.inner.progress.lock_recover();
         let admitted = {
             let slot = progress.calls.entry(call.call_ordinal).or_default();
             if slot.recorded {
@@ -402,14 +402,14 @@ impl UsageCall {
 }
 
 /// What a recorded spending effect's journal entry carries beside its
-/// outcome: the run's owner and identity and the facts it sealed.
+/// outcome: the meter's owner and identity and the facts it sealed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectUsage {
     pub owner: RuntimeOwner,
-    pub run: UsageRunId,
+    pub meter: UsageMeterId,
     pub facts: Vec<UsageAttemptFact>,
-    pub accounting: RunAccounting,
+    pub accounting: MeterAccounting,
 }
 
 impl EffectUsage {
@@ -418,32 +418,32 @@ impl EffectUsage {
         UsageSettlement {
             owner: self.owner.clone(),
             effect: effect.clone(),
-            run: self.run.clone(),
+            meter: self.meter.clone(),
             facts: self.facts.clone(),
             accounting: self.accounting.clone(),
         }
     }
 
-    /// The settlements of a run that dispatched and was never journaled: its
+    /// The settlements of a meter that dispatched and was never journaled: its
     /// attempt ended with a fault after a call of it was sealed (FIG-4632).
-    /// The first lands the facts under the run's own key
-    /// ([`UsageEffectKey::for_unrecorded_run`]), where the facts of the run
+    /// The first lands the facts under the meter's own key
+    /// ([`UsageEffectKey::for_unrecorded_meter`]), where the facts of the meter
     /// the effect is later recorded with cannot conflict with them. The
-    /// second resolves the run's admitted row, which carries no fact under
+    /// second resolves the meter's admitted row, which carries no fact under
     /// the effect's key.
     pub fn unrecorded_settlements(&self, effect: &UsageEffectKey) -> [UsageSettlement; 2] {
         [
             UsageSettlement {
                 owner: self.owner.clone(),
-                effect: UsageEffectKey::for_unrecorded_run(effect, &self.run),
-                run: self.run.clone(),
+                effect: UsageEffectKey::for_unrecorded_meter(effect, &self.meter),
+                meter: self.meter.clone(),
                 facts: self.facts.clone(),
-                accounting: RunAccounting::Complete,
+                accounting: MeterAccounting::Complete,
             },
             UsageSettlement {
                 owner: self.owner.clone(),
                 effect: effect.clone(),
-                run: self.run.clone(),
+                meter: self.meter.clone(),
                 facts: Vec::new(),
                 accounting: self.accounting.clone(),
             },
@@ -451,15 +451,15 @@ impl EffectUsage {
     }
 
     /// The stamp without the facts, for a record whose facts cannot be
-    /// journaled: the run resolves `unknown(facts_unjournalable)` instead of
+    /// journaled: the meter resolves `unknown(facts_unjournalable)` instead of
     /// staying open or losing its identity.
     pub fn without_facts(self) -> Self {
         let dropped_facts = u32::try_from(self.facts.len()).unwrap_or(u32::MAX);
         Self {
             owner: self.owner,
-            run: self.run,
+            meter: self.meter,
             facts: Vec::new(),
-            accounting: RunAccounting::FactsUnjournalable { dropped_facts },
+            accounting: MeterAccounting::FactsUnjournalable { dropped_facts },
         }
     }
 }
@@ -468,7 +468,7 @@ impl EffectUsage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Projected {
     Settled(UsageSettleReceipt),
-    /// The settlement disagreed with stored facts. The runs are marked
+    /// The settlement disagreed with stored facts. The meters are marked
     /// `conflicted`; delivery is complete and is never retried.
     Conflicted(Box<UsageFactConflict>),
 }
@@ -476,7 +476,7 @@ pub enum Projected {
 /// The one projector: the only production caller of
 /// [`UsageAccountingStore::settle_usage`].
 ///
-/// A conflict is marked on the runs and answered `Ok`, so a continuation
+/// A conflict is marked on the meters and answered `Ok`, so a continuation
 /// never retries a conflict forever. A store fault is `Err`: the caller
 /// retries the identical settlement, which is idempotent.
 pub async fn project_usage_settlement(
@@ -502,7 +502,7 @@ pub async fn project_usage_settlement(
     }
 }
 
-/// Project the usage of a run whose attempt ended with a fault, so nothing
+/// Project the usage of a meter whose attempt ended with a fault, so nothing
 /// journals it (FIG-4632): the facts of the calls it dispatched before the
 /// fault land, and its admitted row is resolved
 /// ([`EffectUsage::unrecorded_settlements`]). The facts land first: a fault
@@ -522,7 +522,7 @@ pub async fn project_unrecorded_usage(
 
 /// Where a spending body's usage is admitted and settled: the ledger store
 /// and the clock that stamps it. A local runner whose body may dispatch a
-/// provider call offers it, and the executor begins the body's run with it.
+/// provider call offers it, and the executor begins the body's meter with it.
 #[derive(Clone)]
 pub struct UsageAccountingBinding {
     pub store: Arc<dyn UsageAccountingStore>,
@@ -534,9 +534,9 @@ impl UsageAccountingBinding {
         Self { store, clock }
     }
 
-    /// The run of `envelope`'s body, when the envelope is a spending effect:
+    /// The meter of `envelope`'s body, when the envelope is a spending effect:
     /// `LlmCall`, `Direct` or `ToolAttempt`.
-    pub fn begin(&self, envelope: &crate::RuntimeEffectEnvelope) -> Option<UsageRun> {
+    pub fn begin(&self, envelope: &crate::RuntimeEffectEnvelope) -> Option<UsageMeter> {
         if !is_spending_effect(envelope.command.kind()) {
             return None;
         }
@@ -547,7 +547,7 @@ impl UsageAccountingBinding {
             .ok()?
             .key()
             .to_string();
-        Some(UsageRun::begin(
+        Some(UsageMeter::begin(
             UsageEffectKey::for_effect(address),
             execution_scope_key,
             Arc::clone(&self.store),
@@ -557,7 +557,7 @@ impl UsageAccountingBinding {
 }
 
 /// Whether an effect of `kind` is a spending effect: its body may dispatch a
-/// provider call, so its execution is a usage run.
+/// provider call, so its execution is a usage meter.
 pub fn is_spending_effect(kind: crate::RuntimeEffectKind) -> bool {
     matches!(
         kind,
@@ -573,11 +573,11 @@ pub struct RecordedEffectExecution {
     pub outcome: Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError>,
     /// The spending body's usage; `None` when nothing was dispatched.
     pub usage: Option<EffectUsage>,
-    /// A store fault met by the run's admission: the engine ends the attempt
+    /// A store fault met by the meter's admission: the engine ends the attempt
     /// retryably and journals nothing.
     pub admission_fault: Option<String>,
     /// The typed fault that ended the attempt inside its body
-    /// ([`UsageRun::fault_attempt`]). The engine fails the attempt with it
+    /// ([`UsageMeter::fault_attempt`]). The engine fails the attempt with it
     /// and journals nothing; the usage of the calls dispatched before it is
     /// already projected, so `usage` is `None`.
     pub attempt_fault: Option<crate::RuntimeEffectControllerError>,
@@ -588,8 +588,8 @@ mod tests {
     use super::*;
     use crate::{
         AttemptOutcome, AttemptRecord, LlmCallId, OwnerUsage, TokenUsage, UsageAppendReceipt,
-        UsageCorrection, UsageFactCursor, UsageFactPage, UsageOwnerRetired, UsageRunAdmitted,
-        UsageRunCursor, UsageRunFilter, UsageRunPage,
+        UsageCorrection, UsageFactCursor, UsageFactPage, UsageMeterAdmitted, UsageMeterCursor,
+        UsageMeterFilter, UsageMeterPage, UsageOwnerRetired,
     };
     use std::num::NonZeroU32;
 
@@ -597,17 +597,17 @@ mod tests {
     /// test never reaches the other operations.
     #[derive(Default)]
     struct AdmissionStore {
-        admissions: Mutex<Vec<UsageRunAdmission>>,
+        admissions: Mutex<Vec<UsageMeterAdmission>>,
         retired: bool,
         faulted: bool,
     }
 
     #[async_trait::async_trait]
     impl UsageAccountingStore for AdmissionStore {
-        async fn admit_usage_run(
+        async fn admit_usage_meter(
             &self,
-            admission: &UsageRunAdmission,
-        ) -> Result<UsageRunAdmitted, UsageAdmissionError> {
+            admission: &UsageMeterAdmission,
+        ) -> Result<UsageMeterAdmitted, UsageAdmissionError> {
             if self.faulted {
                 return Err(UsageAdmissionError::Store(StoreError::Backend(
                     "admission store is down".to_string(),
@@ -620,7 +620,7 @@ mod tests {
                 });
             }
             self.admissions.lock_recover().push(admission.clone());
-            Ok(UsageRunAdmitted::Admitted)
+            Ok(UsageMeterAdmitted::Admitted)
         }
         async fn settle_usage(
             &self,
@@ -671,13 +671,13 @@ mod tests {
         ) -> Result<UsageFactPage, StoreError> {
             unreachable!("the projection tests never read")
         }
-        async fn load_usage_run_page(
+        async fn load_usage_meter_page(
             &self,
             _owner: &RuntimeOwner,
-            _filter: UsageRunFilter,
-            _after: Option<&UsageRunCursor>,
+            _filter: UsageMeterFilter,
+            _after: Option<&UsageMeterCursor>,
             _limit: NonZeroU32,
-        ) -> Result<UsageRunPage, StoreError> {
+        ) -> Result<UsageMeterPage, StoreError> {
             unreachable!("the projection tests never read")
         }
     }
@@ -690,13 +690,13 @@ mod tests {
         crate::LlmProfileKey::new("model-key")
     }
 
-    fn run(store: Arc<AdmissionStore>) -> UsageRun {
+    fn meter(store: Arc<AdmissionStore>) -> UsageMeter {
         let address = crate::EffectAddress::new(
             crate::ExecutionScope::runtime_operation("usage-projection"),
             "effect".to_string(),
         )
         .expect("a valid effect address");
-        UsageRun::begin(
+        UsageMeter::begin(
             UsageEffectKey::for_effect(&address),
             "scope".to_string(),
             store,
@@ -759,12 +759,12 @@ mod tests {
     }
 
     /// A billed failed attempt and the retry that succeeded are two facts,
-    /// and both attempts check the fence under the same run identity.
+    /// and both attempts check the fence under the same meter identity.
     #[tokio::test]
-    async fn a_billed_failure_and_its_retry_are_two_facts_under_one_run() {
+    async fn a_billed_failure_and_its_retry_are_two_facts_under_one_meter() {
         let store = Arc::new(AdmissionStore::default());
-        let run = run(Arc::clone(&store));
-        let call = run
+        let meter = meter(Arc::clone(&store));
+        let call = meter
             .call(owner(), "turn", key(), "model")
             .expect("a call slot");
         dispatch(&call, 1)
@@ -785,11 +785,11 @@ mod tests {
                 Some(41),
             ),
         ]));
-        let usage = run.finish().expect("an admitted run has usage");
+        let usage = meter.finish().expect("an admitted meter has usage");
         let admissions = store.admissions.lock_recover();
         assert_eq!(admissions.len(), 2);
-        assert_eq!(admissions[0].run, admissions[1].run);
-        assert_eq!(usage.accounting, RunAccounting::Complete);
+        assert_eq!(admissions[0].meter, admissions[1].meter);
+        assert_eq!(usage.accounting, MeterAccounting::Complete);
         assert_eq!(
             usage
                 .facts
@@ -805,8 +805,8 @@ mod tests {
     /// records nothing.
     #[tokio::test]
     async fn zero_is_a_fact_an_abort_is_unreported_and_unreported_by_provider_is_nothing() {
-        let run = run(Arc::new(AdmissionStore::default()));
-        let call = run
+        let meter = meter(Arc::new(AdmissionStore::default()));
+        let call = meter
             .call(owner(), "turn", key(), "model")
             .expect("a call slot");
         for ordinal in 1..=3 {
@@ -832,7 +832,7 @@ mod tests {
                 None,
             ),
         ]));
-        let usage = run.finish().expect("an admitted run has usage");
+        let usage = meter.finish().expect("an admitted meter has usage");
         assert_eq!(
             usage
                 .facts
@@ -853,11 +853,11 @@ mod tests {
 
     /// FIG-4632: a fault that ends the attempt is kept typed, apart from the
     /// admission fault that says nothing dispatched, and the facts sealed
-    /// before it are settled under the run's own key, never the effect's.
+    /// before it are settled under the meter's own key, never the effect's.
     #[tokio::test]
     async fn an_attempt_fault_stays_typed_and_keeps_the_usage_sealed_before_it() {
-        let run = run(Arc::new(AdmissionStore::default()));
-        let sealed = run
+        let meter = meter(Arc::new(AdmissionStore::default()));
+        let sealed = meter
             .call(owner(), "turn", key(), "model")
             .expect("a call slot");
         dispatch(&sealed, 1).await.expect("admitted");
@@ -873,10 +873,10 @@ mod tests {
                 "the recorded model cannot be bound on this worker",
             )
         };
-        assert!(run.attempt_fault().is_none());
-        run.fault_attempt(unbound("first@host"));
-        run.fault_attempt(unbound("second@host"));
-        let fault = run.attempt_faulted().await;
+        assert!(meter.attempt_fault().is_none());
+        meter.fault_attempt(unbound("first@host"));
+        meter.fault_attempt(unbound("second@host"));
+        let fault = meter.attempt_faulted().await;
         assert_eq!(fault.code, crate::RuntimeErrorCode::LlmProfileUnavailable);
         assert_eq!(
             fault.profile_key(),
@@ -885,31 +885,31 @@ mod tests {
         );
         assert!(fault.is_attempt_fault());
         assert!(
-            run.admission_fault().is_none(),
+            meter.admission_fault().is_none(),
             "an attempt fault does not say that nothing dispatched"
         );
-        let effect = run.effect().clone();
-        let usage = run.finish().expect("the sealed call keeps its usage");
+        let effect = meter.effect().clone();
+        let usage = meter.finish().expect("the sealed call keeps its usage");
         let [facts, row] = usage.unrecorded_settlements(&effect);
         assert_eq!(
             facts.effect,
-            UsageEffectKey::for_unrecorded_run(&effect, &usage.run)
+            UsageEffectKey::for_unrecorded_meter(&effect, &usage.meter)
         );
         assert_ne!(facts.effect, effect);
         assert_eq!(facts.facts, usage.facts);
         assert_eq!(facts.facts.len(), 1);
-        assert_eq!((row.effect, row.run), (effect, usage.run.clone()));
+        assert_eq!((row.effect, row.meter), (effect, usage.meter.clone()));
         assert!(row.facts.is_empty());
-        assert_eq!(row.accounting, RunAccounting::Complete);
+        assert_eq!(row.accounting, MeterAccounting::Complete);
     }
 
     /// An admitted attempt the record does not describe was dispatched and
     /// may be billed, so it is an unreported fact; a call admitted and never
-    /// sealed makes the run's accounting incomplete.
+    /// sealed makes the meter's accounting incomplete.
     #[tokio::test]
     async fn an_undescribed_attempt_is_unreported_and_an_unsealed_call_is_counted() {
-        let run = run(Arc::new(AdmissionStore::default()));
-        let sealed = run
+        let meter = meter(Arc::new(AdmissionStore::default()));
+        let sealed = meter
             .call(owner(), "turn", key(), "model")
             .expect("a call slot");
         dispatch(&sealed, 1).await.expect("admitted");
@@ -920,12 +920,12 @@ mod tests {
             AttemptUsageOutcome::Reported,
             Some(5),
         )]));
-        let unsealed = run
+        let unsealed = meter
             .call(owner(), "turn", key(), "model")
             .expect("a second call slot");
         dispatch(&unsealed, 1).await.expect("admitted");
         drop(unsealed);
-        let usage = run.finish().expect("an admitted run has usage");
+        let usage = meter.finish().expect("an admitted meter has usage");
         assert_eq!(usage.facts.len(), 2);
         assert_eq!(
             usage.facts[1].outcome,
@@ -935,35 +935,35 @@ mod tests {
         );
         assert_eq!(
             usage.accounting,
-            RunAccounting::CallWithoutRecord { calls: 1 }
+            MeterAccounting::CallWithoutRecord { calls: 1 }
         );
     }
 
-    /// A run that dispatched nothing has no usage, and a second owner cannot
-    /// join a run.
+    /// A meter that dispatched nothing has no usage, and a second owner cannot
+    /// join a meter.
     #[tokio::test]
     async fn a_run_that_dispatched_nothing_has_no_usage_and_one_owner() {
-        let run = run(Arc::new(AdmissionStore::default()));
-        let _call = run
+        let meter = meter(Arc::new(AdmissionStore::default()));
+        let _call = meter
             .call(owner(), "turn", key(), "model")
             .expect("a call slot");
         assert!(matches!(
-            run.call(
+            meter.call(
                 RuntimeOwner::Session(crate::SessionId::from("someone-else")),
                 "turn",
                 key(),
                 "model",
             ),
-            Err(UsageRunError::OwnerMismatch { .. })
+            Err(UsageMeterError::OwnerMismatch { .. })
         ));
-        assert!(run.finish().is_none());
+        assert!(meter.finish().is_none());
     }
 
     /// A retired owner refuses the dispatch, not retryably; a store fault
-    /// refuses it retryably and is the run's admission fault.
+    /// refuses it retryably and is the meter's admission fault.
     #[tokio::test]
     async fn a_retired_owner_refuses_and_a_store_fault_is_an_admission_fault() {
-        let retired = run(Arc::new(AdmissionStore {
+        let retired = meter(Arc::new(AdmissionStore {
             retired: true,
             ..AdmissionStore::default()
         }));
@@ -978,7 +978,7 @@ mod tests {
         assert!(retired.admission_fault().is_none());
         assert!(retired.finish().is_none());
 
-        let faulted = run(Arc::new(AdmissionStore {
+        let faulted = meter(Arc::new(AdmissionStore {
             faulted: true,
             ..AdmissionStore::default()
         }));
@@ -990,15 +990,15 @@ mod tests {
         assert!(faulted.admission_fault().is_some());
     }
 
-    /// FIG-4405: each call's facts and its run's admission carry the model
+    /// FIG-4405: each call's facts and its meter's admission carry the model
     /// key the call ran under beside the requested wire model, so two keys
     /// that share a wire model stay apart; the served model is what the
     /// provider reported and nothing else.
     #[tokio::test]
     async fn facts_carry_the_profile_key_and_only_a_provider_reported_served_model() {
         let store = Arc::new(AdmissionStore::default());
-        let run = run(Arc::clone(&store));
-        let first = run
+        let meter = meter(Arc::clone(&store));
+        let first = meter
             .call(
                 owner(),
                 "turn",
@@ -1018,7 +1018,7 @@ mod tests {
             ..crate::llm::types::ExecutionEvidence::default()
         });
         first.record(&record(vec![reporting]));
-        let second = run
+        let second = meter
             .call(
                 owner(),
                 "turn",
@@ -1033,7 +1033,7 @@ mod tests {
             AttemptUsageOutcome::Reported,
             Some(4),
         )]));
-        let usage = run.finish().expect("an admitted run has usage");
+        let usage = meter.finish().expect("an admitted meter has usage");
         assert_eq!(
             usage
                 .facts

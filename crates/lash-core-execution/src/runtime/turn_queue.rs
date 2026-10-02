@@ -101,7 +101,7 @@ impl QueuedWorkBatchingConfig {
         }
     }
 
-    /// Sets how many times a drive may recover a pending follow-on before the
+    /// Sets how many times a shift may recover a pending follow-on before the
     /// follow-on commits as a failed turn carrying
     /// `FollowOnRecoveryExhausted` (ADR 0101 §3). The count is never reset.
     /// The bound is frozen on the pending follow-on when a logical run's
@@ -121,7 +121,7 @@ impl QueuedWorkBatchingConfig {
     /// Selects one of the two shipped drain shapes.
     ///
     /// Unset, Lash uses [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime):
-    /// one row per root, queued work and next-turn host input alike, strict
+    /// one row per run, queued work and next-turn host input alike, strict
     /// FIFO, no token arithmetic.
     pub fn with_drain_mode(mut self, mode: crate::DrainMode) -> Self {
         self.drain_policy = Some(crate::runtime::shared_drain_mode_policy(mode));
@@ -186,14 +186,14 @@ impl QueuedWorkBatchingConfig {
     }
 
     /// Sets the maximum number of pending next-turn inputs one idle admission
-    /// offers the drain policy. How many of them the root takes is the drain
+    /// offers the drain policy. How many of them the run takes is the drain
     /// policy's decision (ADR 0101 §5.2): the default takes one, so each
-    /// input is its own root.
+    /// input is its own run.
     ///
     /// Direct and drained ingress share the bound because they share the admission
     /// (ADR 0069): a direct turn takes the head of the same queue a drain does.
     /// A direct turn whose accepted input sits further back than this bound
-    /// drives nothing and reports the input as queued; the drain answers it in
+    /// executes nothing and reports the input as queued; the drain answers it in
     /// arrival order.
     ///
     /// # Panics

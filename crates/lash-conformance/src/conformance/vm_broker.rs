@@ -9,19 +9,19 @@
 //! request's retention and each cancel-checkpoint observation a recorded step
 //! of its own. A worker is killed at one point of the kill-point matrix; the
 //! broker settles what it admitted and fails typed and retryable; the law
-//! hands that failure to the tier, which re-drives the invocation over its
-//! journal, as it re-drives any failed attempt. Nothing re-runs the model
+//! hands that failure to the tier, which redrives the invocation over its
+//! journal, as it redrives any failed attempt. Nothing re-runs the model
 //! code inside the live invocation.
 //!
-//! Each kill-point law asserts, across the crash and the re-drive:
+//! Each kill-point law asserts, across the crash and the redrive:
 //!
 //! - no recorded effect re-executes, and no completed effect is lost: every
 //!   call's tool body ran exactly once, and the completed run reads each
 //!   call's first (recorded) result;
-//! - the typed outcome of the crashed attempt, and of the re-drive;
+//! - the typed outcome of the crashed attempt, and of the redrive;
 //! - one `ToolCallId` per logical call, derived by the parent from the
 //!   call's ordinal (aggregate leaves from their first-appearance index), the
-//!   same across the crash and the re-drive.
+//!   same across the crash and the redrive.
 //!
 //! Every execution of an attempt builds its own worker pool, broker and
 //! checkpoint store (unless the law carries a checkpoint across invocations
@@ -138,7 +138,7 @@ pub(crate) fn echo(value: i64) -> Invocation {
 pub(crate) enum Phase {
     /// The attempt whose worker the law kills.
     Crashing,
-    /// The tier's re-drive of it, or a law's healthy turn.
+    /// The tier's redrive of it, or a law's healthy turn.
     Healthy,
 }
 
@@ -343,7 +343,7 @@ impl Scenario {
             Box::pin(async move {
                 let end = scenario.run(scoped, Phase::Crashing, fault).await;
                 panic!(
-                    "{}: the worker was lost ({end:?}); the substrate re-drives the invocation",
+                    "{}: the worker was lost ({end:?}); the substrate redrives the invocation",
                     scenario.name
                 )
             })
@@ -351,7 +351,7 @@ impl Scenario {
     }
 
     /// The attempt whose worker refuses the run at `fault`. A refusal that no
-    /// re-drive can change is the run's terminal, so the attempt settles its
+    /// redrive can change is the run's terminal, so the attempt settles its
     /// turn with it; any other failure fails the attempt, as
     /// [`Self::crashing`] does.
     pub(crate) fn refused(self: &Arc<Self>, fault: Fault) -> ConformanceTurnAttempt {
@@ -363,7 +363,7 @@ impl Scenario {
                 match scenario.run(scoped, Phase::Crashing, Some(fault)).await {
                     Err(failure) if !failure.is_retryable() => ConformanceTurnEnd::Settled,
                     end => panic!(
-                        "{}: the attempt is not the run's terminal ({end:?}); the substrate re-drives the invocation",
+                        "{}: the attempt is not the run's terminal ({end:?}); the substrate redrives the invocation",
                         scenario.name
                     ),
                 }
@@ -371,7 +371,7 @@ impl Scenario {
         })
     }
 
-    /// A healthy attempt: the tier's re-drive, or a law's plain turn.
+    /// A healthy attempt: the tier's redrive, or a law's plain turn.
     pub(crate) fn healthy(self: &Arc<Self>) -> ConformanceTurnAttempt {
         let scenario = Arc::clone(self);
         Arc::new(move |scoped| {

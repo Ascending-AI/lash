@@ -5,7 +5,7 @@ use lash_core::ToolProvider as _;
 use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::{SessionAuthorityContext, StaticPluginFactory};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c402;
@@ -20,7 +20,7 @@ async fn create_fixture_session(store: &dyn lash_core::RuntimeStore, session_id:
     .expect("create the runtime fixture session");
 }
 
-async fn set_tool_access_through_drive(
+async fn set_tool_access_through_shift(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
     access: lash_core::SessionToolAccess,
@@ -497,7 +497,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([tool.name])
         .expect("valid hidden tool");
-    set_tool_access_through_drive(&mut runtime, &double, narrowed, "narrow-request-tools").await;
+    set_tool_access_through_shift(&mut runtime, &double, narrowed, "narrow-request-tools").await;
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("mutable-authority-requests").clone(),
@@ -506,7 +506,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .await
         .expect("open the scope's handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("observe the narrowed surface"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -514,7 +514,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .expect("run with narrowed authority");
     handler.close().await.expect("close the scope's handler");
 
-    set_tool_access_through_drive(
+    set_tool_access_through_shift(
         &mut runtime,
         &double,
         lash_core::SessionToolAccess::ambient(),
@@ -529,7 +529,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .await
         .expect("open the scope's handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("observe the widened surface"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -581,7 +581,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([tool.name])
         .expect("valid hidden tool");
-    set_tool_access_through_drive(&mut runtime, &double, narrowed, "narrow-discovery").await;
+    set_tool_access_through_shift(&mut runtime, &double, narrowed, "narrow-discovery").await;
     assert!(
         !plugin_catalog_names(&runtime).contains(&tool.name.to_string()),
         "live plugin discovery must immediately observe narrowed authority"
@@ -591,7 +591,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
         "host discovery must not retain its pre-update catalog cache"
     );
 
-    set_tool_access_through_drive(
+    set_tool_access_through_shift(
         &mut runtime,
         &double,
         lash_core::SessionToolAccess::ambient(),
@@ -636,7 +636,7 @@ async fn updated_tool_access_survives_park_and_resume() {
     let narrowed = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools([hidden.name])
         .expect("valid hidden tool");
-    set_tool_access_through_drive(&mut runtime, &double, narrowed.clone(), "updated-authority")
+    set_tool_access_through_shift(&mut runtime, &double, narrowed.clone(), "updated-authority")
         .await;
 
     let parked = Box::pin(runtime.park())
@@ -933,7 +933,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         32,
     )
     .await
-    .expect("drive wake for filtered process");
+    .expect("shift wake for filtered process");
     assert_eq!(report.enqueued, 1);
     assert_eq!(
         target_store
@@ -1455,7 +1455,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .await
         .expect("open the scope's handler");
     resumed
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("commit the rebuilt surface"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1736,7 +1736,7 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the newly composed tool"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

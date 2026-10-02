@@ -20,7 +20,7 @@
 //! to mint.
 //!
 //! Every pin was retaken once more for a change of value and not of shape
-//! (FIG-3600): drive admission mints a turn's root from its durable input, so
+//! (FIG-3600): shift admission mints a turn's run from its durable input, so
 //! a direct turn's accepted input now carries its turn id in the existing
 //! optional `source_key` field. With that field removed, each commit digests
 //! to its previous pin.
@@ -50,7 +50,7 @@
 //! pinned.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_c2;
 
@@ -144,7 +144,7 @@ async fn run_pinned_turn(
         .await
         .expect("open the scope's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the tool, then answer"),
             TurnOptions::new(cancel, handler.scoped())
                 .with_events(&sessions)
@@ -614,7 +614,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
                 .await
                 .expect("open the scope's handler");
             let assembled = runtime
-                .drive_turn(
+                .execute_turn(
                     TurnInput::text("use the tool, then answer"),
                     TurnOptions::new(CancellationToken::new(), handler.scoped())
                         .with_events(&host)

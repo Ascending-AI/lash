@@ -85,7 +85,7 @@ const LIVE_PROVIDER_FAILURE_COMBOS: &[(&str, usize)] = &[
     (ANTHROPIC, 1),
 ];
 
-/// Drive every live-provider-failure combo for a seed, collecting the observed
+/// Execute every live-provider-failure combo for a seed, collecting the observed
 /// facts for the per-seed coverage oracle.
 pub(super) async fn drive_live_provider_failure_turns(
     seed: u64,

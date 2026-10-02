@@ -353,7 +353,7 @@ fn operator_redelivery_after_forget_runs_and_retained_tombstone_suppresses() {
             .await
             .expect("session");
         register_test_trigger(&session).await;
-        let _hold = fixture.double.hold_session_drive(&session_id).await;
+        let _hold = fixture.double.hold_session_shift(&session_id).await;
         let request = TriggerOccurrenceRequest::new(BUTTON_TRIGGER_SOURCE_TYPE,
             lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE).expect("source key"),
             json!({"button":"Blue", "message":"retention probe", "pressed_at":"2026-10-02T00:00:00Z"}),

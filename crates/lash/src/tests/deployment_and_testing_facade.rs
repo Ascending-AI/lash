@@ -483,8 +483,8 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         .await
         .expect("start the process under the retired generation");
 
-    // FIG-3884, FIG-3927 N8: a root the retired generation's drive admitted
-    // counts as its in-flight turn until the root ends.
+    // FIG-3884, FIG-3927 N8: a run the retired generation's shift admitted
+    // counts as its in-flight turn until the run ends.
     let turn_session = lash_core::SessionId::from("generation-drain-status-turn");
     let session_store = lash_core::runtime::admit_session_view(
         &core.backend().session_store_factory(),
@@ -510,20 +510,20 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
             TurnInput::text("in flight"),
         ))
         .await
-        .expect("accept the root's input")
+        .expect("accept the run's input")
         .input_id;
-    let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+    let lease = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
         session_store.store(),
         &turn_session,
         "generation-drain-status",
     )
     .await;
-    let root = lash_core::TurnId::from("generation-drain-status-root");
+    let run = lash_core::TurnId::from("generation-drain-status-run");
     let admission = session_store
-        .admit_root(&{
-            let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+        .admit_run(&{
+            let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
                 &lease,
-                &root,
+                &run,
                 lash_core::store::AdmittedHead::Input(head),
             );
             request.max_inputs = 1;
@@ -532,8 +532,8 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
             request
         })
         .await
-        .expect("admit the root")
-        .expect("the root reaches its head");
+        .expect("admit the run")
+        .expect("the run reaches its head");
 
     let unmarked = core
         .generation_drain_status(&retired)
@@ -588,18 +588,18 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     };
     state.ensure_agent_frame_initialized();
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state);
-    commit.drive_fence = Some(Box::new(lease.clone()));
-    commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
-        commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
-        turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-        root: root.clone(),
-        outcome: lash_core::store::RootCommittedOutcome::Finished(
+    commit.shift_fence = Some(Box::new(lease.clone()));
+    commit.run_terminal = Some(Box::new(lash_core::store::RunTerminalWrite {
+        commit: lash_core::store::TurnCommitId::new(run.clone(), 0),
+        turn: lash_core::store::PhysicalTurn::derive_turn_id(&run, 0),
+        run: run.clone(),
+        outcome: lash_core::store::RunCommittedOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
         ),
     }));
-    let mut settlement = lash_core::store::IngressSettlement::new(root);
+    let mut settlement = lash_core::store::IngressSettlement::new(run);
     settlement
         .completed_inputs
         .extend(admission.inputs.iter().map(|inputs| inputs.completion()));
@@ -607,7 +607,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     session_store
         .commit_runtime_state(commit)
         .await
-        .expect("the root's final commit ends it");
+        .expect("the run's final commit ends it");
     let still_held = core
         .generation_drain_status(&retired)
         .await
@@ -645,9 +645,9 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
 }
 
 /// FIG-3873 S4: a closing session keeps every draining generation undrained
-/// until its physical delete runs. Its close ended its roots, but each
-/// root's turn-control waits stay registered with the engine, on whichever
-/// build ran the root, until the delete revokes them: a generation retired
+/// until its physical delete runs. Its close ended its runs, but each
+/// run's turn-control waits stay registered with the engine, on whichever
+/// build ran the run, until the delete revokes them: a generation retired
 /// before then would strand them.
 #[tokio::test]
 async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() {

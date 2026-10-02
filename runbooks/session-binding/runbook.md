@@ -5,7 +5,7 @@ turn control, or session administration. The goal is to make noncoincident
 owners visible: use different values for the exact root store, root catalog,
 child catalog, and effect deployment so an accidental fallback cannot pass.
 
-This is a developer checklist triggered by a diff, not a scenario a shard drives:
+This is a developer checklist triggered by a diff, not a scenario a shard executes:
 it names no scenario host, no prompt, no browser surface and no provider, and its
 evidence is a list of commands. Read it that way.
 
@@ -59,14 +59,14 @@ twelve filters, nineteen tests:
 ```bash
 kiln test --test_output=all //crates/lash:lash__unit_test \
   --test_arg=session_lifecycle::session_binding:: \
-  --test_arg=resumed_session_observe_wait_cancel_drive_keep_original_owners \
+  --test_arg=resumed_session_observe_wait_cancel_shift_keep_original_owners \
   --test_arg=related_session_opens_with_parent_and_runs_a_turn \
   --test_arg=core_store_factory_is_used_for_sessions_created_from_a_running_session \
   --test_arg=durable_acquisition \
   --test_arg=existing_session_apis \
   --test_arg=open_of_a_missing_id_is_unknown_session_and_writes_no_row \
   --test_arg=durable_operations_on_a_deleted_id_report_the_tombstone \
-  --test_arg=a_session_close_releases_its_running_roots_execution \
+  --test_arg=a_session_close_releases_its_running_runs_execution \
   --test_arg=core_delete_session_retires_the_deleted_session_effect_journal \
   --test_arg=fork_distinguishes_collected_point_from_retained_orphaned_source \
   --test_arg=a_fork_captures_the_config_of_its_fork_point
@@ -94,11 +94,11 @@ How the selections map to the required observations:
 
 | Observation | Selected laws |
 |---|---|
-| 1. Park/resume keep the recorded owners | `session_lifecycle::session_binding::` (4 laws: the two `resume_` witnesses, the delete-retry law, and the parent-relation readback) and `resumed_session_observe_wait_cancel_drive_keep_original_owners`, which parks on one core and drives observe/wait/cancel on another while the source driver reads the cancel back |
+| 1. Park/resume keep the recorded owners | `session_lifecycle::session_binding::` (4 laws: the two `resume_` witnesses, the delete-retry law, and the parent-relation readback) and `resumed_session_observe_wait_cancel_shift_keep_original_owners`, which parks on one core and executes observe/wait/cancel on another while the source driver reads the cancel back |
 | 2. The child's store is its own, never the parent's or a fallback | `related_session_opens_with_parent_and_runs_a_turn`, `core_store_factory_is_used_for_sessions_created_from_a_running_session`, and `session_binding`'s `parent_relation_is_read_back_and_a_conflicting_create_is_refused` |
 | 3. The catalog driver opens the target once and keeps that handle | `durable_acquisition` (3 laws: once-per-handle, one retry across clones, the SQLite absent/metadata-only/checkpointed spread) |
 | 4. Revoked or failing bindings answer typed, without side effects | `conformance_and_poison::turn_work_driver` for `UnknownOrRevoked`; `existing_session_apis` (3 laws counting zero admissions and one catalog open per verb over a failing catalog), `open_of_a_missing_id_is_unknown_session_and_writes_no_row`, and `durable_operations_on_a_deleted_id_report_the_tombstone` for the no-row/no-lookup halves |
-| 5. Delete retries through its obligation and the installed administration | `session_binding`'s `a_failed_journal_retirement_is_retried_by_the_delete_obligation`, `core_delete_session_retires_the_deleted_session_effect_journal`, and `a_session_close_releases_its_running_roots_execution` (the Restate-installed administration deleting from inside a real handler) |
+| 5. Delete retries through its obligation and the installed administration | `session_binding`'s `a_failed_journal_retirement_is_retried_by_the_delete_obligation`, `core_delete_session_retires_the_deleted_session_effect_journal`, and `a_session_close_releases_its_running_runs_execution` (the Restate-installed administration deleting from inside a real handler) |
 | 6. A retained point outlives its source session | `fork_distinguishes_collected_point_from_retained_orphaned_source` and `a_fork_captures_the_config_of_its_fork_point` |
 
 Both live durable geometries — `just agent-workbench-restate-e2e` and

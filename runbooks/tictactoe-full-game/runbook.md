@@ -15,7 +15,7 @@ the tools the app contributes. If the rendered board, the `/board` endpoint, and
 model's tool calls can drift apart, the whole "host owns the domain, lash runs the turn"
 story breaks. This scenario is the agreement check, ply by ply.
 
-**Real tokens.** This drives OpenRouter with the key from the environment / repo `.env`.
+**Real tokens.** This executes OpenRouter with the key from the environment / repo `.env`.
 The model plays O however it likes — do not gate on which cell it picks or its prose.
 
 ## Scenario-specific golden rules

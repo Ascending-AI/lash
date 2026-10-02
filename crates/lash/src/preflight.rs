@@ -455,7 +455,7 @@ impl Walk {
 
     /// One row per manifest entry, in manifest order.
     ///
-    /// Driven by the manifest rather than by what the walk happened to find, so
+    /// Executed by the manifest rather than by what the walk happened to find, so
     /// a format this build writes but this deployment has none of appears as
     /// `empty` rather than vanishing from the report. A row that silently
     /// disappears is indistinguishable from a format nobody thought to check.

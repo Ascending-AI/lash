@@ -1,6 +1,6 @@
 //! Resident session-state tests that need lash-core's runtime helpers.
 //!
-//! `RuntimeSessionState` itself lives in `lash-core-store`; these cases drive
+//! `RuntimeSessionState` itself lives in `lash-core-store`; these cases shift
 //! it through a live plugin session, so they run here.
 
 use super::RuntimeSessionState;

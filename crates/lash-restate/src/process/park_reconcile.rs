@@ -367,7 +367,7 @@ pub(crate) async fn end_lost_process_runs(
         {
             Ok(LostRun::OffRoute) => off_route.push(run.id.as_str()),
             Ok(LostRun::Ended(process_id)) => {
-                // The lost segment's open usage runs can never settle
+                // The lost segment's open usage meters can never settle
                 // (ADR 0125).
                 if let Err(error) = crate::session_control::recovery_request(
                     deadline,

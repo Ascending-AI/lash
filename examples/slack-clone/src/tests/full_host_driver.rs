@@ -133,7 +133,7 @@ async fn the_driver_reads_usage_with_separate_model_identities_from_the_bot_stor
         connection
             .execute(
                 "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, \
-                 provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, \
+                 provider_attempt, fact_kind, disposition, meter_id, llm_call_id, source, \
                  profile_key, requested_model, served_model, input_tokens, output_tokens, \
                  cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, \
                  payload_hash, recorded_at_ms) VALUES (?1, 'owner', ?2, 0, 0, 'attempt', \

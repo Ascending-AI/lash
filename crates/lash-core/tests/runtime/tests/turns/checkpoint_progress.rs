@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f450;
 
@@ -48,7 +48,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -109,7 +109,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "/yolopush\n\n<skill>\nbody\n</skill>".to_string(),
@@ -209,7 +209,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -272,7 +272,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -331,7 +331,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -397,7 +397,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -437,7 +437,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
     // process injection (FIG-972). The turn that absorbs it is the follow-on
     // physical turn (FIG-3157): the input was admitted at the terminal
     // checkpoint of `queued-checkpoint-turn`, which finished on its own
-    // committed answer, so the admission drives the next turn of the same run.
+    // committed answer, so the admission executes the next turn of the same run.
     assert!(matches!(
         admitted[0].origin.as_ref(),
         Some(lash_core::MessageOrigin::TurnInput { turn_id, input_id })
@@ -508,7 +508,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
         .await
         .expect("open the turn's handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -605,7 +605,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -698,7 +698,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -868,7 +868,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped())
                 .with_turn_events(&turn_events),
@@ -979,7 +979,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
         .await
         .expect("open the turn's handler");
     let assembled = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "hello".to_string(),
@@ -1083,7 +1083,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     assert_eq!(opening_turn_id, "injection-accepted-turn");
     let opening_input_id = opening_input_id
         .as_deref()
-        .expect("a direct turn is admitted durably before it drives");
+        .expect("a direct turn is admitted durably before it executes");
     assert_ne!(opening_input_id, input_id);
     assert_eq!(
         opening.id,
@@ -1092,7 +1092,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
 }
 
 /// [`journal_replay_host`] whose drain takes every eligible input into one
-/// root (`DrainMode::All`): the opening input joins the queued input's root
+/// run (`DrainMode::All`): the opening input joins the queued input's run
 /// as a member, which the default drain never composes (FIG-4457).
 fn composing_journal_replay_host(
     backend: &lash_core::Backend,
@@ -1145,9 +1145,9 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         },
     ]);
     let backend = double.lash_backend();
-    // The injection is sent while the root runs: an input addressed to a
+    // The injection is sent while the run executes: an input addressed to a
     // turn that has not started is refused (ADR 0101 §5.1).
-    let runtime_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(SteerAfterRootAdmissionStore {
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = Arc::new(SteerAfterRunAdmissionStore {
         inner: Arc::clone(&store),
         steer: steer.clone(),
     });
@@ -1182,12 +1182,12 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         Arc::clone(&controller),
     )
     .expect("layer the handler's scope");
-    // FIG-3157: work admitted at the terminal checkpoint drives a
+    // FIG-3157: work admitted at the terminal checkpoint executes a
     // follow-on physical turn, so the run holds two turns. The acceptance
     // belongs to the admitted turn, which is the run's first one; the run
     // carries the same identity for callers that do not index turns.
     let committed = runtime
-        .drive_turn_frames(
+        .execute_turn_frames(
             input.clone(),
             TurnOptions::new(CancellationToken::new(), scope),
         )
@@ -1223,10 +1223,10 @@ pub(super) async fn redrive_checkpoint_injected_turn(
     let scope = lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
         .expect("layer the handler's scope");
     // FIG-3157: the run holds the admitted turn plus the follow-on turn the
-    // terminal-checkpoint admission drives. The acceptance identity belongs to
+    // terminal-checkpoint admission executes. The acceptance identity belongs to
     // the admitted turn, so that is the one returned here.
     let run = runtime
-        .drive_turn_frames(input, TurnOptions::new(CancellationToken::new(), scope))
+        .execute_turn_frames(input, TurnOptions::new(CancellationToken::new(), scope))
         .await?;
     handler.close().await.expect("close the scope's handler");
     Ok(run
@@ -1257,13 +1257,13 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
     .await
     .expect("read first turn applications");
     assert_eq!(first_applications.len(), 2);
-    // The root's admission composes next-turn rows only (FIG-3927 §2.2): the
+    // The run's admission composes next-turn rows only (FIG-3927 §2.2): the
     // mid-turn injection is addressed to the turn named by the opening
-    // acceptance's source key, which the root composed as a member, so that
-    // turn never runs and never reaches a checkpoint. Once the root ended,
+    // acceptance's source key, which the run composed as a member, so that
+    // turn never runs and never reaches a checkpoint. Once the run ended,
     // the injection names a turn that is over: it stays open exactly as
     // submitted, next-turn input by rule (ADR 0101 §5.1), for the session's
-    // next root.
+    // next run.
     let injection = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1278,7 +1278,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
     assert_eq!(
         injection.status,
         lash_core::PendingTurnInputReadStatus::Open,
-        "the ended root released the injection: it is bound to no root"
+        "the ended run released the injection: it is bound to no run"
     );
     assert_eq!(
         injection.input.ingress().active_turn_id(),
@@ -1294,7 +1294,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         first_applications
             .iter()
             .all(|application| application.input_id != injection.input.input_id),
-        "the ended root did not apply the injection"
+        "the ended run did not apply the injection"
     );
     assert_eq!(
         first_applications
@@ -1334,9 +1334,9 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         "redrive must preserve the original initial/checkpoint application split"
     );
 
-    // The session's next root admits the re-opened injection as its input.
-    let next_turn = TurnId::from("checkpoint-injected-next-root");
-    Box::pin(drive_root_after_checkpoint_injection(
+    // The session's next run admits the re-opened injection as its input.
+    let next_turn = TurnId::from("checkpoint-injected-next-run");
+    Box::pin(execute_run_after_checkpoint_injection(
         &double,
         Arc::clone(&store),
         &next_turn,
@@ -1347,14 +1347,14 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         &SessionId::from("root"),
     )
     .await
-    .expect("read applications after the next root");
+    .expect("read applications after the next run");
     let applied = applications
         .iter()
         .find(|application| application.input_id == injection.input.input_id)
-        .expect("the next root applies the injection");
+        .expect("the next run applies the injection");
     assert_eq!(
         applied.checkpoint, None,
-        "the next root admits the injection as next-turn input"
+        "the next run admits the injection as next-turn input"
     );
     assert_ne!(
         applied.turn_id, *turn_id,
@@ -1366,14 +1366,14 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
             &SessionId::from("root"),
         )
         .await
-        .expect("list pending turn inputs after the next root")
+        .expect("list pending turn inputs after the next run")
         .iter()
         .all(|read| read.input.input_id != injection.input.input_id),
-        "the next root settled the injection"
+        "the next run settled the injection"
     );
 }
 
-async fn drive_root_after_checkpoint_injection(
+async fn execute_run_after_checkpoint_injection(
     double: &lash_restate_test::RestateTestBackend,
     store: Arc<RecordingStore>,
     turn_id: &TurnId,
@@ -1403,31 +1403,28 @@ async fn drive_root_after_checkpoint_injection(
     let handler = double
         .open_handler(lash_core::AdmittedScope::turn("root", turn_id))
         .await
-        .expect("open the next root's handler");
+        .expect("open the next run's handler");
     let scope = lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
-        .expect("layer the next root's scope");
+        .expect("layer the next run's scope");
     runtime
-        .drive_turn_frames(
+        .execute_turn_frames(
             TurnInput::text("after the injection"),
             TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
-        .expect("the next root commits");
-    handler
-        .close()
-        .await
-        .expect("close the next root's handler");
+        .expect("the next run commits");
+    handler.close().await.expect("close the next run's handler");
 }
 
 #[tokio::test]
-pub(super) async fn accepted_input_withdrawn_before_its_drive_cedes() {
+pub(super) async fn accepted_input_withdrawn_before_its_shift_cedes() {
     let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let turn_id = &TurnId::from("accepted-input-withdrawn");
     let store = double_unbound_recording_store(&double).await;
     let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
-    let withdrawing: Arc<dyn lash_core::RuntimeStore> = Arc::new(WithdrawBeforeDriveStore {
+    let withdrawing: Arc<dyn lash_core::RuntimeStore> = Arc::new(WithdrawBeforeShiftStore {
         inner: Arc::clone(&store),
     });
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -1446,12 +1443,12 @@ pub(super) async fn accepted_input_withdrawn_before_its_drive_cedes() {
         .expect("layer the handler's scope");
 
     let error = runtime
-        .drive_turn_frames(
+        .execute_turn_frames(
             TurnInput::text("withdrawn out from under the acceptance"),
             TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
-        .expect_err("a drive that finds its accepted row withdrawn cedes");
+        .expect_err("a shift that finds its accepted row withdrawn cedes");
     handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
@@ -1532,7 +1529,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
             .await
             .expect("open the turn's handler");
         runtime
-            .drive_turn(
+            .execute_turn(
                 TurnInput::text("first turn input"),
                 lash_core::facade_support::TurnOptions::new(
                     CancellationToken::new(),
@@ -1585,7 +1582,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
         .await
         .expect("open the drain's handler");
     runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1623,7 +1620,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
         .await
         .expect("open the drain's handler");
     let drained = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1646,7 +1643,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
     );
 }
 
-// The process-wake and active-checkpoint tests exercise the engine drive and
+// The process-wake and active-checkpoint tests exercise the engine shift and
 // its provider-visible turn, while the selected-batch invariant remains in
 // runtime persistence conformance.
 #[tokio::test]
@@ -1733,7 +1730,7 @@ pub(super) async fn next_turn_input_turn_admits_process_wake_at_active_checkpoin
         .await
         .expect("open the drain's handler");
     let drained = runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
@@ -1779,14 +1776,14 @@ pub(super) async fn next_turn_input_turn_admits_process_wake_at_active_checkpoin
 }
 
 #[tokio::test]
-pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_turn() {
+pub(super) async fn wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_turn() {
     let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
     // FIG-3157: a terminal finish ends the turn. A wake admitted at the
     // `BeforeCompletion` checkpoint never extends it — the committed answer
     // stays the turn's answer, and the admission is carried into a follow-on
     // physical turn of the same logical run: no idle gap, no wait for the
-    // user, and the root retains its admitted rows across the seam under
-    // the drive fence (ADR 0101).
+    // user, and the run retains its admitted rows across the seam under
+    // the shift fence (ADR 0101).
     const SESSION_ID: &str = "terminal-checkpoint-follow-on";
 
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -1849,12 +1846,12 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_tu
                 let store = captured_store_cell.lock_recover().clone();
                 let observed = match store {
                     Some(store) => {
-                        let epoch = lash_core::store::DriveEpochStore::drive_epoch(
+                        let epoch = lash_core::store::ShiftEpochStore::shift_epoch(
                             store.as_ref(),
                             &SessionId::from(SESSION_ID),
                         )
                         .await
-                        .expect("read the sealed drive epoch");
+                        .expect("read the sealed shift epoch");
                         epoch
                             .admission()
                             .map(|admission| (admission.as_str().to_owned(), epoch.epoch))
@@ -1920,12 +1917,12 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_tu
         .await
         .expect("open the turn's handler");
     let run = runtime
-        .drive_turn_frames(
+        .execute_turn_frames(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
-        .expect("the terminal-checkpoint wake drives its own follow-on turn");
+        .expect("the terminal-checkpoint wake executes its own follow-on turn");
     handler.close().await.expect("close the turn's handler");
     let wake = appended_wake
         .lock_recover()
@@ -2017,14 +2014,14 @@ enum WithheldFollowOnFailure {
 }
 
 /// FIG-3157 under FIG-3927: a follow-on that will not commit leaves no
-/// withheld row bound to its root.
+/// withheld row bound to its run.
 ///
-/// The wake the terminal checkpoint withheld is bound to the root, and the
+/// The wake the terminal checkpoint withheld is bound to the run, and the
 /// commit that withheld it wrote no terminal because it owed the follow-on.
-/// When the run stops before that follow-on commits, the root ends at the
+/// When the execution stops before that follow-on commits, the run ends at the
 /// turn whose answer it committed: it has terminal evidence, it is no longer
-/// the session's unfinished root, and the wake is open again at its own
-/// position, so the session's next drive admits it in a root of its own and
+/// the session's unfinished run, and the wake is open again at its own
+/// position, so the session's next shift admits it in a run of its own and
 /// completes it.
 async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     seed: u64,
@@ -2032,7 +2029,7 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     failure: WithheldFollowOnFailure,
 ) {
     let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
-    let root = TurnId::fixture(format!("{session_id}-turn"));
+    let run = TurnId::fixture(format!("{session_id}-turn"));
     let store_cell: Arc<Mutex<Option<Arc<RecordingStore>>>> = Arc::new(Mutex::new(None));
     let captured_store_cell = Arc::clone(&store_cell);
     type WakeSource = (
@@ -2169,12 +2166,12 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(session_id),
-            root.clone(),
+            run.clone(),
         ))
         .await
         .expect("open the turn's handler");
-    let run = runtime
-        .drive_turn_frames(
+    let executed = runtime
+        .execute_turn_frames(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -2182,30 +2179,33 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
         .expect("the committed turn is the run's answer");
     handler.close().await.expect("close the turn's handler");
     assert_eq!(
-        run.turns.len(),
+        executed.turns.len(),
         1,
         "{failure:?}: only the answered turn committed"
     );
-    assert_eq!(run.turns[0].assistant_output.safe_text, "committed answer");
+    assert_eq!(
+        executed.turns[0].assistant_output.safe_text,
+        "committed answer"
+    );
     assert!(
-        !run.turns[0].errors.is_empty(),
+        !executed.turns[0].errors.is_empty(),
         "{failure:?}: the answered turn reports the follow-on's failure"
     );
 
     let session = SessionId::from(session_id);
-    let terminal = lash_core::store::RootStore::root_terminal(store.as_ref(), &session, &root)
+    let terminal = lash_core::store::RunStore::run_terminal(store.as_ref(), &session, &run)
         .await
-        .expect("read the root's terminal");
+        .expect("read the run's terminal");
     assert!(
         terminal.is_some(),
-        "{failure:?}: the root ends at the turn whose answer it committed"
+        "{failure:?}: the run ends at the turn whose answer it committed"
     );
     assert!(
-        lash_core::store::RootStore::unfinished_root(store.as_ref(), &session)
+        lash_core::store::RunStore::unfinished_run(store.as_ref(), &session)
             .await
-            .expect("read the unfinished root")
+            .expect("read the unfinished run")
             .is_none(),
-        "{failure:?}: no unfinished root holds the session"
+        "{failure:?}: no unfinished run holds the session"
     );
     let open = lash_core::store::QueuedWorkStore::list_open_queued_work(store.as_ref(), &session)
         .await
@@ -2224,19 +2224,19 @@ async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
         .await
         .expect("open the drain's handler");
     runtime
-        .drive_one_admitted_queued_root(TurnOptions::new(
+        .execute_one_admitted_queued_run(TurnOptions::new(
             CancellationToken::new(),
             handler.scoped(),
         ))
         .await
-        .expect("the session's next drive admits the wake");
+        .expect("the session's next shift admits the wake");
     handler.close().await.expect("close the drain's handler");
     assert!(
         lash_core::store::QueuedWorkStore::list_queued_work(store.as_ref(), &session)
             .await
             .expect("list queued work after the redrive")
             .is_empty(),
-        "{failure:?}: the next drive completes the wake in a root of its own"
+        "{failure:?}: the next shift completes the wake in a run of its own"
     );
 }
 
@@ -2263,7 +2263,7 @@ pub(super) async fn a_withheld_commit_whose_delivery_fails_leaves_no_withheld_ro
 #[tokio::test]
 pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled() {
     let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
-    // Keep this cancellation rendezvous out of the shared `root` lane so unrelated libtest
+    // Keep this cancellation rendezvous out of the shared `run` lane so unrelated libtest
     // cases cannot make its final commit contend with their turn.
     const SESSION_ID: &str = "process-wake-cancelled";
 
@@ -2366,7 +2366,7 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
         .expect("open the drain's handler");
     let drained = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        runtime.drive_one_admitted_queued_root(TurnOptions::new(cancel, handler.scoped())),
+        runtime.execute_one_admitted_queued_run(TurnOptions::new(cancel, handler.scoped())),
     )
     .await
     .expect("cancelled wake drain should finish")
@@ -2411,7 +2411,7 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
         .expect("open the drain's handler");
     assert!(
         runtime
-            .drive_one_admitted_queued_root(TurnOptions::new(
+            .execute_one_admitted_queued_run(TurnOptions::new(
                 CancellationToken::new(),
                 handler.scoped(),
             ))
@@ -2443,13 +2443,13 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
 }
 
 // Regression (ADR 0101): a long-running turn keeps the queued work its
-// root admitted across a provider stall. Root bindings carry no TTL, and
+// run admitted across a provider stall. Run bindings carry no TTL, and
 // re-executing admission reads the existing binding instead of taking rows
-// twice. At finalization the root still holds its rows and the fenced
+// twice. At finalization the run still holds its rows and the fenced
 // commit succeeds.
 //
 // This test must FAIL if anyone reintroduces time- or renewal-based binding
-// invalidation. The turn is driven with an in-process `TurnInput` (not an
+// invalidation. The turn is executed with an in-process `TurnInput` (not an
 // admitted pending input) so the queued-work binding is the one under
 // scrutiny; the equally-unrenewed turn-input binding is covered by the
 // conformance admission laws.

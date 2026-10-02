@@ -240,7 +240,7 @@ impl SegmentStarted {
         &self.authority
     }
 
-    /// A proof for a test that drives a segment without the workflow handler.
+    /// A proof for a test that executes a segment without the workflow handler.
     /// The test's own execution authority is kept when it supplies one.
     #[cfg(test)]
     pub(crate) fn for_test(

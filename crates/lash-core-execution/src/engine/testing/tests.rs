@@ -1,4 +1,4 @@
-//! The harness proves itself: a deterministic drive passes every replay, and
+//! The harness proves itself: a deterministic shift passes every replay, and
 //! each class of nondeterminism the check exists for fails it at the run and
 //! entry that exposes it.
 
@@ -32,7 +32,7 @@ fn failure_of<E: DeterminismEngine>(check: DeterminismCheck, engine: &E) -> Dete
 
 /// The canonical deterministic shape: sequential operations, two concurrent
 /// ones joined in declaration order, and a commit built from their outcomes.
-fn deterministic_drive<'c>(
+fn deterministic_shift<'c>(
     _: &'c (),
     cx: &'c LocalTestCx,
 ) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
@@ -58,8 +58,8 @@ fn deterministic_drive<'c>(
 }
 
 #[test]
-fn a_deterministic_drive_passes_cold_separate_worker_and_perturbed_replays() {
-    let engine = LocalEngine::new(|| (), deterministic_drive);
+fn a_deterministic_shift_passes_cold_separate_worker_and_perturbed_replays() {
+    let engine = LocalEngine::new(|| (), deterministic_shift);
     let report = check()
         .run(&engine)
         .unwrap_or_else(|failure| panic!("{failure}"));
@@ -78,13 +78,13 @@ fn a_deterministic_drive_passes_cold_separate_worker_and_perturbed_replays() {
 
 #[test]
 fn the_check_is_itself_deterministic_under_its_seed() {
-    let engine = LocalEngine::new(|| (), deterministic_drive);
+    let engine = LocalEngine::new(|| (), deterministic_shift);
     let first = check().run(&engine).map(|report| report.transcript);
     let second = check().run(&engine).map(|report| report.transcript);
     assert_eq!(first, second);
 }
 
-/// A value the drive reads that nothing records: a clock, an RNG, a global
+/// A value the shift reads that nothing records: a clock, an RNG, a global
 /// counter. It changes between runs of one worker.
 static AMBIENT: AtomicU64 = AtomicU64::new(0);
 
@@ -150,8 +150,8 @@ fn worker_local_state_in_a_commit_diverges_only_on_a_separate_worker() {
 }
 
 /// Which of two concurrent operations lands first is scheduling, not a
-/// recorded fact: a drive that branches on it is the unrecorded `select!` race.
-fn racing_drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
+/// recorded fact: a shift that branches on it is the unrecorded `select!` race.
+fn racing_shift<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
     Box::pin(async move {
         let left = cx.op("turn/left", "tool", &"left", async { 1_u64 });
         let right = cx.op("turn/right", "tool", &"right", async { 2_u64 });
@@ -166,7 +166,7 @@ fn racing_drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output
 
 #[test]
 fn branching_on_completion_order_diverges_under_perturbed_scheduling() {
-    let engine = LocalEngine::new(|| (), racing_drive);
+    let engine = LocalEngine::new(|| (), racing_shift);
     let failure = failure_of(check().perturbed_replays(32), &engine);
 
     assert!(
@@ -249,7 +249,7 @@ fn awaiting_a_future_that_is_not_an_operation_fails_the_run() {
 }
 
 #[test]
-fn drive_code_runs_outside_any_tokio_runtime() {
+fn shift_code_runs_outside_any_tokio_runtime() {
     let engine = LocalEngine::new(
         || (),
         |_: &(), _cx: &LocalTestCx| -> Pin<Box<dyn Future<Output = ()> + '_>> {
@@ -313,10 +313,10 @@ fn admitted() -> AdmittedScope {
 
 static CONTROLLER_BODIES: AtomicUsize = AtomicUsize::new(0);
 
-/// Drive code as it is today: effects issued through a scoped controller.
-fn controller_drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
+/// Shift code as it is today: effects issued through a scoped controller.
+fn controller_shift<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
     Box::pin(async move {
-        // A drive may keep thread-local state while its recorded controller
+        // A shift may keep thread-local state while its recorded controller
         // operations remain Send and run on the execution side.
         let local_outcomes = Rc::new(std::cell::RefCell::new(Vec::new()));
         let controller = cx
@@ -342,8 +342,8 @@ fn controller_drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Ou
 }
 
 #[test]
-fn drive_code_issuing_effects_through_a_controller_runs_under_the_harness() {
-    let engine = LocalEngine::new(|| (), controller_drive);
+fn shift_code_issuing_effects_through_a_controller_runs_under_the_harness() {
+    let engine = LocalEngine::new(|| (), controller_shift);
     let report = check()
         .run(&engine)
         .unwrap_or_else(|failure| panic!("{failure}"));
@@ -415,10 +415,10 @@ fn the_comparator_reports_the_first_differing_entry() {
         kind: "llm".to_string(),
         bytes: bytes.to_string(),
     };
-    let reference = DriveTranscript {
+    let reference = ShiftTranscript {
         entries: vec![command("same"), command(r#"{"deadline":100}"#)],
     };
-    let actual = DriveTranscript {
+    let actual = ShiftTranscript {
         entries: vec![command("same"), command(r#"{"deadline":101}"#)],
     };
     let divergence = reference
@@ -430,7 +430,7 @@ fn the_comparator_reports_the_first_differing_entry() {
         "{divergence}"
     );
 
-    let shorter = DriveTranscript {
+    let shorter = ShiftTranscript {
         entries: vec![command("same")],
     };
     let divergence = reference

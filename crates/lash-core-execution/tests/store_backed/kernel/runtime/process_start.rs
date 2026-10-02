@@ -8,8 +8,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::runtime::drive::relay::{RelayVerdict, relay_due};
     use crate::runtime::process_start::ProcessStartRelay;
+    use crate::runtime::shift::relay::{RelayVerdict, relay_due};
     use crate::store::{ObligationKind, ObligationState, StallReason};
     use crate::testing::TestClock;
     use crate::{
@@ -193,7 +193,7 @@ mod tests {
         assert_eq!(stalled.reason, StallReason::AttemptsExhausted);
         assert_eq!(
             stalled.attempts,
-            u32::from(crate::runtime::drive::relay::RelayPolicy::default().attempt_ceiling),
+            u32::from(crate::runtime::shift::relay::RelayPolicy::default().attempt_ceiling),
             "the ceiling's attempts are counted"
         );
         assert_eq!(

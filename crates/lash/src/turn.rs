@@ -18,46 +18,50 @@ pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from_uuid(uuid::Uuid::new_v4().as_u128())
 }
 
-/// Run one admitted root on `runtime`'s session (FIG-3600), recording every
+/// Run one admitted run on `runtime`'s session (FIG-3600), recording every
 /// turn activity on the session's observation.
 ///
-/// `unsettled` marks a runtime a drive holds across its roots (FIG-3825):
-/// the root discards what an earlier root that did not end left on it, and
-/// the mark follows this root, both under the runtime's writer.
-pub(crate) async fn run_admitted_root_observed(
+/// `unsettled` marks a runtime a shift holds across its runs (FIG-3825):
+/// the run discards what an earlier run that did not end left on it, and
+/// the mark follows this run, both under the runtime's writer.
+pub(crate) async fn execute_admitted_run_observed(
     runtime: &RuntimeHandle,
     binding: &lash_core::StoreBindingId,
     controller: &ScopedEffectController<'_>,
     admitted: lash_core::engine::Admitted,
-    unsettled: Option<&crate::core::held_drives::UnsettledRoot>,
-) -> lash_core::engine::RootRunEnd {
+    unsettled: Option<&crate::core::held_shifts::UnsettledRun>,
+) -> lash_core::engine::RunEnd {
     let session = admitted.session().clone();
-    // Marked before the root can commit: a handle that sees its commit waits
+    // Marked before the run can commit: a handle that sees its commit waits
     // for the deposit while the run is under way.
-    let _running = crate::send::running(binding, &session, admitted.root());
+    let _running = crate::send::running(binding, &session, admitted.run());
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    if unsettled.is_some_and(crate::core::held_drives::UnsettledRoot::enter) {
-        lash_core::drive::discard_root_residue(&mut writer);
+    if unsettled.is_some_and(crate::core::held_shifts::UnsettledRun::enter) {
+        lash_core::shift::discard_run_residue(&mut writer);
     }
     let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
-    let settled = DepositSettledRoot {
+    let settled = DepositSettledRun {
         runtime,
         binding,
         session: &session,
     };
-    let sinks = lash_core::drive::DriveSinks {
+    let sinks = lash_core::shift::ShiftSinks {
         events: &lash_core::runtime::NoopEventSink,
         turn_events: &observation_sink,
         local_stop: LocalTurnStop::default(),
         settled: &settled,
     };
-    // The root's scope close is the engine's to run beside the session's
-    // next root (FIG-4035): the run returns, and releases the writer, once
-    // the root's report is handed over.
-    let end =
-        lash_core::drive::run_admitted_root_owing_close(&mut writer, controller, admitted, sinks)
-            .await;
+    // The run's scope close is the engine's to run beside the session's
+    // next run (FIG-4035): the run returns, and releases the writer, once
+    // the run's report is handed over.
+    let end = lash_core::shift::execute_admitted_run_owing_close(
+        &mut writer,
+        controller,
+        admitted,
+        sinks,
+    )
+    .await;
     if end.result.is_ok()
         && let Some(unsettled) = unsettled
     {
@@ -67,31 +71,31 @@ pub(crate) async fn run_admitted_root_observed(
     end
 }
 
-/// Deposits a committed root's report the moment the drive hands it over,
-/// before the root's scope closes (FIG-3979), and publishes the runtime's
+/// Deposits a committed run's report the moment the shift hands it over,
+/// before the run's scope closes (FIG-3979), and publishes the runtime's
 /// observation of the commit first, so a handle answered from the deposit
-/// reads the committed head without waiting for the drive to return.
-struct DepositSettledRoot<'a> {
+/// reads the committed head without waiting for the shift to return.
+struct DepositSettledRun<'a> {
     runtime: &'a RuntimeHandle,
     binding: &'a lash_core::StoreBindingId,
     session: &'a lash_core::SessionId,
 }
 
 #[async_trait]
-impl lash_core::drive::RootSettledSink for DepositSettledRoot<'_> {
+impl lash_core::shift::RunSettledSink for DepositSettledRun<'_> {
     async fn settled(
         &self,
         runtime: &crate::support::LashRuntime,
-        root: lash_core::drive::SettledRoot<'_>,
+        run: lash_core::shift::SettledRun<'_>,
     ) {
         self.runtime.publish_from(runtime);
-        crate::send::deposit_settled_root(self.binding, self.session, root, self.runtime);
+        crate::send::deposit_settled_run(self.binding, self.session, run, self.runtime);
     }
 }
 
 /// Records every turn activity on the session's observation, addressed to
 /// the physical turn that produced it, so a send handle can adopt the
-/// activity of its input's root (FIG-3600 S5b). An activity published
+/// activity of its input's run (FIG-3600 S5b). An activity published
 /// without a turn is addressed to the last turn this sink saw.
 pub(crate) struct SessionObservationTurnActivitySink<'a> {
     runtime: RuntimeHandle,
@@ -166,7 +170,7 @@ pub struct TurnReport {
     pub execution: TurnExecutionMetrics,
     /// Errors captured while settling the turn.
     pub errors: Vec<TurnIssue>,
-    /// Durable acceptance identity of the input this turn was driven from.
+    /// Durable acceptance identity of the input this turn was executed from.
     ///
     /// Every turn enters through one acceptance commit before anything executes
     /// (ADR 0069), and this is the same receipt
@@ -245,7 +249,7 @@ impl TurnReport {
     }
 
     /// This report as the remote protocol's settled turn, under `turn_id`
-    /// (a send's root), carrying `activities` as its activity list. An
+    /// (a send's run), carrying `activities` as its activity list. An
     /// activity the remote vocabulary cannot carry is left out.
     pub fn to_remote(
         &self,

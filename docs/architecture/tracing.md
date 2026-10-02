@@ -49,7 +49,7 @@ At the FIG-4835 review of `f9dfed0c61`, the adapter, retained admission
 provenance, transport attempt links and shared plugin runtime are present.
 Whole-arc acceptance remains open pending the FIG-4830 integration follow-up:
 
-- Production admission does not call the scope factory. Root admission
+- Production admission does not call the scope factory. Run admission
   explicitly offers `Untraced`, and the projector skips untraced scopes.
   The engine must persist the selected candidate before dispatching children.
 - Production sites do not yet emit `DomainCompleted` or
@@ -62,7 +62,7 @@ Whole-arc acceptance remains open pending the FIG-4830 integration follow-up:
   ownership. Several transition metric callers still pass no permit and
   consequently publish no counter.
 - `emit_unscoped` still uses the obsolete random-ID record constructor.
-- Drive observations construct their records and read the clock before the
+- Shift observations construct their records and read the clock before the
   replay frontier grants permission. The replay cost law needs to cover that
   producer path, as well as the emitter's early return.
 - The existing P3 law checks replayed record labels and a body counter. It

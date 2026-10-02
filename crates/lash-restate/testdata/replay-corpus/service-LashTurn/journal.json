@@ -1,22 +1,22 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "generation": "1654dff52a0a",
+  "generation": "b14bcd97a3f0",
   "handlers": {
     "close": [
       [
         "InputCommand",
-        "RunCommand lash:drive-close:replay-corpus-turn",
+        "RunCommand lash:shift-close:replay-corpus-turn",
         "OutputCommand"
       ]
     ],
     "run": [
       [
         "InputCommand",
-        "RunCommand lash:drive-root-start:ingress:ti:#:1#0",
-        "RunCommand lash:drive-seal:ingress:ti:#:1#0",
-        "RunCommand lash:drive-admit:replay-corpus-turn",
-        "RunCommand lash:drive-head:replay-corpus-turn",
+        "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
+        "RunCommand lash:shift-seal:ingress:ti:#:1#0",
+        "RunCommand lash:shift-admit:replay-corpus-turn",
+        "RunCommand lash:shift-head:replay-corpus-turn",
         "RunCommand lash:turn-config:replay-corpus-turn",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:sync_execution_environment:1",

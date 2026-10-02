@@ -1743,7 +1743,7 @@ impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
 /// plugin.
 ///
 /// FIG-2999: starting, signalling and yielding are leaf tools rather than
-/// dialect special forms, so a fixture that drives a process installs the same
+/// dialect special forms, so a fixture that executes a process installs the same
 /// declarations and the same attempt bodies `lash-plugin-process-controls`
 /// ships, instead of a host-bridge arm the executor no longer has.
 pub(super) struct ProcessControlToolProvider;

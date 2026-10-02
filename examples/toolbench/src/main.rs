@@ -96,7 +96,7 @@ struct Args {
     /// Persist redacted wire request and response JSON for each provider attempt.
     #[arg(long)]
     dump_requests: Option<std::path::PathBuf>,
-    /// Maximum retries per provider round (no whole-task re-drive).
+    /// Maximum retries per provider round (no whole-task redrive).
     #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(..4294967295))]
     provider_retries: u32,
     /// OpenRouter model identifier.

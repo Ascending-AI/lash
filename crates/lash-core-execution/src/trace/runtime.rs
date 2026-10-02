@@ -4,8 +4,8 @@
 //! alone, under an [`EmissionPermit`]. A permit has two holders. The body of
 //! a recorded step holds one while it really runs: the engine-side wrapper
 //! that runs the body ([`LiveStep`]) mints it, so a substrate that serves the
-//! step from its journal never does. Drive code holds one once its drive has
-//! passed its journal frontier ([`JournalFrontier`]): a drive re-runs from
+//! step from its journal never does. Shift code holds one once its shift has
+//! passed its journal frontier ([`JournalFrontier`]): a shift re-runs from
 //! its start on every attempt, and what it does before the first step whose
 //! body really runs is reconstruction of what an earlier attempt already
 //! observed.
@@ -178,39 +178,39 @@ impl TraceRuntime {
         Ok(())
     }
 
-    /// The standing of drive code that issues its steps through `controller`:
+    /// The standing of shift code that issues its steps through `controller`:
     /// it may emit once one of those steps' bodies has really run.
-    pub fn drive(
+    pub fn shift(
         &self,
         scope: Option<DurableTraceScope>,
         controller: &crate::ScopedEffectController<'_>,
     ) -> TraceStanding {
         self.standing(
             scope,
-            EmissionRight::Drive {
+            EmissionRight::Shift {
                 frontier: controller.frontier().clone(),
                 attempt: controller.controller().attempt_observation(),
             },
         )
     }
 
-    /// The standing of a substrate executing a step for the drive that issued
-    /// it: the issuing drive's. A substrate observes its own handling of a
-    /// step (a wait it parked, a timer it resolved) only once that drive has
-    /// passed its journal. A step no drive issued has no standing.
+    /// The standing of a substrate executing a step for the shift that issued
+    /// it: the issuing shift's. A substrate observes its own handling of a
+    /// step (a wait it parked, a timer it resolved) only once that shift has
+    /// passed its journal. A step no shift issued has no standing.
     pub fn issued(&self, scope: Option<DurableTraceScope>, issue: &StepIssue) -> TraceStanding {
         self.standing(
             scope,
-            EmissionRight::Drive {
+            EmissionRight::Shift {
                 frontier: issue.frontier.clone().unwrap_or_default(),
                 attempt: issue.attempt.clone(),
             },
         )
     }
 
-    /// The standing of the drive code of one physical turn, under that turn's
+    /// The standing of the shift code of one physical turn, under that turn's
     /// scope.
-    pub fn turn_drive(
+    pub fn turn_execution(
         &self,
         session_id: &crate::SessionId,
         turn_id: &crate::TurnId,
@@ -219,7 +219,7 @@ impl TraceRuntime {
         let scope = self
             .is_observed()
             .then(|| turn_trace_scope(session_id, turn_id, self.parts.clock.timestamp_ms()));
-        self.drive(scope, controller)
+        self.shift(scope, controller)
     }
 
     /// The standing of the recorded body of the effect `invocation` names
@@ -392,7 +392,7 @@ fn datetime(at_ms: u64) -> chrono::DateTime<chrono::Utc> {
 /// One real execution of a recorded step's body.
 ///
 /// The engine-side wrapper that runs a body begins one inside it and hands it
-/// to the work. Its attempt is the body's usage run where the body spends, and
+/// to the work. Its attempt is the body's usage meter where the body spends, and
 /// an id of its own otherwise; neither is journaled as a freshness claim. A
 /// holder must not keep it past the body.
 #[derive(Debug)]
@@ -415,11 +415,11 @@ impl LiveStep {
 
     /// Begun where a recorded step's body starts running.
     pub(crate) fn begin(
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
         observation: Option<AttemptObservation>,
     ) -> Arc<Self> {
-        let attempt = match usage_run {
-            Some(run) => TraceAttemptId::new(run.run_id().as_str()),
+        let attempt = match usage_meter {
+            Some(meter) => TraceAttemptId::new(meter.meter_id().as_str()),
             None => fresh_attempt(),
         };
         Self::of(attempt, observation)
@@ -459,23 +459,23 @@ fn fresh_attempt() -> TraceAttemptId {
     TraceAttemptId::new(format!("attempt:{}", uuid::Uuid::new_v4().simple()))
 }
 
-/// Where one drive stands relative to its journal.
+/// Where one shift stands relative to its journal.
 ///
-/// A drive issues its recorded steps through one scoped controller and its
+/// A shift issues its recorded steps through one scoped controller and its
 /// clones, and re-runs from its start on every attempt with a new one. The
 /// engine's step wrapper tells the frontier what became of each step it
 /// issued: its body really ran, or the journal answered it.
 ///
-/// While the drive is behind its journal it cannot know whether what it
+/// While the shift is behind its journal it cannot know whether what it
 /// observes is new, so the observation is held:
 ///
 /// - a step the journal answers proves everything held was a reconstruction
 ///   of work an earlier attempt observed, and it is dropped;
-/// - a step whose body runs, or the drive concluding, proves the attempt
+/// - a step whose body runs, or the shift concluding, proves the attempt
 ///   reached new work: what is still held was made after the last answered
 ///   step, by this attempt, and is emitted.
 ///
-/// Past the journal, the drive emits as it observes.
+/// Past the journal, the shift emits as it observes.
 #[derive(Clone)]
 pub struct JournalFrontier {
     inner: Arc<FrontierInner>,
@@ -487,10 +487,10 @@ struct FrontierInner {
     next_ordinal: AtomicU64,
 }
 
-/// One held drive observation: emits itself under the frontier's attempt.
+/// One held shift observation: emits itself under the frontier's attempt.
 type HeldObservation = Box<dyn FnOnce(&EmissionPermit, TraceAttemptId, u64) + Send>;
 
-/// What a drive holds between two recorded steps, at most. A drive records a
+/// What a shift holds between two recorded steps, at most. A shift records a
 /// step within a few observations; the bound keeps one that never does from
 /// growing.
 const HELD_OBSERVATIONS_MAX: usize = 256;
@@ -498,7 +498,7 @@ const HELD_OBSERVATIONS_MAX: usize = 256;
 enum FrontierState {
     /// No step body has run in this attempt yet.
     Behind(Vec<HeldObservation>),
-    /// A step body has really run in this attempt, or the drive concluded.
+    /// A step body has really run in this attempt, or the shift concluded.
     Past,
 }
 
@@ -535,7 +535,7 @@ impl JournalFrontier {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Records that a step body of this drive really ran ([`StepIssue`]).
+    /// Records that a step body of this shift really ran ([`StepIssue`]).
     fn cross(&self) {
         let held = match std::mem::replace(&mut *self.state(), FrontierState::Past) {
             FrontierState::Behind(held) => held,
@@ -546,7 +546,7 @@ impl JournalFrontier {
         }
     }
 
-    /// Records that the journal answered a step of this drive without its
+    /// Records that the journal answered a step of this shift without its
     /// body running.
     fn served(&self) {
         if let FrontierState::Behind(held) = &mut *self.state() {
@@ -554,13 +554,13 @@ impl JournalFrontier {
         }
     }
 
-    /// Whether a step body of this drive has really run in this attempt, or
-    /// the drive concluded.
+    /// Whether a step body of this shift has really run in this attempt, or
+    /// the shift concluded.
     pub fn is_crossed(&self) -> bool {
         matches!(*self.state(), FrontierState::Past)
     }
 
-    /// Emits `observation` now when the drive is past its journal, and holds
+    /// Emits `observation` now when the shift is past its journal, and holds
     /// it otherwise.
     fn observe(&self, observation: HeldObservation) {
         {
@@ -584,9 +584,9 @@ impl JournalFrontier {
     }
 }
 
-/// What the drive that issues a step lends the step's body: its journal
+/// What the shift that issues a step lends the step's body: its journal
 /// frontier, told when the body really runs, and the substrate attempt the
-/// drive executes under.
+/// shift executes under.
 ///
 /// The issue an executor carries also tells the frontier when the step is
 /// answered without its body running: it is dropped unbegun. A copy carries
@@ -631,9 +631,9 @@ impl StepIssue {
     }
 
     /// Begins the live step of a body the engine's step wrapper is running.
-    pub(crate) fn begin(&self, usage_run: Option<&crate::UsageRun>) -> Arc<LiveStep> {
+    pub(crate) fn begin(&self, usage_meter: Option<&crate::UsageMeter>) -> Arc<LiveStep> {
         self.cross();
-        LiveStep::begin(usage_run, self.attempt.clone())
+        LiveStep::begin(usage_meter, self.attempt.clone())
     }
 
     /// Begins the live step of a body a substrate records itself: called
@@ -651,7 +651,7 @@ impl StepIssue {
         self.reports_served = false;
     }
 
-    /// The issuing drive's frontier, when a drive issued the step.
+    /// The issuing shift's frontier, when a shift issued the step.
     pub fn frontier(&self) -> Option<&JournalFrontier> {
         self.frontier.as_ref()
     }
@@ -670,7 +670,7 @@ impl StepIssue {
 #[derive(Clone)]
 enum EmissionRight {
     Body(Arc<LiveStep>),
-    Drive {
+    Shift {
         frontier: JournalFrontier,
         attempt: Option<AttemptObservation>,
     },
@@ -704,12 +704,12 @@ impl TraceStanding {
         self.runtime.is_observed()
     }
 
-    /// Concludes the drive this standing belongs to: it reached its end in
+    /// Concludes the shift this standing belongs to: it reached its end in
     /// this attempt, so what it still holds was made after the last step the
     /// journal answered and is emitted. A standing in a body has nothing
     /// held.
     pub fn conclude(&self) {
-        if let EmissionRight::Drive { frontier, .. } = &self.right {
+        if let EmissionRight::Shift { frontier, .. } = &self.right {
             frontier.cross();
         }
     }
@@ -737,13 +737,13 @@ impl TraceStanding {
     fn attempt_observation(&self) -> Option<&AttemptObservation> {
         match &self.right {
             EmissionRight::Body(live) => live.attempt_observation(),
-            EmissionRight::Drive { attempt, .. } => attempt.as_ref(),
+            EmissionRight::Shift { attempt, .. } => attempt.as_ref(),
         }
     }
 
     /// Emits an observation of this attempt's own work: a model request, a
-    /// diagnostic, a step of the drive. Each real attempt names its own
-    /// record. Drive code observes through its [`JournalFrontier`].
+    /// diagnostic, a step of the shift. Each real attempt names its own
+    /// record. Shift code observes through its [`JournalFrontier`].
     pub fn observe(&self, record: impl FnOnce() -> (TraceContext, TraceEvent)) {
         if !self.runtime.is_observed() {
             return;
@@ -757,8 +757,8 @@ impl TraceStanding {
                 at_ms,
                 record,
             ),
-            EmissionRight::Drive { frontier, .. } => {
-                // The record is built now, where the drive made it; only its
+            EmissionRight::Shift { frontier, .. } => {
+                // The record is built now, where the shift made it; only its
                 // emission waits on the frontier.
                 let record = self.project(record());
                 let standing = self.clone();
@@ -827,12 +827,12 @@ impl TraceStanding {
         );
     }
 
-    /// The live permit of the body this standing is in, and none for drive
+    /// The live permit of the body this standing is in, and none for shift
     /// code: what a live-class metric is recorded under.
     pub fn body_permit(&self) -> Option<&EmissionPermit> {
         match &self.right {
             EmissionRight::Body(live) => Some(live.permit()),
-            EmissionRight::Drive { .. } => None,
+            EmissionRight::Shift { .. } => None,
         }
     }
 
@@ -849,7 +849,7 @@ impl TraceStanding {
     /// ([`TraceScopeAdmission::permit`](lash_trace::TraceScopeAdmission::permit),
     /// or [`EmissionPermit::new_transition`] minted beside such a receipt):
     /// a retained read has none and emits nothing. Neither a running body nor
-    /// a drive past its journal stands in for it. `at_ms` is the time the
+    /// a shift past its journal stands in for it. `at_ms` is the time the
     /// owning record retained for the fact, never the clock now. `ordinal` is
     /// the transition's index within the scope and kind, 0 for a transition
     /// that happens once.

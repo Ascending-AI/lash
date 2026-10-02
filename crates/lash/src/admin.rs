@@ -182,7 +182,7 @@ pub struct SessionAdmin {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) process_work: Arc<dyn lash_core::ProcessWorkSubstrate>,
     pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,
-    pub(crate) ingress: lash_core::drive::IngressRelay,
+    pub(crate) ingress: lash_core::shift::IngressRelay,
 }
 
 impl SessionAdmin {
@@ -248,9 +248,9 @@ impl SessionAdmin {
         value
     }
 
-    /// Wait, with the writer released, for the engine drive that applies the
+    /// Wait, with the writer released, for the engine shift that applies the
     /// command `receipt` names, then read how it settled. A command the
-    /// drive has not settled by the deadline answers `Pending` with its
+    /// shift has not settled by the deadline answers `Pending` with its
     /// receipt; the command stays durable and settles later.
     async fn await_command_settlement(
         &self,
@@ -263,14 +263,14 @@ impl SessionAdmin {
             .await
             .map_err(|source| {
                 EmbedError::Session(SessionError::Store {
-                    context: "failed to read session command drive".into(),
+                    context: "failed to read session command shift".into(),
                     source,
                 })
             })?;
         if let Some(request) = request {
             let wait = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
-                self.work.await_drive(&receipt.session_id, &request),
+                self.work.await_shift(&receipt.session_id, &request),
             )
             .await;
             match wait {
@@ -279,7 +279,7 @@ impl SessionAdmin {
             }
         }
         // Cancellation removes the ask and the queued batch together. Read
-        // the batch's recorded state after the ask read or drive wait; only a
+        // the batch's recorded state after the ask read or shift wait; only a
         // still-open batch may be reported as pending.
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
@@ -547,11 +547,11 @@ impl SessionAdmin {
 
     /// Submit an administrative compaction to the session's command lane and
     /// await its settlement (FIG-4201). The writer is held only to submit:
-    /// the engine's drive applies the command at the next turn boundary, on
-    /// whichever runtime drives the session, and the submitter reads the
-    /// outcome that drive committed.
+    /// the engine's shift applies the command at the next turn boundary, on
+    /// whichever runtime works the session, and the submitter reads the
+    /// outcome that shift committed.
     ///
-    /// A storeless session has no drive and no command lane: it compacts
+    /// A storeless session has no shift and no command lane: it compacts
     /// directly under the writer, which already serializes the compaction
     /// with every turn it runs.
     async fn compact_context(&self, instructions: Option<String>) -> Result<bool> {
@@ -1000,7 +1000,7 @@ pub struct SessionCommandAdmin {
 impl SessionCommandAdmin {
     /// Submit `command` to the session's command lane under a stable
     /// `idempotency_key` and return its durable receipt, before it applies
-    /// (FIG-4202). The session's drive applies it at a turn boundary; a
+    /// (FIG-4202). The session's shift applies it at a turn boundary; a
     /// resubmission under the same key names the same command. Await its
     /// outcome with [`Self::settle`], from this handle or any other that holds
     /// the receipt.
@@ -1026,11 +1026,11 @@ impl SessionCommandAdmin {
         Box::pin(self.control.await_command_settlement(receipt, None)).await
     }
 
-    /// Withdraw the command `receipt` names (FIG-4202). A command no drive
+    /// Withdraw the command `receipt` names (FIG-4202). A command no shift
     /// has admitted is withdrawn transactionally and never applies; one a
-    /// drive already read, or that already settled, answers
+    /// shift already read, or that already settled, answers
     /// [`SessionCommandWithdrawal::AlreadyAdmitted`] and settles as that
-    /// drive applies it.
+    /// shift applies it.
     pub async fn withdraw(
         &self,
         receipt: &lash_core::facade_support::SessionCommandReceipt,
@@ -1098,11 +1098,11 @@ use host_commands::{HostPluginOperation, SubmittedCommand, unsettled_command_err
 /// What withdrawing a submitted session command did (FIG-4202).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionCommandWithdrawal {
-    /// No drive had admitted the command: it is withdrawn, transactionally,
+    /// No shift had admitted the command: it is withdrawn, transactionally,
     /// and never applies.
     Withdrawn,
-    /// A drive already read the command, or it already settled: the
-    /// withdrawal lost the race, and the command settles as that drive
+    /// A shift already read the command, or it already settled: the
+    /// withdrawal lost the race, and the command settles as that execute
     /// applies it.
     AlreadyAdmitted,
 }
@@ -1135,13 +1135,13 @@ impl SessionStateAdmin {
     /// settlement (FIG-4202).
     ///
     /// The session's bound turn owns its head, so the append is a session
-    /// command its drive applies at the next turn boundary, after everything
+    /// command its shift applies at the next turn boundary, after everything
     /// a running turn commits. The request's `operation_id` is its
     /// idempotency key. It answers
     /// [`StaleBranch`](lash_core::AppendSessionNodesOutcome::StaleBranch)
     /// when its required ancestor left the active path, and a
     /// [`SessionError::SessionCommandPending`](crate::support::SessionError::SessionCommandPending)
-    /// with its receipt when the drive has not applied it by the settlement
+    /// with its receipt when the shift has not applied it by the settlement
     /// deadline; the append stays durable and applies later.
     pub async fn append_session_nodes(
         &self,
@@ -1152,7 +1152,7 @@ impl SessionStateAdmin {
 
     /// Open `request`'s frame durably and await the open's settlement
     /// (FIG-4202): a session command, keyed by `idempotency_key`, that the
-    /// session's drive opens and commits at the next turn boundary,
+    /// session's shift opens and commits at the next turn boundary,
     /// restarting its live interpreter from the frame's seed. A refused open
     /// answers its typed runtime error.
     pub async fn open_agent_frame(
@@ -1284,9 +1284,9 @@ impl PluginOperations {
 
     /// Invokes a typed task operation with cancellation support.
     ///
-    /// Firing `cancellation_token` withdraws a task no drive has admitted,
-    /// and cancels one a drive is running through its cancel signal: either
-    /// answers [`SessionError::SessionCommandCancelled`], unless the drive
+    /// Firing `cancellation_token` withdraws a task no shift has admitted,
+    /// and cancels one a shift is running through its cancel signal: either
+    /// answers [`SessionError::SessionCommandCancelled`], unless the shift
     /// already found the task's code returned and it settles with its own
     /// outcome (FIG-4391, FIG-4453).
     pub async fn run_task_with_cancel<Op: lash_core::facade_support::PluginTask>(
@@ -1319,9 +1319,9 @@ impl PluginOperations {
 
     /// Invokes a raw task operation with cancellation support.
     ///
-    /// Firing `cancellation_token` withdraws a task no drive has admitted,
-    /// and cancels one a drive is running through its cancel signal: either
-    /// answers [`SessionError::SessionCommandCancelled`], unless the drive
+    /// Firing `cancellation_token` withdraws a task no shift has admitted,
+    /// and cancels one a shift is running through its cancel signal: either
+    /// answers [`SessionError::SessionCommandCancelled`], unless the shift
     /// already found the task's code returned and it settles with its own
     /// outcome (FIG-4391, FIG-4453).
     pub async fn run_task_raw_with_cancel(

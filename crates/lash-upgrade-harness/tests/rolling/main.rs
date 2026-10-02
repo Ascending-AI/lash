@@ -49,12 +49,12 @@ const ARTIFACT_DIR_ENV: &str = "LASH_E2E_ROLLING_ARTIFACT_DIR";
 struct StepRecord {
     case: String,
     step: &'static str,
-    /// The build that must have driven the turn; `None` while both serve.
+    /// The build that must have executed the turn; `None` while both serve.
     expected_driver: Option<BuildLabel>,
     report: TurnReport,
 }
 
-/// One turn, checked to have been driven by `driver` when only one build
+/// One turn, checked to have been executed by `driver` when only one build
 /// serves.
 fn turn(
     steps: &mut Vec<StepRecord>,
@@ -186,7 +186,7 @@ fn roll_postgres(steps: &mut Vec<StepRecord>, builds: &NodeBuilds, case: &Case) 
         Some((n, &n_generation)),
     )?;
 
-    // half roll: N+1 serves beside N. Which build drives each host's turn
+    // half roll: N+1 serves beside N. Which build executes each host's turn
     // depends on Restate's routing between the two deployments, so only the
     // answer is checked. The forward drain of N's generation starts.
     operator_next.run("migrate", None)?;

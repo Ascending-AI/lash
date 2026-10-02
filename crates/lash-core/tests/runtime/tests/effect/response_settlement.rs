@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_e215;
 
@@ -230,7 +230,7 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut turn = Box::pin(runtime.drive_turn(
+    let mut turn = Box::pin(runtime.execute_turn(
         TurnInput::text("run the first cell"),
         lash_core::facade_support::TurnOptions::new(
             CancellationToken::new(),
@@ -308,7 +308,7 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         ))
         .await
         .expect("open the scope's handler");
-    let mut first = Box::pin(runtime.drive_turn(
+    let mut first = Box::pin(runtime.execute_turn(
         TurnInput::text("abort the first cell handoff"),
         lash_core::facade_support::TurnOptions::new(
             CancellationToken::new(),
@@ -345,7 +345,7 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         .await
         .expect("open the scope's handler");
     let second = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("run the next cell"),
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),

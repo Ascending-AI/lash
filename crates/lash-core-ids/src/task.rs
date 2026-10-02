@@ -4,8 +4,8 @@ use std::future::Future;
 
 use tracing::Instrument as _;
 
-/// The handle types a [`spawn`]ed task is driven through, re-exported so the
-/// drive names this guarded spawn's task surface rather than `tokio::task`.
+/// The handle types a [`spawn`]ed task is executed through, re-exported so the
+/// shift names this guarded spawn's task surface rather than `tokio::task`.
 pub use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
 #[allow(

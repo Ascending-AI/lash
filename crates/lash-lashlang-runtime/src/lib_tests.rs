@@ -264,7 +264,7 @@ impl DoubleProcessHarness {
             .expect("deliver the harness process");
         assert_eq!(
             verdict,
-            lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+            lash_core::runtime::shift::relay::RelayVerdict::Delivered,
             "the armed start delivers: {verdict:?}"
         );
     }

@@ -504,7 +504,7 @@ impl RuntimeCheckpointComponents {
             if self.execution_state_body_residency
                 == ExecutionStateBodyResidency::DiscardedPostCommit
             {
-                // A released root is never "no execution" (FIG-2521): the
+                // A released run is never "no execution" (FIG-2521): the
                 // durable head must be hydrated instead. Only a set with no
                 // root entry at all never held execution.
                 if self
@@ -574,7 +574,7 @@ impl RuntimeCheckpointComponents {
         // the accepted execution itself (FIG-2521): they stay in place, the
         // residency proof is untouched, and only the tool and plugin snapshots
         // — re-exported from the live plugins — are released. A set without a
-        // root holds no execution to keep and is released like any other.
+        // run holds no execution to keep and is released like any other.
         if retention == AcceptedExecutionRetention::Resident
             && self.execution_state_snapshot().is_some()
         {
@@ -629,36 +629,36 @@ pub struct RuntimeSessionAuthority {
     #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,
     /// The session's recorded plugin configuration (FIG-4379), as the
-    /// installed config view states it: the head's, or a running root's
+    /// installed config view states it: the head's, or a running run's
     /// admitted view. Every plugin session built for this state reads it.
     #[serde(default, skip_serializing_if = "crate::PluginConfig::is_empty")]
     pub plugin_config: crate::PluginConfig,
-    /// The recorded view of the root the state is running or last ran,
+    /// The recorded view of the run the state is running or last ran,
     /// while it is installed. Written only by
-    /// [`RuntimeSessionState::install_root_view`] and
-    /// [`RuntimeSessionState::take_root_view`], so the resident config is
+    /// [`RuntimeSessionState::install_run_view`] and
+    /// [`RuntimeSessionState::take_run_view`], so the resident config is
     /// the view's exactly while this is set. Boxed under `authority` so
     /// carrying it costs resident state nothing.
     #[serde(skip)]
-    root_view: Option<Box<InstalledRootView>>,
+    run_view: Option<Box<InstalledRunView>>,
 }
 
 impl RuntimeSessionAuthority {
-    /// The installed root view, when one is.
-    pub fn root_view(&self) -> Option<&InstalledRootView> {
-        self.root_view.as_deref()
+    /// The installed run view, when one is.
+    pub fn run_view(&self) -> Option<&InstalledRunView> {
+        self.run_view.as_deref()
     }
 }
 
-/// A root's recorded view, installed over the session's sticky config
+/// A run's recorded view, installed over the session's sticky config
 /// (FIG-3838): the resident config is `run`'s while it is installed, and
 /// `sticky` again once it is taken.
 #[derive(Clone, Debug)]
-pub struct InstalledRootView {
+pub struct InstalledRunView {
     /// The session's sticky config under the view: what a commit writes to
     /// the head, and what uninstalling the view restores.
     pub sticky: crate::PersistedSessionConfig,
-    /// The root's recorded shape: the snapshot it was admitted under, the
+    /// The run's recorded shape: the snapshot it was admitted under, the
     /// config and renderer it runs under, its termination policy, and the
     /// record a frame switch puts on the follow-on its commit owes
     /// (FIG-3877).
@@ -1053,7 +1053,7 @@ impl RuntimeSessionState {
     /// the next commit references them as unchanged. A leaf the resident set
     /// holds — durably, or as a body still waiting for its first commit —
     /// keeps exactly that bookkeeping; only a leaf the set never held is
-    /// staged with its body. The root is staged as changed: a capture may
+    /// staged with its body. The run is staged as changed: a capture may
     /// carry appended seed globals the durable root does not.
     pub fn stage_restored_execution_state(
         &mut self,
@@ -1157,13 +1157,13 @@ impl RuntimeSessionState {
             self.set_plugin_state(Some(capture(plugins)?));
         }
         // The config a commit writes is the recorded one too (FIG-4747): the
-        // sticky config under a root view and the view the state runs under
+        // sticky config under a run view and the view the state runs under
         // are written in the formats the source's admission recorded, never
         // in the native format a load decoded them to.
         if let Some(config) = plugins.committed_plugin_config(&self.authority.plugin_config)? {
             self.authority.plugin_config = config;
         }
-        if let Some(view) = self.authority.root_view.as_deref_mut()
+        if let Some(view) = self.authority.run_view.as_deref_mut()
             && let Some(config) = plugins.committed_plugin_config(&view.sticky.plugin_config)?
         {
             view.sticky.plugin_config = config;
@@ -1197,12 +1197,12 @@ impl RuntimeSessionState {
     }
 
     /// The plugin configuration the installed config view runs under, at the
-    /// revision it was admitted under (FIG-4379): inside a root, the root's
+    /// revision it was admitted under (FIG-4379): inside a run, the run's
     /// recorded admission; otherwise the head's.
     pub fn admitted_plugin_config(&self) -> crate::AdmittedPluginConfig {
         let revision = self
             .authority
-            .root_view()
+            .run_view()
             .map_or(self.config_revision, |view| view.run.base.config_revision);
         crate::AdmittedPluginConfig::new(self.authority.plugin_config.clone(), revision)
     }
@@ -1406,12 +1406,12 @@ pub mod facade_ops {
                 fallback_policy.clone()
             };
             // The process captures the configuration its creator runs under:
-            // a running root's admitted view, or the head's (FIG-4379).
+            // a running run's admitted view, or the head's (FIG-4379).
             let mut spec =
                 crate::ProcessExecutionEnvSpec::new(self.admitted_plugin_config(), policy);
             spec.render = self
                 .authority
-                .root_view()
+                .run_view()
                 .and_then(|view| view.run.render.clone());
             spec
         }
@@ -1422,7 +1422,7 @@ pub mod facade_ops {
 mod tests;
 
 /// Adopt a durable session config onto resident state: the one config→state
-/// mapping, shared by head adoption and by a root's recorded turn config
+/// mapping, shared by head adoption and by a run's recorded turn config
 /// (FIG-3600 S6, D3 §2.1). The durable config wins for every fact it
 /// carries, the execution controls included (FIG-4376); a `None`
 /// protocol-turn-options value (a head written before the field existed)
@@ -1438,11 +1438,11 @@ pub fn adopt_session_config(
 }
 
 impl RuntimeSessionState {
-    /// Install a root's recorded [`ResolvedRun`](crate::run_spec::ResolvedRun)
-    /// as the root view: its config becomes the execution view, and the
+    /// Install a run's recorded [`ResolvedRun`](crate::run_spec::ResolvedRun)
+    /// as the run view: its config becomes the execution view, and the
     /// sticky config under it stays what commits write. Installed over
-    /// another root's view, it keeps that view's sticky config.
-    pub fn install_root_view(&mut self, resolved: &crate::run_spec::ResolvedRun) {
+    /// another run's view, it keeps that view's sticky config.
+    pub fn install_run_view(&mut self, resolved: &crate::run_spec::ResolvedRun) {
         let sticky = crate::store::persisted_session_config_from_state(self);
         adopt_session_config(self, resolved.config());
         // An eagerly materialized initial frame still carries the
@@ -1450,18 +1450,18 @@ impl RuntimeSessionState {
         // the first commit opens the same frame a replay materializes
         // (FIG-3877).
         self.open_unpersisted_initial_frame_under_current_assignment();
-        self.authority.root_view = Some(Box::new(InstalledRootView {
+        self.authority.run_view = Some(Box::new(InstalledRunView {
             sticky,
             run: resolved.clone(),
         }));
     }
 
-    /// Uninstall the root view and restore the sticky config under it: the
+    /// Uninstall the run view and restore the sticky config under it: the
     /// resident config is the session's again, so nothing resolved or
-    /// published over this state afterwards reads a root's overrides. `None`
+    /// published over this state afterwards reads a run's overrides. `None`
     /// when no view is installed.
-    pub fn take_root_view(&mut self) -> Option<Box<InstalledRootView>> {
-        let view = self.authority.root_view.take()?;
+    pub fn take_run_view(&mut self) -> Option<Box<InstalledRunView>> {
+        let view = self.authority.run_view.take()?;
         adopt_session_config(self, &view.sticky);
         Some(view)
     }
@@ -1600,9 +1600,9 @@ pub fn adopt_durable_head(
     };
     state.checkpoint_ref = checkpoint_ref;
     state.head_revision = head_revision;
-    // The head wins for every fact it carries: a root view's sticky config
+    // The head wins for every fact it carries: a run view's sticky config
     // is superseded with the view.
-    state.authority.root_view = None;
+    state.authority.run_view = None;
     adopt_session_config(state, &config);
     // The config is adopted before the checkpoint restore, so a
     // checkpointless graph's initial frame captures it.

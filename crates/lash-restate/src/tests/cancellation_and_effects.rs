@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 #[tokio::test]
 pub(super) async fn execute_await_event_forwards_the_invocation_replay_key() {
@@ -1033,7 +1033,7 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
 }
 
 /// FIG-430: durable acceptance is final once the pending-input row commits.
-/// The drive the enqueue schedules is a separate, fire-and-forget ask: an
+/// The shift the enqueue schedules is a separate, fire-and-forget ask: an
 /// engine that cannot be reached leaves the row pending for the reconcile
 /// pass, and never turns the committed enqueue into an error.
 #[tokio::test]
@@ -1046,7 +1046,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         .build()
         .into_handle();
     // A Restate engine whose ingress nothing listens on: the enqueue
-    // commits, then the drive's send fails.
+    // commits, then the shift's send fails.
     let backend = Arc::new(crate::RestateEngine::new(
         Arc::new(
             lash_sqlite_store::SqliteStoreSet::open(dir.path().join("sessions"))
@@ -1260,7 +1260,7 @@ pub(super) async fn run_restate_replay_turn(
         .scoped_effect_controller(durable_admission(&durable_turn_scope(session_id, turn_id)))
         .expect("scoped restate controller");
     runtime
-        .drive_turn(
+        .execute_turn(
             replay_test_input(turn_id),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -1273,7 +1273,7 @@ pub(super) async fn run_restate_replay_turn(
 
 /// A process body parked on `waitSignal` observes no turn: its wait races the
 /// segment's durable cancel promise, and the recorded race is the only thing
-/// that ends it (FIG-3673). The execution's lent stop is not a drive input, so
+/// that ends it (FIG-3673). The execution's lent stop is not a shift input, so
 /// firing it leaves the wait parked; committing the cancel ends it cancelled.
 #[tokio::test]
 pub(super) async fn a_process_parked_on_a_signal_is_cancelled_by_its_durable_race() {

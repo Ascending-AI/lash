@@ -84,7 +84,7 @@ fn two_key_registry(
 
 /// The core's models across a redeploy on one engine: the creating
 /// deployment's registry until [`redeploy`](Self::redeploy), the redeployed
-/// one's after. A crash listener redeploys between a root's dead attempt and
+/// one's after. A crash listener redeploys between a run's dead attempt and
 /// its redrive, as a restarted worker comes back with the new build's
 /// registry.
 struct RedeployableLlmProfiles {
@@ -126,10 +126,10 @@ impl lash_core::LlmProfiles for RedeployableLlmProfiles {
 /// Two sessions on one engine run under two model keys whose request
 /// defaults differ in every field, the capture allowlists included
 /// (FIG-4567). Each session's calls carry the defaults its own binding
-/// recorded, and keep carrying them across a redrive: a root whose attempt
+/// recorded, and keep carrying them across a redrive: a run whose attempt
 /// dies under its model call is redriven after the deployment's registry
 /// changed to serve each key with the other key's defaults, and makes the
-/// call again with the defaults its session recorded. So does every root the
+/// call again with the defaults its session recorded. So does every run the
 /// session runs afterwards.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_across_a_redrive()
@@ -137,7 +137,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
     let double = restate_double(0x4567_0001).await;
     let served: Served = Arc::default();
     // The provider kills the attempt that makes a call it is told to: the
-    // root's handler dies before the call's result is journaled, so its
+    // run's handler dies before the call's result is journaled, so its
     // redrive makes the call again.
     let dies_under_its_call = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let provider = {
@@ -149,7 +149,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
             .complete(move |request| {
                 let served = Arc::clone(&served);
                 if dies_under_its_call.swap(false, Ordering::SeqCst) {
-                    double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
+                    double.crash_run_execution(lash_restate_test::CrashPoint::BeforeRunResult {
                         name: None,
                     });
                 }
@@ -211,7 +211,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
             .await?;
     }
     assert_every_call_carries_its_own(1, "under the creating registry");
-    // Each session's next root dies under its model call and is redriven.
+    // Each session's next run dies under its model call and is redriven.
     // The first death redeploys the registry, so the first session's redrive
     // and both of the second session's attempts run under the redeployed one.
     for (redriven, (id, _, _)) in recorded.iter().enumerate() {
@@ -225,7 +225,7 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
         assert_eq!(
             double.server().stats().crashes,
             redriven as u64 + 1,
-            "{id}: the root's first attempt died under its model call"
+            "{id}: the run's first attempt died under its model call"
         );
         assert_eq!(
             requests_of(&served, id).len(),

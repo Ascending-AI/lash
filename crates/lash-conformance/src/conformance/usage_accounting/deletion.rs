@@ -66,7 +66,7 @@ pub async fn session_delete_drains_accounting_first(tier: &UsageAccountingTier) 
         {
             assert_eq!(
                 usage.completeness.open_runs, 1,
-                "the mid-call child has one open run"
+                "the mid-call child has one open meter"
             );
             break;
         }
@@ -89,19 +89,19 @@ pub async fn session_delete_drains_accounting_first(tier: &UsageAccountingTier) 
         1,
         "the settled opener call survives physical deletion"
     );
-    let runs = accounting
-        .load_usage_run_page(
+    let meters = accounting
+        .load_usage_meter_page(
             &world.owner(),
-            crate::UsageRunFilter::Unresolved,
+            crate::UsageMeterFilter::Unresolved,
             None,
             std::num::NonZeroU32::new(10).expect("nonzero"),
         )
         .await
         .expect("read the child's liability");
-    assert_eq!(runs.runs.len(), 1);
+    assert_eq!(meters.meters.len(), 1);
     assert_eq!(
-        runs.runs[0].state.outcome(),
-        Some(&crate::UsageRunOutcome::Unknown(
+        meters.meters[0].state.outcome(),
+        Some(&crate::UsageMeterOutcome::Unknown(
             crate::UsageUnknownReason::OwnerRetired
         ))
     );

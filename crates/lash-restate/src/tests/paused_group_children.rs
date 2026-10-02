@@ -1,10 +1,10 @@
-//! Paused children of root-opened effect groups (FIG-4630), against the same
+//! Paused children of run-opened effect groups (FIG-4630), against the same
 //! handlers on the double and a live server.
 //!
 //! A group child runs in an invocation of its own. When the engine stops
 //! retrying it, what happens to it follows what its group still needs:
 //!
-//! - a child whose position is not seated parks the root its group runs for,
+//! - a child whose position is not seated parks the run its group runs for,
 //!   and the park records the child's invocation, in every phase of the
 //!   group: a `RunToCompletion` loser of a closed group keeps its scope live
 //!   until it settles;
@@ -14,14 +14,14 @@
 //! - a redrive resumes exactly the children its park recorded, and reads
 //!   nothing else.
 //!
-//! Each law opens its groups at the index, as a root's controller does, with
+//! Each law opens its groups at the index, as a run's controller does, with
 //! a timer child no executor routes: its attempts fail until the engine
 //! pauses it. Routing the timer is what an operator's fix is.
 use super::effect_group_conformance::{
     HarnessServer, LiveConformanceHarness, await_group_wait, index_state, overwrite_index_state,
     replace_index_state, witness_dispatch_route, witness_key, witness_membership,
 };
-use super::root_control_witnesses::{attach_whole_drive, recorded_admission};
+use super::run_control_witnesses::{attach_whole_shift, recorded_admission};
 use crate::effect_group::{
     EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupCommitChildRequest,
     EffectGroupCommitChildResponse, EffectGroupCommittedFinal, EffectGroupDispatchRequest,
@@ -35,7 +35,7 @@ use lash_core::store::*;
 use lash_core::{
     EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, SessionDriver, SessionId, SessionWorkEngine,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, SessionId, SessionShifts, SessionWorkEngine,
     TurnId,
 };
 use std::num::NonZeroUsize;
@@ -79,21 +79,21 @@ impl GroupExecutors for LawExecutors {
     }
 }
 
-/// The deployment's session driver. A law is its roots' controller: it opens
-/// their groups at the index itself, so the driver admits no root and a
-/// drive of a law's session ends idle.
+/// The deployment's `SessionShifts`. A law is its runs' controller: it opens
+/// their groups at the index itself, so the driver admits no run and a
+/// shift of a law's session ends idle.
 struct LawDriver;
 
 #[async_trait::async_trait]
-impl SessionDriver for LawDriver {
+impl SessionShifts for LawDriver {
     async fn admit(
         &self,
         controller: lash_core::ScopedEffectController<'_>,
-        request: &DriveRequest,
+        request: &ShiftRequest,
         admitting_generation: &BuildGeneration,
         ordinal: u32,
         _draining: Option<&BuildGeneration>,
-    ) -> Result<AdmitVerdict, DriveAbort> {
+    ) -> Result<AdmitVerdict, ShiftAbort> {
         recorded_admission(
             &controller,
             request,
@@ -104,25 +104,25 @@ impl SessionDriver for LawDriver {
         .await
     }
 
-    async fn run_root(
+    async fn execute_run(
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
         _admitted: Admitted,
-    ) -> RootRunEnd {
-        unreachable!("the law's driver admits no root")
+    ) -> RunEnd {
+        unreachable!("the law's driver admits no run")
     }
 
-    async fn close_root(
+    async fn close_run(
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
         _session: &SessionId,
-        _root: &TurnId,
-    ) -> Result<(), DriveAbort> {
-        unreachable!("the law's driver admits no root")
+        _run: &TurnId,
+    ) -> Result<(), ShiftAbort> {
+        unreachable!("the law's driver admits no run")
     }
 }
 
-/// One group a law's root opened, and its paused timer child.
+/// One group a law's run opened, and its paused timer child.
 struct Group {
     key: String,
     /// The paused timer child's invocation.
@@ -135,7 +135,7 @@ struct Law {
     work: crate::RestateSessionWork,
     /// The engine's installation of the [`LawDriver`], kept for the law's
     /// life.
-    _driver: Arc<dyn SessionDriver>,
+    _driver: Arc<dyn SessionShifts>,
     factory: Arc<dyn lash_core::DeploymentStore>,
     ingress: crate::RestateIngressClient,
     admin: crate::RestateAdminClient,
@@ -149,7 +149,7 @@ impl Law {
         let work = harness.session_work();
         Self {
             executors,
-            _driver: work.install_session_driver(Arc::new(LawDriver)),
+            _driver: work.install_session_shifts(Arc::new(LawDriver)),
             work,
             factory: harness.law_stores().session_store_factory(),
             ingress: harness.ingress(),
@@ -168,8 +168,8 @@ impl Law {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    /// A live session holding one accepted input per root in `roots`.
-    async fn session(&self, label: &str, roots: &[&str]) -> SessionId {
+    /// A live session holding one accepted input per run in `runs`.
+    async fn session(&self, label: &str, runs: &[&str]) -> SessionId {
         let session = SessionId::fixture(format!(
             "paused-children-{label}-{}",
             self.harness.run_nonce()
@@ -187,36 +187,36 @@ impl Law {
         )
         .await
         .expect("create the session");
-        for root in roots {
+        for run in runs {
             let input = store
                 .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
                     session.clone(),
                     lash_core::TurnInputIngress::next_turn(),
-                    lash_core::TurnInput::text(*root),
+                    lash_core::TurnInput::text(*run),
                 ))
                 .await
-                .expect("accept the root's input")
+                .expect("accept the run's input")
                 .input_id;
             store
-                .bind_root_inputs(&TurnId::fixture(*root), std::slice::from_ref(&input))
+                .bind_run_inputs(&TurnId::fixture(*run), std::slice::from_ref(&input))
                 .await
-                .expect("bind the input to its root");
+                .expect("bind the input to its run");
         }
         session
     }
 
-    /// Open and dispatch a `RunToCompletion` group for root `root` of
+    /// Open and dispatch a `RunToCompletion` group for run `run` of
     /// `session`: an atomic winner first when `winner`, then a timer child no
     /// executor routes. Returns once the engine paused the timer child.
     async fn group_with_paused_timer(
         &self,
         label: &str,
         session: &SessionId,
-        root: &str,
+        run: &str,
         winner: bool,
     ) -> Group {
         let key = witness_key(label);
-        let scope = ExecutionScope::turn(session.clone(), TurnId::fixture(root));
+        let scope = ExecutionScope::turn(session.clone(), TurnId::fixture(run));
         let child = |position: usize, command| {
             RuntimeEffectEnvelope::new(
                 RuntimeEffectInvocation::new(
@@ -259,7 +259,7 @@ impl Law {
                             .collect(),
                         opener: lash_core::AdmittedScope::turn(
                             session.clone(),
-                            TurnId::fixture(root.to_string()),
+                            TurnId::fixture(run.to_string()),
                         ),
                     },
                     membership: witness_membership(&children),
@@ -375,7 +375,7 @@ impl Law {
     /// One whole park-reconcile pass: every page of the engine's listing.
     async fn reconcile(&self) -> ParkReconcileReport {
         let clock = lash_core::facade_support::SystemClock;
-        let writer = lash_core::drive::StoreParkRecovery::new(self.factory.as_ref(), &clock);
+        let writer = lash_core::shift::StoreParkRecovery::new(self.factory.as_ref(), &clock);
         let mut whole = ParkReconcileReport::default();
         let mut after = None;
         loop {
@@ -432,23 +432,23 @@ impl Law {
     }
 
     /// Record `verb` on `park` and deliver its engine half.
-    async fn verb(&self, park: &TurnPark, verb: RootVerb) -> ControlIntentState {
+    async fn verb(&self, park: &TurnPark, verb: RunVerb) -> ControlIntentState {
         self.deliver(park, verb).await.1
     }
 
-    /// [`Self::verb`], also answering the drive its intent asks the session
+    /// [`Self::verb`], also answering the shift its intent asks the session
     /// for.
     async fn deliver(
         &self,
         park: &TurnPark,
-        verb: RootVerb,
-    ) -> (DriveRequestId, ControlIntentState) {
+        verb: RunVerb,
+    ) -> (ShiftRequestId, ControlIntentState) {
         let intent = self
             .factory
-            .open_root_intent(
-                &RootIntentRequest {
+            .open_run_intent(
+                &RunIntentRequest {
                     session_id: park.session_id.clone(),
-                    root: park.turn_id.clone(),
+                    run: park.turn_id.clone(),
                     park: park.park_id,
                     verb,
                 },
@@ -457,14 +457,14 @@ impl Law {
             .await
             .expect("the store takes the verb");
         let scopes: Arc<dyn ScopeCloseSink> = Arc::new(NoScopeClose);
-        let scope_close = Arc::new(lash_core::drive::ScopeCloseRelay::new(
+        let scope_close = Arc::new(lash_core::shift::ScopeCloseRelay::new(
             self.harness
                 .law_stores()
                 .obligation_ledger(ObligationKind::ScopeClose),
             Arc::clone(&self.factory),
             Arc::clone(&scopes),
         ));
-        let state = lash_core::drive::ControlIntentRelay::new(
+        let state = lash_core::shift::ControlIntentRelay::new(
             self.harness
                 .law_stores()
                 .obligation_ledger(ObligationKind::ControlIntent),
@@ -477,20 +477,20 @@ impl Law {
         .deliver_intent(&intent)
         .await
         .expect("deliver the verb's engine half");
-        (lash_core::drive::intent_drive_request(intent.id), state)
+        (lash_core::shift::intent_shift_request(intent.id), state)
     }
 
-    /// How `request`'s drive of `session` stopped.
-    async fn drive_stop(&self, session: &SessionId, request: DriveRequestId) -> DriveStop {
-        let attach = attach_whole_drive(&self.work, session, request);
+    /// How `request`'s shift of `session` stopped.
+    async fn drive_stop(&self, session: &SessionId, request: ShiftRequestId) -> ShiftStop {
+        let attach = attach_whole_shift(&self.work, session, request);
         tokio::pin!(attach);
         for _ in 0..3_000 {
             tokio::select! {
-                outcome = &mut attach => return outcome.expect("the drive answers").stop,
+                outcome = &mut attach => return outcome.expect("the shift answers").stop,
                 () = self.tick() => {}
             }
         }
-        panic!("the drive of {session} did not end");
+        panic!("the shift of {session} did not end");
     }
 
     fn handles(invocations: &[&str]) -> Vec<EnginePark> {
@@ -500,16 +500,16 @@ impl Law {
 
 /// A `RunToCompletion` loser the engine paused after its group closed still
 /// has to settle: until it does its group counts an unsettled child, which
-/// keeps the opener's scope live. It parks the root its group runs for, the
+/// keeps the opener's scope live. It parks the run its group runs for, the
 /// park's redrive resumes it, and once it settled the group retires.
 ///
 /// Red before FIG-4630: a closed group answered `Released` for every child,
 /// so the pass left the loser paused and unparked for good.
 async fn paused_loser(server: HarnessServer) {
     let law = Law::start(server).await;
-    let session = law.session("loser", &["root"]).await;
+    let session = law.session("loser", &["run"]).await;
     let group = law
-        .group_with_paused_timer("closed-loser", &session, "root", true)
+        .group_with_paused_timer("closed-loser", &session, "run", true)
         .await;
     law.close(&group, LoserPolicy::RunToCompletion).await;
     assert_eq!(
@@ -519,21 +519,21 @@ async fn paused_loser(server: HarnessServer) {
     );
 
     let report = law.reconcile().await;
-    let target = ParkTarget::RootChild {
+    let target = ParkTarget::RunChild {
         session: session.clone(),
-        root: TurnId::from("root"),
+        run: TurnId::from("run"),
     };
     assert!(
         report.parked.contains(&target),
-        "the paused loser parks the root that owns its drain: {report:?}"
+        "the paused loser parks the run that owns its drain: {report:?}"
     );
-    let park = law.park(&session).await.expect("the root is parked");
-    assert_eq!(park.turn_id, TurnId::from("root"));
+    let park = law.park(&session).await.expect("the run is parked");
+    assert_eq!(park.turn_id, TurnId::from("run"));
     assert!(matches!(
         park.reason,
         ParkReason::EngineRetryExhausted { .. }
     ));
-    assert_eq!(park.engine, None, "the root's own execution is not stopped");
+    assert_eq!(park.engine, None, "the run's own execution is not stopped");
     assert_eq!(park.children, Law::handles(&[&group.paused]));
     assert!(law.is_paused(&group.paused).await);
     let again = law.reconcile().await;
@@ -545,7 +545,7 @@ async fn paused_loser(server: HarnessServer) {
 
     law.executors.timers_routed.store(true, Ordering::SeqCst);
     assert!(matches!(
-        law.verb(&park, RootVerb::Redrive).await,
+        law.verb(&park, RunVerb::Redrive).await,
         ControlIntentState::Acknowledged { .. }
     ));
     law.await_settled(&group).await;
@@ -569,13 +569,13 @@ async fn paused_loser(server: HarnessServer) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_paused_loser_of_a_closed_group_parks_its_root_resumes_and_lets_the_group_retire() {
+async fn a_paused_loser_of_a_closed_group_parks_its_run_resumes_and_lets_the_group_retire() {
     paused_loser(HarnessServer::in_process()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires the pinned live Restate server"]
-async fn live_a_paused_loser_of_a_closed_group_parks_its_root_resumes_and_lets_the_group_retire() {
+async fn live_a_paused_loser_of_a_closed_group_parks_its_run_resumes_and_lets_the_group_retire() {
     paused_loser(HarnessServer::Live).await;
 }
 
@@ -587,12 +587,12 @@ async fn live_a_paused_loser_of_a_closed_group_parks_its_root_resumes_and_lets_t
 /// The pass releases the invocation and parks nobody.
 ///
 /// Red before FIG-4630: an open group answered that its opener waits on
-/// every child, so the pass parked the root for a child whose seat was taken.
+/// every child, so the pass parked the run for a child whose seat was taken.
 async fn seated_child(server: HarnessServer) {
     let law = Law::start(server).await;
-    let session = law.session("seated", &["root"]).await;
+    let session = law.session("seated", &["run"]).await;
     let group = law
-        .group_with_paused_timer("seated", &session, "root", true)
+        .group_with_paused_timer("seated", &session, "run", true)
         .await;
     let committed: EffectGroupCommitChildResponse = law
         .ingress
@@ -638,7 +638,7 @@ async fn seated_child(server: HarnessServer) {
     assert!(
         !report.parked.iter().any(|target| matches!(
             target,
-            ParkTarget::RootChild { session: parked, .. } if *parked == session
+            ParkTarget::RunChild { session: parked, .. } if *parked == session
         )),
         "a seated child parks nobody: {report:?}"
     );
@@ -673,10 +673,10 @@ async fn live_a_paused_child_of_a_seated_position_is_released() {
 }
 
 /// A redrive resumes the children its park recorded and nothing else. A
-/// child of the same root that paused after the pass is not the park's yet,
+/// child of the same run that paused after the pass is not the park's yet,
 /// and an unrelated group whose index cannot be read is never asked: neither
 /// is resumed, and neither fails the redrive. Once its index is repaired the
-/// unrelated group is the next pass's: the pass parks its own root, and that
+/// unrelated group is the next pass's: the pass parks its own run, and that
 /// park's redrive settles it.
 ///
 /// Red before FIG-4630: the redrive listed every paused child of the
@@ -684,13 +684,13 @@ async fn live_a_paused_child_of_a_seated_position_is_released() {
 /// group refused it.
 async fn recorded_children(server: HarnessServer) {
     let law = Law::start(server).await;
-    let session = law.session("recorded", &["root"]).await;
+    let session = law.session("recorded", &["run"]).await;
     let recorded = law
-        .group_with_paused_timer("recorded", &session, "root", false)
+        .group_with_paused_timer("recorded", &session, "run", false)
         .await;
-    let other_session = law.session("unrelated", &["root"]).await;
+    let other_session = law.session("unrelated", &["run"]).await;
     let unrelated = law
-        .group_with_paused_timer("unrelated", &other_session, "root", false)
+        .group_with_paused_timer("unrelated", &other_session, "run", false)
         .await;
     let retained = index_state(law.harness.harness_admin(), &unrelated.key).await;
     overwrite_index_state(
@@ -708,18 +708,18 @@ async fn recorded_children(server: HarnessServer) {
             .any(|(cursor, _)| cursor.as_str() == unrelated.paused),
         "the unreadable group's child cannot be settled: {report:?}"
     );
-    let park = law.park(&session).await.expect("the root is parked");
+    let park = law.park(&session).await.expect("the run is parked");
     assert_eq!(park.children, Law::handles(&[&recorded.paused]));
     assert_eq!(law.park(&other_session).await, None);
-    // The same root opens another group whose child pauses after the pass.
+    // The same run opens another group whose child pauses after the pass.
     let later = law
-        .group_with_paused_timer("later", &session, "root", false)
+        .group_with_paused_timer("later", &session, "run", false)
         .await;
 
     law.executors.timers_routed.store(true, Ordering::SeqCst);
     assert!(
         matches!(
-            law.verb(&park, RootVerb::Redrive).await,
+            law.verb(&park, RunVerb::Redrive).await,
             ControlIntentState::Acknowledged { .. }
         ),
         "an unreadable unrelated group never refuses the redrive"
@@ -735,10 +735,10 @@ async fn recorded_children(server: HarnessServer) {
     assert_eq!(law.unsettled(&later).await, 1);
 
     // The next pass finds the later child still stopped behind the settled
-    // redrive, and re-parks the root with it.
+    // redrive, and re-parks the run with it.
     let next = law.reconcile().await;
     assert_eq!(next.attached, 1, "{next:?}");
-    let reparked = law.park(&session).await.expect("the root is parked again");
+    let reparked = law.park(&session).await.expect("the run is parked again");
     assert_eq!(reparked.park_id, park.park_id);
     assert_eq!(reparked.resume_intent, None);
     assert_eq!(
@@ -746,31 +746,31 @@ async fn recorded_children(server: HarnessServer) {
         Law::handles(&[&recorded.paused, &later.paused])
     );
     assert!(matches!(
-        law.verb(&reparked, RootVerb::Redrive).await,
+        law.verb(&reparked, RunVerb::Redrive).await,
         ControlIntentState::Acknowledged { .. }
     ));
     law.await_settled(&later).await;
     assert!(law.is_paused(&unrelated.paused).await);
 
     // The unrelated index is repaired. The next pass reads it and parks its
-    // root with the child no redrive touched, and that root's redrive
+    // run with the child no redrive touched, and that run's redrive
     // settles the child.
     replace_index_state(law.harness.harness_admin(), &unrelated.key, retained).await;
     let repaired = law.reconcile().await;
     assert!(
-        repaired.parked.contains(&ParkTarget::RootChild {
+        repaired.parked.contains(&ParkTarget::RunChild {
             session: other_session.clone(),
-            root: TurnId::from("root"),
+            run: TurnId::from("run"),
         }),
-        "the repaired group's paused child parks its own root: {repaired:?}"
+        "the repaired group's paused child parks its own run: {repaired:?}"
     );
     let unrelated_park = law
         .park(&other_session)
         .await
-        .expect("the unrelated root is parked");
+        .expect("the unrelated run is parked");
     assert_eq!(unrelated_park.children, Law::handles(&[&unrelated.paused]));
     assert!(matches!(
-        law.verb(&unrelated_park, RootVerb::Redrive).await,
+        law.verb(&unrelated_park, RunVerb::Redrive).await,
         ControlIntentState::Acknowledged { .. }
     ));
     law.await_settled(&unrelated).await;
@@ -788,50 +788,50 @@ async fn live_a_redrive_resumes_only_its_parks_recorded_children() {
     recorded_children(HarnessServer::Live).await;
 }
 
-/// A release ends a root and leaves its paused child to the next pass. The
-/// drive it asks the session for ends with nothing held behind it. No
+/// A release ends a run and leaves its paused child to the next pass. The
+/// shift it asks the session for ends with nothing held behind it. No
 /// redrive in between resumes the child: not the redrive of the session's next
-/// root, whose park records its own child, and not a resume of the released
-/// root itself, which is handed nothing.
-async fn released_root(server: HarnessServer) {
+/// run, whose park records its own child, and not a resume of the released
+/// run itself, which is handed nothing.
+async fn released_run(server: HarnessServer) {
     let law = Law::start(server).await;
     let session = law.session("released", &["first", "second"]).await;
     let first = law
         .group_with_paused_timer("released-first", &session, "first", false)
         .await;
     law.reconcile().await;
-    let park = law.park(&session).await.expect("the first root is parked");
+    let park = law.park(&session).await.expect("the first run is parked");
     assert_eq!(
         (park.turn_id.clone(), park.children.clone()),
         (TurnId::from("first"), Law::handles(&[&first.paused]))
     );
-    let (drive, released) = law.deliver(&park, RootVerb::Cancel).await;
+    let (shift, released) = law.deliver(&park, RunVerb::Cancel).await;
     assert!(matches!(released, ControlIntentState::Acknowledged { .. }));
     assert_eq!(
-        law.drive_stop(&session, drive).await,
-        DriveStop::Idle,
-        "the drive the release asked for ends"
+        law.drive_stop(&session, shift).await,
+        ShiftStop::Idle,
+        "the shift the release asked for ends"
     );
     assert!(
         law.factory
-            .root_terminal(&session, &TurnId::from("first"))
+            .run_terminal(&session, &TurnId::from("first"))
             .await
             .expect("read the terminal")
             .is_some()
     );
     assert!(
         law.is_paused(&first.paused).await,
-        "the release leaves the root's paused child to the next pass"
+        "the release leaves the run's paused child to the next pass"
     );
 
-    // The session's next root waits on a child of its own. Its park is
+    // The session's next run waits on a child of its own. Its park is
     // written as a pass would write it, without a pass that would reach the
-    // released root's child first.
+    // released run's child first.
     let second = law
         .group_with_paused_timer("released-second", &session, "second", false)
         .await;
     let clock = lash_core::facade_support::SystemClock;
-    let writer = lash_core::drive::StoreParkRecovery::new(law.factory.as_ref(), &clock);
+    let writer = lash_core::shift::StoreParkRecovery::new(law.factory.as_ref(), &clock);
     struct Stopped;
     #[async_trait::async_trait]
     impl StalledExecution for Stopped {
@@ -842,19 +842,19 @@ async fn released_root(server: HarnessServer) {
     assert!(matches!(
         writer
             .record_engine_park(
-                &ParkTarget::RootChild {
+                &ParkTarget::RunChild {
                     session: session.clone(),
-                    root: TurnId::from("second"),
+                    run: TurnId::from("second"),
                 },
                 ParkReason::engine_retry_exhausted(8, None, "the child stopped".into()),
                 EnginePark::new(second.paused.clone()),
                 &Stopped,
             )
             .await
-            .expect("park the second root"),
+            .expect("park the second run"),
         EngineParkRecorded::Parked(_)
     ));
-    let park = law.park(&session).await.expect("the second root is parked");
+    let park = law.park(&session).await.expect("the second run is parked");
     assert_eq!(
         (park.turn_id.clone(), park.children.clone()),
         (TurnId::from("second"), Law::handles(&[&second.paused]))
@@ -862,23 +862,23 @@ async fn released_root(server: HarnessServer) {
 
     law.executors.timers_routed.store(true, Ordering::SeqCst);
     assert!(matches!(
-        law.verb(&park, RootVerb::Redrive).await,
+        law.verb(&park, RunVerb::Redrive).await,
         ControlIntentState::Acknowledged { .. }
     ));
     law.await_settled(&second).await;
     assert!(
         law.is_paused(&first.paused).await,
-        "a later redrive of the session never resumes the released root's child"
+        "a later redrive of the session never resumes the released run's child"
     );
-    // A resume that names the released root is handed no child, and looks
+    // A resume that names the released run is handed no child, and looks
     // for none: the engine holds nothing for it.
     assert_eq!(
         law.work
             .control()
-            .resume_root(
-                &RootRef {
+            .resume_run(
+                &RunRef {
                     session: session.clone(),
-                    root: TurnId::from("first"),
+                    run: TurnId::from("first"),
                 },
                 None,
                 &[],
@@ -892,23 +892,23 @@ async fn released_root(server: HarnessServer) {
 
     let report = law.reconcile().await;
     assert!(
-        report.released.contains(&RootRef {
+        report.released.contains(&RunRef {
             session: session.clone(),
-            root: TurnId::from("first"),
+            run: TurnId::from("first"),
         }),
-        "the next pass releases the ended root's child: {report:?}"
+        "the next pass releases the ended run's child: {report:?}"
     );
     assert!(!law.is_paused(&first.paused).await);
     law.harness.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_released_roots_paused_child_is_never_resumed_by_a_later_redrive() {
-    released_root(HarnessServer::in_process()).await;
+async fn a_released_runs_paused_child_is_never_resumed_by_a_later_redrive() {
+    released_run(HarnessServer::in_process()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires the pinned live Restate server"]
-async fn live_a_released_roots_paused_child_is_never_resumed_by_a_later_redrive() {
-    released_root(HarnessServer::Live).await;
+async fn live_a_released_runs_paused_child_is_never_resumed_by_a_later_redrive() {
+    released_run(HarnessServer::Live).await;
 }

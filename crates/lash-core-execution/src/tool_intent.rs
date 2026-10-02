@@ -870,7 +870,7 @@ mod tests {
         /// declarations realizing as one process, and a spurious difference is
         /// a re-submitted declaration starting a second one. The encoder
         /// length-prefixes each field precisely so that `("a", "b")` and
-        /// `("ab", "")` cannot render to the same bytes; this drives that.
+        /// `("ab", "")` cannot render to the same bytes; this executes that.
         #[test]
         fn tool_intent_identity_derivation_is_injective_in_its_inputs(
             left in identity_inputs(),

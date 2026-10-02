@@ -86,14 +86,14 @@ impl SessionReadView {
 
     /// The session as its record states it, for an observer outside a turn:
     /// `state`'s history under the sticky config a commit writes, not under
-    /// the recorded view of a root the state is running or last ran. That
-    /// view is the root's alone, and it stays installed on resident state
-    /// after the root settles, until the next adoption of the durable head
+    /// the recorded view of a run the state is running or last ran. That
+    /// view is the run's alone, and it stays installed on resident state
+    /// after the run settles, until the next adoption of the durable head
     /// or the next config transaction, which restores the sticky config.
     pub fn recorded_from_runtime_state(state: &RuntimeSessionState) -> Self {
         let mut meta = SessionReadMeta::from_persisted_ref(state)
             .with_policy(crate::store::recorded_session_policy_from_state(state));
-        if let Some(view) = state.authority.root_view() {
+        if let Some(view) = state.authority.run_view() {
             meta.protocol_turn_options = view.sticky.plugin_config.protocol_turn_options();
             meta.plugin_config = view.sticky.plugin_config.clone();
         }

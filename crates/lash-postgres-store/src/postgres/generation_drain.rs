@@ -76,7 +76,7 @@ impl PostgresGenerationDrain {
                 SELECT park_build_generation, FALSE FROM lash_turn_parks
                     WHERE park_build_generation IS NOT NULL
                 UNION ALL
-                SELECT admitted_generation, FALSE FROM lash_session_roots
+                SELECT admitted_generation, FALSE FROM lash_session_runs
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                       AND admitted_generation IS NOT NULL
             ) AS pinned(generation, draining)
@@ -176,8 +176,8 @@ impl GenerationDrainStore for PostgresGenerationDrain {
                 .await?,
             in_flight_turns: self
                 .count_of(
-                    crate::session_roots::session_roots_sql()
-                        .roots
+                    crate::session_runs::session_runs_sql()
+                        .runs
                         .count_unfinished_by_admitted_generation
                         .sql(),
                     generation,
@@ -216,8 +216,8 @@ impl GenerationDrainStore for PostgresGenerationDrain {
         limit: NonZeroUsize,
     ) -> Result<Vec<SessionId>, StoreError> {
         let ids: Vec<String> = sqlx::query_scalar(
-            crate::session_roots::session_roots_sql()
-                .roots
+            crate::session_runs::session_runs_sql()
+                .runs
                 .list_unfinished_sessions_by_admitted_generation
                 .sql(),
         )

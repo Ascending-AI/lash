@@ -629,7 +629,7 @@ impl Session {
     }
 
     /// Installs the tool surface a turn's execution-environment sync
-    /// recorded as the surface its drive reads (FIG-3672 P7b).
+    /// recorded as the surface its shift reads (FIG-3672 P7b).
     ///
     /// The recorded definitions are the catalog: membership, manifests and
     /// contracts are what the pass that wrote the journal saw, whichever
@@ -742,7 +742,7 @@ impl Session {
     /// use for calls from that request.
     ///
     /// Building a surface installs nothing: an execution-environment sync
-    /// records the surface it built, and the drive installs what the sync
+    /// records the surface it built, and the shift installs what the sync
     /// recorded ([`Self::install_recorded_tool_surface`]).
     // `ToolCatalogHandle` is only `pub` under the `testing` feature, so this
     // accessor's visibility tracks it exactly (`private_interfaces`).
@@ -1263,7 +1263,7 @@ mod tool_catalog_cache_tests {
             .expect("authority-hidden request surface");
         assert!(!hidden.tool_catalog().has_callable_tool("alpha"));
         // Building a surface installs nothing; consumers read the surface a
-        // sync recorded, once the drive installs it.
+        // sync recorded, once the shift installs it.
         session
             .install_recorded_tool_surface(&hidden_access, None, &hidden.definitions())
             .expect("install the recorded hidden surface");

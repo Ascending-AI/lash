@@ -1,7 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
-use lash::testing::store_fixtures::RuntimeStoreTestDriveExt;
+use lash::testing::store_fixtures::RuntimeStoreTestShiftExt;
 
 pub(crate) fn product_user_rows(state: &AppState, session_id: &SessionId) -> Vec<(String, String)> {
     state
@@ -69,9 +69,9 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
-/// A successor worker can open immediately after an earlier drive is abandoned.
+/// A successor worker can open immediately after an earlier shift is abandoned.
 #[tokio::test]
-async fn new_turn_after_abandoned_drive_admits_without_waiting() {
+async fn new_turn_after_abandoned_shift_admits_without_waiting() {
     let double = crate::tests::test_double_backend(0).await;
     let store_factory = double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
@@ -117,11 +117,11 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
         .await
         .expect("open the durable session catalog");
     let dead_epoch = store
-        .seal_drive_epoch_for_test(&session_id, &dead_incarnation, "abandoned-drive", 0)
+        .seal_shift_epoch_for_test(&session_id, &dead_incarnation, "abandoned-shift", 0)
         .await
-        .expect("seal abandoned drive")
+        .expect("seal abandoned shift")
         .acquired()
-        .expect("abandoned drive sealed");
+        .expect("abandoned shift sealed");
 
     let successor = crate::created_session(&state.core, session_id.clone())
         .await
@@ -216,9 +216,9 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
     assert!(dead_epoch.epoch() > 0);
 }
 
-/// A same-worker successor opens immediately after an abandoned drive.
+/// A same-worker successor opens immediately after an abandoned shift.
 #[tokio::test]
-async fn same_worker_successor_opens_after_abandoned_drive() {
+async fn same_worker_successor_opens_after_abandoned_shift() {
     let double = crate::tests::test_double_backend(0).await;
     let store_factory = double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
@@ -255,11 +255,11 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
         "agent-workbench-dead-boot",
     );
     let dead_epoch = store
-        .seal_drive_epoch_for_test(&session_id, &dead_boot, "abandoned-same-worker-drive", 0)
+        .seal_shift_epoch_for_test(&session_id, &dead_boot, "abandoned-same-worker-shift", 0)
         .await
-        .expect("seal abandoned drive")
+        .expect("seal abandoned shift")
         .acquired()
-        .expect("abandoned drive sealed");
+        .expect("abandoned shift sealed");
 
     let successor = crate::created_session(&state.core, session_id.clone())
         .await
@@ -295,7 +295,7 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
     assert!(dead_epoch.epoch() > 0);
 }
 
-/// FIG-4202: a host append is a session command the drive applies at a turn
+/// FIG-4202: a host append is a session command the shift applies at a turn
 /// boundary, so two live writers' appends and a workbench reply commit made
 /// at the same moment never race a head CAS: each is queued, applied in
 /// order and settled, and none surfaces a conflict for its host to repair.
@@ -425,7 +425,7 @@ pub(super) fn gated_first_call_provider(
     (provider, entered_rx, release)
 }
 
-/// A test state on `double`: the double's engine drives every accepted send
+/// A test state on `double`: the double's engine executes every accepted send
 /// through its `LashSession` service.
 pub(crate) async fn queued_send_test_state(
     double: &lash_restate_test::RestateTestBackend,
@@ -965,7 +965,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
         .open_session_for_observation(&old_session_id)
         .await
         .expect("observe the still-live session")
-        .root(retried_turn.clone());
+        .run(retried_turn.clone());
     tokio::time::timeout(Duration::from_secs(10), root.outcome())
         .await
         .expect("the still-live turn settles")
@@ -1282,7 +1282,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
 }
 
 /// A busy session accepts the second browser send as durable next-turn input.
-/// The session drive and the root follower settle both sends in order.
+/// The session shift and the run follower settle both sends in order.
 #[tokio::test]
 async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     let (provider, mut provider_entered, release) =
@@ -1395,12 +1395,12 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
                 let first_answer = ("assistant", "answer 0");
                 let second_answer = ("assistant", "answer 1");
                 let first_failure = ("event", PUBLIC_TURN_FAILURE_MESSAGE);
-                // NextTurn waits for the first root's final engine commit, not
+                // NextTurn waits for the first run's final engine commit, not
                 // for its workbench follower. The follower appends a `finish`
                 // answer after that commit, so the second user can precede
                 // either answer, and either follower can append first. The
-                // first root's head-CAS loss instead publishes its failure
-                // event; the queued root must still commit and answer once.
+                // first run's head-CAS loss instead publishes its failure
+                // event; the queued run must still commit and answer once.
                 let legal = [
                     [first_user, first_answer, second_user, second_answer],
                     [first_user, second_user, first_answer, second_answer],
@@ -1411,7 +1411,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
                 ];
                 assert!(
                     legal.iter().any(|order| order.as_slice() == observed),
-                    "the queued send must settle once after the first root's engine commit: {rows:?}"
+                    "the queued send must settle once after the first run's engine commit: {rows:?}"
                 );
                 if observed.contains(&first_failure) {
                     assert_eq!(
@@ -1420,7 +1420,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
                             format!("turn:{first_turn_id}:failed"),
                             PUBLIC_TURN_FAILURE_MESSAGE.to_string(),
                         )],
-                        "only the first root's head-CAS loss can replace its answer"
+                        "only the first run's head-CAS loss can replace its answer"
                     );
                 }
                 break;
@@ -1429,7 +1429,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         }
     })
     .await
-    .expect("the session drive settles the queued send exactly once");
+    .expect("the session shift settles the queued send exactly once");
 }
 
 /// Reopening a session while its prior provider call is stalled must return

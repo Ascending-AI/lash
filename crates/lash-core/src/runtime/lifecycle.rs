@@ -326,9 +326,9 @@ impl LashRuntime {
             state,
             runtime_lease_owner,
             runtime_lease_executor_id,
-            engine_retries_root: false,
+            engine_retries_run: false,
             admitted_turn_index: None,
-            drive_root: None,
+            shift_run: None,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
             resident_session,
@@ -584,8 +584,8 @@ impl LashRuntime {
     /// A park that cannot complete hands the runtime back
     /// ([`ParkRefused`]), with its resident state and its pending usage as
     /// they were: nothing it held is lost. The bound turn owns the session
-    /// head (FIG-4202), so a dirty park while a drive owns the head (a bound
-    /// root, an owed follow-on or an open session command) is refused busy
+    /// head (FIG-4202), so a dirty park while a shift owns the head (a bound
+    /// run, an owed follow-on or an open session command) is refused busy
     /// in the flush's own transaction, and the host parks again once that
     /// owner's boundary passes. A clean park writes nothing and is never
     /// busy.
@@ -640,7 +640,7 @@ impl LashRuntime {
     /// A flush that does not land leaves the runtime as it was, its resident
     /// state and its pending usage included: the store refuses it typed
     /// ([`StoreError::SessionHeadOwned`](crate::StoreError::SessionHeadOwned))
-    /// while a drive owns the session head, and the same flush lands once
+    /// while a shift owns the session head, and the same flush lands once
     /// that owner's boundary passes. A head that moved since this runtime
     /// last read it is adopted first, so the flush never commits an old
     /// whole-session snapshot over it; the pending usage, held apart from the
@@ -688,7 +688,7 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        // A write outside every drive: the store refuses it while a drive
+        // A write outside every shift: the store refuses it while a shift
         // owns the head (FIG-4202).
         let result = store
             .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)

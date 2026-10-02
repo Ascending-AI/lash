@@ -2,8 +2,8 @@
 //!
 //! Serves lash's Restate services over the shared store directory on a
 //! process of its own, so cross-worker cases measure the real split: the
-//! host's sends cross the server, the drive runs here, and the host's
-//! follower has neither live replay nor the settled-root mailbox. The parent
+//! host's sends cross the server, the shift runs here, and the host's
+//! follower has neither live replay nor the settled-run mailbox. The parent
 //! exports `RESTATE_INGRESS_URL`/`RESTATE_ADMIN_URL` and the run's authority
 //! seed, picks the endpoint bind, and polls the ready file.
 

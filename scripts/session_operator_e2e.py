@@ -79,7 +79,7 @@ def main():
         finally:
             with (directory / "postgres-evidence.jsonl").open("w") as output:
                 for table in ("operator_model_calls", "operator_terminal_writes", "operator_child_cancels",
-                              "lash_session_roots", "lash_control_intents", "lash_processes", "lash_process_events", "lash_parent_end_plans"):
+                              "lash_session_runs", "lash_control_intents", "lash_processes", "lash_process_events", "lash_parent_end_plans"):
                     subprocess.run(["docker", "exec", container, "psql", "-U", "lash", "-d", "lash", "-Atqc",
                                     f"SELECT json_build_object('table', '{table}', 'row', row_to_json(t)) FROM {table} t"],
                                    stdout=output, stderr=subprocess.DEVNULL)

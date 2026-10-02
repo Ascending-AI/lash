@@ -1,6 +1,6 @@
 //! The barrier laws (FIG-3400, ADR 0116 §7.1) and the `batch` sugar laws
 //! (§7.2) on the in-process server double:
-//! the endpoint's own turn runner drives each scenario's turn inside a
+//! the endpoint's own turn runner executes each scenario's turn inside a
 //! `ConformanceTurnProbe` handler, where every member of the step's tool group
 //! — native calls and `batch` members alike — runs as an overlapping
 //! group-child invocation (FIG-3397).

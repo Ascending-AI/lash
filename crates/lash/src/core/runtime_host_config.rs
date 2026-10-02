@@ -15,8 +15,8 @@ impl LashCoreBuilder {
             .ok_or(EmbedError::MissingQueuedWorkBatching)?;
         let mut core =
             RuntimeHostConfig::new(self.backend.clone(), commit_budget, queued_work_batching);
-        // The backend's process registry owns the lifetime scopes the drive
-        // closes: a root's end and a session's close write its scope-close
+        // The backend's process registry owns the lifetime scopes the shift
+        // closes: a run's end and a session's close write its scope-close
         // rows (FIG-3607 item 7) and, over the engine's process port, apply
         // the plan each row records (FIG-3822).
         let process_work = self.backend.process_work();

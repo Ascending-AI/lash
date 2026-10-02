@@ -27,7 +27,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     }
 
     /// [`Self::execution_context`] publishing through `observer` instead of
-    /// the turn's stream — for drive paths whose emissions have no host lane.
+    /// the turn's stream — for shift paths whose emissions have no host lane.
     pub(super) fn execution_context_observing(
         &self,
         observer: Arc<dyn crate::engine::ObservationSink>,

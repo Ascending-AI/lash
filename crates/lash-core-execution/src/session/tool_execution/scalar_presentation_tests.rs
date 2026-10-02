@@ -1,5 +1,5 @@
 //! Scalar presentation replay (FIG-3420): the ungrouped `complete_tool_call`
-//! path journals `PresentToolResult` under `{call_id}:present`, so a re-driven
+//! path journals `PresentToolResult` under `{call_id}:present`, so a redriven
 //! scalar call serves the recorded `ToolPresentation` and the registered step
 //! never re-runs.
 //!
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A journal keyed by effect id: the first execution records each outcome,
-/// and a re-driven call is served from the record without running anything.
+/// and a redriven call is served from the record without running anything.
 #[derive(Default)]
 struct JournalByEffectId {
     outcomes: std::sync::Mutex<HashMap<String, crate::RuntimeEffectOutcome>>,

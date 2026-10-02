@@ -55,7 +55,7 @@ impl CheckpointStore for MemoryCheckpoints {
                 checkpoint.frame_epoch, held.frame_epoch
             )));
         }
-        // A re-driven invocation that replays to the same state commits it
+        // A redriven invocation that replays to the same state commits it
         // again: the write is idempotent, as a durable store's keyed write
         // is.
         if held.latest.as_ref() == Some(checkpoint) {

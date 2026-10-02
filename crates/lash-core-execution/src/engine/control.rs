@@ -1,54 +1,54 @@
-//! The scope-close seam (FIG-3607 item 7, R10): what a logical root's end
+//! The scope-close seam (FIG-3607 item 7, R10): what a logical run's end
 //! and a session's close tell the owner of lifetime scopes.
 //!
-//! A root's `Turn(root)` scope, and a session's `Session` scope, own work
+//! A run's `Turn(run)` scope, and a session's `Session` scope, own work
 //! that outlives a single step (processes started under them, among others).
-//! The drive calls this seam only after the end is durable: a root's terminal
+//! The shift calls this seam only after the end is durable: a run's terminal
 //! evidence, or a session's `CloseSession` intent. It names no engine and no
 //! registry: the process registry's scope-close adapter implements it, and
 //! [`NoScopeClose`] stands in until one is installed.
 
-use crate::store::{ControlIntentId, EnginePark, ParkId, ParkReason, RootTerminal, StoreError};
+use crate::store::{ControlIntentId, EnginePark, ParkId, ParkReason, RunTerminal, StoreError};
 use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{SessionId, TurnId};
 
-/// Where the drive reports a closed root scope or session scope.
+/// Where the shift reports a closed run scope or session scope.
 ///
 /// Guarantees a caller of this trait keeps:
 ///
-/// - it is called only after the root's terminal evidence (or the session's
+/// - it is called only after the run's terminal evidence (or the session's
 ///   close intent) is durable;
-/// - it is called at least once per terminal root: a crash between the
+/// - it is called at least once per terminal run: a crash between the
 ///   evidence and the call re-runs the recorded step that calls it;
-/// - it is never called for a parked root, which holds its scope open.
+/// - it is never called for a parked run, which holds its scope open.
 ///
-/// An implementor must be idempotent per `(session, root)` and per intent.
+/// An implementor must be idempotent per `(session, run)` and per intent.
 #[async_trait::async_trait]
 pub trait ScopeCloseSink: Send + Sync {
-    /// Whether this sink owns any scope. The drive records a root's close
+    /// Whether this sink owns any scope. The shift records a run's close
     /// only for a sink that does: with no owner there is nothing to close,
-    /// so no step is recorded and a root's journal ends at its commit.
+    /// so no step is recorded and a run's journal ends at its commit.
     fn owns_scopes(&self) -> bool {
         true
     }
 
-    /// Close `Turn(root)` after its terminal evidence.
-    async fn close_root_scope(&self, terminal: &RootTerminal) -> Result<(), StoreError>;
+    /// Close `Turn(run)` after its terminal evidence.
+    async fn close_run_scope(&self, terminal: &RunTerminal) -> Result<(), StoreError>;
 
-    /// Close `Session(session)` and the listed roots after its
+    /// Close `Session(session)` and the listed runs after its
     /// `CloseSession` intent.
     ///
     /// Closing the session closes every scope inside it: a closed session
-    /// admits no root, so a turn id it never admitted can no longer become
+    /// admits no run, so a turn id it never admitted can no longer become
     /// one, and no start may name it any more (FIG-3948).
     async fn close_session_scope(
         &self,
         session: &SessionId,
         intent: ControlIntentId,
-        roots: &[TurnId],
+        runs: &[TurnId],
     ) -> Result<(), StoreError>;
 }
 
@@ -62,7 +62,7 @@ impl ScopeCloseSink for NoScopeClose {
         false
     }
 
-    async fn close_root_scope(&self, _terminal: &RootTerminal) -> Result<(), StoreError> {
+    async fn close_run_scope(&self, _terminal: &RunTerminal) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -70,7 +70,7 @@ impl ScopeCloseSink for NoScopeClose {
         &self,
         _session: &SessionId,
         _intent: ControlIntentId,
-        _roots: &[TurnId],
+        _runs: &[TurnId],
     ) -> Result<(), StoreError> {
         Ok(())
     }
@@ -84,42 +84,42 @@ pub fn begin_session_close_replay_key(session: &SessionId) -> String {
     format!("{}:begin-close", session.as_str())
 }
 
-/// One logical root, as an engine's control verbs address it.
+/// One logical run, as an engine's control verbs address it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RootRef {
+pub struct RunRef {
     pub session: SessionId,
-    pub root: TurnId,
+    pub run: TurnId,
 }
 
-/// An open logical root as the store's recovery page lists it
-/// ([`DeploymentStore::non_terminal_roots_page`](crate::DeploymentStore::non_terminal_roots_page)),
+/// An open logical run as the store's recovery page lists it
+/// ([`DeploymentStore::non_terminal_runs_page`](crate::DeploymentStore::non_terminal_runs_page)),
 /// with the execution its recorded admission names (FIG-4403).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenRoot {
-    pub target: RootRef,
-    /// The executor the root's admission recorded; `None` while the root
+pub struct OpenRun {
+    pub target: RunRef,
+    /// The executor the run's admission recorded; `None` while the run
     /// has recorded no admission.
-    pub executor: Option<crate::store::RootExecutor>,
+    pub executor: Option<crate::store::RunExecutor>,
 }
 
-/// The engine's evidence that an open root's execution is lost, which
-/// [`DeploymentStore::end_lost_root`](crate::DeploymentStore::end_lost_root)
-/// ends the root on (ADR 0104 O2, O6).
+/// The engine's evidence that an open run's execution is lost, which
+/// [`DeploymentStore::end_lost_run`](crate::DeploymentStore::end_lost_run)
+/// ends the run on (ADR 0104 O2, O6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RootRunLoss {
-    /// The root's workflow run ended with a failure and recorded no
+pub enum RunLoss {
+    /// The run's workflow run ended with a failure and recorded no
     /// outcome: an operator's kill, or a refusal that ended nothing. The
-    /// engine never runs that key again, so the root ends whether or not it
+    /// engine never runs that key again, so the run ends whether or not it
     /// had recorded its admission.
     FailedRun,
-    /// No execution holds the root: the engine holds no run of the root's
+    /// No execution holds the run: the engine holds no execution of the run's
     /// key on any generation lane (the run was purged or its history lost),
     /// and the execution its admission recorded runs nothing more
-    /// ([`RootExecutor`](crate::store::RootExecutor)). A root that recorded its admission
+    /// ([`RunExecutor`](crate::store::RunExecutor)). A run that recorded its admission
     /// started, and its effects may have run, so it ends: a fresh execution
-    /// must never run it again (ADR 0105 L-S8). A root that never recorded
+    /// must never run it again (ADR 0105 L-S8). A run that never recorded
     /// its admission started nothing; its input is still owed by its ingress
-    /// obligation, which drives it, so the store leaves it open.
+    /// obligation, which executes it, so the store leaves it open.
     NoRun,
 }
 
@@ -127,11 +127,11 @@ pub enum RootRunLoss {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EngineAck {
-    /// The engine resumed the execution holding the root.
+    /// The engine resumed the execution holding the run.
     Resumed,
-    /// The engine stopped the root's execution for good.
+    /// The engine stopped the run's execution for good.
     Released,
-    /// The engine held no execution for the root: nothing to do.
+    /// The engine held no execution for the run: nothing to do.
     NothingHeld,
 }
 
@@ -145,7 +145,7 @@ pub enum RefusalClass {
     Permanent,
 }
 
-/// Why an engine could not carry out a control verb or accept a drive: its
+/// Why an engine could not carry out a control verb or accept a shift: its
 /// retry class beside the typed code of its cause. A retryable refusal is
 /// retained on the `ControlIntent` or ingress obligation and retried after a
 /// backoff (ADR 0109); a permanent one refuses the intent and stalls the
@@ -282,17 +282,17 @@ pub trait SessionControlEngine: Send + Sync {
     /// engine stopped retrying is recorded through `parks` with
     /// [`ParkReason::EngineRetryExhausted`] and the engine's handle; one
     /// whose target already ended is released instead. A stalled session
-    /// drive is parked on its session's next root; one that stopped only
+    /// shift is parked on its session's next run; one that stopped only
     /// behind a redrive that has since settled is resumed, and one whose
-    /// session's next work names no root is released (ADR 0109 §3). Stalled
-    /// work a root waits on is parked on that root, which records the work's
+    /// session's next work names no run is released (ADR 0109 §3). Stalled
+    /// work a run waits on is parked on that run, which records the work's
     /// handle; stalled work nothing waits for any more is released.
     ///
     /// Each recovery catalog inspects at most `page.limit` records under
     /// `page.budget`. The stalled-work listing resumes after `page.after`
     /// in the engine's order; the report's `next` continues it, and `None`
     /// wraps it. An engine that also repairs lost runs keeps independent
-    /// process and root cursors across calls. Failed items advance their
+    /// process and run cursors across calls. Failed items advance their
     /// cursor and are retried when that catalog wraps.
     /// Idempotent: a second pass over the same execution records nothing new.
     async fn reconcile_parks(
@@ -301,15 +301,15 @@ pub trait SessionControlEngine: Send + Sync {
         page: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal>;
 
-    /// O4 redrive: resume the execution holding the root's park, and the
-    /// stopped work `children` names: the handles the root's park recorded
+    /// O4 redrive: resume the execution holding the run's park, and the
+    /// stopped work `children` names: the handles the run's park recorded
     /// (FIG-4630). The engine resumes exactly those and looks for no other
-    /// work of the root, the session or anyone else. An engine holding none
-    /// answers [`EngineAck::NothingHeld`], and the caller schedules a drive
+    /// work of the run, the session or anyone else. An engine holding none
+    /// answers [`EngineAck::NothingHeld`], and the caller schedules a shift
     /// instead.
-    async fn resume_root(
+    async fn resume_run(
         &self,
-        target: &RootRef,
+        target: &RunRef,
         engine: Option<&EnginePark>,
         children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal>;
@@ -348,12 +348,12 @@ pub trait SessionControlEngine: Send + Sync {
         Ok(())
     }
 
-    /// O4 release: stop the root's execution for good, AFTER the store
-    /// recorded the root's terminal evidence. Never proof of a lash outcome
+    /// O4 release: stop the run's execution for good, AFTER the store
+    /// recorded the run's terminal evidence. Never proof of a lash outcome
     /// (ADR 0104 O4): the evidence is the store's.
-    async fn release_root(
+    async fn release_run(
         &self,
-        target: &RootRef,
+        target: &RunRef,
         engine: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal>;
 }
@@ -374,18 +374,18 @@ impl SessionControlEngine for NoEngineControl {
         Ok(ParkReconcileReport::default())
     }
 
-    async fn resume_root(
+    async fn resume_run(
         &self,
-        _target: &RootRef,
+        _target: &RunRef,
         _engine: Option<&EnginePark>,
         _children: &[EnginePark],
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }
 
-    async fn release_root(
+    async fn release_run(
         &self,
-        _target: &RootRef,
+        _target: &RunRef,
         _engine: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
@@ -429,21 +429,21 @@ pub struct EnginePage {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ParkTarget {
-    /// A session's logical root.
-    Root { session: SessionId, root: TurnId },
+    /// A session's logical run.
+    Run { session: SessionId, run: TurnId },
     /// A process.
     Process { process: crate::ProcessId },
-    /// A session's drive, stopped in its admission before it ran a root: it
-    /// is parked on the root the session's next admission names (ADR 0109
+    /// A session's shift, stopped in its admission before it ran a run: it
+    /// is parked on the run the session's next admission names (ADR 0109
     /// §3), and only that park's operator verb resumes it.
-    Drive { session: SessionId },
-    /// Work a session's logical root waits on, stopped in an execution of
-    /// its own (a tool attempt's child, FIG-4607). The root's own execution
+    Shift { session: SessionId },
+    /// Work a session's logical run waits on, stopped in an execution of
+    /// its own (a tool attempt's child, FIG-4607). The run's own execution
     /// is not stopped: it waits for the child. The child is parked on the
-    /// root, whose park records the child's engine handle beside those of
-    /// the root's other stopped children (FIG-4630), and the park's redrive
+    /// run, whose park records the child's engine handle beside those of
+    /// the run's other stopped children (FIG-4630), and the park's redrive
     /// resumes exactly the recorded ones.
-    RootChild { session: SessionId, root: TurnId },
+    RunChild { session: SessionId, run: TurnId },
 }
 
 /// What [`ParkRecoveryWriter::record_engine_park`] did.
@@ -458,25 +458,25 @@ pub enum EngineParkRecorded {
     /// The target already has terminal evidence: the engine should release
     /// its execution.
     TargetTerminal,
-    /// The target is gone (its session deleted, root input withdrawn, or process pruned): the
+    /// The target is gone (its session deleted, run input withdrawn, or process pruned): the
     /// engine should release its execution.
     TargetGone,
     /// A redrive owns the execution: it resumed it after the engine listed
     /// it as stopped, or is about to. Nothing was written; a later pass
     /// re-lists the execution if it stops again.
     Redriven,
-    /// A stopped drive whose session's next work names no root — only
+    /// A stopped shift whose session's next work names no run — only
     /// queued commands, a closing session's in-flight claim, or nothing: no
     /// operator verb could resume it, so nothing was written and the engine
-    /// releases the drive. What the session still holds keeps its own
-    /// ingress obligation, whose relay asks for a fresh drive: the command
-    /// lane drives the session again (ADR 0109 §3).
+    /// releases the shift. What the session still holds keeps its own
+    /// ingress obligation, whose relay asks for a fresh shift: the command
+    /// lane works the session again (ADR 0109 §3).
     NothingToPark,
-    /// A stopped drive whose every attempt was refused only because its
+    /// A stopped shift whose every attempt was refused only because its
     /// session's park named a redrive that had not settled (D15), and that
-    /// redrive has since settled: the engine resumes the drive. Nothing was
+    /// redrive has since settled: the engine resumes the shift. Nothing was
     /// written; the redrive already was the operator's action.
-    ResumeDrive,
+    ResumeShift,
 }
 
 /// The engine's live view of the one stalled execution a
@@ -504,9 +504,9 @@ pub trait StalledExecution: Send + Sync {
 #[async_trait::async_trait]
 pub trait ParkRecoveryWriter: Send + Sync {
     /// Park `target` for `reason`, carrying the engine's `engine` handle. A
-    /// [`ParkTarget::Drive`] park stores no handle: the engine finds a
-    /// stopped drive by its session. A [`ParkTarget::RootChild`] park records
-    /// the handle as one of the root's stopped children.
+    /// [`ParkTarget::Shift`] park stores no handle: the engine finds a
+    /// stopped shift by its session. A [`ParkTarget::RunChild`] park records
+    /// the handle as one of the run's stopped children.
     /// `execution` re-reads the stalled execution when a redrive may have
     /// resumed it since the engine listed it.
     async fn record_engine_park(
@@ -525,31 +525,31 @@ pub struct ParkReconcileReport {
     pub parked: Vec<ParkTarget>,
     /// Stalled executions whose target already held a park.
     pub attached: usize,
-    /// Roots whose execution this pass released because the store had
+    /// Runs whose execution this pass released because the store had
     /// already ended them.
-    pub released: Vec<RootRef>,
+    pub released: Vec<RunRef>,
     /// Stalled work this pass released because nothing waits for it any
     /// more, by its engine handle: a group child whose position its group
     /// already seated, or work of a retired group (FIG-4630).
     pub released_work: Vec<EnginePark>,
-    /// Sessions whose stopped drive this pass released: the session is
-    /// gone, or its next work names no root to park on, and its ingress
-    /// obligations ask for a fresh drive.
-    pub released_drives: Vec<SessionId>,
+    /// Sessions whose stopped shift this pass released: the session is
+    /// gone, or its next work names no run to park on, and its ingress
+    /// obligations ask for a fresh shift.
+    pub released_shifts: Vec<SessionId>,
     /// Processes this pass ended `SubstrateLost` because the engine had
     /// finished their current segment's execution without their terminal (an
     /// operator's kill): nothing would ever run them again.
     pub ended_processes: Vec<crate::ProcessId>,
-    /// Roots this pass ended `SubstrateLost` because the engine lost their
-    /// execution ([`RootRunLoss`]): every run of the root failed without a
-    /// Lash terminal, or the engine holds no run of a root that started.
+    /// Runs this pass ended `SubstrateLost` because the engine lost their
+    /// execution ([`RunLoss`]): every execution of the run failed without a
+    /// Lash terminal, or the engine holds no execution of a run that started.
     /// Their scope close is now owed by the terminal row.
-    pub ended_roots: Vec<RootRef>,
-    /// Sessions whose stopped drive this pass resumed: it stopped only behind
-    /// a redrive that has since settled (D15). Any other stopped drive is
+    pub ended_runs: Vec<RunRef>,
+    /// Sessions whose stopped shift this pass resumed: it stopped only behind
+    /// a redrive that has since settled (D15). Any other stopped shift is
     /// never resumed here (ADR 0109 §3): it is parked, and only the park's
     /// operator verb resumes it.
-    pub resumed_drives: Vec<SessionId>,
+    pub resumed_shifts: Vec<SessionId>,
     /// Stalled executions this pass left as they were.
     pub unchanged: usize,
     /// Stalled executions this pass could not settle, each with why: one

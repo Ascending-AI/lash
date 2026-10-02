@@ -2203,7 +2203,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: plan
-    # PRs run the two host legs on drive, handler or example changes. The
+    # PRs run the two host legs on shift, handler or example changes. The
     # other matrix legs remain full-profile work.
     if: >-
       (github.event_name == 'pull_request' && needs.plan.outputs.pr_host_restate == 'true'

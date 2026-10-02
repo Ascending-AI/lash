@@ -1,0 +1,207 @@
+//! Park-id CAS and the store half of run control, in one write transaction.
+use lash_core_execution::store::*;
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::session_runs::*;
+use crate::sqlite_error;
+
+pub(crate) fn open_run_intent_conn(
+    tx: &Connection,
+    request: &RunIntentRequest,
+    at_ms: u64,
+) -> Result<ControlIntent, RunIntentRefused> {
+    let session = &request.session_id;
+    let closing: Option<Option<i64>> = tx
+        .query_row(
+            crate::session_sql::session_sql()
+                .meta
+                .select_closing_intent
+                .sql(),
+            params![session.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some(closing) = closing else {
+        return Err(if close_session_intent_conn(tx, session)?.is_some() {
+            RunIntentRefused::SessionDeleted
+        } else {
+            RunIntentRefused::NotParked
+        });
+    };
+    let park = crate::persistence::turn_park::turn_park_conn(tx, session)?;
+    let resume = match park.as_ref().and_then(|p| p.resume_intent) {
+        Some(id) => load_intent_conn(tx, id)?,
+        None => None,
+    };
+    let verbs = open_verbs_by_session_conn(tx, session)?;
+    let plan = decide_run_intent(
+        request,
+        &RunIntentFacts {
+            closing: closing.map(|id| ControlIntentId::from_sequence(id as u64)),
+            park: park.as_ref(),
+            open_verbs: &verbs,
+            resume: resume.as_ref(),
+        },
+    )?;
+    let kind = match request.verb {
+        RunVerb::Redrive => ControlIntentKind::Redrive {
+            run: request.run.clone(),
+            park: request.park,
+            children: plan.park.children.clone(),
+        },
+        RunVerb::Cancel => ControlIntentKind::Cancel {
+            run: request.run.clone(),
+            park: request.park,
+        },
+        RunVerb::Fork => ControlIntentKind::Fork {
+            run: request.run.clone(),
+            park: request.park,
+            new_run: None,
+        },
+    };
+    let mut intent = insert_intent_conn(tx, session, kind, plan.park.engine.as_ref(), at_ms)?;
+    let park_sql = &crate::turn_ingress::turn_ingress_sql().turn_parks;
+    if request.verb == RunVerb::Redrive {
+        crate::conn::cached_execute(
+            tx,
+            park_sql.set_resume_intent.sql(),
+            params![
+                session.as_str(),
+                request.park.feed_sequence() as i64,
+                intent.id.sequence() as i64
+            ],
+        )
+        .map_err(sqlite_error)?;
+        crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+            tx,
+            session,
+            request.run.as_str(),
+            request.park.feed_sequence() as i64,
+            &ParkEventKind::RedriveRequested { intent: intent.id },
+            crate::clamp_epoch_ms(at_ms),
+        )?;
+        return Ok(intent);
+    }
+    let sql = &crate::session_runs::session_runs_sql().verbs;
+    // A queued-headed run's batches are its own: a cancel removes them, and
+    // a fork leaves them queued with no new run to execute them.
+    let batches = crate::session_runs::admitted_batches_conn(tx, session, &request.run)?;
+    let new_run = (request.verb == RunVerb::Fork && batches.is_empty())
+        .then(|| forked_run(&request.run, intent.id));
+    if request.verb == RunVerb::Fork {
+        intent.kind = ControlIntentKind::Fork {
+            run: request.run.clone(),
+            park: request.park,
+            new_run: new_run.clone(),
+        };
+        crate::conn::cached_execute(
+            tx,
+            sql.set_kind.sql(),
+            params![
+                intent.id.sequence() as i64,
+                stored_intent_kind(&intent.kind)?
+            ],
+        )
+        .map_err(sqlite_error)?;
+    }
+    let cause = match request.verb {
+        RunVerb::Fork => RunTerminalCause::Forked {
+            intent: intent.id,
+            new_run: new_run.clone(),
+        },
+        _ => RunTerminalCause::OperatorCancelled { intent: intent.id },
+    };
+    let head = &crate::session_sql::session_sql().head;
+    let revision: Option<i64> = tx
+        .query_row(
+            head.select_revision.sql(),
+            params![session.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    crate::conn::cached_execute(
+        tx,
+        head.clear_pending_follow_on.sql(),
+        params![session.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    let mut inputs: Vec<String> = {
+        let mut stmt = tx
+            .prepare_cached(sql.bound_inputs.sql())
+            .map_err(sqlite_error)?;
+        stmt.query_map(params![session.as_str(), request.run.as_str()], |row| {
+            row.get(0)
+        })
+        .map_err(sqlite_error)?
+        .collect::<Result<_, _>>()
+        .map_err(sqlite_error)?
+    };
+    inputs.sort();
+    inputs.dedup();
+    for input in inputs {
+        if request.verb == RunVerb::Fork {
+            crate::conn::cached_execute(
+                tx,
+                sql.reopen_input.sql(),
+                params![session.as_str(), input],
+            )
+        } else {
+            crate::conn::cached_execute(
+                tx,
+                sql.cancel_input.sql(),
+                params![
+                    session.as_str(),
+                    input,
+                    crate::clamp_epoch_ms(at_ms),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                ],
+            )
+        }
+        .map_err(sqlite_error)?;
+        if let Some(run) = new_run.as_ref() {
+            crate::conn::cached_execute(
+                tx,
+                sql.rebind.sql(),
+                params![session.as_str(), input, run.as_str()],
+            )
+            .map_err(sqlite_error)?;
+        } else if request.verb == RunVerb::Fork {
+            crate::conn::cached_execute(tx, sql.unbind.sql(), params![session.as_str(), input])
+                .map_err(sqlite_error)?;
+        }
+    }
+    if request.verb == RunVerb::Cancel {
+        for batch in batches {
+            crate::session_runs::cancel_run_batch_conn(tx, session, &batch, at_ms)?;
+        }
+    }
+    // The verb settles the run's own input and batches first; its terminal
+    // write then releases whatever else the run still held (FIG-3927) and
+    // ends its park, as every run's end does (FIG-4780).
+    write_run_terminal_conn(
+        tx,
+        &RunTerminal {
+            session_id: session.clone(),
+            run: request.run.clone(),
+            cause,
+            head_revision: revision.map(|revision| revision as u64),
+            at_ms,
+        },
+    )?;
+    for prior in plan.supersede {
+        let mut next = prior.clone();
+        next.state = ControlIntentState::Superseded { by: intent.id };
+        if !write_intent_state_conn(tx, &prior, &next)? {
+            return Err(StoreError::Contended.into());
+        }
+    }
+    crate::conn::cached_execute(
+        tx,
+        sql.raise_epoch.sql(),
+        params![session.as_str(), close_admission(intent.id).as_str()],
+    )
+    .map_err(sqlite_error)?;
+    Ok(intent)
+}

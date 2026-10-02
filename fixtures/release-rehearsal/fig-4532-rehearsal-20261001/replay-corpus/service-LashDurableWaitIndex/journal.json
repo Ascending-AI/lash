@@ -112,7 +112,7 @@
         "OutputCommand"
       ]
     ],
-    "retire_root": [
+    "retire_run": [
       [
         "InputCommand",
         "GetLazyStateCommand",

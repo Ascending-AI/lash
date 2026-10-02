@@ -25,7 +25,7 @@ The store set holds session commits and history, attachment manifests and byte
 storage, module artifacts, process environments, definitions, records and
 continuations, triggers, ingress and queued-work rows, parked work, and
 store-to-engine delivery obligations. PostgreSQL takes an attachment-byte
-backend at construction. Session drive fences and head compare-and-set checks
+backend at construction. Session shift fences and head compare-and-set checks
 protect store mutations under
 [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md). They are
 not scheduling or replay engines.
@@ -38,7 +38,7 @@ SQL stores implement the data transitions those handlers require.
 Evidence: `crates/lash-core-execution/src/backend.rs:248`,
 `crates/lash-restate/src/engine.rs:113`,
 `crates/lash-restate/src/engine.rs:418`,
-`crates/lash-restate/src/session_driver.rs:1`,
+`crates/lash-restate/src/session_shifts.rs:1`,
 `crates/lash-postgres-store/src/postgres/backend.rs:44`.
 
 ### 2. The effect interface is engine-neutral
@@ -68,7 +68,7 @@ authority as an admission check. Module artifacts belong to `StoreSet`; the
 byte-level port lives in `lash-core-execution`, and the language integration
 owns its codec. A plugin factory bound to another backend is refused.
 
-The drive uses `RuntimeEffectController` through a scoped controller. The
+The shift uses `RuntimeEffectController` through a scoped controller. The
 engine records effects, admission, waits and cancel races. Commit and park are
 fenced, idempotent store writes with receipt validation, under ADR 0105 §9.
 A future engine implements these contracts and runs their conformance laws.
@@ -92,17 +92,17 @@ Evidence: `crates/lash-core-execution/src/backend.rs:43`,
 
 | Obligation | Required outcome | Restate implementation |
 |---|---|---|
-| Per-session serialized execution, O1 | One authorized logical drive; stale store mutations refuse. External operations retain stable idempotency identities because a fence cannot retract a request already sent. | Session virtual object, root workflow and sealed drive fence. |
+| Per-session serialized execution, O1 | One authorized logical shift; stale store mutations refuse. External operations retain stable idempotency identities because a fence cannot retract a request already sent. | Session virtual object, run workflow and sealed shift fence. |
 | Durable acceptance and scheduling, O2 | Persist acceptance and delivery intent, acknowledge submission separately, and reconcile unacknowledged obligations. Status reads do not own recovery. | SQL acceptance and obligation ledger, with the engine relay. |
 | Durable step result | Replay returns the recorded envelope's outcome without fresh body dispatch. | Named `ctx.run` entries and canonical-envelope validation. |
 | Durable timer | Retain the deadline and resume the wait through replay. | Journaled timers and durable-wait deadlines. |
 | Durable keyed promise | A neutral key names a first-writer-wins resolution that survives resolve-before-wait and supports revocation. | Durable-wait workflow and `LashDurableWaitIndex` service. |
 | Effect groups | Retain membership, ranked settlement, protected drain and cancellation admission fences under ADRs 0065 and 0099. | `EffectGroupIndex`, `EffectGroupPayload` and `EffectGroupDispatch` services. |
-| Retry and park, O3 | Preserve replay history, retry live faults under engine policy, and prevent fresh semantic admission while a root is parked. | Invocation retry policy, durable parks and reconciliation through owner mappings. |
+| Retry and park, O3 | Preserve replay history, retry live faults under engine policy, and prevent fresh semantic admission while a run is parked. | Invocation retry policy, durable parks and reconciliation through owner mappings. |
 | Redrive, cancellation and recovery, O4 | Redrive preserves outcomes; a durable cancel cooperates with Lash closure. Engine kill alone proves no Lash terminal. Reset does not substitute for redrive. | Turn gate promises, process cancellation and group-child cancellation. |
 | Replay validation | Same-generation replay preserves recorded commands and keys; a mismatch refuses fresh dispatch. | Positional SDK replay, envelope checks and generation sentinels. |
 | Process identity across runs, O5 | Carry logical identity, continuation and obligations across bounded segments. | Process workflow, segment handovers and journal budget. |
-| Admission before the first effect, O6 | Preserve the journaled start proof and refuse a fresh execution whose retained start history is lost. | Root start nonce and drive seal; process admission and start marker. |
+| Admission before the first effect, O6 | Preserve the journaled start proof and refuse a fresh execution whose retained start history is lost. | Run start nonce and shift seal; process admission and start marker. |
 | Process execution and terminal wait | Run submitted segments, recover from retained history, and await the process terminal through `ProcessWorkSubstrate`. | Process workflow and process-attach workflow. |
 
 These are observable outcomes. The table's last column describes Restate's
@@ -119,7 +119,7 @@ Evidence: `crates/lash-core-execution/src/backend.rs:43`,
 `crates/lash-restate/src/durable_wait.rs:1`,
 `crates/lash-restate/src/effect_group/dispatch.rs:1`,
 `crates/lash-restate/src/process/admission.rs:1`,
-`crates/lash-core-store/src/store/drive_fence.rs:185`,
+`crates/lash-core-store/src/store/shift_fence.rs:185`,
 `crates/lash-conformance/src/macros.rs:1`.
 
 ### 4. Zero-infra is a local Restate server
@@ -145,7 +145,7 @@ Evidence: `examples/shared/local_restate.rs:1`,
 
 Storage laws run against SQLite file, SQLite memory and PostgreSQL. Execution
 hosts are the in-process Restate server double, live Restate and lash-sim's
-in-process effect host. `lash-restate-test` drives the real endpoint and SDK
+in-process effect host. `lash-restate-test` executes the real endpoint and SDK
 VM, retains invocation journals, injects crashes and supports virtual time
 and always-replay. Its backend constructor wires the real engine over a store
 set. Lash-sim's `SimEngine` uses that backend over SQLite memory storage.

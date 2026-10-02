@@ -17,13 +17,13 @@ impl UsageEffectKey {
     pub fn for_effect(address: &lash_sansio::EffectAddress) -> Self {
         Self(address.graph_key())
     }
-    /// The key the facts of `run` are settled under when `run` is a run of
+    /// The key the facts of `meter` are settled under when `meter` is a meter of
     /// `effect` that dispatched and was never journaled (FIG-4632): the effect
-    /// and the run. A fact's identity names its effect and not its run, so
+    /// and the meter. A fact's identity names its effect and not its meter, so
     /// under the effect's own key these facts would collide with the facts
-    /// of the run the effect is later recorded with.
-    pub fn for_unrecorded_run(effect: &Self, run: &UsageRunId) -> Self {
-        Self(format!("{}#{}", effect.0, run.as_str()))
+    /// of the meter the effect is later recorded with.
+    pub fn for_unrecorded_meter(effect: &Self, meter: &UsageMeterId) -> Self {
+        Self(format!("{}#{}", effect.0, meter.as_str()))
     }
     pub fn as_str(&self) -> &str {
         &self.0
@@ -33,8 +33,8 @@ impl UsageEffectKey {
 /// One execution of a spending effect's body: `run:` + 32 lowercase hex of a v4 UUID.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub struct UsageRunId(String);
-impl UsageRunId {
+pub struct UsageMeterId(String);
+impl UsageMeterId {
     pub fn mint() -> Self {
         Self(format!("run:{}", uuid::Uuid::new_v4().simple()))
     }
@@ -42,12 +42,12 @@ impl UsageRunId {
         &self.0
     }
 }
-impl From<UsageRunId> for String {
-    fn from(run: UsageRunId) -> Self {
-        run.0
+impl From<UsageMeterId> for String {
+    fn from(meter: UsageMeterId) -> Self {
+        meter.0
     }
 }
-impl TryFrom<String> for UsageRunId {
+impl TryFrom<String> for UsageMeterId {
     type Error = StoreError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let valid = value.strip_prefix("run:").is_some_and(|id| {
@@ -62,19 +62,19 @@ impl TryFrom<String> for UsageRunId {
         if valid {
             Ok(Self(value))
         } else {
-            Err(corrupt(format!("invalid usage run id {value:?}")))
+            Err(corrupt(format!("invalid usage meter id {value:?}")))
         }
     }
 }
 
-/// Written by a run before its first provider attempt.
+/// Written by a meter before its first provider attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UsageRunAdmission {
+pub struct UsageMeterAdmission {
     pub owner: RuntimeOwner,
     pub effect: UsageEffectKey,
     /// `EffectJournalIdentity::key()` of the effect's execution scope.
     pub execution_scope_key: String,
-    pub run: UsageRunId,
+    pub meter: UsageMeterId,
     /// Attribution of the first dispatch; unknown liabilities report under it.
     pub source: String,
     /// The recorded model key the first dispatch ran under.
@@ -84,7 +84,7 @@ pub struct UsageRunAdmission {
     pub admitted_at_ms: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UsageRunAdmitted {
+pub enum UsageMeterAdmitted {
     Admitted,
     AlreadyAdmitted,
 }
@@ -111,16 +111,16 @@ pub enum UsageFactKind {
 pub struct UsageFactIdentity {
     pub owner: RuntimeOwner,
     pub effect: UsageEffectKey,
-    /// Position of the provider call within the recorded run, 0-based, in
-    /// the order the run recorded its calls. `LlmCall` and `Direct` runs have
-    /// one call (0); a `ToolAttempt` run has one per nested call.
+    /// Position of the provider call within the recorded meter, 0-based, in
+    /// the order the meter recorded its calls. `LlmCall` and `Direct` meters have
+    /// one call (0); a `ToolAttempt` meter has one per nested call.
     pub call_ordinal: u32,
     /// `AttemptRecord::ordinal` within that call.
     pub provider_attempt: u32,
     pub kind: UsageFactKind,
 }
 
-/// One provider attempt of the recorded run.
+/// One provider attempt of the recorded meter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UsageAttemptFact {
@@ -162,20 +162,20 @@ pub struct UsageCorrection {
     pub generation_id: String,
 }
 
-/// What the recorded run delivers.
+/// What the recorded meter delivers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UsageSettlement {
     pub owner: RuntimeOwner,
     pub effect: UsageEffectKey,
-    pub run: UsageRunId,
+    pub meter: UsageMeterId,
     pub facts: Vec<UsageAttemptFact>,
-    pub accounting: RunAccounting,
+    pub accounting: MeterAccounting,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RunAccounting {
-    /// Every call the run began has its sealed record in `facts`.
+pub enum MeterAccounting {
+    /// Every call the meter began has its sealed record in `facts`.
     Complete,
     /// `calls` calls began (admission passed) and ended without a sealed
     /// record (dropped by cancellation before the provider handle returned).
@@ -188,12 +188,12 @@ pub enum RunAccounting {
 pub struct UsageSettleReceipt {
     pub inserted_facts: u32,
     pub duplicate_facts: u32,
-    pub run: UsageRunResolution,
-    /// Other open runs of the same effect resolved `unknown(superseded_run)`.
+    pub meter: UsageMeterResolution,
+    /// Other open meters of the same effect resolved `unknown(superseded_meter)`.
     pub superseded_runs: u32,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum UsageRunResolution {
+pub enum UsageMeterResolution {
     Settled,
     Unknown(UsageUnknownReason),
 }
@@ -201,9 +201,9 @@ pub enum UsageRunResolution {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UsageUnknownReason {
-    SupersededRun,      // another run of the effect was journaled
-    CallWithoutRecord,  // RunAccounting::CallWithoutRecord
-    FactsUnjournalable, // RunAccounting::FactsUnjournalable
+    SupersededMeter,    // another meter of the effect was journaled
+    CallWithoutRecord,  // MeterAccounting::CallWithoutRecord
+    FactsUnjournalable, // MeterAccounting::FactsUnjournalable
     ExecutionEnded,     // its execution was killed or lost before settling
     OwnerRetired,       // open when the owner was drained
 }
@@ -238,7 +238,7 @@ pub struct UsageAppendReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageOwnerRetired {
     pub retired_at_ms: u64,
-    /// Open runs this retirement resolved `unknown(owner_retired)`.
+    /// Open meters this retirement resolved `unknown(owner_retired)`.
     pub resolved_open_runs: u64,
     pub already_retired: bool,
 }
@@ -246,10 +246,10 @@ pub struct UsageOwnerRetired {
 /// How far the owner's usage can be trusted.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageCompleteness {
-    /// Admitted runs no settlement or retirement has resolved yet: delivery pending.
+    /// Admitted meters no settlement or retirement has resolved yet: delivery pending.
     pub open_runs: u64,
     pub oldest_open_admitted_at_ms: Option<u64>,
-    /// Runs that dispatched and whose amount will never be known.
+    /// Meters that dispatched and whose amount will never be known.
     pub unknown_runs: u64,
     pub conflicted_runs: u64,
     /// Unreported attempt facts no correction has filled.
@@ -264,7 +264,7 @@ impl UsageCompleteness {
             && self.conflicted_runs == 0
             && self.unreported_attempts == 0
     }
-    /// No open run: everything that will ever be delivered has been.
+    /// No open meter: everything that will ever be delivered has been.
     pub fn is_settled(&self) -> bool {
         self.open_runs == 0
     }
@@ -326,7 +326,7 @@ pub struct UsageFactRecord {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UsageFactBody {
     Attempt {
-        run: UsageRunId,
+        meter: UsageMeterId,
         outcome: AttemptFactOutcome,
     },
     Correction {
@@ -347,8 +347,8 @@ impl UsageFactRecord {
     pub fn disposition(&self) -> UsageReporting {
         self.body.disposition()
     }
-    pub fn run(&self) -> Option<&UsageRunId> {
-        self.body.run()
+    pub fn meter(&self) -> Option<&UsageMeterId> {
+        self.body.meter()
     }
     pub fn usage(&self) -> TokenUsage {
         self.body.usage()
@@ -377,9 +377,9 @@ impl UsageFactBody {
             Self::Correction { .. } => UsageReporting::Reconciled,
         }
     }
-    pub fn run(&self) -> Option<&UsageRunId> {
+    pub fn meter(&self) -> Option<&UsageMeterId> {
         match self {
-            Self::Attempt { run, .. } => Some(run),
+            Self::Attempt { meter, .. } => Some(meter),
             Self::Correction { .. } => None,
         }
     }
@@ -411,23 +411,23 @@ impl UsageFactBody {
     pub fn from_stored(
         kind: &str,
         disposition: &str,
-        run: Option<UsageRunId>,
+        meter: Option<UsageMeterId>,
         usage: TokenUsage,
         generation_id: Option<String>,
     ) -> Result<Self, StoreError> {
-        match (kind, disposition, run, generation_id) {
-            ("attempt", "reported", Some(run), generation_id) => Ok(Self::Attempt {
-                run,
+        match (kind, disposition, meter, generation_id) {
+            ("attempt", "reported", Some(meter), generation_id) => Ok(Self::Attempt {
+                meter,
                 outcome: AttemptFactOutcome::Reported {
                     usage,
                     generation_id,
                 },
             }),
-            ("attempt", "unreported", Some(run), generation_id)
+            ("attempt", "unreported", Some(meter), generation_id)
                 if usage == TokenUsage::default() =>
             {
                 Ok(Self::Attempt {
-                    run,
+                    meter,
                     outcome: AttemptFactOutcome::Unreported { generation_id },
                 })
             }
@@ -473,16 +473,16 @@ pub struct UsageFactPage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UsageRunRecord {
+pub struct UsageMeterRecord {
     pub effect: UsageEffectKey,
-    pub run: UsageRunId,
-    pub admission: Option<UsageRunDispatch>,
-    pub state: UsageRunState,
+    pub meter: UsageMeterId,
+    pub admission: Option<UsageMeterDispatch>,
+    pub state: UsageMeterState,
 }
 /// Dispatch evidence recorded by admission, never inferred from a settlement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UsageRunDispatch {
+pub struct UsageMeterDispatch {
     pub execution_scope_key: String,
     pub source: String,
     pub profile_key: LlmProfileKey,
@@ -491,22 +491,22 @@ pub struct UsageRunDispatch {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub enum UsageRunState {
+pub enum UsageMeterState {
     Open,
     Resolved {
         at_ms: u64,
-        outcome: UsageRunOutcome,
+        outcome: UsageMeterOutcome,
     },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub enum UsageRunOutcome {
+pub enum UsageMeterOutcome {
     Settled,
     Unknown(UsageUnknownReason),
     Conflicted(UsageFactConflict),
 }
-impl UsageRunState {
-    pub fn outcome(&self) -> Option<&UsageRunOutcome> {
+impl UsageMeterState {
+    pub fn outcome(&self) -> Option<&UsageMeterOutcome> {
         match self {
             Self::Open => None,
             Self::Resolved { outcome, .. } => Some(outcome),
@@ -516,7 +516,7 @@ impl UsageRunState {
         matches!(
             self,
             Self::Resolved {
-                outcome: UsageRunOutcome::Settled,
+                outcome: UsageMeterOutcome::Settled,
                 ..
             }
         )
@@ -531,58 +531,62 @@ impl UsageRunState {
             ("open", None, None, None) => Ok(Self::Open),
             ("settled", None, None, Some(at_ms)) => Ok(Self::Resolved {
                 at_ms,
-                outcome: UsageRunOutcome::Settled,
+                outcome: UsageMeterOutcome::Settled,
             }),
             ("unknown", Some(reason), None, Some(at_ms)) => Ok(Self::Resolved {
                 at_ms,
-                outcome: UsageRunOutcome::Unknown(UsageUnknownReason::from_stored(reason)?),
+                outcome: UsageMeterOutcome::Unknown(UsageUnknownReason::from_stored(reason)?),
             }),
             ("conflicted", None, Some(conflict), Some(at_ms)) => Ok(Self::Resolved {
                 at_ms,
-                outcome: UsageRunOutcome::Conflicted(conflict),
+                outcome: UsageMeterOutcome::Conflicted(conflict),
             }),
-            _ => Err(corrupt("invalid usage run resolution")),
+            _ => Err(corrupt("invalid usage meter resolution")),
         }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UsageRunFilter {
+pub enum UsageMeterFilter {
     Open,
     Unresolved, /* unknown + conflicted */
     All,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UsageRunCursor {
+pub struct UsageMeterCursor {
     owner: RuntimeOwner,
     after_effect: UsageEffectKey,
-    after_run: UsageRunId,
+    after_meter: UsageMeterId,
 }
-impl UsageRunCursor {
-    pub fn new(owner: RuntimeOwner, after_effect: UsageEffectKey, after_run: UsageRunId) -> Self {
+impl UsageMeterCursor {
+    pub fn new(
+        owner: RuntimeOwner,
+        after_effect: UsageEffectKey,
+        after_meter: UsageMeterId,
+    ) -> Self {
         Self {
             owner,
             after_effect,
-            after_run,
+            after_meter,
         }
     }
     pub fn after_effect(&self) -> &UsageEffectKey {
         &self.after_effect
     }
-    pub fn after_run(&self) -> &UsageRunId {
-        &self.after_run
+    pub fn after_meter(&self) -> &UsageMeterId {
+        &self.after_meter
     }
     pub fn check_owner(&self, owner: &RuntimeOwner) -> Result<(), StoreError> {
         if &self.owner == owner {
             Ok(())
         } else {
-            Err(corrupt("usage run cursor belongs to another owner"))
+            Err(corrupt("usage meter cursor belongs to another owner"))
         }
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UsageRunPage {
-    pub runs: Vec<UsageRunRecord>,
-    pub next: Option<UsageRunCursor>,
+pub struct UsageMeterPage {
+    pub meters: Vec<UsageMeterRecord>,
+    pub next: Option<UsageMeterCursor>,
 }
 
 /// Payload identity (moved here from `store/runtime_commit.rs`; same constant,
@@ -600,12 +604,12 @@ pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
 /// BLAKE3 hex under domain `lash-usage-fact-payload/v4` of the framed
 /// projection: kind, disposition tag, source, model key, requested model,
 /// optional served model, the five counters (big-endian i64), llm_call_id,
-/// optional generation_id, optional run id.
+/// optional generation_id, optional meter id.
 /// The identity columns are not part of the payload. Full destructures, no `..`.
-pub fn usage_fact_payload_hash(fact: &UsageAttemptFact, run: &UsageRunId) -> String {
+pub fn usage_fact_payload_hash(fact: &UsageAttemptFact, meter: &UsageMeterId) -> String {
     crate::stable_hash::blake3_hex(
         LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION,
-        &attempt_payload_bytes(fact, run),
+        &attempt_payload_bytes(fact, meter),
     )
 }
 
@@ -621,7 +625,7 @@ pub fn usage_correction_payload_hash(
     )
 }
 
-fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
+fn attempt_payload_bytes(fact: &UsageAttemptFact, meter: &UsageMeterId) -> Vec<u8> {
     let UsageAttemptFact {
         call_ordinal: _,
         provider_attempt: _,
@@ -649,7 +653,7 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
             usage,
             llm_call_id,
             generation_id.as_deref(),
-            Some(run),
+            Some(meter),
         ),
         AttemptFactOutcome::Unreported { generation_id } => payload_bytes(
             0,
@@ -658,7 +662,7 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
             &TokenUsage::default(),
             llm_call_id,
             generation_id.as_deref(),
-            Some(run),
+            Some(meter),
         ),
     }
 }
@@ -699,7 +703,7 @@ fn payload_bytes(
     usage: &TokenUsage,
     call: &LlmCallId,
     generation: Option<&str>,
-    run: Option<&UsageRunId>,
+    meter: Option<&UsageMeterId>,
 ) -> Vec<u8> {
     let TokenUsage {
         input_tokens,
@@ -735,7 +739,7 @@ fn payload_bytes(
     }
     encoder.string(call.0.as_str());
     encoder.optional(generation, |encoder, value| encoder.string(value));
-    encoder.optional(run, |encoder, value| encoder.string(value.as_str()));
+    encoder.optional(meter, |encoder, value| encoder.string(value.as_str()));
     encoder.finish()
 }
 
@@ -857,7 +861,7 @@ impl UsageAttemptFact {
         &self,
         owner: &RuntimeOwner,
         effect: &UsageEffectKey,
-        run: &UsageRunId,
+        meter: &UsageMeterId,
         now_ms: u64,
     ) -> UsageFactRecord {
         let UsageAttemptFact {
@@ -882,22 +886,22 @@ impl UsageAttemptFact {
             requested_model: requested_model.clone(),
             served_model: served_model.clone(),
             body: UsageFactBody::Attempt {
-                run: run.clone(),
+                meter: meter.clone(),
                 outcome: outcome.clone(),
             },
             recorded_at_ms: now_ms,
         }
     }
 }
-impl RunAccounting {
-    pub fn resolution(&self) -> UsageRunResolution {
+impl MeterAccounting {
+    pub fn resolution(&self) -> UsageMeterResolution {
         match self {
-            Self::Complete => UsageRunResolution::Settled,
+            Self::Complete => UsageMeterResolution::Settled,
             Self::CallWithoutRecord { .. } => {
-                UsageRunResolution::Unknown(UsageUnknownReason::CallWithoutRecord)
+                UsageMeterResolution::Unknown(UsageUnknownReason::CallWithoutRecord)
             }
             Self::FactsUnjournalable { .. } => {
-                UsageRunResolution::Unknown(UsageUnknownReason::FactsUnjournalable)
+                UsageMeterResolution::Unknown(UsageUnknownReason::FactsUnjournalable)
             }
         }
     }
@@ -905,7 +909,7 @@ impl RunAccounting {
 impl UsageUnknownReason {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::SupersededRun => "superseded_run",
+            Self::SupersededMeter => "superseded_meter",
             Self::CallWithoutRecord => "call_without_record",
             Self::FactsUnjournalable => "facts_unjournalable",
             Self::ExecutionEnded => "execution_ended",
@@ -914,7 +918,7 @@ impl UsageUnknownReason {
     }
     pub fn from_stored(value: &str) -> Result<Self, StoreError> {
         match value {
-            "superseded_run" => Ok(Self::SupersededRun),
+            "superseded_meter" => Ok(Self::SupersededMeter),
             "call_without_record" => Ok(Self::CallWithoutRecord),
             "facts_unjournalable" => Ok(Self::FactsUnjournalable),
             "execution_ended" => Ok(Self::ExecutionEnded),
@@ -945,13 +949,13 @@ impl UsageReporting {
 mod tests {
     use super::*;
     #[test]
-    fn stored_fact_bodies_reject_every_inconsistent_kind_disposition_and_run() {
+    fn stored_fact_bodies_reject_every_inconsistent_kind_disposition_and_meter() {
         for kind in ["attempt", "correction"] {
             for disposition in ["reported", "unreported", "reconciled"] {
-                for run in [None, Some(UsageRunId::mint())] {
+                for meter in [None, Some(UsageMeterId::mint())] {
                     for generation_id in [None, Some("generation".to_owned())] {
                         let valid = matches!(
-                            (kind, disposition, run.is_some(), generation_id.is_some()),
+                            (kind, disposition, meter.is_some(), generation_id.is_some()),
                             ("attempt", "reported" | "unreported", true, _)
                                 | ("correction", "reconciled", false, true)
                         );
@@ -959,7 +963,7 @@ mod tests {
                             UsageFactBody::from_stored(
                                 kind,
                                 disposition,
-                                run.clone(),
+                                meter.clone(),
                                 TokenUsage::default(),
                                 generation_id
                             )
@@ -974,7 +978,7 @@ mod tests {
             UsageFactBody::from_stored(
                 "attempt",
                 "unreported",
-                Some(UsageRunId::mint()),
+                Some(UsageMeterId::mint()),
                 TokenUsage {
                     input_tokens: 1,
                     ..Default::default()
@@ -986,7 +990,7 @@ mod tests {
     }
 
     #[test]
-    fn run_resolution_rejects_missing_or_extraneous_state_evidence() {
+    fn meter_resolution_rejects_missing_or_extraneous_state_evidence() {
         for state in ["open", "settled", "unknown", "conflicted"] {
             for reason in [None, Some("execution_ended")] {
                 for resolved in [None, Some(10)] {
@@ -997,14 +1001,14 @@ mod tests {
                             | ("unknown", Some(_), Some(_))
                     );
                     assert_eq!(
-                        UsageRunState::from_stored(state, reason, None, resolved).is_ok(),
+                        UsageMeterState::from_stored(state, reason, None, resolved).is_ok(),
                         valid
                     );
                 }
             }
         }
         assert!(
-            serde_json::from_value::<UsageRunState>(
+            serde_json::from_value::<UsageMeterState>(
                 serde_json::json!({"Resolved": {"outcome": "Settled"}})
             )
             .is_err()
@@ -1018,8 +1022,8 @@ mod tests {
     }
 
     fn corpus() -> Vec<(String, Vec<u8>, String)> {
-        let run = UsageRunId::try_from("run:00000000000040008000000000000001".to_owned())
-            .expect("run id");
+        let meter = UsageMeterId::try_from("run:00000000000040008000000000000001".to_owned())
+            .expect("meter id");
         let base = UsageAttemptFact {
             call_ordinal: 0,
             provider_attempt: 0,
@@ -1043,8 +1047,8 @@ mod tests {
         let mut push = |name: &str, fact: UsageAttemptFact| {
             cases.push((
                 name.to_owned(),
-                attempt_payload_bytes(&fact, &run),
-                usage_fact_payload_hash(&fact, &run),
+                attempt_payload_bytes(&fact, &meter),
+                usage_fact_payload_hash(&fact, &meter),
             ));
         };
         push("reported", base.clone());
@@ -1093,7 +1097,7 @@ mod tests {
         let target = base.record(
             &RuntimeOwner::Session(lash_sansio::SessionId::from("owner")),
             &correction.effect,
-            &run,
+            &meter,
             0,
         );
         cases.push((
@@ -1121,7 +1125,7 @@ mod tests {
 
     #[test]
     fn run_ids_accept_only_canonical_v4_renderings() {
-        assert!(UsageRunId::try_from(UsageRunId::mint().as_str().to_owned()).is_ok());
+        assert!(UsageMeterId::try_from(UsageMeterId::mint().as_str().to_owned()).is_ok());
         for bad in [
             "",
             "run:00000000000070008000000000000001",
@@ -1130,14 +1134,14 @@ mod tests {
             "run:00000000-0000-4000-8000-000000000001",
         ] {
             assert!(matches!(
-                UsageRunId::try_from(bad.to_owned()),
+                UsageMeterId::try_from(bad.to_owned()),
                 Err(StoreError::StoredDataCorrupt { .. })
             ));
         }
     }
     #[test]
     fn fact_hash_covers_payload_and_excludes_identity() {
-        let run = UsageRunId::mint();
+        let meter = UsageMeterId::mint();
         let mut fact = UsageAttemptFact {
             call_ordinal: 0,
             provider_attempt: 0,
@@ -1151,31 +1155,31 @@ mod tests {
                 generation_id: None,
             },
         };
-        let hash = usage_fact_payload_hash(&fact, &run);
+        let hash = usage_fact_payload_hash(&fact, &meter);
         fact.call_ordinal = 7;
         fact.provider_attempt = 9;
-        assert_eq!(hash, usage_fact_payload_hash(&fact, &run));
+        assert_eq!(hash, usage_fact_payload_hash(&fact, &meter));
         let mut changed = fact.clone();
         changed.llm_call_id = LlmCallId("other".into());
-        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &meter));
         changed = fact.clone();
         changed.source.push('x');
-        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &meter));
         changed = fact.clone();
         changed.profile_key = LlmProfileKey::new("another-key");
-        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &meter));
         changed = fact.clone();
         changed.requested_model.push('x');
-        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &meter));
         changed = fact.clone();
         changed.served_model = Some("model".into());
-        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &meter));
         changed = fact.clone();
         changed.outcome = AttemptFactOutcome::Unreported {
             generation_id: None,
         };
-        assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
-        assert_ne!(hash, usage_fact_payload_hash(&fact, &UsageRunId::mint()));
+        assert_ne!(hash, usage_fact_payload_hash(&changed, &meter));
+        assert_ne!(hash, usage_fact_payload_hash(&fact, &UsageMeterId::mint()));
     }
 }
 

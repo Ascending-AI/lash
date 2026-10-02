@@ -11,8 +11,8 @@
 //! divergence between the two modes is a real divergence between a session that
 //! stayed on one worker and one that did not.
 
-use super::drive;
 use super::harness::{HarnessMode, Session};
+use super::shift;
 use super::syntax::{Cell, Literal};
 
 /// A representative session: real values, a closure-bearing cell, a failing
@@ -70,8 +70,8 @@ fn a_snapshot_after_closure_bearing_cells_restores_and_runs_different_cells() {
 #[test]
 fn restarting_between_every_pair_of_cells_preserves_the_session() {
     let cells = representative_session();
-    let (resident, _) = drive(HarnessMode::Resident, &cells);
-    let (restarting, _) = drive(HarnessMode::RestartBetweenCells, &cells);
+    let (resident, _) = shift(HarnessMode::Resident, &cells);
+    let (restarting, _) = shift(HarnessMode::RestartBetweenCells, &cells);
     assert_eq!(
         resident.globals(),
         restarting.globals(),
@@ -90,8 +90,8 @@ fn restarting_between_every_pair_of_cells_preserves_the_session() {
 #[test]
 fn a_restarted_session_persists_the_same_bytes() {
     let cells = representative_session();
-    let (resident, _) = drive(HarnessMode::Resident, &cells);
-    let (restarting, _) = drive(HarnessMode::RestartBetweenCells, &cells);
+    let (resident, _) = shift(HarnessMode::Resident, &cells);
+    let (restarting, _) = shift(HarnessMode::RestartBetweenCells, &cells);
 
     let resident = resident.persisted_state();
     let restarting = restarting.persisted_state();
@@ -116,7 +116,7 @@ fn a_restarted_session_persists_the_same_bytes() {
 /// A snapshot taken right after a cell failed restores into a usable session.
 #[test]
 fn a_snapshot_after_a_failing_cell_restores_cleanly() {
-    let (mut session, _) = drive(
+    let (mut session, _) = shift(
         HarnessMode::Resident,
         &[
             Cell::bind("kept", Literal::List(vec![1.0, 2.0])),
@@ -137,7 +137,7 @@ fn a_snapshot_after_a_failing_cell_restores_cleanly() {
 /// running anything, so a restore has to be a fixed point.
 #[test]
 fn restoring_twice_without_running_a_cell_is_a_fixed_point() {
-    let (mut session, _) = drive(HarnessMode::Resident, &representative_session());
+    let (mut session, _) = shift(HarnessMode::Resident, &representative_session());
     let bindings = session.globals();
     let persisted = session.persisted_state();
     session.restart();

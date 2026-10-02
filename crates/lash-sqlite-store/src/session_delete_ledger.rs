@@ -1,6 +1,6 @@
 //! The SQLite store half of a session's two-phase delete (ADR 0109 §4).
 //!
-//! A session's delete obligation and its roots' scope closes live in the
+//! A session's delete obligation and its runs' scope closes live in the
 //! durable core; the parent-end plans of the scopes it owns live in the
 //! process registry file. The acknowledgement of a session's `CloseSession`
 //! intent arms its delete in the durable core's transaction
@@ -18,7 +18,7 @@ use lash_core_execution::store::{
 use lash_core_execution::{EffectOpener, ScopeId, SessionId};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanCleanupStatements;
 use lash_store_sql::session::meta::SessionMetaDeleteStatements;
-use lash_store_sql::session_roots::roots::SessionRootCleanupStatements;
+use lash_store_sql::session_runs::runs::SessionRunCleanupStatements;
 use rusqlite::OptionalExtension;
 
 use crate::conn::SqliteConnection;
@@ -27,8 +27,8 @@ use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
 static META: LazyLock<SessionMetaDeleteStatements> =
     LazyLock::new(|| SessionMetaDeleteStatements::render(Schema::Main.dialect()));
-static ROOTS: LazyLock<SessionRootCleanupStatements> =
-    LazyLock::new(|| SessionRootCleanupStatements::render(Schema::Main.dialect()));
+static RUNS: LazyLock<SessionRunCleanupStatements> =
+    LazyLock::new(|| SessionRunCleanupStatements::render(Schema::Main.dialect()));
 static PLANS: LazyLock<ParentEndPlanCleanupStatements> =
     LazyLock::new(|| ParentEndPlanCleanupStatements::render(Schema::Main.dialect()));
 
@@ -125,7 +125,7 @@ impl SessionDeleteLedger for SqliteSessionDeleteLedger {
             .core
             .call(move |conn| {
                 conn.query_row(
-                    ROOTS.count_undelivered_scope_close.sql(),
+                    RUNS.count_undelivered_scope_close.sql(),
                     rusqlite::params![session],
                     |row| row.get(0),
                 )

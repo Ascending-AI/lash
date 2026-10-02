@@ -49,7 +49,7 @@ session commits across transaction domains.
 
 A session id is host-provided and single-use in its store (ADR 0049).
 History and frame identity therefore use that id directly. Ingress admission
-and settlement use root bindings under the sealed drive fence (ADR 0101).
+and settlement use run bindings under the sealed shift fence (ADR 0101).
 
 ## Store leaf validation versus caller branch liveness
 

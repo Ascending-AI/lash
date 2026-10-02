@@ -911,7 +911,7 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
 
 /// FIG-4645: an input of the run the worker cannot read is refused the same
 /// way on every attempt. Each refusal crosses the pipe as its typed cause and
-/// is terminal: never the attempt's host verdict, which would re-drive the
+/// is terminal: never the attempt's host verdict, which would redrive the
 /// run into the same refusal for ever.
 #[test]
 fn a_deterministic_refusal_of_a_runs_inputs_is_terminal_and_typed() {

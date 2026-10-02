@@ -71,7 +71,7 @@ pub(crate) async fn decide_approval(
     // The ledger row is the decision's durable record, so it is written first
     // and the wait resolution is derived from it. A crash between the two
     // writes leaves a decided row over an outstanding wait; the decided arm
-    // re-drives `resolve` with the recorded decision, which `AlreadyResolved`
+    // redrives `resolve` with the recorded decision, which `AlreadyResolved`
     // makes idempotent. The boot reconcile runs the same repair for rows the
     // operator never retries.
     let (decision, key, tool, arguments, requesting_session) = match pending {
@@ -164,7 +164,7 @@ pub(crate) async fn decide_approval(
 /// Boot-time half of the repair: a crash can leave a decided ledger row over a
 /// wait that was never resolved, and the pending list no longer shows it for
 /// an operator to retry. Re-resolve every decided row; `resolve` is
-/// idempotent, so rows whose wait already settled are observed, not re-driven.
+/// idempotent, so rows whose wait already settled are observed, not redriven.
 pub(crate) async fn reconcile_decided_approvals(state: &AppState) {
     let decided = match state.approvals.decided() {
         Ok(decided) => decided,

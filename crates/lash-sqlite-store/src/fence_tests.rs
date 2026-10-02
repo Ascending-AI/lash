@@ -46,7 +46,7 @@ fn count(location: &SqliteLocation, database: SqliteDatabase, table: &str) -> i6
         .expect("count rows")
 }
 
-fn root_intent_exists(location: &SqliteLocation) -> bool {
+fn run_intent_exists(location: &SqliteLocation) -> bool {
     match location {
         SqliteLocation::File { root } => root.join("lash-finalize.json").exists(),
         SqliteLocation::Memory { .. } => false,
@@ -124,7 +124,7 @@ fn is_fenced(error: &StoreError, recorded: u32) -> bool {
 /// refused `WriterFenced` and writes nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     raw(&location, SqliteDatabase::Triggers)
         .execute(
@@ -226,7 +226,7 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
 /// past this build's floor is refused typed with nothing written.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_fence_readmits_a_stamp_migrated_by_another_process() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     for database in SqliteDatabase::ALL {
         let (connection, table, sql) = writer(&location, database).await;
@@ -292,7 +292,7 @@ async fn sqlite_fence_readmits_a_stamp_migrated_by_another_process() {
 /// exactly the databases the migration holds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_migration_takes_every_database_exclusively_in_order() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let writable = |database: SqliteDatabase| {
         let probe = raw(&location, database);
@@ -493,7 +493,7 @@ async fn sqlite_fence_observes_a_writable_move_of_f() {
 #[tokio::test]
 async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
     use lash_core_execution::SessionCatalogStore as _;
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let factory = set.session_store_factory();
     let session = SessionId::from("fenced-delete");
     factory
@@ -529,7 +529,7 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
 #[tokio::test]
 async fn sqlite_fence_encodes_again_when_f_moves() {
     use lash_core_execution::{SessionCatalogStore as _, SessionCommitStore as _};
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let path = set
         .location()
         .target(SqliteDatabase::DurableCore)
@@ -612,9 +612,9 @@ impl DeploymentRegistry for Deployments {
 )]
 async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
     const TEST: &str = "fence_tests::sqlite_finalize_cold_reopen_completes_partial_epoch_flip";
-    const ROOT: &str = "LASH_SQLITE_FINALIZE_CRASH_ROOT";
+    const RUN: &str = "LASH_SQLITE_FINALIZE_CRASH_ROOT";
     const CUT: &str = "LASH_SQLITE_FINALIZE_CRASH_CUT";
-    if let Some(root) = std::env::var_os(ROOT) {
+    if let Some(root) = std::env::var_os(RUN) {
         let cut = std::env::var(CUT).expect("child crash cut");
         let options = crate::SqliteStoreSetOptions {
             finalize_hook: Some(crate::testing::SqliteFinalizeHook::new(move |database| {
@@ -684,7 +684,7 @@ async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
         drop(set);
         let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
-            .env(ROOT, root.path())
+            .env(RUN, root.path())
             .env(CUT, cut.file_name())
             .output()
             .expect("run the finalizing process");
@@ -891,7 +891,7 @@ async fn sqlite_finalize_cold_reopen_refuses_changed_stamp_or_intent() {
 /// rerun finds the set finalized.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stale_writer_is_fenced_after_finalize() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let writable = FleetFormat::writable();
     let next = writable.max() + 1;
@@ -914,7 +914,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         other => panic!("an undrained generation must refuse finalize: {other:?}"),
     }
     assert!(
-        !root_intent_exists(&location),
+        !run_intent_exists(&location),
         "an undrained generation authorizes nothing"
     );
     set.generation_drain()
@@ -937,7 +937,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
         other => panic!("a retained deployment must refuse finalize: {other:?}"),
     }
     assert!(
-        !root_intent_exists(&location),
+        !run_intent_exists(&location),
         "a retained deployment authorizes nothing"
     );
     for database in SqliteDatabase::ALL {

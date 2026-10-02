@@ -10,7 +10,7 @@ impl RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'a>,
         turn_id: Option<&'a crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_run: Option<crate::UsageRun>,
+        usage_meter: Option<crate::UsageMeter>,
     ) -> DirectInvocationContext<'a> {
         DirectInvocationContext {
             current: &self.current,
@@ -19,7 +19,7 @@ impl RuntimeSessionServices {
             position,
             replay_ordinals: self.direct_replay_ordinals.as_ref(),
             unkeyed_in_flight: self.direct_unkeyed_in_flight.as_ref(),
-            usage_run,
+            usage_meter,
         }
     }
 }
@@ -52,7 +52,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_completion(
@@ -60,7 +60,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_controller,
                     turn_id,
                     position,
-                    usage_run.cloned(),
+                    usage_meter.cloned(),
                 ),
                 request,
                 usage_source,
@@ -76,7 +76,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_llm_completion(
@@ -84,7 +84,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_controller,
                     turn_id,
                     position,
-                    usage_run.cloned(),
+                    usage_meter.cloned(),
                 ),
                 request,
                 usage_source,
@@ -93,7 +93,7 @@ impl DirectCompletionService for RuntimeSessionServices {
             .await
     }
 
-    /// The session's backend ledger: a tool attempt's usage run is admitted
+    /// The session's backend ledger: a tool attempt's usage meter is admitted
     /// to and settled in it (ADR 0125).
     fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
         Some(self.current.host.core.usage_accounting())
@@ -126,10 +126,10 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
     unkeyed_in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
-    /// The usage run of the tool attempt this completion runs inside, when
+    /// The usage meter of the tool attempt this completion runs inside, when
     /// its position is `ToolAttempt`: the call is one of that run's calls,
     /// because it journals no effect of its own (ADR 0125).
-    usage_run: Option<crate::UsageRun>,
+    usage_meter: Option<crate::UsageMeter>,
 }
 
 impl DirectInvocationContext<'_> {
@@ -262,7 +262,7 @@ impl DirectCompletionCapability {
 
     /// Runs a planned direct effect across the journal/controller boundary and
     /// applies trace bookkeeping, yielding the raw provider response. The
-    /// effect's usage run accounts the call; nothing here records usage.
+    /// effect's usage meter accounts the call; nothing here records usage.
     async fn run_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
@@ -297,7 +297,7 @@ impl DirectCompletionCapability {
             }
             DirectExecutionPosition::ToolAttempt => {
                 local_executor
-                    .execute_within_run(envelope, context.usage_run.clone())
+                    .execute_within_meter(envelope, context.usage_meter.clone())
                     .await?
             }
         };

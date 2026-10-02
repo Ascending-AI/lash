@@ -56,7 +56,7 @@ lash_store_sql::statements! {
         /// concurrent admission cannot move it inside this transaction.
         select_state_version_for_update = "SELECT session_state_version FROM session_meta WHERE session_id = ?1 FOR UPDATE";
 
-        /// The shared `select_drive_epoch`, row-locked for the rest of the
+        /// The shared `select_shift_epoch`, row-locked for the rest of the
         /// fenced write's transaction (FIG-4044).
         ///
         /// The lock is the fork. SQLite's fenced writes run under the
@@ -65,10 +65,10 @@ lash_store_sql::statements! {
         /// fences. Locked, the read waits for an in-flight seal and sees the
         /// epoch it committed, and a later seal waits for the write. The lock
         /// is exclusive rather than shared because a fenced write may go on
-        /// to lock the row for update itself (`admit_root` reads the state
+        /// to lock the row for update itself (`admit_run` reads the state
         /// version `FOR UPDATE`): two shared holders upgrading would
         /// deadlock, where exclusive holders simply queue.
-        select_drive_epoch_locked = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
+        select_shift_epoch_locked = "SELECT shift_epoch, shift_admission_id, shift_run_start, closing_intent,
             EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
                 AND kind IN ('cancel', 'fork') AND engine_half_owed),
             fault_json, fault_at_ms
@@ -447,10 +447,10 @@ lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
         /// The receipt session `?1` recorded for operation key `?2`, read in
-        /// the round trip that settles root `?3`'s park (FIG-3586, FIG-3600
+        /// the round trip that settles run `?3`'s park (FIG-3586, FIG-3600
         /// S7) and logs the `Unparked{TurnCommitted}` event (FIG-3659): a
-        /// root's commit clears its park row inside the commit's transaction,
-        /// whichever of its physical turns committed, and another root's
+        /// run's commit clears its park row inside the commit's transaction,
+        /// whichever of its physical turns committed, and another run's
         /// commit leaves it. A `NULL` `?3`, an operation that is no turn's,
         /// matches no park — and the `EXISTS` guard on the clock bump means
         /// no event, no sequence burned.

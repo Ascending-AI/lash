@@ -30,7 +30,7 @@ pub const FAULT_SCRIPT_IMPLEMENTATION: &str = "lash_core::testing::Script";
 /// The actor the faulted commits run as in the script's trace.
 const FAULTED_ACTOR: &str = "lash-sim";
 
-/// Which real store backend a fault plan is driving.
+/// Which real store backend a fault plan is executing.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendFaultKind {

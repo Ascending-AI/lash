@@ -200,7 +200,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
     let session_id = fixture.session_id.clone();
     // The engine admits no pending input while the test asserts what stays
     // pending across the vacuum.
-    let _hold = fixture.double.hold_session_drive(&session_id).await;
+    let _hold = fixture.double.hold_session_shift(&session_id).await;
 
     let Json(retained) = enqueue_turn_input(
         State(state.clone()),

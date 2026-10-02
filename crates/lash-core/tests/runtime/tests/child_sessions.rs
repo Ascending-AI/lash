@@ -2,7 +2,7 @@ use super::*;
 use lash_core::AttachmentStore as _;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt;
 
 const SEED: u64 = 0x5_c401;
@@ -375,7 +375,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         .await
         .expect("open the scope's handler");
     child_runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("write the attachment"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -533,7 +533,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         .await
         .expect("open the scope's handler");
     child_runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("register the process"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -784,7 +784,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .await
         .expect("open the scope's handler");
     let first_parent = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("run child"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -828,7 +828,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .await
         .expect("open the scope's handler");
     let child_turn = child_runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("run the child turn"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -848,7 +848,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .await
         .expect("open the scope's handler");
     let second_parent = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("finish up"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -982,7 +982,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         .await
         .expect("open the scope's handler");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("run parent"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -1022,7 +1022,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         .await
         .expect("open the scope's handler");
     child_runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("run the child turn"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )

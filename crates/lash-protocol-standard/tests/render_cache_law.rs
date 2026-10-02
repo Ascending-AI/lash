@@ -11,7 +11,7 @@ use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
 };
 use lash_core::plugin::{PluginFactory, SessionAuthorityContext};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStorePersistence, CommitBudget, LlmOutputPart, LlmResponse, QueuedWorkBatchingConfig,
@@ -316,7 +316,7 @@ async fn open_runtime(
     .expect("open runtime")
 }
 
-async fn drive(
+async fn shift(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
     session_id: &SessionId,
@@ -330,7 +330,7 @@ async fn drive(
         .await
         .expect("open turn handler");
     let result = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text(id),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
@@ -338,12 +338,12 @@ async fn drive(
             ),
         )
         .await
-        .expect("drive turn");
+        .expect("shift turn");
     handler.close().await.expect("close turn handler");
     assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 
-async fn drive_with_run_spec(
+async fn execute_with_run_spec(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
     store: &lash_core::store::SessionStore,
@@ -370,19 +370,19 @@ async fn drive_with_run_spec(
             TurnId::from("run-spec"),
         ))
         .await
-        .expect("open drive handler");
-    let outcome = lash_core::drive::drive_session(
+        .expect("open shift handler");
+    let outcome = lash_core::shift::work_session(
         runtime,
         &handler.scoped(),
-        &lash_core::engine::DriveRequest {
+        &lash_core::engine::ShiftRequest {
             session: session_id.clone(),
-            request: lash_core::engine::DriveRequestId::new("render-law-run-spec"),
+            request: lash_core::engine::ShiftRequestId::new("render-law-run-spec"),
             intended_lane: None,
         },
     )
     .await
-    .expect("drive run spec");
-    handler.close().await.expect("close drive handler");
+    .expect("shift run spec");
+    handler.close().await.expect("close shift handler");
     assert_eq!(outcome.ran.len(), 1);
 }
 
@@ -664,7 +664,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 Arc::clone(&tool),
             )
             .await;
-            drive(&mut runtime, &double, &session_id, "first").await;
+            shift(&mut runtime, &double, &session_id, "first").await;
             assert_eq!(script.calls.load(Ordering::SeqCst), 2);
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
             assert_eq!(renderer.first_limit.load(Ordering::SeqCst), 140);
@@ -701,9 +701,9 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                     "render-options-command",
                 ))
                 .await
-                .expect("open command drive handler");
+                .expect("open command shift handler");
             runtime
-                .drive_next_root(
+                .execute_next_run(
                     "render-options-command",
                     lash_core::facade_support::TurnOptions::new(
                         tokio_util::sync::CancellationToken::new(),
@@ -711,8 +711,8 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                     ),
                 )
                 .await
-                .expect("drive render options command");
-            handler.close().await.expect("close command drive handler");
+                .expect("shift render options command");
+            handler.close().await.expect("close command shift handler");
             assert!(matches!(
                 runtime
                     .settle_session_command(receipt)
@@ -727,7 +727,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
             ));
 
             renderer.mode.store(1, Ordering::SeqCst);
-            drive(&mut runtime, &double, &session_id, "second").await;
+            shift(&mut runtime, &double, &session_id, "second").await;
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
             assert_eq!(renderer.second.load(Ordering::SeqCst), 1);
             assert_eq!(renderer.second_limit.load(Ordering::SeqCst), 120);
@@ -747,7 +747,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                         .contains("[output cut:")
                 );
             }
-            drive_with_run_spec(&mut runtime, &double, &store, &session_id).await;
+            execute_with_run_spec(&mut runtime, &double, &store, &session_id).await;
             assert_eq!(renderer.second.load(Ordering::SeqCst), 2);
             assert_eq!(renderer.second_limit.load(Ordering::SeqCst), 100);
             assert_eq!(attachments.puts.load(Ordering::SeqCst), 3);
@@ -776,7 +776,7 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 Arc::clone(&tool),
             )
             .await;
-            drive(&mut runtime, &double, &session_id, "reopened").await;
+            shift(&mut runtime, &double, &session_id, "reopened").await;
             assert_eq!(renderer.first.load(Ordering::SeqCst), 2);
             assert_eq!(renderer.second.load(Ordering::SeqCst), 2);
             assert_eq!(attachments.puts.load(Ordering::SeqCst), 3);

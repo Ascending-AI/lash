@@ -20,7 +20,7 @@ pub enum ExecutionScope {
         process_id: ProcessId,
     },
     /// One operation on a session that runs no turn: a host command, named
-    /// by its batch, or the admissions of one drive request. It has no
+    /// by its batch, or the admissions of one shift request. It has no
     /// logical root, and no logical turn runs under it.
     SessionOperation {
         session_id: SessionId,
@@ -84,7 +84,7 @@ impl ExecutionScope {
     /// own. `None` outside a session turn (a process body, a session
     /// operation, a session delete, a runtime operation).
     #[must_use]
-    pub fn logical_root(&self) -> Option<TurnId> {
+    pub fn logical_run(&self) -> Option<TurnId> {
         match self {
             Self::Turn { turn_id, .. } => Some(turn_id.clone()),
             Self::Process { .. }

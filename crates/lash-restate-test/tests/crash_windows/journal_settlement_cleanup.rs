@@ -1,20 +1,20 @@
 //! Every journal retains awaiting cleanups until the relay deferral elapses.
 
-use super::process_root_recovery::{Harness, HeldModelCall, Storage, core, start_child};
+use super::process_run_recovery::{Harness, HeldModelCall, Storage, core, start_child};
 use super::*;
 use lash_core::engine::{
-    AdmissionId, AdmitVerdict, Admitted, DriveAbort, DriveRequest, DriveRequestId, RootOutcome,
-    RootRunEnd, admission_body,
+    AdmissionId, AdmitVerdict, Admitted, RunEnd, RunOutcome, ShiftAbort, ShiftRequest,
+    ShiftRequestId, admission_body,
 };
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
 };
-use lash_core::runtime::drive::relay::{RelayVerdict, deliver_now, relay_due};
-use lash_core::store::{ObligationId, RootCommittedOutcome, RootTerminalWrite, TurnCommitId};
-use lash_core::{ArtifactCleanup, ArtifactReferrer, ExecutionScope, JournalReplay, SessionDriver};
+use lash_core::runtime::shift::relay::{RelayVerdict, deliver_now, relay_due};
+use lash_core::store::{ObligationId, RunCommittedOutcome, RunTerminalWrite, TurnCommitId};
+use lash_core::{ArtifactCleanup, ArtifactReferrer, ExecutionScope, JournalReplay, SessionShifts};
 
-/// Holds admission or a terminal root open while the law drives cleanup passes.
-struct HeldDriver {
+/// Holds admission or a terminal run open while the law executes cleanup passes.
+struct HeldShifts {
     store: lash_core::store::SessionStore,
     session: lash_core::SessionId,
     started: tokio::sync::Notify,
@@ -22,7 +22,7 @@ struct HeldDriver {
     kind: JournalKind,
 }
 
-impl HeldDriver {
+impl HeldShifts {
     async fn held(&self) {
         self.started.notify_one();
         self.release.acquire().await.unwrap().forget();
@@ -30,20 +30,20 @@ impl HeldDriver {
 }
 
 #[async_trait::async_trait]
-impl SessionDriver for HeldDriver {
+impl SessionShifts for HeldShifts {
     async fn admit(
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
-        request: &DriveRequest,
+        request: &ShiftRequest,
         admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
-    ) -> Result<AdmitVerdict, DriveAbort> {
-        if matches!(self.kind, JournalKind::AwaitedRoot) {
+    ) -> Result<AdmitVerdict, ShiftAbort> {
+        if matches!(self.kind, JournalKind::AwaitedRun) {
             return Ok(if ordinal == 0 {
                 AdmitVerdict::Admit(admission_body::admitted(
                     self.session.clone(),
-                    "driveless-root".into(),
+                    "shiftless-run".into(),
                     request.request.clone(),
                     AdmissionId::new("awaited#0"),
                     u64::from(ordinal),
@@ -60,18 +60,18 @@ impl SessionDriver for HeldDriver {
         Ok(AdmitVerdict::Idle)
     }
 
-    async fn run_root(
+    async fn execute_run(
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
         admitted: Admitted,
-    ) -> RootRunEnd {
+    ) -> RunEnd {
         self.held().await;
-        let root = admitted.root().clone();
+        let run = admitted.run().clone();
         let mut state =
             lash_core::RuntimeSessionState::new(lash_core::testing::mock_session_policy());
         state.session_id = self.session.clone();
         let operation =
-            lash_core::OperationId::turn(self.session.clone(), root.clone(), "settlement-cleanup");
+            lash_core::OperationId::turn(self.session.clone(), run.clone(), "settlement-cleanup");
         let mut graph = state.pending_graph_commit();
         graph.derive_node_ids(&self.session, &operation).unwrap();
         let mut commit = lash_core::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
@@ -81,36 +81,36 @@ impl SessionDriver for HeldDriver {
         let finish = lash_core::facade_support::TurnFinish::AssistantMessage {
             text: "settled".into(),
         };
-        commit.root_terminal = Some(Box::new(RootTerminalWrite {
-            root: root.clone(),
-            commit: TurnCommitId::new(root.clone(), 0),
-            turn: root.clone(),
-            outcome: RootCommittedOutcome::Finished(finish.clone()),
+        commit.run_terminal = Some(Box::new(RunTerminalWrite {
+            run: run.clone(),
+            commit: TurnCommitId::new(run.clone(), 0),
+            turn: run.clone(),
+            outcome: RunCommittedOutcome::Finished(finish.clone()),
         }));
         self.store.commit_runtime_state(commit).await.unwrap();
         // Terminal evidence is durable, but Restate still owns this open
         // attempt. Terminal evidence alone does not settle its journal.
         self.held().await;
-        RootRunEnd::owing_nothing(Ok(RootOutcome::Committed {
-            root,
+        RunEnd::owing_nothing(Ok(RunOutcome::Committed {
+            run,
             outcome: lash_core::facade_support::TurnOutcome::Finished(finish),
         }))
     }
 
-    async fn close_root(
+    async fn close_run(
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
         _session: &lash_core::SessionId,
-        _root: &lash_core::TurnId,
-    ) -> Result<(), DriveAbort> {
+        _run: &lash_core::TurnId,
+    ) -> Result<(), ShiftAbort> {
         Ok(())
     }
 }
 
 #[derive(Clone, Copy, Debug)]
 enum JournalKind {
-    AwaitedRoot,
-    DrivelessRoot,
+    AwaitedRun,
+    ShiftlessRun,
     Process,
     SessionOperation,
 }
@@ -144,9 +144,9 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
     let (harness, _stores) = Harness::new(storage, live).await;
     let backend = harness.backend();
     let session = lash_core::SessionId::fixture(run_tag("settlement-cleanup"));
-    let root = lash_core::TurnId::from("driveless-root");
+    let run = lash_core::TurnId::from("shiftless-run");
     let mut process = None;
-    let mut held_driver = None;
+    let mut held_shifts = None;
     let mut installation = None;
     let scope = match kind {
         JournalKind::Process => {
@@ -159,7 +159,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
             process = Some((core, hold));
             ExecutionScope::process(id)
         }
-        JournalKind::AwaitedRoot | JournalKind::DrivelessRoot | JournalKind::SessionOperation => {
+        JournalKind::AwaitedRun | JournalKind::ShiftlessRun | JournalKind::SessionOperation => {
             let store = lash_core::runtime::admit_session_view(
                 &backend.session_store_factory(),
                 &lash_core::SessionStoreCreateRequest {
@@ -173,7 +173,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
             )
             .await
             .unwrap();
-            let driver = Arc::new(HeldDriver {
+            let shifts = Arc::new(HeldShifts {
                 store,
                 session: session.clone(),
                 started: tokio::sync::Notify::new(),
@@ -183,25 +183,25 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
             installation = Some(
                 backend
                     .session_work()
-                    .install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>),
+                    .install_session_shifts(Arc::clone(&shifts) as Arc<dyn SessionShifts>),
             );
             let generation = backend
                 .build_generation()
                 .expect("the engine's generation is bound")
                 .clone();
             let scope = match kind {
-                JournalKind::DrivelessRoot => {
+                JournalKind::ShiftlessRun => {
                     ingress(&harness)
                         .send_workflow_json(
                             "LashTurn",
-                            &lash_restate::turn_workflow_key(&session, &root),
+                            &lash_restate::turn_workflow_key(&session, &run),
                             "run",
-                            &lash_restate::Call::new(lash_restate::RestateTurnDriveRequest {
+                            &lash_restate::Call::new(lash_restate::RestateRunRequest {
                                 sender_generation: Some(generation.clone()),
                                 admitted: admission_body::admitted(
                                     session.clone(),
-                                    root.clone(),
-                                    DriveRequestId::new("unawaited"),
+                                    run.clone(),
+                                    ShiftRequestId::new("unawaited"),
                                     AdmissionId::new("unawaited#0"),
                                     0,
                                     generation,
@@ -213,18 +213,18 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                         )
                         .await
                         .unwrap();
-                    ExecutionScope::turn(session.clone(), root)
+                    ExecutionScope::turn(session.clone(), run)
                 }
-                JournalKind::SessionOperation | JournalKind::AwaitedRoot => {
+                JournalKind::SessionOperation | JournalKind::AwaitedRun => {
                     ingress(&harness)
                         .send_object_json(
                             "LashSession",
                             session.as_str(),
-                            "drive",
-                            &lash_restate::Call::new(lash_restate::RestateSessionDriveRequest {
-                                request: DriveRequest {
+                            "shift",
+                            &lash_restate::Call::new(lash_restate::RestateSessionShiftRequest {
+                                request: ShiftRequest {
                                     session: session.clone(),
-                                    request: DriveRequestId::new("drain-drive"),
+                                    request: ShiftRequestId::new("drain-shift"),
                                     intended_lane: None,
                                 },
                                 handed_off: None,
@@ -232,18 +232,18 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                         )
                         .await
                         .unwrap();
-                    if matches!(kind, JournalKind::AwaitedRoot) {
-                        ExecutionScope::turn(session.clone(), root)
+                    if matches!(kind, JournalKind::AwaitedRun) {
+                        ExecutionScope::turn(session.clone(), run)
                     } else {
                         ExecutionScope::session_operation(session.clone(), "drain")
                     }
                 }
                 JournalKind::Process => unreachable!(),
             };
-            tokio::time::timeout(BOUND, driver.started.notified())
+            tokio::time::timeout(BOUND, shifts.started.notified())
                 .await
                 .unwrap();
-            held_driver = Some(driver);
+            held_shifts = Some(shifts);
             scope
         }
     };
@@ -282,25 +282,25 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
         );
         ids.push(id);
     }
-    if matches!(kind, JournalKind::DrivelessRoot | JournalKind::AwaitedRoot) {
-        let driver = held_driver.as_ref().unwrap();
-        driver.release.add_permits(1);
-        tokio::time::timeout(BOUND, driver.started.notified())
+    if matches!(kind, JournalKind::ShiftlessRun | JournalKind::AwaitedRun) {
+        let shifts = held_shifts.as_ref().unwrap();
+        shifts.release.add_permits(1);
+        tokio::time::timeout(BOUND, shifts.started.notified())
             .await
             .unwrap();
         assert!(
             backend
                 .session_store_factory()
-                .root_terminal(&driver.session, &lash_core::TurnId::from("driveless-root"))
+                .run_terminal(&shifts.session, &lash_core::TurnId::from("shiftless-run"))
                 .await
                 .unwrap()
                 .is_some(),
-            "the root terminal is durable while its invocation is open"
+            "the run terminal is durable while its invocation is open"
         );
         assert_eq!(
             host.journal_replay(&journal).await.unwrap(),
             JournalReplay::MayReplay,
-            "terminal evidence does not settle the still-open root invocation"
+            "terminal evidence does not settle the still-open run invocation"
         );
     }
     // Force a due pass while the invocation is still open. It must retain
@@ -320,8 +320,8 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
         2,
         "an open journal retains both awaiting cleanups even after the first deferral"
     );
-    if let Some(driver) = &held_driver {
-        driver.release.add_permits(1);
+    if let Some(shifts) = &held_shifts {
+        shifts.release.add_permits(1);
     }
     if let Some((_, hold)) = &process {
         hold.release.add_permits(1);
@@ -336,15 +336,15 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
     })
     .await
     .expect("the engine observes settlement after the handler ends");
-    if matches!(kind, JournalKind::AwaitedRoot) {
-        let drive = ExecutionScope::session_operation(
-            held_driver.as_ref().unwrap().session.clone(),
+    if matches!(kind, JournalKind::AwaitedRun) {
+        let shift = ExecutionScope::session_operation(
+            held_shifts.as_ref().unwrap().session.clone(),
             "drain",
         )
         .journal_identity()
         .unwrap();
         tokio::time::timeout(BOUND, async {
-            while host.journal_replay(&drive).await.unwrap() != JournalReplay::Settled {
+            while host.journal_replay(&shift).await.unwrap() != JournalReplay::Settled {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
@@ -375,7 +375,7 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
         "{kind:?} on {storage:?}, live={live}: settled journal, next pass {pass:?}, outstanding={outstanding}"
     );
     drop(installation);
-    drop(held_driver);
+    drop(held_shifts);
     drop(process);
     harness.finish().await;
     assert_eq!(
@@ -401,18 +401,18 @@ macro_rules! laws {
             use super::*;
             $(#[ignore = $service])?
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn awaited_root_deferral_retains_then_releases_awaiting_cleanups() {
-                law($storage, false, JournalKind::AwaitedRoot).await;
+            async fn awaited_run_deferral_retains_then_releases_awaiting_cleanups() {
+                law($storage, false, JournalKind::AwaitedRun).await;
             }
             #[ignore = "live Restate; crash-windows suite"]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn live_restate_awaited_root_deferral_retains_then_releases_awaiting_cleanups() {
-                law($storage, true, JournalKind::AwaitedRoot).await;
+            async fn live_restate_awaited_run_deferral_retains_then_releases_awaiting_cleanups() {
+                law($storage, true, JournalKind::AwaitedRun).await;
             }
             $(#[ignore = $service])?
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn driveless_root_deferral_retains_then_releases_awaiting_cleanups() {
-                law($storage, false, JournalKind::DrivelessRoot).await;
+            async fn driveless_run_deferral_retains_then_releases_awaiting_cleanups() {
+                law($storage, false, JournalKind::ShiftlessRun).await;
             }
             $(#[ignore = $service])?
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -426,8 +426,8 @@ macro_rules! laws {
             }
             #[ignore = "live Restate; crash-windows suite"]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn live_restate_driveless_root_deferral_retains_then_releases_awaiting_cleanups() {
-                law($storage, true, JournalKind::DrivelessRoot).await;
+            async fn live_restate_driveless_run_deferral_retains_then_releases_awaiting_cleanups() {
+                law($storage, true, JournalKind::ShiftlessRun).await;
             }
             #[ignore = "live Restate; crash-windows suite"]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

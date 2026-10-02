@@ -13,8 +13,8 @@
 //! CI budget is spent here on breadth at short length; the `#[ignore]`d soak
 //! runs the same generator far longer for anyone chasing a specific failure.
 
-use super::drive;
 use super::harness::HarnessMode;
+use super::shift;
 use super::syntax::{Cell, Literal};
 
 /// Sessions generated in the resident mode. Each session is eleven
@@ -176,7 +176,7 @@ fn live_names(
 fn sweep(mode: HarnessMode, seeds: impl IntoIterator<Item = u64>) {
     for seed in seeds {
         let cells = generate_session(seed);
-        drive(mode, &cells);
+        shift(mode, &cells);
     }
 }
 

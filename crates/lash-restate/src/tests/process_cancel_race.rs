@@ -8,7 +8,7 @@ async fn drive_sleeping_process(
     context: &Arc<ReplayableRecordingContext>,
     execution_write_authority: &lash_core::ProcessExecutionWriteAuthority,
 ) -> Result<lash_core::ProcessRunOutcome, HandlerError> {
-    // Fresh stores mint the sequential ids, so every drive registers the
+    // Fresh stores mint the sequential ids, so every shift registers the
     // process under the id its journal was recorded for.
     let (registry, continuations) = sequential_process_stores();
     let registered = registry
@@ -53,7 +53,7 @@ fn is_cancelled_terminal(outcome: &lash_core::ProcessRunOutcome) -> bool {
 }
 
 /// A process sleep races its segment's cancel promise, and the race's winner
-/// is a journal fact (FIG-3673): the live drive that lost its sleep to the
+/// is a journal fact (FIG-3673): the live shift that lost its sleep to the
 /// promise settles cancelled, and a redrive against state that no longer
 /// carries the cancellation settles cancelled too, from the journal alone.
 #[tokio::test]
@@ -97,7 +97,7 @@ pub(super) async fn a_process_sleep_that_lost_to_the_cancel_promise_replays_canc
     assert_eq!(context.process_cancel_race_verdicts(), vec![true]);
 
     // Redelivery lands against state that no longer carries the cancellation:
-    // only the journal still holds the race the live drive recorded.
+    // only the journal still holds the race the live shift recorded.
     context.clear_process_cancel();
     context.start_replay();
     let replayed = tokio::time::timeout(
@@ -125,7 +125,7 @@ pub(super) async fn a_process_sleep_that_lost_to_the_cancel_promise_replays_canc
 
 /// The converse: a cancel that commits after the timer won is not read back
 /// into the replayed wake (FIG-3673). The recorded race says the timer won, so
-/// the replay reaches the same settled terminal the live drive did.
+/// the replay reaches the same settled terminal the live shift did.
 #[tokio::test]
 pub(super) async fn a_cancel_committed_after_the_timer_won_does_not_rewrite_the_replayed_wake() {
     let process_id = lash_core::ProcessIdMint::sequential_id_for_testing(1);

@@ -1,7 +1,7 @@
 //! FIG-2765: billed-but-unreported calls must survive a restart.
 //!
 //! The owner's usage accounting is the only place that knows a call was
-//! billed and never counted (ADR 0125). These witnesses drive the whole loop
+//! billed and never counted (ADR 0125). These witnesses shift the whole loop
 //! through a real store round trip — unreported attempt, reconciliation,
 //! park, reopen — and pin the cancellation schedule that used to eat pending
 //! work when a lookup future was dropped.

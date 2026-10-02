@@ -1,20 +1,20 @@
-//! What a drive run issued, in issue order, and the comparator that finds the
+//! What a shift run issued, in issue order, and the comparator that finds the
 //! first place two runs disagree.
 //!
-//! A drive is deterministic when every run of it over the same recorded
+//! A shift is deterministic when every run of it over the same recorded
 //! history issues the same commands, in the same order, with the same bytes,
-//! and commits the same bytes. [`DriveTranscript`] is that record and
-//! [`DriveTranscript::compare`] is the check.
+//! and commits the same bytes. [`ShiftTranscript`] is that record and
+//! [`ShiftTranscript::compare`] is the check.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// One thing a drive run did that another run must repeat exactly.
+/// One thing a shift run did that another run must repeat exactly.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "entry", rename_all = "snake_case")]
 pub enum TranscriptEntry {
-    /// A recorded operation the drive issued.
+    /// A recorded operation the shift issued.
     Command {
         /// The operation's replay identity.
         key: String,
@@ -23,7 +23,7 @@ pub enum TranscriptEntry {
         /// The command's canonical bytes.
         bytes: String,
     },
-    /// Bytes the drive committed.
+    /// Bytes the shift committed.
     Commit {
         /// The committed request's canonical bytes.
         bytes: String,
@@ -45,14 +45,14 @@ impl TranscriptEntry {
     }
 }
 
-/// The command stream plus commit bytes of one drive run.
+/// The command stream plus commit bytes of one shift run.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DriveTranscript {
-    /// Every entry, in the order the drive issued it.
+pub struct ShiftTranscript {
+    /// Every entry, in the order the shift issued it.
     pub entries: Vec<TranscriptEntry>,
 }
 
-impl DriveTranscript {
+impl ShiftTranscript {
     /// The commands alone, in issue order.
     pub fn commands(&self) -> impl Iterator<Item = &TranscriptEntry> {
         self.entries
@@ -70,7 +70,7 @@ impl DriveTranscript {
 
     /// Compare `actual` against this transcript, the reference, and report the
     /// first entry at which they differ.
-    pub fn compare(&self, actual: &DriveTranscript) -> Result<(), Box<TranscriptDivergence>> {
+    pub fn compare(&self, actual: &ShiftTranscript) -> Result<(), Box<TranscriptDivergence>> {
         let len = self.entries.len().max(actual.entries.len());
         for index in 0..len {
             let expected = self.entries.get(index);

@@ -209,7 +209,7 @@ async fn publish_env(set: &SqliteStoreSet, format: u32) -> Result<(), StoreError
 /// namespace stamped outside its plugin's range, and publish nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_path() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let store = store(&set);
     let permitted = VersionRange::exactly(1);
@@ -315,7 +315,7 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 /// typed, and the store publishes nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_malformed_writer_range_refuses_every_plugin_publication() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let store = store(&set);
     raw(&location, SqliteDatabase::DurableCore)
@@ -356,7 +356,7 @@ async fn a_malformed_writer_range_refuses_every_plugin_publication() {
 /// plugin the record does not name, and never moves a recorded one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provisioning_records_a_registered_plugin_once() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let store = store(&set);
     assert!(
@@ -400,7 +400,7 @@ async fn provisioning_records_a_registered_plugin_once() {
 /// moving `F` is refused and changes nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_plugin_only_finalize_moves_f_and_the_range_together_and_fences_the_old_build() {
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let store = store(&set);
     let writable = FleetFormat::writable();
@@ -526,10 +526,10 @@ fn fleet_of(location: &SqliteLocation, database: SqliteDatabase) -> i64 {
 async fn a_plugin_only_finalize_survives_a_crash_between_the_database_files() {
     const TEST: &str =
         "plugin_writer_tests::a_plugin_only_finalize_survives_a_crash_between_the_database_files";
-    const ROOT: &str = "LASH_SQLITE_PLUGIN_FINALIZE_CRASH_ROOT";
+    const RUN: &str = "LASH_SQLITE_PLUGIN_FINALIZE_CRASH_RUN";
     const CUT: &str = "LASH_SQLITE_PLUGIN_FINALIZE_CRASH_CUT";
     let retired = BuildGeneration::for_test("plugin-crash-old");
-    if let Some(root) = std::env::var_os(ROOT) {
+    if let Some(root) = std::env::var_os(RUN) {
         let cut = std::env::var(CUT).expect("child crash cut");
         let options = crate::SqliteStoreSetOptions {
             finalize_hook: Some(crate::testing::SqliteFinalizeHook::new(move |database| {
@@ -581,7 +581,7 @@ async fn a_plugin_only_finalize_survives_a_crash_between_the_database_files() {
 
         let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
-            .env(ROOT, root.path())
+            .env(RUN, root.path())
             .env(CUT, cut.file_name())
             .output()
             .expect("run the finalizing process");
@@ -693,23 +693,23 @@ impl lash_core_execution::facade_support::PluginFactory for WindowPlugin {
     }
 }
 
-/// A Run of `session` as its drive admits it: the session, a sealed drive
-/// fence, a head input and the root's admission recording `plugins`.
+/// A Run of `session` as its shift admits it: the session, a sealed shift
+/// fence, a head input and the run's admission recording `plugins`.
 #[cfg(feature = "synthetic-next")]
 async fn admit_run(
     store: &Arc<dyn RuntimeStore>,
     session: &str,
     plugins: &lash_core_execution::store::plugin_writers::PluginAdmission,
 ) -> (
-    lash_core_execution::store::AdmitRootRequest,
-    lash_core_execution::store::RootAdmission,
+    lash_core_execution::store::AdmitRunRequest,
+    lash_core_execution::store::RunAdmission,
 ) {
     use lash_core_execution::testing::store_fixtures::{
-        admit_root_request_for_test, seal_drive_fence_for_test,
+        admit_run_request_for_test, seal_shift_fence_for_test,
     };
     let session_id =
         SessionId::try_from(session.to_owned()).expect("a law session id is never blank");
-    let fence = seal_drive_fence_for_test(store, &session_id, "plugin-admission-law").await;
+    let fence = seal_shift_fence_for_test(store, &session_id, "plugin-admission-law").await;
     let head = store
         .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
             session_id,
@@ -718,7 +718,7 @@ async fn admit_run(
         ))
         .await
         .expect("enqueue the Run's head");
-    let mut request = admit_root_request_for_test(
+    let mut request = admit_run_request_for_test(
         &fence,
         &lash_core_execution::TurnId::try_from(format!("{session}-run"))
             .expect("a formatted id is never blank"),
@@ -726,7 +726,7 @@ async fn admit_run(
     );
     request.plugins = plugins.clone();
     let admission = store
-        .admit_root(&request)
+        .admit_run(&request)
         .await
         .expect("admit the Run")
         .expect("the admission reaches its head");
@@ -743,7 +743,7 @@ async fn admit_run(
 async fn a_run_admitted_before_finalize_and_retried_after_it_keeps_its_recorded_writer() {
     use lash_core_execution::plugin::PluginSessionRequest;
 
-    let (_root, set) = file_set().await;
+    let (_run, set) = file_set().await;
     let location = set.location().clone();
     let store = store(&set);
     let mut factories = lash_core_execution::testing::test_standard_protocol_factories();
@@ -842,7 +842,7 @@ async fn a_run_admitted_before_finalize_and_retried_after_it_keeps_its_recorded_
     let mut retry = request.clone();
     retry.plugins = fresh.clone();
     let replayed = store
-        .admit_root(&retry)
+        .admit_run(&retry)
         .await
         .expect("re-admit the Run")
         .expect("the recorded admission");

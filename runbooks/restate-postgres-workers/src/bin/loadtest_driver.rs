@@ -334,7 +334,7 @@ impl Driver {
             "unavailable": {"first_visible_ns": "workflow attach exposes the terminal only",
                 "settled_ns": "remote settlement clock is not synchronized with the client"},
             "outcome": outcome, "error": answer.as_ref().err().map(|error| format!("{error:#}")),
-            "root_id": response.as_ref().and_then(|value| value["outcome"]["root"].as_str()),
+            "run_id": response.as_ref().and_then(|value| value["outcome"]["run"].as_str()),
             "client_attempts": delivery.submit_attempts, "client_reattaches": delivery.attach_attempts.saturating_sub(1),
             "request_bytes": serde_json::to_vec(&request)?.len(), "response_bytes": delivery.response_bytes,
             "response": response, "journal": journal, "journal_error": journal_error, "fault_ids": [],
@@ -369,11 +369,11 @@ impl Driver {
             Ok(response) => {
                 if let LoadResponse::Turn(report) = &response {
                     println!(
-                        "load turn operation={} status={:?} credits_input={} root={}",
+                        "load turn operation={} status={:?} credits_input={} run={}",
                         report.operation,
                         report.outcome.status,
                         report.outcome.credits_input(&report.operation),
-                        report.outcome.root.as_deref().unwrap_or("none")
+                        report.outcome.run.as_deref().unwrap_or("none")
                     );
                 }
                 Ok(Some(response))

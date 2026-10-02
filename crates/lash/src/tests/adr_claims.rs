@@ -13,18 +13,18 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             .build(crate::testing::runtime_lease_owner())
     };
     let core = build()?;
-    core.session("materialize-root")
+    core.session("materialize-run")
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     core.session("materialize-child")
         .create(crate::SessionCreation {
             spec: mock_session_spec(),
-            parent: Some("materialize-root".into()),
+            parent: Some("materialize-run".into()),
         })
         .await?;
     core.session("materialize-stated")
         .create(crate::SessionCreation {
-            parent: Some("materialize-root".into()),
+            parent: Some("materialize-run".into()),
             spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
@@ -39,7 +39,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         .await?;
     for (id, format) in [
         (
-            "materialize-root",
+            "materialize-run",
             crate::rlm::RlmFinalAnswerFormat::Markdown,
         ),
         (
@@ -69,7 +69,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     );
     for (id, format) in [
         (
-            "materialize-root",
+            "materialize-run",
             crate::rlm::RlmFinalAnswerFormat::Markdown,
         ),
         (
@@ -98,7 +98,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     let bad = cold
         .session("materialize-refused")
         .create(crate::SessionCreation {
-            parent: Some("materialize-root".into()),
+            parent: Some("materialize-run".into()),
             spec: mock_session_spec().plugin_options(
                 lash_core::PluginOptions::typed(
                     lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
@@ -174,7 +174,7 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
         .await?;
     let output = session
         .send(TurnInput::text("use both served models"))
-        .id("evidence-root")
+        .id("evidence-run")
         .output()
         .await?;
     let calls = &output.result.llm_calls;
@@ -218,7 +218,7 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
     }
     let remote = output.result.to_remote(
         &SessionId::from("per-call-evidence"),
-        &lash_core::TurnId::from("evidence-root"),
+        &lash_core::TurnId::from("evidence-run"),
         &output.activities,
     );
     let encoded = serde_json::to_value(&remote).unwrap();
@@ -279,7 +279,7 @@ async fn multi_model_turn_and_remote_report_keep_per_call_evidence() -> Result<(
 }
 
 #[tokio::test]
-async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Result<()> {
+async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Result<()> {
     let source_double = restate_double(0x0414_314a).await;
     let receiving_double = restate_double(0x0414_314b).await;
     let source_backend = source_double.lash_backend();
@@ -309,7 +309,7 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
     let receiving_session = receiving.session(id).open().await?;
     let receiving_output = receiving_session
         .send(TurnInput::text("receiving-row"))
-        .id("receiving-root")
+        .id("receiving-run")
         .output()
         .await?;
     assert_eq!(
@@ -471,8 +471,8 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
     );
     let sent = resumed
         .durable()
-        .send(TurnInput::text("drive the original catalog"))
-        .id("source-drive")
+        .send(TurnInput::text("shift the original catalog"))
+        .id("source-shift")
         .await?;
     let output = sent.output().await?;
     assert_eq!(output.assistant_message(), Some("receiving-answer"));
@@ -484,10 +484,10 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
             .await?,
         receiving_before
     );
-    let cancel_root = lash_core::TurnId::from("matrix-cancel");
+    let cancel_run = lash_core::TurnId::from("matrix-cancel");
     assert!(matches!(
         resumed
-            .cancel(crate::CancelTarget::Root(cancel_root.clone()))
+            .cancel(crate::CancelTarget::Run(cancel_run.clone()))
             .request_id("matrix-cancel-request")
             .await?,
         crate::CancelReceipt::Requested { .. }
@@ -505,7 +505,7 @@ async fn resumed_session_observe_wait_cancel_drive_keep_original_owners() -> Res
         .request_cancel(crate::TurnCancelRequest::new(
             crate::TurnAddress::new(
                 id,
-                lash_core::store::PhysicalTurn::derive_turn_id(&cancel_root, 0),
+                lash_core::store::PhysicalTurn::derive_turn_id(&cancel_run, 0),
             ),
             "matrix-source-probe",
             None,

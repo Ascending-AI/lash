@@ -1,31 +1,31 @@
-//! A host's cancel of a plugin task a drive already admitted (FIG-4391,
+//! A host's cancel of a plugin task a shift already admitted (FIG-4391,
 //! FIG-4453).
 //!
-//! Withdrawal reaches only a command no drive has read (FIG-4202). Once a
-//! drive admitted a plugin task, a host's cancel resolves the task's cancel
+//! Withdrawal reaches only a command no shift has read (FIG-4202). Once a
+//! shift admitted a plugin task, a host's cancel resolves the task's cancel
 //! signal: a keyed promise under the command's own session-operation scope, which
 //! only a host's cancel ever resolves. The signal is a durable request, not a
 //! decision. The one record of how the command ended is its settlement,
 //! written by the commit that settles it, which every replay and every
 //! submitter reads back (ADR 0105 §1).
 //!
-//! The drive peeks the signal before the task runs, and a task whose cancel
+//! The shift peeks the signal before the task runs, and a task whose cancel
 //! was already requested runs none of its code. While the task runs, the
-//! drive watches the signal and fires the task's cancellation token when a
-//! cancel lands. Once the task's code returned, the drive peeks the signal
+//! shift watches the signal and fires the task's cancellation token when a
+//! cancel lands. Once the task's code returned, the shift peeks the signal
 //! again: a requested cancel settles the command
 //! [`Cancelled`](crate::PluginOperationCommandOutcome::Cancelled) with nothing
 //! of the task committed, and otherwise the command settles with the task's
 //! own outcome. That decision becomes durable only with the settling commit
-//! (FIG-4453): a drive that dies before its commit leaves nothing decided,
+//! (FIG-4453): a shift that dies before its commit leaves nothing decided,
 //! and its redrive runs the task's code again under the same live signal, so
 //! a host's cancel still reaches the task.
 //!
-//! A cancel that lands after the drive's last peek and before its commit is
+//! A cancel that lands after the shift's last peek and before its commit is
 //! kept on the signal but reaches nothing: the command settles with the
 //! task's own outcome, and its settlement says so. The token only stops the
 //! task's code. A watch that fails is not a cancel: the task runs to its own
-//! end, and the drive's peek after it still finds a requested cancel.
+//! end, and the shift's peek after it still finds a requested cancel.
 
 use super::*;
 use tokio_util::sync::CancellationToken;
@@ -36,9 +36,9 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PluginTaskCancelRequest {
     /// The command was unsettled, and the task's cancel signal holds the
-    /// cancel, from this request or an earlier one. Its drive stops the
+    /// cancel, from this request or an earlier one. Its shift stops the
     /// task's code and settles the command `Cancelled`, with nothing of the
-    /// task committed, unless the drive already found the task's code
+    /// task committed, unless the shift already found the task's code
     /// returned with no cancel requested and settles it with its own
     /// outcome.
     Requested,
@@ -47,7 +47,7 @@ pub enum PluginTaskCancelRequest {
     AlreadySettled,
     /// No signal carries the cancel: the effect host keeps no durable
     /// await-event keys, or the session's waits are revoked. The command
-    /// settles as its drive applies it.
+    /// settles as its shift applies it.
     Unavailable,
 }
 
@@ -102,7 +102,7 @@ impl PluginTaskCancelSignal {
         }
     }
 
-    /// Whether a host's cancel of the task was requested. The drive asks
+    /// Whether a host's cancel of the task was requested. The shift asks
     /// before the task runs, so a task cancelled before it ran runs none of
     /// its code, and again once the task's code returned, to decide how the
     /// command settles.
@@ -123,7 +123,7 @@ impl PluginTaskCancelSignal {
 
     /// Execution-side only: fire `stop` when a host's cancel resolves the
     /// signal. It ends once the signal resolved or the watch failed; the
-    /// drive drops it when the task's code returns first.
+    /// shift drops it when the task's code returns first.
     pub(super) async fn watch(&self, stop: &CancellationToken) {
         // Never a fired token: firing the waiter's token would resolve the
         // signal itself cancelled.
@@ -168,16 +168,16 @@ impl PluginTaskCancelSignal {
     }
 }
 
-/// Cancel the plugin task `receipt` names after a drive admitted it
+/// Cancel the plugin task `receipt` names after a shift admitted it
 /// (FIG-4391), over the session's `store` and the deployment's
 /// `effect_host`: a host's cancel once withdrawing the command
 /// ([`cancel_queued_work_batch`](crate::RuntimeHandle::cancel_queued_work_batch))
-/// no longer reaches it. It takes no runtime writer, which the drive applying
+/// no longer reaches it. It takes no runtime writer, which the shift applying
 /// the task may hold.
 ///
 /// A command that already settled answers
 /// [`AlreadySettled`](PluginTaskCancelRequest::AlreadySettled). Otherwise the
-/// cancel resolves the task's cancel signal: the drive stops the task's code
+/// cancel resolves the task's cancel signal: the shift stops the task's code
 /// through its cancellation token and settles the command `Cancelled`, with
 /// nothing of the task committed, unless it already found the task's code
 /// returned with no cancel requested (FIG-4453). Either way the command's

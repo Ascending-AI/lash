@@ -14,7 +14,7 @@ pub(super) fn settled_closure_for_test(
         key_id: format!("{turn}:{suffix}"),
         signature: format!("test:{suffix}"),
     };
-    let fence = crate::store_backend_support::sealed_drive_fence(
+    let fence = crate::store_backend_support::sealed_shift_fence(
         SessionId::fixture(session),
         1,
         AdmissionId::new("admission"),
@@ -136,7 +136,7 @@ fn append_identity_refuses_non_append_operation_key() {
 
 fn ingress_fixture(commit: &RuntimeCommit) -> IngressSettlement {
     IngressSettlement {
-        root: crate::TurnId::from("root-turn"),
+        run: crate::TurnId::from("root-turn"),
         completed_inputs: vec![crate::TurnInputCompletion {
             session_id: commit.session_id.clone(),
             data: crate::TurnInputCompletionData {
@@ -154,12 +154,12 @@ fn ingress_fixture(commit: &RuntimeCommit) -> IngressSettlement {
 }
 
 #[test]
-fn ingress_settlement_requires_the_drive_fence() {
+fn ingress_settlement_requires_the_shift_fence() {
     let mut commit = intent_fixture();
     commit.ingress = Some(ingress_fixture(&commit));
     let error = commit
         .validate_ingress_settlement()
-        .expect_err("a settlement without a drive fence must be refused");
+        .expect_err("a settlement without a shift fence must be refused");
     assert!(matches!(
         error,
         StoreError::IngressSettlementUnfenced { ref session_id } if *session_id == commit.session_id
@@ -179,7 +179,7 @@ fn ingress_settlement_requires_the_drive_fence() {
 #[test]
 fn ingress_settlement_refuses_a_row_named_twice() {
     let mut commit = intent_fixture();
-    commit.drive_fence = Some(Box::new(crate::store_backend_support::sealed_drive_fence(
+    commit.shift_fence = Some(Box::new(crate::store_backend_support::sealed_shift_fence(
         commit.session_id.clone(),
         1,
         AdmissionId::new("admission"),
@@ -200,7 +200,7 @@ fn ingress_settlement_refuses_a_row_named_twice() {
 #[test]
 fn ingress_settlement_refuses_a_completion_minted_for_another_session() {
     let mut commit = intent_fixture();
-    commit.drive_fence = Some(Box::new(crate::store_backend_support::sealed_drive_fence(
+    commit.shift_fence = Some(Box::new(crate::store_backend_support::sealed_shift_fence(
         commit.session_id.clone(),
         1,
         AdmissionId::new("admission"),
@@ -213,7 +213,7 @@ fn ingress_settlement_refuses_a_completion_minted_for_another_session() {
         .expect_err("a foreign completion must be refused");
     assert!(matches!(
         error,
-        StoreError::IngressRowNotAdmitted { ref row, admitted_root: None, .. }
+        StoreError::IngressRowNotAdmitted { ref row, admitted_run: None, .. }
             if **row == IngressRowId::Input("input".into())
     ));
 }
@@ -304,7 +304,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
         },
     };
     first.ingress = Some(IngressSettlement {
-        root: crate::TurnId::from("turn-42"),
+        run: crate::TurnId::from("turn-42"),
         completed_inputs: vec![completion],
         completed_batches: Vec::new(),
         released: Vec::new(),
@@ -453,7 +453,7 @@ fn session_head_meta_takes_its_identity_from_the_row_key() {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            published_by_drive: false,
+            published_by_shift: false,
         },
         7,
         None,
@@ -480,7 +480,7 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
             ),
-            published_by_drive: false,
+            published_by_shift: false,
         },
         7,
         None,
@@ -519,7 +519,7 @@ fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
         None,
         None,
     )
-    .expect_err("an absent head session id must not be invented as `root`");
+    .expect_err("an absent head session id must not be invented as `run`");
 
     assert!(
         matches!(&error, StoreError::StoredDataCorrupt { record_kind, .. } if *record_kind == "SessionHeadMeta"),
@@ -939,10 +939,10 @@ fn decorator_surface_covers_every_component_trait_method() {
         declared.extend(declared_methods(store_mod, trait_name));
     }
     declared.extend(declared_methods(
-        include_str!("drive_fence.rs"),
-        "DriveEpochStore",
+        include_str!("shift_fence.rs"),
+        "ShiftEpochStore",
     ));
-    declared.extend(declared_methods(include_str!("root.rs"), "RootStore"));
+    declared.extend(declared_methods(include_str!("run.rs"), "RunStore"));
     assert!(
         declared.contains_key("commit_runtime_state")
             && declared.contains_key("vacuum")
@@ -1007,7 +1007,7 @@ fn decorator_surface_covers_every_component_trait_method() {
             .map(|name| (*name).to_string())
             .collect();
     assert!(
-        ledger.contains("open_root_intent"),
+        ledger.contains("open_run_intent"),
         "the ledger scan must reach the trait's last method: {ledger:?}"
     );
     assert_eq!(
@@ -1033,7 +1033,7 @@ fn every_interceptable_operation_is_scriptable() {
         .collect();
     let scriptable: Vec<&str> = StoreOp::ALL.iter().map(|op| op.name()).collect();
     assert_eq!(scriptable, interceptable);
-    assert!(scriptable.contains(&"admit_root") && scriptable.contains(&"acknowledge_intent"));
+    assert!(scriptable.contains(&"admit_run") && scriptable.contains(&"acknowledge_intent"));
     let distinct: std::collections::BTreeSet<&str> = scriptable.iter().copied().collect();
     assert_eq!(
         distinct.len(),

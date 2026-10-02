@@ -66,10 +66,10 @@ command outcome is charged.
 
 The budget is host policy, not durable state, so the host must not set it
 below its live heads. A host that does strands each such session's leading
-session command: the drive that meets it refuses the command root with the
+session command: the shift that meets it refuses the command run with the
 typed budget rejection and stops, without admitting the command again, and the
 command stays open and unsettled. Raising the budget recovers the session: its
-next drive applies the command and settles it.
+next shift applies the command and settles it.
 
 Attachment admission is separately configurable through
 `max_attachment_bytes: Option<u64>`. `None` leaves puts unbounded;
@@ -136,7 +136,7 @@ changes without changing what the commit means.
 - [Logical-byte measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L290).
 - [Created-head measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L246).
 - [Measured creation](../../crates/lash-core-store/src/store/catalog.rs#L91).
-- [A stranded command stops its drive](../../crates/lash-core-execution/src/engine/drive.rs#L224).
+- [A stranded command stops its shift](../../crates/lash-core-execution/src/engine/shift.rs#L224).
 - [Verified realization](../../crates/lash-core-store/src/store/realization.rs#L8).
 - [Host attachment configuration](../../crates/lash/src/core.rs#L841).
 - [Physical-operation timing](../../crates/lash-perf/src/runtime_perf/store.rs#L1).

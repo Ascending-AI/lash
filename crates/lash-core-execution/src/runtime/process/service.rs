@@ -62,8 +62,8 @@ pub trait ProcessService: Send + Sync {
     /// Implementations must not consult live visibility, existence, terminal,
     /// or host policy state before crossing the effect-controller boundary.
     ///
-    /// The drain calls this from drive code, so an engine that replays its
-    /// drive calls it again for an intent it already landed: Restate re-runs
+    /// The drain calls this from shift code, so an engine that replays its
+    /// shift calls it again for an intent it already landed: Restate re-runs
     /// the handler from the top of its journal on every resumption. The
     /// repeat carries the same recorded identity (the request's derived
     /// process id) and the effect controller answers it with the recorded
@@ -269,7 +269,7 @@ pub trait ProcessService: Send + Sync {
 
     /// Journal-first event emission used only by the recorded intent protocol.
     ///
-    /// Called from drive code, so a replaying engine calls it again for an
+    /// Called from shift code, so a replaying engine calls it again for an
     /// event the drain already landed, under the same `replay_key`; the effect
     /// controller answers the repeat with the recorded event. As for
     /// [`Self::start_from_recorded_intent`], anything an implementation does

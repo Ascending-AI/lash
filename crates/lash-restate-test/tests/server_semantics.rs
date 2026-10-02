@@ -697,7 +697,7 @@ async fn request(server: &RestateTestServer, method: HttpMethod, path: &str) -> 
     (status, String::from_utf8_lossy(&body).into_owned())
 }
 
-/// Drive `id` to paused under manual time and return its view: the handler
+/// Shift `id` to paused under manual time and return its view: the handler
 /// retry policy pauses it after three failed attempts.
 async fn driven_to_paused(server: &RestateTestServer, id: &str) {
     server.settle().await;
@@ -791,7 +791,7 @@ async fn retries_and_suspension_resumes_stay_pinned_to_the_starting_deployment()
     assert!(server.fire_next_timer().is_some());
     server.settle().await;
     // So does the suspended invocation's resume — its sleep fired — and the
-    // resume its approval drives.
+    // resume its approval executes.
     server.advance(Duration::from_secs(60));
     server.settle().await;
     assert_eq!(post(&server, "Flow/pinned/approve", "\"yes\"").await.0, 200);

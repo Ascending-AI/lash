@@ -1,5 +1,5 @@
 //! FIG-4389's recorded-termination redrive law on the simulator's effect
-//! host: the root runs in a handler of [`SimEngine`]'s server double, over
+//! host: the run executes in a handler of [`SimEngine`]'s server double, over
 //! its SQLite memory store set, and the crash is a failed handler attempt the
 //! double redelivers.
 
@@ -64,4 +64,4 @@ lash_conformance::turn_config_tests!(@law [] {
     let stores = Arc::clone(double.engine_stores());
     let runner = Arc::new(SimTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
     (engine, "sim-recorded-termination", effect_host, stores, runner)
-}; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+}; (a_redrive_assembles_the_terminal_its_run_recorded_termination_decides, "turn-config-recorded-termination-redrive"));

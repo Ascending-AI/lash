@@ -33,14 +33,14 @@ impl Fixture {
         reason = "the evidence fixture runs the real reconcile pass"
     )]
     pub async fn reconcile(&self) {
-        if let Some(driver) = self
+        if let Some(shifts) = self
             .double
             .restate()
             .session_work_engine()
-            .driver_slot()
+            .shifts_slot()
             .installed()
         {
-            driver
+            shifts
                 .reconcile(
                     &lash_core::engine::ReconcileCursor::default(),
                     std::num::NonZeroUsize::MIN.saturating_add(63),

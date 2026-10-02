@@ -41,8 +41,8 @@ pub struct RecordingStore {
     list_queued_work_count: AtomicUsize,
     fail_next_runtime_commit: Mutex<Option<StoreError>>,
     fail_next_turn_terminal_commit: Mutex<Option<StoreError>>,
-    fail_next_end_refused_root: Mutex<Option<StoreError>>,
-    before_next_end_refused_root: Mutex<Option<EndRefusedRootHook>>,
+    fail_next_end_refused_run: Mutex<Option<StoreError>>,
+    before_next_end_refused_run: Mutex<Option<EndRefusedRunHook>>,
     inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     fail_next_load_session_head_meta: AtomicBool,
     fail_load_session_on_call: Mutex<Option<usize>>,
@@ -55,9 +55,9 @@ pub struct RecordingStore {
 /// A hook a test runs as the next admission reaches the store.
 pub type AdmissionHook = Arc<dyn Fn() + Send + Sync>;
 
-/// A hook a test awaits as the next refused run's root-end write reaches the
+/// A hook a test awaits as the next refused execution's run-end write reaches the
 /// store, before the wrapped store sees it.
-pub type EndRefusedRootHook =
+pub type EndRefusedRunHook =
     Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
 impl RecordingStore {
@@ -74,8 +74,8 @@ impl RecordingStore {
             list_queued_work_count: AtomicUsize::new(0),
             fail_next_runtime_commit: Mutex::new(None),
             fail_next_turn_terminal_commit: Mutex::new(None),
-            fail_next_end_refused_root: Mutex::new(None),
-            before_next_end_refused_root: Mutex::new(None),
+            fail_next_end_refused_run: Mutex::new(None),
+            before_next_end_refused_run: Mutex::new(None),
             inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             fail_next_load_session_head_meta: AtomicBool::new(false),
             fail_load_session_on_call: Mutex::new(None),
@@ -110,7 +110,7 @@ impl RecordingStore {
     ///
     /// This is a read-side double for a head the durable store cannot hold on
     /// its own — a changed checkpoint ref or leaf under an unchanged revision —
-    /// so a test can drive the runtime's freshness decision on it. A head a
+    /// so a test can execute the runtime's freshness decision on it. A head a
     /// real writer could produce belongs in a real commit instead
     /// ([`super::runtime_helpers::advance_session_head`]).
     pub fn forge_session_head(&self, head: crate::SessionHeadMeta) {
@@ -122,7 +122,7 @@ impl RecordingStore {
         self.session_admission_count.load(Ordering::SeqCst)
     }
 
-    /// Run `hook` as the next root or checkpoint admission reaches the
+    /// Run `hook` as the next run or checkpoint admission reaches the
     /// store, before the wrapped store admits.
     pub fn set_admission_hook(&self, hook: AdmissionHook) {
         *self.admission_hook.lock_recover() = Some(hook);
@@ -174,19 +174,19 @@ impl RecordingStore {
         *self.fail_next_turn_terminal_commit.lock_recover() = Some(error);
     }
 
-    /// Refuse the next root-end write of a refused run with `error`, before
+    /// Refuse the next run-end write of a refused execution with `error`, before
     /// the wrapped store sees it: the refused run fails between meeting its
     /// refusal and writing its end.
-    pub fn fail_next_end_refused_root(&self, error: StoreError) {
-        *self.fail_next_end_refused_root.lock_recover() = Some(error);
+    pub fn fail_next_end_refused_run(&self, error: StoreError) {
+        *self.fail_next_end_refused_run.lock_recover() = Some(error);
     }
 
-    /// Await `hook` as the next refused run's root-end write reaches the
+    /// Await `hook` as the next refused execution's run-end write reaches the
     /// store, before the wrapped store sees it: whatever the hook does lands
     /// between the run meeting its refusal and its end. A hook that panics
     /// crashes the run there.
-    pub fn before_next_end_refused_root(&self, hook: EndRefusedRootHook) {
-        *self.before_next_end_refused_root.lock_recover() = Some(hook);
+    pub fn before_next_end_refused_run(&self, hook: EndRefusedRunHook) {
+        *self.before_next_end_refused_run.lock_recover() = Some(hook);
     }
 
     /// Record `request` on the wrapped store immediately before the next
@@ -212,12 +212,12 @@ impl RecordingStore {
 #[async_trait::async_trait]
 impl RuntimeStoreDecorator for RecordingStore {
     type Inner = dyn RuntimeStore;
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+        request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
         self.run_admission_hook();
-        self.inner.admit_root(request).await
+        self.inner.admit_run(request).await
     }
 
     async fn admit_at_checkpoint(
@@ -321,24 +321,22 @@ impl RuntimeStoreDecorator for RecordingStore {
         Ok(receipt)
     }
 
-    async fn end_refused_root(
+    async fn end_refused_run(
         &self,
-        fence: &crate::store::DriveFence,
-        root: &crate::TurnId,
+        fence: &crate::store::ShiftFence,
+        run: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<crate::store::RootEnd, StoreError> {
-        let hook = self.before_next_end_refused_root.lock_recover().take();
+    ) -> Result<crate::store::RunEndOutcome, StoreError> {
+        let hook = self.before_next_end_refused_run.lock_recover().take();
         if let Some(hook) = hook {
             hook().await;
         }
-        let injected_failure = self.fail_next_end_refused_root.lock_recover().take();
+        let injected_failure = self.fail_next_end_refused_run.lock_recover().take();
         if let Some(error) = injected_failure {
             return Err(error);
         }
-        self.inner
-            .end_refused_root(fence, root, refusal, at_ms)
-            .await
+        self.inner.end_refused_run(fence, run, refusal, at_ms).await
     }
 
     async fn begin_attachment_write(
@@ -443,11 +441,11 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
         self.inner.as_ref()
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
-        self.record(request.session_id()).admit_root(request).await
+        request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
+        self.record(request.session_id()).admit_run(request).await
     }
 
     async fn admit_at_checkpoint(
@@ -520,15 +518,15 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
         self.record(session_id).list_queued_work(session_id).await
     }
 
-    async fn end_refused_root(
+    async fn end_refused_run(
         &self,
-        fence: &crate::store::DriveFence,
-        root: &crate::TurnId,
+        fence: &crate::store::ShiftFence,
+        run: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<crate::store::RootEnd, StoreError> {
+    ) -> Result<crate::store::RunEndOutcome, StoreError> {
         self.record(fence.session())
-            .end_refused_root(fence, root, refusal, at_ms)
+            .end_refused_run(fence, run, refusal, at_ms)
             .await
     }
 

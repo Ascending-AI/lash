@@ -1180,7 +1180,7 @@ pub(crate) use harness::{
     latest_double, llm_profile_spec, mock_llm_profile_spec, mock_session_spec,
     output_into_cancelled_by, postgres_store_set, recorded_llm_profile, redeploy, restate_double,
     retry_when_claim_frees, run_async_test_on_stack_budget, serve_processes, session_spec_for,
-    settle_session_drive, sqlite_memory_store_backend, sqlite_memory_store_set,
+    settle_session_shift, sqlite_memory_store_backend, sqlite_memory_store_set,
     store_backend_with_clock, test_catalog, turn_input_states,
 };
 mod absent_session_delete;
@@ -1193,7 +1193,7 @@ mod aggregate_await_comprehension;
 mod aggregate_oracle;
 mod commit_superseded;
 mod crashed_create_drain;
-mod deleted_session_root_replay;
+mod deleted_session_run_replay;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod drain_hand_over;
@@ -1215,7 +1215,7 @@ mod response_phase_replay;
 mod rlm_restore_idempotence;
 mod send_handle;
 mod session_control;
-mod session_drive;
+mod session_shift;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod standard_compaction_persistence;

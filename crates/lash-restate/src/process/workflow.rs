@@ -6,17 +6,17 @@
 //! The `LashProcessWorkflow` segment executor.
 //!
 //! One responsibility: run exactly one process segment inside a Restate
-//! workflow invocation — admit it, drive its runner, and deliver either a
+//! workflow invocation — admit it, shift its runner, and deliver either a
 //! terminal outcome or a segment successor.
 //!
-//! The drive is deterministic (FIG-3673): every input that shapes the journal
+//! The shift is deterministic (FIG-3673): every input that shapes the journal
 //! is itself a journaled command. The segment's cancellation is its durable
-//! cancel promise, which the drive observes only through recorded races on its
+//! cancel promise, which the shift observes only through recorded races on its
 //! waits, recorded peeks at its body's cancel checkpoints and one recorded peek
 //! after the runner settles. Every registry read or write the handler makes is
 //! a named step. The live watch that stops step bodies on a cancel
 //! ([`ProcessStopDelivery`](crate::process_stop::ProcessStopDelivery)) is
-//! execution-side only: the drive never reads it.
+//! execution-side only: the shift never reads it.
 
 use std::sync::Arc;
 
@@ -305,7 +305,7 @@ impl<R> Clone for LashProcessWorkflowImpl<R> {
 impl<R> LashProcessWorkflowImpl<R> {
     /// Build a Restate process workflow whose segments stop their step bodies
     /// on a cancel through a live watch of their cancel promise over the
-    /// ingress (execution-side only; the drive never reads it).
+    /// ingress (execution-side only; the shift never reads it).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         runner: Arc<R>,
@@ -715,7 +715,7 @@ where
         .await
     }
 
-    /// [`run_registration`](Self::run_registration) for a test that drives a
+    /// [`run_registration`](Self::run_registration) for a test that executes a
     /// segment without the handler's admission: the segment proof is minted
     /// from the scope and the execution authority the test supplies, and the
     /// proposed terminal is stored directly rather than through the
@@ -765,10 +765,10 @@ where
         }
     }
 
-    /// Drive one admitted segment's runner and propose how it ended.
+    /// Execute one admitted segment's runner and propose how it ended.
     ///
     /// The runner is lent a stop that only the execution-side
-    /// [`ProcessStopDelivery`] fires, to stop its step bodies; the drive never
+    /// [`ProcessStopDelivery`] fires, to stop its step bodies; the shift never
     /// reads it. For a `SessionTurn` process a committed cancellation
     /// outranks a settled runner success (PR #897), read here through one
     /// journaled peek of the segment's cancel promise.
@@ -810,11 +810,11 @@ where
             registration.input.as_ref(),
             lash_core::ProcessInput::SessionTurn { .. }
         );
-        let drive = scoped_effect_controller.clone();
+        let shift = scoped_effect_controller.clone();
         let stop = tokio_util::sync::CancellationToken::new();
         let delivery = self.stop_delivery(&process_id, segment_ordinal, stop.clone());
         let outcome = delivery
-            .drive(self.runner.run_process_segment(
+            .shift(self.runner.run_process_segment(
                 started,
                 process_id.clone(),
                 registration,
@@ -839,7 +839,7 @@ where
                 if is_session_turn
                     && output.terminal_status() != Some(TerminalProcessStatus::Cancelled) =>
             {
-                if drive
+                if shift
                     .controller()
                     .observe_process_cancel(&tokio_util::sync::CancellationToken::new())
                     .await
@@ -1062,7 +1062,7 @@ where
         let process_id = input.process_id.clone();
         // Admission is the handler's first journaled work: the verdict, then
         // the start marker, and only the proof the start returns can mint the
-        // segment's effect controller or drive its runner (FIG-3588). The
+        // segment's effect controller or execute its runner (FIG-3588). The
         // verdict records what decides the rest of the journal's shape: whether
         // the segment is superseded or its handover missing, the digest of the
         // handover it resumes from, and its boundary policy (FIG-3673). FIG-788:

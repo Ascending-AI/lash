@@ -1,7 +1,7 @@
 //! ADR 0115 §3 on the server double: every lash handler takes a versioned
 //! [`Call`](crate::Call) and answers a [`Reply`](crate::Reply), every object
 //! family's `_compat` record admits or refuses a build before any other
-//! state is read, a drive pinned to one build hands its root to the newer
+//! state is read, a shift pinned to one build hands its run to the newer
 //! build without a drain gate, and a build never registers over another
 //! build's endpoint.
 
@@ -14,7 +14,7 @@ use lash_sansio::TurnId;
 use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer, ServerConfig};
 
 use super::bindings::{backend_and_process_worker, bindings_generation, discovery_document};
-use super::session_drive_roll_on_the_double::{
+use super::session_shift_roll_on_the_double::{
     BUILD_N_URI, SessionRoll, generation, stable_session,
 };
 use super::test_restate_authority_id;
@@ -33,7 +33,7 @@ use crate::effect_group::{
 use crate::object_state::StampedValue;
 use crate::wire::{CALL_SCHEMA_TITLE, REPLY_SCHEMA_TITLE, RestateCompatError};
 use crate::{LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRegistrationError};
-use lash_core::engine::DriveStop;
+use lash_core::engine::ShiftStop;
 use lash_core_store::compat::CompatRefusal;
 
 /// The done-when enumeration: read from the discovery document of an
@@ -457,23 +457,23 @@ async fn a_disjoint_wire_is_refused_typed_before_any_state() {
     assert_eq!(probe.body, EffectGroupProbeResponse::Absent);
 }
 
-/// ADR 0115 §3.1: a drive pinned to build N sends its admitted root to the
-/// stable `LashTurn`, which build N+1 serves once it registers. The root
+/// ADR 0115 §3.1: a shift pinned to build N sends its admitted run to the
+/// stable `LashTurn`, which build N+1 serves once it registers. The run
 /// runs there, once, with no refusal and no `SubstrateLost`: the request
-/// carries no drive stamp for N+1 to gate on. The outcome N+1 records is
+/// carries no shift stamp for N+1 to gate on. The outcome N+1 records is
 /// stamped (§3.4), and a request an older build stamped is still served.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn pinned_older_drive_root_runs_on_the_newer_build() {
+async fn pinned_older_shift_run_executes_on_the_newer_build() {
     let gn = generation("N");
     let roll = SessionRoll::start(0x4048_0002).await;
     let session = lash_sansio::SessionId::from("compat-pinned");
-    roll.driver.accept(&session, "p1");
-    let gate = roll.driver.gate("r-pinned", 0);
+    roll.shifts.accept(&session, "p1");
+    let gate = roll.shifts.gate("r-pinned", 0);
     roll.send(&session, "r-pinned", &gn, &stable_session())
         .await;
     tokio::time::timeout(Duration::from_secs(60), gate.reached.notified())
         .await
-        .expect("the drive reached its gated admission on build N");
+        .expect("the shift reached its gated admission on build N");
     roll.register_next().await;
     gate.release.notify_one();
     let outcome = roll
@@ -482,36 +482,36 @@ async fn pinned_older_drive_root_runs_on_the_newer_build() {
     assert_eq!(
         outcome.ran.len(),
         1,
-        "the pinned drive ran its root: {outcome:?}"
+        "the pinned shift ran its run: {outcome:?}"
     );
     assert!(
         matches!(
             outcome.ran[0],
-            lash_core::engine::RootOutcome::Committed { .. }
+            lash_core::engine::RunOutcome::Committed { .. }
         ),
-        "the root committed, neither released nor lost: {outcome:?}"
+        "the run committed, neither released nor lost: {outcome:?}"
     );
     assert!(
-        !matches!(outcome.stop, DriveStop::SubstrateLost { .. }),
+        !matches!(outcome.stop, ShiftStop::SubstrateLost { .. }),
         "{outcome:?}"
     );
-    let drive = roll.invocations_of(&format!("LashSession/{session}/drive"));
-    assert_eq!(drive.len(), 1);
+    let shift = roll.invocations_of(&format!("LashSession/{session}/shift"));
+    assert_eq!(shift.len(), 1);
     assert_eq!(
-        drive[0].pinned_deployment_id,
+        shift[0].pinned_deployment_id,
         roll.deployment_n.as_str(),
-        "the drive stayed pinned to build N"
+        "the shift stayed pinned to build N"
     );
-    let key = crate::session_driver::turn_workflow_key(&session, &TurnId::from("p1"));
+    let key = crate::session_shifts::turn_workflow_key(&session, &TurnId::from("p1"));
     let turn = roll.invocations_of(&format!("LashTurn/{key}/run"));
-    assert_eq!(turn.len(), 1, "the root ran once");
+    assert_eq!(turn.len(), 1, "the run ran once");
     assert_eq!(
         turn[0].pinned_deployment_id,
         roll.deployment_next().as_str(),
-        "the root's LashTurn ran on the newer build"
+        "the run's LashTurn ran on the newer build"
     );
-    assert_eq!(roll.driver.runs_of("p1"), 1);
-    assert_eq!(roll.driver.ledger(&session).consumed, ["p1"]);
+    assert_eq!(roll.shifts.runs_of("p1"), 1);
+    assert_eq!(roll.shifts.ledger(&session).consumed, ["p1"]);
 
     // The recorded outcome is stamped at its format, and `outcome` reads it
     // back through the stamp.
@@ -522,7 +522,7 @@ async fn pinned_older_drive_root_runs_on_the_newer_build() {
     assert_eq!(recorded["format"], LASH_TURN_OUTCOME_FORMAT_VERSION);
     let read = roll
         .ingress
-        .call_lash_workflow::<_, Option<lash_core::engine::RootOutcome>>(
+        .call_lash_workflow::<_, Option<lash_core::engine::RunOutcome>>(
             "LashTurn",
             &key,
             "outcome",
@@ -532,26 +532,26 @@ async fn pinned_older_drive_root_runs_on_the_newer_build() {
         .expect("read the recorded outcome");
     assert_eq!(read.as_ref(), Some(&outcome.ran[0]));
 
-    // A request an older build stamped with its drive version is served by
+    // A request an older build stamped with its shift version is served by
     // the newer build: the stamp is never a gate.
     let session_stamped = lash_sansio::SessionId::from("compat-stamped");
-    roll.driver.accept(&session_stamped, "s1");
+    roll.shifts.accept(&session_stamped, "s1");
     let mut body =
-        serde_json::to_value(SessionRoll::drive_body(&session_stamped, "r-stamped", None))
-            .expect("encode the drive");
-    body["drive_version"] = serde_json::json!(crate::LASH_SESSION_DRIVE_VERSION + 7);
+        serde_json::to_value(SessionRoll::shift_body(&session_stamped, "r-stamped", None))
+            .expect("encode the shift");
+    body["shift_version"] = serde_json::json!(crate::LASH_SESSION_SHIFT_VERSION + 7);
     let stamped = roll
         .ingress
-        .call_lash_object::<_, lash_core::engine::DriveOutcome>(
+        .call_lash_object::<_, lash_core::engine::ShiftOutcome>(
             "LashSession",
             session_stamped.as_str(),
-            "drive",
+            "shift",
             &body,
         )
         .await
         .expect("a stamped request is served");
     assert_eq!(stamped.ran.len(), 1, "{stamped:?}");
-    assert_eq!(roll.driver.runs_of("s1"), 1);
+    assert_eq!(roll.shifts.runs_of("s1"), 1);
     roll.settle().await;
 }
 

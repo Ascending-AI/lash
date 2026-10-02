@@ -1,4 +1,4 @@
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
@@ -54,7 +54,7 @@ fn closure_key(
 )]
 async fn authorize_closure(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     address: &crate::TurnAddress,
     observed: crate::TurnCancelIntentSnapshot,
     proposed: crate::TurnCancelClosureProposal,
@@ -87,7 +87,7 @@ fn closure_authorization(
     admitted_scope: crate::ExecutionScope,
     observed: crate::TurnCancelIntentSnapshot,
     proposed: crate::TurnCancelClosureProposal,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
 ) -> crate::TurnCancelClosureAuthorization {
     closure_authorization_under(
         address,
@@ -111,7 +111,7 @@ fn closure_authorization_under(
     admitted_scope: crate::ExecutionScope,
     observed: crate::TurnCancelIntentSnapshot,
     proposed: crate::TurnCancelClosureProposal,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
 ) -> crate::TurnCancelClosureAuthorization {
     let binding_id = crate::turn_control_binding_id_for_scope(binding_base, &admitted_scope)
         .expect("bind physical cancellation scope");
@@ -147,7 +147,7 @@ fn closure_authorization_under(
 /// transaction. Returns the input outcome the commit recorded.
 pub(super) async fn commit_teardown(
     store: &dyn crate::RuntimeStore,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     turn: &TurnId,
     observed: &crate::TurnCancelIntentSnapshot,
     settlement: &crate::TurnCancelClosureSettlement,
@@ -168,7 +168,7 @@ pub(super) async fn commit_teardown(
     );
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state)
         .closing_interrupted_turn(settlement.clone(), observed.clone());
-    commit.drive_fence = Some(Box::new(fence.clone()));
+    commit.shift_fence = Some(Box::new(fence.clone()));
     store
         .commit_runtime_state(commit)
         .await
@@ -209,16 +209,16 @@ pub async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical<F, Fut
     let address = crate::TurnAddress::new(&request.session_id, TurnId::from("settled-turn"));
     let first = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("receipt-first", "receipt-first:1"),
             "receipt-first:executor",
             60_000,
         )
         .await
-        .expect("seal the original drive")
+        .expect("seal the original shift")
         .acquired()
-        .expect("the original drive is free");
+        .expect("the original shift is free");
     let authorization = authorize_closure(
         store.store(),
         &first,
@@ -239,7 +239,7 @@ pub async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical<F, Fut
             "final",
         ))
         .expect("stamp the final commit");
-    commit.drive_fence = Some(Box::new(first.clone()));
+    commit.shift_fence = Some(Box::new(first.clone()));
     commit.interrupted_turn = Some(crate::store::InterruptedTurnClosure {
         settlement: settled_closure(&authorization, None),
         observed_intent: crate::TurnCancelIntentSnapshot::Absent,
@@ -269,21 +269,21 @@ pub async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical<F, Fut
     );
     store
         .store()
-        .supersede_drive_epoch_for_test(&first)
+        .supersede_shift_epoch_for_test(&first)
         .await
-        .expect("supersede the original drive");
+        .expect("supersede the original shift");
     let successor = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("receipt-successor", "receipt-successor:1"),
             "receipt-successor:executor",
             60_000,
         )
         .await
-        .expect("seal a successor drive")
+        .expect("seal a successor shift")
         .acquired()
-        .expect("the successor drive is free");
+        .expect("the successor shift is free");
     assert!(successor.epoch() > first.epoch());
     assert_eq!(
         store
@@ -337,7 +337,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
     );
     let first = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("exact-replay-first", "exact-replay-first:1"),
             "exact-replay-first:executor",
@@ -378,7 +378,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
 
     let successor = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "exact-replay-successor",
@@ -450,7 +450,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     let store = factory.admit_view(&request).await.expect("create store");
     let first = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("closure-first", "closure-first:incarnation"),
             "closure-first:executor",
@@ -577,12 +577,12 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
 
     store
         .store()
-        .supersede_drive_epoch_for_test(&first)
+        .supersede_shift_epoch_for_test(&first)
         .await
         .expect("release first owner");
     let successor = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "closure-successor",
@@ -652,7 +652,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     );
 
     // Consuming the exact authorization is the durable fence. Its authorizing
-    // drive epoch alone cannot veto final settlement under ADR 0039.
+    // shift epoch alone cannot veto final settlement under ADR 0039.
     let stale_state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.config.session_policy())
@@ -726,7 +726,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         .expect("create session-scoped store");
     let session_lease = session_store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &session_request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "session-scope-owner",
@@ -823,9 +823,9 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
         store: &Arc<dyn crate::RuntimeStore>,
         session_id: &SessionId,
         owner: &str,
-    ) -> crate::store::DriveFence {
+    ) -> crate::store::ShiftFence {
         store
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 session_id,
                 &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:incarnation")),
                 "repair-base-executor",
@@ -843,7 +843,7 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-repair-base-acceptor:turn");
-    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
+    crate::conformance::active_run_on_wake(store.store(), &request.session_id, &turn_id).await;
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
     store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -888,7 +888,7 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
     .await;
     store
         .store()
-        .supersede_drive_epoch_for_test(&authorizing)
+        .supersede_shift_epoch_for_test(&authorizing)
         .await
         .expect("release crashed owner");
     drop(store);
@@ -949,7 +949,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         scope: crate::ExecutionScope,
     ) -> (
         Arc<dyn crate::RuntimeStore>,
-        crate::store::DriveFence,
+        crate::store::ShiftFence,
         crate::TurnCancelClosureAuthorization,
     ) {
         let request = session_store_request(
@@ -960,7 +960,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         let store = factory.admit_view(&request).await.expect("create store");
         let lease = store
             .store()
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque(
                     format!("scope-retirement:{suffix}"),
@@ -1150,8 +1150,7 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
             .admit_view(&request)
             .await
             .expect("create cancellation crash store");
-        crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id)
-            .await;
+        crate::conformance::active_run_on_wake(store.store(), &request.session_id, &turn_id).await;
         let dropped = store
             .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
                 &request.session_id,
@@ -1184,7 +1183,7 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
             .expect("persist the disposition before the owner crashes");
         let authorizing_lease = store
             .store()
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque(
                     "turn-cancel-authorizer",
@@ -1237,7 +1236,7 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
         } else {
             store
                 .store()
-                .supersede_drive_epoch_for_test(&authorizing_lease)
+                .supersede_shift_epoch_for_test(&authorizing_lease)
                 .await
                 .expect("release authorizing owner before successor repair");
         }
@@ -1265,7 +1264,7 @@ pub(super) async fn turn_cancel_undelivered_crash_matrix(factory: Arc<dyn crate:
         }
         let lease = reopened
             .store()
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque(
                     "turn-cancel-drop-successor",
@@ -1658,9 +1657,9 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         store: &Arc<dyn crate::RuntimeStore>,
         session_id: &SessionId,
         owner: &str,
-    ) -> crate::store::DriveFence {
+    ) -> crate::store::ShiftFence {
         store
-            .seal_drive_epoch_for_test(
+            .seal_shift_epoch_for_test(
                 session_id,
                 &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:incarnation")),
                 &format!("{owner}:executor"),
@@ -1680,7 +1679,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-intent-first:turn");
-    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
+    crate::conformance::active_run_on_wake(store.store(), &request.session_id, &turn_id).await;
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
@@ -1786,8 +1785,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-repair-first:turn");
     let root =
-        crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id)
-            .await;
+        crate::conformance::active_run_on_wake(store.store(), &request.session_id, &turn_id).await;
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
@@ -1802,7 +1800,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     let fence = lease(store.store(), &request.session_id, "repair-first-owner").await;
     // The turn's root ends first: the input addressed to it is next-turn
     // input by rule, its submitted delivery unchanged (ADR 0101 §5.1).
-    crate::conformance::end_root(
+    crate::conformance::end_run(
         store.store(),
         &fence,
         crate::conformance::completing_admission(turn_id.as_str(), &root),
@@ -1864,7 +1862,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     );
     let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-completion-wins:turn");
-    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
+    crate::conformance::active_run_on_wake(store.store(), &request.session_id, &turn_id).await;
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             &request.session_id,
@@ -1946,7 +1944,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .await
         .expect("create CAS store");
     let turn_id = TurnId::from("turn-cancel-final-cas:turn");
-    crate::conformance::running_root_on_wake(store.store(), &request.session_id, &turn_id).await;
+    crate::conformance::active_run_on_wake(store.store(), &request.session_id, &turn_id).await;
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
     let pending = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -1977,7 +1975,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .expect("snapshot after-step intent");
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "turn-cancel-final-cas-owner",
@@ -2398,7 +2396,7 @@ pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
     let store = factory.admit_view(&request).await.expect("create store");
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "wrong-binding-owner",

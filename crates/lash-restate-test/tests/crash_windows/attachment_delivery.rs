@@ -453,7 +453,7 @@ fn core(harness: &Harness) -> lash::LashCore {
         Harness::Live { backend } => backend.explicit_reconcile_session_work(),
     };
     // The child turn runs through its process. A wall-clock reconciliation
-    // must not race that turn for the session's drive fence.
+    // must not race that turn for the session's shift fence.
     let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(harness.backend())
         .with_session_work(session_work)
         .into_backend();

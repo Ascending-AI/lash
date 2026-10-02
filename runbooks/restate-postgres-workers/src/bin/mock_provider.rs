@@ -436,7 +436,7 @@ await control.continue_as({{
 }
 
 /// The frame switch whose original turn exits its worker once, in a tool
-/// before the switch commits: whichever worker the engine's drive lands on.
+/// before the switch commits: whichever worker the engine's shift lands on.
 fn frame_switch_crash_start_script(workflow_id: &str) -> String {
     format!(
         r#"

@@ -24,7 +24,7 @@ replay carrier per call, so the continuity and route-filter gates cannot pass by
 coincidence. The run is browser-driven but deterministic — every response is a fixture
 string and nothing in the scenario depends on model behaviour — so it is funded at the
 `deterministic` / `scripted-provider` rung `judged-matrix.toml` gives it, and any judge may
-drive it. Retain the driving prompt and verdict with the run artifacts.
+shift it. Retain the executing prompt and verdict with the run artifacts.
 
 ## Scenario-specific golden rules
 

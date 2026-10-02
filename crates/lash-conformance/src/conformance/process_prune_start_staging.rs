@@ -493,7 +493,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
     assert_eq!(started_b.record.env_ref.as_ref(), Some(&env_b));
     assert_eq!(
         relay_on_end.verdict.get(),
-        Some(&crate::drive::relay::RelayVerdict::Delivered),
+        Some(&crate::shift::relay::RelayVerdict::Delivered),
         "the relay applied A's end of `Start(key)` before A went on"
     );
 
@@ -665,7 +665,7 @@ struct RelayOnEnd {
     inner: Arc<dyn crate::ArtifactCleanupLedger>,
     start: crate::ArtifactReferrer,
     relay: Arc<ArtifactCleanupRelay>,
-    verdict: std::sync::OnceLock<crate::drive::relay::RelayVerdict>,
+    verdict: std::sync::OnceLock<crate::shift::relay::RelayVerdict>,
 }
 
 #[async_trait::async_trait]
@@ -749,7 +749,7 @@ impl crate::ArtifactCleanupLedger for RelayOnEnd {
         let id = self.inner.arm_cleanup(cleanup, now_ms).await?;
         if cleanup.is_ended() && cleanup.referrer() == self.start {
             let verdict =
-                crate::drive::relay::deliver_now(self.relay.as_ref(), &id, &crate::SystemClock)
+                crate::shift::relay::deliver_now(self.relay.as_ref(), &id, &crate::SystemClock)
                     .await?;
             let _ = self.verdict.set(verdict);
         }

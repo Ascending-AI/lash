@@ -4,20 +4,20 @@
 //! host measures the wall spans it can see; a per-sample store poller reads
 //! durable evidence so the admission, application and settlement instants do
 //! not ride the follower's own wake schedule. Every read is keyed — the
-//! input's open-set row, the input's root binding, the root's terminal —
+//! input's open-set row, the input's run binding, the run's terminal —
 //! and all of them run on the lane's one observer connection, so a poll
 //! never rescans session history or opens a connection per tick. The tick
 //! backs off from a 2 ms floor toward a 50 ms ceiling while nothing changes
 //! and restarts at the floor the moment a mark lands, so clustered marks
 //! keep tick-fine precision while a quiet wait stays cheap:
 //!
-//! * `admission` — the input's pending row first reports `Admitted` (a root took
+//! * `admission` — the input's pending row first reports `Admitted` (a run took
 //!   it), or leaves the open set.
-//! * `applied` — the input's durable binding names the root that took it.
-//! * `settled` — the root's terminal evidence is readable.
+//! * `applied` — the input's durable binding names the run that took it.
+//! * `settled` — the run's terminal evidence is readable.
 //!
 //! The follower tail (`settled→complete`) is what live replay, the settled
-//! mailbox, the drive-attach wake and the 25 ms→1 s poll each contribute
+//! mailbox, the shift-attach wake and the 25 ms→1 s poll each contribute
 //! to; the `poll`/`grace` cases isolate those contributions.
 
 use std::collections::BTreeMap;
@@ -35,7 +35,7 @@ use super::provider::{
     HoldRegistry, LaneHold, LatencyProviderKind, ProviderTiming, latency_provider,
 };
 use super::restate::{LocalDeployment, LocalRestate, LocalRestateServer};
-use super::work_engine::{AwaitDriveMode, LatencySessionWork};
+use super::work_engine::{AwaitShiftMode, LatencySessionWork};
 use crate::perf_support::memory::process_memory_sample;
 use crate::perf_support::metrics::percentile_sorted;
 use crate::perf_support::scheduler::process_cpu_ms;
@@ -65,7 +65,7 @@ const WORKER_READY: Duration = Duration::from_secs(120);
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Topology {
     /// The endpoint serves in this process: the same `RestateEngine` submits
-    /// and executes, and live replay plus the settled-root mailbox are
+    /// and executes, and live replay plus the settled-run mailbox are
     /// process-local.
     SameProcess,
     /// A `lash-perf latency-worker` child process serves the endpoint; the
@@ -78,10 +78,10 @@ pub(crate) struct CaseSpec {
     pub(crate) name: &'static str,
     pub(crate) topology: Topology,
     pub(crate) provider: LatencyProviderKind,
-    pub(crate) await_drive: AwaitDriveMode,
+    pub(crate) await_shift: AwaitShiftMode,
     pub(crate) samples: usize,
     pub(crate) lanes: usize,
-    /// Queue each measured input behind a held sibling root.
+    /// Queue each measured input behind a held sibling run.
     pub(crate) busy: bool,
 }
 
@@ -245,9 +245,9 @@ impl LaneSession {
         }
     }
 
-    /// Lane teardown: a live session is parked out of the drives so its last
-    /// drive leg stops instead of being orphaned when the endpoint drops.
-    /// A durable session runs no runtime — its last drive ends on its own
+    /// Lane teardown: a live session is parked out of the shifts so its last
+    /// shift leg stops instead of being orphaned when the endpoint drops.
+    /// A durable session runs no runtime — its last shift ends on its own
     /// admission check.
     async fn close(self) -> Result<()> {
         match self {
@@ -263,7 +263,7 @@ impl LaneSession {
 /// `observer` is a second core over its own store set on the same directory:
 /// the per-sample durable pollers read through its connections (WAL readers
 /// beside the writer) so marker reads never serialize on the
-/// connections the drive itself writes through.
+/// connections the shift itself writes through.
 struct CaseTopology {
     core: lash::LashCore,
     observer: lash::LashCore,
@@ -327,8 +327,8 @@ pub(crate) async fn run_case(
                 .map_err(|error| anyhow::anyhow!("open host store set: {error}"))?;
             let engine = env.restate.engine(Arc::new(stores));
             let backend = lash::Backend::new(engine);
-            let backend = match spec.await_drive {
-                AwaitDriveMode::Real => backend,
+            let backend = match spec.await_shift {
+                AwaitShiftMode::Real => backend,
                 mode => {
                     let wrapped = LatencySessionWork::wrap(&backend, mode);
                     lash_core::testing::runtime_helpers::LayeredBackend::over(backend)
@@ -371,7 +371,7 @@ pub(crate) async fn run_case(
         }
     }
     samples.sort_by_key(|sample| (sample.lane, sample.index));
-    quiesce_drives(&env.restate, spec).await;
+    quiesce_shifts(&env.restate, spec).await;
     let wall = started.elapsed();
     let report = CaseReport::assemble(spec, &samples, errors, wall);
     Ok((report, samples))
@@ -420,8 +420,8 @@ fn build_core(
 
 /// A read-only core over a second store set on `stores_dir`. The per-sample
 /// durable pollers read through its connections (WAL readers beside the
-/// writer) so their cadence never serializes on the drive's own connections;
-/// it never serves an endpoint, so it can never drive.
+/// writer) so their cadence never serializes on the shift's own connections;
+/// it never serves an endpoint, so it can never work.
 async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<lash::LashCore> {
     let stores = lash::sqlite::SqliteStoreSet::open(stores_dir)
         .await
@@ -431,7 +431,7 @@ async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<las
         name: "observer",
         topology: Topology::SameProcess,
         provider: LatencyProviderKind::Text,
-        await_drive: AwaitDriveMode::Real,
+        await_shift: AwaitShiftMode::Real,
         samples: 0,
         lanes: 0,
         busy: false,
@@ -469,14 +469,14 @@ fn compat_profile() -> BenchmarkStreamProfile {
     }
 }
 
-/// Let the case's last drive legs finish before the endpoint drops. A drive
+/// Let the case's last shift legs finish before the endpoint drops. A shift
 /// still running when its deployment goes away is retried against the dead
 /// address for the rest of the run — dead retry traffic that would inflate
 /// the next case's numbers. The server's own invocation table names every
-/// lash invocation of the case's sessions — a `LashSession` drive keyed by
-/// the session, a root's run keyed by a turn workflow key that carries it —
-/// so it sees worker-process drives too.
-async fn quiesce_drives(restate: &LocalRestate, spec: &CaseSpec) {
+/// lash invocation of the case's sessions — a `LashSession` shift keyed by
+/// the session, a run's execution keyed by a turn workflow key that carries it —
+/// so it sees worker-process shifts too.
+async fn quiesce_shifts(restate: &LocalRestate, spec: &CaseSpec) {
     let admin = lash_restate::RestateAdminClient::new(restate.admin_url.clone());
     let query = format!(
         "SELECT target_service_key FROM sys_invocation \
@@ -555,7 +555,7 @@ async fn run_lane(
         samples.push(run_sample(&ctx, lane, index, hold.as_deref()).await?);
     }
     // Teardown only: a close refusal leaves the quiesce wait below to finish
-    // the drive; it must not cost the lane its measured samples.
+    // the shift; it must not cost the lane its measured samples.
     let _ = session.close().await;
     Ok(samples)
 }
@@ -570,7 +570,7 @@ struct SampleCtx<'a> {
 }
 
 /// One measured send. `busy` lanes first park a sibling input's provider
-/// call so the measured input queues behind a live root; the hold releases
+/// call so the measured input queues behind a live run; the hold releases
 /// the moment the measured input is durably accepted.
 async fn run_sample(
     ctx: &SampleCtx<'_>,
@@ -705,7 +705,7 @@ fn status_name(status: &lash::TurnStatus) -> String {
 /// The durable-evidence poller for one send: admission, application and
 /// settlement instants read from the store itself, not the follower's wake
 /// schedule. Every read is keyed — the input's open-set row, the input's
-/// root binding, the root's terminal — on `store`'s one connection
+/// run binding, the run's terminal — on `store`'s one connection
 /// (FIG-3974, FIG-4061): `pending_turn_input` is the admission read the open-set
 /// listing used to answer, narrowed to the one tracked row, so a poll never
 /// rescans the session's pending inputs or decodes its commit history.
@@ -713,7 +713,7 @@ fn status_name(status: &lash::TurnStatus) -> String {
 /// The interval starts at `STORE_POLL_FLOOR` — a fresh send's admission is
 /// imminent — and doubles each tick that observes nothing, up to
 /// `STORE_POLL_CEILING`. A tick that lands a mark or first sees the row
-/// restarts it at the floor: admission binds the row and names its root in
+/// restarts it at the floor: admission binds the row and names its run in
 /// one transaction, so the next mark is imminent whenever one just landed,
 /// and only a quiet wait pays the backoff.
 async fn poll_marks(
@@ -723,7 +723,7 @@ async fn poll_marks(
     t_request: Instant,
 ) -> PollMarks {
     let mut marks = PollMarks::default();
-    let mut root: Option<lash_core::TurnId> = None;
+    let mut run: Option<lash_core::TurnId> = None;
     let mut row_seen = false;
     let mut interval = STORE_POLL_FLOOR;
     let deadline = Instant::now() + STORE_POLL_TIMEOUT;
@@ -745,7 +745,7 @@ async fn poll_marks(
                         changed = true;
                     }
                 }
-                // The row left the open set: the drive consumed it.
+                // The row left the open set: the shift consumed it.
                 None if row_seen => {
                     marks.admission_ms = Some(now);
                     changed = true;
@@ -753,23 +753,23 @@ async fn poll_marks(
                 None => {}
             }
         }
-        // The admission's transaction binds the input to its root, so the keyed
-        // `root_of_input` read is the applied mark and the settled mark's
+        // The admission's transaction binds the input to its run, so the keyed
+        // `run_of_input` read is the applied mark and the settled mark's
         // key in one.
-        if root.is_none()
-            && let Ok(Some(bound)) = store.root_of_input(&session_id, &input_id).await
+        if run.is_none()
+            && let Ok(Some(bound)) = store.run_of_input(&session_id, &input_id).await
         {
             marks.applied_ms = Some(now);
-            root = Some(bound);
+            run = Some(bound);
             changed = true;
         }
-        if let Some(root) = &root {
-            if let Ok(Some(_)) = store.root_terminal(&session_id, root).await {
+        if let Some(run) = &run {
+            if let Ok(Some(_)) = store.run_terminal(&session_id, run).await {
                 marks.settled_ms = Some(now);
                 break;
             }
         } else if marks.admission_ms.is_some() && marks.applied_ms.is_some() {
-            // Nothing left to learn without a root.
+            // Nothing left to learn without a run.
             break;
         }
         if Instant::now() >= deadline {
@@ -800,7 +800,7 @@ fn simulated_poll_detect_ms(settled_ms: f64) -> f64 {
     }
 }
 
-/// The `latency-worker` child a cross-worker case drives: serves lash's
+/// The `latency-worker` child a cross-worker case executes: serves lash's
 /// Restate services over the shared store directory.
 struct LatencyWorkerProcess {
     child: std::process::Child,
@@ -896,10 +896,10 @@ fn summarize(values: impl Iterator<Item = f64>) -> Option<LatencySummary> {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct PhaseSummaries {
     pub(crate) request_to_accept: Option<LatencySummary>,
-    pub(crate) accept_to_drive_admission: Option<LatencySummary>,
+    pub(crate) accept_to_shift_admission: Option<LatencySummary>,
     pub(crate) accept_to_applied: Option<LatencySummary>,
-    pub(crate) drive_admission_to_first_delta: Option<LatencySummary>,
-    pub(crate) drive_admission_to_root_settled: Option<LatencySummary>,
+    pub(crate) shift_admission_to_first_delta: Option<LatencySummary>,
+    pub(crate) shift_admission_to_run_settled: Option<LatencySummary>,
     pub(crate) root_settled_to_completion: Option<LatencySummary>,
     pub(crate) send_to_completion: Option<LatencySummary>,
     pub(crate) provider: Option<LatencySummary>,
@@ -914,10 +914,10 @@ fn phases_of(samples: &[&Sample]) -> PhaseSummaries {
     };
     PhaseSummaries {
         request_to_accept: column(&|sample| Some(sample.request_to_accept_ms)),
-        accept_to_drive_admission: column(&|sample| sample.accept_to_admission_ms),
+        accept_to_shift_admission: column(&|sample| sample.accept_to_admission_ms),
         accept_to_applied: column(&|sample| sample.accept_to_applied_ms),
-        drive_admission_to_first_delta: column(&|sample| sample.admission_to_first_delta_ms),
-        drive_admission_to_root_settled: column(&|sample| sample.admission_to_settled_ms),
+        shift_admission_to_first_delta: column(&|sample| sample.admission_to_first_delta_ms),
+        shift_admission_to_run_settled: column(&|sample| sample.admission_to_settled_ms),
         root_settled_to_completion: column(&|sample| sample.settled_to_complete_ms),
         send_to_completion: column(&|sample| Some(sample.send_to_completion_ms)),
         provider: column(&|sample| sample.provider_ms),
@@ -933,7 +933,7 @@ pub(crate) struct CaseReport {
     pub(crate) name: &'static str,
     pub(crate) topology: Topology,
     pub(crate) provider: LatencyProviderKind,
-    pub(crate) await_drive: AwaitDriveMode,
+    pub(crate) await_shift: AwaitShiftMode,
     pub(crate) busy: bool,
     pub(crate) samples: usize,
     pub(crate) lanes: usize,
@@ -963,7 +963,7 @@ impl CaseReport {
             name: spec.name,
             topology: spec.topology,
             provider: spec.provider,
-            await_drive: spec.await_drive,
+            await_shift: spec.await_shift,
             busy: spec.busy,
             samples: samples.len(),
             lanes: spec.lanes,
@@ -1073,7 +1073,7 @@ mod tests {
 
     /// The store half of `poll_marks`' keyed-read contract (FIG-3974,
     /// FIG-4061): the admission, applied and settled marks come from point
-    /// reads — the pending row, the input's root binding, the root's
+    /// reads — the pending row, the input's run binding, the run's
     /// terminal — on the one store the lane's pollers share.
     /// `list_pending_turn_inputs` and `list_turn_input_applications`, the
     /// open-set scan and the full-history receipt decode the poller issued
@@ -1082,12 +1082,12 @@ mod tests {
     struct PollProbeStore {
         inner: Arc<dyn lash::persistence::RuntimeStore>,
         row: lash::PendingTurnInput,
-        root: lash_core::TurnId,
-        terminal: lash::persistence::RootTerminal,
+        run: lash_core::TurnId,
+        terminal: lash::persistence::RunTerminal,
         pending_input_calls: AtomicUsize,
         applications_calls: AtomicUsize,
-        root_of_input_calls: AtomicUsize,
-        root_terminal_calls: AtomicUsize,
+        run_of_input_calls: AtomicUsize,
+        run_terminal_calls: AtomicUsize,
     }
 
     impl PollProbeStore {
@@ -1095,7 +1095,7 @@ mod tests {
             inner: Arc<dyn lash::persistence::RuntimeStore>,
             session_id: &SessionId,
             input_id: &lash_core::InputId,
-            root: &lash_core::TurnId,
+            run: &lash_core::TurnId,
         ) -> Self {
             Self {
                 inner,
@@ -1110,14 +1110,14 @@ mod tests {
                     run_spec: None,
                     trace_cause: Default::default(),
                 },
-                root: root.clone(),
-                terminal: lash::persistence::RootTerminal {
+                run: run.clone(),
+                terminal: lash::persistence::RunTerminal {
                     session_id: session_id.clone(),
-                    root: root.clone(),
-                    cause: lash::persistence::RootTerminalCause::Committed {
-                        commit: lash::persistence::TurnCommitId::new(root.clone(), 0),
-                        turn: root.clone(),
-                        outcome: lash::persistence::RootCommittedOutcome::Finished(
+                    run: run.clone(),
+                    cause: lash::persistence::RunTerminalCause::Committed {
+                        commit: lash::persistence::TurnCommitId::new(run.clone(), 0),
+                        turn: run.clone(),
+                        outcome: lash::persistence::RunCommittedOutcome::Finished(
                             lash::TurnFinish::AssistantMessage {
                                 text: String::new(),
                             },
@@ -1128,8 +1128,8 @@ mod tests {
                 },
                 pending_input_calls: AtomicUsize::new(0),
                 applications_calls: AtomicUsize::new(0),
-                root_of_input_calls: AtomicUsize::new(0),
-                root_terminal_calls: AtomicUsize::new(0),
+                run_of_input_calls: AtomicUsize::new(0),
+                run_terminal_calls: AtomicUsize::new(0),
             }
         }
     }
@@ -1153,7 +1153,7 @@ mod tests {
         }
 
         /// The row reports `Open` on the first keyed read and `Admitted`
-        /// after, a drive's root admission landing between two ticks.
+        /// after, a shift's run admission landing between two ticks.
         async fn pending_turn_input(
             &self,
             _session_id: &SessionId,
@@ -1165,7 +1165,7 @@ mod tests {
             } else {
                 lash::PendingTurnInputRead::admitted(
                     self.row.clone(),
-                    lash_core::TurnId::from("poll-probe-root"),
+                    lash_core::TurnId::from("poll-probe-run"),
                 )
             }))
         }
@@ -1178,26 +1178,25 @@ mod tests {
             panic!("the store poller must never rescan turn-input applications");
         }
 
-        /// The input's root binding: absent until the admission transaction
+        /// The input's run binding: absent until the admission transaction
         /// records it, keyed on `input` only.
-        async fn root_of_input(
+        async fn run_of_input(
             &self,
             _session_id: &SessionId,
             _input: &lash_core::InputId,
         ) -> Result<Option<lash_core::TurnId>, lash::persistence::StoreError> {
-            let call = self.root_of_input_calls.fetch_add(1, Ordering::SeqCst);
-            Ok((call >= 2).then(|| self.root.clone()))
+            let call = self.run_of_input_calls.fetch_add(1, Ordering::SeqCst);
+            Ok((call >= 2).then(|| self.run.clone()))
         }
 
-        /// The root's terminal evidence: absent on the read before it lands,
+        /// The run's terminal evidence: absent on the read before it lands,
         /// present after.
-        async fn root_terminal(
+        async fn run_terminal(
             &self,
             _session_id: &SessionId,
-            _root: &lash_core::TurnId,
-        ) -> Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
-        {
-            let call = self.root_terminal_calls.fetch_add(1, Ordering::SeqCst);
+            _run: &lash_core::TurnId,
+        ) -> Result<Option<lash::persistence::RunTerminal>, lash::persistence::StoreError> {
+            let call = self.run_terminal_calls.fetch_add(1, Ordering::SeqCst);
             Ok((call >= 1).then(|| self.terminal.clone()))
         }
     }
@@ -1208,7 +1207,7 @@ mod tests {
     async fn the_store_poller_marks_keyed_reads_without_an_applications_scan() {
         let session_id = SessionId::from("latency-probe");
         let input_id = lash_core::InputId::from("latency-probe-input");
-        let root = lash_core::TurnId::from("latency-probe-root");
+        let run = lash_core::TurnId::from("latency-probe-run");
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("open the SQLite in-memory store set");
@@ -1229,7 +1228,7 @@ mod tests {
             .await
             .expect("create the probe's inner store");
         let inner: Arc<dyn lash::persistence::RuntimeStore> = factory;
-        let probe = Arc::new(PollProbeStore::over(inner, &session_id, &input_id, &root));
+        let probe = Arc::new(PollProbeStore::over(inner, &session_id, &input_id, &run));
         let store: Arc<dyn lash::persistence::RuntimeStore> = probe.clone();
 
         let marks = poll_marks(store, session_id, input_id, Instant::now()).await;
@@ -1244,7 +1243,7 @@ mod tests {
         );
         assert_eq!(probe.applications_calls.load(Ordering::SeqCst), 0);
         assert_eq!(probe.pending_input_calls.load(Ordering::SeqCst), 2);
-        assert_eq!(probe.root_of_input_calls.load(Ordering::SeqCst), 3);
-        assert_eq!(probe.root_terminal_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(probe.run_of_input_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(probe.run_terminal_calls.load(Ordering::SeqCst), 2);
     }
 }

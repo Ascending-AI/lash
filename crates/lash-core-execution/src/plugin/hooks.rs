@@ -205,9 +205,9 @@ pub type AssistantStreamFinishedHook = Arc<
 pub struct TurnHookContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
@@ -226,9 +226,9 @@ pub struct SessionConfigChangedContext {
 pub struct SessionStateChangedContext<'run> {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionStateService>,
@@ -278,9 +278,9 @@ pub struct ToolCallHookContext {
     /// Who the call runs for: a session, or a process runtime.
     pub owner: crate::RuntimeOwner,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub tool_name: String,
     pub args: serde_json::Value,
@@ -338,9 +338,9 @@ pub struct ToolResultHookContext {
     /// Who the call runs for: a session, or a process runtime.
     pub owner: crate::RuntimeOwner,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     /// The durable identity of the prepared call this observation belongs to:
     /// the same value the attempt body saw as [`crate::AttemptContext::call_id`]
@@ -428,9 +428,9 @@ pub struct ToolResultProjectionContext {
 pub struct TurnResultHookContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub turn: Arc<TurnHookReport>,
     pub sessions: Arc<dyn SessionStateService>,
@@ -440,9 +440,9 @@ pub struct TurnResultHookContext {
 pub struct CheckpointHookContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub checkpoint: CheckpointKind,
     pub state: SessionReadView,
@@ -455,9 +455,9 @@ pub struct CheckpointHookContext {
 pub struct AssistantStreamHookContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub chunk: String,
 }
@@ -480,9 +480,9 @@ pub struct AssistantStreamTransform {
 pub struct AssistantResponseHookContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub response: crate::LlmResponse,
     /// The state this plugin's [`AssistantStreamFinishedHook`] returned when
@@ -512,9 +512,9 @@ pub enum AssistantStreamFinishReason {
 pub struct AssistantStreamFinishedContext {
     pub session_id: SessionId,
     /// The plugin configuration this hook runs under (FIG-4379): the
-    /// running root's admitted configuration and its revision, a process's
-    /// captured one, or the head's outside a root — never today's head
-    /// inside a root.
+    /// running run's admitted configuration and its revision, a process's
+    /// captured one, or the head's outside a run — never today's head
+    /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub reason: AssistantStreamFinishReason,
 }

@@ -5,7 +5,7 @@
 //! the rows say, so both backends answer one target the same way.
 
 use crate::session_store_factory_types::Target;
-use crate::store::RootTerminal;
+use crate::store::RunTerminal;
 use crate::turn_input_vocabulary::TurnInputStateKind;
 use crate::{SessionId, StoreError};
 
@@ -14,10 +14,10 @@ use crate::{SessionId, StoreError};
 pub enum TargetResolution {
     /// The target names this head revision.
     Revision(u64),
-    /// The target's root has not finished, or nothing has recorded the
+    /// The target's run has not finished, or nothing has recorded the
     /// target yet.
     Pending,
-    /// The target names no state: its root ended without a commit, or its
+    /// The target names no state: its run ended without a commit, or its
     /// input was withdrawn.
     Unavailable,
 }
@@ -34,11 +34,11 @@ impl TargetResolution {
         }
     }
 
-    /// A turn target against its root's terminal evidence: no evidence is a
-    /// root that has not finished, and evidence without a head revision is a
-    /// root that ended without a commit.
+    /// A turn target against its run's terminal evidence: no evidence is a
+    /// run that has not finished, and evidence without a head revision is a
+    /// run that ended without a commit.
     #[must_use]
-    pub fn of_root(terminal: Option<&RootTerminal>) -> Self {
+    pub fn of_run(terminal: Option<&RunTerminal>) -> Self {
         match terminal {
             None => Self::Pending,
             Some(terminal) => match terminal.head_revision {
@@ -48,8 +48,8 @@ impl TargetResolution {
         }
     }
 
-    /// An input target no root is bound to, against the input's stored
-    /// lifecycle state: a settled input that reached no root was withdrawn,
+    /// An input target no run is bound to, against the input's stored
+    /// lifecycle state: a settled input that reached no run was withdrawn,
     /// and an open or unrecorded one may still be applied.
     ///
     /// # Errors

@@ -5,12 +5,12 @@
 //!
 //! * A deterministic failure is an outcome: a direct turn records it as a
 //!   failed turn.
-//! * A replay refusal parks the direct turn until its parked root is cancelled.
-//! * An accepted input is withdrawable by its send receipt before it drives.
+//! * A replay refusal parks the direct turn until its parked run is cancelled.
+//! * An accepted input is withdrawable by its send receipt before it executes.
 //! * Cancellation keeps settling `Stopped { Cancelled }`.
 //!
 //! A live fault is the engine's to retry (FIG-3897): the Restate engine
-//! reruns the root under its own attempt, so the host-side redrive-by-turn-id
+//! reruns the run under its own attempt, so the host-side redrive-by-turn-id
 //! laws the store-journal host had, retired in 476264fbea, are the engine's retry laws in
 //! `lash-restate`.
 
@@ -193,10 +193,10 @@ impl lash_core::plugin::ProtocolSessionPlugin for DivergingBeforeLlmCall {
     }
 }
 
-/// FIG-3586, FIG-3600: a replay refusal parks the sent root without a failed
-/// turn report. Reattaching observes the same park; a root cancel clears it.
+/// FIG-3586, FIG-3600: a replay refusal parks the sent run without a failed
+/// turn report. Reattaching observes the same park; a run cancel clears it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() -> Result<()> {
+async fn a_replay_refusal_parks_the_direct_turn_until_its_run_is_cancelled() -> Result<()> {
     const SESSION: &str = "direct-replay-refusal";
     let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -217,10 +217,10 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
         .expect("the first send answers its park")?;
     let reobserved = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        session.root("parked-turn").outcome(),
+        session.run("parked-turn").outcome(),
     )
     .await
-    .expect("the root handle observes the same park")?;
+    .expect("the run handle observes the same park")?;
     let park_id = match &first.status() {
         crate::TurnStatus::Parked(parked) => parked.park_id,
         other => panic!("expected the first send to park: {other:?}"),
@@ -252,14 +252,14 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
     );
     let pending = session.durable().pending_turn_inputs().await?;
     assert_eq!(pending.len(), 1);
-    // The parked root keeps the input bound to it until the root ends; no
-    // other root may drive it (FIG-3927).
+    // The parked run keeps the input bound to it until the run ends; no
+    // other run may execute it (FIG-3927).
     assert!(
         matches!(
             &pending[0].status,
             lash_core::PendingTurnInputReadStatus::Admitted { .. }
         ),
-        "the parked turn's input stays admitted to its root: {:?}",
+        "the parked turn's input stays admitted to its run: {:?}",
         pending[0].status
     );
     let cancelled = session.cancel(crate::CancelTarget::Input(input_id)).await?;
@@ -277,10 +277,10 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
             park_id,
         )
         .await
-        .expect("cancel the parked root");
+        .expect("cancel the parked run");
     assert_eq!(
         cancelled.terminal.kind(),
-        lash_core::store::RootTerminalKind::Cancelled
+        lash_core::store::RunTerminalKind::Cancelled
     );
     let status = core.drain_status(false).await?;
     assert_eq!(
@@ -294,7 +294,7 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
+async fn a_send_receipt_withdraws_input_before_shift() -> Result<()> {
     const SESSION: &str = "direct-live-fault";
     let backend = TestBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -306,11 +306,11 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
-    // The engine drives a send as soon as it is accepted. Hold the session's
-    // drive so nothing claims the input before the withdraw below: the
+    // The engine executes a send as soon as it is accepted. Hold the session's
+    // shift so nothing claims the input before the withdraw below: the
     // withdraw is never a claim race.
     let double = held_double(&core).expect("the core runs on its held double");
-    let hold = double.hold_session_drive(&SessionId::from(SESSION)).await;
+    let hold = double.hold_session_shift(&SessionId::from(SESSION)).await;
 
     let handle = session
         .send(TurnInput::text(STRANDED_WORDS))

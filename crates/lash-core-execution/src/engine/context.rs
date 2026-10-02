@@ -4,20 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::{SessionStreamEvent, TurnActivity, TurnActivityId, TurnEvent};
 
-/// One observation a drive or step publishes, keyed by the replay key it
+/// One observation a shift or step publishes, keyed by the replay key it
 /// belongs to and its ordinal under that key, so a replay can suppress or
 /// deduplicate it. Observation is never a decision input (ADR 0105 §1).
 ///
 /// `(key, ordinal)` is also the observation's identity on the host stream: an
 /// activity's id is derived from it, never minted.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DriveObservation {
+pub struct ShiftObservation {
     pub key: ReplayKey,
     pub ordinal: u32,
     pub event: ObservedEvent,
 }
 
-/// What one [`DriveObservation`] carries: an event on either of the two host
+/// What one [`ShiftObservation`] carries: an event on either of the two host
 /// streams a turn publishes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ObservedEvent {

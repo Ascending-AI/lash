@@ -16,8 +16,8 @@
 //! - **Lapsed claim.** A claim whose relay died is retaken by
 //!   `claimed_at + claim_ttl + T`, never before its expiry.
 //!
-//! The session's cleanup is a scope-close obligation on its one root, armed
-//! by the root's terminal transaction (ADR 0109 §3), left owed by a close
+//! The session's cleanup is a scope-close obligation on its one run, armed
+//! by the run's terminal transaction (ADR 0109 §3), left owed by a close
 //! whose parent-end record the registry refused once, and delivered by hand
 //! when the law releases the delete.
 
@@ -25,8 +25,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lash::LashCore;
-use lash_core::drive::relay::{RelayPass, RelayPolicy, relay_due};
 use lash_core::session_delete::SessionDeleteRelay;
+use lash_core::shift::relay::{RelayPass, RelayPolicy, relay_due};
 use lash_core::store::{
     ObligationId, ObligationKind, ObligationSettlement, ObligationState, StallReason,
 };
@@ -40,7 +40,7 @@ const EPOCH_MS: u64 = 1_700_000_000_000;
 const STALL_BOUND_MS: u64 = 107 * 60_000 + 3_000;
 
 struct Deployment {
-    /// The engine the roots run on; its server's virtual time is the clock.
+    /// The engine the runs execute on; its server's virtual time is the clock.
     double: lash_restate_test::RestateTestBackend,
     clock: Arc<TestClock>,
     backend: Backend,
@@ -55,14 +55,14 @@ struct Deployment {
     clippy::expect_used,
     reason = "test fixture: a deployment that fails to build aborts the law"
 )]
-async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
-    // The law's root's first parent-end record is refused once, so its
+async fn deployment(turns: usize, session: &str, run: &str) -> Deployment {
+    // The law's run's first parent-end record is refused once, so its
     // close step's immediate delivery fails and its scope close stays owed.
     // The refusal is layered under the engine, so the engine's own close
     // step meets it.
-    let root_scope = lash_core::ScopeId::turn(
+    let run_scope = lash_core::ScopeId::turn(
         SessionId::fixture(session),
-        TurnId::fixture(root.to_string()),
+        TurnId::fixture(run.to_string()),
     );
     let double = lash_restate_test::backend_with(
         0x5e55_de1e,
@@ -73,7 +73,7 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
         move |stores| {
             lash_core::testing::runtime_helpers::LayeredStores::over(stores)
                 .map_process_registry(|registry| {
-                    lash_core::fail_parent_end_once(registry, root_scope)
+                    lash_core::fail_parent_end_once(registry, run_scope)
                 })
                 .into_store_set()
         },
@@ -177,15 +177,15 @@ impl Deployment {
         outcome
     }
 
-    /// Run root `root` of `session` to its end: its terminal transaction
-    /// arms the root's scope close (ADR 0109 §3), and the refused parent-end
+    /// Run run `run` of `session` to its end: its terminal transaction
+    /// arms the run's scope close (ADR 0109 §3), and the refused parent-end
     /// record fails the close step's immediate delivery, so the close stays
     /// owed.
     #[expect(
         clippy::expect_used,
         reason = "test fixture: a session that fails to run aborts the law"
     )]
-    async fn ended_root(&self, session: &str, root: &str) -> ObligationId {
+    async fn ended_run(&self, session: &str, run: &str) -> ObligationId {
         let handle = created_session(
             &self.core,
             &self.model,
@@ -196,20 +196,20 @@ impl Deployment {
         .await
         .expect("open");
         handle
-            .send(lash::TurnInput::text("end a root"))
-            .id(TurnId::fixture(root))
+            .send(lash::TurnInput::text("end a run"))
+            .id(TurnId::fixture(run))
             .output()
             .await
-            .expect("run the root");
+            .expect("run the run");
         drop(handle);
-        // The handle answered at the root's final commit; its close step
+        // The handle answered at the run's final commit; its close step
         // runs after (FIG-3979).
         self.double
-            .settle_session_drive(&SessionId::fixture(session))
+            .settle_session_shift(&SessionId::fixture(session))
             .await;
         let id = lash_core::store::ObligationKey::ScopeClose {
             session_id: SessionId::fixture(session),
-            root: TurnId::fixture(root),
+            run: TurnId::fixture(run),
         }
         .id();
         assert_eq!(
@@ -219,7 +219,7 @@ impl Deployment {
                 .await
                 .expect("read the scope close"),
             Some(ObligationState::Due),
-            "the root's failed close left its scope close owed"
+            "the run's failed close left its scope close owed"
         );
         id
     }
@@ -299,8 +299,8 @@ impl Deployment {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_held_delete_retries_within_its_windows_and_stalls_by_its_bound() {
     const SESSION: &str = "bounds-held";
-    let deployment = deployment(1, SESSION, "held-root").await;
-    let scope_close = deployment.ended_root(SESSION, "held-root").await;
+    let deployment = deployment(1, SESSION, "held-run").await;
+    let scope_close = deployment.ended_run(SESSION, "held-run").await;
     let policy = RelayPolicy::default();
 
     let first_attempt = deployment.now();
@@ -395,8 +395,8 @@ async fn a_held_delete_retries_within_its_windows_and_stalls_by_its_bound() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_delete_whose_verb_died_is_claimed_within_one_tick() {
     const SESSION: &str = "bounds-lost";
-    let deployment = deployment(1, SESSION, "lost-root").await;
-    let scope_close = deployment.ended_root(SESSION, "lost-root").await;
+    let deployment = deployment(1, SESSION, "lost-run").await;
+    let scope_close = deployment.ended_run(SESSION, "lost-run").await;
     deployment
         .deliver(ObligationKind::ScopeClose, &scope_close)
         .await;
@@ -427,8 +427,8 @@ async fn a_delete_whose_verb_died_is_claimed_within_one_tick() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lapsed_claim_is_retaken_within_its_bound() {
     const SESSION: &str = "bounds-lapsed";
-    let deployment = deployment(1, SESSION, "lapsed-root").await;
-    let scope_close = deployment.ended_root(SESSION, "lapsed-root").await;
+    let deployment = deployment(1, SESSION, "lapsed-run").await;
+    let scope_close = deployment.ended_run(SESSION, "lapsed-run").await;
     deployment
         .deliver(ObligationKind::ScopeClose, &scope_close)
         .await;
@@ -527,12 +527,12 @@ async fn lease_pass(
 ) -> lash_core::engine::ReconcileTick {
     let sessions = deployment.backend.session_store_factory();
     let work = lash_core::NoSessionWork::new();
-    let relays: Vec<Arc<dyn lash_core::drive::relay::ObligationRelay>> = vec![Arc::new(relay)];
+    let relays: Vec<Arc<dyn lash_core::shift::relay::ObligationRelay>> = vec![Arc::new(relay)];
     let lanes = lash_conformance::law_tick_lanes(
         Arc::clone(&deployment.clock) as Arc<dyn lash_core::Clock>
     );
-    lash_core::drive::reconcile_once(
-        &lash_core::drive::ReconcileParts {
+    lash_core::shift::reconcile_once(
+        &lash_core::shift::ReconcileParts {
             sessions: sessions.as_ref(),
             work: &work,
             scopes: &lash_core::engine::NoScopeClose,
@@ -552,7 +552,7 @@ async fn lease_pass(
 /// cell of {cleanup owed, cleanup delivered} × {steady leader, leader taken
 /// over} holds the same invariants.
 ///
-/// - **Transactions.** The root's terminal armed its scope close and the
+/// - **Transactions.** The run's terminal armed its scope close and the
 ///   close armed the delete, each due in its producer's own commit.
 /// - **Lease contention.** Of two deployments contending for the recovery
 ///   lease one leads; on a store whose due claims need the leader the other
@@ -572,9 +572,9 @@ async fn obligation_transaction_lease_and_delete_recovery_matrix() {
         for claimant in [Claimant::Leader, Claimant::TakenOver] {
             let cell = format!("cleanup_owed={cleanup_owed} claimant={claimant:?}");
             let session = format!("matrix-{cleanup_owed}-{claimant:?}").to_lowercase();
-            let deployment = deployment(1, &session, "matrix-root").await;
-            // Transactions: the root's terminal armed its scope close.
-            let scope_close = deployment.ended_root(&session, "matrix-root").await;
+            let deployment = deployment(1, &session, "matrix-run").await;
+            // Transactions: the run's terminal armed its scope close.
+            let scope_close = deployment.ended_run(&session, "matrix-run").await;
             let mut cleanup_delivered = !cleanup_owed;
             if cleanup_delivered {
                 deployment

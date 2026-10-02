@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use crate::ToolDefinitionBindingExt as _;
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt as _;
 
 /// The law's deadlock budget for each run of the turn.
@@ -159,14 +159,14 @@ fn script(producer: &crate::ToolBatchProducer) -> Vec<crate::LlmResponse> {
 }
 
 /// One execution of the turn: a fresh runtime over the tier's host and
-/// stores, driving the turn on the controller the tier lends it. The model
+/// stores, executing the turn on the controller the tier lends it. The model
 /// answers a request by how many answers the conversation already holds, so
 /// a replay that asks again is answered as the first execution was.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn drive_redrive_turn(
+async fn shift_redrive_turn(
     session_id: &lash_sansio::SessionId,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -237,7 +237,7 @@ async fn drive_redrive_turn(
     input.trace_turn_id = Some(redrive_turn_id(session_id));
     tokio::time::timeout(
         TURN_BUDGET,
-        runtime.drive_turn(
+        runtime.execute_turn(
             input,
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
         ),
@@ -302,7 +302,7 @@ pub async fn a_settled_batch_member_runs_once_across_a_turn_crash(
                 if !crashing {
                     witness.release();
                 }
-                let turn = drive_redrive_turn(
+                let turn = shift_redrive_turn(
                     &session_id,
                     host,
                     stores,

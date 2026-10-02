@@ -492,7 +492,7 @@ pub(crate) fn provider_transport_exclusions() -> Vec<ProviderTransportExclusion>
         ProviderTransportExclusion {
             path: "crates/lash-provider-openai/src/codex.rs",
             status: "reviewed_non_dst_exclusion",
-            reason: "Codex HTTP/SSE execution rides the injectable LlmHttpTransport and is in the scripted matrix; the provider-native websocket transport (session cache, reservation, and retry over tokio-tungstenite) cannot be driven by scripted HTTP transports and stays outside the LLM DST.",
+            reason: "Codex HTTP/SSE execution rides the injectable LlmHttpTransport and is in the scripted matrix; the provider-native websocket transport (session cache, reservation, and retry over tokio-tungstenite) cannot be executed by scripted HTTP transports and stays outside the LLM DST.",
             replacement_lane: "codex websocket transport lane: provider-layer websocket tests plus the opt-in scripts/codex-websocket-live.sh check",
             review_owner: "lash-sim provider matrix",
         },

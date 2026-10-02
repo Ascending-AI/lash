@@ -49,7 +49,7 @@ async fn runs_a_turn(
         ),
         Err(error) => panic!("session `{id}` runs a turn: {error:?}"),
     }
-    double.settle_session_drive(&SessionId::fixture(id)).await;
+    double.settle_session_shift(&SessionId::fixture(id)).await;
     Ok(())
 }
 
@@ -188,7 +188,7 @@ async fn a_delete_racing_a_create_cleans_up_nothing_without_an_accepted_close(
     );
     assert!(
         core.store_factory
-            .drive_epoch(&session_id)
+            .shift_epoch(&session_id)
             .await?
             .closing
             .is_none(),

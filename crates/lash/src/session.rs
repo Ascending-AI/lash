@@ -365,7 +365,7 @@ impl SessionBuilder {
     }
 
     /// [`open_with_state`](Self::open_with_state) for a reader: the core's
-    /// drives never run on this runtime. A host that loads a head without the
+    /// executes never run on this runtime. A host that loads a head without the
     /// session's lease to project or watch it opens it this way, so the
     /// session's turns keep running on an admitted open, or on one the
     /// engine opens itself, and never on the reader's snapshot. Like `open`,
@@ -395,7 +395,7 @@ impl SessionBuilder {
         Box::pin(self.open_resolved(state, resolved, resident)).await
     }
 
-    /// The policy a root records from `spec` alone (FIG-4594): nothing of
+    /// The policy a run records from `spec` alone (FIG-4594): nothing of
     /// this core stands beneath it. The model key is minted into a recorded
     /// binding by the core's models now.
     fn minted_policy(&self, spec: &SessionSpec) -> Result<SessionPolicy> {
@@ -521,7 +521,7 @@ impl SessionBuilder {
             policy,
             state,
             Some(binding.store()),
-            self.core.drive_owner.clone(),
+            self.core.shift_owner.clone(),
         )
         .await?;
         let handle = RuntimeHandle::with_live_replay_store(
@@ -658,7 +658,7 @@ impl SessionParkRefused {
         &self.error
     }
 
-    /// The drive that owns the session head, when the refusal is a busy one:
+    /// The shift that owns the session head, when the refusal is a busy one:
     /// the park's flush met a bound turn, an owed follow-on or an open
     /// session command. The same park lands once that owner's boundary
     /// passes.
@@ -781,7 +781,7 @@ impl LashSession {
     /// A close whose flush does not land is recoverable and loses nothing
     /// (FIG-4202): the refusal hands the session back with its runtime and
     /// its pending usage, and [`SessionParkRefused::busy_owner`] names the
-    /// drive that owns the session head when that is why. Close it again once
+    /// shift that owns the session head when that is why. Close it again once
     /// that owner's boundary passes.
     ///
     /// To keep a handle for later resumption instead of discarding the session,
@@ -808,7 +808,7 @@ impl LashSession {
     ///   anything. Parking is therefore an *idle-session* operation: finish
     ///   or cancel ([`SendHandle::cancel`](crate::SendHandle::cancel)) first.
     /// - **Busy is recoverable (FIG-4202).** The session's bound turn owns its
-    ///   head. A dirty park while a drive owns it (a turn running on another
+    ///   head. A dirty park while a shift owns it (a turn running on another
     ///   runtime, an owed follow-on, a session command not yet applied)
     ///   writes nothing and hands the session back, with its runtime and its
     ///   pending usage, in [`SessionParkRefused`]. Park it again once that
@@ -878,11 +878,11 @@ impl LashSession {
     /// (a cloned session or an in-flight turn) shares the runtime, so
     /// consuming operations never proceed on a still-shared runtime.
     ///
-    /// The core's session driver runs drives on an open session's runtime, so
-    /// the session is first withdrawn from the drives and a drive already
+    /// The core's `SessionShifts` runs shifts on an open session's runtime, so
+    /// the session is first withdrawn from the shifts and a shift already
     /// running on it is let stop; a failed take lends it to them again.
     ///
-    /// `was_resident` says whether the session was lent to the drives
+    /// `was_resident` says whether the session was lent to the shifts
     /// before the take, so a failed take lends it to them again.
     async fn into_owned_runtime(self, was_resident: bool) -> Result<LashRuntime> {
         let LashSession {
@@ -927,8 +927,8 @@ impl LashSession {
     }
 
     /// Returns a snapshot of the session's recorded policy: the config its
-    /// commits write to the durable head. A root's per-run overrides (a
-    /// send's model key, prompt or generation options) are that root's
+    /// commits write to the durable head. A run's per-run overrides (a
+    /// send's model key, prompt or generation options) are that run's
     /// execution view and never show here, while it runs, after it settles
     /// or on a replay.
     pub fn policy_snapshot(&self) -> SessionPolicy {
@@ -957,7 +957,7 @@ impl LashSession {
         self.binding.effect_host()
     }
 
-    /// Accept `input` durably and ask the engine to drive the session: the
+    /// Accept `input` durably and ask the engine to work the session: the
     /// one way a turn starts (FIG-3600).
     ///
     /// Awaiting the builder commits the acceptance and yields a
@@ -969,7 +969,7 @@ impl LashSession {
     }
 
     /// Accept `inputs` durably as one request under one shared spec, and ask
-    /// the engine to drive the session (FIG-3842).
+    /// the engine to work the session (FIG-3842).
     ///
     /// Awaiting the builder yields one [`SendHandle`](crate::SendHandle) per
     /// input, in request order. New ids are enqueued in request order as one
@@ -995,24 +995,24 @@ impl LashSession {
     /// Re-attach to the input a send accepted under host id `id`
     /// ([`SendBuilder::id`](crate::SendBuilder::id)): after a restart, with
     /// nothing but the id. It follows the input wherever it went, including
-    /// into another root, and never commits anything.
+    /// into another run, and never commits anything.
     pub fn attach_id(&self, id: impl Into<TurnId>) -> crate::SendHandle {
         crate::send::attach_id(crate::send::SendTarget::Live(self.clone()), id.into())
     }
 
-    /// Re-await a logical root: after a park verb, or by the host id a send
+    /// Re-await a logical run: after a park verb, or by the host id a send
     /// named.
-    pub fn root(&self, root: impl Into<TurnId>) -> crate::RootHandle {
-        crate::send::root(crate::send::SendTarget::Live(self.clone()), root.into())
+    pub fn run(&self, run: impl Into<TurnId>) -> crate::RunHandle {
+        crate::send::run(crate::send::SendTarget::Live(self.clone()), run.into())
     }
 
-    /// Withdraw a queued input, or cooperatively cancel a running root
+    /// Withdraw a queued input, or cooperatively cancel a running run
     /// (ADR 0039).
     pub fn cancel(&self, target: crate::CancelTarget) -> crate::CancelBuilder {
         crate::CancelBuilder::new(crate::send::SendTarget::Live(self.clone()), target)
     }
 
-    /// The session's unfinished root, if a turn is under way: the name a
+    /// The session's unfinished run, if a turn is under way: the name a
     /// host pins out of band while the turn runs
     /// ([`Target::Turn`](lash_core::Target::Turn)).
     pub async fn current_turn(&self) -> Result<Option<TurnId>> {

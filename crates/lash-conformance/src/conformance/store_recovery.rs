@@ -1,7 +1,7 @@
 //! Durable store-recovery laws over fresh persistence handles.
 
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
@@ -11,7 +11,7 @@ const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const RECOVERY_SUCCESSOR_TTL_MS: u64 = 60_000;
 const RECOVERY_ACQUIRE_DEADLINE: Duration = Duration::from_secs(3);
 
-/// How store-recovery conformance drives the predecessor lease to expiry.
+/// How store-recovery conformance executes the predecessor lease to expiry.
 #[derive(Clone)]
 pub enum StoreRecoveryLeaseTiming {
     /// Let a realtime backend's authoritative clock advance explicitly.
@@ -81,7 +81,7 @@ async fn seed_and_admit(
     session_id: &SessionId,
     source: &str,
     lease_ttl_ms: u64,
-) -> (crate::store::DriveFence, lash_core::store::RootAdmission) {
+) -> (crate::store::ShiftFence, lash_core::store::RunAdmission) {
     admit_conformance_session(store, session_id).await;
     let batch = store
         .enqueue_queued_work(queued_work(session_id, source))
@@ -89,33 +89,33 @@ async fn seed_and_admit(
         .expect("seed store-recovery queued work");
     let lease_owner = owner(format!("{source}:owner-a"));
     let lease = store
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             session_id,
             &lease_owner,
             "seed-and-admit-executor",
             lease_ttl_ms,
         )
         .await
-        .expect("seal the store-recovery drive")
+        .expect("seal the store-recovery shift")
         .acquired()
-        .expect("fresh store-recovery drive");
-    let admission = admitted_root(
+        .expect("fresh store-recovery shift");
+    let admission = admitted_run(
         store,
         &lease,
-        &root_of(source),
+        &run_of(source),
         lash_core::store::AdmittedHead::Batch(batch.batch_id.clone()),
     )
     .await;
     assert_eq!(
         admission.batch_ids(),
         vec![batch.batch_id],
-        "the root's admission takes the seeded batch"
+        "the run's admission takes the seeded batch"
     );
     (lease, admission)
 }
 
-fn root_of(source: &str) -> String {
-    format!("{source}:root")
+fn run_of(source: &str) -> String {
+    format!("{source}:run")
 }
 
 #[expect(
@@ -127,7 +127,7 @@ async fn acquire_successor<F>(
     session_id: &SessionId,
     source: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
-) -> (Arc<dyn RuntimeStore>, crate::store::DriveFence)
+) -> (Arc<dyn RuntimeStore>, crate::store::ShiftFence)
 where
     F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
@@ -138,7 +138,7 @@ where
             let store = make(session_id);
             admit_conformance_session(&store, session_id).await;
             let acquired = store
-                .seal_drive_epoch_for_test(
+                .seal_shift_epoch_for_test(
                     session_id,
                     &successor,
                     "acquire-successor-executor",
@@ -174,15 +174,15 @@ fn committed_state(session_id: &SessionId, marker: &str) -> crate::RuntimeSessio
     state
 }
 
-/// Resume `source`'s root under `fence`: the recorded admission reads back
+/// Resume `source`'s run under `fence`: the recorded admission reads back
 /// unchanged.
 async fn resume(
     store: &Arc<dyn RuntimeStore>,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     source: &str,
-    recorded: &lash_core::store::RootAdmission,
-) -> lash_core::store::RootAdmission {
-    let resumed = admitted_root(store, fence, &root_of(source), recorded.head.clone()).await;
+    recorded: &lash_core::store::RunAdmission,
+) -> lash_core::store::RunAdmission {
+    let resumed = admitted_run(store, fence, &run_of(source), recorded.head.clone()).await;
     assert_eq!(
         resumed.batch_ids(),
         recorded.batch_ids(),
@@ -191,25 +191,22 @@ async fn resume(
     resumed
 }
 
-/// While the root is unfinished no second root takes its rows: the session
-/// admits one root at a time, and a bound row is no other root's head.
-async fn assert_no_second_root(
+/// While the run is unfinished no second run takes its rows: the session
+/// admits one run at a time, and a bound row is no other run's head.
+async fn assert_no_second_run(
     store: &Arc<dyn RuntimeStore>,
-    fence: &crate::store::DriveFence,
-    admission: &lash_core::store::RootAdmission,
+    fence: &crate::store::ShiftFence,
+    admission: &lash_core::store::RunAdmission,
 ) {
-    let result = admit_root_for_test(
+    let result = admit_run_for_test(
         store,
         fence,
-        &crate::TurnId::from("store-recovery-second-root"),
+        &crate::TurnId::from("store-recovery-second-run"),
         admission.head.clone(),
     )
     .await;
     assert!(
-        matches!(
-            result,
-            Err(crate::StoreError::UnfinishedRootConflict { .. })
-        ),
+        matches!(result, Err(crate::StoreError::UnfinishedRunConflict { .. })),
         "admitted work must not be delivered again before settlement: {result:?}"
     );
 }
@@ -252,7 +249,7 @@ pub async fn checkpoint_survives_before_admission_settlement<F>(
             &committed_state(&session_id, "checkpoint-committed"),
         ))
         .await
-        .expect("commit checkpoint before the root settles");
+        .expect("commit checkpoint before the run settles");
     drop(writer);
 
     let cold_reader = make(&session_id);
@@ -273,20 +270,20 @@ pub async fn checkpoint_survives_before_admission_settlement<F>(
     let (successor_store, successor_lease) =
         acquire_successor(make, &session_id, source, lease_timing).await;
     let resumed = resume(&successor_store, &successor_lease, source, &admission).await;
-    assert_no_second_root(&successor_store, &successor_lease, &resumed).await;
+    assert_no_second_run(&successor_store, &successor_lease, &resumed).await;
     successor_store
         .commit_runtime_state(final_commit(
             crate::RuntimeCommit::persisted_state_for_test(&recovered_state),
             &successor_lease,
-            completing_admission(&root_of(source), &resumed),
+            completing_admission(&run_of(source), &resumed),
         ))
         .await
-        .expect("settle the checkpoint-associated root");
+        .expect("settle the checkpoint-associated run");
     drop(successor_store);
     assert_settled_once(make, &session_id).await;
 }
 
-/// A root's final commit settles its admitted rows and publishes its state in
+/// A run's final commit settles its admitted rows and publishes its state in
 /// one transaction, once.
 #[expect(
     clippy::expect_used,
@@ -308,10 +305,10 @@ where
                 "atomically-settled",
             )),
             &lease,
-            completing_admission(&root_of(source), &admission),
+            completing_admission(&run_of(source), &admission),
         ))
         .await
-        .expect("atomically commit state and settle the root's rows");
+        .expect("atomically commit state and settle the run's rows");
     drop(writer);
 
     let reader = make(&session_id);
@@ -333,11 +330,11 @@ where
     );
     assert!(
         reader
-            .unfinished_root(&session_id)
+            .unfinished_run(&session_id)
             .await
-            .expect("read the unfinished root")
+            .expect("read the unfinished run")
             .is_none(),
-        "the final commit ends the root"
+        "the final commit ends the run"
     );
 }
 
@@ -364,7 +361,7 @@ where
     let commit = final_commit(
         commit,
         &lease,
-        completing_admission(&root_of(source), &admission),
+        completing_admission(&run_of(source), &admission),
     );
     let first = writer
         .commit_runtime_state(commit.clone())

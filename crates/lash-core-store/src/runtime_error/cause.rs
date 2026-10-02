@@ -94,7 +94,7 @@ pub enum RuntimeErrorCause {
     MaxToolCallsExceeded {
         exceeded: Box<crate::ToolCallLimitExceeded>,
     },
-    /// Why a root's shape was refused (FIG-4652): the typed half of
+    /// Why a run's shape was refused (FIG-4652): the typed half of
     /// [`RuntimeErrorCode::RunShapeRefused`] and, for a refused reasoning,
     /// of [`RuntimeErrorCode::ReasoningRefused`].
     RunShapeRefused {

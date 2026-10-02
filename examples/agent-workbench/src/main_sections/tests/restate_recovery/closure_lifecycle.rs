@@ -26,7 +26,7 @@ async fn authorize_restate_completion_closure(
     physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
     Arc<dyn lash::persistence::RuntimeStore>,
-    lash::persistence::DriveFence,
+    lash::persistence::ShiftFence,
     lash::TurnCancelClosureAuthorization,
 ) {
     let address = lash::TurnAddress::new(lash::SessionId::fixture(session.to_string()), "turn");
@@ -46,7 +46,7 @@ async fn authorize_restate_completion_closure(
         .await
         .expect("create live Restate catalog session");
     let store: Arc<dyn lash::persistence::RuntimeStore> = factory.clone();
-    let lease = lash::testing::store_fixtures::seal_drive_fence_for_test(
+    let lease = lash::testing::store_fixtures::seal_shift_fence_for_test(
         &store,
         &address.session_id,
         session,
@@ -110,7 +110,7 @@ async fn authorize_restate_completion_closure(
 /// `lease` and re-defers the turn's undelivered input.
 async fn consume_closure_by_commit(
     store: &dyn lash::persistence::RuntimeStore,
-    lease: &lash::persistence::DriveFence,
+    lease: &lash::persistence::ShiftFence,
     authorization: &lash::TurnCancelClosureAuthorization,
     settlement: lash::TurnCancelClosureSettlement,
 ) -> Result<(), lash::persistence::StoreError> {
@@ -123,7 +123,7 @@ async fn consume_closure_by_commit(
     };
     let mut commit = lash::persistence::RuntimeCommit::persisted_state_for_test(&state)
         .closing_interrupted_turn(settlement, authorization.observed_intent().clone());
-    commit.drive_fence = Some(Box::new(lease.clone()));
+    commit.shift_fence = Some(Box::new(lease.clone()));
     store.commit_runtime_state(commit).await.map(|_| ())
 }
 
@@ -132,7 +132,7 @@ async fn settle_and_release_restate_completion_closure(
     factory: &Arc<lash_sqlite_store::SqliteStore>,
     scope: &lash::runtime::ExecutionScope,
     store: Arc<dyn lash::persistence::RuntimeStore>,
-    lease: lash::persistence::DriveFence,
+    lease: lash::persistence::ShiftFence,
     authorization: lash::TurnCancelClosureAuthorization,
 ) {
     use lash::persistence::DeploymentStore as _;
@@ -600,7 +600,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 .await
                 .expect("create late live Restate catalog session");
             let late_store: Arc<dyn lash::persistence::RuntimeStore> = factory_a.clone();
-            let late_lease = lash::testing::store_fixtures::seal_drive_fence_for_test(
+            let late_lease = lash::testing::store_fixtures::seal_shift_fence_for_test(
                 &late_store,
                 &late_address.session_id,
                 "late",

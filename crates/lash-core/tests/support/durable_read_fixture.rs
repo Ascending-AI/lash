@@ -20,7 +20,7 @@
 //! | Durable area | Populated tables | Supported read or refusal asserted |
 //! | --- | --- | --- |
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
-//! | Usage accounting | `usage_runs`, `usage_facts`, `usage_owner_retirements` | Owner totals and completeness of a settled owner, and a retired owner's retirement |
+//! | Usage accounting | `usage_meters`, `usage_facts`, `usage_owner_retirements` | Owner totals and completeness of a settled owner, and a retired owner's retirement |
 //! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
@@ -317,28 +317,28 @@ async fn seed_usage_accounting(handles: &FixtureHandles) {
         )
         .expect("fixture effect address"),
     );
-    let run = lash_core::UsageRunId::mint();
+    let meter = lash_core::UsageMeterId::mint();
     handles
         .usage_accounting
-        .admit_usage_run(&lash_core::UsageRunAdmission {
+        .admit_usage_meter(&lash_core::UsageMeterAdmission {
             owner: owner.clone(),
             effect: effect.clone(),
             execution_scope_key: "durable-read-turn-scope".to_string(),
-            run: run.clone(),
+            meter: meter.clone(),
             source: "durable-read-turn".to_string(),
             profile_key: lash_core::LlmProfileKey::new("durable-read-model-key"),
             requested_model: "durable-read-model".to_string(),
             admitted_at_ms: FIXTURE_WRITE_MS,
         })
         .await
-        .expect("admit the fixture usage run");
+        .expect("admit the fixture usage meter");
     handles
         .usage_accounting
         .settle_usage(
             &lash_core::UsageSettlement {
                 owner,
                 effect,
-                run,
+                meter,
                 facts: vec![lash_core::UsageAttemptFact {
                     call_ordinal: 0,
                     provider_attempt: 1,
@@ -352,12 +352,12 @@ async fn seed_usage_accounting(handles: &FixtureHandles) {
                         generation_id: None,
                     },
                 }],
-                accounting: lash_core::RunAccounting::Complete,
+                accounting: lash_core::MeterAccounting::Complete,
             },
             FIXTURE_WRITE_MS,
         )
         .await
-        .expect("settle the fixture usage run");
+        .expect("settle the fixture usage meter");
     handles
         .usage_accounting
         .retire_usage_owner(&retired_usage_owner(), FIXTURE_WRITE_MS)
@@ -700,21 +700,21 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("enqueue fixture process wake at receiver");
     let queue_admission = lash_core::store::AdmissionId::new("durable-read-queue-admission");
     let queue_epoch = session
-        .drive_epoch()
+        .shift_epoch()
         .await
-        .expect("read fixture drive epoch");
+        .expect("read fixture shift epoch");
     match session
-        .seal_drive_epoch(
+        .seal_shift_epoch(
             &queue_admission,
             queue_epoch.epoch,
-            &lash_core::store::RootStartNonce::new(queue_admission.as_str()),
+            &lash_core::store::RunStartNonce::new(queue_admission.as_str()),
             None,
         )
         .await
-        .expect("seal fixture queue drive")
+        .expect("seal fixture queue shift")
     {
-        lash_core::store::DriveEpochSeal::Sealed(_) => {}
-        other => panic!("fixture queue drive did not seal: {other:?}"),
+        lash_core::store::ShiftEpochSeal::Sealed(_) => {}
+        other => panic!("fixture queue shift did not seal: {other:?}"),
     }
     // The receiver wake sits behind the fixture's queued work, which stays
     // pending, so the turn lane never reaches it: its host cancel is the
@@ -737,20 +737,20 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("commit the fixture head after the receiver wake's cancel");
     let retained_admission = lash_core::store::AdmissionId::new("durable-read-retained-admission");
     let retained_epoch = session
-        .drive_epoch()
+        .shift_epoch()
         .await
-        .expect("read fixture drive epoch");
+        .expect("read fixture shift epoch");
     assert!(matches!(
         session
-            .seal_drive_epoch(
+            .seal_shift_epoch(
                 &retained_admission,
                 retained_epoch.epoch,
-                &lash_core::store::RootStartNonce::new(retained_admission.as_str()),
+                &lash_core::store::RunStartNonce::new(retained_admission.as_str()),
                 None,
             )
             .await
-            .expect("seal retained fixture drive"),
-        lash_core::store::DriveEpochSeal::Sealed(_)
+            .expect("seal retained fixture shift"),
+        lash_core::store::ShiftEpochSeal::Sealed(_)
     ));
 
     let read = load_fixture_window(&session).await;
@@ -938,9 +938,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     }
 
     let stored_epoch = session
-        .drive_epoch()
+        .shift_epoch()
         .await
-        .expect("durable fixture drive epoch read");
+        .expect("durable fixture shift epoch read");
     assert_eq!(stored_epoch.epoch, 2);
     assert_eq!(
         stored_epoch.admission().map(|id| id.as_str()),

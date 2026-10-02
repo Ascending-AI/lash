@@ -8,7 +8,7 @@ use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLan
 /// context-budget warning and the render — is this deployment's creation
 /// default: a session
 /// records it in its RLM namespace when it is created
-/// ([`RlmRecordedBehaviour`]), and every open, root and process of that
+/// ([`RlmRecordedBehaviour`]), and every open, run and process of that
 /// session runs under the recorded value, never under the configuration of
 /// the deployment that happens to open it (FIG-4398).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -77,7 +77,7 @@ pub struct RlmRecordedBehaviour {
     /// The host operation the model discovers tools omitted from the prompt
     /// with, or `None` when every tool is inline.
     pub discovery_operation: Option<String>,
-    /// The render the creating deployment configured: the base a root's
+    /// The render the creating deployment configured: the base a run's
     /// render is resolved over, under the session's own render preferences
     /// (FIG-4527).
     pub render: lash_rlm_types::RlmRenderPatch,

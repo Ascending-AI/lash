@@ -320,7 +320,7 @@ pub(crate) enum PluginOperationContext {
 }
 
 impl PluginOperationContext {
-    /// The kind of registration this context can drive.
+    /// The kind of registration this context can work.
     fn kind(&self) -> PluginOperationKind {
         match self {
             Self::Query(_) => PluginOperationKind::Query,

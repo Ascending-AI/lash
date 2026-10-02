@@ -292,8 +292,8 @@ pub(super) async fn drive_turn_control_scenarios(
     // another authority — and liveness comes from the engine re-invoking against
     // the journaled acceptance. Which worker serves that re-invocation is the
     // engine's business, and it is routinely the restarted original one, because
-    // failover latency is the engine's redelivery cadence: the re-invoked drive
-    // seals a new session drive epoch and supersedes whatever the dead holder
+    // failover latency is the engine's redelivery cadence: the re-invoked shift
+    // seals a new session shift epoch and supersedes whatever the dead holder
     // claimed. What must hold is stricter than
     // the old identity check: the turn completes exactly once, against exactly one
     // acceptance, with no duplicate or conflicting settlement anywhere.
@@ -705,7 +705,7 @@ pub(super) async fn drive_break_glass_scenario(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    // Run this last: a hard-killed handler leaves its sealed drive epoch
+    // Run this last: a hard-killed handler leaves its sealed shift epoch
     // standing, and no subsequent scenario should depend on claims taken under
     // it.
     // This remains a negative operator gate and must not manufacture a Lash
@@ -1009,7 +1009,7 @@ pub(super) async fn assert_recovered_turn_converged(
 
     // An empty application set is only legal for a turn that was cancelled before
     // any input was applied to it. No scenario routed through this helper is in
-    // that shape - each one drives an accepted input to a durable commit - so an
+    // that shape - each one executes an accepted input to a durable commit - so an
     // empty set here means the receipt shape drifted (`turn_input_applications`
     // is `skip_serializing_if = "Vec::is_empty"`) and the checks below would
     // otherwise degrade to "one commit row exists".
@@ -1058,7 +1058,7 @@ pub(super) async fn wait_for_invocation_terminal(
     anyhow::bail!("break-glass invocation `{invocation_id}` did not terminate")
 }
 
-/// The engine's `LashTurn` invocation running `request`'s turn: the root the
+/// The engine's `LashTurn` invocation running `request`'s turn: the run the
 /// worker sends under the workflow id.
 pub(super) async fn lash_turn_invocation(
     admin: &RestateAdminClient,

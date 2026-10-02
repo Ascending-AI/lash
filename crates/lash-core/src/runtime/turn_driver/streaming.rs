@@ -1454,7 +1454,7 @@ impl RuntimeTurnDriver<'_> {
 }
 
 /// What the body of an unjournaled model call dispatches with: the transport
-/// it bound for the recorded model, and the call of its effect's usage run.
+/// it bound for the recorded model, and the call of its effect's usage meter.
 pub(in crate::runtime) struct LlmCallDispatch {
     pub(in crate::runtime) provider: crate::ProviderHandle,
     pub(in crate::runtime) usage_call: crate::UsageCall,

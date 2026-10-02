@@ -1,7 +1,7 @@
 //! The scope-close ledger: one row per closed scope (FIG-3607 R9).
 //!
 //! The ledger is keyed by the scope itself — `(kind, id)` — not by a process
-//! row. A turn root or a session has no process row, and a process scope's row
+//! row. A turn run or a session has no process row, and a process scope's row
 //! may be pruned before its children settle, so a foreign key onto
 //! `processes` cannot express the fact this table records.
 
@@ -316,7 +316,7 @@ pub(super) async fn list_unrecorded_opener_parents(
 ///
 /// A session's plan also owes the children of every scope inside the
 /// session that has no row of its own (FIG-3948): a turn that never became
-/// a root is closed by its session's close, which no root close precedes.
+/// a run is closed by its session's close, which no run close precedes.
 pub(super) fn children_conn(
     conn: &Connection,
     parent: &ScopeId,

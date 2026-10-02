@@ -71,9 +71,9 @@ pub trait SessionCatalogStore: Send + Sync {
     ///
     /// The answer is computed by query and stored nowhere:
     ///
-    /// * [`StoreError::ForkTargetPending`]: the target's root has not
+    /// * [`StoreError::ForkTargetPending`]: the target's run has not
     ///   finished, or nothing has recorded the target yet;
-    /// * [`StoreError::ForkTargetUnavailable`]: the root ended without a
+    /// * [`StoreError::ForkTargetUnavailable`]: the run ended without a
     ///   commit, or the input was withdrawn;
     /// * [`StoreError::ForkTargetPruned`]: the revision was collected.
     ///

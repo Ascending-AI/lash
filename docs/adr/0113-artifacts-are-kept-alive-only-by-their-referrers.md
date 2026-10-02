@@ -198,7 +198,7 @@ The resolution and delivery are in
 settlement is in
 `crates/lash-store-sql/src/artifact/cleanup_obligations.rs:125-149`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
-Every journal kind uses this deferral: awaited and driveless roots,
+Every journal kind uses this deferral: awaited and shiftless runs,
 processes, and session operations. Settlement permits cleanup when the next due
 pass reaches the row; it does not shorten the recorded delay. Retaining
 artifacts for the full deferral avoids a separate settlement fast path.
@@ -206,15 +206,15 @@ artifacts for the full deferral avoids a separate settlement fast path.
 A missing carry stalls as refused, an undecodable row stalls as undecodable,
 and store faults retry the delivery. A retry repeats every store
 idempotently; partial success is never acknowledged
-(`crates/lash-core-execution/src/runtime/drive/relay.rs:184-205`,
+(`crates/lash-core-execution/src/runtime/shift/relay.rs:184-205`,
 `crates/lash-core/src/runtime/artifact_cleanup.rs:571-593`).
 
 `EffectHost::journal_replay` returns `MayReplay` or `Settled`. `Settled`
 promises that the journal cannot replay or append. Restate uses durable
 facts and its invocation status:
 
-- A turn needs a root terminal and no open run of that root.
-- A session operation needs no open session drive or root run.
+- A turn needs a run terminal and no open run of that root.
+- A session operation needs no open session shift or root run.
 - A process needs terminal evidence and no open segment run; a pruned
   process is settled.
 - A runtime operation needs its durable waits retired after its commit.
@@ -621,7 +621,7 @@ Prune and a late start rescue respect fences
 
 A replaying journal keeps its gate's artifacts
 (`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:618`). For awaited
-and driveless roots, processes, and session operations, a deferred
+and shiftless runs, processes, and session operations, a deferred
 cleanup retains its artifacts while the journal can replay and releases
 after settlement once the deferral expires, on SQLite memory/file and
 PostgreSQL over both the double and live Restate

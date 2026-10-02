@@ -147,7 +147,7 @@ pub enum MessageOrigin {
         turn_id: TurnId,
         /// The durable turn input this message was materialized from, present
         /// when the input arrived through queued ingress and absent when the
-        /// turn was driven with its input in hand.
+        /// turn was executed with its input in hand.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_id: Option<crate::InputId>,
     },

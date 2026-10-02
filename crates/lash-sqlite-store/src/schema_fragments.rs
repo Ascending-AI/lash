@@ -18,21 +18,21 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 );
 ";
 
-/// The logical-root family (FIG-3600 S7), carried by the durable core alone.
+/// The logical-run family (FIG-3600 S7), carried by the durable core alone.
 ///
-/// `session_roots` holds one row per `(session, root)` a drive admitted work
+/// `session_runs` holds one row per `(session, run)` a shift admitted work
 /// under, with the executor the seal of its admission recorded
 /// (`executor_json`, written in the seal's transaction, FIG-4814), the exact
-/// result of the root's admission (`admission_json`),
-/// committed in the admission's own transaction (FIG-3840, FIG-3927), and the root's terminal evidence once
-/// it has one: all four `terminal_*` columns are set together, exactly once. `session_root_inputs`
-/// binds each accepted input to the root that drives it. `control_intents`
+/// result of the run's admission (`admission_json`),
+/// committed in the admission's own transaction (FIG-3840, FIG-3927), and the run's terminal evidence once
+/// it has one: all four `terminal_*` columns are set together, exactly once. `session_run_inputs`
+/// binds each accepted input to the run that executes it. `control_intents`
 /// records an operator's verb or a session's close; a `close_session` row
 /// outlives its session as the deletion tombstone.
-pub(crate) const SESSION_ROOTS_TABLES: &str = "
-CREATE TABLE IF NOT EXISTS session_roots (
+pub(crate) const SESSION_RUNS_TABLES: &str = "
+CREATE TABLE IF NOT EXISTS session_runs (
     session_id              TEXT NOT NULL,
-    root                    TEXT NOT NULL,
+    run                    TEXT NOT NULL,
     executor_json           TEXT,
     admission_json          TEXT,
     admitted_generation     TEXT,
@@ -47,37 +47,37 @@ CREATE TABLE IF NOT EXISTS session_roots (
     obligation_claim_token  TEXT,
     obligation_stall_reason TEXT,
     obligation_last_error   TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_session_roots_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
+    obligation_last_error_code TEXT CONSTRAINT ck_session_runs_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
     obligation_settled_at_ms INTEGER,
-    CONSTRAINT ck_session_roots_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
-    PRIMARY KEY (session_id, root),
-    CONSTRAINT ck_session_roots_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
+    CONSTRAINT ck_session_runs_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
+    PRIMARY KEY (session_id, run),
+    CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
 );
 
 -- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
 -- and the stalled listing.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_session_roots_obligation_id
-    ON session_roots(obligation_id);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_session_roots_unfinished
-    ON session_roots(session_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_runs_obligation_id
+    ON session_runs(obligation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_session_runs_unfinished
+    ON session_runs(session_id)
     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
-CREATE INDEX IF NOT EXISTS idx_session_roots_admitted_generation
-    ON session_roots(admitted_generation)
+CREATE INDEX IF NOT EXISTS idx_session_runs_admitted_generation
+    ON session_runs(admitted_generation)
     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
-CREATE INDEX IF NOT EXISTS idx_session_roots_obligation_due
-    ON session_roots(obligation_due_at_ms, obligation_id)
+CREATE INDEX IF NOT EXISTS idx_session_runs_obligation_due
+    ON session_runs(obligation_due_at_ms, obligation_id)
     WHERE obligation_state IN ('due', 'claimed');
-CREATE INDEX IF NOT EXISTS idx_session_roots_obligation_stalled
-    ON session_roots(obligation_id)
+CREATE INDEX IF NOT EXISTS idx_session_runs_obligation_stalled
+    ON session_runs(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_session_roots_open
-    ON session_roots(session_id, root)
+CREATE INDEX IF NOT EXISTS idx_session_runs_open
+    ON session_runs(session_id, run)
     WHERE terminal_kind IS NULL;
 
-CREATE TABLE IF NOT EXISTS session_root_inputs (
+CREATE TABLE IF NOT EXISTS session_run_inputs (
     session_id  TEXT NOT NULL,
     input_id    TEXT NOT NULL,
-    root        TEXT NOT NULL,
+    run        TEXT NOT NULL,
     PRIMARY KEY (session_id, input_id)
 );
 

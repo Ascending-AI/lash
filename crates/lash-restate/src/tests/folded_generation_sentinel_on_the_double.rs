@@ -3,20 +3,20 @@
 //!
 //! A handler's journal is recorded under drain generation `G_a`: its first
 //! command is its first recorded step, whose entry carries `G_a`, and no
-//! separate sentinel step exists. A session drive's first command is its leg
+//! separate sentinel step exists. A session shift's first command is its leg
 //! start, which is ahead of its first admission so that a failed attempt
 //! inside that admission is seen (FIG-4556), and carries `G_a` itself. The code behind the same deployment id is
 //! then swapped for a build of `G_b` and the double replays the invocation
 //! there. The replay parks typed `RetiredGeneration`, naming `G_a`, at that
-//! first entry: the step's outcome never reaches the drive, no body runs
+//! first entry: the step's outcome never reaches the shift, no body runs
 //! again, and nothing is journaled past it. Swapped back to a build of `G_a`,
 //! the resumed invocation replays the kept journal and completes.
 
 use super::*;
-use lash_core::SessionDriver;
+use lash_core::SessionShifts;
 use lash_core::engine::{
-    AdmitVerdict, DriveAbort, DriveOutcome, DriveRequest, DriveRequestId, DriveStop, RootOutcome,
-    admission_body, drive_admission_replay_key,
+    AdmitVerdict, RunOutcome, ShiftAbort, ShiftOutcome, ShiftRequest, ShiftRequestId, ShiftStop,
+    admission_body, shift_admission_replay_key,
 };
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{RestateTestServer, ServerConfig};
@@ -24,9 +24,9 @@ use restate_sdk::endpoint::{HandlerOptions, ServiceOptions};
 use restate_sdk::service::Service;
 use restate_sdk::service::macro_support::ServiceBoxFuture;
 
-use crate::session_driver::{
-    LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionDriveRequest,
-    RestateTurnDriveRequest, turn_workflow_key,
+use crate::session_shifts::{
+    LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateRunRequest,
+    RestateSessionShiftRequest, turn_workflow_key,
 };
 
 const MAX_ATTEMPTS: u64 = 3;
@@ -46,29 +46,29 @@ impl<S: Service<Future = ServiceBoxFuture>> Service for Swappable<S> {
     }
 }
 
-/// The drive both builds install: every recorded step it journals counts
+/// The shift both builds install: every recorded step it journals counts
 /// its body's executions, and the first pass past the step is held open so
 /// the test can crash the attempt that journaled it.
 #[derive(Default)]
-struct HeldDriver {
+struct HeldShifts {
     bodies: Arc<AtomicUsize>,
     passes: AtomicUsize,
 }
 
-impl HeldDriver {
+impl HeldShifts {
     async fn recorded_step(
         &self,
         controller: &ScopedEffectController<'_>,
         replay_key: String,
-    ) -> Result<(), DriveAbort> {
+    ) -> Result<(), ShiftAbort> {
         let address = EffectAddress::new(controller.execution_scope().clone(), replay_key)
-            .map_err(|error| DriveAbort::Refused(runtime_error(error.to_string())))?;
+            .map_err(|error| ShiftAbort::Refused(runtime_error(error.to_string())))?;
         let envelope = RuntimeEffectEnvelope::new(
             RuntimeEffectInvocation::new(address, RuntimeAttribution::default(), "first-step"),
-            RuntimeEffectCommand::AdmitDrive {
+            RuntimeEffectCommand::AdmitShift {
                 request: Box::new(lash_core::engine::AdmitRequest {
                     session: SessionId::from("held"),
-                    request: DriveRequestId::new("held"),
+                    request: ShiftRequestId::new("held"),
                     build_generation: lash_core::engine::BuildGeneration::for_test("G_a"),
                 }),
             },
@@ -79,13 +79,13 @@ impl HeldDriver {
                 envelope,
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     bodies.fetch_add(1, Ordering::SeqCst);
-                    Ok(RuntimeEffectOutcome::AdmitDrive {
+                    Ok(RuntimeEffectOutcome::AdmitShift {
                         verdict: Box::new(AdmitVerdict::Idle),
                     })
                 }),
             )
             .await
-            .map_err(|error| DriveAbort::Retry(error.into_runtime_error()))?;
+            .map_err(|error| ShiftAbort::Retry(error.into_runtime_error()))?;
         if self.passes.fetch_add(1, Ordering::SeqCst) == 0 {
             // The first attempt is crashed here by the test.
             std::future::pending::<()>().await;
@@ -99,63 +99,63 @@ fn runtime_error(message: impl Into<String>) -> lash_core::RuntimeError {
 }
 
 #[async_trait::async_trait]
-impl SessionDriver for HeldDriver {
+impl SessionShifts for HeldShifts {
     async fn admit(
         &self,
         controller: ScopedEffectController<'_>,
-        request: &DriveRequest,
+        request: &ShiftRequest,
         _admitting_generation: &lash_core::engine::BuildGeneration,
         ordinal: u32,
         _draining: Option<&lash_core::engine::BuildGeneration>,
-    ) -> Result<AdmitVerdict, DriveAbort> {
+    ) -> Result<AdmitVerdict, ShiftAbort> {
         self.recorded_step(
             &controller,
-            drive_admission_replay_key(&request.request, ordinal),
+            shift_admission_replay_key(&request.request, ordinal),
         )
         .await?;
         Ok(AdmitVerdict::Idle)
     }
 
-    async fn run_root(
+    async fn execute_run(
         &self,
         controller: ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
-    ) -> lash_core::engine::RootRunEnd {
-        lash_core::engine::RootRunEnd::owing_nothing(
+    ) -> lash_core::engine::RunEnd {
+        lash_core::engine::RunEnd::owing_nothing(
             async {
-                let root = admitted.root().clone();
-                self.recorded_step(&controller, format!("first-step:{root}"))
+                let run = admitted.run().clone();
+                self.recorded_step(&controller, format!("first-step:{run}"))
                     .await?;
-                Ok(RootOutcome::Committed {
+                Ok(RunOutcome::Committed {
                     outcome: lash_core::facade_support::TurnOutcome::Finished(
                         lash_core::facade_support::TurnFinish::AssistantMessage {
-                            text: format!("answered {root}"),
+                            text: format!("answered {run}"),
                         },
                     ),
-                    root,
+                    run,
                 })
             }
             .await,
         )
     }
 
-    async fn close_root(
+    async fn close_run(
         &self,
         _controller: lash_core::ScopedEffectController<'_>,
         _session: &lash_core::SessionId,
-        _root: &lash_core::TurnId,
-    ) -> Result<(), lash_core::engine::DriveAbort> {
+        _run: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::ShiftAbort> {
         Ok(())
     }
 }
 
-/// One swappable service on the double, with the driver both builds share.
+/// One swappable service on the double, with the `SessionShifts` both builds share.
 struct Swap<S> {
     server: RestateTestServer,
     ingress: RestateIngressClient,
-    driver: Arc<HeldDriver>,
-    /// The slot's installation of `driver`, kept for the swap's life.
-    _installation: Arc<dyn SessionDriver>,
+    shifts: Arc<HeldShifts>,
+    /// The slot's installation of `shifts`, kept for the swap's life.
+    _installation: Arc<dyn SessionShifts>,
     current: Arc<Mutex<Arc<S>>>,
     recorded: Arc<S>,
     swapped: Arc<S>,
@@ -168,16 +168,16 @@ where
     async fn start(
         seed: u64,
         handler: &str,
-        build: impl Fn(RestateSessionDriverSlot, lash_core::engine::BuildGeneration) -> S,
+        build: impl Fn(RestateSessionShiftsSlot, lash_core::engine::BuildGeneration) -> S,
     ) -> Self {
         let server = RestateTestServer::new(ServerConfig::default().with_seed(seed))
             .expect("start the server double");
         let connection =
             RestateConnection::with_transport(server.ingress_url(), server.transport());
         let ingress = RestateIngressClient::new(connection);
-        let driver = Arc::new(HeldDriver::default());
-        let slot = RestateSessionDriverSlot::new();
-        let installation = slot.install(Arc::clone(&driver) as Arc<dyn SessionDriver>);
+        let shifts = Arc::new(HeldShifts::default());
+        let slot = RestateSessionShiftsSlot::new();
+        let installation = slot.install(Arc::clone(&shifts) as Arc<dyn SessionShifts>);
         let generation = lash_core::engine::BuildGeneration::for_test;
         let recorded = Arc::new(build(slot.clone(), generation("G_a")));
         let swapped = Arc::new(build(slot, generation("G_b")));
@@ -203,7 +203,7 @@ where
         Self {
             server,
             ingress,
-            driver,
+            shifts,
             _installation: installation,
             current,
             recorded,
@@ -246,7 +246,7 @@ where
     /// of which carries the generation.
     async fn replays_parked_under_another_generation(&self, target: &str, steps: &[String]) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-        while self.driver.passes.load(Ordering::SeqCst) == 0 {
+        while self.shifts.passes.load(Ordering::SeqCst) == 0 {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "the first step never ran"
@@ -299,14 +299,14 @@ where
             "the replay parks typed, naming the recording generation: {failure}"
         );
         assert_eq!(
-            self.driver.bodies.load(Ordering::SeqCst),
+            self.shifts.bodies.load(Ordering::SeqCst),
             1,
             "no replay ran the step's body again"
         );
         assert_eq!(
-            self.driver.passes.load(Ordering::SeqCst),
+            self.shifts.passes.load(Ordering::SeqCst),
             1,
-            "the refused entry's outcome never reached the drive"
+            "the refused entry's outcome never reached the shift"
         );
         assert_eq!(
             self.commands(&invocation.id),
@@ -326,7 +326,7 @@ where
             "the resumed journal completes: {view:?}"
         );
         assert_eq!(
-            self.driver.bodies.load(Ordering::SeqCst),
+            self.shifts.bodies.load(Ordering::SeqCst),
             1,
             "the resumed replay served the recorded step"
         );
@@ -334,8 +334,8 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_start() {
-    let swap = Swap::start(0x3980_5e55, "drive", |slot, generation| {
+async fn a_session_shift_replayed_under_another_generation_parks_at_its_leg_start() {
+    let swap = Swap::start(0x3980_5e55, "shift", |slot, generation| {
         LashSessionImpl::new(
             slot,
             test_restate_authority_id(),
@@ -346,14 +346,14 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_star
     })
     .await;
     let session = SessionId::from("folded");
-    let request = DriveRequestId::new("r-folded");
+    let request = ShiftRequestId::new("r-folded");
     swap.ingress
         .send_object_json_idempotent(
             "LashSession",
             session.as_str(),
-            "drive",
-            &crate::Call::new(RestateSessionDriveRequest {
-                request: DriveRequest {
+            "shift",
+            &crate::Call::new(RestateSessionShiftRequest {
+                request: ShiftRequest {
                     session: session.clone(),
                     request: request.clone(),
                     intended_lane: None,
@@ -363,23 +363,23 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_star
             request.as_str(),
         )
         .await
-        .expect("send the drive");
+        .expect("send the shift");
     swap.replays_parked_under_another_generation(
-        &format!("LashSession/{session}/drive"),
+        &format!("LashSession/{session}/shift"),
         &[
-            "lash.drive.leg".to_owned(),
-            format!("lash:{}", drive_admission_replay_key(&request, 0)),
+            "lash.shift.leg".to_owned(),
+            format!("lash:{}", shift_admission_replay_key(&request, 0)),
         ],
     )
     .await;
-    let outcome: crate::Reply<DriveOutcome> = swap
+    let outcome: crate::Reply<ShiftOutcome> = swap
         .ingress
         .call_object_json_idempotent(
             "LashSession",
             session.as_str(),
-            "drive",
-            &crate::Call::new(RestateSessionDriveRequest {
-                request: DriveRequest {
+            "shift",
+            &crate::Call::new(RestateSessionShiftRequest {
+                request: ShiftRequest {
                     session: session.clone(),
                     request: request.clone(),
                     intended_lane: None,
@@ -389,16 +389,16 @@ async fn a_session_drive_replayed_under_another_generation_parks_at_its_leg_star
             request.as_str(),
         )
         .await
-        .expect("the resumed drive's outcome");
+        .expect("the resumed shift's outcome");
     let outcome = outcome.body;
     assert!(
-        matches!(outcome.stop, DriveStop::Idle),
-        "the resumed drive answers its recorded admission: {outcome:?}"
+        matches!(outcome.stop, ShiftStop::Idle),
+        "the resumed shift answers its recorded admission: {outcome:?}"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_root_run_replayed_under_another_generation_parks_at_its_first_step() {
+async fn a_run_execution_replayed_under_another_generation_parks_at_its_first_step() {
     let swap = Swap::start(0x3980_7a11, "run", |slot, generation| {
         LashTurnImpl::new(
             slot,
@@ -411,11 +411,11 @@ async fn a_root_run_replayed_under_another_generation_parks_at_its_first_step() 
     })
     .await;
     let session = SessionId::from("folded");
-    let root = TurnId::from("root-folded");
+    let run = TurnId::from("run-folded");
     let admitted = admission_body::admitted(
         session.clone(),
-        root.clone(),
-        DriveRequestId::new("r-folded"),
+        run.clone(),
+        ShiftRequestId::new("r-folded"),
         lash_core::engine::AdmissionId::new("r-folded:0"),
         0,
         lash_core::engine::BuildGeneration::for_test("G_a"),
@@ -423,22 +423,22 @@ async fn a_root_run_replayed_under_another_generation_parks_at_its_first_step() 
             head: lash_core::BatchId::from("scripted-batch"),
         },
     );
-    let key = turn_workflow_key(&session, &root);
+    let key = turn_workflow_key(&session, &run);
     swap.ingress
         .send_lash_workflow(
             "LashTurn",
             &key,
             "run",
-            &RestateTurnDriveRequest {
+            &RestateRunRequest {
                 sender_generation: Some(lash_core::engine::BuildGeneration::for_test("G_a")),
                 admitted,
             },
         )
         .await
-        .expect("send the root run");
+        .expect("send the run run");
     swap.replays_parked_under_another_generation(
         &format!("LashTurn/{key}/run"),
-        &[format!("lash:first-step:{root}")],
+        &[format!("lash:first-step:{run}")],
     )
     .await;
 }

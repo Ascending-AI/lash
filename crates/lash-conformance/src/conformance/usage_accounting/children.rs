@@ -304,7 +304,7 @@ fn attempt(world: &World, drift: bool) -> crate::ConformanceTurnAttempt {
                 }),
             )
             .expect("post-incorporation layer");
-            let result = world.drive(scoped).await;
+            let result = world.shift(scoped).await;
             assert!(
                 result.as_ref().is_err_and(|error| error.code.parks_turn()),
                 "the replayed opener parks: {result:?}"

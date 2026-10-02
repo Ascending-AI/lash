@@ -1,131 +1,131 @@
-//! Shared fixtures for laws that admit rows to a root and settle them
-//! (FIG-3927): a row is open until a root's admission binds it, and only
-//! that root's fenced commit (or its terminal) answers it.
+//! Shared fixtures for laws that admit rows to a run and settle them
+//! (FIG-3927): a row is open until a run's admission binds it, and only
+//! that run's fenced commit (or its terminal) answers it.
 
 use super::*;
 use lash_core::store::{
-    AdmittedHead, CheckpointAdmission, DriveFence, IngressRowId, IngressSettlement, RootAdmission,
-    RootTerminalWrite, TurnCommitId,
+    AdmittedHead, CheckpointAdmission, IngressRowId, IngressSettlement, RunAdmission,
+    RunTerminalWrite, ShiftFence, TurnCommitId,
 };
 pub(crate) use lash_core::testing::store_fixtures::{
-    admit_at_checkpoint_for_test, admit_root_for_test, admit_root_request_for_test,
+    admit_at_checkpoint_for_test, admit_run_for_test, admit_run_request_for_test,
     settling_commit_for_test,
 };
 
-/// Admit `root` headed by `head` under `fence`; the admission must reach
+/// Admit `run` headed by `head` under `fence`; the admission must reach
 /// its head.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the admission is established by the setup"
 )]
-pub(crate) async fn admitted_root(
+pub(crate) async fn admitted_run(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &DriveFence,
-    root: &str,
+    fence: &ShiftFence,
+    run: &str,
     head: AdmittedHead,
-) -> RootAdmission {
-    admit_root_for_test(store, fence, &crate::TurnId::fixture(root), head)
+) -> RunAdmission {
+    admit_run_for_test(store, fence, &crate::TurnId::fixture(run), head)
         .await
-        .expect("admit the root")
-        .expect("the root's admission reaches its head")
+        .expect("admit the run")
+        .expect("the run's admission reaches its head")
 }
 
-/// Start `root` running under `fence`: enqueue a next-turn head input filed
-/// under the root's own id and admit the root with it. Input may address a
+/// Start `run` running under `fence`: enqueue a next-turn head input filed
+/// under the run's own id and admit the run with it. Input may address a
 /// turn only while that turn runs or once it has ended (ADR 0101 §5.1), so a
-/// law that addresses `root`'s turns starts it first, before it enqueues the
-/// rows it composes, and the root takes only its own head.
+/// law that addresses `run`'s turns starts it first, before it enqueues the
+/// rows it composes, and the run takes only its own head.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the head and its admission are established by the setup"
 )]
-pub(crate) async fn running_root(
+pub(crate) async fn active_run(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &DriveFence,
-    root: &crate::TurnId,
-) -> RootAdmission {
+    fence: &ShiftFence,
+    run: &crate::TurnId,
+) -> RunAdmission {
     let head = store
         .enqueue_pending_turn_input(
             crate::PendingTurnInputDraft::new(
                 fence.session(),
                 crate::TurnInputIngress::NextTurn,
-                crate::TurnInput::text(format!("{root} head")),
+                crate::TurnInput::text(format!("{run} head")),
             )
-            .with_source_key(root.as_str()),
+            .with_source_key(run.as_str()),
         )
         .await
-        .expect("enqueue the running root's head");
-    admitted_root(
+        .expect("enqueue the running run's head");
+    admitted_run(
         store,
         fence,
-        root.as_str(),
+        run.as_str(),
         AdmittedHead::Input(head.input_id),
     )
     .await
 }
 
-/// [`running_root`] headed by a process wake instead of an input, for a law
-/// whose assertions read the session's pending inputs: the root's own head
+/// [`active_run`] headed by a process wake instead of an input, for a law
+/// whose assertions read the session's pending inputs: the run's own head
 /// is then no pending input.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the head and its admission are established by the setup"
 )]
-pub(crate) async fn running_root_on_wake(
+pub(crate) async fn active_run_on_wake(
     store: &Arc<dyn crate::RuntimeStore>,
     session_id: &crate::SessionId,
-    root: &crate::TurnId,
-) -> RootAdmission {
-    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+    run: &crate::TurnId,
+) -> RunAdmission {
+    let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
         store,
         session_id,
-        root.as_str(),
+        run.as_str(),
     )
     .await;
     let head = store
         .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
             session_id,
-            &format!("{root}-starter"),
+            &format!("{run}-starter"),
             1,
-            "start the root",
+            "start the run",
             crate::DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
-        .expect("enqueue the running root's head");
-    admitted_root(
+        .expect("enqueue the running run's head");
+    admitted_run(
         store,
         &fence,
-        root.as_str(),
+        run.as_str(),
         AdmittedHead::Batch(head.batch_id),
     )
     .await
 }
 
-/// Admit `root` headed by `head` under `fence`, composing its prefix with
+/// Admit `run` headed by `head` under `fence`, composing its prefix with
 /// `policy`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the admission is established by the setup"
 )]
-pub(crate) async fn admitted_root_with_policy(
+pub(crate) async fn admitted_run_with_policy(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &DriveFence,
-    root: &str,
+    fence: &ShiftFence,
+    run: &str,
     head: AdmittedHead,
     policy: crate::TurnLaneAdmissionPolicy,
-) -> RootAdmission {
-    let mut request = admit_root_request_for_test(fence, &crate::TurnId::fixture(root), head);
+) -> RunAdmission {
+    let mut request = admit_run_request_for_test(fence, &crate::TurnId::fixture(run), head);
     request.policy = policy;
     store
-        .admit_root(&request)
+        .admit_run(&request)
         .await
-        .expect("admit the root")
-        .expect("the root's admission reaches its head")
+        .expect("admit the run")
+        .expect("the run's admission reaches its head")
 }
 
-/// The settlement completing every row `admission` bound to `root`.
-pub(crate) fn completing_admission(root: &str, admission: &RootAdmission) -> IngressSettlement {
-    let mut settlement = IngressSettlement::new(crate::TurnId::fixture(root));
+/// The settlement completing every row `admission` bound to `run`.
+pub(crate) fn completing_admission(run: &str, admission: &RunAdmission) -> IngressSettlement {
+    let mut settlement = IngressSettlement::new(crate::TurnId::fixture(run));
     if let Some(inputs) = &admission.inputs {
         settlement.completed_inputs.push(inputs.completion());
     }
@@ -149,24 +149,24 @@ pub(crate) fn completing_checkpoint(
     settlement
 }
 
-/// A settlement of `root` that hands `rows` back open at their positions.
+/// A settlement of `run` that hands `rows` back open at their positions.
 pub(crate) fn releasing(
-    root: &str,
+    run: &str,
     rows: impl IntoIterator<Item = IngressRowId>,
 ) -> IngressSettlement {
-    let mut settlement = IngressSettlement::new(crate::TurnId::fixture(root));
+    let mut settlement = IngressSettlement::new(crate::TurnId::fixture(run));
     settlement.released.extend(rows);
     settlement
 }
 
-/// The terminal write of `root`'s first physical turn completing it.
-pub(crate) fn root_completes(root: &str) -> RootTerminalWrite {
-    let root = crate::TurnId::fixture(root);
-    RootTerminalWrite {
-        commit: TurnCommitId::new(root.clone(), 0),
-        turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-        root,
-        outcome: crate::store::RootCommittedOutcome::Finished(
+/// The terminal write of `run`'s first physical turn completing it.
+pub(crate) fn run_completes(run: &str) -> RunTerminalWrite {
+    let run = crate::TurnId::fixture(run);
+    RunTerminalWrite {
+        commit: TurnCommitId::new(run.clone(), 0),
+        turn: lash_core::store::PhysicalTurn::derive_turn_id(&run, 0),
+        run,
+        outcome: crate::store::RunCommittedOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -174,16 +174,16 @@ pub(crate) fn root_completes(root: &str) -> RootTerminalWrite {
     }
 }
 
-/// `commit` settling `settlement` under `fence` and ending its root: the
-/// shape of a root's final commit.
+/// `commit` settling `settlement` under `fence` and ending its run: the
+/// shape of a run's final commit.
 pub(crate) fn final_commit(
     commit: crate::RuntimeCommit,
-    fence: &DriveFence,
+    fence: &ShiftFence,
     settlement: IngressSettlement,
 ) -> crate::RuntimeCommit {
-    let terminal = root_completes(settlement.root.as_str());
+    let terminal = run_completes(settlement.run.as_str());
     let mut commit = settling_commit_for_test(commit, fence, settlement);
-    commit.root_terminal = Some(Box::new(terminal));
+    commit.run_terminal = Some(Box::new(terminal));
     commit
 }
 
@@ -191,10 +191,10 @@ pub(crate) fn final_commit(
 /// command lane's bindless settlement (design §2.7).
 pub(crate) fn applying_commands(
     mut commit: crate::RuntimeCommit,
-    fence: &DriveFence,
+    fence: &ShiftFence,
     completion: crate::QueuedWorkCompletion,
 ) -> crate::RuntimeCommit {
-    commit.drive_fence = Some(Box::new(fence.clone()));
+    commit.shift_fence = Some(Box::new(fence.clone()));
     commit.applied_commands = Some(completion);
     commit
 }
@@ -210,7 +210,7 @@ pub(crate) fn batch_row(batch: &crate::QueuedWorkBatch) -> IngressRowId {
 }
 
 /// A bare commit over the store's current head for `session_id`: the base a
-/// settling or root-ending commit is built on.
+/// settling or run-ending commit is built on.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the store answers its own head read"
@@ -235,11 +235,11 @@ pub(crate) async fn head_commit(
     crate::RuntimeCommit::persisted_state_for_test(&state)
 }
 
-/// Land `root`'s final commit settling `settlement` under `fence`, over the
+/// Land `run`'s final commit settling `settlement` under `fence`, over the
 /// current head.
-pub(crate) async fn try_end_root(
+pub(crate) async fn try_end_run(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &DriveFence,
+    fence: &ShiftFence,
     settlement: IngressSettlement,
 ) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
     let commit = head_commit(store, fence.session()).await;
@@ -248,30 +248,30 @@ pub(crate) async fn try_end_root(
         .await
 }
 
-/// [`try_end_root`], which must land.
+/// [`try_end_run`], which must land.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the final commit is established by the setup"
 )]
-pub(crate) async fn end_root(
+pub(crate) async fn end_run(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &DriveFence,
+    fence: &ShiftFence,
     settlement: IngressSettlement,
 ) -> crate::store::RuntimeCommitReceipt {
-    try_end_root(store, fence, settlement)
+    try_end_run(store, fence, settlement)
         .await
-        .expect("the root's final commit lands")
+        .expect("the run's final commit lands")
 }
 
-/// Admit `root` headed by `head` and end it completing everything it took;
+/// Admit `run` headed by `head` and end it completing everything it took;
 /// returns the admission.
-pub(crate) async fn drive_root_to_end(
+pub(crate) async fn execute_run_to_end(
     store: &Arc<dyn crate::RuntimeStore>,
-    fence: &DriveFence,
-    root: &str,
+    fence: &ShiftFence,
+    run: &str,
     head: AdmittedHead,
-) -> RootAdmission {
-    let admission = admitted_root(store, fence, root, head).await;
-    end_root(store, fence, completing_admission(root, &admission)).await;
+) -> RunAdmission {
+    let admission = admitted_run(store, fence, run, head).await;
+    end_run(store, fence, completing_admission(run, &admission)).await;
     admission
 }

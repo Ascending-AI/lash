@@ -6,12 +6,12 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// A crashed worker leaves the input its root admitted visible as
-/// `Admitted{root}`, and the successor that resumes the root delivers it
+/// A crashed worker leaves the input its run admitted visible as
+/// `Admitted{run}`, and the successor that resumes the run delivers it
 /// exactly once (FIG-3927).
 ///
 /// The tier's runner crashes its real turn at the provider mid-stream seam.
-/// Nothing a worker crash does releases a row: only the root's commit or
+/// Nothing a worker crash does releases a row: only the run's commit or
 /// terminal answers it.
 #[expect(
     clippy::expect_used,
@@ -29,7 +29,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
     let scenario = "held-turn-input-visibility";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let reader = make(scenario) as Arc<dyn RuntimeStore>;
-    seed_reference_ingress_for_drive(&reader, &identity).await;
+    seed_reference_ingress_for_shift(&reader, &identity).await;
     let host = LawSeamHost::over(host);
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -43,7 +43,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
         &executions,
         crashed_turn_timings(),
     )
-    .before_drive(|control| {
+    .before_shift(|control| {
         control.arm(TurnCrashPoint {
             operation: TurnSeamOperation::Provider(ProviderOperation::InitialMidStream),
             placement: CrashPlacement::ProviderMidStream,
@@ -70,7 +70,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
         &executions,
         nominal_recovery_timings(),
     )
-    .before_drive(SeamControl::clear)
+    .before_shift(SeamControl::clear)
     .reporting();
     let before_reader = Arc::clone(&reader);
     let before_identity = identity.clone();
@@ -90,7 +90,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
                 "both open rows must remain visible after the holder task aborts"
             );
             let admitted_status = crate::PendingTurnInputReadStatus::Admitted {
-                root: identity.turn_id.clone(),
+                run: identity.turn_id.clone(),
             };
             let admitted = during_crash
                 .iter()
@@ -99,12 +99,12 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
             assert_eq!(
                 admitted.len(),
                 1,
-                "exactly the admitted next-turn row is bound to the root"
+                "exactly the admitted next-turn row is bound to the run"
             );
             assert_eq!(
                 pending_input_text(admitted[0]),
                 "durable next-turn input",
-                "the admitted row must be the input the root took before provider execution"
+                "the admitted row must be the input the run took before provider execution"
             );
             let open = during_crash
                 .iter()
@@ -114,7 +114,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
             assert_eq!(
                 pending_input_text(open[0]),
                 "active checkpoint input",
-                "the status split must reflect the root's actual admission"
+                "the status split must reflect the run's actual admission"
             );
 
             successor(scoped).await

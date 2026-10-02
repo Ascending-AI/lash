@@ -3,7 +3,7 @@
 > **Read [../RULES.md](../RULES.md) first.** This runbook documents a
 > deterministic, operator-only rehearsal — not a judged browser journey. Its
 > executable half is the `host_effect_ledger` witness module in
-> `crates/lash-core-execution::tool_dispatch::tests`, which drives the real
+> `crates/lash-core-execution::tool_dispatch::tests`, which executes the real
 > dispatch path against in-memory providers and makes no model or network
 > call.
 
@@ -89,7 +89,7 @@ exits `0` having proved nothing, so require `7 passed` in the log.
 
 Abort on a test count other than `7 passed; 0 failed`, a provider or
 network call in the log, or a test that passes while the ledger rows it
-prints contradict the claim its name makes. This rehearsal drives in-memory
+prints contradict the claim its name makes. This rehearsal executes in-memory
 providers only; a run that needed a real token is a harness defect, not a
 funding decision.
 

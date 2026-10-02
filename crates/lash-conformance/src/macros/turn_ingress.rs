@@ -12,16 +12,16 @@
 macro_rules! direct_turn_acceptance_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
-            (direct_turn_accepts_before_driving, "direct-turn-accepts-before-driving"),
+            (direct_turn_accepts_before_executing, "direct-turn-accepts-before-executing"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
             (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
             (vacuum_then_redrive_replays_receipt_absorbed_rows, "direct-turn-vacuum-redrive-absorbed"),
             (cancelled_vacuumed_acceptance_is_not_resurrected, "direct-turn-cancelled-vacuumed"),
-            (uncommitted_redrive_drives_journaled_set_not_live_admission, "direct-turn-uncommitted-redrive"),
-            (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
+            (uncommitted_redrive_executes_journaled_set_not_live_admission, "direct-turn-uncommitted-redrive"),
+            (shift_effect_refusal_is_journaled, "direct-turn-refused-shift"),
             (direct_turn_behind_earlier_admissions_runs_after_them, "direct-turn-queued-input"),
             (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
-            (an_accepted_direct_input_is_held_for_its_acceptors_drive, "direct-turn-held-for-acceptor"),
+            (an_accepted_direct_input_is_held_for_its_acceptors_shift, "direct-turn-held-for-acceptor"),
         ]);
     };
     (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

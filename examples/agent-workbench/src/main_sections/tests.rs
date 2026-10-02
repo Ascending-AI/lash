@@ -239,9 +239,9 @@ fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
                             .expect("host world")
                             .add_account("unrecorded")
                             .expect("change live data before replay");
-                        double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
-                            name: None,
-                        });
+                        double.crash_run_execution(
+                            lash_restate_test::CrashPoint::BeforeRunResult { name: None },
+                        );
                     }
                     async {
                         Ok(text_response(
@@ -266,7 +266,7 @@ fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
         )
         .await
         .expect("connect account after creation");
-        double.settle_session_drive(&session_id).await;
+        double.settle_session_shift(&session_id).await;
         let expected = connected_accounts_prompt(&state.mail_world);
         let crashes = double.server().stats().crashes;
         for sequence in 1..=2 {
@@ -294,21 +294,21 @@ fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
                 .expect("enqueue process wake");
             tokio::time::timeout(
                 Duration::from_secs(20),
-                double.attach_drive(
+                double.attach_shift(
                     &session_id,
-                    lash::restate::DriveRequestId::new(format!(
-                        "accounts-context-drive:{sequence}"
+                    lash::restate::ShiftRequestId::new(format!(
+                        "accounts-context-shift:{sequence}"
                     )),
                 ),
             )
             .await
-            .expect("drive answers")
-            .expect("drive wake");
+            .expect("shift answers")
+            .expect("shift wake");
         }
         assert_eq!(
             double.server().stats().crashes,
             crashes + 1,
-            "one root attempt crashed"
+            "one run attempt crashed"
         );
         let seen = requests.lock_recover();
         assert_eq!(seen.len(), 3, "first call, redrive, and next wake");
@@ -1088,7 +1088,7 @@ finish({ test: boxes[0], test2: boxes[1] });
 }
 
 #[test]
-#[ignore = "FIG-3600 S5a: a session command now settles through the session drive, asynchronously; the workbench refresh path that waited on a synchronous drain is rewritten onto send() in S5b"]
+#[ignore = "FIG-3600 S5a: a session command now settles through the session shift, asynchronously; the workbench refresh path that waited on a synchronous drain is rewritten onto send() in S5b"]
 fn inbox_added_after_session_open_updates_persisted_tool_catalog() {
     run_async_test_on_stack_budget("workbench-dynamic-inbox-surface-test", || {
         inbox_added_after_session_open_updates_persisted_tool_catalog_inner()
@@ -1523,7 +1523,7 @@ async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() -> PathBuf {
 
     // FIG-1130 ruling: sync cancel is the live fast path and zombie cancel
     // is the crash-safety backstop. This future schedule leaves no queued
-    // turn in flight; retirement commits first, then an explicit run drives
+    // turn in flight; retirement commits first, then an explicit run executes
     // the backstop without relying on wall-clock ordering.
     retire_cron_session_and_assert_zombie(
         &scenario.state,
@@ -1707,7 +1707,7 @@ pub(super) async fn wait_for_turn_released(
 }
 
 /// The Restate invocation of the turn's `LashTurn`, once the session's engine
-/// admitted its root.
+/// admitted its run.
 async fn lash_turn_invocation(
     state: &AppState,
     turn: &WorkbenchTurn,
@@ -2131,7 +2131,7 @@ async fn persisted_trigger_route_fires_after_reopening_the_core_inner() {
 }
 
 /// Waits for the session's engine to apply an enqueued command batch: the
-/// submission asked its drive, which drains the command lane first.
+/// submission asked its shift, which drains the command lane first.
 async fn drain_refresh_batch(state: &AppState, receipt: &lash::SessionCommandReceipt) {
     let durable = state
         .core
@@ -2151,7 +2151,7 @@ async fn drain_refresh_batch(state: &AppState, receipt: &lash::SessionCommandRec
         }
     })
     .await
-    .expect("the refresh batch settles through the session drive");
+    .expect("the refresh batch settles through the session shift");
 }
 
 #[cfg(test)]

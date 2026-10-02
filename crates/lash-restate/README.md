@@ -2,8 +2,8 @@
 
 `lash-restate` is Lash's Restate engine. A deployment starts its endpoint from
 `RestateEngine::endpoint_builder`, which binds Lash's own services beside the
-host's: the `LashSession` virtual object drives each session and the `LashTurn`
-workflow runs each root it admits, through a `RestateRuntimeEffectController`
+host's: the `LashSession` virtual object works each session and the `LashTurn`
+workflow executes each run it admits, through a `RestateRuntimeEffectController`
 (a `RuntimeEffectController`). A host handler never runs a turn (FIG-3600). It
 sends and, where it waits, waits durably:
 
@@ -46,9 +46,9 @@ the endpoint only when no other deployment holds those names. The default
 namespace keeps the bare names.
 
 `accept_restate` journals the input id before it accepts, so every replay of the
-handler submits under the same id; `outcome_restate` follows the root in bounded,
+handler submits under the same id; `outcome_restate` follows the run in bounded,
 journaled probes, so the wait survives suspension, replay, and a turn longer than
-the invocation's timers. An exclusive object handler cannot wait for a root its
+the invocation's timers. An exclusive object handler cannot wait for a run its
 own object may serve: it accepts, returns the receipt, and a shared handler or
 the caller waits.
 
@@ -76,8 +76,8 @@ turn invocation instead of modeling it as local in-process work.
 `RestateAdminClient` cancels those active invocations through the Admin API,
 queries invocation status, and exposes unfinished-invocation introspection for
 tests and cleanup. `kill_invocation` stops an invocation for good; it is the
-release half of an operator's cancel or fork of a parked root, run only after
-the store recorded the root's end. The Restate CLI remains a
+release half of an operator's cancel or fork of a parked run, run only after
+the store recorded the run's end. The Restate CLI remains a
 useful operator tool, but Lash tests and examples use these HTTP APIs directly.
 
 Deterministic contract failures are terminal handler errors, not retry loops.

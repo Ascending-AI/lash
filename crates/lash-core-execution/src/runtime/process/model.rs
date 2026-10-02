@@ -854,7 +854,7 @@ impl<I> ProcessRegistration<I> {
     /// backend that locks each scope must take the locks in.
     ///
     /// The enclosing session is what fences a turn that never became a
-    /// root: no root close ever records such a turn's row, and its session's
+    /// root: no run close ever records such a turn's row, and its session's
     /// close is the fact that it can no longer become one.
     #[must_use]
     pub fn closing_scopes(&self) -> Vec<ScopeId> {

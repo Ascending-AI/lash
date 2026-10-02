@@ -49,7 +49,7 @@ pub async fn admit_conformance_session_with_policy(
         .expect("admit the conformance session");
 }
 
-/// A root admission request for `session_id`, under the conformance model.
+/// A run admission request for `session_id`, under the conformance model.
 pub fn root_session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
     session_store_request(
         session_id,
@@ -58,7 +58,7 @@ pub fn root_session_request(session_id: &SessionId) -> crate::SessionStoreCreate
     )
 }
 
-/// A root admission request for `session_id` recording `policy`.
+/// A run admission request for `session_id` recording `policy`.
 pub fn root_session_request_with_policy(
     session_id: &SessionId,
     policy: crate::SessionPolicy,
@@ -163,53 +163,53 @@ pub async fn commit_runtime_state_for_test(
     store.commit_runtime_state(commit).await
 }
 
-pub async fn seal_drive_fence_for_test(
+pub async fn seal_shift_fence_for_test(
     store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     owner_id: &str,
-) -> crate::store::DriveFence {
+) -> crate::store::ShiftFence {
     let _ = owner_id;
-    let stored = match store.drive_epoch(session_id).await {
+    let stored = match store.shift_epoch(session_id).await {
         Ok(stored) => stored,
-        Err(crate::StoreError::DriveEpochUnavailable { .. }) => {
+        Err(crate::StoreError::ShiftEpochUnavailable { .. }) => {
             store
                 .admit_session(&root_session_request(session_id))
                 .await
-                .expect("admit drive-fence test session");
+                .expect("admit shift-fence test session");
             store
-                .drive_epoch(session_id)
+                .shift_epoch(session_id)
                 .await
-                .expect("read admitted drive epoch")
+                .expect("read admitted shift epoch")
         }
-        Err(error) => panic!("read drive-fence test drive epoch: {error}"),
+        Err(error) => panic!("read shift-fence test shift epoch: {error}"),
     };
     let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
     match store
-        .seal_drive_epoch(
+        .seal_shift_epoch(
             session_id,
             &admission,
             stored.epoch,
-            &crate::store::RootStartNonce::new(admission.as_str()),
+            &crate::store::RunStartNonce::new(admission.as_str()),
             None,
         )
         .await
-        .expect("seal drive-fence test drive")
+        .expect("seal shift-fence test shift")
     {
-        crate::store::DriveEpochSeal::Sealed(fence) => fence,
-        other => panic!("drive-fence test drive did not seal: {other:?}"),
+        crate::store::ShiftEpochSeal::Sealed(fence) => fence,
+        other => panic!("shift-fence test shift did not seal: {other:?}"),
     }
 }
 
-/// Result of sealing a test drive admission for an admission law.
+/// Result of sealing a test shift admission for an admission law.
 #[derive(Debug)]
-pub enum DriveSealTestOutcome {
-    Sealed(crate::store::DriveFence),
+pub enum ShiftSealTestOutcome {
+    Sealed(crate::store::ShiftFence),
     Superseded { current_epoch: u64 },
     ExecutionLost,
 }
 
-impl DriveSealTestOutcome {
-    pub fn acquired(self) -> Option<crate::store::DriveFence> {
+impl ShiftSealTestOutcome {
+    pub fn acquired(self) -> Option<crate::store::ShiftFence> {
         match self {
             Self::Sealed(fence) => Some(fence),
             Self::Superseded { .. } => None,
@@ -218,97 +218,97 @@ impl DriveSealTestOutcome {
     }
 }
 
-/// Test support for admission laws that need an independent sealed drive epoch.
+/// Test support for admission laws that need an independent sealed shift epoch.
 #[async_trait::async_trait]
-pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
-    async fn seal_drive_epoch_for_test(
+pub trait RuntimeStoreTestShiftExt: crate::RuntimeStore {
+    async fn seal_shift_epoch_for_test(
         &self,
         session_id: &SessionId,
         _owner: &crate::store::LeaseOwnerIdentity,
         _executor_id: &str,
         _old_lease_ttl_ms: u64,
-    ) -> Result<DriveSealTestOutcome, StoreError> {
-        let stored = match self.drive_epoch(session_id).await {
+    ) -> Result<ShiftSealTestOutcome, StoreError> {
+        let stored = match self.shift_epoch(session_id).await {
             Ok(stored) => stored,
-            Err(crate::StoreError::DriveEpochUnavailable { .. }) => {
+            Err(crate::StoreError::ShiftEpochUnavailable { .. }) => {
                 self.admit_session(&root_session_request(session_id))
                     .await?;
-                self.drive_epoch(session_id).await?
+                self.shift_epoch(session_id).await?
             }
             Err(error) => return Err(error),
         };
         let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
         let seal = self
-            .seal_drive_epoch(
+            .seal_shift_epoch(
                 session_id,
                 &admission,
                 stored.epoch,
-                &crate::store::RootStartNonce::new(admission.as_str()),
+                &crate::store::RunStartNonce::new(admission.as_str()),
                 None,
             )
             .await?;
         Ok(match seal {
-            crate::store::DriveEpochSeal::Sealed(fence) => DriveSealTestOutcome::Sealed(fence),
-            crate::store::DriveEpochSeal::Superseded { epoch } => {
-                DriveSealTestOutcome::Superseded {
+            crate::store::ShiftEpochSeal::Sealed(fence) => ShiftSealTestOutcome::Sealed(fence),
+            crate::store::ShiftEpochSeal::Superseded { epoch } => {
+                ShiftSealTestOutcome::Superseded {
                     current_epoch: epoch,
                 }
             }
-            crate::store::DriveEpochSeal::ExecutionLost => DriveSealTestOutcome::ExecutionLost,
-            held @ crate::store::DriveEpochSeal::HeldByAnotherExecutor { .. } => {
+            crate::store::ShiftEpochSeal::ExecutionLost => ShiftSealTestOutcome::ExecutionLost,
+            held @ crate::store::ShiftEpochSeal::HeldByAnotherExecutor { .. } => {
                 return Err(StoreError::Backend(format!(
-                    "a test seal that names no root was refused {held:?}"
+                    "a test seal that names no run was refused {held:?}"
                 )));
             }
         })
     }
 
-    async fn supersede_drive_epoch_for_test(
+    async fn supersede_shift_epoch_for_test(
         &self,
-        fence: &crate::store::DriveFence,
+        fence: &crate::store::ShiftFence,
     ) -> Result<(), StoreError> {
         let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
         let result = self
-            .seal_drive_epoch(
+            .seal_shift_epoch(
                 fence.session(),
                 &admission,
                 fence.epoch(),
-                &crate::store::RootStartNonce::new(admission.as_str()),
+                &crate::store::RunStartNonce::new(admission.as_str()),
                 None,
             )
             .await?;
         match result {
-            crate::store::DriveEpochSeal::Sealed(_) => Ok(()),
-            crate::store::DriveEpochSeal::Superseded { epoch } => {
-                Err(StoreError::StaleDriveFence {
+            crate::store::ShiftEpochSeal::Sealed(_) => Ok(()),
+            crate::store::ShiftEpochSeal::Superseded { epoch } => {
+                Err(StoreError::StaleShiftFence {
                     session_id: fence.session().clone(),
                     fence_epoch: fence.epoch(),
                     current_epoch: epoch,
                 })
             }
-            crate::store::DriveEpochSeal::ExecutionLost => Err(StoreError::Backend(
-                "test drive successor lost execution".to_string(),
+            crate::store::ShiftEpochSeal::ExecutionLost => Err(StoreError::Backend(
+                "test shift successor lost execution".to_string(),
             )),
-            held @ crate::store::DriveEpochSeal::HeldByAnotherExecutor { .. } => Err(
-                StoreError::Backend(format!("test drive successor was refused {held:?}")),
+            held @ crate::store::ShiftEpochSeal::HeldByAnotherExecutor { .. } => Err(
+                StoreError::Backend(format!("test shift successor was refused {held:?}")),
             ),
         }
     }
 }
 
-impl<T: crate::RuntimeStore + ?Sized> RuntimeStoreTestDriveExt for T {}
+impl<T: crate::RuntimeStore + ?Sized> RuntimeStoreTestShiftExt for T {}
 
-/// The admission request conformance laws present for `root` headed by
+/// The admission request conformance laws present for `run` headed by
 /// `head` under `fence`: generous bounds, an empty base, a test build
-/// generation, and the root run as its own engine run.
-pub fn admit_root_request_for_test(
-    fence: &crate::store::DriveFence,
-    root: &crate::TurnId,
+/// generation, and the run run as its own engine execution.
+pub fn admit_run_request_for_test(
+    fence: &crate::store::ShiftFence,
+    run: &crate::TurnId,
     head: crate::store::AdmittedHead,
-) -> crate::store::AdmitRootRequest {
-    crate::store::AdmitRootRequest {
+) -> crate::store::AdmitRunRequest {
+    crate::store::AdmitRunRequest {
         fence: fence.clone(),
-        root: root.clone(),
+        run: run.clone(),
         head,
         max_inputs: 64,
         policy: super::queued_work_admission_policy(64),
@@ -321,32 +321,32 @@ pub fn admit_root_request_for_test(
         turn_index: 1,
         generation: None,
         admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
-        executor: crate::store::RootExecutor::Root,
+        executor: crate::store::RunExecutor::Run,
         plugins: Default::default(),
         trace_anchor: Default::default(),
     }
 }
 
-/// Admit `root`'s turn-lane run headed by `head` under `fence`
-/// ([`RootStore::admit_root`](crate::store::RootStore::admit_root)).
-pub async fn admit_root_for_test(
+/// Admit `run`'s turn-lane run headed by `head` under `fence`
+/// ([`RunStore::admit_run`](crate::store::RunStore::admit_run)).
+pub async fn admit_run_for_test(
     store: &Arc<dyn RuntimeStore>,
-    fence: &crate::store::DriveFence,
-    root: &crate::TurnId,
+    fence: &crate::store::ShiftFence,
+    run: &crate::TurnId,
     head: crate::store::AdmittedHead,
-) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+) -> Result<Option<crate::store::RunAdmission>, StoreError> {
     store
-        .admit_root(&admit_root_request_for_test(fence, root, head))
+        .admit_run(&admit_run_request_for_test(fence, run, head))
         .await
 }
 
-/// Admit what `root`'s physical turn `turn_id` takes at `checkpoint`, keyed
-/// by `step` ([`RootStore::admit_at_checkpoint`](crate::store::RootStore::admit_at_checkpoint)).
+/// Admit what `run`'s physical turn `turn_id` takes at `checkpoint`, keyed
+/// by `step` ([`RunStore::admit_at_checkpoint`](crate::store::RunStore::admit_at_checkpoint)).
 #[allow(clippy::too_many_arguments)]
 pub async fn admit_at_checkpoint_for_test(
     store: &Arc<dyn RuntimeStore>,
-    fence: &crate::store::DriveFence,
-    root: &crate::TurnId,
+    fence: &crate::store::ShiftFence,
+    run: &crate::TurnId,
     turn_id: &crate::TurnId,
     checkpoint: crate::CheckpointKind,
     step: &str,
@@ -356,7 +356,7 @@ pub async fn admit_at_checkpoint_for_test(
     store
         .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
             fence: fence.clone(),
-            root: root.clone(),
+            run: run.clone(),
             turn_id: turn_id.clone(),
             checkpoint,
             step: step.to_string(),
@@ -367,13 +367,13 @@ pub async fn admit_at_checkpoint_for_test(
 }
 
 /// Present `fence` on `commit` and have it settle `settlement`: the shape of
-/// every commit that settles rows a root admitted (FIG-3927).
+/// every commit that settles rows a run admitted (FIG-3927).
 pub fn settling_commit_for_test(
     mut commit: RuntimeCommit,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     settlement: crate::store::IngressSettlement,
 ) -> RuntimeCommit {
-    commit.drive_fence = Some(Box::new(fence.clone()));
+    commit.shift_fence = Some(Box::new(fence.clone()));
     commit.ingress = Some(settlement);
     commit
 }

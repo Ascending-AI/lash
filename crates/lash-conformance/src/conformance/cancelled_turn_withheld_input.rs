@@ -14,12 +14,12 @@
 //! `TurnCancelAffectedWake`, and delivered once by the next turn (FIG-3543,
 //! ADR 0101 §10).
 //!
-//! The law drives a real runtime turn over the supplied durable store and
+//! The law executes a real runtime turn over the supplied durable store and
 //! reads the outcome back only through surfaces every backend already owes.
 
 use super::direct_turn_acceptance::{acceptance_runtime_for_session, direct_input, text_response};
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::conformance_support::ActiveTurnControl;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-/// The session every store in this suite is exercised under. Not `root`:
+/// The session every store in this suite is exercised under. Not `run`:
 /// commit admission is process-wide and keyed by session, and a cancelled
 /// turn's commit does not wait behind other laws' commits in the same binary.
 pub const CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID: &str = "cancelled-turn-withheld-input";
@@ -141,7 +141,7 @@ impl crate::store::RuntimeStoreDecorator for StopAfterTerminalAdmission {
             let stop = self.armed.lock().expect("stop slot").take();
             match stop {
                 // A token-fired stop reaches the turn's cancellation gate
-                // through the drive's spawned forwarder, and the commit
+                // through the shift's spawned forwarder, and the commit
                 // settles that gate first-writer-wins against its own
                 // completion seal: without a rendezvous the seal can win
                 // and the stop lands on the follow-on turn instead. This
@@ -247,7 +247,7 @@ impl Harness {
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
             .expect("scope the turn");
         self.runtime
-            .drive_turn_frames(
+            .execute_turn_frames(
                 direct_input(turn_id, text),
                 crate::TurnOptions::new(cancel, scope),
             )
@@ -440,9 +440,9 @@ async fn withheld_cancel_case(
         "{case}: the durable cancellation records the undelivered input"
     );
 
-    // Deferred input is driven exactly once, in order, ahead of the next
+    // Deferred input is executed exactly once, in order, ahead of the next
     // turn's own input: under the default drain each deferred input is its
-    // own root, named by it, and the next turn's root follows (FIG-3600,
+    // own run, named by it, and the next turn's run follows (FIG-3600,
     // FIG-4457). Dropped input never reaches a turn.
     let asked_before = harness.request_count();
     let run = harness
@@ -467,13 +467,13 @@ async fn withheld_cancel_case(
     };
     assert_eq!(
         delivered, expected_delivered,
-        "{case}: what the drive delivers ahead of the next turn"
+        "{case}: what the shift delivers ahead of the next turn"
     );
-    let delivered_roots = delivered.len();
+    let delivered_runs = delivered.len();
     assert_eq!(
         harness.request_count() - asked_before,
-        delivered_roots + 1,
-        "{case}: one model call per deferred input's root, then the next turn's"
+        delivered_runs + 1,
+        "{case}: one model call per deferred input's run, then the next turn's"
     );
     let next_turn_request = harness.request_count() - 1;
     let mut seen = asked_before;
@@ -482,11 +482,11 @@ async fn withheld_cancel_case(
         match disposition {
             crate::TurnCancelUndeliveredInputPolicy::Defer => {
                 let first = first.unwrap_or_else(|| {
-                    panic!("{case}: a deferred input's root shows the model `{text}`")
+                    panic!("{case}: a deferred input's run shows the model `{text}`")
                 });
                 assert!(
                     first >= seen && first < next_turn_request,
-                    "{case}: the model first sees `{text}` in its own root, in enqueue order, \
+                    "{case}: the model first sees `{text}` in its own run, in enqueue order, \
                      ahead of the next turn: request {first} of {asked_before}..{next_turn_request}"
                 );
                 seen = first + 1;

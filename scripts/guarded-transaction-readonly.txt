@@ -39,12 +39,12 @@ postgres crates/lash-postgres-store/src/postgres/process_registry.rs::processes_
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::event_page_after  # reads a page of process events
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::list_processes  # a filtered process listing, a SELECT the filter composes
 postgres crates/lash-postgres-store/src/postgres/process_registry/parent_end.rs::children  # lists the children a parent's end names, a SELECT chosen by scope kind
-postgres crates/lash-postgres-store/src/postgres/runtime_persistence/drive_epoch.rs::drive_epoch  # reads a session's stored drive epoch
+postgres crates/lash-postgres-store/src/postgres/runtime_persistence/shift_epoch.rs::shift_epoch  # reads a session's stored shift epoch
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::list_queued_work_pg  # reads the queued work of one session
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::pending_session_work_ordering_pg  # reads the order of a session's pending work
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::list_open_queued_work_pg  # reads a session's open queued work
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs::read_session_state_version  # reads a session's stored state version
-postgres crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs::admit_session_state  # reads the state version under the drive fence's locks and writes nothing
+postgres crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs::admit_session_state  # reads the state version under the shift fence's locks and writes nothing
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs::load_session_head_meta  # reads a session's head metadata
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs::load_session_meta_for_commit  # reads a session's metadata before a commit
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/turn_input.rs::list_pending_turn_inputs  # reads a session's pending inputs in one REPEATABLE READ snapshot

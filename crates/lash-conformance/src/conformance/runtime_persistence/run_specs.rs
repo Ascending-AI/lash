@@ -157,11 +157,11 @@ pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeS
                 .input_id,
         );
     }
-    let fence = seal_drive_fence_for_test(&store, &session_id, "run-spec-admission-owner").await;
+    let fence = seal_shift_fence_for_test(&store, &session_id, "run-spec-admission-owner").await;
     let mut compositions = Vec::new();
     for ordinal in 0.. {
-        // Each root is headed by the earliest open input and, once it ends,
-        // the next root starts at the row after its admission.
+        // Each run is headed by the earliest open input and, once it ends,
+        // the next run starts at the row after its admission.
         let Some(head) = store
             .list_pending_turn_inputs(&session_id)
             .await
@@ -172,10 +172,10 @@ pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeS
         else {
             break;
         };
-        let admission = drive_root_to_end(
+        let admission = execute_run_to_end(
             &store,
             &fence,
-            &format!("run-spec-root-{ordinal}"),
+            &format!("run-spec-run-{ordinal}"),
             crate::store::AdmittedHead::Input(head.input.input_id.clone()),
         )
         .await;
@@ -194,7 +194,7 @@ pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeS
 
 /// An input addressed to a running turn joins that turn's recorded shape.
 /// An omitted spec inherits it and an equal spec matches it; a differing
-/// explicit spec is refused before anything is stored. Once the turn's root
+/// explicit spec is refused before anything is stored. Once the turn's run
 /// has ended, an input addressed to it is a next-turn input under its own
 /// spec.
 #[expect(
@@ -215,8 +215,8 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
         )
         .await
         .expect("admit the input that starts the turn");
-    let fence = seal_drive_fence_for_test(&store, &session_id, "run-spec-steering-owner").await;
-    let admission = admitted_root(
+    let fence = seal_shift_fence_for_test(&store, &session_id, "run-spec-steering-owner").await;
+    let admission = admitted_run(
         &store,
         &fence,
         turn.as_str(),
@@ -264,7 +264,7 @@ pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
         "the refused input stored nothing"
     );
 
-    end_root(
+    end_run(
         &store,
         &fence,
         completing_admission(turn.as_str(), &admission),
@@ -341,16 +341,16 @@ async fn commit_switch_owing(
     owed
 }
 
-/// A follow-on the head owes is a running root under the shape its fact
+/// A follow-on the head owes is a running run under the shape its fact
 /// recorded at the switch (FIG-3877): an input steered into the follow-on
 /// turn must match that recorded spec, not the spec of the input that started
-/// the parent root. An omitted spec inherits the recorded shape.
+/// the parent run. An omitted spec inherits the recorded shape.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dyn RuntimeStore>) {
-    // The fact carries the shape the parent root recorded: steering joins it,
+    // The fact carries the shape the parent run recorded: steering joins it,
     // a differing spec — even the parent input's own — is refused.
     let session_id = SessionId::from("run-spec-follow-on-steering");
     let parent_shape = spec_with_shape("the parent input's shape");
@@ -415,35 +415,35 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dy
         .expect("an omitted spec inherits the recorded shape");
 }
 
-/// A queued-headed root runs under the default spec (FIG-3877): its members
+/// A queued-headed run executes under the default spec (FIG-3877): its members
 /// are queued work, which carries none, so an input steered into its physical
 /// turn joins the default shape and any other spec is refused.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_steering_spec_must_match_a_queued_headed_roots_default_shape(
+pub async fn a_steering_spec_must_match_a_queued_headed_runs_default_shape(
     store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("run-spec-queued-steering");
     let batch = store
         .enqueue_queued_work(checkpoint_admissions::queued_draft(
             &session_id,
-            "the root's work",
+            "the run's work",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
         .expect("enqueue the head batch");
-    let lease = seal_drive_fence_for_test(&store, &session_id, "queued-owner").await;
-    super::root_admissions::admitted_on(
+    let lease = seal_shift_fence_for_test(&store, &session_id, "queued-owner").await;
+    super::run_admissions::admitted_on(
         &store,
         &lease,
         &session_id,
-        "queued-root",
+        "queued-run",
         crate::store::AdmittedHead::Batch(batch.batch_id),
     )
     .await;
-    let turn = crate::store::PhysicalTurn::derive_turn_id(&TurnId::from("queued-root"), 0);
+    let turn = crate::store::PhysicalTurn::derive_turn_id(&TurnId::from("queued-run"), 0);
     let steer = |text: &str, spec: crate::RunSpec| {
         pending_active_turn_input_draft(
             &session_id,
@@ -464,5 +464,5 @@ pub async fn a_steering_spec_must_match_a_queued_headed_roots_default_shape(
     store
         .enqueue_pending_turn_input(steer("inherit", crate::RunSpec::default()))
         .await
-        .expect("the default spec matches the root's shape");
+        .expect("the default spec matches the run's shape");
 }

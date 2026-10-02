@@ -1,4 +1,4 @@
-//! The open-time migration's laws, driven by the synthetic successor
+//! The open-time migration's laws, executed by the synthetic successor
 //! (ADR 0115 §6): this build writes every database one version past its
 //! schema-version constant, and a store stamped at the constant without the
 //! successor's objects is the release before it.

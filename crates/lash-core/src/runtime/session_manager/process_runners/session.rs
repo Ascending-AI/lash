@@ -2,7 +2,7 @@ use super::*;
 
 impl RuntimeSessionServices {
     /// Run a `ProcessInput::SessionTurn`: initialize the recorded child
-    /// session and drive its first turn through the shared session-turn path.
+    /// session and execute its first turn through the shared session-turn path.
     ///
     /// Cancellation never tears the session down. The process token is the
     /// turn's own cancellation token inside the port, so a cancelled process

@@ -55,19 +55,19 @@ fn foreground_turn_cancel_peek_replay_keys_remain_unchanged() {
 #[test]
 fn process_turn_cancel_peek_replay_keys_cover_physical_turn_and_gate() {
     let scope = ExecutionScope::process(crate::process_id_for_test("process:subagent:peek-key"));
-    let root = TurnAddress::new("session:subagent:peek-key", "process:subagent:peek-key");
-    let follow_on = TurnAddress::new(&root.session_id, "process:subagent:peek-key:agent-frame:1");
+    let run = TurnAddress::new("session:subagent:peek-key", "process:subagent:peek-key");
+    let follow_on = TurnAddress::new(&run.session_id, "process:subagent:peek-key:agent-frame:1");
     assert_eq!(
         turn_cancel_peek_replay_key(
             &scope,
-            &root,
+            &run,
             &TurnCancelPeekIdentity::StartGate.causal_identity(),
         ),
         "turn-cancel-peek:v1:blake3:da49b5246b68613ad7de048d74eca8f0655c4fc2b62db4872af62491b5f7656e",
     );
     let mut keys = BTreeSet::new();
 
-    for address in [&root, &follow_on] {
+    for address in [&run, &follow_on] {
         for identity in [
             TurnCancelPeekIdentity::StartGate,
             TurnCancelPeekIdentity::PostAbortGate,
@@ -99,25 +99,25 @@ fn process_turn_cancel_peek_replay_keys_cover_physical_turn_and_gate() {
 fn every_shared_scope_cancel_peek_key_covers_physical_turn_and_gate() {
     let cases = [
         (
-            ExecutionScope::turn("turn-session", "turn-root"),
-            TurnAddress::new("turn-session", "turn-root"),
-            TurnAddress::new("turn-session", "turn-root:agent-frame:1"),
+            ExecutionScope::turn("turn-session", "turn-run"),
+            TurnAddress::new("turn-session", "turn-run"),
+            TurnAddress::new("turn-session", "turn-run:agent-frame:1"),
         ),
         (
             ExecutionScope::session_operation("queue-session", "queue-operation"),
-            TurnAddress::new("queue-session", "queue-root"),
+            TurnAddress::new("queue-session", "queue-run"),
             TurnAddress::new("queue-session", "queue-follow-on"),
         ),
         (
             ExecutionScope::runtime_operation("runtime-operation"),
-            TurnAddress::new("runtime-session", "runtime-root"),
+            TurnAddress::new("runtime-session", "runtime-run"),
             TurnAddress::new("runtime-session", "runtime-follow-on"),
         ),
     ];
 
-    for (scope, root, follow_on) in cases {
+    for (scope, run, follow_on) in cases {
         let mut keys = BTreeSet::new();
-        for address in [&root, &follow_on] {
+        for address in [&run, &follow_on] {
             for identity in [
                 TurnCancelPeekIdentity::StartGate,
                 TurnCancelPeekIdentity::PostAbortGate,
@@ -141,12 +141,12 @@ fn every_shared_scope_cancel_peek_key_covers_physical_turn_and_gate() {
         assert_eq!(
             turn_cancel_peek_replay_key(
                 &scope,
-                &root,
+                &run,
                 &TurnCancelPeekIdentity::StartGate.causal_identity(),
             ),
             turn_cancel_peek_replay_key(
                 &scope,
-                &root,
+                &run,
                 &TurnCancelPeekIdentity::StartGate.causal_identity(),
             ),
             "same-frame replay must reconstruct the same key"

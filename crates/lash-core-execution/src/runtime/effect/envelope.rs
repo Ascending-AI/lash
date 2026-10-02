@@ -520,19 +520,19 @@ pub enum RuntimeEffectCommand {
     AcceptTurnInput {
         draft: Box<crate::PendingTurnInputDraft>,
     },
-    /// Admit the turn-lane run a root is headed by (FIG-3927). The outcome
-    /// journals the admitted rows with their content, and the base the root
-    /// was admitted on, so a replaying root drives the same rows from the
+    /// Admit the turn-lane run a run is headed by (FIG-3927). The outcome
+    /// journals the admitted rows with their content, and the base the run
+    /// was admitted on, so a replaying run executes the same rows from the
     /// same head and never reads open rows.
-    /// The envelope names only the head: the drive fence is captured by the
+    /// The envelope names only the head: the shift fence is captured by the
     /// local executor, so the envelope hashes the same under every epoch.
-    AdmitRoot {
+    AdmitRun {
         head: crate::store::AdmittedHead,
     },
-    /// Inspect the admitted root's head before executing its turn. The body
+    /// Inspect the admitted run's head before executing its turn. The body
     /// reads live store state once; replay uses its recorded verdict.
     InspectAdmittedHead {
-        root: crate::TurnId,
+        run: crate::TurnId,
         head: crate::store::AdmittedHead,
     },
     /// Read, at a quiet point of a turn, whether `generation` — the build
@@ -541,36 +541,36 @@ pub enum RuntimeEffectCommand {
     ObserveDrainMark {
         generation: crate::engine::BuildGeneration,
     },
-    /// Decide a follow-on recovery root before its turn (FIG-4361): whether
+    /// Decide a follow-on recovery run before its turn (FIG-4361): whether
     /// the head still owes `follow_on`, and, from the recovery count
-    /// `attempts` its drive admission recorded, whether it runs under a
+    /// `attempts` its shift admission recorded, whether it runs under a
     /// raised count or commits exhausted. The body raises the count; replay
     /// serves the recorded answer and never reads the head.
     RecoverFollowOn {
         follow_on: crate::TurnId,
         attempts: u32,
     },
-    /// Admit the next root of a session drive (ADR 0105 §2, FIG-3600); every
+    /// Admit the next run of a session shift (ADR 0105 §2, FIG-3600); every
     /// replay decodes the recorded verdict instead of re-reading the store.
-    AdmitDrive {
+    AdmitShift {
         request: Box<crate::engine::AdmitRequest>,
     },
-    /// Draw the start marker of this execution of an admitted root (ADR 0105
-    /// §2, L-S8): the root's first recorded step, in its own journal, before
+    /// Draw the start marker of this execution of an admitted run (ADR 0105
+    /// §2, L-S8): the run's first recorded step, in its own journal, before
     /// its seal. A retry of the execution replays the marker; an execution
     /// that cannot read the journal draws a new one, which the seal refuses.
-    DrawRootStart {
-        root: crate::TurnId,
+    DrawRunStart {
+        run: crate::TurnId,
     },
-    /// Seal an admission: the drive-epoch compare-and-set keyed by its nonce.
+    /// Seal an admission: the shift-epoch compare-and-set keyed by its nonce.
     /// The fence rides the outcome, never this envelope (L-S12).
-    SealDriveAdmission {
+    SealShiftAdmission {
         admitted: Box<crate::engine::Admitted>,
     },
-    /// Resolve the shape `root` runs under (FIG-3600 S6, FIG-3838): once per
-    /// root, keyed by it, so every redrive replays the recorded shape.
+    /// Resolve the shape `run` runs under (FIG-3600 S6, FIG-3838): once per
+    /// run, keyed by it, so every redrive replays the recorded shape.
     ResolveTurnConfig {
-        root: crate::TurnId,
+        run: crate::TurnId,
     },
     /// Record the base an administrative compaction (`compact_context`)
     /// summarizes and opens its frame from (FIG-4133): the head and the frame
@@ -602,10 +602,10 @@ pub enum RuntimeEffectCommand {
         session: crate::SessionId,
         transaction: String,
     },
-    /// Read the session's leading open command run for a command root to
+    /// Read the session's leading open command run for a command run to
     /// apply (ADR 0101 §4, FIG-4201), acknowledging its obligations
-    /// delivered under the root's fence. Keyed by the read's ordinal in the
-    /// root, so a redrive of the root reads back the run its first execution
+    /// delivered under the run's fence. Keyed by the read's ordinal in the
+    /// run, so a redrive of the run reads back the execution its first execution
     /// applied at each ordinal and applies it again, replaying the steps an
     /// administrative compaction journaled and meeting the receipts of the
     /// commits that landed, even after those commits settled the lane. The
@@ -613,13 +613,13 @@ pub enum RuntimeEffectCommand {
     ReadSessionCommandRun {
         session: crate::SessionId,
     },
-    /// Close a logical root's scope after its terminal evidence (FIG-3600
-    /// S7, FIG-3607 item 7). Recorded under the root's scope at
-    /// [`drive_close_root_replay_key`](crate::engine::drive_close_root_replay_key),
-    /// so a crash between the root's terminal commit and its close re-runs
+    /// Close a logical run's scope after its terminal evidence (FIG-3600
+    /// S7, FIG-3607 item 7). Recorded under the run's scope at
+    /// [`shift_close_run_replay_key`](crate::engine::shift_close_run_replay_key),
+    /// so a crash between the run's terminal commit and its close re-runs
     /// the close; the session is the scope's.
-    CloseRootScope {
-        root: crate::TurnId,
+    CloseRunScope {
+        run: crate::TurnId,
     },
     /// Begin closing a session (FIG-3600 S7, FIG-3607 item 7): the store half
     /// of its `CloseSession` control intent, recorded under the session's
@@ -727,19 +727,19 @@ impl RuntimeEffectCommand {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
+            Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
-            Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
-            Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
-            Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
+            Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
+            Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
+            Self::SealShiftAdmission { .. } => RuntimeEffectKind::SealShiftAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
-            Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
+            Self::CloseRunScope { .. } => RuntimeEffectKind::CloseRunScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
@@ -1006,7 +1006,7 @@ type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError
 ///
 /// Checkpoint replay skips the local executor that admitted these rows, so
 /// they are journaled with the delivery: the replaying turn settles exactly
-/// the rows its root holds in its final commit, and never reads the queue.
+/// the rows its run holds in its final commit, and never reads the queue.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CheckpointAdmittedSet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1237,36 +1237,36 @@ pub type RuntimeDirectLlmOutcome = (
     Option<crate::LlmCallRecord>,
 );
 
-/// The first execution's decision about the head a root admitted, by how
+/// The first execution's decision about the head a run admitted, by how
 /// the live head stands against the admission's base when no final commit
-/// of the root is behind it (FIG-3824, FIG-4200, FIG-4201). The head is
-/// bound to the root alone (FIG-3927), so no other driver can have answered
+/// of the run is behind it (FIG-3824, FIG-4200, FIG-4201). The head is
+/// bound to the run alone (FIG-3927), so no other shift can have answered
 /// it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdmittedHeadVerdict {
-    /// The head is the admission's base, or the root's final commit moved
-    /// it: drive the root from the base.
+    /// The head is the admission's base, or the run's final commit moved
+    /// it: shift the run from the base.
     Ready,
-    /// The root's own commits moved the head past the admission's base, to
-    /// `head`: a context-pressure frame or another commit the root made
+    /// The run's own commits moved the head past the admission's base, to
+    /// `head`: a context-pressure frame or another commit the run made
     /// before its final one, which a fresh journal no longer records. The
-    /// bound turn owns the head, so the root continues from `head`, its own
+    /// bound turn owns the head, so the run continues from `head`, its own
     /// frame, and never meets it as another writer's (FIG-4201).
     Advanced { head: crate::store::SessionHeadRef },
     /// Another writer committed past the admission's base, to a higher
-    /// revision: ordinary head overtaking. The root can never commit on the
+    /// revision: ordinary head overtaking. The run can never commit on the
     /// base it was admitted on, so it ends typed `StoreCommitSuperseded`.
     Overtaken { live_revision: u64 },
     /// The live head is inconsistent with the admission's base: a lower
     /// revision, or the same revision with another leaf or checkpoint. The
-    /// root parks for an operator.
+    /// run parks for an operator.
     Diverged { live_revision: u64 },
 }
 
 /// The base an administrative compaction records before its summarizer
 /// runs (FIG-4133): the durable head it summarizes and the frame it opens its
-/// frame from. The compaction commits under the fence of the command root
+/// frame from. The compaction commits under the fence of the command run
 /// that applies it (FIG-4201), so the base records no fence. Plain store
 /// identities, so any build replays it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1395,10 +1395,10 @@ pub enum RuntimeEffectOutcome {
     AcceptTurnInput {
         accepted: Box<crate::PendingTurnInput>,
     },
-    /// The root's recorded admission, journaled so replay drives and settles
+    /// The run's recorded admission, journaled so replay executes and settles
     /// the same rows (FIG-3927).
-    AdmitRoot {
-        answer: crate::store::RootAdmissionAnswer,
+    AdmitRun {
+        answer: crate::store::RunAdmissionAnswer,
     },
     InspectAdmittedHead {
         verdict: AdmittedHeadVerdict,
@@ -1407,24 +1407,24 @@ pub enum RuntimeEffectOutcome {
     ObserveDrainMark {
         draining: bool,
     },
-    /// A follow-on recovery root's recorded decision (FIG-4361), with the
+    /// A follow-on recovery run's recorded decision (FIG-4361), with the
     /// head its turn runs on (FIG-4380).
     RecoverFollowOn {
         answer: Box<crate::store::FollowOnRecoveryAnswer>,
     },
-    /// The drive admission's recorded verdict.
-    AdmitDrive {
+    /// The shift admission's recorded verdict.
+    AdmitShift {
         verdict: Box<crate::engine::AdmitVerdict>,
     },
-    /// The start marker this execution of a root drew.
-    DrawRootStart {
-        root_start: crate::engine::RootStartNonce,
+    /// The start marker this execution of a run drew.
+    DrawRunStart {
+        run_start: crate::engine::RunStartNonce,
     },
     /// The seal's recorded verdict, with the fence when `Sealed`.
-    SealDriveAdmission {
+    SealShiftAdmission {
         verdict: Box<crate::engine::SealVerdict>,
     },
-    /// The root's recorded shape: its spec resolved against its snapshot
+    /// The run's recorded shape: its spec resolved against its snapshot
     /// of the durable head's config (FIG-3838).
     ResolveTurnConfig {
         resolved: Box<crate::ResolvedRun>,
@@ -1444,14 +1444,14 @@ pub enum RuntimeEffectOutcome {
     ResolveConfigTransaction {
         resolution: Box<crate::ConfigResolution>,
     },
-    /// The command run a command root read: the leading open batches, in
+    /// The command run a command run read: the leading open batches, in
     /// `enqueue_seq` order, empty when the lane was.
     ReadSessionCommandRun {
         batches: Vec<crate::QueuedWorkBatch>,
     },
-    /// The terminal evidence of the root the close closed.
-    CloseRootScope {
-        terminal: Box<crate::store::RootTerminal>,
+    /// The terminal evidence of the run the close closed.
+    CloseRunScope {
+        terminal: Box<crate::store::RunTerminal>,
     },
     /// The session's `CloseSession` intent, boxed; `None` when the session
     /// had no durable record and nothing was closed.
@@ -1466,7 +1466,7 @@ pub enum RuntimeEffectOutcome {
     SyncExecutionEnvironment {
         result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
         /// The tool surface the sync built: every tool of the catalog the
-        /// iteration's calls resolve against, as its definition. The drive
+        /// iteration's calls resolve against, as its definition. The shift
         /// installs it as the catalog, on the live pass and on every replay,
         /// and judges each tool against the live registry on its own (FIG-3672
         /// P7b). Empty when the sync failed.
@@ -1851,19 +1851,19 @@ impl RuntimeEffectOutcome {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
-            Self::AdmitRoot { .. } => RuntimeEffectKind::AdmitRoot,
+            Self::AdmitRun { .. } => RuntimeEffectKind::AdmitRun,
             Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::ObserveDrainMark { .. } => RuntimeEffectKind::ObserveDrainMark,
             Self::RecoverFollowOn { .. } => RuntimeEffectKind::RecoverFollowOn,
-            Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
-            Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
-            Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
+            Self::AdmitShift { .. } => RuntimeEffectKind::AdmitShift,
+            Self::DrawRunStart { .. } => RuntimeEffectKind::DrawRunStart,
+            Self::SealShiftAdmission { .. } => RuntimeEffectKind::SealShiftAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::RecordCompactionBase { .. } => RuntimeEffectKind::RecordCompactionBase,
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
-            Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
+            Self::CloseRunScope { .. } => RuntimeEffectKind::CloseRunScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,

@@ -202,7 +202,7 @@ impl TurnCancelClosureAuthorization {
         terminal_key: AwaitEventKey,
         proposed_base: TurnCancelClosureProposal,
         observed_intent: TurnCancelIntentSnapshot,
-        fence: &crate::store::DriveFence,
+        fence: &crate::store::ShiftFence,
     ) -> Result<Self, RuntimeError> {
         address.validate()?;
         admitted_scope.validate()?;

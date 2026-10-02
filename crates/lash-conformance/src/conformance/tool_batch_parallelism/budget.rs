@@ -1,10 +1,10 @@
 use super::{Duration, Rendezvous};
 use std::future::Future;
 
-/// Drives `turn` to its end under the scenario's activation budget. A budget
+/// Executes `turn` to its end under the scenario's activation budget. A budget
 /// that expires with planned leaves still unstarted records them and releases
 /// every waiter ([`Rendezvous::expire_if_activation_stalled`]), and the turn
-/// is still driven to its end: the released members drain, and the expiry is
+/// is still executed to its end: the released members drain, and the expiry is
 /// how the scenario ended.
 ///
 /// The turn is never cut short at the expiry. On a journaling tier the turn
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_expired_activation_budget_drives_the_released_turn() {
+    async fn an_expired_activation_budget_executes_the_released_turn() {
         let rendezvous = rendezvous();
         rendezvous.record_started("first");
         assert!(rendezvous.expire_if_activation_stalled(1, BUDGET));
@@ -141,7 +141,7 @@ mod tests {
     /// expiry ends its handler where a later execution of the same handler
     /// runs the turn, and the two diverge on the journal (FIG-4309).
     #[tokio::test(start_paused = true)]
-    async fn an_expiry_before_the_first_step_still_drives_the_whole_turn() {
+    async fn an_expiry_before_the_first_step_still_executes_the_whole_turn() {
         let rendezvous = rendezvous();
         let steps = std::sync::atomic::AtomicUsize::new(0);
         let turn = async {

@@ -1,6 +1,6 @@
 //! The laws of `lashctl finalize` and of the backfill and contract phases on
 //! PostgreSQL (FIG-3800 B, FIG-3817), each on its own isolated database and
-//! driven with Phase A's synthetic successor: N is a storage whose writable
+//! executed with Phase A's synthetic successor: N is a storage whose writable
 //! range is `[1,1]`, N+1 one whose range is `[1,2]` (ADR 0115 §2.1). The
 //! backfill and contract laws need the synthetic catalog, so they run in the
 //! `synthetic-next` build of this crate.

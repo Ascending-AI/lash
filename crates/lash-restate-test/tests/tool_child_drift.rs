@@ -1,7 +1,7 @@
 //! A group tool child whose tool drifted, redeployed while the child was in
 //! flight (FIG-3725).
 //!
-//! Each law sends a real tool turn, which the engine drives in the root's
+//! Each law sends a real tool turn, which the engine executes in the run's
 //! `LashTurn` workflow, and holds its tool child mid-flight: the
 //! child's first attempt waits on a gate. The turn
 //! is then suspended, so no opener is live, and the deployment is replaced by
@@ -23,11 +23,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core::engine::{DriveOutcome, RootOutcome};
+use lash_core::engine::{RunOutcome, ShiftOutcome};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::{
-    RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE, TimeMode,
+    RestateTestBackend, SESSION_SHIFT_SERVICE, ServerConfig, TURN_DRIVER_SERVICE, TimeMode,
 };
 use serde_json::json;
 
@@ -200,8 +200,8 @@ struct Turn {
     world: World,
     /// The deployment whose core's driver the engine runs the turn on.
     live: Arc<Mutex<Option<Deployment>>>,
-    /// The turn's drive, attached to until it stops.
-    run: tokio::task::JoinHandle<DriveOutcome>,
+    /// The turn's shift, attached to until it stops.
+    run: tokio::task::JoinHandle<ShiftOutcome>,
 }
 
 async fn start_turn() -> Turn {
@@ -217,22 +217,22 @@ async fn start_turn() -> Turn {
         .id(TURN)
         .await
         .expect("accept the turn input");
-    let request = lash_core::drive::ingress_drive_request(
+    let request = lash_core::shift::ingress_shift_request(
         handle.input_id().as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
     let live = Arc::new(Mutex::new(Some(first)));
-    // The acceptance scheduled the drive under the input's own request: the
-    // attach waits on that one drive, across the redeploys, until it stops.
+    // The acceptance scheduled the shift under the input's own request: the
+    // attach waits on that one shift, across the redeploys, until it stops.
     let run = tokio::spawn({
         let backend = backend.clone();
         async move {
             let session = lash_core::SessionId::from(SESSION);
             loop {
-                match backend.attach_drive(&session, request.clone()).await {
+                match backend.attach_shift(&session, request.clone()).await {
                     Ok(outcome) => return outcome,
                     Err(error) if error.is_timeout() => {}
-                    Err(error) => panic!("the turn's drive failed: {error}"),
+                    Err(error) => panic!("the turn's shift failed: {error}"),
                 }
             }
         }
@@ -299,12 +299,12 @@ impl Turn {
     async fn drivers_idle(&self) {
         let freed = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                let driving = self.backend.server().invocations().into_iter().any(|view| {
+                let executing = self.backend.server().invocations().into_iter().any(|view| {
                     (view.target.starts_with(TURN_DRIVER_SERVICE)
-                        || view.target.starts_with(SESSION_DRIVER_SERVICE))
+                        || view.target.starts_with(SESSION_SHIFT_SERVICE))
                         && matches!(view.status, "running" | "pending")
                 });
-                if !driving {
+                if !executing {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -322,7 +322,7 @@ impl Turn {
     /// Replaces the deployment: the old one is dropped first, so exactly one
     /// deployment's context source is installed.
     ///
-    /// A redeploy kills what the old deployment was running: a drive or root
+    /// A redeploy kills what the old deployment was running: a shift or run
     /// attempt in flight keeps the old deployment's driver, so it would go on
     /// serving the turn — and lending its children the old context — under
     /// the build the redeploy replaced. Its retry runs on the new one.
@@ -332,15 +332,15 @@ impl Turn {
         let next = deploy(&self.backend, &self.world, drifted).await;
         *self.live.lock().unwrap() = Some(next);
         for view in self.backend.server().invocations() {
-            let driving = view.target.starts_with(TURN_DRIVER_SERVICE)
-                || view.target.starts_with(SESSION_DRIVER_SERVICE);
-            if driving && view.status == "running" {
+            let executing = view.target.starts_with(TURN_DRIVER_SERVICE)
+                || view.target.starts_with(SESSION_SHIFT_SERVICE);
+            if executing && view.status == "running" {
                 self.backend.server().crash(&view.id);
             }
         }
     }
 
-    /// Waits until the turn's root workflow is parked: not running, or its
+    /// Waits until the turn's run workflow is parked: not running, or its
     /// live attempt blocked on the server. Only a time advance or outside
     /// input can move it from there.
     async fn turn_parked(&self) {
@@ -448,7 +448,7 @@ impl Turn {
         let answer = match finished {
             Ok(Ok(outcome)) => match outcome.ran.as_slice() {
                 [
-                    RootOutcome::Committed {
+                    RunOutcome::Committed {
                         outcome:
                             lash_core::facade_support::TurnOutcome::Finished(
                                 lash_core::facade_support::TurnFinish::AssistantMessage { text },
@@ -456,7 +456,7 @@ impl Turn {
                         ..
                     },
                 ] => text.clone(),
-                other => format!("drive ran {other:?}, stopped {:?}", outcome.stop),
+                other => format!("shift ran {other:?}, stopped {:?}", outcome.stop),
             },
             other => format!(
                 "stuck: {other:?}; open: {:#?}",

@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 
 use lashlang::testing::ast_builders as b;
 
@@ -294,7 +294,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     .await?;
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-owner",
@@ -384,7 +384,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     };
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state)
         .closing_interrupted_turn(settlement, lash_core::TurnCancelIntentSnapshot::Absent);
-    commit.drive_fence = Some(Box::new(lease.clone()));
+    commit.shift_fence = Some(Box::new(lease.clone()));
     store.commit_runtime_state(commit).await?;
     let report = core
         .processes()
@@ -411,7 +411,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     .await?;
     let late_lease = late_store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &late_session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-late-owner",
@@ -1488,7 +1488,7 @@ impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory 
 }
 
 /// FIG-3116: `triggers.register` is an ordinary declaring leaf tool now.
-/// Driven only through `send()`: the cell's recorded call is
+/// Executed only through `send()`: the cell's recorded call is
 /// `register_trigger`, it declares a `register_trigger` intent, and the
 /// subscription installs when that intent is realized — so an occurrence
 /// emitted in a later turn still starts the lifted target and delivers the

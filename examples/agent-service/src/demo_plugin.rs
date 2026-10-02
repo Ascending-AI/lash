@@ -212,8 +212,8 @@ async fn record_board_context_for_tool(
         .await?;
     let config = session.admin().config();
     let revision = config.revision().await?;
-    // The move runs inside its root, so submission must not wait for the
-    // command lane. The root keeps its render; the command precedes later work.
+    // The move runs inside its run, so submission must not wait for the
+    // command lane. The run keeps its render; the command precedes later work.
     config
         .submit(
             lash::config::ConfigWrite::new(
@@ -278,7 +278,7 @@ mod tests {
                             db.lock_recover()
                                 .upsert_chat_board(&chat_id, &crate::board::default_board())
                                 .expect("change live data before replay");
-                            double.crash_turn_drive(
+                            double.crash_run_execution(
                                 lash_restate_test::CrashPoint::BeforeRunResult { name: None },
                             );
                         }
@@ -321,7 +321,7 @@ mod tests {
         axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("user turn ends");
-        double.settle_session_drive(&session_id).await;
+        double.settle_session_shift(&session_id).await;
         assert_eq!(
             db.lock_recover().chat_board(&chat.id).expect("board"),
             moved,
@@ -357,18 +357,18 @@ mod tests {
             .expect("enqueue process wake");
         tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            double.attach_drive(
+            double.attach_shift(
                 &session_id,
-                lash::restate::DriveRequestId::new("board-context-drive"),
+                lash::restate::ShiftRequestId::new("board-context-shift"),
             ),
         )
         .await
-        .expect("drive answers")
-        .expect("drive wake");
+        .expect("shift answers")
+        .expect("shift wake");
         assert_eq!(
             double.server().stats().crashes,
             crashes + 1,
-            "one root attempt crashed"
+            "one run attempt crashed"
         );
         let seen = requests.lock_recover();
         assert_eq!(seen.len(), 3, "user call, non-user call, and redrive");

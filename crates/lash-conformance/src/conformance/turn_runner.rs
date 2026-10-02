@@ -1,9 +1,9 @@
-//! Where a turn-driving law runs its turn.
+//! Where a turn-executing law runs its turn.
 //!
-//! The in-process tiers scope a turn on the host the runtime runs on and drive
+//! The in-process tiers scope a turn on the host the runtime runs on and execute
 //! it in the test task. A Restate turn exists only inside a handler: its
 //! effects journal on a `ctx`-bound controller, and the deployment-level host
-//! refuses every effect that has not entered one. A law that drives a real
+//! refuses every effect that has not entered one. A law that executes a real
 //! turn therefore takes the turn as a [`ConformanceTurnAttempt`] and hands it
 //! to the tier's [`ConformanceTurnRunner`], which supplies the scoped
 //! controller the turn runs on — the host's own on the in-process tiers, a
@@ -68,16 +68,16 @@ pub enum ConformanceTurnEnd {
 }
 
 impl ConformanceTurnEnd {
-    /// How a turn ended when its root has durable terminal evidence.
-    /// A matching recorded refusal ends the root even when its error code
+    /// How a turn ended when its run has durable terminal evidence.
+    /// A matching recorded refusal ends the run even when its error code
     /// alone describes a redrivable operation, such as a superseded commit.
-    pub(crate) fn of_root<T>(
+    pub(crate) fn of_run<T>(
         turn: &Result<T, crate::RuntimeError>,
-        terminal: Option<&crate::store::RootTerminal>,
+        terminal: Option<&crate::store::RunTerminal>,
     ) -> Self {
         if let Err(error) = turn
             && let Some(terminal) = terminal
-            && let crate::store::RootTerminalCause::Refused { code, .. } = &terminal.cause
+            && let crate::store::RunTerminalCause::Refused { code, .. } = &terminal.cause
             && code == &error.code
         {
             return Self::Settled;
@@ -353,7 +353,7 @@ pub trait ConformanceTurnRunner: Send + Sync {
 }
 
 /// The in-process tiers' runner: the turn is scoped on the host the runtime
-/// runs on and driven in the calling task.
+/// runs on and executed in the calling task.
 pub struct HostTurnRunner {
     host: Arc<dyn crate::EffectHost>,
 }

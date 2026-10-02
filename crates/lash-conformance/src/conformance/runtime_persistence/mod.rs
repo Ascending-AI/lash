@@ -1,7 +1,7 @@
 //! [`RuntimeStore`] conformance, organized by capability segment:
 //! [`SessionCommitStore`](crate::SessionCommitStore) (head CAS, checkpoint
 //! hydration, metadata, attachment manifest, turn-commit stamps),
-//! [`RootStore`](crate::store::RootStore) (admission binding),
+//! [`RunStore`](crate::store::RunStore) (admission binding),
 //! [`TurnInputStore`](crate::TurnInputStore), and
 //! [`StoreMaintenance`](crate::StoreMaintenance).
 
@@ -9,7 +9,7 @@ use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 pub(super) use lash_core::testing::store_fixtures::commit_runtime_state_for_test;
-use lash_core::testing::store_fixtures::seal_drive_fence_for_test;
+use lash_core::testing::store_fixtures::seal_shift_fence_for_test;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -41,9 +41,9 @@ mod enqueue_sequence_identity;
 mod pending_follow_on;
 mod queue_redrive;
 mod reopen_and_commit;
-mod root_admissions;
-mod root_terminals;
+mod run_admissions;
 mod run_specs;
+mod run_terminals;
 mod runtime_basics;
 mod suite_and_receipts;
 mod turn_input_batches;
@@ -63,9 +63,9 @@ pub mod runtime_persistence_macro_support {
     pub use super::pending_follow_on::*;
     pub use super::queue_redrive::*;
     pub use super::reopen_and_commit::*;
-    pub use super::root_admissions::*;
-    pub use super::root_terminals::*;
+    pub use super::run_admissions::*;
     pub use super::run_specs::*;
+    pub use super::run_terminals::*;
     pub use super::runtime_basics::*;
     pub use super::suite_and_receipts::*;
     pub use super::turn_input_batches::*;

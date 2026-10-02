@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_c0aa;
 
@@ -55,7 +55,7 @@ async fn durable_journaled_engine_commits_bypass_local_admission() {
     )
     .expect("layer the handler's scope");
     runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("commit"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), scope),
         )
@@ -122,7 +122,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         }),
     )
     .await;
-    let lease = lash_core::testing::RuntimeStoreTestDriveExt::seal_drive_epoch_for_test(
+    let lease = lash_core::testing::RuntimeStoreTestShiftExt::seal_shift_epoch_for_test(
         store.as_ref(),
         &SessionId::from(session_id),
         &lease_owner(session_id),

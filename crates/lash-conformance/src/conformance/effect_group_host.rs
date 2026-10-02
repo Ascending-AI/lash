@@ -709,7 +709,7 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
         )
         .await
         .expect("the root wait key derives on the scoped controller");
-    let drive = crate::runtime::effect::drive_effect_controller_task(
+    let shift = crate::runtime::effect::drive_effect_controller_task(
         scoped.controller(),
         root_scope.clone(),
         RuntimeEffectEnvelope::new(
@@ -768,7 +768,7 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
             "the root wait was still outstanding when the proxied resolve landed"
         );
     };
-    let ((), outcome) = tokio::join!(scenario, drive);
+    let ((), outcome) = tokio::join!(scenario, shift);
     outcome.expect("the driver completes its root effect");
 }
 

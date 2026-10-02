@@ -199,9 +199,9 @@ impl RestateView {
 
     /// Every invocation of any service in this namespace that has not
     /// completed, oldest first, as its target and status: work the engine
-    /// still owes a serving node. A root's scope close and the wait
+    /// still owes a serving node. A run's scope close and the wait
     /// retirement it calls run on `LashTurn` and `LashDurableWaitIndex` after
-    /// the session's drive has returned, so the session's own key does not
+    /// the session's shift has returned, so the session's own key does not
     /// show them.
     pub async fn open_invocations(&self) -> Result<Vec<String>> {
         #[derive(Deserialize)]

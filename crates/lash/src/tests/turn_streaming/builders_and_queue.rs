@@ -35,8 +35,8 @@ pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> 
 }
 
 /// Every plain turn entry point — output into a sink, output, the event
-/// stream, and a later send — drives its own root, and the engine journals
-/// each root's model call under that root's turn and no other.
+/// stream, and a later send — executes its own run, and the engine journals
+/// each run's model call under that run's turn and no other.
 #[tokio::test]
 pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> Result<()> {
     let double = restate_double(SEED).await;
@@ -100,7 +100,7 @@ pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> R
     assert_eq!(
         llm_calls.len(),
         turns.len(),
-        "no model call is journaled outside the four roots: {llm_calls:?}"
+        "no model call is journaled outside the four runs: {llm_calls:?}"
     );
     Ok(())
 }
@@ -167,13 +167,13 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     };
     assert_eq!(turn_id, expected_turn_id);
     let crate::CancelReceipt::Requested { receipt, .. } = session
-        .cancel(crate::CancelTarget::Root(turn_id.clone()))
+        .cancel(crate::CancelTarget::Run(turn_id.clone()))
         .request_id("turn-started-cancel-request")
         .origin("pull-stream-host")
         .reason("cancel from first activity")
         .await?
     else {
-        panic!("the running root must receive the cancellation request");
+        panic!("the running run must receive the cancellation request");
     };
     assert!(matches!(
         receipt.outcome,
@@ -224,11 +224,11 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         .accepted()
         .await?;
 
-    let root = session
+    let run = session
         .attach(admission.input_id.clone())
         .outcome()
         .await?
-        .root()
+        .run()
         .cloned()
         .expect("queued input should run");
 
@@ -266,7 +266,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     assert_ne!(live.input_id, empty_admission.input_id);
     assert_eq!(live.input_id, admission.input_id);
     assert_eq!(live.source_key.as_deref(), Some("idle-source"));
-    assert_eq!(live.turn_id, root.as_str());
+    assert_eq!(live.turn_id, run.as_str());
     assert_eq!(live.checkpoint, None);
     assert!(
         session
@@ -309,11 +309,11 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         .id("gap-source")
         .accepted()
         .await?;
-    let root = session
+    let run = session
         .attach(admission.input_id.clone())
         .outcome()
         .await?
-        .root()
+        .run()
         .cloned()
         .expect("queued input should run");
 
@@ -335,7 +335,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         [application]
             if application.input_id == admission.input_id
                 && application.source_key.as_deref() == Some("gap-source")
-                && application.turn_id == root
+                && application.turn_id == run
                 && application.checkpoint.is_none()
                 && session
                     .read_view()
@@ -346,7 +346,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     Ok(())
 }
 
-/// A core whose engine drives its sends in the background, answering every
+/// A core whose engine executes its sends in the background, answering every
 /// model call with `answer`.
 async fn answering_core(answer: &'static str) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
@@ -361,13 +361,13 @@ async fn answering_core(answer: &'static str) -> Result<LashCore> {
         .build(crate::testing::runtime_lease_owner())
 }
 
-/// The settled-root mailbox is shared by every driver in the process, and a
+/// The settled-run mailbox is shared by every `SessionShifts` in the process, and a
 /// keyed input's id derives from its session and key alone, so two stores
 /// can hold the same session and input ids. A handle answers only from a
-/// root its own stores ran: a root another store's driver left behind under
+/// run its own stores ran: a run another store's driver left behind under
 /// the same ids is not its answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Result<()> {
+pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Result<()> {
     let first = answering_core("answered by the first store").await?;
     let second = answering_core("answered by the second store").await?;
     let first_session = first
@@ -383,7 +383,7 @@ pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Resu
         .open()
         .await?;
 
-    // The first store's root settles and its driver deposits the report; no
+    // The first store's run settles and its driver deposits the report; no
     // handle takes it, so it stays in the mailbox under the shared ids.
     let unread = first_session
         .send(TurnInput::text("ask"))
@@ -404,7 +404,7 @@ pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Resu
         }
     })
     .await
-    .expect("the first store's root settles")?;
+    .expect("the first store's run settles")?;
 
     let second_handle = second_session
         .send(TurnInput::text("ask"))
@@ -420,7 +420,7 @@ pub(super) async fn a_send_never_answers_from_a_root_another_store_ran() -> Resu
 }
 
 /// FIG-3980: a turn's journal does not grow with its transcript, and neither
-/// session-driver handler journals a separate generation sentinel step.
+/// `SessionShifts` handler journals a separate generation sentinel step.
 ///
 /// Every turn sends the same large input, so each adds it and its echo to
 /// the transcript the next turn's model request carries. The model-call
@@ -476,8 +476,8 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
                     && first
                         .name
                         .as_deref()
-                        .is_some_and(|name| name.starts_with("lash:drive-root-start:"))),
-            "the root's start marker is its first command: {:?}",
+                        .is_some_and(|name| name.starts_with("lash:shift-run-start:"))),
+            "the run's start marker is its first command: {:?}",
             commands.first()
         );
     }

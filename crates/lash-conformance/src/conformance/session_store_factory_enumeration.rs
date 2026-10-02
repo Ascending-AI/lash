@@ -1,6 +1,6 @@
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
@@ -165,7 +165,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
     assert_eq!(head_after.head_revision, head_before.head_revision);
     let first_lease = root
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &root_request.session_id,
             &crate::LeaseOwnerIdentity::opaque("enumeration-proof", "first"),
             "session-enumeration-proof-executor",

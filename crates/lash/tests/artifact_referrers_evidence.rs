@@ -1275,7 +1275,7 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
                 .is_some(),
             "the pending close still holds the created module"
         );
-        let relay = lash_core::drive::ControlIntentRelay::new(
+        let relay = lash_core::shift::ControlIntentRelay::new(
             Arc::clone(&services.intents),
             Arc::clone(execution.administration.store_factory()),
             Arc::clone(&services.work),
@@ -1284,7 +1284,7 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
             Arc::clone(&services.clock),
         )
         .with_policy(services.policy);
-        lash_core::drive::relay::deliver_claimed(&relay, claimed, services.clock.as_ref())
+        lash_core::shift::relay::deliver_claimed(&relay, claimed, services.clock.as_ref())
             .await
             .expect("deliver the competing close claim");
         acknowledged.await;

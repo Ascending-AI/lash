@@ -153,7 +153,7 @@ async fn run_fixed_intent_attempt(
         provider_call_id: None,
         tool_id: "tool:fixed_intent_law".into(),
         tool_name: "fixed_intent_law".into(),
-        args: json!({"value": "drive"}),
+        args: json!({"value": "shift"}),
         replay: None,
         prepared_payload: serde_json::Value::Null,
     };
@@ -595,7 +595,7 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
         crate::session::ToolInvocation::new(
             lash_core_execution::ToolCallId::fixture("fixed-intent-call"),
             crate::ToolId::from("tool:fixed_intent_law"),
-            json!({"value": "drive"}),
+            json!({"value": "shift"}),
         ),
     ))
     .await;
@@ -670,7 +670,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
             crate::session::ToolInvocation::new(
                 lash_core_execution::ToolCallId::fixture("fixed-intent-call"),
                 crate::ToolId::from("tool:fixed_intent_law"),
-                json!({"value": "drive"}),
+                json!({"value": "shift"}),
             ),
         ))
         .await
@@ -748,7 +748,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
         provider_call_id: None,
         tool_id: definition.id().to_string().into(),
         tool_name: "retry_intents".into(),
-        args: json!({"value": "drive"}),
+        args: json!({"value": "shift"}),
         replay: None,
         prepared_payload: serde_json::Value::Null,
     };
@@ -958,7 +958,7 @@ async fn trigger_intent_dispatch_context(
     context
 }
 
-/// Drives one recorded `EmitTrigger` declaration, crashes the coordinator at
+/// Executes one recorded `EmitTrigger` declaration, crashes the coordinator at
 /// `pause`, and redrives it. Returns the store, the registered subscription and
 /// the redriven outcome so each half of the exactly-once law can assert on the
 /// state its crash point leaves behind.
@@ -1066,7 +1066,7 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
 
 /// A delivery that never started is the declaration's own refusal, not a
 /// failure buried inside a successful outcome. Its reason is a live error
-/// string the next drive need not reproduce, so letting it reach
+/// string the next shift need not reproduce, so letting it reach
 /// `Executed { realized }` would both call a start that did not happen a success
 /// and put replay-varying bytes on the durable wire.
 #[tokio::test]
@@ -1103,9 +1103,9 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
     );
 }
 
-/// The trigger arm of the public byte-stability law: two clean drives of the
+/// The trigger arm of the public byte-stability law: two clean shifts of the
 /// same recorded declaration hand the caller identical bytes, even though the
-/// second drive re-ingests an occurrence that already exists and re-starts a
+/// second shift re-ingests an occurrence that already exists and re-starts a
 /// delivery the store already holds (FIG-806).
 #[tokio::test]
 async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emission() {
@@ -1126,10 +1126,10 @@ async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emis
         store
             .list_deliveries_by_occurrence_id(&occurrence_id)
             .await
-            .expect("read the deliveries the first drive reserved")
+            .expect("read the deliveries the first shift reserved")
             .len(),
         1,
-        "the first drive must reserve the delivery the second one reads back as already reserved"
+        "the first shift must reserve the delivery the second one reads back as already reserved"
     );
 
     let redriven = run_fixed_intent_attempt(&context).await;
@@ -1138,7 +1138,7 @@ async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emis
     assert_eq!(
         serde_json::to_string(&redriven).expect("serialize the redriven public outcome"),
         first_rendered,
-        "the recorded trigger outcome is byte-stable across drives"
+        "the recorded trigger outcome is byte-stable across shifts"
     );
     let deliveries = store
         .list_deliveries_by_occurrence_id(&occurrence_id)
@@ -1341,7 +1341,7 @@ async fn cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress()
 /// The at-most-once half: a crash after the occurrence is ingested and its
 /// delivery start commits leaves durable state the redrive must not add to. The
 /// redrive re-ingests the same idempotency key, replays the same delivery start
-/// from the journal, and reports the same bytes: the second drive finds the
+/// from the journal, and reports the same bytes: the second shift finds the
 /// reservation already held, a live-state read a recorded outcome may not
 /// expose.
 #[tokio::test]
@@ -1407,7 +1407,7 @@ async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_ou
                     .expect("the delivery was started"),
             },
         }],
-        "the recorded outcome states what every drive did, not which drive reserved first"
+        "the recorded outcome states what every shift did, not which shift reserved first"
     );
 }
 

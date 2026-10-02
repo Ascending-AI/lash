@@ -58,8 +58,8 @@ pub(super) async fn run_once_queued_work_admission_stress(
                 let mut phase_profile = BTreeMap::new();
 
                 let (fence, phase) =
-                    measure_runtime_perf_async_phase("queued_work.seal_drive_epoch", async {
-                        seal_perf_drive(store.as_ref(), &session_id).await
+                    measure_runtime_perf_async_phase("queued_work.seal_shift_epoch", async {
+                        seal_perf_shift(store.as_ref(), &session_id).await
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
@@ -109,14 +109,13 @@ pub(super) async fn run_once_queued_work_admission_stress(
                 phase_profile.insert(phase.0, phase.1);
                 completed_batches += 1;
 
-                let join_root =
-                    lash_core::TurnId::fixture(format!("queued-work-join-{turn_index}"));
+                let join_run = lash_core::TurnId::fixture(format!("queued-work-join-{turn_index}"));
                 let (join, phase) =
                     measure_runtime_perf_async_phase("queued_work.admit_join_turn_work", async {
-                        admit_perf_root(
+                        admit_perf_run(
                             store.as_ref(),
                             &fence,
-                            &join_root,
+                            &join_run,
                             AdmittedHead::Batch(heads.join.clone()),
                             QUEUED_WORK_JOIN_BATCHES_PER_TURN,
                         )
@@ -138,21 +137,21 @@ pub(super) async fn run_once_queued_work_admission_stress(
                 join_admissions += 1;
                 join_batches_admitted += join_batch_ids.len();
 
-                // An interrupted drive: a successor seals, then resumes the
-                // unfinished root, reading back exactly its recorded admission.
+                // An interrupted shift: a successor seals, then resumes the
+                // unfinished run, reading back exactly its recorded admission.
                 let (fence, phase) =
-                    measure_runtime_perf_async_phase("queued_work.supersede_join_drive", async {
-                        seal_perf_drive(store.as_ref(), &session_id).await
+                    measure_runtime_perf_async_phase("queued_work.supersede_join_shift", async {
+                        seal_perf_shift(store.as_ref(), &session_id).await
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
 
                 let (join, phase) =
                     measure_runtime_perf_async_phase("queued_work.resume_join_admission", async {
-                        admit_perf_root(
+                        admit_perf_run(
                             store.as_ref(),
                             &fence,
-                            &join_root,
+                            &join_run,
                             AdmittedHead::Batch(heads.join.clone()),
                             64,
                         )
@@ -171,9 +170,9 @@ pub(super) async fn run_once_queued_work_admission_stress(
                     "queued_work.complete_join_turn_work",
                     async {
                         let result = store
-                            .commit_runtime_state(finishing_perf_root(
+                            .commit_runtime_state(finishing_perf_run(
                                 queued_work_stress_commit(&commit_state, &fence),
-                                &join_root,
+                                &join_run,
                                 &join,
                             ))
                             .await?;
@@ -185,15 +184,15 @@ pub(super) async fn run_once_queued_work_admission_stress(
                 phase_profile.insert(phase.0, phase.1);
                 completed_batches += join_batch_ids.len();
 
-                let exclusive_root =
+                let exclusive_run =
                     lash_core::TurnId::fixture(format!("queued-work-exclusive-{turn_index}"));
                 let (exclusive, phase) = measure_runtime_perf_async_phase(
                     "queued_work.admit_exclusive_turn_work",
                     async {
-                        admit_perf_root(
+                        admit_perf_run(
                             store.as_ref(),
                             &fence,
-                            &exclusive_root,
+                            &exclusive_run,
                             AdmittedHead::Batch(heads.exclusive.clone()),
                             QUEUED_WORK_JOIN_BATCHES_PER_TURN,
                         )
@@ -217,9 +216,9 @@ pub(super) async fn run_once_queued_work_admission_stress(
                     "queued_work.complete_exclusive_turn_work",
                     async {
                         let result = store
-                            .commit_runtime_state(finishing_perf_root(
+                            .commit_runtime_state(finishing_perf_run(
                                 queued_work_stress_commit(&commit_state, &fence),
-                                &exclusive_root,
+                                &exclusive_run,
                                 &exclusive,
                             ))
                             .await?;
@@ -449,14 +448,14 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     lash_core::TurnId::fixture(format!("turn-input-ingress-{turn_index}"));
 
                 let (fence, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.seal_drive_epoch",
-                    async { seal_perf_drive(store.as_ref(), &session_id).await },
+                    "turn_input_ingress.seal_shift_epoch",
+                    async { seal_perf_shift(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
 
-                // The turn runs as its own root before input addresses it
-                // (ADR 0101 §5.1); its own input heads the root.
+                // The turn runs as its own run before input addresses it
+                // (ADR 0101 §5.1); its own input heads the run.
                 let turn_head = store
                     .enqueue_pending_turn_input(
                         lash_core::PendingTurnInputDraft::new(
@@ -467,7 +466,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                         .with_source_key(turn_id.as_str()),
                     )
                     .await?;
-                let turn_root = admit_perf_root(
+                let turn_run = admit_perf_run(
                     store.as_ref(),
                     &fence,
                     &turn_id,
@@ -475,7 +474,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     1,
                 )
                 .await?
-                .ok_or_else(|| anyhow::anyhow!("expected the turn's root admission"))?;
+                .ok_or_else(|| anyhow::anyhow!("expected the turn's run admission"))?;
 
                 let (_, phase) =
                     measure_runtime_perf_async_phase("turn_input_ingress.enqueue_active", async {
@@ -552,11 +551,11 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 phase_profile.insert(phase.0, phase.1);
                 active_admissions += 1;
 
-                // An interrupted drive: a successor seals, then re-runs the
+                // An interrupted shift: a successor seals, then re-runs the
                 // checkpoint step, reading back exactly the rows it admitted.
                 let (fence, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.supersede_active_drive",
-                    async { seal_perf_drive(store.as_ref(), &session_id).await },
+                    "turn_input_ingress.supersede_active_shift",
+                    async { seal_perf_shift(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
@@ -601,11 +600,11 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 // The deferral's completion gate is settled through the
                 // effect host that owns the turn-control promises; the phase
                 // measures the store's complete-and-defer commit, which ends
-                // the turn's root.
-                let mut completing = finishing_perf_root(
+                // the turn's run.
+                let mut completing = finishing_perf_run(
                     RuntimeCommit::persisted_state_for_test(&commit_state),
                     &turn_id,
-                    &turn_root,
+                    &turn_run,
                 );
                 if let Some(settlement) = completing.ingress.as_mut() {
                     settlement
@@ -640,7 +639,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     .await?
                     .into_iter()
                     .find(|read| {
-                        // With the turn's root ended, every open input is
+                        // With the turn's run ended, every open input is
                         // next-turn input, the deferred ones at their own
                         // positions (ADR 0101 §5.1).
                         matches!(read.status, lash_core::PendingTurnInputReadStatus::Open)
@@ -648,15 +647,15 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     })
                     .map(|read| read.input.input_id)
                     .ok_or_else(|| anyhow::anyhow!("expected an open next-turn input"))?;
-                let next_root =
+                let next_run =
                     lash_core::TurnId::fixture(format!("turn-input-ingress-next-{turn_index}"));
                 let (next, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.admit_next_turn_inputs",
                     async {
-                        admit_perf_root(
+                        admit_perf_run(
                             store.as_ref(),
                             &fence,
-                            &next_root,
+                            &next_run,
                             AdmittedHead::Input(next_head.clone()),
                             1,
                         )
@@ -678,8 +677,8 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 }
 
                 let (fence, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.supersede_next_drive",
-                    async { seal_perf_drive(store.as_ref(), &session_id).await },
+                    "turn_input_ingress.supersede_next_shift",
+                    async { seal_perf_shift(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
@@ -687,10 +686,10 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 let (next_admission, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.resume_next_admission",
                     async {
-                        admit_perf_root(
+                        admit_perf_run(
                             store.as_ref(),
                             &fence,
-                            &next_root,
+                            &next_run,
                             AdmittedHead::Input(next_head.clone()),
                             1,
                         )
@@ -725,11 +724,11 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     "turn_input_ingress.complete_next_turn_inputs",
                     async {
                         let mut commit = RuntimeCommit::persisted_state_for_test(&commit_state);
-                        commit.drive_fence = Some(Box::new(fence.clone()));
+                        commit.shift_fence = Some(Box::new(fence.clone()));
                         let result = store
-                            .commit_runtime_state(finishing_perf_root(
+                            .commit_runtime_state(finishing_perf_run(
                                 commit,
-                                &next_root,
+                                &next_run,
                                 &next_admission,
                             ))
                             .await?;
@@ -817,39 +816,39 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
 /// A head-preserving commit over `state` under `fence`.
 fn queued_work_stress_commit(
     state: &RuntimeSessionState,
-    fence: &lash_core::store::DriveFence,
+    fence: &lash_core::store::ShiftFence,
 ) -> RuntimeCommit {
     RuntimeCommit {
         graph: GraphAppend::PreserveHead,
-        drive_fence: Some(Box::new(fence.clone())),
+        shift_fence: Some(Box::new(fence.clone())),
         ..RuntimeCommit::persisted_state_for_test(state)
     }
 }
 
-/// Admit `root` headed by `head` under `fence`, composing at most
+/// Admit `run` headed by `head` under `fence`, composing at most
 /// `max_batches` joined wakes and every input its head's run takes.
-async fn admit_perf_root(
+async fn admit_perf_run(
     store: &RuntimePerfStore,
-    fence: &lash_core::store::DriveFence,
-    root: &lash_core::TurnId,
+    fence: &lash_core::store::ShiftFence,
+    run: &lash_core::TurnId,
     head: AdmittedHead,
     max_batches: usize,
-) -> anyhow::Result<Option<lash_core::store::RootAdmission>> {
+) -> anyhow::Result<Option<lash_core::store::RunAdmission>> {
     let mut request =
-        lash_core::testing::store_fixtures::admit_root_request_for_test(fence, root, head);
+        lash_core::testing::store_fixtures::admit_run_request_for_test(fence, run, head);
     request.policy = lash_core::testing::queued_work_admission_policy(max_batches);
     request.max_inputs = TURN_INPUT_INGRESS_ACTIVE_PER_TURN + TURN_INPUT_INGRESS_NEXT_PER_TURN;
-    Ok(store.admit_root(&request).await?)
+    Ok(store.admit_run(&request).await?)
 }
 
-/// `commit` as `root`'s final commit: it completes every row `admission`
-/// bound and writes the root's terminal.
-pub(super) fn finishing_perf_root(
+/// `commit` as `run`'s final commit: it completes every row `admission`
+/// bound and writes the run's terminal.
+pub(super) fn finishing_perf_run(
     mut commit: RuntimeCommit,
-    root: &lash_core::TurnId,
-    admission: &lash_core::store::RootAdmission,
+    run: &lash_core::TurnId,
+    admission: &lash_core::store::RunAdmission,
 ) -> RuntimeCommit {
-    let mut settlement = lash_core::store::IngressSettlement::new(root.clone());
+    let mut settlement = lash_core::store::IngressSettlement::new(run.clone());
     settlement
         .completed_batches
         .extend(admission.queued.as_ref().map(|queued| queued.completion()));
@@ -857,11 +856,11 @@ pub(super) fn finishing_perf_root(
         .completed_inputs
         .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
     commit.ingress = Some(settlement);
-    commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
-        commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
-        turn: lash_core::store::PhysicalTurn::derive_turn_id(root, 0),
-        root: root.clone(),
-        outcome: lash_core::store::RootCommittedOutcome::Finished(
+    commit.run_terminal = Some(Box::new(lash_core::store::RunTerminalWrite {
+        commit: lash_core::store::TurnCommitId::new(run.clone(), 0),
+        turn: lash_core::store::PhysicalTurn::derive_turn_id(run, 0),
+        run: run.clone(),
+        outcome: lash_core::store::RunCommittedOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: String::new(),
             },
@@ -870,18 +869,18 @@ pub(super) fn finishing_perf_root(
     commit
 }
 
-/// Admit what root `turn_id`'s `AfterWork` checkpoint step `step` takes
+/// Admit what run `turn_id`'s `AfterWork` checkpoint step `step` takes
 /// under `fence`.
 async fn admit_perf_checkpoint(
     store: &RuntimePerfStore,
-    fence: &lash_core::store::DriveFence,
+    fence: &lash_core::store::ShiftFence,
     turn_id: &lash_core::TurnId,
     step: &str,
 ) -> anyhow::Result<lash_core::store::CheckpointAdmission> {
     Ok(store
         .admit_at_checkpoint(&lash_core::store::CheckpointAdmissionRequest {
             fence: fence.clone(),
-            root: turn_id.clone(),
+            run: turn_id.clone(),
             turn_id: turn_id.clone(),
             checkpoint: lash_core::CheckpointKind::AfterWork,
             step: step.to_string(),

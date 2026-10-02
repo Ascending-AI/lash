@@ -69,7 +69,7 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
         "INSERT INTO lash_pending_turn_inputs
             (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
              submission_digest, enqueued_at_ms,
-             admitted_root, admitted_by)
+             admitted_run, admitted_by)
          VALUES (10003, 'accepted', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
                  'accepted', '{}', 'digest', 0, 'root', 'checkpoint')",
     )
@@ -79,7 +79,7 @@ async fn open_ingress_reads_seek_state_indexes_with_settled_history() {
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
             (enqueue_seq, batch_id, session_id, delivery_policy, work_kind,
-             authority_json, submission_digest, enqueued_at_ms, payload_json, admitted_root, admitted_by)
+             authority_json, submission_digest, enqueued_at_ms, payload_json, admitted_run, admitted_by)
          SELECT n, 'admitted-' || n, 'history', 'earliest_safe_boundary',
                 'turn', '{}', 'digest', 0, jsonb_build_object('type', 'process_wake')::text, 'root', 'admit'
          FROM generate_series(1, 10000) AS n",
@@ -250,7 +250,7 @@ fn a_state_token_renders_to_the_predicate_its_generator_spells() {
     ),);
     assert!(
         sql.pending_inputs
-            .release_root
+            .release_run
             .sql()
             .contains(&vocabulary::released_turn_input_state_sql("state")),
     );

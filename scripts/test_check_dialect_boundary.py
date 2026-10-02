@@ -47,7 +47,7 @@ CLEAN = {
         "- The law in [the seam proof](../../crates/lash/tests/seam_proof_dialect.rs), "
         f"`{FIXTURE_ID}` included.\n"
     ),
-    "docs/adr/0105-the-drive-is-deterministic-workflow-code.md": (
+    "docs/adr/0105-the-shift-is-deterministic-workflow-code.md": (
         "The evidence is the seam proof (`lane-seam-proof.report.md`).\n"
     ),
 }

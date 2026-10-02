@@ -1,10 +1,10 @@
 //! The committed content is a pure function of recorded outcomes, checked with
 //! the determinism harness (ADR 0105 §1; FIG-3672 P6).
 //!
-//! Each drive below is a turn in miniature over [`LocalTestCx`]: every model
+//! Each shift below is a turn in miniature over [`LocalTestCx`]: every model
 //! call, tool call and code cell is a recorded operation whose body streams
 //! observations through a [`TurnObserver`] from the execution side, and whose
-//! outcome is the machine emissions for it. The drive folds those emissions
+//! outcome is the machine emissions for it. The shift folds those emissions
 //! into a [`RecordedTurnAssembly`] and records the assembled turn's committed
 //! content as its commit bytes.
 //!
@@ -41,7 +41,7 @@ enum Host {
     StalledOneSecond,
 }
 
-/// The order in which the drive folds its parallel tool results.
+/// The order in which the shift folds its parallel tool results.
 #[derive(Clone, Copy)]
 enum Fold {
     /// Declaration order, as the turn machine incorporates tool results.
@@ -301,7 +301,7 @@ fn commit_content_repeats_under_perturbed_scheduling_and_a_stalled_host() {
             .entries
             .iter()
             .any(|entry| matches!(entry, TranscriptEntry::Commit { .. })),
-        "the drive records its commit bytes"
+        "the shift records its commit bytes"
     );
     prompt
         .transcript

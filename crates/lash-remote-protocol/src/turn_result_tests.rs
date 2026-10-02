@@ -15,9 +15,9 @@ fn remote_turn_status_projects_explicit_stopped_outcome_as_failed() {
 }
 
 #[test]
-fn remote_turn_status_names_a_parked_root_and_refuses_the_retired_queued_tag() {
+fn remote_turn_status_names_a_parked_run_and_refuses_the_retired_queued_tag() {
     let parked = RemoteTurnStatus::Parked {
-        root: TurnId::from("root"),
+        run: TurnId::from("run"),
         park_id: 7,
         reason: RemoteTurnParkReason {
             code: "binding_drift".to_string(),
@@ -29,7 +29,7 @@ fn remote_turn_status_names_a_parked_root_and_refuses_the_retired_queued_tag() {
     };
     let wire = serde_json::json!({
         "type": "parked",
-        "root": "root",
+        "run": "run",
         "park_id": 7,
         "reason": { "code": "binding_drift", "message": "tool `search` changed" },
         "since_ms": 1_000,
@@ -45,7 +45,7 @@ fn remote_turn_status_names_a_parked_root_and_refuses_the_retired_queued_tag() {
         serde_json::json!({"type": "answered"})
     );
     // Window 100 retired the queued outcome and status: no turn answers
-    // "queued" once the engine drives every accepted input.
+    // "queued" once the engine executes every accepted input.
     serde_json::from_value::<RemoteTurnStatus>(serde_json::json!({"type": "queued"}))
         .expect_err("queued is no longer a remote turn status");
     serde_json::from_value::<RemoteTurnOutcome>(serde_json::json!({"type": "queued", "ahead": 3}))
@@ -299,7 +299,7 @@ fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
 fn answered_report() -> RemoteTurnReport {
     RemoteTurnReport {
         session_id: SessionId::from("session"),
-        turn_id: TurnId::from("root"),
+        turn_id: TurnId::from("run"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -359,7 +359,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
         session_id: session_id.clone(),
         input_id: input_id.clone(),
         parked: RemoteParkedTurn {
-            root: "root".into(),
+            run: "run".into(),
             park_id: 7,
             reason: RemoteTurnParkReason {
                 code: "binding_drift".into(),
@@ -389,7 +389,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
         gaps: Vec::new(),
     };
     assert_eq!(settled.status(), RemoteTurnStatus::Answered);
-    assert_eq!(settled.root(), Some(&TurnId::from("root")));
+    assert_eq!(settled.run(), Some(&TurnId::from("run")));
     assert!(matches!(parked.status(), RemoteTurnStatus::Parked { .. }));
     assert!(matches!(stalled.status(), RemoteTurnStatus::Stalled { .. }));
     assert_eq!(withdrawn.status(), RemoteTurnStatus::Cancelled);
@@ -400,7 +400,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
         let value = serde_json::to_value(&outcome).expect("serialize");
         assert!(validator.is_valid(&value), "{value}");
         assert!(value.get("status").is_none());
-        assert!(value.get("root_id").is_none());
+        assert!(value.get("run_id").is_none());
         let wire = outcome
             .encode_json(&crate::negotiation::test_negotiated())
             .expect("encode");
@@ -430,7 +430,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
 fn a_remote_send_outcome_requires_the_data_owned_by_its_variant() {
     let invalid = serde_json::json!({
         "session_id": "session", "input_id": "ti:input",
-        "status": {"type": "answered"}, "root_id": null, "report": null, "gaps": []
+        "status": {"type": "answered"}, "run_id": null, "report": null, "gaps": []
     });
     assert!(
         serde_json::from_value::<RemoteSendOutcome>(invalid).is_err(),

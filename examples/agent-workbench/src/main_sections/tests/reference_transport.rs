@@ -1,7 +1,7 @@
 //! Reference client transport for the workbench's recoverable-chat
 //! observation stream, plus the deterministic corpus proving its invariant:
 //! **one stable output identity per turn** across live delivery, observer
-//! disconnect and reconnect, trimmed-gap refetch, and recovery re-drives
+//! disconnect and reconnect, trimmed-gap refetch, and recovery redrives
 //! (FIG-764).
 //!
 //! The transport is the client half of `/api/observations`. It consumes
@@ -9,7 +9,7 @@
 //! NDJSON body — and folds every delivery leg into one [`TurnOutputRow`] per
 //! `TurnId`. The row renders under the workbench's stable
 //! `workbench-assistant:{turn_id}` identity, so a second subscription leg, a
-//! replay-gap replacement, or a re-driven turn can never mint a second output
+//! replay-gap replacement, or a redriven turn can never mint a second output
 //! row for the same turn.
 //!
 //! The mapping, in the order the wire presents it:
@@ -32,7 +32,7 @@
 //!   clears the applied-identity window: everything at or before the
 //!   replacement snapshot is superseded.
 //! * `turn_started` under a turn id the transport already knows is a recovery
-//!   re-drive: the abandoned drive's provisional copy is superseded in place.
+//!   redrive: the abandoned shift's provisional copy is superseded in place.
 //!   The row — and so the output identity — stays the same.
 //! * `replace_from_settled` writes the settled text for each turn the snapshot
 //!   carries, keyed by the message's own turn provenance, and retires the
@@ -119,7 +119,7 @@ impl TurnOutputRow {
         self.settled_text.is_some()
     }
 
-    /// What a client renders: provisional text while a (re-)drive is live —
+    /// What a client renders: provisional text while a (re-)shift is live —
     /// it is newer than the last settled read — else the settled text, else
     /// the provisional terminal value.
     pub(crate) fn rendered(&self) -> Option<String> {
@@ -197,7 +197,7 @@ impl ReferenceTransport {
     /// Replace provisional state with the settled read view — the only
     /// authoritative text the transport ever renders. Rows for turns the
     /// snapshot does not yet carry keep their live provisional state; a
-    /// re-driven turn that committed twice collapses to the newest copy.
+    /// redriven turn that committed twice collapses to the newest copy.
     pub(crate) fn replace_from_settled(&mut self, snapshot: &StateReadSnapshot) {
         self.resume_cursor = Some(snapshot.observation.cursor.clone());
         for message in &snapshot.state.messages {
@@ -272,8 +272,8 @@ impl ReferenceTransport {
         let row = self.outputs.entry(turn_id).or_default();
         match &activity.event {
             RemoteTurnEvent::TurnStarted { .. } => {
-                // A fresh drive under an existing turn id is a re-drive: its
-                // provisional copy supersedes whatever the abandoned drive
+                // A fresh shift under an existing turn id is a redrive: its
+                // provisional copy supersedes whatever the abandoned shift
                 // left behind. The settled text stays — it is still the last
                 // canonical word until the next refetch.
                 row.provisional_prose.clear();
@@ -408,7 +408,7 @@ async fn apply_until_settled(
     panic!("turn {turn_id} never settled");
 }
 
-/// Drive one turn through the workbench's send and settlement path.
+/// Execute one turn through the workbench's send and settlement path.
 async fn drive_reference_turn(
     state: &AppState,
     session: &lash::LashSession,
@@ -423,7 +423,7 @@ async fn drive_reference_turn(
             turn_state: Arc::clone(&turn_state),
         })
         .await
-        .expect("drive turn");
+        .expect("shift turn");
     crate::restate::record_turn_output(
         state,
         session,
@@ -444,7 +444,7 @@ async fn drive_reference_turn(
 /// recovery is deterministic, and an optional effect layer over the
 /// backend's journaling host lets a test observe or fault turn effects.
 ///
-/// The core runs over `double`'s engine, which drives every accepted input
+/// The core runs over `double`'s engine, which executes every accepted input
 /// through its `LashSession` service; the double's process worker is this
 /// core's, so a turn's processes run in the double's `LashProcessWorkflow`.
 #[allow(clippy::too_many_arguments)]
@@ -570,10 +570,10 @@ fn retried_attempt_provider(superseded: &'static str, answer: &'static str) -> P
         .into_handle()
 }
 
-/// The provider behind the re-drive leg. Call 0 streams a partial and returns
-/// a cell that keeps the turn open — the journaled call the crashed drive
-/// bought and the re-drive must replay rather than re-buy. Every later call is
-/// a plain answer: the re-drive's own completion, then the queued drain's.
+/// The provider behind the redrive leg. Call 0 streams a partial and returns
+/// a cell that keeps the turn open — the journaled call the crashed shift
+/// bought and the redrive must replay rather than re-buy. Every later call is
+/// a plain answer: the redrive's own completion, then the queued drain's.
 fn redrive_provider(
     partial: &'static str,
     answers: &[&'static str],
@@ -603,7 +603,7 @@ fn redrive_provider(
                         call => {
                             let answer = answers
                                 .get(call - 1)
-                                .expect("the re-drive provider ran out of answers");
+                                .expect("the redrive provider ran out of answers");
                             send_delta(&request, answer);
                             Ok(text_response(answer))
                         }
@@ -861,7 +861,7 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     drop(client);
 }
 
-/// A provider retry inside one drive: the first attempt dies after partial
+/// A provider retry inside one shift: the first attempt dies after partial
 /// output, the runtime re-buys the generation, and `model_attempt_reset`
 /// retracts the superseded copy on the same row — never a second identity,
 /// never stale partial text left standing over the canonical answer.
@@ -936,14 +936,14 @@ async fn a_retried_attempt_replaces_partial_prose_on_the_same_row() {
     drop(client);
 }
 
-/// A faulted drive retries under the accepted root id. The transport keeps
-/// one output row, and a same-id send observes the settled root without
+/// A faulted shift retries under the accepted run id. The transport keeps
+/// one output row, and a same-id send observes the settled run without
 /// producing another row.
 #[tokio::test]
 async fn a_redriven_turn_keeps_its_output_identity() {
-    const CRASHED_PARTIAL: &str = "partial prose from the crashed drive";
-    const LOST_ANSWER: &str = "answer the crashed drive never journaled";
-    const REDRIVEN_ANSWER: &str = "answer from the recovery re-drive";
+    const CRASHED_PARTIAL: &str = "partial prose from the crashed shift";
+    const LOST_ANSWER: &str = "answer the crashed shift never journaled";
+    const REDRIVEN_ANSWER: &str = "answer from the recovery redrive";
     const NEXT_ANSWER: &str = "answer from the queued drain";
     let (provider, provider_calls) = redrive_provider(
         CRASHED_PARTIAL,
@@ -961,11 +961,11 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     )
     .await;
     let session_id = state.current_session_id();
-    // The root's handler dies before the server stores its second model
-    // call's result, on its first attempt: the server replays the root, the
+    // The run's handler dies before the server stores its second model
+    // call's result, on its first attempt: the server replays the run, the
     // first call's result comes back from the journal and the second runs
     // anew.
-    double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResult {
+    double.crash_run_execution(lash_restate_test::CrashPoint::BeforeRunResult {
         name: Some(format!("lash:{session_id}:turn-one:1:1:llm_call:6")),
     });
     let session = crate::created_session(&state.core, session_id.clone())
@@ -988,7 +988,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     assert_eq!(
         double.server().stats().crashes,
         1,
-        "the root crashed on its second model call"
+        "the run crashed on its second model call"
     );
     // The first model call replays from the journal: the provider answered
     // it once, and the second call twice — the crashed attempt and the
@@ -1015,7 +1015,7 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         .id("turn-one")
         .output()
         .await
-        .expect("same-id retry observes the settled root");
+        .expect("same-id retry observes the settled run");
     assert_eq!(retried.assistant_message(), Some(REDRIVEN_ANSWER));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
     assert_eq!(

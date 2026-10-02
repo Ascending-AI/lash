@@ -1,4 +1,4 @@
-//! Observation sinks a fixture installs to capture a drive's output.
+//! Observation sinks a fixture installs to capture a shift's output.
 
 use std::sync::Arc;
 
@@ -27,8 +27,8 @@ impl ChannelObservationSink {
 }
 
 impl crate::engine::ObservationSink for ChannelObservationSink {
-    fn observe(&self, observation: crate::engine::DriveObservation) {
-        let crate::engine::DriveObservation {
+    fn observe(&self, observation: crate::engine::ShiftObservation) {
+        let crate::engine::ShiftObservation {
             key,
             ordinal,
             event,

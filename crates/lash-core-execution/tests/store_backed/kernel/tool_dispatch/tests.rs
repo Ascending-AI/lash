@@ -1876,7 +1876,7 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         provider_call_id: None,
         tool_id: definition.id().to_string().into(),
         tool_name: "attempt_intents".into(),
-        args: json!({"value": "drive"}),
+        args: json!({"value": "shift"}),
         replay: None,
         prepared_payload: serde_json::Value::Null,
     };

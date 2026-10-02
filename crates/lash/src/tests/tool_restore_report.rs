@@ -261,16 +261,16 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     Ok(())
 }
 
-/// The engine's drive rebuilds a session runtime per admission. Under
-/// Require, a rebuild that lost a catalog member refuses the drive, typed and
+/// The engine's shift rebuilds a session runtime per admission. Under
+/// Require, a rebuild that lost a catalog member refuses the shift, typed and
 /// naming the lost member.
 #[tokio::test]
-async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()> {
+async fn require_refuses_a_shift_rebuild_that_lost_a_tool_source() -> Result<()> {
     let session_id = SessionId::from("fig-3367-queued");
     let seeding = restate_double(SEED).await;
     seed_session_with_a_persisted_tool(&seeding.lash_backend(), &session_id).await?;
     // The strict build is the deployment restarted over the same stores: its
-    // engine drives with the strict core's driver.
+    // engine executes with the strict core's `SessionShifts`.
     let strict = redeploy(seeding).await;
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(strict.lash_backend()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -281,21 +281,21 @@ async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()>
         .session(session_id.clone())
         .durable()
         .await?
-        .send(TurnInput::text("drive the strict rebuild"))
+        .send(TurnInput::text("shift the strict rebuild"))
         .await?;
     let error = match handle.output().await {
         Ok(report) => panic!("the rebuild must fail under Require, got {report:?}"),
         Err(error) => error,
     };
-    // The drive's refusal reaches the sender typed and naming the lost
+    // The shift's refusal reaches the sender typed and naming the lost
     // tool. (The engine classifies it by its runtime code, which is
     // `plugin_session_manager` today: making a lost source terminal on the
-    // engine's drive is FIG-3860's B6 follow-up.)
+    // engine's shift is FIG-3860's B6 follow-up.)
     assert!(
         error
             .to_string()
             .contains("requires every persisted tool source"),
-        "the drive refuses the rebuild on the lost tool source: {error}"
+        "the shift refuses the rebuild on the lost tool source: {error}"
     );
     assert!(
         error.to_string().contains("tool:app_lookup"),

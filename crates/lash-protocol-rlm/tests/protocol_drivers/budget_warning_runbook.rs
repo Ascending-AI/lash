@@ -6,7 +6,7 @@ use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
 };
 use lash_core::plugin::PluginFactory;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::testing::runtime_helpers::RecordingSink;
 use lash_core::{
     CommitBudget, LlmOutputPart, LlmResponse, PluginRuntimeEvent, QueuedWorkBatchingConfig,
@@ -161,7 +161,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 .await
                 .expect("open turn handler");
             let pressure = runtime
-                .drive_turn_frames(
+                .execute_turn_frames(
                     TurnInput::text("OLD-ONLY-4042"),
                     lash_core::facade_support::TurnOptions::new(
                         tokio_util::sync::CancellationToken::new(),
@@ -170,7 +170,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                     .with_events(&events),
                 )
                 .await
-                .expect("drive pressure turn");
+                .expect("shift pressure turn");
             pressure_handler.close().await.expect("close pressure handler");
             assert_eq!(pressure.turns.len(), 1);
             assert!(runtime.state().token_usage.total() >= 120);
@@ -182,7 +182,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 .await
                 .expect("open switch handler");
             let result = runtime
-                .drive_turn_frames(
+                .execute_turn_frames(
                     TurnInput::text("switch now"),
                     lash_core::facade_support::TurnOptions::new(
                         tokio_util::sync::CancellationToken::new(),
@@ -191,7 +191,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                     .with_events(&events),
                 )
                 .await
-                .expect("drive RLM turn");
+                .expect("shift RLM turn");
             handler.close().await.expect("close turn handler");
 
             let requests = requests.lock().expect("request lock");

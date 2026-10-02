@@ -138,7 +138,7 @@ The generated region below is checked against the live filenames and headings.
 | 0102 | [Every backend binds one journaled engine to one store set](0102-zero-infra-is-a-sqlite-in-memory-backend.md) |
 | 0103 | [Code cells replay by re-execution on every host](0103-code-cells-replay-by-re-execution-on-every-host.md) |
 | 0104 | [Restate is the only effect engine; SQL stores are storage](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md) |
-| 0105 | [The drive replays recorded decisions through the controller](0105-the-drive-is-deterministic-workflow-code.md) |
+| 0105 | [The shift replays recorded decisions through the controller](0105-the-shift-is-deterministic-workflow-code.md) |
 | 0106 | [Durable formats use migration, drain or coexistence](0106-durable-formats-upgrade-by-migration-or-drain.md) |
 | 0107 | [A process is named by a minted id, a start by its key](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) |
 | 0108 | [A process lives until a scope its start could reach](0108-a-process-lives-until-a-scope-its-start-could-reach.md) |

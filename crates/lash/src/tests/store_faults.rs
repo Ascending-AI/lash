@@ -2,16 +2,16 @@
 //! batch admission, and a committed child's reopen on every SQL backend.
 //! Transient failures and lost replies must preserve the clean answer,
 //! transcript and input applications; sticky refusals and corruption must
-//! answer typed within a deadline. Corruption met after a root's answer was
+//! answer typed within a deadline. Corruption met after a run's answer was
 //! published leaves that answer standing and is recorded as the session's
 //! typed fault (ADR 0109 §9). Only ticketed outcome rows may differ.
 //!
 //! A send to a session the engine cannot open is answered, never left
 //! waiting (FIG-4597).
 //!
-//! The engine opens a session's runtime for every drive
-//! (`core/session_driver.rs`, `open_runtime`). Each way that open ends
-//! terminally answers the sender of the input the drive was for, within a
+//! The engine opens a session's runtime for every shift
+//! (`core/session_shifts.rs`, `open_runtime`). Each way that open ends
+//! terminally answers the sender of the input the shift was for, within a
 //! bound, with the error that names the cause:
 //!
 //! - no catalog row, or a deleted one: the facade refuses the send before
@@ -35,7 +35,7 @@
 //!
 //! A tool source lost under `ToolSourcePolicy::Require` is the runtime
 //! build's own refusal; `tool_restore_report.rs` holds its law. A deployment
-//! under another Restate authority opens and is refused at its root's
+//! under another Restate authority opens and is refused at its run's
 //! admission; `wrong_authority_redeploy.rs` holds that law.
 
 use super::*;
@@ -92,11 +92,11 @@ fn assert_nothing_paused(double: &lash_restate_test::RestateTestBackend) {
     assert!(paused.is_empty(), "nothing is left paused: {paused:?}");
 }
 
-/// The runtime error the engine's drive refused the send with.
-fn drive_refusal(id: &str, error: EmbedError) -> lash_core::RuntimeError {
+/// The runtime error the engine's shift refused the send with.
+fn shift_refusal(id: &str, error: EmbedError) -> lash_core::RuntimeError {
     match error {
         EmbedError::Runtime(error) => error,
-        other => panic!("{id}: the drive's refusal is a runtime error: {other:?}"),
+        other => panic!("{id}: the shift's refusal is a runtime error: {other:?}"),
     }
 }
 
@@ -148,7 +148,7 @@ async fn a_send_to_a_catalog_row_with_no_head_is_answered_creation_unrecorded() 
     )
     .await
     .map_err(EmbedError::Store)?;
-    let error = drive_refusal(ID, refusal_of(&core, &double, ID).await);
+    let error = shift_refusal(ID, refusal_of(&core, &double, ID).await);
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::SessionCreationUnrecorded,
@@ -216,7 +216,7 @@ async fn a_send_to_a_session_whose_plugin_refuses_to_build_is_answered_with_the_
         .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, ID).await?;
     refuse.store(true, Ordering::SeqCst);
-    let error = drive_refusal(ID, refusal_of(&core, &double, ID).await);
+    let error = shift_refusal(ID, refusal_of(&core, &double, ID).await);
     assert_eq!(
         error.code,
         lash_core::RuntimeErrorCode::PluginSessionManager,
@@ -253,8 +253,8 @@ impl CatalogRefusal {
 }
 
 /// The send is accepted, and then the catalog refuses the lookup the
-/// engine's open makes: the sender is answered with the drive's refusal.
-async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
+/// engine's open makes: the sender is answered with the shift's refusal.
+async fn a_send_whose_shift_meets_a_refusing_catalog_is_answered(
     refusal: CatalogRefusal,
 ) -> Result<lash_core::RuntimeError> {
     let id = format!("catalog-refuses-{refusal:?}").to_lowercase();
@@ -271,7 +271,7 @@ async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
         .session(SessionId::fixture(id.clone()))
         .durable()
         .await?;
-    // The catalog refuses from before the send, so no drive opens the
+    // The catalog refuses from before the send, so no shift opens the
     // session ahead of the refusal; the facade's own acquisition was made
     // above.
     durable.pending_turn_inputs().await?;
@@ -295,7 +295,7 @@ async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
     };
     let error = match answer {
         Ok(output) => panic!("{id}: the session cannot open, got {:?}", output.result),
-        Err(error) => drive_refusal(&id, error),
+        Err(error) => shift_refusal(&id, error),
     };
     assert_nothing_paused(&double);
     Ok(error)
@@ -304,7 +304,7 @@ async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_whose_open_meets_a_typed_store_refusal_is_answered_with_it() -> Result<()> {
     let error =
-        a_send_whose_drive_meets_a_refusing_catalog_is_answered(CatalogRefusal::WriterFenced)
+        a_send_whose_shift_meets_a_refusing_catalog_is_answered(CatalogRefusal::WriterFenced)
             .await?;
     assert_eq!(
         error.code,
@@ -325,7 +325,7 @@ async fn a_send_whose_open_meets_a_typed_store_refusal_is_answered_with_it() -> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_whose_open_meets_an_untyped_store_refusal_is_answered_naming_it() -> Result<()> {
     let error =
-        a_send_whose_drive_meets_a_refusing_catalog_is_answered(CatalogRefusal::Unsupported)
+        a_send_whose_shift_meets_a_refusing_catalog_is_answered(CatalogRefusal::Unsupported)
             .await?;
     assert_eq!(
         error.code,
@@ -634,7 +634,7 @@ mod sweep {
         let mut open_hold = None;
         let mut accepted = None;
         if matches!(scenario, Scenario::Open | Scenario::Assembly) {
-            open_hold = Some(double.hold_session_drive(&SessionId::from(ID)).await);
+            open_hold = Some(double.hold_session_shift(&SessionId::from(ID)).await);
             accepted = Some(
                 submit(&durable, false)
                     .await
@@ -646,7 +646,7 @@ mod sweep {
                     .nth(script.calls(StoreOp::load_session_window) + 1)
                     .after()
                     .pause();
-                open_hold.take().expect("held drive").release();
+                open_hold.take().expect("held shift").release();
                 gate.reached(1).await;
                 ready = Some(gate);
             }
@@ -741,13 +741,13 @@ mod sweep {
         // Finish background delivery before inspecting the durable result.
         // A sticky fault that wedges the engine is evidence, not a hung law.
         let settled =
-            tokio::time::timeout(WITHIN, double.settle_session_drive(&SessionId::from(ID))).await;
+            tokio::time::timeout(WITHIN, double.settle_session_shift(&SessionId::from(ID))).await;
         let mut answer = answer;
         if settled.is_err() {
-            answer = Err("the drive did not settle".into());
+            answer = Err("the shift did not settle".into());
         }
         // Corruption met after the answer was published is recorded beside
-        // the drive: by the root's scope close, or by its next admission.
+        // the shift: by the run's scope close, or by its next admission.
         let mut faults = Vec::new();
         if matches!(
             (&answer, cell),
@@ -1185,7 +1185,7 @@ mod sweep {
             .await
             .expect("create the session");
         armed.store(true, Ordering::SeqCst);
-        let error = drive_refusal(SESSION, refusal_of(&core, &double, SESSION).await);
+        let error = shift_refusal(SESSION, refusal_of(&core, &double, SESSION).await);
         assert_typed_refusal(
             error,
             serde_json::json!({
@@ -1213,7 +1213,7 @@ mod sweep {
             .durable()
             .await
             .expect("durable handle");
-        let hold = double.hold_session_drive(&SessionId::from(SESSION)).await;
+        let hold = double.hold_session_shift(&SessionId::from(SESSION)).await;
         let sent = durable
             .send(TurnInput::text("first"))
             .id("unsupported-input")
@@ -1229,7 +1229,7 @@ mod sweep {
             .await
             .expect("the open answers")
             .expect_err("the generation is refused");
-        let error = drive_refusal(SESSION, error);
+        let error = shift_refusal(SESSION, error);
         assert_nothing_paused(&double);
         assert_typed_refusal(
             error,
@@ -1244,7 +1244,7 @@ mod sweep {
         );
     }
 
-    /// The drive's admission meets an unreadable head before a runtime opens:
+    /// The shift's admission meets an unreadable head before a runtime opens:
     /// the sender is refused once, as corrupt stored data.
     async fn undecodable_head_is_refused_corrupt(storage: Storage) {
         const ID: &str = "undecodable-head";
@@ -1271,9 +1271,9 @@ mod sweep {
             .await
             .expect("resolve before the corruption");
         let id = SessionId::from(ID);
-        // The input is accepted over a readable head and its drive is held,
-        // so the first read of the corrupt head is the drive's admission.
-        let hold = double.hold_session_drive(&id).await;
+        // The input is accepted over a readable head and its shift is held,
+        // so the first read of the corrupt head is the shift's admission.
+        let hold = double.hold_session_shift(&id).await;
         let accepted = durable
             .send(TurnInput::text("accepted before the head is corrupt"))
             .await
@@ -1293,11 +1293,11 @@ mod sweep {
         let answer = tokio::time::timeout(ANSWERS_WITHIN, accepted.output())
             .await
             .unwrap_or_else(|_| panic!("no answer, {:?}", invocations(&double)));
-        tokio::time::timeout(ANSWERS_WITHIN, double.settle_session_drive(&id))
+        tokio::time::timeout(ANSWERS_WITHIN, double.settle_session_shift(&id))
             .await
-            .expect("the drive ends without a paused invocation");
+            .expect("the shift ends without a paused invocation");
         assert_nothing_paused(&double);
-        let error = drive_refusal(ID, answer.expect_err("the drive is refused"));
+        let error = shift_refusal(ID, answer.expect_err("the shift is refused"));
         assert_eq!(
             error.code,
             lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
@@ -1407,7 +1407,7 @@ mod sweep {
         );
     }
 
-    /// Corrupt stored data met by a root's owed scope close, after its
+    /// Corrupt stored data met by a run's owed scope close, after its
     /// answer was published (FIG-4777): the answer stands, the close's
     /// obligation stalls refused instead of retrying, and the session
     /// carries the typed fault, which refuses every later send until an
@@ -1480,7 +1480,7 @@ mod sweep {
             serde_json::to_value(&fault.record.cause).expect("typed cause"),
             cause
         );
-        let lash_core::store::SessionFaultOrigin::ScopeClose { root } = &fault.record.origin else {
+        let lash_core::store::SessionFaultOrigin::ScopeClose { run } = &fault.record.origin else {
             panic!("the scope close met the fault: {fault:?}");
         };
 
@@ -1504,7 +1504,7 @@ mod sweep {
             stalled.key,
             Ok(lash_core::store::ObligationKey::ScopeClose {
                 session_id: id.clone(),
-                root: root.clone(),
+                run: run.clone(),
             })
         );
         assert_eq!(
@@ -1515,9 +1515,9 @@ mod sweep {
             stalled.last_error.as_ref().map(|error| error.code.clone()),
             Some(lash_core::RuntimeErrorCode::RuntimeStoreCorrupt)
         );
-        tokio::time::timeout(ANSWERS_WITHIN, double.settle_session_drive(&id))
+        tokio::time::timeout(ANSWERS_WITHIN, double.settle_session_shift(&id))
             .await
-            .expect("the drive ends");
+            .expect("the shift ends");
         assert_nothing_paused(&double);
 
         if !cleared {
@@ -1529,7 +1529,7 @@ mod sweep {
             .await
             .expect("the second send is answered")
             .expect_err("a faulted session admits nothing");
-            let refused = drive_refusal(SESSION, refused);
+            let refused = shift_refusal(SESSION, refused);
             assert_eq!(
                 refused.code,
                 lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,

@@ -2,16 +2,16 @@
 //! publication is a retained revision until the host collects, and a pin is a
 //! name (an input, a turn or a revision) that only host collection reads.
 //!
-//! Every law drives real roots through the store: an accepted input, the
-//! root's admission, and its final commit, which writes the terminal that
+//! Every law executes real runs through the store: an accepted input, the
+//! run's admission, and its final commit, which writes the terminal that
 //! names the revision the turn published. A fork "is" a turn when the fork's
 //! head reads back the window, checkpoint, frame and model the turn's commit
 //! published.
 
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_core::store::{AdmittedHead, ConformanceDeployment, DriveFence, RootAdmission};
-use lash_core::testing::store_fixtures::seal_drive_fence_for_test;
+use lash_core::store::{AdmittedHead, ConformanceDeployment, RunAdmission, ShiftFence};
+use lash_core::testing::store_fixtures::seal_shift_fence_for_test;
 use lash_sansio::{SessionId, TurnId};
 use pretty_assertions::assert_eq;
 
@@ -24,7 +24,7 @@ struct CommittedTurn {
     state: serde_json::Value,
 }
 
-/// One session a law drives turns on.
+/// One session a law executes turns on.
 struct PinLaw {
     factory: Arc<dyn ConformanceDeployment>,
     request: crate::SessionStoreCreateRequest,
@@ -78,25 +78,20 @@ impl PinLaw {
             .input_id
     }
 
-    /// Admit `root` headed by `head` under a fresh drive fence.
-    async fn admit(&self, root: &str, head: &crate::InputId) -> (DriveFence, RootAdmission) {
-        let fence = seal_drive_fence_for_test(self.store(), self.id(), root).await;
-        let admission = admitted_root(
-            self.store(),
-            &fence,
-            root,
-            AdmittedHead::Input(head.clone()),
-        )
-        .await;
+    /// Admit `run` headed by `head` under a fresh shift fence.
+    async fn admit(&self, run: &str, head: &crate::InputId) -> (ShiftFence, RunAdmission) {
+        let fence = seal_shift_fence_for_test(self.store(), self.id(), run).await;
+        let admission =
+            admitted_run(self.store(), &fence, run, AdmittedHead::Input(head.clone())).await;
         (fence, admission)
     }
 
-    /// Land `root`'s final commit: one new node, a checkpoint component only
+    /// Land `run`'s final commit: one new node, a checkpoint component only
     /// this turn wrote, and the terminal that names the published revision.
     async fn commit(
         &self,
-        root: &str,
-        fence: &DriveFence,
+        run: &str,
+        fence: &ShiftFence,
         settlement: crate::store::IngressSettlement,
     ) -> CommittedTurn {
         let mut state = crate::conformance::helpers::load_window_state(self.store(), self.id())
@@ -107,10 +102,10 @@ impl PinLaw {
                 ..crate::RuntimeSessionState::new(self.request.config.session_policy())
             });
         state.ensure_agent_frame_initialized();
-        append_conformance_event_node(&mut state, &format!("{}:{root}", self.id()), root);
-        state.set_execution_state_snapshot(Some(root.as_bytes().to_vec().into()));
+        append_conformance_event_node(&mut state, &format!("{}:{run}", self.id()), run);
+        state.set_execution_state_snapshot(Some(run.as_bytes().to_vec().into()));
         let operation =
-            crate::OperationId::turn(self.id(), TurnId::fixture(root.to_string()), "final");
+            crate::OperationId::turn(self.id(), TurnId::fixture(run.to_string()), "final");
         let (commit, _) =
             crate::RuntimeCommit::persisted_state_with_operation(&mut state, operation)
                 .expect("build the turn's commit");
@@ -125,11 +120,11 @@ impl PinLaw {
         }
     }
 
-    /// Accept an input, admit `root` with it and commit the root.
-    async fn turn(&self, root: &str) -> CommittedTurn {
-        let input = self.accept(root, false).await;
-        let (fence, admission) = self.admit(root, &input).await;
-        self.commit(root, &fence, completing_admission(root, &admission))
+    /// Accept an input, admit `run` with it and commit the run.
+    async fn turn(&self, run: &str) -> CommittedTurn {
+        let input = self.accept(run, false).await;
+        let (fence, admission) = self.admit(run, &input).await;
+        self.commit(run, &fence, completing_admission(run, &admission))
             .await
     }
 
@@ -277,7 +272,7 @@ fn pruned(error: &crate::StoreError) -> Option<(&SessionId, &crate::Target)> {
 }
 
 /// Law 1, pin timing. T2 is pinned (a) through its input before it starts,
-/// (b) out of band through the unfinished root while it runs, or (c) by its
+/// (b) out of band through the unfinished run while it runs, or (c) by its
 /// revision after T3 committed. In each case a host collection keeps T2 and
 /// the head, releases T1, and a fork of the pinned target is T2's committed
 /// state exactly.
@@ -311,11 +306,11 @@ pub async fn a_pin_written_before_during_or_after_its_turn_keeps_that_turn_throu
         if timing == Timing::DuringByTurn {
             let running = law
                 .store()
-                .unfinished_root(law.id())
+                .unfinished_run(law.id())
                 .await
-                .expect("read the unfinished root")
+                .expect("read the unfinished run")
                 .expect("T2 is running")
-                .root;
+                .run;
             assert_eq!(running, TurnId::from("t2"));
             target = crate::Target::Turn(running);
             law.factory
@@ -412,14 +407,14 @@ pub async fn a_pin_racing_its_turns_commit_and_the_next_admission_keeps_the_turn
     law.assert_fork_is(&target, &second, "raced").await;
 }
 
-/// Law 2. An input its first root handed back resolves to the root that
-/// later applied it, never to the root that deferred it; inputs merged into
-/// one root resolve to that root; and a pin written twice is one pin.
+/// Law 2. An input its first run handed back resolves to the run that
+/// later applied it, never to the run that deferred it; inputs merged into
+/// one run resolve to that run; and a pin written twice is one pin.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_merged_or_deferred_input_resolves_to_the_root_that_applied_it(
+pub async fn a_merged_or_deferred_input_resolves_to_the_run_that_applied_it(
     factory: Arc<dyn ConformanceDeployment>,
 ) {
     let law = PinLaw::new(&factory, "pin-merge-defer").await;
@@ -459,10 +454,10 @@ pub async fn a_merged_or_deferred_input_resolves_to_the_root_that_applied_it(
         admission
             .inputs
             .as_ref()
-            .expect("the root admitted inputs")
+            .expect("the run admitted inputs")
             .input_ids(),
         vec![merged.clone(), head.clone()],
-        "the root headed by the second input takes the first with it"
+        "the run headed by the second input takes the first with it"
     );
     let merging = law
         .commit("rc", &fence, completing_admission("rc", &admission))
@@ -485,7 +480,7 @@ pub async fn a_merged_or_deferred_input_resolves_to_the_root_that_applied_it(
     assert_eq!(
         law.retained().await,
         vec![applying.revision, merging.revision, last.revision],
-        "each pinned input keeps the revision of the root that applied it"
+        "each pinned input keeps the revision of the run that applied it"
     );
     law.assert_fork_is(&deferred_target, &applying, "deferred")
         .await;
@@ -504,8 +499,8 @@ pub async fn every_turn_forks_until_the_host_collects_and_refuses_pruned_after(
         state: law.head_state(law.id()).await,
     };
     let mut turns = Vec::new();
-    for root in ["t1", "t2", "t3"] {
-        turns.push((root, law.turn(root).await));
+    for run in ["t1", "t2", "t3"] {
+        turns.push((run, law.turn(run).await));
     }
     assert_eq!(
         law.retained().await,
@@ -514,17 +509,17 @@ pub async fn every_turn_forks_until_the_host_collects_and_refuses_pruned_after(
     );
     law.assert_fork_is(&crate::Target::Revision(0), &created, "created")
         .await;
-    for (root, turn) in &turns {
+    for (run, turn) in &turns {
         law.assert_fork_is(
-            &crate::Target::Turn(TurnId::from(*root)),
+            &crate::Target::Turn(TurnId::from(*run)),
             turn,
-            &format!("{root}-by-turn"),
+            &format!("{run}-by-turn"),
         )
         .await;
         law.assert_fork_is(
             &crate::Target::Revision(turn.revision),
             turn,
-            &format!("{root}-by-revision"),
+            &format!("{run}-by-revision"),
         )
         .await;
     }
@@ -536,16 +531,16 @@ pub async fn every_turn_forks_until_the_host_collects_and_refuses_pruned_after(
     assert_eq!(law.retained().await, vec![head.revision]);
     law.assert_refused(&crate::Target::Revision(0), "created-late", pruned)
         .await;
-    for (root, turn) in &turns {
+    for (run, turn) in &turns {
         law.assert_refused(
-            &crate::Target::Turn(TurnId::from(*root)),
-            &format!("{root}-by-turn-late"),
+            &crate::Target::Turn(TurnId::from(*run)),
+            &format!("{run}-by-turn-late"),
             pruned,
         )
         .await;
         law.assert_refused(
             &crate::Target::Revision(turn.revision),
-            &format!("{root}-by-revision-late"),
+            &format!("{run}-by-revision-late"),
             pruned,
         )
         .await;
@@ -717,13 +712,13 @@ pub async fn every_reclaimer_keeps_a_pinned_turn_until_its_last_pin_is_released(
 }
 
 /// The session retention policy's window: `LastTurns(n)` keeps the last `n`
-/// terminal roots' revisions and `HeadOnly` only the head, each releasing at
+/// terminal runs' revisions and `HeadOnly` only the head, each releasing at
 /// commit with no host collection; a pin keeps a turn outside either window.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn the_retention_window_counts_terminal_roots_and_pins_extend_it(
+pub async fn the_retention_window_counts_terminal_runs_and_pins_extend_it(
     factory: Arc<dyn ConformanceDeployment>,
 ) {
     let law = PinLaw::new(&factory, "retention-window").await;
@@ -757,7 +752,7 @@ pub async fn the_retention_window_counts_terminal_roots_and_pins_extend_it(
     assert_eq!(
         law.retained().await,
         vec![first.revision, third.revision, fourth.revision],
-        "the last two terminal roots and the pinned turn stay; the commits released the rest"
+        "the last two terminal runs and the pinned turn stay; the commits released the rest"
     );
     law.assert_refused(&crate::Target::Revision(second.revision), "outside", pruned)
         .await;
@@ -778,7 +773,7 @@ pub async fn the_retention_window_counts_terminal_roots_and_pins_extend_it(
     assert_eq!(law.retained().await, vec![first.revision, fifth.revision]);
 }
 
-/// Law 5. A target whose root has not finished refuses `Pending`; a root
+/// Law 5. A target whose run has not finished refuses `Pending`; a run
 /// that ended without a commit and a withdrawn input refuse `Unavailable`.
 /// Neither ever forks the head in the target's place, and a pin on such a
 /// target is accepted and keeps nothing.
@@ -793,7 +788,7 @@ pub async fn pending_and_unavailable_targets_refuse_typed_and_never_fork_the_hea
     let first = law.turn("t1").await;
     let head_before = law.head_state(law.id()).await;
 
-    // Accepted, not admitted: no root has taken the input.
+    // Accepted, not admitted: no run has taken the input.
     let input = law.accept("t2", true).await;
     let by_input = crate::Target::Input(input.clone());
     let by_turn = crate::Target::Turn(TurnId::from("t2"));
@@ -817,27 +812,27 @@ pub async fn pending_and_unavailable_targets_refuse_typed_and_never_fork_the_hea
     law.assert_refused(&by_turn, "running-by-turn", pending)
         .await;
 
-    // The root ends without a commit.
+    // The run ends without a commit.
     let refusal = lash_core::RuntimeError::new(
         lash_core::RuntimeErrorCode::StoreCommitSuperseded,
-        "the root is refused before it commits",
+        "the run is refused before it commits",
     );
     assert!(
         matches!(
             law.store()
-                .end_refused_root(&fence, &TurnId::from("t2"), &refusal, 1)
+                .end_refused_run(&fence, &TurnId::from("t2"), &refusal, 1)
                 .await
-                .expect("end the refused root"),
-            crate::store::RootEnd::Ended(_)
+                .expect("end the refused run"),
+            crate::store::RunEndOutcome::Ended(_)
         ),
-        "the refusal ends the root"
+        "the refusal ends the run"
     );
     law.assert_refused(&by_turn, "refused-by-turn", unavailable)
         .await;
     law.assert_refused(&by_input, "refused-by-input", unavailable)
         .await;
 
-    // An input withdrawn before any root took it.
+    // An input withdrawn before any run took it.
     let withdrawn = law.accept("withdrawn", true).await;
     law.store()
         .cancel_pending_turn_input(law.id(), withdrawn.as_str())

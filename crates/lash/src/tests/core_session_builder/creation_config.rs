@@ -375,7 +375,7 @@ async fn a_session_created_by_create_runs_its_first_opened_turn_with_the_creatio
     Ok(())
 }
 
-/// A session created by `create()` and first driven by the engine — a send
+/// A session created by `create()` and first executed by the engine — a send
 /// through its durable handle, with no host open — runs with the creation
 /// config, not the core's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

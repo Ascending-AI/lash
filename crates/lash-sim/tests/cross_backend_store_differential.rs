@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_core::{
     AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
     ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity, PendingTurnInputDraft,
@@ -102,7 +102,7 @@ enum CaseName {
     IdenticalAndMutatedTurnCommitReplay,
     TurnInputAdmissionAfterHandoff,
     QueuedWorkAdmissionAfterHandoff,
-    UnfinishedRootRefusesRival,
+    UnfinishedRunRefusesRival,
     CheckpointBodiesThenRefOnly,
     CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
@@ -115,14 +115,14 @@ enum CaseName {
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
-    LostRootRecovery,
-    RootEnd,
+    LostRunRecovery,
+    RunEndOutcome,
     PendingFollowOnRaise,
-    RootAdmissionReplay,
+    RunAdmissionReplay,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
-    RootCancelLedger,
-    RootForkLedger,
+    RunCancelLedger,
+    RunForkLedger,
     CorruptGraphNodeRefusals,
     CorruptPendingTurnInputRefusals,
     CorruptQueuedWorkRefusals,
@@ -156,7 +156,7 @@ impl CaseName {
             Self::QueuedWorkAdmissionAfterHandoff => {
                 "queued_work_admission_settles_only_under_the_live_fence"
             }
-            Self::UnfinishedRootRefusesRival => "unfinished_root_refuses_a_rival_admission",
+            Self::UnfinishedRunRefusesRival => "unfinished_run_refuses_a_rival_admission",
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
@@ -165,20 +165,20 @@ impl CaseName {
             Self::ForeignLineageFork => "fork_accepts_foreign_lineage",
             Self::Rewind => "rewind_fork_delete_source_refork",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
-            Self::QueuedWorkAdmissionReleased => "queued_work_admission_released_by_root_terminal",
+            Self::QueuedWorkAdmissionReleased => "queued_work_admission_released_by_run_terminal",
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
-            Self::LostRootRecovery => "lost_root_recovery",
-            Self::RootEnd => "refused_root_end",
+            Self::LostRunRecovery => "lost_run_recovery",
+            Self::RunEndOutcome => "refused_run_end",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
-            Self::RootAdmissionReplay => "root_admission_replays_exact_result_after_drive_handoff",
+            Self::RunAdmissionReplay => "run_admission_replays_exact_result_after_shift_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
-            Self::RootCancelLedger => "root_cancel_ledger",
-            Self::RootForkLedger => "root_fork_ledger",
-            Self::SessionCloseLedger => "session_close_ledger_closes_roots_and_tracks_its_intent",
+            Self::RunCancelLedger => "run_cancel_ledger",
+            Self::RunForkLedger => "run_fork_ledger",
+            Self::SessionCloseLedger => "session_close_ledger_closes_runs_and_tracks_its_intent",
             Self::CorruptGraphNodeRefusals => "corrupt_graph_node_refuses_every_reader",
             Self::CorruptPendingTurnInputRefusals => {
                 "corrupt_pending_turn_input_refuses_list_and_admission"
@@ -221,7 +221,7 @@ enum StoreOperation {
     /// (ADR 0101 §3): `owed_turn_id` set is the frame-switch commit that
     /// leaves the head owing that turn; `None` is the follow-on turn's own
     /// terminal commit, which clears the fact. Seeded so the inventory can
-    /// drive `raise_pending_follow_on_attempts` over a live fact.
+    /// shift `raise_pending_follow_on_attempts` over a live fact.
     CommitFollowOn {
         label: &'static str,
         expected_head_revision: u64,
@@ -243,27 +243,27 @@ enum StoreOperation {
         slot: LeaseSlot,
         owner: &'static str,
     },
-    /// Admit the differential root headed by the case's open `head` under
-    /// `lease`. A later admission of the same root, under any fence, must
+    /// Admit the differential run headed by the case's open `head` under
+    /// `lease`. A later admission of the same run, under any fence, must
     /// return the recorded admission unchanged.
-    AdmitRoot {
+    AdmitRun {
         lease: LeaseSlot,
         head: HeadKind,
     },
-    /// Admit a second root, headed by the case's next-turn input, while the
-    /// differential root is unfinished: every backend must refuse it
-    /// `UnfinishedRootConflict` and write nothing.
-    AdmitRivalRoot {
+    /// Admit a second run, headed by the case's next-turn input, while the
+    /// differential run is unfinished: every backend must refuse it
+    /// `UnfinishedRunConflict` and write nothing.
+    AdmitRivalRun {
         lease: LeaseSlot,
     },
-    /// End the differential root handing every row it admitted back open.
-    EndRootReleasing {
+    /// End the differential run handing every row it admitted back open.
+    EndRunReleasing {
         lease: LeaseSlot,
     },
-    /// End the differential root completing every row it admitted, under
+    /// End the differential run completing every row it admitted, under
     /// `lease`. Under a superseded fence every backend must refuse it
-    /// `StaleDriveFence` and write nothing.
-    EndRootCompleting {
+    /// `StaleShiftFence` and write nothing.
+    EndRunCompleting {
         lease: LeaseSlot,
         expected_head_revision: u64,
     },
@@ -335,24 +335,24 @@ impl StoreOperation {
                 slot: LeaseSlot::Successor,
                 ..
             } => "acquire_successor_session_lease_generation",
-            Self::AdmitRoot {
+            Self::AdmitRun {
                 lease: LeaseSlot::First,
                 ..
-            } => "admit_root_under_first_fence",
-            Self::AdmitRoot {
+            } => "admit_run_under_first_fence",
+            Self::AdmitRun {
                 lease: LeaseSlot::Successor,
                 ..
-            } => "admit_root_under_successor_fence",
-            Self::AdmitRivalRoot { .. } => "admit_rival_root_while_unfinished",
-            Self::EndRootReleasing { .. } => "end_root_releasing_its_rows",
-            Self::EndRootCompleting {
+            } => "admit_run_under_successor_fence",
+            Self::AdmitRivalRun { .. } => "admit_rival_run_while_unfinished",
+            Self::EndRunReleasing { .. } => "end_run_releasing_its_rows",
+            Self::EndRunCompleting {
                 lease: LeaseSlot::First,
                 ..
-            } => "end_root_completing_under_first_fence",
-            Self::EndRootCompleting {
+            } => "end_run_completing_under_first_fence",
+            Self::EndRunCompleting {
                 lease: LeaseSlot::Successor,
                 ..
-            } => "end_root_completing_under_successor_fence",
+            } => "end_run_completing_under_successor_fence",
             Self::ReleaseSessionLease { .. } => "release_first_session_lease_generation",
             Self::ColdReopenSession => "cold_reopen_session",
             Self::DeleteSession => "delete_session",
@@ -446,7 +446,7 @@ fn differential_frame_key(node_id: &str) -> lash_core::FrameKey {
 fn is_frame_alias(node_id: &str) -> bool {
     matches!(
         node_id,
-        "active-frame" | "collision" | "root" | "root-end-node"
+        "active-frame" | "collision" | "root" | "run-end-node"
     )
 }
 
@@ -482,7 +482,7 @@ enum LeaseSlot {
     Successor,
 }
 
-/// Which open row heads the differential root's admission.
+/// Which open row heads the differential run's admission.
 #[derive(Clone, Copy, Debug)]
 enum HeadKind {
     /// The case's next-turn input.
@@ -491,9 +491,9 @@ enum HeadKind {
     Batch,
 }
 
-/// The root the admission cases admit, and the rival they refuse.
-const DIFFERENTIAL_ROOT_ID: &str = "differential-root";
-const RIVAL_ROOT_ID: &str = "differential-rival-root";
+/// The run the admission cases admit, and the rival they refuse.
+const DIFFERENTIAL_RUN_ID: &str = "differential-run";
+const RIVAL_RUN_ID: &str = "differential-rival-run";
 
 fn append(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec {
     GraphSpec {
@@ -654,18 +654,18 @@ fn generated_cases() -> Vec<GeneratedCase> {
         fork_cases::rewind_case(),
         session_lifecycle_cases::attachment_adoption_case(),
         admission_cases::queued_work_admission_released(),
-        admission_cases::unfinished_root_refuses_rival(),
+        admission_cases::unfinished_run_refuses_rival(),
         admission_cases::queued_work_admission_after_handoff(),
         session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
-        surface_sweep::lost_root_recovery_case(),
-        surface_sweep::refused_root_end_case(),
+        surface_sweep::lost_run_recovery_case(),
+        surface_sweep::refused_run_end_case(),
         surface_sweep::pending_follow_on_raise_case(),
-        surface_sweep::root_admission_replay_case(),
+        surface_sweep::run_admission_replay_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
-        surface_sweep::root_control_case(false),
-        surface_sweep::root_control_case(true),
+        surface_sweep::run_control_case(false),
+        surface_sweep::run_control_case(true),
         session_lifecycle_cases::stale_handle_after_delete_case(),
     ]
     .into_iter()
@@ -990,10 +990,10 @@ struct BackendRunner {
     lifecycle_backend: lash::Backend,
     lifecycle_core: Option<lash::LashCore>,
     reopened_postgres_pool: Option<PgPool>,
-    first_lease: Option<lash_core::store::DriveFence>,
-    successor_lease: Option<lash_core::store::DriveFence>,
-    /// The differential root's recorded admission.
-    admission: Option<lash_core::store::RootAdmission>,
+    first_lease: Option<lash_core::store::ShiftFence>,
+    successor_lease: Option<lash_core::store::ShiftFence>,
+    /// The differential run's recorded admission.
+    admission: Option<lash_core::store::RunAdmission>,
     /// Stored `turn_commit_hash` -> backend-neutral hash, for the settling
     /// commits whose identity names backend-minted batch ids.
     neutral_commit_hashes: BTreeMap<String, String>,
@@ -1090,7 +1090,7 @@ impl BackendRunner {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn lease(&self, slot: LeaseSlot) -> &lash_core::store::DriveFence {
+    fn lease(&self, slot: LeaseSlot) -> &lash_core::store::ShiftFence {
         match slot {
             LeaseSlot::First => self.first_lease.as_ref(),
             LeaseSlot::Successor => self.successor_lease.as_ref(),
@@ -1100,12 +1100,12 @@ impl BackendRunner {
 
     #[expect(
         clippy::expect_used,
-        reason = "test support: the generated sequence admits the root before it ends it"
+        reason = "test support: the generated sequence admits the run before it ends it"
     )]
-    fn recorded_admission(&self) -> lash_core::store::RootAdmission {
+    fn recorded_admission(&self) -> lash_core::store::RunAdmission {
         self.admission
             .clone()
-            .expect("generated sequence admitted the differential root before ending it")
+            .expect("generated sequence admitted the differential run before ending it")
     }
 
     /// The case's open row of `kind`, read rather than assumed: backends mint
@@ -1132,11 +1132,11 @@ impl BackendRunner {
         }
     }
 
-    /// Admit the differential root under `fence`. The first admission is
+    /// Admit the differential run under `fence`. The first admission is
     /// recorded; every later one, under any fence, must return it unchanged.
-    async fn admit_differential_root(
+    async fn admit_differential_run(
         &mut self,
-        fence: &lash_core::store::DriveFence,
+        fence: &lash_core::store::ShiftFence,
         kind: HeadKind,
     ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
         let head = match &self.admission {
@@ -1145,17 +1145,17 @@ impl BackendRunner {
         };
         let admission = self
             .store()
-            .admit_root(
-                &lash_core::testing::store_fixtures::admit_root_request_for_test(
+            .admit_run(
+                &lash_core::testing::store_fixtures::admit_run_request_for_test(
                     fence,
-                    &lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID),
+                    &lash_core::TurnId::from(DIFFERENTIAL_RUN_ID),
                     head,
                 ),
             )
             .await?
             .ok_or_else(|| {
                 StoreError::Backend(format!(
-                    "{} did not admit the generated root at its head",
+                    "{} did not admit the generated run at its head",
                     self.name
                 ))
             })?;
@@ -1171,18 +1171,18 @@ impl BackendRunner {
         Ok(None)
     }
 
-    /// Land the differential root's final commit settling `settlement` under
-    /// `fence`, with the root's terminal in the same commit.
-    async fn end_differential_root(
+    /// Land the differential run's final commit settling `settlement` under
+    /// `fence`, with the run's terminal in the same commit.
+    async fn end_differential_run(
         &mut self,
-        fence: &lash_core::store::DriveFence,
+        fence: &lash_core::store::ShiftFence,
         expected_head_revision: u64,
         settlement: lash_core::store::IngressSettlement,
     ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
-        let root = lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID);
+        let run = lash_core::TurnId::from(DIFFERENTIAL_RUN_ID);
         let graph = GraphSpec {
-            nodes: vec![NodeSpec::new("root-end-node", None, "root-end")],
-            leaf_node_id: Some("root-end-node"),
+            nodes: vec![NodeSpec::new("run-end-node", None, "run-end")],
+            leaf_node_id: Some("run-end-node"),
         };
         let mut commit = lash_core::testing::store_fixtures::settling_commit_for_test(
             runtime_commit(
@@ -1196,11 +1196,11 @@ impl BackendRunner {
             fence,
             settlement,
         );
-        commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
-            commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
-            turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-            root,
-            outcome: lash_core::store::RootCommittedOutcome::Finished(
+        commit.run_terminal = Some(Box::new(lash_core::store::RunTerminalWrite {
+            commit: lash_core::store::TurnCommitId::new(run.clone(), 0),
+            turn: lash_core::store::PhysicalTurn::derive_turn_id(&run, 0),
+            run,
+            outcome: lash_core::store::RunCommittedOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: String::new(),
                 },
@@ -1215,14 +1215,14 @@ impl BackendRunner {
             .map(|result| Some(result.into()))
     }
 
-    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::store::DriveFence) {
+    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::store::ShiftFence) {
         match slot {
             LeaseSlot::First => self.first_lease = Some(lease),
             LeaseSlot::Successor => self.successor_lease = Some(lease),
         }
     }
 
-    /// Drive `commit` through the store and, on success, thread the runner's
+    /// Shift `commit` through the store and, on success, thread the runner's
     /// frame/leaf tracking and checkpoint expectations forward.
     #[expect(
         clippy::expect_used,
@@ -1444,24 +1444,24 @@ impl BackendRunner {
                 .await
                 .map(|_| None),
             StoreOperation::AcquireSessionLease { slot, owner } => {
-                use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
-                let stored = self.store().drive_epoch(&self.session_id).await?;
+                use lash_core::store::{AdmissionId, RunStartNonce, ShiftEpochSeal};
+                let stored = self.store().shift_epoch(&self.session_id).await?;
                 let admission = AdmissionId::new(format!("{owner}:{slot:?}-admission"));
                 let seal = self
                     .store()
-                    .seal_drive_epoch(
+                    .seal_shift_epoch(
                         &self.session_id,
                         &admission,
                         stored.epoch,
-                        &RootStartNonce::new(admission.as_str()),
+                        &RunStartNonce::new(admission.as_str()),
                         None,
                     )
                     .await?;
                 let fence = match seal {
-                    DriveEpochSeal::Sealed(fence) => fence,
+                    ShiftEpochSeal::Sealed(fence) => fence,
                     other => {
                         return Err(StoreError::Backend(format!(
-                            "{} failed to seal generated drive: {other:?}",
+                            "{} failed to seal generated shift: {other:?}",
                             self.name
                         )));
                     }
@@ -1470,32 +1470,32 @@ impl BackendRunner {
                     let first = self.lease(LeaseSlot::First);
                     assert!(
                         fence.epoch() > first.epoch(),
-                        "{} reused drive epoch",
+                        "{} reused shift epoch",
                         self.name
                     );
                 }
                 self.put_lease(*slot, fence);
                 Ok(None)
             }
-            StoreOperation::AdmitRoot { lease, head } => {
+            StoreOperation::AdmitRun { lease, head } => {
                 let fence = self.lease(*lease).clone();
-                self.admit_differential_root(&fence, *head).await
+                self.admit_differential_run(&fence, *head).await
             }
-            StoreOperation::AdmitRivalRoot { lease } => {
+            StoreOperation::AdmitRivalRun { lease } => {
                 let fence = self.lease(*lease).clone();
                 let head = self.open_head(HeadKind::Input).await?;
                 self.store()
-                    .admit_root(
-                        &lash_core::testing::store_fixtures::admit_root_request_for_test(
+                    .admit_run(
+                        &lash_core::testing::store_fixtures::admit_run_request_for_test(
                             &fence,
-                            &lash_core::TurnId::from(RIVAL_ROOT_ID),
+                            &lash_core::TurnId::from(RIVAL_RUN_ID),
                             head,
                         ),
                     )
                     .await
                     .map(|admission| {
                         panic!(
-                            "{}: a rival root must be refused while the differential root is \
+                            "{}: a rival run must be refused while the differential run is \
                              unfinished, got {admission:?}",
                             self.name
                         )
@@ -1503,14 +1503,14 @@ impl BackendRunner {
             }
             StoreOperation::ReleaseSessionLease { lease } => self
                 .store()
-                .supersede_drive_epoch_for_test(self.lease(*lease))
+                .supersede_shift_epoch_for_test(self.lease(*lease))
                 .await
                 .map(|_| None),
-            StoreOperation::EndRootReleasing { lease } => {
+            StoreOperation::EndRunReleasing { lease } => {
                 let fence = self.lease(*lease).clone();
                 let admission = self.recorded_admission();
                 let mut settlement = lash_core::store::IngressSettlement::new(
-                    lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID),
+                    lash_core::TurnId::from(DIFFERENTIAL_RUN_ID),
                 );
                 settlement.released.extend(
                     admission
@@ -1529,21 +1529,21 @@ impl BackendRunner {
                     .store()
                     .load_session_head_meta(&self.session_id)
                     .await?;
-                self.end_differential_root(
+                self.end_differential_run(
                     &fence,
                     head.map_or(0, |head| head.head_revision),
                     settlement,
                 )
                 .await
             }
-            StoreOperation::EndRootCompleting {
+            StoreOperation::EndRunCompleting {
                 lease,
                 expected_head_revision,
             } => {
                 let fence = self.lease(*lease).clone();
                 let admission = self.recorded_admission();
                 let mut settlement = lash_core::store::IngressSettlement::new(
-                    lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID),
+                    lash_core::TurnId::from(DIFFERENTIAL_RUN_ID),
                 );
                 if let Some(inputs) = &admission.inputs {
                     settlement.completed_inputs.push(inputs.completion());
@@ -1551,7 +1551,7 @@ impl BackendRunner {
                 if let Some(queued) = &admission.queued {
                     settlement.completed_batches.push(queued.completion());
                 }
-                self.end_differential_root(&fence, *expected_head_revision, settlement)
+                self.end_differential_run(&fence, *expected_head_revision, settlement)
                     .await
             }
             StoreOperation::ColdReopenSession => {
@@ -2049,7 +2049,7 @@ fn differential_clock_wall_clock_faces_agree() {
 }
 
 /// The lifecycle backend's session work: an engine that holds the core's
-/// installed driver and never runs it. The in-process engine the backend
+/// installed `SessionShifts` and never runs it. The in-process engine the backend
 /// otherwise selects ticks the reconcile pass on a wall-clock cadence, and
 /// its relays claim due obligations on the shared Postgres database —
 /// a `SessionDelete` obligation went `Claimed` between the close's
@@ -2139,7 +2139,7 @@ async fn runners_for_case_with_clock(
     );
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
-    std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential root");
+    std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential run");
     let sqlite_backend = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
             &sqlite_case_root,
@@ -2354,19 +2354,19 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "fork_accepts_foreign_lineage",
             "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",
-            "queued_work_admission_released_by_root_terminal",
-            "unfinished_root_refuses_a_rival_admission",
+            "queued_work_admission_released_by_run_terminal",
+            "unfinished_run_refuses_a_rival_admission",
             "queued_work_admission_settles_only_under_the_live_fence",
             "delete_then_attempt_admission",
             "store_surface_sweep",
-            "lost_root_recovery",
-            "refused_root_end",
+            "lost_run_recovery",
+            "refused_run_end",
             "pending_follow_on_raise_and_clear",
-            "root_admission_replays_exact_result_after_drive_handoff",
+            "run_admission_replays_exact_result_after_shift_handoff",
             "refused_surface_on_deleted_session_leaves_no_residue",
-            "session_close_ledger_closes_roots_and_tracks_its_intent",
-            "root_cancel_ledger",
-            "root_fork_ledger",
+            "session_close_ledger_closes_runs_and_tracks_its_intent",
+            "run_cancel_ledger",
+            "run_fork_ledger",
             "stale_handle_after_delete",
             "corrupt_graph_node_refuses_every_reader",
             "corrupt_pending_turn_input_refuses_list_and_admission",
@@ -2403,7 +2403,7 @@ async fn cross_backend_store_differential_agrees() {
     let (_database_lock, postgres, database_url) = open_postgres_differential()
         .await
         .expect("open the PostgreSQL differential fixture");
-    let sqlite_root = tempfile::tempdir().expect("create SQLite differential root");
+    let sqlite_root = tempfile::tempdir().expect("create SQLite differential run");
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
     obligation_cases::compare_obligation_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;

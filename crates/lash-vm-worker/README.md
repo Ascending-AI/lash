@@ -34,7 +34,7 @@ A reset still drops and replaces the VM instance.
 
 The pool never retries guest execution. On infrastructure failure, it fences
 the checkout, kills and reaps the process, then replenishes its minimum.
-The broker must settle admitted operations and re-drive the owning substrate
+The broker must settle admitted operations and redrive the owning substrate
 invocation through its real journal. Carry the parent-owned `ExecutionBudget`
 through replacement. The backend's recovery store preserves known CPU,
 consumed attempts and unknown CPU attempts across substrate redrive, independently

@@ -1313,7 +1313,7 @@ impl Processes {
         &self,
     ) -> Result<lash_core::facade_support::WakeDeliveryDriveReport> {
         let ports = self.core.substrate_slot.ports().await;
-        ports.queued.drive_wake().await.map_err(Into::into)
+        ports.queued.shift_wake().await.map_err(Into::into)
     }
 }
 /// A conflicting host start names only its key (ADR 0107). Every other

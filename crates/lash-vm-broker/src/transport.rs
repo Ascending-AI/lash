@@ -86,7 +86,7 @@ pub enum CheckoutRefusal {
 
 impl CheckoutRefusal {
     /// The typed infrastructure outcome a refused checkout surfaces as: the
-    /// run never started, so the owning invocation is re-driven.
+    /// run never started, so the owning invocation is redriven.
     pub fn outcome(&self) -> InfrastructureOutcome {
         if let Self::Infrastructure(outcome) = self {
             return outcome.clone();

@@ -25,7 +25,7 @@ struct RetainedWake {
     submission_digest: String,
     terminal_cause: Option<String>,
     terminal_at_ms: Option<i64>,
-    admitted_root: Option<String>,
+    admitted_run: Option<String>,
     admitted_by: Option<String>,
     payload_json: String,
 }
@@ -40,7 +40,7 @@ impl RetainedWake {
         .with_context(|| format!("runtime defect: retained batch is live work: {self:?}"))?;
         anyhow::ensure!(
             terminal.cause == IngressTerminalCause::Delivered
-                && self.admitted_root.is_none()
+                && self.admitted_run.is_none()
                 && self.admitted_by.is_none(),
             "expected delivered wake tombstone with released admission: {self:?}"
         );
@@ -62,10 +62,10 @@ async fn retained_queued_work_snapshot(pool: &sqlx::PgPool) -> Result<Vec<Value>
 
 pub(super) async fn assert_retained_wake_tombstones(storage: &PostgresStorage) -> Result<()> {
     let before = retained_queued_work_snapshot(storage.pool()).await?;
-    let roots = driven_queued_roots(storage.pool(), DEFAULT_SESSION_ID).await?;
+    let runs = executed_queued_runs(storage.pool(), DEFAULT_SESSION_ID).await?;
     anyhow::ensure!(
-        before.len() == 2 && roots.len() == 2,
-        "expected the two consumed kitchen-sink wakes and their driven roots, got rows={before:?}, roots={roots:?}"
+        before.len() == 2 && runs.len() == 2,
+        "expected the two consumed kitchen-sink wakes and their executed runs, got rows={before:?}, runs={runs:?}"
     );
     let store = storage.session_store_factory();
     for snapshot in &before {
@@ -114,8 +114,8 @@ pub(super) async fn assert_retained_wake_tombstones(storage: &PostgresStorage) -
     );
     assert_no_live_queued_work(storage).await?;
     anyhow::ensure!(
-        driven_queued_roots(storage.pool(), DEFAULT_SESSION_ID).await? == roots,
-        "redelivery created another driven root"
+        executed_queued_runs(storage.pool(), DEFAULT_SESSION_ID).await? == runs,
+        "redelivery created another executed run"
     );
     println!("queued-work cleanup passed: live=0 retained=2 idempotent-redeliveries=2");
     Ok(())
@@ -133,7 +133,7 @@ mod tests {
             submission_digest: "digest".into(),
             terminal_cause: cause.map(|cause| cause.as_str().into()),
             terminal_at_ms: cause.map(|_| 123),
-            admitted_root: None,
+            admitted_run: None,
             admitted_by: None,
             payload_json: String::new(),
         }
@@ -148,7 +148,7 @@ mod tests {
         );
         assert!(retained_wake(None).terminal().is_err());
         let mut admitted = retained_wake(None);
-        admitted.admitted_root = Some("root".into());
+        admitted.admitted_run = Some("root".into());
         admitted.admitted_by = Some("step".into());
         assert!(admitted.terminal().is_err());
     }
@@ -173,9 +173,9 @@ mod tests {
         let mut negative_time = delivered();
         negative_time.terminal_at_ms = Some(-1);
         assert!(negative_time.terminal().is_err());
-        let mut bound_root = delivered();
-        bound_root.admitted_root = Some("root".into());
-        assert!(bound_root.terminal().is_err());
+        let mut bound_run = delivered();
+        bound_run.admitted_run = Some("root".into());
+        assert!(bound_run.terminal().is_err());
         let mut bound_step = delivered();
         bound_step.admitted_by = Some("step".into());
         assert!(bound_step.terminal().is_err());

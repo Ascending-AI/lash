@@ -55,8 +55,8 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) merge_key: Option<String>,
     pub(crate) enqueued_at_ms: u64,
     pub(crate) submission_digest: String,
-    /// The root whose admission holds the batch; `None` while it is open.
-    pub(crate) admitted_root: Option<String>,
+    /// The run whose admission holds the batch; `None` while it is open.
+    pub(crate) admitted_run: Option<String>,
     pub(crate) terminal_cause: Option<String>,
     pub(crate) terminal_at_ms: Option<u64>,
     pub(crate) trace_cause_json: Option<String>,
@@ -121,7 +121,7 @@ pub(crate) fn queued_batch_row_from_sql(
             row.get("enqueued_at_ms")?,
         )?,
         submission_digest: row.get("submission_digest")?,
-        admitted_root: row.get("admitted_root")?,
+        admitted_run: row.get("admitted_run")?,
         terminal_cause: row.get("terminal_cause")?,
         terminal_at_ms: row
             .get::<_, Option<i64>>("terminal_at_ms")?
@@ -265,7 +265,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         ],
     )
     .map_err(sqlite_error)?;
-    // The admitted batch owes its session a drive (ADR 0109 §3), armed in
+    // The admitted batch owes its session a shift (ADR 0109 §3), armed in
     // the transaction that admits it.
     crate::ingress_obligation::arm_queued_batch_tx(conn, &batch.session_id, &batch_id, now)?;
     let inserted = load_queued_batch_by_id_conn(conn, &batch_id)?
@@ -273,17 +273,17 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     Ok(QueuedWorkEnqueueOutcome::Inserted(inserted))
 }
 
-/// Complete batch `batch_id`, which root `root` of session `session_id` must
+/// Complete batch `batch_id`, which run `run` of session `session_id` must
 /// hold, inside the commit's `BEGIN IMMEDIATE` write transaction (FIG-3927).
 ///
 /// The shared verdict decides over the row as read; a consumed wake's
 /// redelivery fence lands before the row leaves, because a crash between the
 /// two would replay a wake the session already consumed (FIG-1065). The
-/// root predicate stays on the delete as its backstop.
+/// run predicate stays on the delete as its backstop.
 pub(crate) fn complete_admitted_batch_conn(
     conn: &Connection,
     session_id: &SessionId,
-    root: &lash_core_execution::TurnId,
+    run: &lash_core_execution::TurnId,
     batch_id: &lash_core_execution::BatchId,
     terminal: lash_core_execution::store::IngressTerminal,
 ) -> Result<(), StoreError> {
@@ -297,9 +297,9 @@ pub(crate) fn complete_admitted_batch_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    lash_core_execution::store_backend_support::require_admitted_to_root(
+    lash_core_execution::store_backend_support::require_admitted_to_run(
         session_id,
-        root,
+        run,
         &row,
         observed.as_ref().map(Option::as_deref),
     )?;
@@ -310,7 +310,7 @@ pub(crate) fn complete_admitted_batch_conn(
                 .queued_batches
                 .select_admitted_batch_payload
                 .sql(),
-            params![session_id.as_str(), batch_id.as_str(), root.as_str()],
+            params![session_id.as_str(), batch_id.as_str(), run.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()
@@ -329,7 +329,7 @@ pub(crate) fn complete_admitted_batch_conn(
             params![
                 session_id.as_str(),
                 batch_id.as_str(),
-                root.as_str(),
+                run.as_str(),
                 terminal.cause.as_str(),
                 crate::clamp_epoch_ms(terminal.at_ms),
             ],
@@ -342,9 +342,9 @@ pub(crate) fn complete_admitted_batch_conn(
         u64::try_from(settled).unwrap_or(u64::MAX),
         || StoreError::IngressRowNotAdmitted {
             session_id: session_id.clone(),
-            root: root.clone(),
+            run: run.clone(),
             row: Box::new(row.clone()),
-            admitted_root: None,
+            admitted_run: None,
         },
     )
 }
@@ -352,7 +352,7 @@ pub(crate) fn complete_admitted_batch_conn(
 /// Settle open session command `batch_id` of session `session_id`, in the
 /// commit that applied it (FIG-3927): the command lane takes no admission,
 /// so the predicate is the row's presence and openness. A command withdrawn
-/// since the drive read it refuses the whole commit.
+/// since the shift read it refuses the whole commit.
 pub(crate) fn settle_open_command_conn(
     conn: &Connection,
     commit: &lash_core_execution::store::RuntimeCommit,
@@ -409,7 +409,7 @@ pub(crate) fn settle_open_command_conn(
 /// for a wake whose row is leaving the queue in this transaction.
 ///
 /// The one home of the invariant that every terminal transition of a wake —
-/// settlement by its root, host cancel and a content conflict's refusal —
+/// settlement by its run, host cancel and a content conflict's refusal —
 /// raises the floor with the row's removal or the refusal (FIG-1065,
 /// FIG-3545, FIG-4487). Callers write the fence before the delete.
 pub(crate) fn raise_wake_redelivery_fence_conn(

@@ -54,12 +54,12 @@ pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
 pub mod artifact_cleanup;
-pub mod drive;
 mod durable_queue;
 mod lifecycle;
 pub mod process_start;
 pub mod process_terminal;
 pub mod recovery_lease;
+pub mod shift;
 pub mod trigger_delivery;
 use turn_settlement::TurnIngressSettlement;
 #[cfg(feature = "testing")]
@@ -72,7 +72,7 @@ use lash_core_execution::runtime::process;
 mod plugin_namespace_tests;
 use lash_core_store::queued_drain_policy;
 mod process_runtime;
-mod root_start;
+mod run_start;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
@@ -161,7 +161,7 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
-use crate::store::DriveFence;
+use crate::store::ShiftFence;
 use host::*;
 use session_manager::*;
 use turn_boundary::*;
@@ -251,7 +251,7 @@ pub use lash_core_execution::runtime::DirectCompletionClient;
 pub use lash_core_execution::runtime::EffectOpenerError;
 pub use lash_core_execution::runtime::work::{
     NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
+    ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,
     WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
 };
 /// The trace handle a host config carries.
@@ -265,7 +265,7 @@ pub use observation::{
     SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
     SessionQueueEventKind, SessionResume, SessionRevision, WeakRuntimeHandle,
 };
-pub use observation_publisher::{ObservationSource, drive_with_observations};
+pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
@@ -423,9 +423,9 @@ pub use normalized_item::NormalizedItem;
 #[cfg(not(feature = "testing"))]
 pub(crate) use normalized_item::NormalizedItem;
 
-/// Optional sinks and scoped effect controller for a turn the kernel drives in
+/// Optional sinks and scoped effect controller for a turn the kernel executes in
 /// process: a child session's turn, and a test's turn on the engine's calls
-/// (`testing::TestTurnDrive`).
+/// (`testing::TestTurnExecution`).
 ///
 /// Event sinks default to no-op sinks.
 /// Execution scope is explicit and required at every runtime boundary that can execute
@@ -443,7 +443,7 @@ pub struct TurnOptions<'a> {
 impl<'a> TurnOptions<'a> {
     /// `cancel` is a host-local stop lever for the turn: firing it asks the
     /// turn to stop now, delivered as a durable request on the turn's gate
-    /// (see [`LocalTurnStop`]). The drive itself never reads it.
+    /// (see [`LocalTurnStop`]). The shift itself never reads it.
     pub fn new(
         cancel: CancellationToken,
         scoped_effect_controller: ScopedEffectController<'a>,
@@ -532,26 +532,26 @@ pub struct LashRuntime {
     /// host on the paths that have no return value to give it (FIG-3367); the
     /// facade reads it as `LashSession::tool_restore_report()`.
     pub tool_restore_report: Option<crate::ToolRestoreReport>,
-    /// Whether the running direct turn replays the journaled initial drive
+    /// Whether the running direct turn replays the journaled initial shift
     /// set (ADR 0069 §6). A superseded one cedes the turn at commit under
     /// any generation: if its rows were reclaimed while the turn was down,
-    /// another driver answered them, so committing would answer them twice.
-    /// Set while an engine runs one admitted root as an attempt of its own
-    /// ([`run_admitted_root`](crate::drive::run_admitted_root)): the engine retries
-    /// that attempt on a live fault, under the same root (FIG-3897). The
+    /// another shift answered them, so committing would answer them twice.
+    /// Set while an engine executions one admitted run as an attempt of its own
+    /// ([`execute_admitted_run`](crate::shift::execute_admitted_run)): the engine retries
+    /// that attempt on a live fault, under the same run (FIG-3897). The
     /// attempt's guard lowers it when the attempt returns or the engine
     /// drops it, discarding a dropped attempt's residue (FIG-3984).
-    pub(crate) engine_retries_root: bool,
+    pub(crate) engine_retries_run: bool,
     /// The turn index the running direct turn's admission recorded
     /// (FIG-3682). The accept phase sets it after it adopted the head the
     /// turn was admitted on; the prepare phase takes it, so the admitted
     /// physical turn is addressed under the recorded index and never re-reads
     /// the head a replay's live store may have moved past.
     pub(crate) admitted_turn_index: Option<usize>,
-    /// The admitted root this runtime is running, with the fence its seal
+    /// The admitted run this runtime is running, with the fence its seal
     /// raised (FIG-3600 S7): its commits present the fence, and the commit of
     /// its final physical turn writes its terminal evidence.
-    pub(crate) drive_root: Option<Box<crate::runtime::drive::DriveRootRun>>,
+    pub(crate) shift_run: Option<Box<crate::runtime::shift::RunExecution>>,
 }
 
 #[doc(hidden)]

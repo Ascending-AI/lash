@@ -1706,7 +1706,7 @@
           "type": "object"
         },
         {
-          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one drive request.\n\nAn operation is a lifecycle owner in the sense \u00a71 means: its id is\ndurable and retry-stable, so a redrive of the operation binds the\nsame opener. No logical turn runs under it: every turn a drive runs\nis opened by its logical root's [`Turn`](Self::Turn) (FIG-3607\ncontract 4). No root's end closes an operation's scope; its session's\nclose does.",
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request.\n\nAn operation is a lifecycle owner in the sense \u00a71 means: its id is\ndurable and retry-stable, so a redrive of the operation binds the\nsame opener. No logical turn runs under it: every turn a shift runs\nis opened by its logical run's [`Turn`](Self::Turn) (FIG-3607\ncontract 4). No run's end closes an operation's scope; its session's\nclose does.",
           "properties": {
             "kind": {
               "const": "session_operation",
@@ -1855,7 +1855,7 @@
           "type": "object"
         },
         {
-          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one drive request. It has no\nlogical root, and no logical turn runs under it.",
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request. It has no\nlogical root, and no logical turn runs under it.",
           "properties": {
             "operation_id": {
               "type": "string"
@@ -3086,7 +3086,7 @@
       ]
     },
     "ProtocolBreach": {
-      "description": "A parent, its worker or the pool between them broke the protocol. A fresh\nworker may keep it, so the owning invocation is re-driven.",
+      "description": "A parent, its worker or the pool between them broke the protocol. A fresh\nworker may keep it, so the owning invocation is redriven.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -8920,7 +8920,7 @@
     },
     "RenderRefusal": {
       "additionalProperties": false,
-      "description": "Why a protocol refused to resolve the render a root's results present\nwith. `refusal` is the protocol's own refusal type, serialized, and\n`message` its display text.",
+      "description": "Why a protocol refused to resolve the render a run's results present\nwith. `refusal` is the protocol's own refusal type, serialized, and\n`message` its display text.",
       "properties": {
         "message": {
           "type": "string"
@@ -9049,7 +9049,7 @@
     },
     "RunDefinitionRefusal": {
       "additionalProperties": false,
-      "description": "Why a registered definition refused to shape a root: deterministic, so it\nis recorded as the root's failure. `refusal` is the definition's own\nrefusal type, serialized, and `message` its display text.",
+      "description": "Why a registered definition refused to shape a run: deterministic, so it\nis recorded as the run's failure. `refusal` is the definition's own\nrefusal type, serialized, and `message` its display text.",
       "properties": {
         "definition": {
           "$ref": "#/$defs/DefinitionRef"
@@ -9099,7 +9099,7 @@
       ]
     },
     "RunRefusal": {
-      "description": "The run's own inputs are refused. They are the same on every attempt, so\nre-driving the invocation refuses them again: the refusal is terminal.",
+      "description": "The run's own inputs are refused. They are the same on every attempt, so\nredriving the invocation refuses them again: the refusal is terminal.",
       "oneOf": [
         {
           "enum": [
@@ -9349,7 +9349,7 @@
       ]
     },
     "RunShapeRefusal": {
-      "description": "Why a root's shape was refused: deterministic, so it is the root's\nrecorded failure, carried typed as\n[`RuntimeErrorCause::RunShapeRefused`](crate::RuntimeErrorCause::RunShapeRefused).",
+      "description": "Why a run's shape was refused: deterministic, so it is the run's\nrecorded failure, carried typed as\n[`RuntimeErrorCause::RunShapeRefused`](crate::RuntimeErrorCause::RunShapeRefused).",
       "oneOf": [
         {
           "description": "The spec's registered definition refused its context.",
@@ -9386,7 +9386,7 @@
           "type": "object"
         },
         {
-          "description": "The reasoning the root would run is one its model's recorded\ncapability refuses.",
+          "description": "The reasoning the run would run is one its model's recorded\ncapability refuses.",
           "properties": {
             "kind": {
               "const": "reasoning",
@@ -9429,7 +9429,7 @@
           "type": "object"
         },
         {
-          "description": "The protocol refused to resolve the root's render.",
+          "description": "The protocol refused to resolve the run's render.",
           "properties": {
             "kind": {
               "const": "render",
@@ -9823,7 +9823,7 @@
           "type": "object"
         },
         {
-          "description": "Why a root's shape was refused (FIG-4652): the typed half of\n[`RuntimeErrorCode::RunShapeRefused`] and, for a refused reasoning,\nof [`RuntimeErrorCode::ReasoningRefused`].",
+          "description": "Why a run's shape was refused (FIG-4652): the typed half of\n[`RuntimeErrorCode::RunShapeRefused`] and, for a refused reasoning,\nof [`RuntimeErrorCode::ReasoningRefused`].",
           "properties": {
             "kind": {
               "const": "run_shape_refused",
@@ -9958,7 +9958,7 @@
       "type": "string"
     },
     "ScopeId": {
-      "description": "A scope a process may live until.\n\nAn effect opener (a logical turn root, a session operation, one process)\nor a session. A session is never an effect-group opener:\nit owns lifetimes, not effects.",
+      "description": "A scope a process may live until.\n\nAn effect opener (a logical turn run, a session operation, one process)\nor a session. A session is never an effect-group opener:\nit owns lifetimes, not effects.",
       "oneOf": [
         {
           "description": "An effect opener's scope.",
@@ -10028,23 +10028,23 @@
       "type": "string"
     },
     "SessionHeadOwner": {
-      "description": "What owns a session's head, refusing a head write outside the drive.",
+      "description": "What owns a session's head, refusing a head write outside the shift.",
       "oneOf": [
         {
-          "description": "An admitted root without terminal evidence.",
+          "description": "An admitted run without terminal evidence.",
           "properties": {
             "owner": {
-              "const": "root",
+              "const": "run",
               "type": "string"
             },
-            "root": {
+            "run": {
               "minLength": 1,
               "type": "string"
             }
           },
           "required": [
             "owner",
-            "root"
+            "run"
           ],
           "type": "object"
         },
@@ -12682,13 +12682,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "An admitted root and the run it drives.",
+          "description": "An admitted run, the owner of its execution.",
           "properties": {
             "kind": {
               "const": "run",
               "type": "string"
             },
-            "root": {
+            "run": {
               "minLength": 1,
               "type": "string"
             },
@@ -12700,7 +12700,7 @@
           "required": [
             "kind",
             "session_id",
-            "root"
+            "run"
           ],
           "type": "object"
         },

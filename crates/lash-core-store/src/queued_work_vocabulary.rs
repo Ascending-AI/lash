@@ -18,7 +18,7 @@ pub enum SessionCommand {
     },
     /// An administrative compaction (FIG-4201): the command drain summarizes
     /// the frame current at the boundary and opens a compaction frame seeded
-    /// with the summary, under the command root's sealed fence. It applies
+    /// with the summary, under the command run's sealed fence. It applies
     /// only at a turn boundary, so the bound turn owns the head until it
     /// ends. It settles as a [`CompactContextOutcome`].
     CompactContext {
@@ -26,7 +26,7 @@ pub enum SessionCommand {
         instructions: Option<String>,
     },
     /// A host's append to the session graph (FIG-4202). The bound turn owns
-    /// the session head, so a host append is a command the drive applies at
+    /// the session head, so a host append is a command the shift applies at
     /// a turn boundary, against the boundary's resident head: its nodes land
     /// after everything the bound turn committed. The request's
     /// `operation_id` is the command's idempotency key. It settles as a
@@ -37,8 +37,8 @@ pub enum SessionCommand {
         request: Box<crate::session_append::AppendSessionNodesRequest>,
     },
     /// A host's plugin command (FIG-4202). The plugin's code runs only once
-    /// the drive admits the command, at a turn boundary, under the command
-    /// root's fence; its events, state and queued turns commit with the
+    /// the shift admits the command, at a turn boundary, under the command
+    /// run's fence; its events, state and queued turns commit with the
     /// command's settlement. It settles as a
     /// [`SessionCommandOutcome::PluginOperation`].
     RunPluginCommand {
@@ -62,7 +62,7 @@ pub enum SessionCommand {
     ApplyConfigTransaction {
         transaction: Box<crate::ConfigTransactionRecord>,
     },
-    /// A host's durable frame open (FIG-4202): the drive opens the frame at
+    /// A host's durable frame open (FIG-4202): the shift opens the frame at
     /// a turn boundary, in the commit that settles the command, and restarts
     /// its live interpreter from the frame's seed. It settles as a
     /// [`SessionCommandOutcome::OpenAgentFrame`].
@@ -199,7 +199,7 @@ pub enum PluginOperationCommandOutcome {
     /// Queued input was refused at admission. The cause is retained for the
     /// submitting host, and none of the operation's inputs were admitted.
     Refused { error: Box<crate::RuntimeError> },
-    /// A host cancelled the task after a drive admitted it, and its drive
+    /// A host cancelled the task after a shift admitted it, and its shift
     /// found the cancel requested before or once the task's code returned
     /// (FIG-4391, FIG-4453): nothing of the task committed, and the command
     /// is settled, so it is never applied again.
@@ -733,15 +733,15 @@ pub enum AdmissionBoundary {
     Idle,
 }
 /// The queued-work batches one commit completes (FIG-3927): row
-/// identities only, settled under the committing root's admission.
+/// identities only, settled under the committing run's admission.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkCompletion {
     pub session_id: SessionId,
     pub batch_ids: Vec<crate::BatchId>,
 }
-/// Queued-work batches one admission bound to a root, with their payloads,
+/// Queued-work batches one admission bound to a run, with their payloads,
 /// in `enqueue_seq` order (FIG-3927). The binding lives on the rows; this
-/// is what the root drives and what its journal records.
+/// is what the run executes and what its journal records.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AdmittedQueuedWork {
     pub session_id: SessionId,

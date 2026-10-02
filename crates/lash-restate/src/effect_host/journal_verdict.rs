@@ -12,7 +12,7 @@ use crate::LashService;
 
 /// The engine's reads behind [`lash_core::EffectHost::journal_replay`] (ADR 0113 §2.5):
 /// Restate's invocation table through the admin API, and the store set's
-/// root terminals and process rows.
+/// run terminals and process rows.
 #[derive(Clone)]
 pub struct RestateJournalAuthority {
     admin: crate::RestateAdminClient,
@@ -29,9 +29,9 @@ impl RestateJournalAuthority {
 /// runs no publication and is always settled. A runtime operation is
 /// settled once its durable waits are retired under `WhenQuiescent`,
 /// which the facade does only after the operation's commit. A turn is
-/// settled once its root has terminal evidence and Restate holds no open
-/// run of that root; a session operation once Restate holds no open drive of
-/// its session and no open run of any of its roots; a process once it is
+/// settled once its run has terminal evidence and Restate holds no open
+/// run of that run; a session operation once Restate holds no open shift of
+/// its session and no open run of any of its runs; a process once it is
 /// terminal, or pruned, and Restate holds no open run of any of its
 /// segments. A wait retirement alone settles nothing else.
 pub(super) async fn journal_replay(
@@ -86,38 +86,38 @@ fn journal_read_error(what: &str, error: impl std::fmt::Display) -> RuntimeError
     )
 }
 
-/// A turn's journal is settled once its root has terminal evidence and
-/// Restate holds no open run of the root's workflow, on any lane.
+/// A turn's journal is settled once its run has terminal evidence and
+/// Restate holds no open run of the run's workflow, on any lane.
 async fn turn_journal_settled(
     authority: &RestateJournalAuthority,
     namespace: &crate::RestateNamespace,
     session_id: &SessionId,
-    root: &lash_core::TurnId,
+    run: &lash_core::TurnId,
 ) -> Result<bool, RuntimeError> {
     if authority
         .stores
         .session_store_factory()
-        .root_terminal(session_id, root)
+        .run_terminal(session_id, run)
         .await
-        .map_err(|error| journal_read_error("the root terminal", error))?
+        .map_err(|error| journal_read_error("the run terminal", error))?
         .is_none()
     {
         return Ok(false);
     }
     let runs = authority
         .admin
-        .root_runs(
+        .run_executions(
             namespace,
-            &[crate::session_driver::turn_workflow_key(session_id, root)],
+            &[crate::session_shifts::turn_workflow_key(session_id, run)],
         )
         .await
-        .map_err(|error| journal_read_error("root runs", error))?;
-    Ok(!runs.iter().any(|run| run.status.is_open()))
+        .map_err(|error| journal_read_error("run executes", error))?;
+    Ok(!runs.iter().any(|executed| executed.status.is_open()))
 }
 
-/// A session operation names no root, so its journal is settled only once Restate
-/// holds no open drive of its session and no open run of any of the
-/// session's roots: nothing of the session can replay it.
+/// A session operation names no run, so its journal is settled only once Restate
+/// holds no open shift of its session and no open run of any of the
+/// session's runs: nothing of the session can replay it.
 async fn session_operation_journal_settled(
     authority: &RestateJournalAuthority,
     namespace: &crate::RestateNamespace,
@@ -126,25 +126,25 @@ async fn session_operation_journal_settled(
     let session = sql_text(session_id.as_str());
     // `LIKE` wildcards inside the session id only widen the match to other
     // sessions' runs, which can only answer `MayReplay`.
-    let roots_prefix = sql_text(&format!(
+    let runs_prefix = sql_text(&format!(
         "{}:{}%",
         session_id.as_str().len(),
         session_id.as_str()
     ));
-    let drives = namespace.service_lanes_sql(LashService::SessionDriver);
-    let roots = namespace.service_lanes_sql(LashService::TurnDriver);
+    let shifts = namespace.service_lanes_sql(LashService::SessionShifts);
+    let runs = namespace.service_lanes_sql(LashService::TurnDriver);
     let runs: Vec<crate::RestateInvocationStatus> = authority
         .admin
         .query_json(&format!(
             "SELECT id, target, target_service_name, target_service_key, target_handler_name, \
              status, completion_result, completion_failure FROM sys_invocation WHERE \
-             ({drives} AND target_handler_name = 'drive' AND target_service_key = {session}) \
-             OR ({roots} AND target_handler_name = 'run' AND target_service_key LIKE \
-             {roots_prefix})"
+             ({shifts} AND target_handler_name = 'shift' AND target_service_key = {session}) \
+             OR ({runs} AND target_handler_name = 'executed' AND target_service_key LIKE \
+             {runs_prefix})"
         ))
         .await
         .map_err(|error| journal_read_error("session runs", error))?;
-    Ok(!runs.iter().any(|run| run.status.is_open()))
+    Ok(!runs.iter().any(|executed| executed.status.is_open()))
 }
 
 /// A process journal is settled once the process is terminal, or pruned

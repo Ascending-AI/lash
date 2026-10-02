@@ -282,9 +282,9 @@ impl PluginConfig {
 }
 
 /// A plugin configuration at the config revision it was recorded under
-/// (FIG-4379): what a root was admitted under (its recorded `ResolvedRun`),
+/// (FIG-4379): what a run was admitted under (its recorded `ResolvedRun`),
 /// what a process captured with its execution environment, or the head's
-/// outside any root. Hooks read their configuration from this, never from
+/// outside any run. Hooks read their configuration from this, never from
 /// the session's current head.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

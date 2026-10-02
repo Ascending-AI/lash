@@ -1,20 +1,20 @@
 //! FIG-3788: a driver turn that switches its agent frame, redriven after the
 //! switch's commit, replays at the head it was admitted on.
 //!
-//! A drive admits one root and runs its physical turns in order: the first
+//! A shift admits one run and runs its physical turns in order: the first
 //! turn's tool asks for a second agent frame, so that turn commits closed
-//! with `AgentFrameSwitch` and the root continues in a follow-on turn. A
-//! worker can die after that switch commit and before the root ended. The
-//! tier then redrives the root, and the redrive replays its journal. By then
+//! with `AgentFrameSwitch` and the run continues in a follow-on turn. A
+//! worker can die after that switch commit and before the run ended. The
+//! tier then redrives the run, and the redrive replays its journal. By then
 //! the store has moved on: the admitted input is consumed and the follow-on
 //! is recorded on the head. A redrive that decided from that live state
 //! would take another path than the journal holds (on Restate, a journal
 //! mismatch at the switch's next call). The redrive must instead replay the
-//! recorded admission, rebuild the root from the base it recorded, read the
+//! recorded admission, rebuild the run from the base it recorded, read the
 //! switched turn's model and tool results back, and run only the follow-on.
 //!
-//! The law crashes the drive after the switched turn's commit and redrives
-//! it on the tier's runner. The root must end with the follow-on frame's
+//! The law crashes the shift after the switched turn's commit and redrives
+//! it on the tier's runner. The run must end with the follow-on frame's
 //! answer, ask the model once per frame in total, run its tool once, and
 //! commit each physical turn once.
 
@@ -31,7 +31,7 @@ use crate::plugin::PluginFactory;
 const SWITCH_TOOL: &str = "frame_switch_probe";
 
 /// Panics as the first committed turn's delivery begins: the switch commit is
-/// durable and the root has not ended.
+/// durable and the run has not ended.
 struct PanicAfterSwitchCommit;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAfterSwitchCommit {
@@ -130,15 +130,15 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
     .expect("build the frame-switch redrive conformance runtime")
 }
 
-type DriveResultTx = tokio::sync::mpsc::UnboundedSender<
+type ShiftResultTx = tokio::sync::mpsc::UnboundedSender<
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>,
 >;
 
-/// One attempt at the root: the crashing one panics after the switch commit;
-/// the redrive sends back how its drive ended.
+/// One attempt at the run: the crashing one panics after the switch commit;
+/// the redrive sends back how its shift ended.
 fn attempt(
     parts: &RedriveParts,
-    result_tx: Option<DriveResultTx>,
+    result_tx: Option<ShiftResultTx>,
 ) -> crate::ConformanceTurnAttempt {
     let parts = parts.clone();
     Arc::new(move |scope| {
@@ -149,7 +149,7 @@ fn attempt(
             if result_tx.is_none() {
                 runtime.set_turn_phase_probe(Arc::new(PanicAfterSwitchCommit));
             }
-            let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+            let shift = Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scope,
             )))
@@ -157,11 +157,11 @@ fn attempt(
             let Some(result_tx) = result_tx else {
                 panic!(
                     "the crash probe did not fire after the switch commit: {:?}",
-                    drive.map(crate::facade_support::QueuedTurnDrain::ran)
+                    shift.map(crate::facade_support::QueuedTurnDrain::ran)
                 );
             };
-            let end = crate::ConformanceTurnEnd::of(&drive);
-            let _ = result_tx.send(drive);
+            let end = crate::ConformanceTurnEnd::of(&shift);
+            let _ = result_tx.send(shift);
             end
         })
     })
@@ -226,7 +226,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
             crate::TurnInput::text("switch frames, then answer"),
         ))
         .await
-        .expect("accept the root's input");
+        .expect("accept the run's input");
     let before = store
         .load_session_head_meta(&session_id)
         .await
@@ -247,7 +247,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
     let scope = admit(crate::ExecutionScope::turn(
         &session_id,
-        crate::TurnId::fixture(format!("{prefix}-frame-switch-drive")),
+        crate::TurnId::fixture(format!("{prefix}-frame-switch-shift")),
     ));
     // A redrive that diverged from its journal never ends: the tier retries
     // it until it rests. Bound the wait so the divergence fails the law.
@@ -261,15 +261,15 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
     )
     .await
     .expect("the redrive after the switch commit ends (FIG-3788: it diverged from its journal)");
-    let drive = result_rx
+    let shift = result_rx
         .recv()
         .await
-        .expect("the tier's runner ran the redriven drive")
+        .expect("the tier's runner ran the redriven shift")
         .unwrap_or_else(|error| panic!("the redrive after the switch commit replays: {error:?}"));
-    let turn = drive.ran().expect("the redrive ran the root to its end");
+    let turn = shift.ran().expect("the redrive ran the run to its end");
     assert!(
         matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
-        "the root finishes in the follow-on frame: {:?}; errors: {:?}",
+        "the run finishes in the follow-on frame: {:?}; errors: {:?}",
         turn.outcome,
         turn.errors
     );
@@ -291,7 +291,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         .load_session_head_meta(&session_id)
         .await
         .expect("read the committed head")
-        .expect("the root committed");
+        .expect("the run committed");
     assert_eq!(
         committed.head_revision,
         before + 2,
@@ -303,7 +303,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         .expect("read the pending inputs");
     assert!(
         pending.is_empty(),
-        "the root's input is consumed: {pending:?}"
+        "the run's input is consumed: {pending:?}"
     );
 }
 

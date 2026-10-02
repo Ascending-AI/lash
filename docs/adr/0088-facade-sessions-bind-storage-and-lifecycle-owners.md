@@ -40,7 +40,7 @@ session.
 
 ### Behaviour is recorded config; live is physical only
 
-A core installs one plugin set, and every session, open, resume, engine drive
+A core installs one plugin set, and every session, open, resume, engine shift
 and process worker of that core runs that set. No open, resume or worker adds
 plugins of its own: a session's behaviour is the plugin config it recorded at
 creation, changed only by its owners' typed config commands. An open still
@@ -75,13 +75,13 @@ instead of rediscovering storage from a receiving core.
 ### Park and close
 
 The bound turn owns the session head, so park and close never commit a
-whole-session snapshot beside the drive. A session whose runtime holds nothing
+whole-session snapshot beside the shift. A session whose runtime holds nothing
 unpersisted parks and closes without writing. A dirty one (plugin state, graph
 nodes, or pending usage no commit carried yet) adopts the durable head and then
 flushes. Adopting a head that moved replaces the resident state with that
 head's, as a cold rebuild from it would: plugin writes and graph nodes the
 runtime accepted on the older head are dropped, and pending usage, held apart
-from the head, rides the flush. While a root is bound, a follow-on is owed, or a
+from the head, rides the flush. While a run is bound, a follow-on is owed, or a
 session command is open, the store refuses that flush in its own transaction as
 `StoreError::SessionHeadOwned`, naming the owner. The refusal is typed and
 recoverable: `LashSession::park` and `close` answer `SessionParkRefused` and the
@@ -127,7 +127,7 @@ owns external deployment composition.
 
 - `crates/lash/src/session.rs:152-169,247-275,518-541` separates create and existing-session resolution.
 - `crates/lash/src/session_binding.rs:6-63,150-185` captures owner services and applies them on resume.
-- `crates/lash/src/core.rs` (`build_plugin_host`, `durable_process_worker_config`) builds the core's one plugin set for opens, drives and workers.
+- `crates/lash/src/core.rs` (`build_plugin_host`, `durable_process_worker_config`) builds the core's one plugin set for opens, shifts and workers.
 - `crates/lash-core/src/runtime/process_runtime.rs` (`ProcessRuntimeContext::for_admitted`) builds every process runtime from its captured environment; `crates/lash-core/src/runtime/session_manager/session_init.rs` (`resolve_child_facts`, `admit_session_turn_child`) resolves and admits a session-turn child's facts.
 - `crates/lash-core/src/runtime/lifecycle.rs` (`park`, `flush_for_park`) and `crates/lash-core/src/runtime/environment.rs` (`ParkRefused`) make a busy park recoverable.
 - `crates/lash-core/src/runtime/session_administration.rs:104-153` issues the paired deletion context.

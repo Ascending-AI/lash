@@ -1,4 +1,4 @@
-//! The deployment a drive request is pinned to, so the engine routes a replay
+//! The deployment a shift request is pinned to, so the engine routes a replay
 //! to a compatible build.
 //!
 //! The value is a digest: 12 lowercase hexadecimal characters, the first six

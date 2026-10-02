@@ -42,7 +42,7 @@ impl CancelledStart {
                     .with_process_starts(
                         Arc::clone(&self.stores.start_ledger),
                         Arc::clone(&self.stores.clock),
-                        lash_core::drive::relay::RelayPolicy::default(),
+                        lash_core::shift::relay::RelayPolicy::default(),
                     ),
             )
             .await
@@ -144,7 +144,7 @@ pub(super) async fn a_cancel_at_the_claim_await_still_submits_the_start() {
     assert!(stored.external_ref.is_some() && stored.cancel_request.is_none());
     assert!(
         start.stores.clock.timestamp_ms().saturating_sub(began_ms)
-            < lash_core::runtime::drive::relay::RelayPolicy::default().claim_ttl_ms,
+            < lash_core::runtime::shift::relay::RelayPolicy::default().claim_ttl_ms,
         "the start ran inside one claim lapse"
     );
     assert_eq!(

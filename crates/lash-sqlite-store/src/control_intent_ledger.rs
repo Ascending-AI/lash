@@ -10,7 +10,7 @@ use lash_core_execution::store::{
     decide_intent_application, decide_intent_refusal,
 };
 
-use crate::session_roots::{
+use crate::session_runs::{
     begin_session_close_conn, load_intent_conn, settle_intent_claimed_conn, write_intent_state_conn,
 };
 
@@ -50,18 +50,18 @@ impl SqliteStore {
 
 #[async_trait::async_trait]
 impl ControlIntentStore for SqliteStore {
-    async fn open_root_intent(
+    async fn open_run_intent(
         &self,
-        request: &lash_core_execution::store::RootIntentRequest,
+        request: &lash_core_execution::store::RunIntentRequest,
         at_ms: u64,
-    ) -> Result<ControlIntent, lash_core_execution::store::RootIntentRefused> {
+    ) -> Result<ControlIntent, lash_core_execution::store::RunIntentRefused> {
         let Some(conn) = self.control_ledger().await? else {
-            return Err(lash_core_execution::store::RootIntentRefused::NotParked);
+            return Err(lash_core_execution::store::RunIntentRefused::NotParked);
         };
         let request = request.clone();
         conn.write_flow(move |tx| {
             Ok(
-                match crate::root_verbs::open_root_intent_conn(tx, &request, at_ms) {
+                match crate::run_verbs::open_run_intent_conn(tx, &request, at_ms) {
                     Ok(intent) => TxOutcome::Commit(Ok(intent)),
                     Err(error) => TxOutcome::Rollback(Err(error)),
                 },

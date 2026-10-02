@@ -117,7 +117,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// Bumped to 11 for claim generation fencing: queued-work and
 /// pending-turn-input rows replace their per-claim claimed-at and expiry
 /// columns with a single column pinning the session-execution-lease generation
-/// the claim was taken under (since replaced by root admission, FIG-3927).
+/// the claim was taken under (since replaced by run admission, FIG-3927).
 /// There is no migration chain — pre-11 session databases are rejected at open
 /// and recreated.
 /// Bumped to 12 for FIG-546 owner-bound attachment intents. This is a
@@ -183,7 +183,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// recreated; there is no backfill or compatibility read path.
 /// Version 29 replaces the fixed checkpoint slots with a complete keyed
 /// component descriptor set carrying per-component encoding versions. Older
-/// roots have no honest compatibility interpretation and are rejected with the
+/// runs have no honest compatibility interpretation and are rejected with the
 /// existing recreate-store remedy.
 /// Version 30 removes the CLI-era session name, creation timestamp, model, and
 /// working-directory columns from session metadata. Older databases are
@@ -261,7 +261,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// disposition at all and their unreported holes cannot be reconstructed, so
 /// existing catalogs are rejected rather than migrated with a defaulted column.
 /// Version 54 preserves successful attachment deletion as the terminal
-/// `reclaimed` phase so adoption can refuse roots whose bytes are absent.
+/// `reclaimed` phase so adoption can refuse runs whose bytes are absent.
 /// Version 55 keeps that phase present under an opaque write token associated
 /// with its manifest session until a restoring backend put succeeds, so failed
 /// re-puts and explicit host recovery can restore it exactly.
@@ -361,7 +361,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// all-or-none and a binding to an open next-turn claim. A pre-80 database is rejected at open and
 /// recreated.
 /// Bumped to 81 for FIG-3586: the catalog gains `turn_parks`, the typed
-/// parked state of a driver-run turn that `drain_status` counts, and the
+/// parked state of an engine-executed turn that `drain_status` counts, and the
 /// durable `RuntimeErrorCode` vocabulary gains
 /// `lashlang_cell_replay_divergence`, `lashlang_cell_replay_key_format_cutover`
 /// and `recorded_journal_read_unsupported`. A pre-81 database is rejected at
@@ -444,8 +444,8 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// `engine_object_state_format_unsupported`, with the effect-group protocol's
 /// exact-version refusal. No relation changes; a pre-96 database is rejected at
 /// open and recreated; it is not migrated.
-/// Bumped to 97 for FIG-3815: `session_meta` gains `drive_root_start`, the
-/// start marker of the execution of an admitted root that sealed the
+/// Bumped to 97 for FIG-3815: `session_meta` gains `shift_run_start`, the
+/// start marker of the execution of an admitted run that sealed the
 /// session's current admission (ADR 0105 L-S8); a later seal of the same
 /// admission by another execution is refused. A pre-97 database is rejected
 /// at open and recreated; it is not migrated.
@@ -455,9 +455,9 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// the durable `RuntimeErrorCode` vocabulary drops
 /// `process_incarnation_superseded`. A pre-98 database is rejected at open
 /// and recreated; it is not migrated.
-/// Bumped to 99 for FIG-3600 S7: the logical-root family. `session_roots`
-/// holds each admitted root and its terminal evidence, `session_root_inputs`
-/// binds an accepted input to its root, `control_intents` records operator
+/// Bumped to 99 for FIG-3600 S7: the logical-run family. `session_runs`
+/// holds each admitted run and its terminal evidence, `session_run_inputs`
+/// binds an accepted input to its run, `control_intents` records operator
 /// verbs and session closes, `session_meta` gains `closing_intent`, a turn
 /// park gains `engine_ref` and `resume_intent`, and a park event may be
 /// `redrive_requested`. A pre-99 database is rejected at open and recreated;
@@ -466,13 +466,13 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// build whose checkpoint it resumes (FIG-3795, changed in place under the
 /// pre-1.0 version freeze, FIG-3846): `turn_parks` and `turn_park_events`
 /// gain the projected `park_build_generation` column, and `turn_parks` the
-/// partial index drain status counts it by. `session_roots` records each
-/// root's admission (`admission_json`) and the drain generation of the drive
+/// partial index drain status counts it by. `session_runs` records each
+/// run's admission (`admission_json`) and the drain generation of the shift
 /// that admitted it (`admitted_generation`, indexed for the drain's in-flight
-/// count per generation, FIG-3795 S9), with at most one unfinished root per
+/// count per generation, FIG-3795 S9), with at most one unfinished run per
 /// session; the queued-run ledger is gone and a queued-work head is admitted
-/// as an ordinary root (FIG-3927). `session_roots` also records the executor
-/// the seal of a root's admission named (`executor_json`, FIG-4814).
+/// as an ordinary run (FIG-3927). `session_runs` also records the executor
+/// the seal of a run's admission named (`executor_json`, FIG-4814).
 /// `pending_turn_inputs` and `queued_work_batches` retain the trace cause
 /// their first acceptance was given (`trace_cause_json`, written once and
 /// NULL for a root cause, FIG-4829). A database written before these changes
@@ -482,7 +482,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 /// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
 /// recreate it.
 /// Version 99 also lets a turn park record the engine's handles on stopped
-/// work its root waits on (FIG-4630, changed in place under the version
+/// work its run waits on (FIG-4630, changed in place under the version
 /// freeze): `turn_parks` gains `child_engine_refs`. A database written before
 /// it has the old shape; recreate it.
 ///
@@ -491,7 +491,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 ///         path = "crates/lash-sqlite-store/src/lib.rs", StoredBlobEnvelope,
 ///         BlobArtifactDescriptor, BlobStorageHint, BlobCompression,
 ///     ),
-///     roots(path = "crates/lash-core-store/src/store/root.rs", RootAdmission),
+///     roots(path = "crates/lash-core-store/src/store/run.rs", RunAdmission),
 ///     roots(path = "crates/lash-core-store/src/store/pending_follow_on.rs", PendingFollowOn),
 ///     roots(path = "crates/lash-core-store/src/runtime_error.rs", RuntimeErrorCode),
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
@@ -501,7 +501,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 141;
 ///     ),
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/schema_fragments.rs", SESSION_INGRESS_TABLE,
-///         SESSION_ROOTS_TABLES, elide = "sql_idempotent_index",
+///         SESSION_RUNS_TABLES, elide = "sql_idempotent_index",
 ///     ),
 ///     catalog(
 ///         path = "crates/lash-sqlite-store/src/migration.rs", CATALOG,

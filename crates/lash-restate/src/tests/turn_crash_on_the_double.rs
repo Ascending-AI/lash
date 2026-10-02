@@ -43,8 +43,8 @@ lash_conformance::turn_crash_level_1_tests!(parked: &[]; {
 lash_conformance::effect_layer_group_child_tests!({ turn_crash_runner_fixture().await });
 
 // A drain crashed after its final commit and redriven through the session
-// drive replays its recorded admission and seal and reads the
-// committed root back (FIG-3748).
+// shift replays its recorded admission and seal and reads the
+// committed run back (FIG-3748).
 lash_conformance::turn_crash_after_commit_redrive_tests!({ turn_crash_runner_fixture().await });
 
 // FIG-3927 N9's crash cells: a final commit whose reply was lost replays its
@@ -54,6 +54,6 @@ lash_conformance::turn_crash_admission_cells_tests!({ turn_crash_runner_fixture(
 
 lash_conformance::turn_crash_direct_acceptance_tests!({ turn_crash_runner_fixture().await });
 
-// Every closure cut recovers through the session drive, the one inside the
+// Every closure cut recovers through the session shift, the one inside the
 // store write that applies the input effects included (FIG-3736).
 lash_conformance::turn_crash_cancel_closure_tests!({ turn_crash_runner_fixture().await });

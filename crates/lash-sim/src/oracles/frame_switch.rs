@@ -39,10 +39,10 @@ pub fn frame_switch_seeds(observations: &[FrameSwitchSeedObservation]) -> Oracle
     )
 }
 
-/// Match the runtime's admission and settlement trace records by root and
+/// Match the runtime's admission and settlement trace records by run and
 /// row (FIG-3927), and require every admitted row to be admitted once and
-/// settled once under the root that admitted it: completed as delivered, or
-/// handed back open or dropped by that root's commit.
+/// settled once under the run that admitted it: completed as delivered, or
+/// handed back open or dropped by that run's commit.
 pub fn logical_turn_admissions_settle_exactly_once(
     records: &[lash_core::facade_support::TraceRecord],
 ) -> OracleVerdict {
@@ -70,14 +70,14 @@ pub fn logical_turn_admissions_settle_exactly_once(
             ),
             _ => continue,
         };
-        let Some(root) = payload.get("root").and_then(Value::as_str) else {
+        let Some(run) = payload.get("run").and_then(Value::as_str) else {
             return OracleVerdict::failed(
                 LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
-                format!("{name} trace omitted root"),
+                format!("{name} trace omitted run"),
             );
         };
         for row in row_ids(payload, fields) {
-            *counts.entry((root.to_string(), row)).or_default() += 1;
+            *counts.entry((run.to_string(), row)).or_default() += 1;
         }
     }
     if admitted.is_empty() {
@@ -92,7 +92,7 @@ pub fn logical_turn_admissions_settle_exactly_once(
             return OracleVerdict::failed(
                 LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
                 format!(
-                    "row `{}` of root `{}` was admitted {admission_count} times and settled \
+                    "row `{}` of run `{}` was admitted {admission_count} times and settled \
                      {settlement_count} times",
                     row.1, row.0
                 ),
@@ -106,7 +106,7 @@ pub fn logical_turn_admissions_settle_exactly_once(
         return OracleVerdict::failed(
             LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE,
             format!(
-                "row `{}` of root `{}` had {count} settlements without one matching admission",
+                "row `{}` of run `{}` had {count} settlements without one matching admission",
                 row.1, row.0
             ),
         );
@@ -391,43 +391,43 @@ mod admission_identity_tests {
         }
     }
 
-    fn admit_and_settle(root: &str, batch: &str) -> [lash_core::facade_support::TraceRecord; 2] {
+    fn admit_and_settle(run: &str, batch: &str) -> [lash_core::facade_support::TraceRecord; 2] {
         [
             record(
                 "ingress.admitted",
-                serde_json::json!({"root": root, "admitted_by": "admit", "batch_ids": [batch]}),
+                serde_json::json!({"run": run, "admitted_by": "admit", "batch_ids": [batch]}),
             ),
             record(
                 "ingress.settled",
-                serde_json::json!({"root": root, "batch_ids": [batch]}),
+                serde_json::json!({"run": run, "batch_ids": [batch]}),
             ),
         ]
     }
 
-    /// A row one root released and another admitted is two admissions, each
+    /// A row one run released and another admitted is two admissions, each
     /// settled once.
     #[test]
-    fn a_row_readmitted_by_another_root_is_a_distinct_admission() {
-        let mut records = admit_and_settle("root-a", "qwb:a").to_vec();
+    fn a_row_readmitted_by_another_run_is_a_distinct_admission() {
+        let mut records = admit_and_settle("run-a", "qwb:a").to_vec();
         records.push(record(
             "ingress.admitted",
-            serde_json::json!({"root": "root-b", "admitted_by": "admit", "batch_ids": ["qwb:b"]}),
+            serde_json::json!({"run": "run-b", "admitted_by": "admit", "batch_ids": ["qwb:b"]}),
         ));
         records.push(record(
             "ingress.settled",
-            serde_json::json!({"root": "root-b", "released": ["qwb:b"]}),
+            serde_json::json!({"run": "run-b", "released": ["qwb:b"]}),
         ));
         let verdict = logical_turn_admissions_settle_exactly_once(&records);
         assert!(verdict.is_passed(), "{verdict:?}");
     }
 
-    /// The same row admitted and settled twice under one root is a double
+    /// The same row admitted and settled twice under one run is a double
     /// settlement.
     #[test]
-    fn the_same_row_settled_twice_under_one_root_is_refused() {
+    fn the_same_row_settled_twice_under_one_run_is_refused() {
         let records = [
-            admit_and_settle("root-a", "qwb:a"),
-            admit_and_settle("root-a", "qwb:a"),
+            admit_and_settle("run-a", "qwb:a"),
+            admit_and_settle("run-a", "qwb:a"),
         ]
         .concat();
         let verdict = logical_turn_admissions_settle_exactly_once(&records);

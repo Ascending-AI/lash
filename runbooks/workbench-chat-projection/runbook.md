@@ -75,7 +75,7 @@ id shape (FIG-972). Both regimes now carry unit coverage; this runbook is the ju
 browser-surface layer over it, and it exists because the unit tests assert within one surface
 while both defects were only visible **between** surfaces.
 
-**Two lanes.** The rendered-surface answer key is driven only with the named development
+**Two lanes.** The rendered-surface answer key is executed only with the named development
 provider scenarios below. They make no provider network calls and have exact event and text
 markers. The existing one-send/one-wake count lane still uses OpenRouter: its prose and
 termination style are nondeterministic, so that lane gates on role counts and records ids
@@ -150,7 +150,7 @@ histogram.
    durable contract above: retained source operation/outcome summaries plus an explicit omitted
    count. Backfill is a second, independent projection of committed state; never manufacture
    unavailable live fields to make the two paths look identical.
-7. **Scope everything to one session id.** Drive `/?session_id=<S>` and scope every read —
+7. **Scope everything to one session id.** Shift `/?session_id=<S>` and scope every read —
    `/api/state?session_id=<S>`, the `graph_nodes.session_id` filter, the product-event map
    key, and the trace's `context.session_id` — to that id. An unscoped read mixes other
    tabs' conversations into the counts and voids the run.

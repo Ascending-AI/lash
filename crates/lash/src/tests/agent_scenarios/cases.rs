@@ -233,7 +233,7 @@ finish(value);"#,
 #[test]
 fn agent_scenario_started_process_labeled_tool_call() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-started-process-tool", || async {
-        let run = run_agent_turn_scenario(
+        let ran_execution = run_agent_turn_scenario(
             AgentScenario::new(
                 STARTED_PROCESS_LABELED_TOOL_CALL.scenario_name,
                 "Start a process that calls the app lookup tool.",
@@ -264,7 +264,7 @@ finish(result);"#,
             .min_completed_process_graphs(1),
         )
         .await?;
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&ran_execution, "root"), @r#"
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
@@ -366,7 +366,7 @@ fn agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once() -> R
 #[test]
 fn agent_scenario_started_process_labeled_subagent_spawn() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-started-process-subagent", || async {
-        let run = run_agent_turn_scenario(
+        let ran_execution = run_agent_turn_scenario(
             AgentScenario::new(
                 STARTED_PROCESS_SUBAGENT.scenario_name,
                 "Run a durable process that spawns a subagent and returns its value.",
@@ -399,7 +399,7 @@ finish(result);"#,
             .min_completed_process_graphs(1),
         )
         .await?;
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&ran_execution, "root"), @r#"
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
@@ -434,7 +434,7 @@ finish(result);"#,
 #[test]
 fn agent_scenario_nested_process_start_await() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-nested-process", || async {
-        let run = run_agent_turn_scenario(
+        let ran_execution = run_agent_turn_scenario(
             AgentScenario::new(
                 NESTED_PROCESS_START_AWAIT.scenario_name,
                 "Start a parent process that starts and awaits a child process.",
@@ -467,7 +467,7 @@ finish(result);"#,
             .min_completed_process_graphs(3),
         )
         .await?;
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&ran_execution, "root"), @r#"
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
@@ -487,7 +487,7 @@ finish(result);"#,
         process-003  outcome   process.completed       label="-" kind="lashlang" terminal=true
         "#);
         assert_lashlang_process_ids_unique_for_labels(
-            &run.final_process_list,
+            &ran_execution.final_process_list,
             ["parent", "child", "grandchild"],
         );
         Ok(())
@@ -506,7 +506,7 @@ fn agent_scenario_session_turn_process_child() -> Result<()> {
 #[test]
 fn agent_scenario_failed_child_preserves_failure_graph() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-failed-child", || async {
-        let run = run_agent_turn_scenario_without_success_assertions(
+        let ran_execution = run_agent_turn_scenario_without_success_assertions(
             AgentScenario::new(
                 FAILED_CHILD_PRESERVES_GRAPH.scenario_name,
                 "Spawn a child that fails and preserve its execution graph.",
@@ -537,7 +537,7 @@ finish(result);"#,
         // Expect test first: the failure path's shape is the review artifact —
         // which cell failed, that the child's reason surfaced, and that the
         // parent's processes still folded to a terminal state.
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&ran_execution, "root"), @r#"
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
@@ -563,9 +563,9 @@ finish(result);"#,
         process-001  outcome   process.failed          label="spawn" kind="subagent" terminal=true
         "#);
 
-        assert_failed_code_block_present(&run.streamed_events);
-        assert_no_forbidden_error_text(&run.streamed_events);
-        let spawn_failure = run
+        assert_failed_code_block_present(&ran_execution.streamed_events);
+        assert_no_forbidden_error_text(&ran_execution.streamed_events);
+        let spawn_failure = ran_execution
             .streamed_events
             .iter()
             .find_map(|activity| match &activity.event {
@@ -586,22 +586,22 @@ finish(result);"#,
         assert_eq!(spawn_failure.source, lash_core::ToolFailureSource::Tool);
         assert_eq!(spawn_failure.retry, lash_core::ToolRetryStatus::Never);
         assert!(
-            !format!("{:#?}", run.streamed_events)
+            !format!("{:#?}", ran_execution.streamed_events)
                 .contains("scripted agent scenario provider exhausted"),
             "failed-child scenario must fail through the child task.fail path, not provider exhaustion"
         );
-        assert_no_false_finishted_success(&run);
-        assert_all_processes_terminal(&run.final_process_list);
-        let contract = GraphContract::from_graphs(&run.graph_snapshots);
+        assert_no_false_finishted_success(&ran_execution);
+        assert_all_processes_terminal(&ran_execution.final_process_list);
+        let contract = GraphContract::from_graphs(&ran_execution.graph_snapshots);
         assert_labeled_resource_operation(
             &contract,
             "Spawn failing subagent",
             NodeStatusFact::Failed,
         );
         assert_no_duplicate_label_step(&contract, "Spawn failing subagent");
-        assert_graph_lineage_connected(&contract, &run.final_process_list);
+        assert_graph_lineage_connected(&contract, &ran_execution.final_process_list);
         assert_subagent_bridge_exec_graphs(
-            &run,
+            &ran_execution,
             crate::tracing::TraceLanguageExecutionStatus::Completed,
         );
 
@@ -613,7 +613,7 @@ finish(result);"#,
 #[test]
 fn agent_scenario_parallel_spawn_and_join() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-parallel-spawn-join", || async {
-        let run = run_agent_turn_scenario(
+        let ran_execution = run_agent_turn_scenario(
             AgentScenario::new(
                 PARALLEL_SPAWN_AND_JOIN.scenario_name,
                 "Start two processes, await both, and finish their joined result.",
@@ -642,7 +642,7 @@ finish({ joined: [leftValue, rightValue] });"#,
         // Expect test first: the reviewable artifact is the spawn -> await ->
         // terminal fold plus what each turn actually committed, and a changed
         // shape is easier to judge than the first assertion that trips on it.
-        insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
+        insta::assert_snapshot!(agent_scenario_transcript(&ran_execution, "root"), @r#"
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
@@ -663,7 +663,10 @@ finish({ joined: [leftValue, rightValue] });"#,
         process-001  outcome   process.completed       label="-" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="-" kind="lashlang" terminal=true
         "#);
-        assert_lashlang_process_ids_unique_for_labels(&run.final_process_list, ["child", "child"]);
+        assert_lashlang_process_ids_unique_for_labels(
+            &ran_execution.final_process_list,
+            ["child", "child"],
+        );
 
         Ok(())
     })

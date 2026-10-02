@@ -118,7 +118,7 @@ pub fn nonterminal_turn_input_state_predicate_sql(column: &str) -> String {
     format!("{column} NOT IN ({terminal})")
 }
 
-/// The state an admitted row in `column` takes when its root lets go of it
+/// The state an admitted row in `column` takes when its run lets go of it
 /// without settling it: an `accepted` row is `pending_active` again, the
 /// state its submitted delivery names, and every other row keeps its own
 /// (ADR 0101 §5.1).

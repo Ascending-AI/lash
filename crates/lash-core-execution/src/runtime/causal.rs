@@ -45,7 +45,7 @@ pub fn turn_effect_invocation(
 /// of the session and the execution scope alone — both of which a replaying
 /// engine reconstructs identically — so a redriven handler journals the same
 /// entry and re-derives the admission instead of admitting a second turn.
-/// Nor does it name a turn index: the drive that admits the turn fixes that,
+/// Nor does it name a turn index: the shift that admits the turn fixes that,
 /// and anything read before it would come from the live head (FIG-3682).
 #[expect(
     clippy::expect_used,
@@ -70,17 +70,17 @@ pub fn turn_acceptance_effect_invocation(
     )
 }
 
-/// Invocation for the journaled initial drive set of an accepted turn input
+/// Invocation for the journaled initial shift set of an accepted turn input
 /// (ADR 0069 §6).
 ///
-/// The drive is a child of the acceptance's admission: same execution scope and
+/// The shift is a child of the acceptance's admission: same execution scope and
 /// attribution, a replay key derived from the acceptance's, and a causal edge
 /// back to it. Nothing about the lease that performs the admission enters the
 /// identity, so every lease generation replays the same entry.
-pub fn turn_input_drive_effect_invocation(
+pub fn turn_input_shift_effect_invocation(
     acceptance: &RuntimeEffectInvocation,
 ) -> RuntimeEffectInvocation {
-    let kind = RuntimeEffectKind::AdmitRoot.as_str();
+    let kind = RuntimeEffectKind::AdmitRun.as_str();
     child_effect_invocation_from_effect(
         acceptance.execution_scope(),
         acceptance,
@@ -895,7 +895,7 @@ mod tests {
             Some(&session_id)
         );
         assert_eq!(acceptance.attribution.turn_id.as_ref(), Some(&turn_id));
-        // The drive fixes the turn index; nothing before it names one
+        // The shift fixes the turn index; nothing before it names one
         // (FIG-3682).
         assert_eq!(acceptance.attribution.turn_index, None);
         assert_eq!(acceptance.attribution.protocol_iteration, None);
@@ -904,15 +904,15 @@ mod tests {
             "session:subagent:call:process:subagent:call:accept_turn_input"
         );
 
-        let drive = turn_input_drive_effect_invocation(&acceptance);
-        assert_eq!(drive.execution_scope(), &process_scope);
-        assert_eq!(drive.attribution, acceptance.attribution);
+        let shift = turn_input_shift_effect_invocation(&acceptance);
+        assert_eq!(shift.execution_scope(), &process_scope);
+        assert_eq!(shift.attribution, acceptance.attribution);
         assert_eq!(
-            drive.effect_replay_key(),
-            "session:subagent:call:process:subagent:call:accept_turn_input:admit_root"
+            shift.effect_replay_key(),
+            "session:subagent:call:process:subagent:call:accept_turn_input:admit_run"
         );
-        assert_eq!(drive.effect_id(), "process:subagent:call.accept.admit_root");
-        assert_eq!(drive.caused_by, Some(acceptance.causal_ref()));
+        assert_eq!(shift.effect_id(), "process:subagent:call.accept.admit_run");
+        assert_eq!(shift.caused_by, Some(acceptance.causal_ref()));
     }
 
     #[test]

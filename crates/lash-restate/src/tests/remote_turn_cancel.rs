@@ -5,7 +5,7 @@ use lash_core::facade_support::{
     AssembledTurn, LashRuntime, RuntimeHostConfig, TurnCancelMode, TurnCancelRequest, TurnOptions,
     TurnOutcome, TurnStop, TurnWorkDriver,
 };
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use tokio_util::sync::CancellationToken;
 
 /// The boundary events of a turn, one inner list per handler execution.
@@ -25,7 +25,7 @@ impl BoundaryEvents {
     const COMMITTED: [&'static str; 2] = ["checkpoint", "stopped"];
 
     /// Open the next execution's list; the turn fixture calls it before each
-    /// execution drives the turn.
+    /// execution executes the turn.
     fn begin_execution(&self) {
         self.0.lock_recover().push(Vec::new());
     }
@@ -117,7 +117,7 @@ impl TurnFixture {
         let mut input = lash_core::TurnInput::text("finish this step before stopping");
         input.trace_turn_id = Some(self.turn_id.clone());
         runtime
-            .drive_turn(
+            .execute_turn(
                 input,
                 TurnOptions::new(CancellationToken::new(), scope)
                     .with_events(&self.events)
@@ -309,13 +309,13 @@ pub(super) async fn held_step_law<Stores: lash_core::StoreSet + ?Sized + 'static
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let terminal = view
-        .root_terminal(&turn_id)
+        .run_terminal(&turn_id)
         .await
         .expect("read durable terminal")
         .expect("the stopped turn is committed in the store");
     assert!(
-        matches!(terminal.cause, lash_core::store::RootTerminalCause::Committed {
-        outcome: lash_core::store::RootCommittedOutcome::Stopped(TurnStop::Cancelled { evidence: ref durable }), ..
+        matches!(terminal.cause, lash_core::store::RunTerminalCause::Committed {
+        outcome: lash_core::store::RunCommittedOutcome::Stopped(TurnStop::Cancelled { evidence: ref durable }), ..
     } if durable == &evidence),
         "the store retains the exact checkpoint evidence"
     );

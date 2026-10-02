@@ -24,11 +24,11 @@ pub(crate) fn workbench_owns_committed_agent_reply(output: &TurnReport) -> bool 
 /// Commit the reply the workbench renders as this turn's durable assistant
 /// message. Only for turns `workbench_owns_committed_agent_reply` claims.
 ///
-/// The commit is a host append made after the root settled, so it is a
-/// session command (FIG-4202): the session's drive applies it at its next
+/// The commit is a host append made after the run settled, so it is a
+/// session command (FIG-4202): the session's shift applies it at its next
 /// turn boundary, after anything the session committed in between (a queued
 /// input, a wake), and the call awaits that settlement. It never races the
-/// drive for the head, so there is no conflict to reload past. The reply's
+/// shift for the head, so there is no conflict to reload past. The reply's
 /// message id is the command's idempotency key, and an already-committed
 /// reply skips the append, so a retry after a lost response commits it once.
 /// A settlement the deadline outruns is the session briefly busy, not a turn

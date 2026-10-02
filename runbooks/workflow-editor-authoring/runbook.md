@@ -72,7 +72,7 @@ changes when the lens's printer changes, not with this arc.
 - Teardown is Ctrl-C/SIGTERM to that foreground recipe. Confirm the port is closed.
 - Value editing commits on **blur**. A chip opened with `✎` writes its new value when focus
   leaves the input (Tab or a click elsewhere); pressing **Enter discards the edit** and the
-  field returns to its previous value. Drive every field edit with a blur, and never read a
+  field returns to its previous value. Shift every field edit with a blur, and never read a
   post-Enter field as evidence that the product dropped a value.
 - Browser affordances: workflow selector; **Steps** / **Canvas** tabs; rail **+** menus;
   Canvas **+ Add node · main** palette; editable value chips; `</>` raw-expression

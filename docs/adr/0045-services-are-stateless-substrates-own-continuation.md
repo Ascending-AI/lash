@@ -3,7 +3,7 @@
 A service instance is stateless with respect to correctness across an effect
 boundary. In-memory turns, watch hubs and caches exist, but committed steps
 live in SQL state or the engine journal. Sticky sessions are an optimization,
-not correctness authority. The session-head CAS and sealed drive fence govern
+not correctness authority. The session-head CAS and sealed shift fence govern
 session mutations and admission (ADR 0101).
 
 Streaming is in memory until the next recorded effect or checkpoint. A crash

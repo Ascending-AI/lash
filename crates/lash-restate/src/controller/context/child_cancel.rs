@@ -21,7 +21,7 @@ pub struct GroupChildCancelArm {
 }
 
 /// The two races of a group child's waits against its cancel fact, a part of
-/// every controller context. A context the controller never drives a group
+/// every controller context. A context the controller never executes a group
 /// child on refuses them.
 pub trait GroupChildCancelRace<'ctx>: Send + Sync + 'ctx {
     /// A durable timer of an effect-group child, raced against the child's

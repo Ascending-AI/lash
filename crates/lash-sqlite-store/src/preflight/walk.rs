@@ -244,7 +244,7 @@ fn next_cursor(last: Option<String>, scanned_rows: usize, limit: usize) -> Optio
 /// numerically, its cursor orders lexicographically, and the first process whose
 /// ordinals crossed a digit boundary would silently skip or repeat rows across a
 /// page boundary. Zero-padding to twenty digits makes the text form order the
-/// same way the integer does, and driving the `ORDER BY` off the same expression
+/// same way the integer does, and executing the `ORDER BY` off the same expression
 /// makes that agreement structural instead of a property two clauses happen to
 /// share.
 fn read_parked_segments(

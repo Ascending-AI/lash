@@ -4,14 +4,14 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f45a;
 
 /// An active-turn input admitted at a non-terminal checkpoint is settled by
 /// the in-flight turn's commit, and hosts see that in exactly one
-/// `ingress.settled` record under that turn and its root (ADR 0101, FIG-3927
-/// amendment: settlement is keyed by the root and the turn). The workbench's
+/// `ingress.settled` record under that turn and its run (ADR 0101, FIG-3927
+/// amendment: settlement is keyed by the run and the turn). The workbench's
 /// live turn-ingress law reads this record; FIG-3946 renamed it from
 /// `turn_input.completed` without that reader, which only the hourly e2e saw.
 #[tokio::test]
@@ -76,7 +76,7 @@ pub(super) async fn active_input_settles_once_under_the_in_flight_turn_in_the_tr
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text("use the tool, then answer"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
@@ -120,7 +120,7 @@ pub(super) async fn active_input_settles_once_under_the_in_flight_turn_in_the_tr
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
             record
-                .pointer("/payload/root")
+                .pointer("/payload/run")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
         )
@@ -130,6 +130,6 @@ pub(super) async fn active_input_settles_once_under_the_in_flight_turn_in_the_tr
     assert_eq!(
         settlements,
         vec![(Some(turn_id.to_string()), Some(turn_id.to_string()))],
-        "the active input settles exactly once, under the in-flight turn and its root"
+        "the active input settles exactly once, under the in-flight turn and its run"
     );
 }

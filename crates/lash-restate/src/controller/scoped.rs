@@ -66,7 +66,7 @@ where
         self.recording_controller(started.admitted_scope().clone())
     }
 
-    /// A process-scope controller for a test that drives effects without a
+    /// A process-scope controller for a test that executes effects without a
     /// workflow handler, and so without an admitted segment.
     #[cfg(test)]
     pub(crate) fn process_scope_for_test<'run>(

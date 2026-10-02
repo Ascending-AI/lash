@@ -3,7 +3,7 @@
 //! every await.
 //!
 //! The turn runs through the endpoint's real turn handler on the in-process
-//! server double, over a SQLite memory store set. Its drive observes around
+//! server double, over a SQLite memory store set. Its shift observes around
 //! each recorded step and each step's body observes from inside, the way the
 //! engine's turn loop and its effect bodies do. Under always-replay every
 //! step suspends the handler, and every resumption replays the journal up to
@@ -68,7 +68,7 @@ async fn run_golden_turn(always_replay: bool) -> Observed {
             let metric = Arc::clone(&metric);
             Box::pin(async move {
                 handler_runs.fetch_add(1, Ordering::SeqCst);
-                let turn = tracing.turn_drive(&session_id, &turn_id, &controller);
+                let turn = tracing.turn_execution(&session_id, &turn_id, &controller);
                 turn.observe(|| observation("turn started".to_string()));
                 for step in 0..STEPS {
                     turn.observe(|| observation(format!("step {step} issued")));

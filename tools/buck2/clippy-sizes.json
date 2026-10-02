@@ -719,7 +719,7 @@
     "peak_bytes": 164945920,
     "samples": 130
   },
-  "lash-internal-restate-test/root_close": {
+  "lash-internal-restate-test/run_close": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.05,
@@ -735,7 +735,7 @@
     "peak_bytes": 173199360,
     "samples": 169
   },
-  "lash-internal-restate-test/session_driver": {
+  "lash-internal-restate-test/session_shifts": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.05,

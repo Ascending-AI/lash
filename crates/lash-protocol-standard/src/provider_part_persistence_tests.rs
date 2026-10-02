@@ -1,7 +1,7 @@
 use super::tests::{CountingEffectController, runtime_test_tool};
 use super::*;
 use lash_core::llm::types::ResponsePhase;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Debug)]
@@ -133,7 +133,7 @@ async fn persisted_provider_response(
                     .expect("valid model"),
             ),
         )),
-        // Bounded, not unbounded: these fixtures drive a live runtime loop
+        // Bounded, not unbounded: these fixtures shift a live runtime loop
         // against a stub provider, so a driver that mistakes a tool-call-free
         // response for a tool-calling one spins here forever instead of
         // failing. The budget is well above the iterations the scenario needs.
@@ -169,7 +169,7 @@ async fn persisted_provider_response(
     .await
     .expect("runtime");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("respond"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

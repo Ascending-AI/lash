@@ -1,32 +1,32 @@
 use super::*;
 use crate::testing::TestClock;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
-/// A session-work engine that records the sessions it was asked to drive.
+/// A session-work engine that records the sessions it was asked to work.
 #[derive(Default)]
 struct RecordingWakeTurnHandle {
-    drives: std::sync::Mutex<Vec<SessionId>>,
-    driver: std::sync::OnceLock<Arc<dyn crate::SessionDriver>>,
+    shifts: std::sync::Mutex<Vec<SessionId>>,
+    driver: std::sync::OnceLock<Arc<dyn crate::SessionShifts>>,
     notify: tokio::sync::Notify,
 }
 
 impl crate::SessionWorkEngine for RecordingWakeTurnHandle {
-    fn schedule_drive(&self, session: &SessionId, _request: crate::engine::DriveRequestId) {
-        self.drives
+    fn schedule_shift(&self, session: &SessionId, _request: crate::engine::ShiftRequestId) {
+        self.shifts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(session.clone());
         self.notify.notify_one();
     }
 
-    fn install_session_driver(
+    fn install_session_shifts(
         &self,
-        driver: Arc<dyn crate::SessionDriver>,
-    ) -> Arc<dyn crate::SessionDriver> {
+        driver: Arc<dyn crate::SessionShifts>,
+    ) -> Arc<dyn crate::SessionShifts> {
         Arc::clone(self.driver.get_or_init(|| driver))
     }
 }
@@ -36,17 +36,17 @@ impl RecordingWakeTurnHandle {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn wait_for_process_wake(&self, session_id: &SessionId, prior_drives: usize) {
+    async fn wait_for_process_wake(&self, session_id: &SessionId, prior_shifts: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                // A wake asks the engine to drive its session (FIG-3600).
+                // A wake asks the engine to work its session (FIG-3600).
                 let notified = self.notify.notified();
                 if self
-                    .drives
+                    .shifts
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .iter()
-                    .skip(prior_drives)
+                    .skip(prior_shifts)
                     .any(|session| session == session_id)
                 {
                     return;
@@ -55,11 +55,11 @@ impl RecordingWakeTurnHandle {
             }
         })
         .await
-        .expect("process wake must ask the engine to drive its session");
+        .expect("process wake must ask the engine to work its session");
     }
 
     fn len(&self) -> usize {
-        self.drives
+        self.shifts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .len()
@@ -388,7 +388,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         32,
     )
     .await
-    .expect("re-drive wake outbox");
+    .expect("redrive wake outbox");
     assert_eq!(second.enqueued, 0);
 
     // Production authority and host delivery policy are stamped at process
@@ -507,7 +507,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     );
     let authority_lease = authority_target
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &SessionId::from(authority_target_session_id),
             &authority_owner,
             "wake-authority-target-executor",
@@ -517,11 +517,11 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .expect("claim authority target execution lease")
         .acquired()
         .expect("authority target lease is free");
-    let authority_root = "wake-authority-root";
-    let authority_admission = super::admitted_root_with_policy(
+    let authority_run = "wake-authority-run";
+    let authority_admission = super::admitted_run_with_policy(
         authority_target.store(),
         &authority_lease,
-        authority_root,
+        authority_run,
         crate::store::AdmittedHead::Batch(authority_rows[0].batch_id.clone()),
         crate::testing::queued_work_admission_policy(10),
     )
@@ -552,11 +552,11 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             .as_str()
         )
     );
-    super::end_root(
+    super::end_run(
         authority_target.store(),
         &authority_lease,
         super::releasing(
-            authority_root,
+            authority_run,
             authority_claim.batches.iter().map(super::batch_row),
         ),
     )
@@ -1361,16 +1361,16 @@ async fn settle_queued_batch(
         format!("{batch_id}:incarnation"),
     );
     let lease = target
-        .seal_drive_epoch_for_test(session_id, &owner, "settle-queued-batch-executor", 60_000)
+        .seal_shift_epoch_for_test(session_id, &owner, "settle-queued-batch-executor", 60_000)
         .await
         .expect("claim target session lease")
         .acquired()
         .expect("target session lease available");
-    let root = format!("settle-wake:{batch_id}");
-    let admission = super::admitted_root_with_policy(
+    let run = format!("settle-wake:{batch_id}");
+    let admission = super::admitted_run_with_policy(
         target,
         &lease,
-        &root,
+        &run,
         crate::store::AdmittedHead::Batch(head.batch_id.clone()),
         crate::testing::queued_work_admission_policy(1),
     )
@@ -1380,10 +1380,10 @@ async fn settle_queued_batch(
         Some(1),
         "the admission takes the head wake alone"
     );
-    super::end_root(
+    super::end_run(
         target,
         &lease,
-        super::completing_admission(&root, &admission),
+        super::completing_admission(&run, &admission),
     )
     .await;
 }
@@ -1872,7 +1872,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         32,
     )
     .await
-    .expect("drive rewound poison wake");
+    .expect("shift rewound poison wake");
     assert_eq!(poison_report.discarded_sequence_rewound, 1);
     assert_eq!(poison_report.retryable_failures, 0);
     let delivery_report = registry
@@ -1906,7 +1906,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         32,
     )
     .await
-    .expect("drive healthy wake behind rewound discard");
+    .expect("shift healthy wake behind rewound discard");
     assert_eq!(healthy_report.enqueued, 1);
     assert!(
         target
@@ -1982,7 +1982,7 @@ async fn target_gone_is_a_typed_discard(
         32,
     )
     .await
-    .expect("drive target-gone wake");
+    .expect("shift target-gone wake");
     assert_eq!(report.discarded_target_gone, 1);
     assert_eq!(report.retryable_failures, 0);
     let delivery = registry
@@ -2065,7 +2065,7 @@ async fn expired_is_a_typed_discard(
         32,
     )
     .await
-    .expect("drive expired wake with injected clock");
+    .expect("shift expired wake with injected clock");
     assert_eq!(report.retryable_failures, 0);
     assert!(
         report.discarded_expired >= 1,

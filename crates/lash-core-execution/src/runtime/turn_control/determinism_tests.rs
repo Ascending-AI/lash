@@ -139,7 +139,7 @@ type Arrival = fn(&GateEngine<'_>, &ActiveTurnControl, usize);
 
 /// A code cell's checkpoints, then the after-cell peek: the turn records the
 /// peek at which it first honours a stop, and the evidence it honours.
-fn cell_drive(
+fn cell_shift(
     gate: LiveGate,
     arrival: Arrival,
 ) -> impl for<'c> Fn(&'c (), &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>>
@@ -182,7 +182,7 @@ fn cell_drive(
 }
 
 fn check(gate: LiveGate, arrival: Arrival) -> crate::engine::testing::DeterminismReport {
-    let engine = LocalEngine::new(|| (), cell_drive(gate, arrival));
+    let engine = LocalEngine::new(|| (), cell_shift(gate, arrival));
     DeterminismCheck::new(0x3672_0009)
         .perturbed_replays(6)
         .run(&engine)

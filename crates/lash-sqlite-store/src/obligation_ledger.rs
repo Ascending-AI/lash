@@ -1,7 +1,7 @@
 //! The SQLite obligation ledgers (ADR 0109 §1.3): one generic ledger over
 //! each table's shared obligation statements.
 //!
-//! Ingress, intents, roots and the session catalog live in the durable core;
+//! Ingress, intents, runs and the session catalog live in the durable core;
 //! parent-end plans and processes in the process registry file; trigger
 //! deliveries in the trigger store's file. Each ledger
 //! holds a connection to its own database. Ingress spans two tables, one
@@ -31,8 +31,8 @@ use lash_store_sql::process::processes::{
     ProcessObligationStatements, ProcessStartObligationStatements,
 };
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
-use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
-use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
+use lash_store_sql::session_runs::control_intents::ControlIntentObligationStatements;
+use lash_store_sql::session_runs::runs::SessionRunObligationStatements;
 use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use rusqlite::types::Value;
 use rusqlite::{Row, params_from_iter};
@@ -43,8 +43,8 @@ use crate::{StoreError, sqlite_conversion_error, sqlite_error, stored_data_corru
 
 static INTENTS: LazyLock<ControlIntentObligationStatements> =
     LazyLock::new(|| ControlIntentObligationStatements::render(Schema::Main.dialect()));
-static ROOTS: LazyLock<SessionRootObligationStatements> =
-    LazyLock::new(|| SessionRootObligationStatements::render(Schema::Main.dialect()));
+static RUNS: LazyLock<SessionRunObligationStatements> =
+    LazyLock::new(|| SessionRunObligationStatements::render(Schema::Main.dialect()));
 static META: LazyLock<SessionMetaObligationStatements> =
     LazyLock::new(|| SessionMetaObligationStatements::render(Schema::Main.dialect()));
 static PLANS: LazyLock<ParentEndPlanObligationStatements> =
@@ -71,7 +71,7 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
     match kind {
         ObligationKind::Ingress => crate::ingress_obligation::turn_input_sql(),
         ObligationKind::ControlIntent => INTENTS.obligation_sql(),
-        ObligationKind::ScopeClose => ROOTS.obligation_sql(),
+        ObligationKind::ScopeClose => RUNS.obligation_sql(),
         ObligationKind::SessionDelete => META.obligation_sql(),
         ObligationKind::ParentEnd => PLANS.obligation_sql(),
         ObligationKind::TriggerDelivery => DELIVERIES.obligation_sql(),

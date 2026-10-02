@@ -43,7 +43,7 @@ pub(crate) async fn reclaim(
             .await
             .map_err(store_sqlx_error)?
             .rows_affected() as usize;
-        let removed_usage_run_count = sqlx::query(runs)
+        let removed_usage_meter_count = sqlx::query(runs)
             .bind(cutoff)
             .execute(&mut **tx)
             .await
@@ -59,7 +59,7 @@ pub(crate) async fn reclaim(
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
             removed_usage_fact_count,
-            removed_usage_run_count,
+            removed_usage_meter_count,
             removed_usage_owner_retirement_count,
             removed_attachment_root_count: 0,
             // Effect scopes are the engine's to retire; this catalog holds

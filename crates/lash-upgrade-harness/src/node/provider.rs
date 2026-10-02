@@ -1,4 +1,4 @@
-//! The scripted provider a serving node drives turns with.
+//! The scripted provider a serving node executes turns with.
 //!
 //! Every model call is an effect the legs count: with an effects log the
 //! provider appends one JSON line per call, naming the build and generation
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn a_message_names_its_gate() {
-        assert_eq!(gate_of("first turn hold:drive-1 please"), Some("drive-1"));
+        assert_eq!(gate_of("first turn hold:shift-1 please"), Some("shift-1"));
         assert_eq!(gate_of("hold:a_b"), Some("a_b"));
         assert_eq!(gate_of("no gate here"), None);
         assert_eq!(gate_of("hold: spaced"), None);

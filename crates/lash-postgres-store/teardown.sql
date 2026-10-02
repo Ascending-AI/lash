@@ -42,7 +42,7 @@ DROP TABLE IF EXISTS lash_fork_lineage CASCADE;
 
 DROP TABLE IF EXISTS lash_usage_facts CASCADE;
 
-DROP TABLE IF EXISTS lash_usage_runs CASCADE;
+DROP TABLE IF EXISTS lash_usage_meters CASCADE;
 
 DROP TABLE IF EXISTS lash_usage_owner_retirements CASCADE;
 
@@ -78,9 +78,9 @@ DROP TABLE IF EXISTS lash_session_run_specs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_ingress_sequence CASCADE;
 
-DROP TABLE IF EXISTS lash_session_roots CASCADE;
+DROP TABLE IF EXISTS lash_session_runs CASCADE;
 
-DROP TABLE IF EXISTS lash_session_root_inputs CASCADE;
+DROP TABLE IF EXISTS lash_session_run_inputs CASCADE;
 
 DROP TABLE IF EXISTS lash_control_intents CASCADE;
 

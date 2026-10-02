@@ -22,8 +22,8 @@ use std::future::Future;
 use std::sync::Arc;
 
 use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft};
-use lash_core_execution::store::RootStore as _;
-use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
+use lash_core_execution::store::RunStore as _;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestShiftExt;
 use lash_core_execution::{
     AttachmentReferrers, AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore,
     RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError,
@@ -64,32 +64,32 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-async fn sealed_drive_fence(
+async fn sealed_shift_fence(
     store: &SqliteStore,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     executor_id: &str,
-) -> lash_core_execution::store::DriveFence {
+) -> lash_core_execution::store::ShiftFence {
     store
-        .seal_drive_epoch_for_test(session_id, owner, executor_id, 0)
+        .seal_shift_epoch_for_test(session_id, owner, executor_id, 0)
         .await
-        .expect("seal drive epoch")
+        .expect("seal shift epoch")
         .acquired()
-        .expect("drive epoch sealed")
+        .expect("shift epoch sealed")
 }
 
-/// Admit `root` headed by the batch `head` under `fence`.
+/// Admit `run` headed by the batch `head` under `fence`.
 async fn admit(
     store: &SqliteStore,
-    fence: &lash_core_execution::store::DriveFence,
-    root: &str,
+    fence: &lash_core_execution::store::ShiftFence,
+    run: &str,
     head: &lash_core_execution::BatchId,
-) -> Result<Option<lash_core_execution::store::RootAdmission>, StoreError> {
+) -> Result<Option<lash_core_execution::store::RunAdmission>, StoreError> {
     store
-        .admit_root(
-            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+        .admit_run(
+            &lash_core_execution::testing::store_fixtures::admit_run_request_for_test(
                 fence,
-                &lash_core_execution::TurnId::fixture(root),
+                &lash_core_execution::TurnId::fixture(run),
                 lash_core_execution::store::AdmittedHead::Batch(head.clone()),
             ),
         )
@@ -308,8 +308,8 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
     lash_core_execution::runtime::process_wake_batch_draft(wake)
 }
 
-// Finding 2 (sequential): a batch admitted to one root is not won by a
-// second admission. One root takes the only ready batch; a second root headed
+// Finding 2 (sequential): a batch admitted to one run is not won by a
+// second admission. One run takes the only ready batch; a second run headed
 // by the same batch is refused while the first is unfinished.
 #[tokio::test]
 async fn second_admission_of_an_admitted_batch_is_not_won() {
@@ -323,7 +323,7 @@ async fn second_admission_of_an_admitted_batch_is_not_won() {
         .enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
         .await
         .expect("enqueue");
-    let fence = sealed_drive_fence(
+    let fence = sealed_shift_fence(
         &store,
         &SessionId::from("root"),
         &lease_owner("session-owner"),
@@ -331,16 +331,16 @@ async fn second_admission_of_an_admitted_batch_is_not_won() {
     )
     .await;
 
-    let admission_a = admit(&store, &fence, "root-a", &batch.batch_id)
+    let admission_a = admit(&store, &fence, "run-a", &batch.batch_id)
         .await
-        .expect("admit root a")
-        .expect("root a takes the only batch");
+        .expect("admit run a")
+        .expect("run a takes the only batch");
     assert_eq!(admission_a.batch_ids(), vec![batch.batch_id.clone()]);
 
-    let admission_b = admit(&store, &fence, "root-b", &batch.batch_id).await;
+    let admission_b = admit(&store, &fence, "run-b", &batch.batch_id).await;
     assert!(
-        matches!(admission_b, Err(StoreError::UnfinishedRootConflict { .. })),
-        "a batch admitted to an unfinished root must not be admitted again, got {admission_b:?}"
+        matches!(admission_b, Err(StoreError::UnfinishedRunConflict { .. })),
+        "a batch admitted to an unfinished run must not be admitted again, got {admission_b:?}"
     );
 
     // The admitted batch is hidden from the user-editable pending snapshot.
@@ -348,15 +348,15 @@ async fn second_admission_of_an_admitted_batch_is_not_won() {
         store
             .list_open_queued_work(&SessionId::from("root"))
             .await
-            .expect("list pending during root a's admission")
+            .expect("list pending during run a's admission")
             .is_empty(),
-        "the batch admitted to root a must be hidden from pending work"
+        "the batch admitted to run a must be hidden from pending work"
     );
 }
 
 // Finding 2 (concurrent): two callers under one fence on two connections
-// race to admit different roots headed by the same single ready batch. The
-// admission is read-then-write, so without the unfinished-root index and the
+// race to admit different runs headed by the same single ready batch. The
+// admission is read-then-write, so without the unfinished-run index and the
 // rows-affected check (and the `BEGIN IMMEDIATE` that serializes the read
 // with the write) both could believe they won. At most one admission may
 // succeed, and a successful one must actually own the batch.
@@ -375,7 +375,7 @@ fn concurrent_admissions_never_double_own_a_batch() {
     let fence = {
         let store = block_on(SqliteStore::open_file_for_testing(&path)).expect("admission store");
         let owner = lease_owner("session-owner");
-        block_on(sealed_drive_fence(
+        block_on(sealed_shift_fence(
             &store,
             &SessionId::from("root"),
             &owner,
@@ -384,36 +384,30 @@ fn concurrent_admissions_never_double_own_a_batch() {
     };
 
     let barrier = Arc::new(std::sync::Barrier::new(2));
-    let run = |path: std::path::PathBuf,
-               fence: lash_core_execution::store::DriveFence,
-               root: &'static str,
-               batch_id: lash_core_execution::BatchId,
-               barrier: Arc<std::sync::Barrier>| {
+    let executed = |path: std::path::PathBuf,
+                    fence: lash_core_execution::store::ShiftFence,
+                    run: &'static str,
+                    batch_id: lash_core_execution::BatchId,
+                    barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {
                 let store = SqliteStore::open_file_for_testing(&path)
                     .await
                     .expect("open store");
                 barrier.wait();
-                admit(&store, &fence, root, &batch_id).await
+                admit(&store, &fence, run, &batch_id).await
             })
         })
     };
 
-    let handle_a = run(
+    let handle_a = executed(
         path.clone(),
         fence.clone(),
-        "root-a",
+        "run-a",
         batch_id.clone(),
         Arc::clone(&barrier),
     );
-    let handle_b = run(
-        path.clone(),
-        fence,
-        "root-b",
-        batch_id,
-        Arc::clone(&barrier),
-    );
+    let handle_b = executed(path.clone(), fence, "run-b", batch_id, Arc::clone(&barrier));
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 
@@ -421,17 +415,17 @@ fn concurrent_admissions_never_double_own_a_batch() {
     for result in [result_a, result_b] {
         match result {
             Ok(Some(admission)) => winners.push(admission),
-            Ok(None) | Err(StoreError::UnfinishedRootConflict { .. } | StoreError::Contended) => {}
+            Ok(None) | Err(StoreError::UnfinishedRunConflict { .. } | StoreError::Contended) => {}
             Err(err) => panic!("a contended admission must resolve cleanly, got error: {err:?}"),
         }
     }
     assert_eq!(
         winners.len(),
         1,
-        "exactly one root may win the single batch, got {} winners",
+        "exactly one run may win the single batch, got {} winners",
         winners.len()
     );
-    // A successful admission really owns the batch: while its root is
+    // A successful admission really owns the batch: while its run is
     // unfinished, the batch is hidden from the user-editable pending snapshot.
     let verify = block_on(SqliteStore::open_file_for_testing(&path)).expect("verify store");
     let pending = block_on(verify.list_open_queued_work(&SessionId::from("root")))

@@ -33,7 +33,7 @@ process body. Generation refusal uses the same terminal vocabulary with
 `StoredArtifactCorrupt`, carrying the artifact reference and typed validation
 cause. Corruption never contributes a refused generation to a drain.
 
-Restate journals the admission verdict and nonce. The root's execution-start
+Restate journals the admission verdict and nonce. The run's execution-start
 write binds attempt 1. Successor segments use their retained handover and
 set-if-absent segment-start marker. Retrying the same execution is
 idempotent; a successor execution takes the next attempt. The registry

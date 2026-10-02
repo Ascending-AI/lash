@@ -18,14 +18,14 @@ async fn postgres_a_partial_admission_rolls_back_through_both_entry_points() {
                 ),
             )
             .await
-            .expect("admit queued-admission root");
+            .expect("admit queued-admission run");
         let case = law::prepare(Arc::new(storage.store()) as Arc<dyn RuntimeStore>, entry).await;
         sqlx::query("CREATE OR REPLACE FUNCTION lose_second_bind() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$").execute(storage.pool()).await.unwrap();
         let second = case.ids[1].replace('\'', "''");
-        sqlx::query(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_root ON lash_queued_work_batches FOR EACH ROW WHEN (OLD.batch_id = '{second}') EXECUTE FUNCTION lose_second_bind()")).execute(storage.pool()).await.unwrap();
+        sqlx::query(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_run ON lash_queued_work_batches FOR EACH ROW WHEN (OLD.batch_id = '{second}') EXECUTE FUNCTION lose_second_bind()")).execute(storage.pool()).await.unwrap();
         let admitted = case.admit().await;
         let bound: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM lash_queued_work_batches WHERE admitted_root IS NOT NULL",
+            "SELECT count(*) FROM lash_queued_work_batches WHERE admitted_run IS NOT NULL",
         )
         .fetch_one(storage.pool())
         .await
@@ -65,7 +65,7 @@ async fn postgres_an_admission_holds_its_rows_across_a_displaced_fence() {
             ),
         )
         .await
-        .expect("admit queued-admission root");
+        .expect("admit queued-admission run");
     law::an_admission_holds_its_rows_across_a_displaced_fence(
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
         "postgres",

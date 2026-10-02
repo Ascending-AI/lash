@@ -65,36 +65,36 @@ pub enum RuntimeErrorCode {
     /// retry policy - the runtime deliberately stops waiting instead of
     /// blocking one invocation indefinitely.
     SessionExecutionLaneBusy,
-    /// A session's drive admission found a turn input while the parked
-    /// root's park still names a redrive intent that is not yet settled
+    /// A session's shift admission found a turn input while the parked
+    /// run's park still names a redrive intent that is not yet settled
     /// (D15). The input is refused rather than interleaved with the
     /// redrive; the refusal is never a recorded verdict, so the identical
     /// admission is safe to retry and admits the input once the redrive
     /// settles.
     SessionRedriveUnsettled,
-    /// A head write outside every drive found the session head owned
-    /// (FIG-4202): a bound root, an owed follow-on or an open session
+    /// A head write outside every shift found the session head owned
+    /// (FIG-4202): a bound run, an owed follow-on or an open session
     /// command. Nothing was written. The owner releases the head at its
     /// boundary, so the identical write is safe to retry then; a host moves
     /// the head through a session command instead.
     SessionHeadOwned,
     /// A host write that moves a store-backed session's head was called
     /// directly (FIG-4202): the bound turn owns the head, so the write is a
-    /// session command the drive applies at a turn boundary. Submit it with
+    /// session command the shift applies at a turn boundary. Submit it with
     /// `submit_session_command` and await its settlement; only a storeless
     /// runtime writes directly.
     SessionCommandRequired,
-    /// The journaled initial drive of a turn cannot drive the input that turn
+    /// The journaled initial shift of a turn cannot execute the input that turn
     /// accepted: another claim of the live lease generation holds it; it is no
     /// longer open because it was settled, cancelled, or pruned by `vacuum()`;
     /// or, on a replay, a recovery drain reclaimed the journaled rows before the
-    /// turn could commit them. Nothing is committed. The drive is a journaled
+    /// turn could commit them. Nothing is committed. The shift is a journaled
     /// effect (ADR 0069 §6), so re-running the same turn cedes the same way; the
     /// accepted input is answered, if at all, by the driver that holds or
     /// settled it.
     AcceptedTurnInputCeded,
-    /// A caller waited on a session drive (`SessionWorkEngine::await_drive`)
-    /// of a deployment that runs no session work: nothing will ever drive the
+    /// A caller waited on a session shift (`SessionWorkEngine::await_shift`)
+    /// of a deployment that runs no session work: nothing will ever shift the
     /// session, so nothing will answer the wait. Configuring the core with a
     /// session-work engine is the recovery.
     SessionWorkUnavailable,
@@ -109,15 +109,15 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
-    /// Session work waits for an unfinished root or its owed follow-on.
-    SessionRootPending,
+    /// Session work waits for an unfinished run or its owed follow-on.
+    SessionRunPending,
     /// A pending follow-on owns the session (ADR 0101 §3): the commit or
     /// frame change is refused until the follow-on's own terminal commit.
     FollowOnPending,
     /// The final runtime commit lost the session-head compare-and-swap to a
     /// newer commit. Nothing from the losing commit was published, but the
     /// identical stale commit is not safe to retry: reload the durable head and
-    /// re-establish current drive and root authority before building new work
+    /// re-establish current shift and run authority before building new work
     /// (ADR 0101).
     StoreCommitSuperseded,
     /// The session was deleted before its final runtime commit could publish.
@@ -172,8 +172,8 @@ pub enum RuntimeErrorCode {
     /// A durable record failed deterministic serialization before publication.
     /// Retrying the same value with the same build cannot change the result.
     RecordEncodingFailed,
-    /// Terminal assembly has no installed root record from which to read
-    /// its termination policy. Repair the root's recorded view before it
+    /// Terminal assembly has no installed run record from which to read
+    /// its termination policy. Repair the run's recorded view before it
     /// can commit; the worker's live policy cannot replace that record.
     RecordedTerminationUnavailable,
     /// A process (re-)execution was handed an empty/non-persisted process id.
@@ -233,39 +233,39 @@ pub enum RuntimeErrorCode {
     /// refused typed before anything is accepted, a config command is
     /// refused when its transaction resolves. Nothing changes either way.
     LlmProfileUnknown,
-    /// A send, a root's run spec or a child's create request selects
+    /// A send, a run's run spec or a child's create request selects
     /// reasoning the capability of the model it would run refuses
     /// (FIG-4531). It is refused where it is stated, before anything runs:
     /// the same selection over the same recorded capability is refused
     /// again.
     ReasoningRefused,
-    /// A model a root recorded, or an admitted root's per-run key, has no
+    /// A model a run recorded, or an admitted run's per-run key, has no
     /// binding on this worker. The model was adopted when it was set, so this
     /// is the worker's deployment, not the session's intent: the engine
-    /// retries the root, and its retry budget parks it.
+    /// retries the run, and its retry budget parks it.
     LlmProfileUnavailable,
     /// A recorded config selects no model, so the work it governs has
     /// nothing to run a model call with. It is a recorded absence no
     /// deployment can repair, so it is the work's outcome and is never
     /// retried, unlike [`Self::LlmProfileUnavailable`].
     LlmProfileUnconfigured,
-    /// A root's run spec names a definition revision this worker does not
-    /// register (FIG-3838). It is the deployment, not the input: the root
+    /// A run's run spec names a definition revision this worker does not
+    /// register (FIG-3838). It is the deployment, not the input: the run
     /// retries, its retry budget parks it, and a redeploy that registers the
     /// revision recovers it. Nothing is recorded, and no other revision is
     /// ever used instead.
     RunDefinitionUnavailable,
-    /// A recorded renderer is absent on this worker. Redeploying it can resume the root.
+    /// A recorded renderer is absent on this worker. Redeploying it can resume the run.
     RecordedRendererUnavailable,
     /// An output too long for history could not be retained as a session
     /// attachment before it entered history (FIG-1643). The output never
     /// enters history in its place: the step retries, and its retry budget
-    /// parks the root.
+    /// parks the run.
     OutputRetentionFailed,
     /// A required output retention was permanently refused by its attachment store.
     OutputRetentionRefused,
     /// A registered run definition refused the spec's context (FIG-3838):
-    /// deterministic, so it is recorded as the root's failure.
+    /// deterministic, so it is recorded as the run's failure.
     RunShapeRefused,
     /// An input addressed to a running turn carried an explicit run spec
     /// that differs from the turn's (FIG-3838): refused before acceptance.
@@ -417,15 +417,15 @@ pub enum RuntimeErrorCode {
     EngineProcessTurnCancelContextMissing,
     EngineProcessTerminalEncode,
     EngineTurnTerminalAttach,
-    /// The engine ended a root's only run without a Lash outcome.
-    EngineRootSubstrateLost,
-    /// A control verb or drive request did not reach the engine, or the engine
+    /// The engine ended a run's only run without a Lash outcome.
+    EngineRunSubstrateLost,
+    /// A control verb or shift request did not reach the engine, or the engine
     /// did not carry it out. The refusal's disposition says whether asking
     /// again can succeed.
     EngineControlRequest,
     /// The installed engine does not implement the control verb asked of it.
     EngineControlUnsupported,
-    /// A park's stored engine handle does not name an execution of the root's
+    /// A park's stored engine handle does not name an execution of the run's
     /// session, so the engine resumes or releases nothing under it.
     EngineHandleMismatch,
     /// A process redrive named a process that holds no park.
@@ -519,11 +519,11 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolChildRequestOpener,
     RuntimeEffectToolChildRequestVersion,
     RuntimeEffectToolSettlementVersion,
-    /// A provider call was dispatched outside any spending effect's usage run
+    /// A provider call was dispatched outside any spending effect's usage meter
     /// (ADR 0125): nothing would account for it, so it is refused before
     /// dispatch.
-    UsageRunMissing,
-    /// Admitting a spending effect's usage run to storage failed. The attempt
+    UsageMeterMissing,
+    /// Admitting a spending effect's usage meter to storage failed. The attempt
     /// ends retryably and journals nothing; the engine runs it again.
     UsageAdmissionFault,
     /// The accounting owner is retired; no further provider dispatch may spend under it.
@@ -552,7 +552,7 @@ pub enum RuntimeErrorCode {
     StoreRefused,
     SessionCommandRun,
     SessionCommandIdempotencyKey,
-    SessionCommandPostDriveRefresh,
+    SessionCommandPostShiftRefresh,
     SessionCommandRefresh,
     SessionCommandRefreshTools,
     SessionDeleteScopeMismatch,
@@ -629,7 +629,7 @@ impl RuntimeErrorCode {
                 "turn_execution_requires_reconciled_tool_surface"
             }
             Self::StoreCommitContended => "store_commit_contended",
-            Self::SessionRootPending => "session_root_pending",
+            Self::SessionRunPending => "session_run_pending",
             Self::FollowOnPending => "follow_on_pending",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
@@ -746,7 +746,7 @@ impl RuntimeErrorCode {
             }
             Self::EngineProcessTerminalEncode => "engine_process_terminal_encode",
             Self::EngineTurnTerminalAttach => "engine_turn_terminal_attach",
-            Self::EngineRootSubstrateLost => "engine_root_substrate_lost",
+            Self::EngineRunSubstrateLost => "engine_run_substrate_lost",
             Self::EngineControlRequest => "engine_control_request",
             Self::EngineControlUnsupported => "engine_control_unsupported",
             Self::EngineHandleMismatch => "engine_handle_mismatch",
@@ -815,7 +815,7 @@ impl RuntimeErrorCode {
                 "runtime_effect_tool_child_request_admission"
             }
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
-            Self::UsageRunMissing => "usage_run_missing",
+            Self::UsageMeterMissing => "usage_meter_missing",
             Self::UsageAdmissionFault => "usage_admission_fault",
             Self::UsageOwnerRetired => "usage_owner_retired",
             Self::RuntimeEffectToolChildRequestVersion => {
@@ -834,7 +834,7 @@ impl RuntimeErrorCode {
             Self::StoreRefused => "store_refused",
             Self::SessionCommandRun => "session_command_run",
             Self::SessionCommandIdempotencyKey => "session_command_idempotency_key",
-            Self::SessionCommandPostDriveRefresh => "session_command_post_drive_refresh",
+            Self::SessionCommandPostShiftRefresh => "session_command_post_shift_refresh",
             Self::SessionCommandRefresh => "session_command_refresh",
             Self::SessionCommandRefreshTools => "session_command_refresh_tools",
             Self::SessionDeleteScopeMismatch => "session_delete_scope_mismatch",
@@ -923,7 +923,7 @@ impl RuntimeErrorCode {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }
             "store_commit_contended" => Self::StoreCommitContended,
-            "session_root_pending" => Self::SessionRootPending,
+            "session_run_pending" => Self::SessionRunPending,
             "follow_on_pending" => Self::FollowOnPending,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
@@ -1040,7 +1040,7 @@ impl RuntimeErrorCode {
             }
             "engine_process_terminal_encode" => Self::EngineProcessTerminalEncode,
             "engine_turn_terminal_attach" => Self::EngineTurnTerminalAttach,
-            "engine_root_substrate_lost" => Self::EngineRootSubstrateLost,
+            "engine_run_substrate_lost" => Self::EngineRunSubstrateLost,
             "engine_control_request" => Self::EngineControlRequest,
             "engine_control_unsupported" => Self::EngineControlUnsupported,
             "engine_handle_mismatch" => Self::EngineHandleMismatch,
@@ -1109,7 +1109,7 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectToolChildRequestAdmission
             }
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
-            "usage_run_missing" => Self::UsageRunMissing,
+            "usage_meter_missing" => Self::UsageMeterMissing,
             "usage_admission_fault" => Self::UsageAdmissionFault,
             "usage_owner_retired" => Self::UsageOwnerRetired,
             "runtime_effect_tool_child_request_version" => {
@@ -1128,7 +1128,7 @@ impl RuntimeErrorCode {
             "store_refused" => Self::StoreRefused,
             "session_command_run" => Self::SessionCommandRun,
             "session_command_idempotency_key" => Self::SessionCommandIdempotencyKey,
-            "session_command_post_drive_refresh" => Self::SessionCommandPostDriveRefresh,
+            "session_command_post_shift_refresh" => Self::SessionCommandPostShiftRefresh,
             "session_command_refresh" => Self::SessionCommandRefresh,
             "session_command_refresh_tools" => Self::SessionCommandRefreshTools,
             "session_delete_scope_mismatch" => Self::SessionDeleteScopeMismatch,
@@ -1655,13 +1655,13 @@ impl RuntimeEffectControllerError {
     /// execution-environment load, presentation
     /// whose recorded renderer is unavailable, and a presentation or language
     /// value whose output retention faulted (FIG-1643) — and a
-    /// drive's admission and seal, a root's resolution (its spec read and its
+    /// shift's admission and seal, a run's resolution (its spec read and its
     /// definition lookup, FIG-3838), a config transaction's resolution under
-    /// reducers other than it was admitted with (FIG-4379), a root's scope
+    /// reducers other than it was admitted with (FIG-4379), a run's scope
     /// close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
     /// admission, whose binding read is the attempt's (FIG-4369), a follow-on
-    /// recovery root's decision (FIG-4361), and a process command
+    /// recovery run's decision (FIG-4361), and a process command
     /// that marked its registry fault retryable (a session deletion's process
     /// cleanup, after its close) can consume derivation retry authority, as
     /// can any step whose cancellation watch was lost
@@ -1686,15 +1686,15 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::PresentToolResult
                 | RuntimeEffectKind::LanguageRuntimeValue
-                | RuntimeEffectKind::AdmitDrive
-                | RuntimeEffectKind::SealDriveAdmission
-                | RuntimeEffectKind::AdmitRoot
+                | RuntimeEffectKind::AdmitShift
+                | RuntimeEffectKind::SealShiftAdmission
+                | RuntimeEffectKind::AdmitRun
                 | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::ResolveConfigTransaction
-                | RuntimeEffectKind::CloseRootScope
+                | RuntimeEffectKind::CloseRunScope
                 | RuntimeEffectKind::BeginSessionClose
                 | RuntimeEffectKind::IngestTriggerOccurrence
                 | RuntimeEffectKind::AdmitTriggerDelivery

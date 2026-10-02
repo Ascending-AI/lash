@@ -111,21 +111,21 @@ fn core(
                 if index == 1 && cut {
                     tokio::time::timeout(BOUND, async {
                         loop {
-                            let runs = backend
+                            let meters = backend
                                 .stores()
                                 .usage_accounting()
-                                .load_usage_run_page(
+                                .load_usage_meter_page(
                                     &owner,
-                                    lash_core::UsageRunFilter::All,
+                                    lash_core::UsageMeterFilter::All,
                                     None,
                                     std::num::NonZeroU32::new(10).unwrap(),
                                 )
                                 .await
                                 .unwrap();
-                            if runs.runs.iter().any(|run| {
-                                run.admission.as_ref().is_some_and(|admission| {
+                            if meters.meters.iter().any(|meter| {
+                                meter.admission.as_ref().is_some_and(|admission| {
                                     admission.requested_model == "mock-model"
-                                }) && run.state.is_settled()
+                                }) && meter.state.is_settled()
                             }) {
                                 break;
                             }
@@ -290,16 +290,16 @@ async fn cut_before_send(kill: bool) {
         .expect("observe the crash");
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let invocations = backend.invocations().await.unwrap();
-    let root = invocations
+    let run = invocations
         .iter()
         .find(|row| row.target.starts_with("LashTurn/") && row.status != "completed")
-        .expect("root at the cut");
-    let journal = backend.journal_entries(&root.id).await.unwrap();
+        .expect("run at the cut");
+    let journal = backend.journal_entries(&run.id).await.unwrap();
     assert!(
         journal.iter().any(|(name, bytes)| name.contains("Run")
             && String::from_utf8_lossy(bytes).contains("\"call\":1")),
         "the second paid effect entry is retained: {:?}",
-        backend.journal(&root.id).await.unwrap()
+        backend.journal(&run.id).await.unwrap()
     );
     let before = backend
         .stores()
@@ -319,19 +319,19 @@ async fn cut_before_send(kill: bool) {
         .unwrap()
         .head_revision;
     let lost = factory
-        .non_terminal_roots_page(None, std::num::NonZeroUsize::new(2).unwrap())
+        .non_terminal_runs_page(None, std::num::NonZeroUsize::new(2).unwrap())
         .await
         .unwrap()
         .into_iter()
-        .map(|open| open.target.root)
+        .map(|open| open.target.run)
         .collect::<Vec<_>>();
     let [lost] = lost.as_slice() else {
-        panic!("one open root at the cut: {lost:?}");
+        panic!("one open run at the cut: {lost:?}");
     };
     if kill {
         assert!(
-            backend.kill_and_await(&root.id).await.unwrap(),
-            "admin kill confirms the root ended"
+            backend.kill_and_await(&run.id).await.unwrap(),
+            "admin kill confirms the run ended"
         );
         assert_eq!(
             backend
@@ -358,18 +358,18 @@ async fn cut_before_send(kill: bool) {
         let liabilities = backend
             .stores()
             .usage_accounting()
-            .load_usage_run_page(
+            .load_usage_meter_page(
                 &owner,
-                lash_core::UsageRunFilter::Unresolved,
+                lash_core::UsageMeterFilter::Unresolved,
                 None,
                 std::num::NonZeroU32::new(10).unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(liabilities.runs.len(), 1);
+        assert_eq!(liabilities.meters.len(), 1);
         assert_eq!(
-            liabilities.runs[0].state.outcome(),
-            Some(&lash_core::UsageRunOutcome::Unknown(
+            liabilities.meters[0].state.outcome(),
+            Some(&lash_core::UsageMeterOutcome::Unknown(
                 lash_core::UsageUnknownReason::OwnerRetired
             ))
         );
@@ -385,18 +385,18 @@ async fn cut_before_send(kill: bool) {
         );
         send.abort();
         let _ = send.await;
-        // Nothing of the killed root outlives it: the recovery pass that
-        // ends the root lost also closes its scope, which releases what the
+        // Nothing of the killed run outlives it: the recovery pass that
+        // ends the run lost also closes its scope, which releases what the
         // aborted send left waiting on its terminal.
-        let driver = backend
+        let shifts = backend
             .restate()
             .session_work_engine()
-            .driver_slot()
+            .shifts_slot()
             .installed()
-            .expect("the core installed its driver");
+            .expect("the core installed its `SessionShifts`");
         tokio::time::timeout(
             BOUND,
-            driver.reconcile(
+            shifts.reconcile(
                 &lash_core::engine::ReconcileCursor::default(),
                 std::num::NonZeroUsize::MIN.saturating_add(63),
             ),
@@ -404,13 +404,13 @@ async fn cut_before_send(kill: bool) {
         .await
         .expect("one recovery pass")
         .unwrap();
-        let terminal = factory.root_terminal(&id, lost).await.unwrap();
+        let terminal = factory.run_terminal(&id, lost).await.unwrap();
         assert!(
             matches!(
                 terminal.as_ref().map(|terminal| &terminal.cause),
-                Some(lash_core::store::RootTerminalCause::SubstrateLost { .. })
+                Some(lash_core::store::RunTerminalCause::SubstrateLost { .. })
             ),
-            "the pass ends the killed root substrate-lost: {terminal:?}"
+            "the pass ends the killed run substrate-lost: {terminal:?}"
         );
         assert_eq!(
             backend
@@ -419,21 +419,21 @@ async fn cut_before_send(kill: bool) {
                 .state(
                     &lash_core::store::ObligationKey::ScopeClose {
                         session_id: id.clone(),
-                        root: lost.clone(),
+                        run: lost.clone(),
                     }
                     .id(),
                 )
                 .await
                 .unwrap(),
             Some(lash_core::store::ObligationState::Delivered),
-            "the pass that ended the root delivered its scope close"
+            "the pass that ended the run delivered its scope close"
         );
     } else {
         tokio::time::timeout(BOUND, send)
             .await
             .unwrap()
             .unwrap()
-            .expect("replay completes the root");
+            .expect("replay completes the run");
         charged(&backend, &owner, 2, 0).await;
     }
     assert_eq!(

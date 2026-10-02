@@ -78,7 +78,7 @@ fn deployment_core(
             "lash-restate-test",
             "cold-recovery",
         ))
-        .expect("fresh session driver, process engine and tool context source")
+        .expect("fresh SessionShifts, process engine and tool context source")
 }
 
 fn live(engine: &Engine) -> &LiveRestateBackend {
@@ -608,16 +608,16 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         .id("before")
         .await
         .expect("accept input");
-    let drive = lash_core::drive::ingress_drive_request(
+    let shift = lash_core::shift::ingress_shift_request(
         handle.input_id().as_str(),
-        lash_core::drive::FIRST_INGRESS_ATTEMPT,
+        lash_core::shift::FIRST_INGRESS_ATTEMPT,
     );
-    handle.output().await.expect("first root commits");
-    let first_drive = live(&engine)
-        .attach_drive(&session_id, drive.clone())
+    handle.output().await.expect("first run commits");
+    let first_shift = live(&engine)
+        .attach_shift(&session_id, shift.clone())
         .await
-        .expect("recorded drive");
-    let first_root = first_drive.ran[0].root().clone();
+        .expect("recorded shift");
+    let first_run = first_shift.ran[0].run().clone();
     assert_eq!(models.load(Ordering::SeqCst), 1);
     let checkpoint = group_checkpoint(&engine).await;
     let mut env = process_env_spec();
@@ -734,22 +734,22 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         1,
         "the retained dispatcher sends no additional tool work"
     );
-    let old_drive = live(&engine)
-        .attach_drive(&session_id, drive)
+    let old_shift = live(&engine)
+        .attach_shift(&session_id, shift)
         .await
-        .expect("old drive reattaches");
-    assert_eq!(old_drive, first_drive);
-    let reply: Reply<Option<lash_core::engine::RootOutcome>> = live(&engine)
+        .expect("old shift reattaches");
+    assert_eq!(old_shift, first_shift);
+    let reply: Reply<Option<lash_core::engine::RunOutcome>> = live(&engine)
         .ingress()
         .call_workflow_json(
             "LashTurn",
-            &turn_workflow_key(&session_id, &first_root),
+            &turn_workflow_key(&session_id, &first_run),
             "outcome",
             &Call::new(()),
         )
         .await
         .expect("fresh turn handler reads its recorded state");
-    assert_eq!(reply.body, Some(first_drive.ran[0].clone()));
+    assert_eq!(reply.body, Some(first_shift.ran[0].clone()));
     let session = core
         .session(lash_core::SessionId::fixture(session_id.as_str()))
         .open()
@@ -770,7 +770,7 @@ async fn live_restate_stateless_service_rebuild_recovers_each_service_kind() {
         .id("after")
         .output()
         .await
-        .expect("fresh session handler drives only new ingress");
+        .expect("fresh session handler executes only new ingress");
     assert_eq!(models.load(Ordering::SeqCst), 2);
     recover_group(&engine, checkpoint).await;
     signal(&engine, &core, &id).await;

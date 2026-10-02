@@ -1,15 +1,15 @@
-//! Acceptance-before-drive laws for direct turns (ADR 0069).
+//! Acceptance-before-shift laws for direct turns (ADR 0069).
 //!
-//! Every turn enters through one durable acceptance commit and is then driven,
+//! Every turn enters through one durable acceptance commit and is then executed,
 //! so these belong to the store contract rather than to one backend's tests: a
 //! backend that admits a direct turn without recording it, or records it in a
 //! shape its own drains cannot recover, has a different ingress from its
 //! siblings.
 //!
-//! A host's turn is a send the engine drives; the in-process entry these laws
-//! drive is the one a child session's turn takes inside its parent's
+//! A host's turn is a send the engine executes; the in-process entry these laws
+//! shift is the one a child session's turn takes inside its parent's
 //! execution, through the testing door
-//! [`TestTurnDrive::drive_child_session_turn`](crate::testing::TestTurnDrive::drive_child_session_turn).
+//! [`TestTurnExecution::execute_child_session_turn`](crate::testing::TestTurnExecution::execute_child_session_turn).
 //!
 //! The suites run a real runtime turn over the supplied durable store and read
 //! it back only through surfaces every backend already owes:
@@ -17,7 +17,7 @@
 //! `cancel_pending_turn_input`.
 
 use crate::admit;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -141,19 +141,19 @@ pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
 /// nothing is left pending. A backend that drove the caller's copy of the words
 /// instead of the accepted row settles no application for it.
 ///
-/// Mid-drive the session offers *no* open input, because the accepted row is
-/// bound to this turn's own root. The ordinary pending listing still returns
-/// that row with the factual `Admitted{root}` status naming the root.
+/// Mid-shift the session offers *no* open input, because the accepted row is
+/// bound to this turn's own run. The ordinary pending listing still returns
+/// that row with the factual `Admitted{run}` status naming the run.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn direct_turn_accepts_before_driving(
+pub async fn direct_turn_accepts_before_executing(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::fixture(format!("{prefix}-accept-before-drive"));
+    let turn_id = TurnId::fixture(format!("{prefix}-accept-before-shift"));
     let probe = Arc::new(std::sync::Mutex::new(None));
     let provider = {
         let store = Arc::clone(&store);
@@ -165,11 +165,11 @@ pub async fn direct_turn_accepts_before_driving(
                 let probe = Arc::clone(&probe);
                 async move {
                     // The turn is executing right now, so whatever this reads
-                    // was already true before the drive began.
+                    // was already true before the shift began.
                     let pending = store
                         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
                         .await
-                        .expect("read the session's pending inputs mid-drive");
+                        .expect("read the session's pending inputs mid-shift");
                     *probe.lock().expect("probe lock") = Some(pending);
                     Ok(text_response("accepted"))
                 }
@@ -190,7 +190,7 @@ pub async fn direct_turn_accepts_before_driving(
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
         .expect("scope the direct acceptance turn");
     let turn = runtime
-        .drive_child_session_turn(
+        .execute_child_session_turn(
             direct_input(&turn_id, "direct turn under durable acceptance"),
             crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
         )
@@ -207,9 +207,9 @@ pub async fn direct_turn_accepts_before_driving(
     assert_eq!(
         held.status,
         crate::PendingTurnInputReadStatus::Admitted {
-            root: turn_id.clone()
+            run: turn_id.clone()
         },
-        "the admitted marker must name the root driving it"
+        "the admitted marker must name the run executing it"
     );
     assert_eq!(
         held.input.state,
@@ -224,13 +224,13 @@ pub async fn direct_turn_accepts_before_driving(
     let input_id = acceptance.input_id.clone();
     assert_eq!(
         held.input.input_id, input_id,
-        "the held projection must name the acceptance this turn is driving"
+        "the held projection must name the acceptance this turn is executing"
     );
     assert_eq!(acceptance.session_id, SESSION_ID);
     assert_eq!(
         acceptance.source_key.as_deref(),
         Some(turn_id.as_str()),
-        "direct ingress names its row by the turn id, the root the drive runs it under"
+        "direct ingress names its row by the turn id, the run the shift runs it under"
     );
     assert_eq!(acceptance.ingress, crate::TurnInputIngress::next_turn());
 
@@ -253,7 +253,7 @@ pub async fn direct_turn_accepts_before_driving(
     );
 
     // The model-visible message the turn ran on is attributed to the accepted
-    // row, so the drive consumed the acceptance rather than the caller's copy
+    // row, so the shift consumed the acceptance rather than the caller's copy
     // of the same words.
     assert!(
         turn.state
@@ -270,7 +270,7 @@ pub async fn direct_turn_accepts_before_driving(
 
 /// Direct ingress identity is the turn id: two direct turns carrying the same
 /// content under two turn ids are two admissions, each keyed by its own turn
-/// id (the root the drive runs it under), never by its content.
+/// id (the run the shift runs it under), never by its content.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -311,7 +311,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
             .expect("scope a resubmitted direct turn");
         let turn = runtime
-            .drive_child_session_turn(
+            .execute_child_session_turn(
                 direct_input(&turn_id, "the very same words"),
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             )
@@ -340,7 +340,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
 }
 
 // ---------------------------------------------------------------------------
-// Journaled initial drive set (ADR 0069 §6, FIG-3532)
+// Journaled initial shift set (ADR 0069 §6, FIG-3532)
 // ---------------------------------------------------------------------------
 
 /// A journal-owning layer over the in-process effect host: the first
@@ -373,13 +373,13 @@ impl JournalLayer {
     }
 
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
-    pub(super) fn journaled_drive(&self) -> Option<crate::store::RootAdmissionAnswer> {
+    pub(super) fn journaled_shift(&self) -> Option<crate::store::RunAdmissionAnswer> {
         self.outcomes
             .lock()
             .expect("journal lock")
             .values()
             .find_map(|outcome| match outcome {
-                crate::RuntimeEffectOutcome::AdmitRoot { answer } => Some(answer.clone()),
+                crate::RuntimeEffectOutcome::AdmitRun { answer } => Some(answer.clone()),
                 _ => None,
             })
     }
@@ -437,7 +437,7 @@ impl crate::testing::EffectLayer for JournalLayer {
 
 /// A replaying worker resumes from the invocation's pre-commit resident state
 /// while the store may already hold the first execution's commit, so the
-/// redrive runtime sees no persisted session. It also counts every read a drive
+/// redrive runtime sees no persisted session. It also counts every read a shift
 /// could make of pending rows, so a replay can prove it made none.
 struct RedriveStore {
     inner: Arc<dyn crate::RuntimeStore>,
@@ -465,12 +465,12 @@ impl crate::store::RuntimeStoreDecorator for RedriveStore {
         self.inner.as_ref()
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
+        request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, crate::StoreError> {
         self.pending_row_reads.fetch_add(1, Ordering::SeqCst);
-        self.inner.admit_root(request).await
+        self.inner.admit_run(request).await
     }
 
     async fn load_session_window(
@@ -541,8 +541,8 @@ impl Journal {
         self
     }
 
-    /// Take every eligible input, up to the admission bound, into one root
-    /// (`DrainMode::All`): the default drain gives each input its own root
+    /// Take every eligible input, up to the admission bound, into one run
+    /// (`DrainMode::All`): the default drain gives each input its own run
     /// (FIG-4457).
     fn composing(mut self) -> Self {
         self.batching = self.batching.with_drain_mode(crate::DrainMode::All);
@@ -561,7 +561,7 @@ impl Journal {
             .await
     }
 
-    /// Run the direct turn `turn_id` until its worker dies after the drive and
+    /// Run the direct turn `turn_id` until its worker dies after the shift and
     /// before the commit ([`crash_before_commit_plugin`]).
     #[expect(
         clippy::expect_used,
@@ -592,7 +592,7 @@ impl Journal {
         crash_turn(
             store,
             &died,
-            runtime.drive_child_session_turn(
+            runtime.execute_child_session_turn(
                 direct_input(turn_id, text),
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             ),
@@ -628,7 +628,7 @@ impl Journal {
             .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
             .expect("scope the journaled direct turn");
         runtime
-            .drive_child_session_turn(
+            .execute_child_session_turn(
                 direct_input(turn_id, text),
                 crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
             )
@@ -636,7 +636,7 @@ impl Journal {
     }
 }
 
-/// A worker that dies after its drive and before its commit: its turn stops
+/// A worker that dies after its shift and before its commit: its turn stops
 /// in the prepare phase and never returns, and [`crash_turn`] drops it there.
 /// No abort path runs, so the admission stays pinned to a lease generation that no
 /// longer holds the lane — the state a killed worker leaves behind.
@@ -655,7 +655,7 @@ pub(super) fn crash_before_commit_plugin(
     ))
 }
 
-/// Drive `turn` until its worker dies in [`crash_before_commit_plugin`], drop
+/// Shift `turn` until its worker dies in [`crash_before_commit_plugin`], drop
 /// it there, and wait for the dropped lease guard's best-effort release, so a
 /// successor worker can take the lane.
 pub(super) async fn crash_turn<T>(
@@ -804,7 +804,7 @@ async fn assert_nothing_left_to_answer(
         )))
         .expect("scope the post-redrive drain");
     let drain = drainer
-        .drive_one_admitted_queued_root(crate::TurnOptions::new(
+        .execute_one_admitted_queued_run(crate::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scope,
         ))
@@ -818,8 +818,8 @@ async fn assert_nothing_left_to_answer(
 }
 
 /// A committed direct turn whose handler died before it was acknowledged is
-/// redriven after `vacuum()` pruned its completed row. The redrive drives the
-/// journaled drive set, finds the first commit's receipt, and replays it: no
+/// redriven after `vacuum()` pruned its completed row. The redrive executes the
+/// journaled shift set, finds the first commit's receipt, and replays it: no
 /// row is re-admitted and nothing is answered twice.
 #[expect(
     clippy::expect_used,
@@ -875,7 +875,7 @@ pub async fn vacuum_then_redrive_replays_receipt_single_row(
 }
 
 /// The same redrive when the first execution absorbed earlier queued rows into
-/// its turn. The journaled drive set carries those rows' content, so the
+/// its turn. The journaled shift set carries those rows' content, so the
 /// redrive materializes the same words after `vacuum()` pruned every row, and
 /// the receipt replays with identical applications.
 #[expect(
@@ -904,11 +904,11 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     );
     assert!(
         matches!(
-            journal.controller.journaled_drive(),
-            Some(crate::store::RootAdmissionAnswer::Admitted { admission })
+            journal.controller.journaled_shift(),
+            Some(crate::store::RunAdmissionAnswer::Admitted { admission })
                 if admission.input_ids().len() == 3
         ),
-        "the journaled drive carries all three rows"
+        "the journaled shift carries all three rows"
     );
 
     vacuum(&store, &SessionId::from(SESSION_ID)).await;
@@ -930,8 +930,8 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
 }
 
 /// A worker dies after its turn's acceptance was journaled and before the
-/// drive was; the host cancels the accepted input and `vacuum()` prunes it.
-/// The redrive runs the drive for the first time, finds the row gone, and
+/// shift was; the host cancels the accepted input and `vacuum()` prunes it.
+/// The redrive runs the shift for the first time, finds the row gone, and
 /// cedes: the cancelled input is not re-admitted, not answered, and its turn
 /// never reaches the provider.
 #[expect(
@@ -947,12 +947,12 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     let journal = Journal::new(&backend);
     journal
         .controller
-        .crash_at_next(crate::RuntimeEffectKind::AdmitRoot);
+        .crash_at_next(crate::RuntimeEffectKind::AdmitRun);
     let (provider, requests) = recording_provider("never answered");
     journal
         .run(&store, provider.clone(), &turn_id, "withdrawn later")
         .await
-        .expect_err("the worker dies before the drive is journaled");
+        .expect_err("the worker dies before the shift is journaled");
     let accepted = pending_input_ids(&store)
         .await
         .into_iter()
@@ -979,9 +979,9 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     );
     assert!(
         matches!(
-            journal.controller.journaled_drive(),
-            Some(crate::store::RootAdmissionAnswer::Refused {
-                refusal: crate::store::RootAdmissionRefusal::HeadGone
+            journal.controller.journaled_shift(),
+            Some(crate::store::RunAdmissionAnswer::Refused {
+                refusal: crate::store::RunAdmissionRefusal::HeadGone
             })
         ),
         "the redrive journals the refusal it ceded with"
@@ -997,15 +997,15 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     );
 }
 
-/// A first execution that died after its drive and before its commit is
-/// redriven after a new input was admitted. The redrive drives the journaled
+/// A first execution that died after its shift and before its commit is
+/// redriven after a new input was admitted. The redrive executes the journaled
 /// set, not a live admission: the committed turn holds only the first execution's
 /// rows, and the new input waits for the next turn.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
+pub async fn uncommitted_redrive_executes_journaled_set_not_live_admission(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
@@ -1016,8 +1016,8 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
     journal
         .crash_before_commit(&store, provider.clone(), &turn_id, "the accepted words")
         .await;
-    let journaled = match journal.controller.journaled_drive() {
-        Some(crate::store::RootAdmissionAnswer::Admitted { admission }) => admission,
+    let journaled = match journal.controller.journaled_shift() {
+        Some(crate::store::RunAdmissionAnswer::Admitted { admission }) => admission,
         other => panic!("the first execution admitted its accepted row: {other:?}"),
     };
     let late = enqueue_next_turn(&store, "admitted after the crash").await;
@@ -1027,11 +1027,11 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
     journal
         .run(&redrive_store, provider, &turn_id, "the accepted words")
         .await
-        .expect("the redrive commits the journaled drive set");
+        .expect("the redrive commits the journaled shift set");
     assert_eq!(
         reads.load(Ordering::SeqCst),
         0,
-        "the redrive drives the journaled set and never admits or reads a pending row"
+        "the redrive executes the journaled set and never admits or reads a pending row"
     );
 
     let requests = requests.lock().expect("request lock").clone();
@@ -1039,7 +1039,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
     assert!(requests[0].contains("the accepted words"), "{requests:?}");
     assert!(
         !requests[0].contains("admitted after the crash"),
-        "a row admitted after the drive must not join the redriven turn: {requests:?}"
+        "a row admitted after the shift must not join the redriven turn: {requests:?}"
     );
     let applied = applications(&store).await;
     assert_eq!(
@@ -1063,21 +1063,21 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_admission(
     );
 }
 
-/// A first execution whose drive was refused journals the refusal, and the
+/// A first execution whose shift was refused journals the refusal, and the
 /// redrive replays that same refusal without reading a pending row.
 ///
 /// The refusal here is the host withdrawing the accepted input between its
-/// acceptance and its drive; the turn cedes before any provider work.
+/// acceptance and its shift; the turn cedes before any provider work.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn drive_effect_refusal_is_journaled(
+pub async fn shift_effect_refusal_is_journaled(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
 ) {
-    let turn_id = TurnId::fixture(format!("{prefix}-refused-drive"));
+    let turn_id = TurnId::fixture(format!("{prefix}-refused-shift"));
     let journal = Journal::new(&backend);
     let (provider, requests) = recording_provider("never reached");
 
@@ -1102,9 +1102,9 @@ pub async fn drive_effect_refusal_is_journaled(
     );
     assert!(
         matches!(
-            journal.controller.journaled_drive(),
-            Some(crate::store::RootAdmissionAnswer::Refused {
-                refusal: crate::store::RootAdmissionRefusal::HeadGone
+            journal.controller.journaled_shift(),
+            Some(crate::store::RunAdmissionAnswer::Refused {
+                refusal: crate::store::RunAdmissionRefusal::HeadGone
             })
         ),
         "the refusal is journaled"
@@ -1123,25 +1123,25 @@ pub async fn drive_effect_refusal_is_journaled(
     assert_eq!(
         reads.load(Ordering::SeqCst),
         0,
-        "a replayed drive never admits or reads a pending row"
+        "a replayed shift never admits or reads a pending row"
     );
     assert!(requests.lock().expect("request lock").is_empty());
     assert!(pending_input_ids(&store).await.is_empty());
 }
 
-/// A child session's turn is driven by its acceptor, inline in the parent's
+/// A child session's turn is executed by its acceptor, inline in the parent's
 /// execution, so the acceptance holds the accepted row's ingress claim from
 /// the commit that admits the row (FIG-4728). Between that commit and the
-/// root's admission a relay pass finds nothing due and asks the session for
-/// no second drive of the row, which would run the same root beside its
+/// run's admission a relay pass finds nothing due and asks the session for
+/// no second shift of the row, which would run the same run beside its
 /// acceptor. The obligation stays the row's: a claim that lapses because the
-/// acceptor was lost is the relay's to retake, and the root's admission
+/// acceptor was lost is the relay's to retake, and the run's admission
 /// delivers it whoever holds the claim (ADR 0109 §3).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
+pub async fn an_accepted_direct_input_is_held_for_its_acceptors_shift(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimeStore>,
@@ -1149,15 +1149,15 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
     use lash_core::store::{ObligationKey, ObligationKind, ObligationState};
     let turn_id = TurnId::fixture(format!("{prefix}-held-for-its-acceptor"));
     let journal = Journal::new(&backend);
-    let (provider, requests) = recording_provider("answered by the acceptor's drive");
-    // The acceptor dies between its acceptance and its root's admission.
+    let (provider, requests) = recording_provider("answered by the acceptor's shift");
+    // The acceptor dies between its acceptance and its run's admission.
     journal
         .controller
-        .crash_at_next(crate::RuntimeEffectKind::AdmitRoot);
+        .crash_at_next(crate::RuntimeEffectKind::AdmitRun);
     journal
         .run(&store, provider.clone(), &turn_id, "the accepted words")
         .await
-        .expect_err("the acceptor died before it admitted its root");
+        .expect_err("the acceptor died before it admitted its run");
     let accepted = pending_input_ids(&store).await;
     let [input_id] = accepted.as_slice() else {
         panic!("the acceptance left its one row open: {accepted:?}");
@@ -1169,7 +1169,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
     .id();
 
     let ingress = backend.obligation_ledger(ObligationKind::Ingress);
-    let ttl_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    let ttl_ms = lash_core::shift::relay::RelayPolicy::default().claim_ttl_ms;
     let page = std::num::NonZeroUsize::new(64).expect("non-zero");
     let now = backend.clock().timestamp_ms();
     assert_eq!(
@@ -1186,7 +1186,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
         .expect("a relay pass reads the ledger");
     assert!(
         due.iter().all(|claimed| claimed.id != obligation),
-        "a relay pass before the acceptor's admission asks no drive for its row: {due:?}"
+        "a relay pass before the acceptor's admission asks no shift for its row: {due:?}"
     );
     assert!(
         requests.lock().expect("request lock").is_empty(),
@@ -1194,7 +1194,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
     );
 
     // The acceptor never came back: once its claim lapsed, the row is the
-    // relay's to ask the session's drive for.
+    // relay's to ask the session's shift for.
     let lapsed = ingress
         .claim_due(now.saturating_add(ttl_ms), ttl_ms, page)
         .await
@@ -1204,7 +1204,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
         "the lost acceptor's lapsed claim is retaken: {lapsed:?}"
     );
 
-    // The acceptor's redrive admits its root; the admission delivers the
+    // The acceptor's redrive admits its run; the admission delivers the
     // obligation whatever claim it stood under.
     let turn = journal
         .run(&store, provider, &turn_id, "the accepted words")
@@ -1221,7 +1221,7 @@ pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
             .await
             .expect("read the obligation"),
         Some(ObligationState::Delivered),
-        "the root's admission delivers the row's obligation"
+        "the run's admission delivers the row's obligation"
     );
     assert_eq!(requests.lock().expect("request lock").len(), 1);
     assert!(pending_input_ids(&store).await.is_empty());
@@ -1240,10 +1240,10 @@ impl crate::store::RuntimeStoreDecorator for WithdrawBeforeAdmission {
         self.inner.as_ref()
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
+        request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, crate::StoreError> {
         for open in self
             .inner
             .list_pending_turn_inputs(request.session_id())
@@ -1253,14 +1253,14 @@ impl crate::store::RuntimeStoreDecorator for WithdrawBeforeAdmission {
                 .cancel_pending_turn_input(request.session_id(), &open.input.input_id)
                 .await?;
         }
-        self.inner.admit_root(request).await
+        self.inner.admit_run(request).await
     }
 }
 
-/// A direct turn whose accepted input sits behind earlier admissions is driven
-/// after them (FIG-3600): the drive admits each earlier root first, in arrival
-/// order, every root's admission takes the admissible prefix up to the admission bound,
-/// and the call returns the run of the root that drove its input. Every input
+/// A direct turn whose accepted input sits behind earlier admissions is executed
+/// after them (FIG-3600): the shift admits each earlier run first, in arrival
+/// order, every run's admission takes the admissible prefix up to the admission bound,
+/// and the call returns the execution of the run that drove its input. Every input
 /// is answered once, nothing is dropped, and nothing waits for a later drain.
 #[expect(
     clippy::expect_used,
@@ -1302,7 +1302,7 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
             .map(|application| application.input_id.clone())
             .collect::<Vec<_>>(),
         vec![first.input_id, second.input_id, input_id.clone()],
-        "the drive answers every input once, in arrival order"
+        "the shift answers every input once, in arrival order"
     );
     let direct_answer = answered
         .iter()
@@ -1311,14 +1311,14 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     assert_eq!(
         direct_answer.turn_id.as_str(),
         turn_id.as_str(),
-        "the direct input is answered by its own root"
+        "the direct input is answered by its own run"
     );
     assert!(pending_input_ids(&store).await.is_empty());
     let requests = requests.lock().expect("request lock").clone();
     assert_eq!(
         requests.len(),
         2,
-        "one root for the two earlier inputs under the admission bound, then the direct one"
+        "one run for the two earlier inputs under the admission bound, then the direct one"
     );
     assert!(
         requests

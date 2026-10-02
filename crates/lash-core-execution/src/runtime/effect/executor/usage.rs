@@ -1,11 +1,11 @@
 //! How a local executor accounts what its body spends (ADR 0125): the
-//! body's [`UsageRun`](crate::UsageRun) is begun here, and its usage is
+//! body's [`UsageMeter`](crate::UsageMeter) is begun here, and its usage is
 //! either handed to the engine to journal or projected at once.
 
 use super::{LocalTarget, RuntimeEffectLocalExecutor, RuntimeEffectLocalExecutorState};
 use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectOutcome};
 
-/// The accounting of one `Direct` effect: the ledger its run is admitted
+/// The accounting of one `Direct` effect: the ledger its meter is admitted
 /// to, and the owner its call is attributed to. The source label and the
 /// model key come from the effect's envelope.
 pub struct DirectUsage {
@@ -14,20 +14,20 @@ pub struct DirectUsage {
 }
 
 impl DirectUsage {
-    /// The one call a `Direct` body makes, taken from its effect's run. A
-    /// body outside any run refuses before it dispatches.
+    /// The one call a `Direct` body makes, taken from its effect's meter. A
+    /// body outside any meter refuses before it dispatches.
     pub(super) fn call(
         &self,
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
         source: String,
         profile_key: crate::LlmProfileKey,
         requested_model: &str,
     ) -> Result<crate::UsageCall, RuntimeEffectControllerError> {
-        usage_run
+        usage_meter
             .ok_or_else(|| {
                 RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::UsageRunMissing,
-                    "a direct completion reached its provider outside any usage run",
+                    crate::RuntimeErrorCode::UsageMeterMissing,
+                    "a direct completion reached its provider outside any usage meter",
                 )
             })?
             .call(
@@ -38,7 +38,7 @@ impl DirectUsage {
             )
             .map_err(|error| {
                 RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::UsageRunMissing,
+                    crate::RuntimeErrorCode::UsageMeterMissing,
                     error.to_string(),
                 )
             })
@@ -46,19 +46,19 @@ impl DirectUsage {
 }
 
 impl super::LocalDirectEffectRunner {
-    /// Runs the direct request as its run's one call, attributed to the
+    /// Runs the direct request as its meter's one call, attributed to the
     /// envelope's `usage_source` and `profile_key`, and records the sealed call
     /// record, failed attempts included, as that call's facts.
-    pub(super) async fn run_direct_in_usage_run(
+    pub(super) async fn run_direct_in_usage_meter(
         &mut self,
         invocation: &crate::RuntimeEffectInvocation,
         provider: crate::ProviderHandle,
         request: crate::LlmRequest,
         usage_source: String,
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let call = self.usage.call(
-            usage_run,
+            usage_meter,
             usage_source,
             request.model.key().clone(),
             request.model.wire_model(),
@@ -126,16 +126,16 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Executes the effect body for an engine that journals what it spent
     /// (ADR 0125).
     ///
-    /// A spending body runs under a fresh [`UsageRun`](crate::UsageRun); the
-    /// answer carries the run's [`EffectUsage`](crate::EffectUsage), which the
+    /// A spending body runs under a fresh [`UsageMeter`](crate::UsageMeter); the
+    /// answer carries the meter's [`EffectUsage`](crate::EffectUsage), which the
     /// engine journals beside the outcome and delivers through
     /// [`project_usage_settlement`](crate::project_usage_settlement) once it
     /// is recorded. An admission fault is the attempt's, never the effect's:
     /// the engine ends the attempt retryably and journals nothing.
     ///
-    /// The body is raced against its run's attempt fault (FIG-4632): a call
-    /// of the run that latches one ends the attempt there, and the body is
-    /// dropped instead of running on. Nothing will journal that run, so the
+    /// The body is raced against its meter's attempt fault (FIG-4632): a call
+    /// of the meter that latches one ends the attempt there, and the body is
+    /// dropped instead of running on. Nothing will journal that meter, so the
     /// usage of the calls it dispatched before the fault is projected here.
     pub async fn execute_recording_usage(
         self,
@@ -152,14 +152,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             };
         }
         let binding = self.usage_accounting();
-        let usage_run = binding
+        let usage_meter = binding
             .as_ref()
             .and_then(|binding| binding.begin(&envelope));
         let effect = crate::UsageEffectKey::for_effect(envelope.invocation.address());
         // Boxed: the body's future is the executor's largest, and every
         // engine path awaits this one inside its own journaling future.
-        let body = Box::pin(self.run_body(envelope, usage_run.clone()));
-        let (Some(usage_run), Some(binding)) = (usage_run, binding) else {
+        let body = Box::pin(self.run_body(envelope, usage_meter.clone()));
+        let (Some(usage_meter), Some(binding)) = (usage_meter, binding) else {
             return crate::RecordedEffectExecution {
                 outcome: body.await,
                 usage: None,
@@ -169,12 +169,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         };
         let outcome = tokio::select! {
             biased;
-            fault = usage_run.attempt_faulted() => Err(fault),
+            fault = usage_meter.attempt_faulted() => Err(fault),
             outcome = body => outcome,
         };
-        let admission_fault = usage_run.admission_fault();
-        let attempt_fault = usage_run.attempt_fault();
-        let usage = usage_run.finish();
+        let admission_fault = usage_meter.admission_fault();
+        let attempt_fault = usage_meter.attempt_fault();
+        let usage = usage_meter.finish();
         let Some(fault) = attempt_fault else {
             return crate::RecordedEffectExecution {
                 outcome,
@@ -184,7 +184,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             };
         };
         if let Some(usage) = &usage {
-            // A projection the store refuses leaves the run's admitted row
+            // A projection the store refuses leaves the meter's admitted row
             // open, which its execution's end resolves as an explicit unknown
             // liability; the attempt ends with its fault either way.
             let _ = crate::project_unrecorded_usage(
@@ -203,31 +203,31 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Executes a spending body inside another spending effect's run: a
+    /// Executes a spending body inside another spending effect's meter: a
     /// direct completion a recorded tool attempt makes journals nothing of its
-    /// own, so its provider call is a call of the attempt's run (ADR 0125).
+    /// own, so its provider call is a call of the attempt's meter (ADR 0125).
     /// `None` refuses the call before dispatch.
     ///
     /// A recorded model this worker cannot bind ends the enclosing attempt
     /// (FIG-4404): the body journals nothing of its own that could stay
-    /// unsealed, so the fault is latched on that run and this call never
-    /// returns. The run's executor drops the attempt's body here
+    /// unsealed, so the fault is latched on that meter and this call never
+    /// returns. The meter's executor drops the attempt's body here
     /// ([`Self::execute_recording_usage`]), so the tool is handed no error it
     /// could swallow and runs no further (FIG-4632).
-    pub async fn execute_within_run(
+    pub async fn execute_within_meter(
         self,
         envelope: RuntimeEffectEnvelope,
-        usage_run: Option<crate::UsageRun>,
+        usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if let Some(refusal) = self.served_only_refusal() {
             return Err(refusal);
         }
-        let outcome = Box::pin(self.run_body(envelope, usage_run.clone())).await;
-        if let (Err(fault), Some(usage_run)) = (&outcome, &usage_run)
+        let outcome = Box::pin(self.run_body(envelope, usage_meter.clone())).await;
+        if let (Err(fault), Some(usage_meter)) = (&outcome, &usage_meter)
             && fault.code == crate::RuntimeErrorCode::LlmProfileUnavailable
             && fault.is_attempt_fault()
         {
-            usage_run.fault_attempt(fault.clone());
+            usage_meter.fault_attempt(fault.clone());
             return std::future::pending().await;
         }
         outcome

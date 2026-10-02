@@ -66,7 +66,7 @@ impl Harness {
                         .map_err(|error| lash::provider::LlmTransportError::new(error.to_string()))?;
                     let call = encoded["scope"]["request_id"].as_str().unwrap_or_default();
                     let first = call.ends_with(":llm:0");
-                    // The second call of a faulted root: its response is the
+                    // The second call of a faulted run: its response is the
                     // one whose derivation fails until the repair.
                     let second = call.ends_with(":llm:1");
                     sqlx::query("INSERT INTO operator_model_calls(marker, request_json) VALUES ($1, $2)")
@@ -185,7 +185,7 @@ impl Harness {
     async fn receipt(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         park: lash_core::store::ParkId,
         verb: &str,
     ) -> Result<lash_core::store::ControlIntent> {
@@ -207,19 +207,19 @@ impl Harness {
                 }
                 match &intent.kind {
                     lash_core::store::ControlIntentKind::Redrive {
-                        root: saved,
+                        run: saved,
                         park: token,
                         ..
                     }
                     | lash_core::store::ControlIntentKind::Cancel {
-                        root: saved,
+                        run: saved,
                         park: token,
                     }
                     | lash_core::store::ControlIntentKind::Fork {
-                        root: saved,
+                        run: saved,
                         park: token,
                         ..
-                    } => saved == root && *token == park,
+                    } => saved == run && *token == park,
                     _ => false,
                 }
             })
@@ -241,13 +241,13 @@ impl Harness {
     async fn acknowledged_receipt(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         park: lash_core::store::ParkId,
         verb: &str,
     ) -> Result<lash_core::store::ControlIntent> {
         tokio::time::timeout(WAIT, async {
             loop {
-                let intent = self.receipt(session, root, park, verb).await?;
+                let intent = self.receipt(session, run, park, verb).await?;
                 if matches!(
                     intent.state,
                     lash_core::store::ControlIntentState::Acknowledged { .. }
@@ -259,16 +259,16 @@ impl Harness {
         })
         .await
         .context(format!(
-            "{verb} acknowledgement deadline for {session}/{root}"
+            "{verb} acknowledgement deadline for {session}/{run}"
         ))?
     }
 
-    async fn journal(&self, session: &SessionId, root: &TurnId, label: &str) -> Result<Value> {
+    async fn journal(&self, session: &SessionId, run: &TurnId, label: &str) -> Result<Value> {
         let client = reqwest::Client::builder()
             .no_proxy()
             .timeout(WAIT)
             .build()?;
-        let key = lash_restate::turn_workflow_key(session, root).replace('\'', "''");
+        let key = lash_restate::turn_workflow_key(session, run).replace('\'', "''");
         let invocations: Value = client.post(format!("{}/query", self.restate.admin_url))
             .header("accept", "application/json")
             .json(&json!({"query":format!("SELECT id FROM sys_invocation WHERE target_service_key = '{key}' AND target_handler_name = 'run'")}))
@@ -276,9 +276,9 @@ impl Harness {
         let ids = invocations["rows"].as_array().context("invocation rows")?;
         ensure!(
             ids.len() == 1,
-            "one recorded invocation for root, got {invocations}"
+            "one recorded invocation for run, got {invocations}"
         );
-        let id = ids[0]["id"].as_str().context("root invocation id")?;
+        let id = ids[0]["id"].as_str().context("run invocation id")?;
         let journal: Value = client.post(format!("{}/query", self.restate.admin_url))
             .header("accept", "application/json")
             .json(&json!({"query":format!("SELECT index, entry_type, name, raw FROM sys_journal WHERE id = '{id}' ORDER BY index")}))
@@ -294,7 +294,7 @@ impl Harness {
             })
             .cloned()
             .collect();
-        ensure!(!commands.is_empty(), "root journal must execute commands");
+        ensure!(!commands.is_empty(), "run journal must execute commands");
         let evidence = json!({"invocation":id,"commands":commands});
         std::fs::write(
             std::path::Path::new(&std::env::var("LASH_OPERATOR_ARTIFACT_DIR")?)
@@ -304,10 +304,10 @@ impl Harness {
         Ok(evidence)
     }
 
-    async fn child(&self, session: &SessionId, root: &TurnId) -> Result<(String, String)> {
+    async fn child(&self, session: &SessionId, run: &TurnId) -> Result<(String, String)> {
         let scope = lash_core::ScopeId::Opener(lash_core::EffectOpener::Turn {
             session_id: session.clone(),
-            turn_id: root.clone(),
+            turn_id: run.clone(),
         })
         .storage_id();
         tokio::time::timeout(WAIT, async {
@@ -315,7 +315,7 @@ impl Harness {
                 let rows = sqlx::query("SELECT process_id, lifetime_scope_kind, lifetime_scope_id FROM lash_processes WHERE record_json::jsonb ->> 'session_capability' = $1 AND lifetime_scope_id = $2")
                     .bind(session.as_str()).bind(&scope).fetch_all(&self.pool).await?;
                 if let Some(row) = rows.first() {
-                    ensure!(rows.len() == 1, "one child per root, got {}", rows.len());
+                    ensure!(rows.len() == 1, "one child per run, got {}", rows.len());
                     ensure!(row.get::<String, _>("lifetime_scope_kind") == "turn", "child must live Until(Turn)");
                     return Ok((row.get("process_id"), row.get("lifetime_scope_id")));
                 }
@@ -327,15 +327,15 @@ impl Harness {
     async fn terminal(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         kind: &str,
         child: &(String, String),
         allow_substrate_loss: bool,
     ) -> Result<Value> {
         tokio::time::timeout(WAIT, async {
             loop {
-                let row = sqlx::query("SELECT terminal_kind, terminal_cause_json, terminal_at_ms FROM lash_session_roots WHERE session_id = $1 AND root = $2")
-                    .bind(session.as_str()).bind(root.as_str()).fetch_one(&self.pool).await?;
+                let row = sqlx::query("SELECT terminal_kind, terminal_cause_json, terminal_at_ms FROM lash_session_runs WHERE session_id = $1 AND run = $2")
+                    .bind(session.as_str()).bind(run.as_str()).fetch_one(&self.pool).await?;
                 let record: String = sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
                     .bind(&child.0).fetch_one(&self.pool).await?;
                 let record: lash_core::ProcessRecord = serde_json::from_str(&record)?;
@@ -355,8 +355,8 @@ impl Harness {
                     let request = record.cancel_request.as_ref().context("child cancel request")?;
                     ensure!(request.origin == lash_core::CancelOrigin::ParentEnded && request.requester == child.1,
                         "child cancellation must name its closed turn scope");
-                    let writes: i64 = sqlx::query_scalar("SELECT count(*) FROM operator_terminal_writes WHERE session_id = $1 AND root = $2")
-                        .bind(session.as_str()).bind(root.as_str()).fetch_one(&self.pool).await?;
+                    let writes: i64 = sqlx::query_scalar("SELECT count(*) FROM operator_terminal_writes WHERE session_id = $1 AND run = $2")
+                        .bind(session.as_str()).bind(run.as_str()).fetch_one(&self.pool).await?;
                     let cancels: i64 = sqlx::query_scalar("SELECT count(*) FROM operator_child_cancels WHERE process_id = $1")
                         .bind(&child.0).fetch_one(&self.pool).await?;
                     ensure!(writes == 1 && cancels == 1, "terminal writes={writes}, child cancels={cancels}");
@@ -367,7 +367,7 @@ impl Harness {
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
-        }).await.context(format!("terminal/scope deadline for {session}/{root}"))?
+        }).await.context(format!("terminal/scope deadline for {session}/{run}"))?
     }
 
     async fn parked(
@@ -394,30 +394,30 @@ impl Harness {
             outcome.output().is_none(),
             "park cannot fabricate an answer"
         );
-        let root = TurnId::parse(tag)?;
+        let run = TurnId::parse(tag)?;
         let child = self
-            .child(&SessionId::prefixed("operator:", tag), &root)
+            .child(&SessionId::prefixed("operator:", tag), &run)
             .await?;
-        self.assert_open(&SessionId::prefixed("operator:", tag), &root, &child)
+        self.assert_open(&SessionId::prefixed("operator:", tag), &run, &child)
             .await?;
         ensure!(
             self.calls(tag).await? == 2,
             "park has exactly two recorded model effects"
         );
-        Ok((session, root, park.park_id, child))
+        Ok((session, run, park.park_id, child))
     }
 
     async fn assert_open(
         &self,
         session: &SessionId,
-        root: &TurnId,
+        run: &TurnId,
         child: &(String, String),
     ) -> Result<()> {
         let terminal: Option<String> = sqlx::query_scalar(
-            "SELECT terminal_kind FROM lash_session_roots WHERE session_id = $1 AND root = $2",
+            "SELECT terminal_kind FROM lash_session_runs WHERE session_id = $1 AND run = $2",
         )
         .bind(session.as_str())
-        .bind(root.as_str())
+        .bind(run.as_str())
         .fetch_one(&self.pool)
         .await?;
         let closes: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_parent_end_plans WHERE parent_kind = 'turn' AND parent_id = $1")
@@ -430,7 +430,7 @@ impl Harness {
         .await?;
         ensure!(
             terminal.is_none() && closes == 0 && cancelled.is_none(),
-            "park keeps root and child scope open"
+            "park keeps run and child scope open"
         );
         Ok(())
     }
@@ -476,12 +476,12 @@ impl SessionPlugin for FaultPlugin {
         ], Hold)))?;
         let repaired = self.repaired.clone();
         let pool = self.pool.clone();
-        // The fault fires once the root's work has started its child: the
+        // The fault fires once the run's work has started its child: the
         // response derivation of the next model call fails until the
         // operator repairs it. That step retries a live fault, so the engine
-        // pauses the root and parks it with the paid completion journaled. A
+        // pauses the run and parks it with the paid completion journaled. A
         // checkpoint records every fault as its outcome, so a fault there
-        // fails the root for good (FIG-4636).
+        // fails the run for good (FIG-4636).
         reg.output().response(Arc::new(move |ctx| {
             let repaired = repaired.clone();
             let pool = pool.clone();
@@ -489,7 +489,7 @@ impl SessionPlugin for FaultPlugin {
                 if ctx.session_id.as_str() != "operator:running"
                     && !repaired.load(Ordering::SeqCst)
                 {
-                    let has_child: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM lash_processes p JOIN lash_session_roots r ON p.lifetime_scope_id = 'turn:' || octet_length(r.session_id)::text || ':' || r.session_id || ':' || octet_length(r.root)::text || ':' || r.root WHERE r.session_id = $1 AND r.terminal_kind IS NULL)")
+                    let has_child: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM lash_processes p JOIN lash_session_runs r ON p.lifetime_scope_id = 'turn:' || octet_length(r.session_id)::text || ':' || r.session_id || ':' || octet_length(r.run)::text || ':' || r.run WHERE r.session_id = $1 AND r.terminal_kind IS NULL)")
                         .bind(ctx.session_id.as_str()).fetch_one(&pool).await
                         .map_err(|error| lash::plugins::PluginError::Runtime(lash_core::RuntimeError::new(lash_core::RuntimeErrorCode::StoreCommitFailed, error.to_string())))?;
                     if has_child {
@@ -545,7 +545,7 @@ async fn main() -> Result<()> {
         lash::CancelReceipt::Withdrawn(_)
     ));
     ensure!(sent.outcome().await?.status() == TurnStatus::Cancelled);
-    let terminal: bool = sqlx::query_scalar("SELECT state = 'cancelled' AND terminal_at_ms IS NOT NULL AND admitted_root IS NULL FROM lash_pending_turn_inputs WHERE input_id = $1")
+    let terminal: bool = sqlx::query_scalar("SELECT state = 'cancelled' AND terminal_at_ms IS NOT NULL AND admitted_run IS NULL FROM lash_pending_turn_inputs WHERE input_id = $1")
         .bind(input.as_str()).fetch_one(&h.pool).await?;
     ensure!(terminal && h.calls("withdraw").await? == 0);
     ensure!(matches!(
@@ -563,49 +563,49 @@ async fn main() -> Result<()> {
         .send(TurnInput::text("operator:running"))
         .id("running")
         .await?;
-    let root = TurnId::from("running");
+    let run = TurnId::from("running");
     let sid = SessionId::from("operator:running");
-    let child = h.child(&sid, &root).await?;
+    let child = h.child(&sid, &run).await?;
     let request = session
-        .cancel(CancelTarget::Root(root.clone()))
+        .cancel(CancelTarget::Run(run.clone()))
         .request_id("running-cancel")
         .await?;
     ensure!(matches!(request, lash::CancelReceipt::Requested { .. }));
     ensure!(tokio::time::timeout(WAIT, sent.outcome()).await??.status() == TurnStatus::Cancelled);
-    let before = h.terminal(&sid, &root, "cancelled", &child, false).await?;
+    let before = h.terminal(&sid, &run, "cancelled", &child, false).await?;
     let reopened = h.core.session(sid.clone()).open().await?;
     for _ in 0..3 {
         ensure!(matches!(
             reopened
-                .cancel(CancelTarget::Root(root.clone()))
+                .cancel(CancelTarget::Run(run.clone()))
                 .request_id("running-cancel")
                 .await?,
             lash::CancelReceipt::AlreadySettled { .. }
         ));
     }
-    ensure!(before == h.terminal(&sid, &root, "cancelled", &child, false).await?);
+    ensure!(before == h.terminal(&sid, &run, "cancelled", &child, false).await?);
     emit("running_cancel", before);
 
-    let (_session, root, park, child) = h.parked("redrive").await?;
+    let (_session, run, park, child) = h.parked("redrive").await?;
     let sid = SessionId::from("operator:redrive");
     let target = lash::ParkedWorkRef::Turn {
         session_id: sid.clone(),
-        turn_id: root.clone(),
+        turn_id: run.clone(),
     };
     let admission: String = sqlx::query_scalar(
-        "SELECT admission_json FROM lash_session_roots WHERE session_id = $1 AND root = $2",
+        "SELECT admission_json FROM lash_session_runs WHERE session_id = $1 AND run = $2",
     )
     .bind(sid.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .fetch_one(&h.pool)
     .await?;
-    let journal_before = h.journal(&sid, &root, "redrive-before").await?;
+    let journal_before = h.journal(&sid, &run, "redrive-before").await?;
     h.repaired.store(true, Ordering::SeqCst);
     let accepted = h.core.parked_work().redrive(&target, park).await?;
-    let lash::RedriveAccepted::Root(accepted) = accepted else {
-        anyhow::bail!("root redrive receipt");
+    let lash::RedriveAccepted::Run(accepted) = accepted else {
+        anyhow::bail!("run redrive receipt");
     };
-    ensure!(accepted.root == root && accepted.applied);
+    ensure!(accepted.run == run && accepted.applied);
     let output = tokio::time::timeout(WAIT, async {
         loop {
             let output = h
@@ -613,7 +613,7 @@ async fn main() -> Result<()> {
                 .session(sid.clone())
                 .open()
                 .await?
-                .root(root.clone())
+                .run(run.clone())
                 .outcome()
                 .await?;
             if !matches!(output.status(), TurnStatus::Parked(_)) {
@@ -628,17 +628,17 @@ async fn main() -> Result<()> {
         .context("redrive returns real output")?;
     ensure!(answer.is_success() && answer.final_value() == Some(&json!("real answer")));
     let after: String = sqlx::query_scalar(
-        "SELECT admission_json FROM lash_session_roots WHERE session_id = $1 AND root = $2",
+        "SELECT admission_json FROM lash_session_runs WHERE session_id = $1 AND run = $2",
     )
     .bind(sid.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .fetch_one(&h.pool)
     .await?;
     ensure!(
         admission == after && h.calls("redrive").await? == 3,
-        "redrive preserves root admission and model journal"
+        "redrive preserves run admission and model journal"
     );
-    let journal_after = h.journal(&sid, &root, "redrive-after").await?;
+    let journal_after = h.journal(&sid, &run, "redrive-after").await?;
     ensure!(journal_before["invocation"] == journal_after["invocation"]);
     let before_commands = journal_before["commands"]
         .as_array()
@@ -650,7 +650,7 @@ async fn main() -> Result<()> {
         after_commands.starts_with(before_commands),
         "redrive preserves the exact recorded command bytes"
     );
-    let mut detail = h.terminal(&sid, &root, "answered", &child, false).await?;
+    let mut detail = h.terminal(&sid, &run, "answered", &child, false).await?;
     detail["same_admission"] = json!(true);
     detail["model_calls"] = json!(h.calls("redrive").await?);
     detail["same_journal_prefix"] = json!(true);
@@ -658,22 +658,22 @@ async fn main() -> Result<()> {
     emit("parked_redrive", detail);
     h.repaired.store(false, Ordering::SeqCst);
 
-    let (_, cancel_root, cancel_park, cancel_child) = h.parked("park-cancel").await?;
-    let (_, fork_root, fork_park, fork_child) = h.parked("park-fork").await?;
+    let (_, cancel_run, cancel_park, cancel_child) = h.parked("park-cancel").await?;
+    let (_, fork_run, fork_park, fork_child) = h.parked("park-fork").await?;
     let cancel_sid = SessionId::from("operator:park-cancel");
     let fork_sid = SessionId::from("operator:park-fork");
     let target = lash::ParkedWorkRef::Turn {
         session_id: cancel_sid.clone(),
-        turn_id: cancel_root.clone(),
+        turn_id: cancel_run.clone(),
     };
     // Lose the operator's first reply, then reconnect and repeat its exact address.
     let lost = h.core.parked_work().cancel(&target, cancel_park).await?;
     drop(lost);
     let repeated = h
-        .acknowledged_receipt(&cancel_sid, &cancel_root, cancel_park, "cancel")
+        .acknowledged_receipt(&cancel_sid, &cancel_run, cancel_park, "cancel")
         .await?;
     let cancel_before = h
-        .terminal(&cancel_sid, &cancel_root, "cancelled", &cancel_child, true)
+        .terminal(&cancel_sid, &cancel_run, "cancelled", &cancel_child, true)
         .await?;
     for _ in 0..3 {
         ensure!(matches!(
@@ -681,43 +681,43 @@ async fn main() -> Result<()> {
             Err(lash::ParkVerbRefused::NotParked)
         ));
         ensure!(
-            h.receipt(&cancel_sid, &cancel_root, cancel_park, "cancel")
+            h.receipt(&cancel_sid, &cancel_run, cancel_park, "cancel")
                 .await?
                 == repeated
         );
     }
     ensure!(
         cancel_before
-            == h.terminal(&cancel_sid, &cancel_root, "cancelled", &cancel_child, true)
+            == h.terminal(&cancel_sid, &cancel_run, "cancelled", &cancel_child, true)
                 .await?
     );
-    h.assert_open(&fork_sid, &fork_root, &fork_child).await?;
+    h.assert_open(&fork_sid, &fork_run, &fork_child).await?;
     emit("parked_cancel", cancel_before);
 
     let lost = h
         .core
         .parked_work()
-        .fork(&fork_sid, &fork_root, fork_park)
+        .fork(&fork_sid, &fork_run, fork_park)
         .await?;
     drop(lost);
     let repeated_fork = h
-        .acknowledged_receipt(&fork_sid, &fork_root, fork_park, "fork")
+        .acknowledged_receipt(&fork_sid, &fork_run, fork_park, "fork")
         .await?;
     let lash_core::store::ControlIntentKind::Fork {
-        new_root: Some(successor),
+        new_run: Some(successor),
         ..
     } = repeated_fork.kind.clone()
     else {
         anyhow::bail!("addressed fork successor");
     };
-    ensure!(successor != fork_root);
+    ensure!(successor != fork_run);
     let successor_outcome = tokio::time::timeout(
         WAIT,
         h.core
             .session(fork_sid.clone())
             .open()
             .await?
-            .root(successor.clone())
+            .run(successor.clone())
             .outcome(),
     )
     .await??;
@@ -730,25 +730,25 @@ async fn main() -> Result<()> {
     h.assert_open(&fork_sid, &successor, &successor_child)
         .await?;
     let fork_before = h
-        .terminal(&fork_sid, &fork_root, "cancelled", &fork_child, true)
+        .terminal(&fork_sid, &fork_run, "cancelled", &fork_child, true)
         .await?;
     for _ in 0..3 {
         let next = h
             .core
             .parked_work()
-            .fork(&fork_sid, &fork_root, fork_park)
+            .fork(&fork_sid, &fork_run, fork_park)
             .await;
         ensure!(matches!(next, Err(lash::ParkVerbRefused::NotParked)));
-        ensure!(h.receipt(&fork_sid, &fork_root, fork_park, "fork").await? == repeated_fork);
+        ensure!(h.receipt(&fork_sid, &fork_run, fork_park, "fork").await? == repeated_fork);
     }
     ensure!(
         fork_before
-            == h.terminal(&fork_sid, &fork_root, "cancelled", &fork_child, true)
+            == h.terminal(&fork_sid, &fork_run, "cancelled", &fork_child, true)
                 .await?
     );
     let mut detail = fork_before;
     detail["successor"] = json!(successor);
-    detail["original"] = json!(fork_root);
+    detail["original"] = json!(fork_run);
     detail["successor_scope_open"] = json!(true);
     emit("parked_fork", detail);
     let cancel_calls = h.calls("park-cancel").await?;

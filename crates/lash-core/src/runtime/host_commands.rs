@@ -1,13 +1,13 @@
 //! Host head writes are session commands (FIG-4202): an append, a plugin
-//! command or task, and a durable frame open, applied by the drive's command
+//! command or task, and a durable frame open, applied by the shift's command
 //! lane at a turn boundary.
 //!
 //! The bound turn owns the session head. A write a host makes from outside a
-//! turn therefore never commits beside the drive: it is a
+//! turn therefore never commits beside the shift: it is a
 //! [`SessionCommand`](crate::SessionCommand) the command drain applies once
-//! no root is bound (ADR 0101 §4), against the boundary's resident head, and
+//! no run is bound (ADR 0101 §4), against the boundary's resident head, and
 //! never against a checkpoint the host read before. Each applies alone, under
-//! the command root's sealed fence, and settles in the one commit that makes
+//! the command run's sealed fence, and settles in the one commit that makes
 //! its head write: the commit completes the command's row and carries its
 //! typed [`SessionCommandOutcome`](super::SessionCommandOutcome), which the
 //! submitter reads back from the batch's completion on any runtime.
@@ -22,7 +22,7 @@
 //!   per call (ADR 0125). A task's effects are journaled under
 //!   the command's own session-operation scope, so a redrive of the unsettled
 //!   command replays them. A host's cancel reaches an admitted task through
-//!   its cancel signal ([`task_cancel`]), and a cancel the drive finds
+//!   its cancel signal ([`task_cancel`]), and a cancel the shift finds
 //!   requested once the task's code returned settles the command
 //!   `Cancelled`.
 //! - A frame open opens the frame in the commit that settles it and restarts
@@ -41,13 +41,13 @@ use task_cancel::PluginTaskCancelSignal;
 pub use task_cancel::{PluginTaskCancelRequest, request_plugin_task_cancel};
 
 /// The named phase a runtime's turn-phase probe sees when a host command
-/// starts to apply: the drive read its run, and nothing of it has run.
+/// starts to apply: the shift read its run, and nothing of it has run.
 pub const SESSION_COMMAND_APPLYING_PHASE: &str = "session_command.applying";
 /// The named phase a runtime's turn-phase probe sees once a host command
 /// applied in resident state, right before the commit that settles it.
 pub const SESSION_COMMAND_STAGED_PHASE: &str = "session_command.staged";
 /// The named phase a runtime's turn-phase probe sees once a host command's
-/// settling commit landed, before its command root goes on.
+/// settling commit landed, before its command run goes on.
 pub const SESSION_COMMAND_COMMITTED_PHASE: &str = "session_command.committed";
 
 /// A host plugin operation the command lane applies.
@@ -104,7 +104,7 @@ impl LashRuntime {
         &mut self,
         request: crate::AppendSessionNodesRequest,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -145,7 +145,7 @@ impl LashRuntime {
                 self.reload_invalidated_resident_session_state().await?;
                 let committed = Box::pin(self.commit_host_command(
                     &completion,
-                    drive_fence,
+                    shift_fence,
                     None,
                     None,
                     |_, _| crate::runtime::SessionCommandOutcome::Failed {
@@ -160,7 +160,7 @@ impl LashRuntime {
         self.stamp_live_plugin_state()?;
         let committed = Box::pin(self.commit_host_command(
             &completion,
-            drive_fence,
+            shift_fence,
             Some(append_stamp),
             None,
             |state, persisted| crate::runtime::SessionCommandOutcome::AppendSessionNodes {
@@ -180,7 +180,7 @@ impl LashRuntime {
                 self.reload_invalidated_resident_session_state().await?;
                 let settled = Box::pin(self.commit_host_command(
                     &completion,
-                    drive_fence,
+                    shift_fence,
                     None,
                     None,
                     |_, _| crate::runtime::SessionCommandOutcome::AppendSessionNodes {
@@ -207,7 +207,7 @@ impl LashRuntime {
         name: String,
         args: serde_json::Value,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -234,7 +234,7 @@ impl LashRuntime {
                 &name,
                 args,
                 &batch_id,
-                drive_fence,
+                shift_fence,
                 cancel_signal.as_ref(),
             ))
             .await?
@@ -265,7 +265,7 @@ impl LashRuntime {
         };
         let committed =
             Box::pin(
-                self.commit_host_command(&completion, drive_fence, None, None, |_, _| {
+                self.commit_host_command(&completion, shift_fence, None, None, |_, _| {
                     crate::runtime::SessionCommandOutcome::PluginOperation { outcome }
                 }),
             )
@@ -281,7 +281,7 @@ impl LashRuntime {
     /// the moment its code returns: a host's cancel requested by then answers
     /// `Cancelled`, with nothing of the task folded into resident state. The
     /// decision is durable only with the command's settling commit
-    /// (FIG-4453). The outer `Err` is the drive's fault (the peek did not
+    /// (FIG-4453). The outer `Err` is the shift's fault (the peek did not
     /// answer), which settles nothing; the inner one is the operation's
     /// failure.
     async fn run_host_plugin_operation(
@@ -290,7 +290,7 @@ impl LashRuntime {
         name: &str,
         args: serde_json::Value,
         batch_id: &crate::BatchId,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
         cancel_signal: Option<&PluginTaskCancelSignal>,
     ) -> Result<
         Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
@@ -302,7 +302,7 @@ impl LashRuntime {
         );
         // The operation's services join the command as in-turn services join
         // a turn: its appends ride the command's commit.
-        let services = match self.runtime_session_services_for_turn(Some(drive_fence), &draft) {
+        let services = match self.runtime_session_services_for_turn(Some(shift_fence), &draft) {
             Ok(services) => services,
             Err(error) => return Ok(Err(error)),
         };
@@ -498,7 +498,7 @@ impl LashRuntime {
         &mut self,
         request: crate::OpenAgentFrameRequest,
         completion: crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
@@ -534,7 +534,7 @@ impl LashRuntime {
         let opens = switch.is_some();
         let committed = Box::pin(self.commit_host_command(
             &completion,
-            drive_fence,
+            shift_fence,
             None,
             switch,
             |state, persisted| {
@@ -560,7 +560,7 @@ impl LashRuntime {
         .await?;
         if matches!(committed, CommandCommit::Landed) && opens {
             // Every accepted open restarts the live interpreter from the new
-            // frame's seed, on the drive's own resident runtime (F5).
+            // frame's seed, on the shift's own resident runtime (F5).
             self.restore_protocol_session_after_frame_open().await?;
         }
         Ok(!matches!(committed, CommandCommit::Withdrawn))
@@ -578,12 +578,12 @@ impl LashRuntime {
     /// Commit the resident state as the command's one commit (F2): whatever
     /// the command put in resident state and the command's settlement with the outcome `outcome` derives from
     /// the committed state and its persisted node ids, under the command
-    /// root's fence.
+    /// run's fence.
     ///
     /// Nothing of a commit that did not land stays resident: resident state
     /// gives way to the durable head. A newer admission that sealed since
-    /// the command root's seal refuses the commit as superseded, with nothing
-    /// of it durable: that admission's drive applies the command.
+    /// the command run's seal refuses the commit as superseded, with nothing
+    /// of it durable: that admission's shift applies the command.
     ///
     /// A commit over the session's commit budget settles the command failed
     /// with the budget refusal instead, over the durable head; the budget
@@ -591,12 +591,12 @@ impl LashRuntime {
     /// fits wherever the head's bare commit does. A head whose
     /// bare settlement exceeds the budget is one a host lowered the budget
     /// below (ADR 0058, FIG-4393): the settlement's typed refusal ends the
-    /// command root, the drive stops at it, and the command stays open until
+    /// command run, the shift stops at it, and the command stays open until
     /// the host raises the budget again.
     pub(super) async fn commit_host_command(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
         outcome: impl FnOnce(
@@ -606,7 +606,7 @@ impl LashRuntime {
     ) -> Result<CommandCommit, RuntimeError> {
         let over_budget = match Box::pin(self.commit_host_command_once(
             completion,
-            drive_fence,
+            shift_fence,
             append_stamp,
             switch,
             outcome,
@@ -619,7 +619,7 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         let settled =
             Box::pin(
-                self.commit_host_command_once(completion, drive_fence, None, None, |_, _| {
+                self.commit_host_command_once(completion, shift_fence, None, None, |_, _| {
                     crate::runtime::SessionCommandOutcome::Failed {
                         code: over_budget.code.clone(),
                         message: over_budget.message.clone(),
@@ -642,7 +642,7 @@ impl LashRuntime {
     async fn commit_host_command_once(
         &mut self,
         completion: &crate::QueuedWorkCompletion,
-        drive_fence: &crate::store::DriveFence,
+        shift_fence: &crate::store::ShiftFence,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
         outcome: impl FnOnce(
@@ -692,7 +692,7 @@ impl LashRuntime {
             )
             .map_err(super::runtime_error_from_store_commit)?;
         }
-        commit.drive_fence = Some(Box::new(drive_fence.clone()));
+        commit.shift_fence = Some(Box::new(shift_fence.clone()));
         commit.applied_commands = Some(completion.clone());
         let outcome = outcome(&self.state, &persisted_node_ids);
         for batch_id in &completion.batch_ids {
@@ -736,8 +736,8 @@ impl LashRuntime {
                     crate::StoreError::AppendAncestorNotActive { required_node_id } => {
                         Ok(Ok(CommandCommit::AncestorNotActive { required_node_id }))
                     }
-                    // A later admission that sealed after the command root's
-                    // is a superseded commit: that admission's drive applies
+                    // A later admission that sealed after the command run's
+                    // is a superseded commit: that admission's shift applies
                     // the command.
                     error => Err(super::runtime_error_from_store_commit(error)),
                 }

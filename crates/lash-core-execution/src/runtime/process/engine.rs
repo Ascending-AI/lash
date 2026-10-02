@@ -449,12 +449,12 @@ impl<'run> ProcessEngineRunContext<'run> {
         crate::trace::process_trace_scope(&self.process_id, self.tracing.clock().timestamp_ms())
     }
 
-    /// Where this run's drive code stands when it observes: it may emit once
+    /// Where this run's shift code stands when it observes: it may emit once
     /// a step body of this attempt has really run. The handle is cloneable
     /// and carries the scope, the substrate attempt and the right to emit.
     pub fn trace_standing(&self) -> crate::trace::TraceStanding {
         self.tracing
-            .drive(Some(self.trace_scope()), &self.scoped_effect_controller)
+            .shift(Some(self.trace_scope()), &self.scoped_effect_controller)
     }
 
     /// Exposes registration to protocol and process-engine implementors while running a durable

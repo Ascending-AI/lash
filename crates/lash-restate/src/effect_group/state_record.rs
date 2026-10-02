@@ -429,7 +429,7 @@ pub(crate) fn paused_work_need(
 ///   admission of a committed child comes from an invocation whose journal
 ///   is gone: a successor the idempotency-keyed re-send minted, which Restate
 ///   may mint under the very id it retains. It drains the committed final and
-///   never drives the child again.
+///   never executes the child again.
 /// - `Refused` stays for a position that was never dispatched and for the
 ///   `Cancel`/`Refused` close dispositions, where a late child is simply
 ///   disallowed — except a child committed before a `Cancel` close, which

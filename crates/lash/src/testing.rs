@@ -42,7 +42,7 @@ pub use lash_core::testing::{
 };
 
 /// [`RuntimeExecutionContext`](crate::tools::RuntimeExecutionContext)
-/// constructors for host tests that drive context-bound execution —
+/// constructors for host tests that shift context-bound execution —
 /// e.g. [`tools::compile_with_deferred_resolution`](crate::tools::compile_with_deferred_resolution)
 /// — without a production runtime.
 ///
@@ -68,7 +68,7 @@ pub use lash_core::testing::{
 /// [`DeferredResolutionLinkKey::from_exec_code_invocation`](crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation)
 /// for a fixture known to carry an admitted `ExecCode` effect address. Construct a
 /// [`DeferredLink`](crate::tools::DeferredLink) with it
-/// when a host test drives
+/// when a host test executes
 /// [`compile_with_deferred_resolution`](crate::tools::compile_with_deferred_resolution).
 #[cfg(feature = "rlm")]
 pub fn deferred_resolution_link_key(

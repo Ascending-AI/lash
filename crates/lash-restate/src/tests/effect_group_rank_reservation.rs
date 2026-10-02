@@ -1,5 +1,5 @@
 //! The rank is reserved at the §4 point and a seat only publishes it (ADR 0099
-//! §5 as amended by FIG-4308), driven through the index's own handlers and the
+//! §5 as amended by FIG-4308), executed through the index's own handlers and the
 //! dispatch's real child handler.
 //!
 //! - A hole: a lower rank reserved and unseated while higher ranks seat. No

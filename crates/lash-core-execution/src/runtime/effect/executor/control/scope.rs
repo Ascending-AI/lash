@@ -74,7 +74,7 @@ pub struct ScopedEffectController<'run> {
     /// issues the same effects, so the count at one quiet point is the same
     /// on every replay ([`Self::effects_executed`]).
     pub(in crate::runtime::effect::executor) effects: Arc<AtomicU64>,
-    /// Where the drive issuing steps through this controller stands relative
+    /// Where the shift issuing steps through this controller stands relative
     /// to its journal, shared by its clones. A handler re-runs from the top
     /// on every replay with a fresh controller, so the frontier starts
     /// uncrossed on every attempt and is crossed when a step body of this
@@ -379,10 +379,10 @@ impl<'run> ScopedEffectController<'run> {
     }
 
     /// The ordinal of the next read of the session's command lane recorded
-    /// through this controller among this command root's reads (FIG-4201).
+    /// through this controller among this command run's reads (FIG-4201).
     ///
     /// A handler re-runs from the top on every replay with a fresh
-    /// controller, so a redriven command root reads the run its first
+    /// controller, so a redriven command run reads the execution its first
     /// execution read at each ordinal and applies it again, meeting the
     /// receipts of the commits that landed.
     pub fn next_command_run_ordinal(&self) -> u32 {
@@ -479,19 +479,19 @@ impl<'run> ScopedEffectController<'run> {
             .await
     }
 
-    /// Where this controller's drive stands relative to its journal: crossed
+    /// Where this controller's shift stands relative to its journal: crossed
     /// once a step executed through this controller or a clone of it ran its
     /// body, which a step served from the journal never does.
     pub fn frontier(&self) -> &crate::trace::JournalFrontier {
         &self.frontier
     }
 
-    /// This controller as part of `drive`'s drive: a proxy or lent controller
-    /// that issues the same drive's steps shares its frontier, so a body run
+    /// This controller as part of `shift`'s shift: a proxy or lent controller
+    /// that issues the same shift's steps shares its frontier, so a body run
     /// through either moves both.
     #[must_use]
-    pub fn in_drive_of(mut self, drive: &ScopedEffectController<'_>) -> Self {
-        self.frontier = drive.frontier.clone();
+    pub fn in_drive_of(mut self, shift: &ScopedEffectController<'_>) -> Self {
+        self.frontier = shift.frontier.clone();
         self
     }
 

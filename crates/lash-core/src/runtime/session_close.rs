@@ -8,17 +8,17 @@
 //! then delivers it through [`ControlIntentRelay`], the one engine-half body
 //! the verbs and the reconcile tick's relay pass also run.
 //!
-//! It is deletion code, not the session drive: it runs under the deletion's
-//! `SessionDelete` scope, never a drive's. It names no engine: the engine's
+//! It is deletion code, not the session shift: it runs under the deletion's
+//! `SessionDelete` scope, never a shift's. It names no engine: the engine's
 //! part is the work engine's [`SessionControlEngine`](crate::engine::SessionControlEngine),
 //! and the scope owner is a [`ScopeCloseSink`].
 
 use std::sync::Arc;
 
-use crate::drive::ControlIntentRelay;
-use crate::drive::relay::ObligationRelay;
 use crate::engine::{ScopeCloseSink, begin_session_close_replay_key};
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
+use crate::shift::ControlIntentRelay;
+use crate::shift::relay::ObligationRelay;
 use crate::store::{ControlIntent, ControlIntentState, StoreError};
 use crate::{
     Clock, DeploymentStore, EffectAddress, ExecutionScope, RuntimeAttribution,
@@ -37,7 +37,7 @@ pub struct SessionCloseServices {
     /// until the process registry's scope-close adapter is installed
     /// (FIG-3607 PR-2).
     pub scopes: Arc<dyn ScopeCloseSink>,
-    /// The `ScopeClose` kind's relay (ADR 0109 §3): each closed root's
+    /// The `ScopeClose` kind's relay (ADR 0109 §3): each closed run's
     /// obligation gets its immediate delivery here.
     pub scope_close_obligations: Arc<dyn ObligationRelay>,
     /// The store set's `ControlIntent` obligation ledger (ADR 0109).
@@ -49,18 +49,18 @@ pub struct SessionCloseServices {
     /// The relay policy the close's and delete's immediate deliveries run
     /// under: the host's configured attempt budget, the same source the
     /// reconcile tick's relays run under.
-    pub policy: crate::drive::relay::RelayPolicy,
+    pub policy: crate::shift::relay::RelayPolicy,
 }
 
 /// Whether session `session_id` is already closing: its close committed,
-/// under the `CloseSession` intent its stored drive epoch names.
+/// under the `CloseSession` intent its stored shift epoch names.
 async fn session_is_closing(
     stores: &dyn DeploymentStore,
     session_id: &SessionId,
 ) -> Result<bool, StoreError> {
     match stores.lookup_session(session_id).await? {
         crate::store::SessionLookup::Live(_) => {
-            Ok(stores.drive_epoch(session_id).await?.closing.is_some())
+            Ok(stores.shift_epoch(session_id).await?.closing.is_some())
         }
         crate::store::SessionLookup::Deleted | crate::store::SessionLookup::Absent => Ok(false),
     }
@@ -100,12 +100,12 @@ pub enum SessionCloseError {
 ///    committed asks none of them: it only replays the step below.
 /// 2. The recorded `BeginSessionClose` step runs the close's store half
 ///    ([`ControlIntentStore::begin_session_close`](crate::store::ControlIntentStore::begin_session_close)):
-///    every root ends, the session stops accepting and admitting, and the
+///    every run ends, the session stops accepting and admitting, and the
 ///    `CloseSession` intent is recorded. This is the point of no return:
 ///    after it the deletion only retries, and a retried deletion replays the
 ///    recorded step.
 /// 3. [`ControlIntentRelay`] delivers its engine half now: every closed
-///    root's execution is released and the session's scope is closed. A
+///    run's execution is released and the session's scope is closed. A
 ///    failure is retained on the intent and its obligation and never fails
 ///    the close: the obligation's relay finishes it. The acknowledgement
 ///    arms the session's physical delete
@@ -222,7 +222,7 @@ impl RuntimeEffectLocalRunner for BeginSessionCloseRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::BeginSessionClose { session } = &envelope.command else {
             return Err(RuntimeEffectControllerError::new(

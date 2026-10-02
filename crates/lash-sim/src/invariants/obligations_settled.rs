@@ -7,7 +7,7 @@
 //! is not owed yet (ADR 0113 §2.5's `NotYet`), and the ledger holds it. A
 //! `due` row whose time has come, or a `claimed` one, is work left
 //! undelivered. An obligation its producer's own transaction arms (ADR
-//! 0109 §3: an admitted ingress item, a terminal root's scope close) that is
+//! 0109 §3: an admitted ingress item, a terminal run's scope close) that is
 //! not armed at all was dropped silently.
 //!
 //! An artifact cleanup is delivered only by the recovery pass's relay (ADR
@@ -51,11 +51,11 @@ impl HistoryChecker for ObligationsSettled {
     fn check(&self, history: &History) -> Vec<Violation> {
         let mut violations = Vec::new();
         for store in &history.stores {
-            let terminal_roots = store
-                .roots
+            let terminal_runs = store
+                .runs
                 .iter()
-                .filter(|root| root.terminal_kind.is_some())
-                .map(|root| format!("{}/{}", root.session, root.root))
+                .filter(|run| run.terminal_kind.is_some())
+                .map(|run| format!("{}/{}", run.session, run.run))
                 .collect::<BTreeSet<_>>();
             for row in &store.obligations {
                 let problem = match row.state.as_deref() {
@@ -85,7 +85,7 @@ impl HistoryChecker for ObligationsSettled {
                             "pending_turn_inputs" | "queued_work_batches" => {
                                 Some("its admission armed no ingress obligation")
                             }
-                            "session_roots" if terminal_roots.contains(&row.key) => {
+                            "session_runs" if terminal_runs.contains(&row.key) => {
                                 Some("its terminal transaction armed no scope close")
                             }
                             _ => None,

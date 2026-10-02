@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// FIG-3600 S6 (D3 Q2): a root's recorded config round-trips whole, so a
+/// FIG-3600 S6 (D3 Q2): a run's recorded config round-trips whole, so a
 /// replay adopts every field its first execution ran under.
 #[test]
 fn a_recorded_turn_config_round_trips_whole() {

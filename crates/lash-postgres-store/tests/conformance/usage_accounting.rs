@@ -1,5 +1,5 @@
 //! The engine-owned usage accounting laws (FIG-4236, ADR 0125) on
-//! PostgreSQL: a root's turns run inside the Restate double's handlers over
+//! PostgreSQL: a run's turns run inside the Restate double's handlers over
 //! this test's PostgreSQL stores, each spending effect's settlement is a
 //! one-way send to the deployment's `LashUsageAccounting` object, and a
 //! crash kills the handler execution where it stands and the double's

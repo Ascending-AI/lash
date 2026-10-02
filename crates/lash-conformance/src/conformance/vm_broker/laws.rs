@@ -119,7 +119,7 @@ async fn kill_point(
     );
     assert!(
         failure.is_retryable(),
-        "{law}: the failure re-drives: {failure:?}"
+        "{law}: the failure redrives: {failure:?}"
     );
     let crash_pool = probe
         .pool(Phase::Crashing)
@@ -132,11 +132,11 @@ async fn kill_point(
         crash_pool.releases, 0,
         "{law}: a lost worker is never reused"
     );
-    // The re-drive completes.
+    // The redrive completes.
     let redriven = probe
         .end(Phase::Healthy)
-        .unwrap_or_else(|| panic!("{law}: the re-drive ran"))
-        .unwrap_or_else(|failure| panic!("{law}: the re-drive completes: {failure:?}"));
+        .unwrap_or_else(|| panic!("{law}: the redrive ran"))
+        .unwrap_or_else(|failure| panic!("{law}: the redrive completes: {failure:?}"));
     // No recorded effect re-executes, and none is lost: every call's body
     // ran exactly once, and the completed run reads that one run.
     let runs = probe.runs();
@@ -183,7 +183,7 @@ fn crashed(failure: &BrokerFailure) -> bool {
     )
 }
 
-/// A worker that dies before its run starts runs no effect; the re-drive
+/// A worker that dies before its run starts runs no effect; the redrive
 /// runs every one once.
 pub async fn worker_kill_before_start_runs_no_effect(
     prefix: &str,
@@ -214,7 +214,7 @@ pub async fn worker_kill_before_start_runs_no_effect(
     .await;
 }
 
-/// A worker that dies mid-compute is recovered by the substrate re-driving
+/// A worker that dies mid-compute is recovered by the substrate redriving
 /// the invocation: the call recorded before the crash is served, the rest
 /// run once.
 pub async fn worker_kill_mid_compute_redrives_through_the_substrate(
@@ -237,7 +237,7 @@ pub async fn worker_kill_mid_compute_redrives_through_the_substrate(
         let pool = scenario.probe.pool(Phase::Healthy).unwrap_or_default();
         assert_eq!(
             pool.checkouts, 1,
-            "{law}: the re-drive rebuilds the run on one fresh worker, from the journal"
+            "{law}: the redrive rebuilds the run on one fresh worker, from the journal"
         );
     })
     .await;
@@ -245,7 +245,7 @@ pub async fn worker_kill_mid_compute_redrives_through_the_substrate(
 
 /// A worker that dies after its request reached the parent, before the
 /// outcome was recorded: the parent settles the admitted operation within
-/// its invocation, once, and the re-drive serves it.
+/// its invocation, once, and the redrive serves it.
 pub async fn worker_kill_after_request_before_record_settles_the_admitted_operation_once(
     prefix: &str,
     runner: Arc<dyn ConformanceTurnRunner>,
@@ -291,7 +291,7 @@ pub async fn worker_kill_after_request_before_record_settles_the_admitted_operat
 }
 
 /// A worker that dies after the parent recorded its outcome, before it was
-/// delivered: the re-drive replays the record with zero dispatch.
+/// delivered: the redrive replays the record with zero dispatch.
 pub async fn worker_kill_after_record_before_delivery_replays_with_zero_dispatch(
     prefix: &str,
     runner: Arc<dyn ConformanceTurnRunner>,
@@ -309,7 +309,7 @@ pub async fn worker_kill_after_record_before_delivery_replays_with_zero_dispatch
             },
         )
         .await;
-        // Two calls ran before the crash; the re-drive dispatched only the
+        // Two calls ran before the crash; the redrive dispatched only the
         // three that had no record.
         assert_eq!(
             scenario.probe.runs().len(),
@@ -322,7 +322,7 @@ pub async fn worker_kill_after_record_before_delivery_replays_with_zero_dispatch
 
 /// A worker that dies while it serializes its state: the partial frame is
 /// refused, nothing is committed from it, and the last committed checkpoint
-/// stands. The run it re-drives resumes from that checkpoint, with every
+/// stands. The run it redrives resumes from that checkpoint, with every
 /// call before it served from its record.
 pub async fn worker_kill_mid_serialization_keeps_the_last_checkpoint(
     prefix: &str,
@@ -387,13 +387,13 @@ pub async fn worker_kill_mid_serialization_keeps_the_last_checkpoint(
                 checkpoint == &parked
                     || matches!(checkpoint.vm.kind(), lash_vm_protocol::VmStateKind::Snapshot)
             }),
-            "{law}: nothing but the parked checkpoint and the re-drive's completion was committed"
+            "{law}: nothing but the parked checkpoint and the redrive's completion was committed"
         );
         let completed = second
             .probe
             .end(Phase::Healthy)
-            .unwrap_or_else(|| panic!("{law}: the re-drive ran"))
-            .unwrap_or_else(|failure| panic!("{law}: the re-drive completes: {failure:?}"));
+            .unwrap_or_else(|| panic!("{law}: the redrive ran"))
+            .unwrap_or_else(|failure| panic!("{law}: the redrive completes: {failure:?}"));
         assert_eq!(
             result_calls(&completed),
             vec![
@@ -410,7 +410,7 @@ pub async fn worker_kill_mid_serialization_keeps_the_last_checkpoint(
 
 /// A worker that sent its whole completion and died before the parent
 /// committed it: the completion wins over the death, and it is committed
-/// once, however often the invocation is re-driven after.
+/// once, however often the invocation is redriven after.
 pub async fn worker_kill_after_complete_before_commit_commits_once(
     prefix: &str,
     runner: Arc<dyn ConformanceTurnRunner>,
@@ -424,7 +424,7 @@ pub async fn worker_kill_after_complete_before_commit_commits_once(
             carried: Some(Arc::clone(&carried)),
             ..Scenario::new(law, matrix_program())
         });
-        // The parent itself dies after the commit: the tier re-drives the
+        // The parent itself dies after the commit: the tier redrives the
         // invocation, which replays to the same completion.
         runner
             .run_crashed_then_redriven_turn(
@@ -574,7 +574,7 @@ pub async fn unauthorized_worker_effect_request_is_refused_without_invoking_a_to
 
 /// A message under a stale lease or frame, a replayed frame and a repeated
 /// request id are never applied: the worker is discarded typed, and the
-/// re-drive runs each call once.
+/// redrive runs each call once.
 pub async fn stale_epoch_and_duplicate_worker_messages_are_refused(
     prefix: &str,
     runner: Arc<dyn ConformanceTurnRunner>,
@@ -612,8 +612,8 @@ pub async fn stale_epoch_and_duplicate_worker_messages_are_refused(
             let redriven = scenario
                 .probe
                 .end(Phase::Healthy)
-                .unwrap_or_else(|| panic!("{name}: the re-drive ran"))
-                .unwrap_or_else(|failure| panic!("{name}: the re-drive completes: {failure:?}"));
+                .unwrap_or_else(|| panic!("{name}: the redrive ran"))
+                .unwrap_or_else(|failure| panic!("{name}: the redrive completes: {failure:?}"));
             let mut per_call = BTreeMap::<String, usize>::new();
             for run in scenario.probe.runs() {
                 *per_call.entry(run.call_id).or_default() += 1;
@@ -635,8 +635,8 @@ pub async fn stale_epoch_and_duplicate_worker_messages_are_refused(
 
 /// A worker that refuses the run's own inputs refuses them on every attempt:
 /// the refusal crosses the pipe as its typed cause and is the run's terminal,
-/// which the turn settles with and the tier never re-drives. A breach of the
-/// exchange is the attempt's: the tier re-drives it, and each call runs once
+/// which the turn settles with and the tier never redrives. A breach of the
+/// exchange is the attempt's: the tier redrives it, and each call runs once
 /// (FIG-4645).
 pub async fn a_refused_run_is_terminal_and_a_broken_exchange_is_redriven(
     prefix: &str,
@@ -668,7 +668,7 @@ pub async fn a_refused_run_is_terminal_and_a_broken_exchange_is_redriven(
         );
         assert!(
             !failure.is_retryable(),
-            "{name}: no re-drive can change the refusal: {failure:?}"
+            "{name}: no redrive can change the refusal: {failure:?}"
         );
         assert_eq!(
             failure.settlement(),
@@ -713,15 +713,15 @@ pub async fn a_refused_run_is_terminal_and_a_broken_exchange_is_redriven(
         let redriven = scenario
             .probe
             .end(Phase::Healthy)
-            .unwrap_or_else(|| panic!("{name}: the re-drive ran"))
-            .unwrap_or_else(|failure| panic!("{name}: the re-drive completes: {failure:?}"));
+            .unwrap_or_else(|| panic!("{name}: the redrive ran"))
+            .unwrap_or_else(|failure| panic!("{name}: the redrive completes: {failure:?}"));
         assert_eq!(
             result_calls(&redriven),
             calls
                 .iter()
                 .map(|call| (call.to_string(), 1))
                 .collect::<Vec<_>>(),
-            "{name}: the re-drive runs each call once"
+            "{name}: the redrive runs each call once"
         );
         runner.scenario_finished().await;
     })
@@ -734,10 +734,10 @@ pub async fn a_refused_run_is_terminal_and_a_broken_exchange_is_redriven(
 /// - **The host cancels, then the worker is killed.** Checkpoint 1 was
 ///   observed not cancelled; the host then cancels (durably and live) and
 ///   the worker dies before checkpoint 2. Nothing the crash did decides: the
-///   re-drive replays checkpoint 1's observation unchanged, is cancelled at
+///   redrive replays checkpoint 1's observation unchanged, is cancelled at
 ///   checkpoint 2, and runs nothing after it.
 /// - **An unsolicited stop.** A live stop with nothing durable behind it
-///   (a stray `Cancel`) stops or kills the worker; the re-drive observes both
+///   (a stray `Cancel`) stops or kills the worker; the redrive observes both
 ///   checkpoints not cancelled and completes, branching exactly as a run that
 ///   was never stopped.
 pub async fn cancellation_winner_is_the_journaled_checkpoint_across_worker_kill(
@@ -793,7 +793,7 @@ pub async fn cancellation_winner_is_the_journaled_checkpoint_across_worker_kill(
                     assert_eq!(
                         scenario.probe.end(Phase::Healthy),
                         Some(Ok(BrokeredEnd::Cancelled)),
-                        "{name}: the re-drive is cancelled"
+                        "{name}: the redrive is cancelled"
                     );
                     assert_eq!(
                         scenario.probe.observations(Phase::Healthy),
@@ -813,7 +813,7 @@ pub async fn cancellation_winner_is_the_journaled_checkpoint_across_worker_kill(
                     );
                     assert!(
                         matches!(scenario.probe.end(Phase::Healthy), Some(Ok(BrokeredEnd::Complete { .. }))),
-                        "{name}: the re-drive completes"
+                        "{name}: the redrive completes"
                     );
                     assert_eq!(
                         scenario.probe.observations(Phase::Healthy),

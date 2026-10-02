@@ -32,7 +32,7 @@
 //! requires a session id the store already knows: sending to an id that was
 //! never created fails with [`EmbedError::UnknownSession`], and to a deleted
 //! one with [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
-//! Nothing is stored and no driver is woken in either case. Create the session
+//! Nothing is stored and no `SessionShifts` is woken in either case. Create the session
 //! first — `core.session(id).create(creation)` — then send.
 //!
 //! A catalog that cannot resolve a session by id at all is a different answer
@@ -114,7 +114,7 @@ impl DurableSession {
         session_id: SessionId,
         catalog: Arc<dyn DeploymentStore>,
         work: Arc<ResolvedQueuedWork>,
-        ingress: lash_core::drive::IngressRelay,
+        ingress: lash_core::shift::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
@@ -150,7 +150,7 @@ impl DurableSession {
         session_id: SessionId,
         store: lash_core::store::SessionStore,
         work: Arc<ResolvedQueuedWork>,
-        ingress: lash_core::drive::IngressRelay,
+        ingress: lash_core::shift::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
@@ -178,7 +178,7 @@ impl DurableSession {
     }
 
     /// The session's model usage, read from the deployment's usage ledger
-    /// (ADR 0125). A durable read: it opens nothing and drives nothing, and it
+    /// (ADR 0125). A durable read: it opens nothing and executes nothing, and it
     /// answers for a live, parked or deleted-but-retained session alike.
     pub async fn usage(&self) -> Result<lash_core::OwnerUsage> {
         self.usage_accounting
@@ -238,7 +238,7 @@ impl DurableSession {
         }
     }
 
-    /// Accept `input` durably and ask the engine to drive the session; the
+    /// Accept `input` durably and ask the engine to work the session; the
     /// same acceptance as [`LashSession::send`](crate::LashSession::send), with
     /// no resident runtime to refresh when the handle answers.
     pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
@@ -269,18 +269,18 @@ impl DurableSession {
         crate::send::attach_id(crate::send::SendTarget::Durable(self.clone()), id.into())
     }
 
-    /// Re-await a logical root by id.
-    pub fn root(&self, root: impl Into<lash_core::TurnId>) -> crate::RootHandle {
-        crate::send::root(crate::send::SendTarget::Durable(self.clone()), root.into())
+    /// Re-await a logical run by id.
+    pub fn run(&self, run: impl Into<lash_core::TurnId>) -> crate::RunHandle {
+        crate::send::run(crate::send::SendTarget::Durable(self.clone()), run.into())
     }
 
-    /// Withdraw a queued input, or cooperatively cancel a running root
+    /// Withdraw a queued input, or cooperatively cancel a running run
     /// (ADR 0039).
     pub fn cancel(&self, target: crate::CancelTarget) -> crate::CancelBuilder {
         crate::CancelBuilder::new(crate::send::SendTarget::Durable(self.clone()), target)
     }
 
-    /// A held input reports the sealed drive epoch under which its admission was
+    /// A held input reports the sealed shift epoch under which its admission was
     /// taken. That status does not prove the holder is alive; resubmitting
     /// while it is held creates another admission unless the host reuses the
     /// same source key.
@@ -365,21 +365,21 @@ impl DurableSession {
             .await?)
     }
 
-    /// Returns the session's admitted root that has no terminal evidence yet,
-    /// with the head its admission recorded: the one root the next drive
+    /// Returns the session's admitted run that has no terminal evidence yet,
+    /// with the head its admission recorded: the one run the next shift
     /// resumes before admitting anything else.
-    pub async fn unfinished_root(&self) -> Result<Option<lash_core::store::UnfinishedRoot>> {
-        Ok(self.store().await?.unfinished_root().await?)
+    pub async fn unfinished_run(&self) -> Result<Option<lash_core::store::UnfinishedRun>> {
+        Ok(self.store().await?.unfinished_run().await?)
     }
 
-    /// The session's unfinished root, if a turn is under way: the name a
+    /// The session's unfinished run, if a turn is under way: the name a
     /// host pins out of band while the turn runs
     /// ([`Target::Turn`](lash_core::Target::Turn)).
     pub async fn current_turn(&self) -> Result<Option<lash_core::TurnId>> {
         Ok(self
-            .unfinished_root()
+            .unfinished_run()
             .await?
-            .map(|unfinished| unfinished.root))
+            .map(|unfinished| unfinished.run))
     }
 
     /// Pin `target`: the revision it resolves to is retained through every

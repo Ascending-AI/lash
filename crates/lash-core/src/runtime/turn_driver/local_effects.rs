@@ -35,7 +35,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_run: Option<crate::UsageRun>,
+        usage_meter: Option<crate::UsageMeter>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let mut runner = *self;
         match envelope.command {
@@ -75,14 +75,14 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 let host = Arc::clone(&runner.driver.host.core.control.effect_host);
                 let honoured = runner.driver.turn_cancel.is_some();
                 let request = Arc::new((*request).into_request(None, None));
-                // The model call is one call of this effect's usage run,
+                // The model call is one call of this effect's usage meter,
                 // owned by the turn's session (ADR 0125).
-                let call = usage_run
+                let call = usage_meter
                     .as_ref()
                     .ok_or_else(|| {
                         RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::UsageRunMissing,
-                            "a turn's model call reached its provider outside any usage run",
+                            crate::RuntimeErrorCode::UsageMeterMissing,
+                            "a turn's model call reached its provider outside any usage meter",
                         )
                     })?
                     .call(
@@ -93,7 +93,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     )
                     .map_err(|error| {
                         RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::UsageRunMissing,
+                            crate::RuntimeErrorCode::UsageMeterMissing,
                             error.to_string(),
                         )
                     })?;
@@ -270,8 +270,8 @@ pub(super) fn turn_effect_executor(
         // back on the journalled admitted set, not on the driver copy.
         withheld_terminal_work: Default::default(),
         checkpoint_messages: driver.checkpoint_messages.clone(),
-        drive_fence: driver.drive_fence.clone(),
-        drive_root: driver.drive_root.clone(),
+        shift_fence: driver.shift_fence.clone(),
+        shift_run: driver.shift_run.clone(),
         drive_generation: driver.drive_generation.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: Arc::clone(&driver.turn_control),
@@ -307,7 +307,7 @@ mod tests {
     struct ObservationIds(std::sync::Mutex<Vec<String>>);
 
     impl crate::engine::ObservationSink for ObservationIds {
-        fn observe(&self, observation: crate::engine::DriveObservation) {
+        fn observe(&self, observation: crate::engine::ShiftObservation) {
             self.0
                 .lock()
                 .expect("observation ids")
@@ -334,7 +334,7 @@ mod tests {
         let session_id = crate::SessionId::from("session");
 
         let mut driver_cursor =
-            crate::runtime::turn_loop::turn_observation_cursor(&scoped, &turn_id, "drive");
+            crate::runtime::turn_loop::turn_observation_cursor(&scoped, &turn_id, "shift");
         let body_invocation = crate::runtime::causal::turn_effect_invocation(
             scoped.execution_scope(),
             &session_id,

@@ -135,7 +135,7 @@ pub enum TurnFailureCode {
     EmptyResponse,
     /// The model emitted a native tool call the RLM protocol does not allow.
     NativeToolCallNotAllowed,
-    /// The RLM driver was resumed in a state it cannot drive.
+    /// The RLM driver was resumed in a state it cannot work.
     InvalidDriverState,
     /// The RLM driver was handed turn options it cannot honour.
     InvalidTurnOptions,

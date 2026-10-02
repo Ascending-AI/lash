@@ -1,7 +1,7 @@
 //! The end state an epoch's ledger owes: the crash matrix's invariants
 //! ([`invariants::check`]) over what the host saw admitted, and the soak's
 //! own checks for what the matrix does not read — admissions the host never
-//! saw answered, held roots, every waiter, and every retired generation.
+//! saw answered, held runs, every waiter, and every retired generation.
 
 use std::sync::Arc;
 
@@ -105,7 +105,7 @@ pub(super) async fn expected(world: &CrashWorld, ledger: &Ledger) -> Result<Expe
         .filter(|input| input.admission == Admission::Known && live.contains(&input.session))
         .map(|input| AcceptedInput {
             session: input.session.clone(),
-            root: TurnId::fixture(input.root.as_str()),
+            run: TurnId::fixture(input.run.as_str()),
         })
         .collect();
     let mut closed_scopes: Vec<ScopeId> = ledger.child_scopes.clone();
@@ -116,7 +116,7 @@ pub(super) async fn expected(world: &CrashWorld, ledger: &Ledger) -> Result<Expe
         ("at_most_once", at_most_once(ledger, &live)),
         ("ingress", no_open_ingress(live.clone())),
         ("commands", no_queued_work(live.clone())),
-        ("scope_close", roots_closed(ledger, &live)),
+        ("scope_close", runs_closed(ledger, &live)),
         ("waiters", waiters_served(ledger)),
         (
             "generations",
@@ -144,28 +144,28 @@ fn count(messages: &[(String, String)], role: &str, marker: &str) -> usize {
         .sum()
 }
 
-/// Admissions the host never saw answered, and held roots: each committed at
+/// Admissions the host never saw answered, and held runs: each committed at
 /// most once; an unanswered-admission input committed is answered once, and
-/// a held root is never answered.
+/// a held run is never answered.
 fn at_most_once(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
     let maybe: Vec<(SessionId, String, bool)> = ledger
         .inputs
         .iter()
         .filter(|input| input.admission == Admission::Maybe && live.contains(&input.session))
-        .map(|input| (input.session.clone(), input.root.clone(), false))
+        .map(|input| (input.session.clone(), input.run.clone(), false))
         .chain(
             ledger
                 .held
                 .iter()
                 .filter(|held| live.contains(&held.session))
-                .map(|held| (held.session.clone(), held.root.clone(), true)),
+                .map(|held| (held.session.clone(), held.run.clone(), true)),
         )
         .collect();
     Arc::new(move |world: &CrashWorld| {
         let maybe = maybe.clone();
         Box::pin(async move {
             let mut violations = Vec::new();
-            for (session, root, held) in maybe {
+            for (session, run, held) in maybe {
                 let messages = match invariants::transcript(world, &session).await {
                     Ok(messages) => messages,
                     Err(error) => {
@@ -173,13 +173,13 @@ fn at_most_once(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
                         continue;
                     }
                 };
-                let asked = count(&messages, "user", &input_text(&root));
-                let answered = count(&messages, "assistant", &answer_text(&root));
+                let asked = count(&messages, "user", &input_text(&run));
+                let answered = count(&messages, "assistant", &answer_text(&run));
                 let owed = if held { 0 } else { asked };
                 if asked > 1 || answered != owed {
                     violations.push(format!(
-                        "{} `{root}` of `{session}` committed {asked} time(s) and was answered {answered} time(s)",
-                        if held { "held root" } else { "input the host never saw accepted" }
+                        "{} `{run}` of `{session}` committed {asked} time(s) and was answered {answered} time(s)",
+                        if held { "held run" } else { "input the host never saw accepted" }
                     ));
                 }
             }
@@ -262,52 +262,50 @@ fn no_queued_work(live: Vec<SessionId>) -> CustomCheck {
     })
 }
 
-/// Every root with terminal evidence owes its scope close as an ADR 0109
-/// obligation on its root row: delivered, or stalled typed.
-fn roots_closed(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
-    let roots: Vec<(SessionId, String)> = ledger
+/// Every run with terminal evidence owes its scope close as an ADR 0109
+/// obligation on its run row: delivered, or stalled typed.
+fn runs_closed(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
+    let runs: Vec<(SessionId, String)> = ledger
         .inputs
         .iter()
-        .map(|input| (input.session.clone(), input.root.clone()))
+        .map(|input| (input.session.clone(), input.run.clone()))
         .chain(
             ledger
                 .held
                 .iter()
-                .map(|held| (held.session.clone(), held.root.clone())),
+                .map(|held| (held.session.clone(), held.run.clone())),
         )
         .filter(|(session, _)| live.contains(session))
         .collect();
     Arc::new(move |world: &CrashWorld| {
-        let roots = roots.clone();
+        let runs = runs.clone();
         Box::pin(async move {
             let factory = world.backend().session_store_factory();
             let ledger = world
                 .backend()
                 .obligation_ledger(ObligationKind::ScopeClose);
             let mut violations = Vec::new();
-            for (session, root) in roots {
-                let turn = TurnId::fixture(root.as_str());
-                match factory.root_terminal(&session, &turn).await {
+            for (session, run) in runs {
+                let turn = TurnId::fixture(run.as_str());
+                match factory.run_terminal(&session, &turn).await {
                     Ok(Some(_)) => {
                         let id = lash_core::store::ObligationKey::ScopeClose {
                             session_id: session.clone(),
-                            root: turn.clone(),
+                            run: turn.clone(),
                         }
                         .id();
                         match ledger.state(&id).await {
                             Ok(Some(ObligationState::Delivered | ObligationState::Stalled)) => {}
                             Ok(state) => violations.push(format!(
-                                "the scope-close obligation of terminal root `{root}` of `{session}` is {state:?}"
+                                "the scope-close obligation of terminal run `{run}` of `{session}` is {state:?}"
                             )),
                             Err(error) => violations
-                                .push(format!("read the scope close of `{root}`: {error}")),
+                                .push(format!("read the scope close of `{run}`: {error}")),
                         }
                     }
-                    // A batched input owns no root.
+                    // A batched input owns no run.
                     Ok(None) => {}
-                    Err(error) => {
-                        violations.push(format!("read the terminal of `{root}`: {error}"))
-                    }
+                    Err(error) => violations.push(format!("read the terminal of `{run}`: {error}")),
                 }
             }
             violations
@@ -316,7 +314,7 @@ fn roots_closed(ledger: &Ledger, live: &[SessionId]) -> CustomCheck {
 }
 
 /// Every process ended and its engine waiter was answered by the terminal;
-/// no process the stores hold is left unfinished but the held roots'
+/// no process the stores hold is left unfinished but the held runs'
 /// children, which only their cancel ends (the no-orphan invariant reads
 /// those).
 fn waiters_served(ledger: &Ledger) -> CustomCheck {
@@ -506,7 +504,7 @@ pub(super) async fn diagnose_recovery(world: &CrashWorld, live_since_wall_ms: i6
     {
         Ok(parks) => lines.extend(parks.into_iter().map(|park| {
             format!(
-                "turn park: `{}` root `{}` {:?} attempts={} engine={:?}",
+                "turn park: `{}` run `{}` {:?} attempts={} engine={:?}",
                 park.session_id, park.turn_id, park.reason, park.attempts, park.engine
             )
         })),

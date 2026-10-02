@@ -154,7 +154,7 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
     );
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &owner,
             "config-command-coalescing-executor",
@@ -171,10 +171,10 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
             .expect("blocked commands")
             .is_empty()
     );
-    let admitted = crate::testing::store_fixtures::admit_root_for_test(
+    let admitted = crate::testing::store_fixtures::admit_run_for_test(
         store.store(),
         &lease,
-        &TurnId::from("blocked-root"),
+        &TurnId::from("blocked-run"),
         crate::store::AdmittedHead::Input(input.input_id.clone()),
     )
     .await
@@ -201,9 +201,9 @@ pub async fn ingress_follow_on_fork_and_command_run_matrix(
         crate::OperationId::turn(&request.session_id, &owed.follow_on_turn_id, "final"),
     );
     terminal.pending_follow_on = None;
-    // The follow-on's terminal is its drive's commit: it presents the drive's
+    // The follow-on's terminal is its shift's commit: it presents the shift's
     // fence, as every head write while commands are open must (FIG-4202).
-    terminal.drive_fence = Some(Box::new(lease.clone()));
+    terminal.shift_fence = Some(Box::new(lease.clone()));
     store
         .commit_runtime_state(terminal)
         .await
@@ -330,7 +330,7 @@ pub(super) async fn session_store_factory_runs_every_config_command_alone(
     );
     let lease = store
         .store()
-        .seal_drive_epoch_for_test(
+        .seal_shift_epoch_for_test(
             &request.session_id,
             &owner,
             "config-command-run-alone-executor",
@@ -381,7 +381,7 @@ fn config_transaction_command(model: &str) -> crate::SessionCommand {
 async fn commit_session_command_run(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     run: Vec<crate::QueuedWorkBatch>,
 ) {
     commit_session_command_run_with(store, request, fence, run, |_| {}).await;
@@ -396,7 +396,7 @@ async fn commit_session_command_run(
 async fn commit_session_command_run_with(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
-    fence: &crate::store::DriveFence,
+    fence: &crate::store::ShiftFence,
     run: Vec<crate::QueuedWorkBatch>,
     adjust: impl FnOnce(&mut crate::RuntimeSessionState),
 ) {
@@ -422,7 +422,7 @@ async fn commit_session_command_run_with(
             "session-command",
         ),
     );
-    commit.drive_fence = Some(Box::new(fence.clone()));
+    commit.shift_fence = Some(Box::new(fence.clone()));
     commit.applied_commands = Some(crate::QueuedWorkCompletion {
         session_id: request.session_id.clone(),
         batch_ids: run.iter().map(|batch| batch.batch_id.clone()).collect(),
@@ -435,12 +435,12 @@ async fn commit_session_command_run_with(
 
 tokio::task_local! {
     /// Marks the facade writer's task: only its sleeps move the virtual clock.
-    static DRIVES_SETTLEMENT_CLOCK: ();
+    static SHIFTS_SETTLEMENT_CLOCK: ();
 }
 
 /// Virtual clock for runtime settlement tests.
 ///
-/// Only the facade writer drives it: a sleep inside [`Self::driving`] advances
+/// Only the facade writer executes it: a sleep inside [`Self::executing`] advances
 /// the clock by its duration and yields once, so the settlement deadline is
 /// exercised without waiting on wall time. Every other sleeper (the session
 /// lease renewer the settlement loop spawns, for one) waits for the writer to
@@ -465,9 +465,9 @@ impl ConfigSettlementClock {
         }
     }
 
-    /// Run `writer` as the task whose sleeps drive the clock.
-    async fn driving<T>(writer: impl Future<Output = T>) -> T {
-        DRIVES_SETTLEMENT_CLOCK.scope((), writer).await
+    /// Run `writer` as the task whose sleeps shift the clock.
+    async fn executing<T>(writer: impl Future<Output = T>) -> T {
+        SHIFTS_SETTLEMENT_CLOCK.scope((), writer).await
     }
 
     fn duration_ms(duration: std::time::Duration) -> u64 {
@@ -514,7 +514,7 @@ impl crate::Clock for ConfigSettlementClock {
     }
 
     async fn sleep(&self, duration: std::time::Duration) {
-        if DRIVES_SETTLEMENT_CLOCK.try_with(|()| ()).is_ok() {
+        if SHIFTS_SETTLEMENT_CLOCK.try_with(|()| ()).is_ok() {
             self.advance(duration);
             tokio::task::yield_now().await;
             return;
@@ -662,7 +662,7 @@ async fn runtime_for_config_settlement(
 async fn hold_config_settlement_lease(store: &dyn crate::RuntimeStore, session_id: &SessionId) {
     let owner = crate::LeaseOwnerIdentity::opaque("config-blocker", "config-blocker:incarnation");
     store
-        .seal_drive_epoch_for_test(session_id, &owner, "config-blocker", 600_000)
+        .seal_shift_epoch_for_test(session_id, &owner, "config-blocker", 600_000)
         .await
         .expect("claim the competing writer lease")
         .acquired()
@@ -680,7 +680,7 @@ fn config_command_model(key: &str) -> crate::LlmProfileConfig {
 }
 
 /// Submit a config transaction moving the session to the model `key` and
-/// read how it settled, once: a transaction no drive applied yet answers
+/// read how it settled, once: a transaction no shift applied yet answers
 /// `Pending`.
 #[expect(
     clippy::expect_used,
@@ -729,7 +729,7 @@ where
     .await;
     let original_profile = runtime.export_persistence_state().policy.model.clone();
     let started = clock.now();
-    let settlement = ConfigSettlementClock::driving(Box::pin(submit_config_settlement(
+    let settlement = ConfigSettlementClock::executing(Box::pin(submit_config_settlement(
         &mut runtime,
         "must-remain-pending",
     )))
@@ -744,7 +744,7 @@ where
     assert_eq!(
         clock.now().saturating_duration_since(started),
         std::time::Duration::ZERO,
-        "the submission returns the pending receipt without driving the command"
+        "the submission returns the pending receipt without executing the command"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -783,7 +783,7 @@ where
     )
     .await;
     let original_profile = runtime.export_persistence_state().policy.model.clone();
-    let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
+    let setter = crate::task::spawn(ConfigSettlementClock::executing(async move {
         let mut runtime = runtime;
         let result = submit_config_settlement(&mut runtime, "must-be-cancelled").await;
         (result, runtime)
@@ -865,13 +865,13 @@ where
     let owner =
         crate::LeaseOwnerIdentity::opaque("superseding-writer", "superseding-writer:incarnation");
     let lease = store
-        .seal_drive_epoch_for_test(&request.session_id, &owner, "superseding-executor", 600_000)
+        .seal_shift_epoch_for_test(&request.session_id, &owner, "superseding-executor", 600_000)
         .await
         .expect("claim superseding session lease")
         .acquired()
         .expect("superseding session lease");
 
-    let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
+    let setter = crate::task::spawn(ConfigSettlementClock::executing(async move {
         let mut runtime = runtime;
         let result = submit_config_settlement(&mut runtime, "first-settled").await;
         (result, runtime)

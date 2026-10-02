@@ -2,7 +2,7 @@
 //!
 //! Every lash handler whose journal only its own build may replay — the
 //! process segment workflow, the effect-group dispatcher's run and children,
-//! and the session driver's `LashSession` and `LashTurn` — records the
+//! and the `SessionShifts`'s `LashSession` and `LashTurn` — records the
 //! executing build's drain generation `G` as its journal's first command: a
 //! `ctx.run` step named [`GENERATION_SENTINEL`] whose recorded output is
 //! the generation as a JSON string.
@@ -18,13 +18,13 @@
 //! The step's name and its output encoding are frozen: every later
 //! generation must read a sentinel any earlier one wrote.
 //!
-//! The session driver's `LashSession` and `LashTurn` fold the sentinel into
+//! The `SessionShifts`'s `LashSession` and `LashTurn` fold the sentinel into
 //! their first recorded step instead (FIG-3980): that step's journal entry
 //! carries the generation beside its own fields, and [`FoldedSentinel`]
-//! checks it on a replay before the step's outcome reaches the drive. The
+//! checks it on a replay before the step's outcome reaches the shift. The
 //! first recorded step is the handler's first command, so the check still
 //! comes before any other command replays, and a turn journals one step
-//! fewer per handler. `LashSession`'s first command is its drive's leg start,
+//! fewer per handler. `LashSession`'s first command is its shift's leg start,
 //! a step of the handler's own, which stamps and checks the sentinel itself
 //! (FIG-4556).
 
@@ -73,7 +73,7 @@ pub(crate) use record_generation;
 /// A handler whose first command is a step of its own stamps and checks that
 /// step the same way.
 /// A journal of another generation is refused through [`Self::guard`], the
-/// handler's wrapper around its drive: the drive's step never answers, so
+/// handler's wrapper around its shift: the shift's step never answers, so
 /// nothing past the entry replays and no effect runs, and the handler ends
 /// the attempt with the typed `RetiredGeneration` park.
 pub(crate) struct FoldedSentinel {
@@ -83,7 +83,7 @@ pub(crate) struct FoldedSentinel {
     refusal: Mutex<Refusal>,
 }
 
-/// A refusal on its way from the drive's step to the handler's guard.
+/// A refusal on its way from the shift's step to the handler's guard.
 #[derive(Default)]
 struct Refusal {
     refusal: Option<HandlerError>,
@@ -140,12 +140,12 @@ impl FoldedSentinel {
         std::future::pending::<()>().await;
     }
 
-    /// Run `drive` to its end, unless its first recorded entry turns out to
-    /// be another generation's: then the refusal, with `drive` never polled
+    /// Run `shift` to its end, unless its first recorded entry turns out to
+    /// be another generation's: then the refusal, with `shift` never polled
     /// again. The refusal is looked at first on every poll, so the answer is
     /// deterministic.
-    pub(crate) async fn guard<T>(&self, drive: impl Future<Output = T>) -> Result<T, HandlerError> {
-        let mut drive = std::pin::pin!(drive);
+    pub(crate) async fn guard<T>(&self, shift: impl Future<Output = T>) -> Result<T, HandlerError> {
+        let mut shift = std::pin::pin!(shift);
         std::future::poll_fn(|cx| {
             {
                 let mut state = self.refusal.lock_recover();
@@ -154,7 +154,7 @@ impl FoldedSentinel {
                 }
                 state.handler = Some(cx.waker().clone());
             }
-            drive.as_mut().poll(cx).map(Ok)
+            shift.as_mut().poll(cx).map(Ok)
         })
         .await
     }

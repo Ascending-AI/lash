@@ -11,10 +11,10 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    AdmissionId, AdmitRootRequest, CheckpointAdmission, CheckpointAdmissionRequest, DriveEpochSeal,
-    GraphAppend, IngressSettlement, OperationId, PersistedSessionConfig, RealizedNodeTimestamp,
-    RuntimeCommit, RuntimeCommitReceipt, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
-    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, StoreError,
+    AdmissionId, AdmitRunRequest, CheckpointAdmission, CheckpointAdmissionRequest, GraphAppend,
+    IngressSettlement, OperationId, PersistedSessionConfig, RealizedNodeTimestamp, RuntimeCommit,
+    RuntimeCommitReceipt, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, ShiftEpochSeal, StoreError,
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, commit_runtime_state_verified,
 };
 use lash::plugins::{
@@ -38,9 +38,9 @@ fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
     RuntimeCommit {
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
-        drive_fence: None,
-        root_terminal: None,
-        park_root: None,
+        shift_fence: None,
+        run_terminal: None,
+        park_run: None,
         config: PersistedSessionConfig::new(
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
@@ -219,7 +219,7 @@ fn model_errors_are_nameable(
 
 fn cancellation_token_is_at_root(token: lash::CancellationToken, session: &lash::LashSession) {
     token.cancel();
-    let _: lash::CancelBuilder = session.cancel(lash::CancelTarget::Root("turn".into()));
+    let _: lash::CancelBuilder = session.cancel(lash::CancelTarget::Run("turn".into()));
 }
 
 fn turn_input_ingress_types_are_nameable(
@@ -382,7 +382,7 @@ fn main() {
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             ),
-            published_by_drive: false,
+            published_by_shift: false,
         },
         0,
         None,

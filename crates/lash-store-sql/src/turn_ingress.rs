@@ -1,12 +1,12 @@
-//! The turn-ingress tables: how work reaches a session and which root holds
+//! The turn-ingress tables: how work reaches a session and which run holds
 //! it while it is being done.
 //!
 //! One family, two lifecycles:
 //!
 //! * **ingress** — [`pending_inputs`] holds the turn inputs a caller submitted
 //!   and [`queued_batches`] the work batches enqueued against
-//!   a session. A row a root admitted names it (`admitted_root`), written
-//!   under the session's current drive fence, and only that root's commit or
+//!   a session. A row a run admitted names it (`admitted_run`), written
+//!   under the session's current shift fence, and only that run's commit or
 //!   terminal write lets go of it again (FIG-3927).
 //! * **cancellation** — [`cancellation_bindings`], [`cancel_requests`],
 //!   [`closure_authorizations`] and
@@ -34,57 +34,57 @@ crate::statements! {
     /// Statements over more than one of the family's tables, which both
     /// backends issue verbatim.
     pub struct TurnIngressStatements @ "turn_ingress" {
-        /// Whether turn `?2` of session `?1`, a physical turn of root `?3`,
-        /// has ended: its final commit is recorded, or its root has terminal
+        /// Whether turn `?2` of session `?1`, a physical turn of run `?3`,
+        /// has ended: its final commit is recorded, or its run has terminal
         /// evidence. Read in the admitting transaction of input addressed to
         /// it (ADR 0101 §5.1).
         turn_address_ended = "SELECT EXISTS(
                 SELECT 1 FROM runtime_turn_commits
                 WHERE session_id = ?1 AND turn_id = ?2
              ) OR EXISTS(
-                SELECT 1 FROM session_roots
-                WHERE session_id = ?1 AND root = ?3 AND terminal_kind IS NOT NULL
+                SELECT 1 FROM session_runs
+                WHERE session_id = ?1 AND run = ?3 AND terminal_kind IS NOT NULL
              )";
 
-        /// Whether root `?2` of session `?1` has terminal evidence. A
+        /// Whether run `?2` of session `?1` has terminal evidence. A
         /// teardown of one of its turns then finds no input to dispose of:
-        /// the root's terminal write already applied its disposition, and
+        /// the run's terminal write already applied its disposition, and
         /// what it left open is next-turn input (ADR 0101 §5.1).
-        root_ended = "SELECT EXISTS(
-                SELECT 1 FROM session_roots
-                WHERE session_id = ?1 AND root = ?2 AND terminal_kind IS NOT NULL
+        run_ended = "SELECT EXISTS(
+                SELECT 1 FROM session_runs
+                WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NOT NULL
              )";
 
         /// Clear session `?1`'s park once its turn holds no work: no
-        /// unsettled input bound to the parked root, and the parked root
+        /// unsettled input bound to the parked run, and the parked run
         /// holds no admission without terminal evidence (only its own
-        /// terminal write ends an admitted root). The returning projection
+        /// terminal write ends an admitted run). The returning projection
         /// names the park the `Cancelled` event logs.
         delete_released_turn_park_returning = "DELETE FROM turn_parks
              WHERE session_id = ?1
                AND NOT EXISTS(
-                  SELECT 1 FROM session_root_inputs binding
+                  SELECT 1 FROM session_run_inputs binding
                   JOIN pending_turn_inputs pti
                     ON pti.session_id = binding.session_id
                    AND pti.input_id = binding.input_id
                   WHERE binding.session_id = ?1
-                    AND binding.root = turn_parks.turn_id
+                    AND binding.run = turn_parks.turn_id
                     AND {{nonterminal_turn_input_state(pti.state)}}
                )
                AND NOT EXISTS(
-                  SELECT 1 FROM session_roots sr
+                  SELECT 1 FROM session_runs sr
                   WHERE sr.session_id = ?1
-                    AND sr.root = turn_parks.turn_id
+                    AND sr.run = turn_parks.turn_id
                     AND sr.admission_json IS NOT NULL
                     AND sr.terminal_kind IS NULL
                )
              RETURNING turn_id, park_id";
 
         /// The deployment's parked turns, the oldest live park's instant,
-        /// its turns in flight — a session with an unfinished root or a
+        /// its turns in flight — a session with an unfinished run or a
         /// parked turn — and the unparked ones among them its stalled close
         /// holds: the session's `close_session` intent stalled its obligation
-        /// (ADR 0109 §4), so no delete retires the root until an operator
+        /// (ADR 0109 §4), so no delete retires the run until an operator
         /// re-arms it.
         count_unsettled_turns = "SELECT
                 (SELECT COUNT(*) FROM turn_parks) AS parked_turns,
@@ -92,11 +92,11 @@ crate::statements! {
                 (SELECT COUNT(*) FROM (
                     SELECT session_id FROM turn_parks
                     UNION
-                    SELECT session_id FROM session_roots
+                    SELECT session_id FROM session_runs
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                 ) AS unsettled) AS in_flight_turns,
                 (SELECT COUNT(*) FROM (
-                    SELECT session_id FROM session_roots
+                    SELECT session_id FROM session_runs
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                 ) AS held
                 WHERE held.session_id NOT IN (SELECT session_id FROM turn_parks)
@@ -120,15 +120,15 @@ crate::statements! {
              GROUP BY park_executable_generation";
 
         /// Whether session `?1` has work a runner could pick up: an unfinished
-        /// root, an open queued batch, or an open input. With no unfinished
-        /// root every open input is next-turn input, whatever turn its
+        /// run, an open queued batch, or an open input. With no unfinished
+        /// run every open input is next-turn input, whatever turn its
         /// submitted delivery addresses (ADR 0101 §5.1).
         ///
         /// One question, so one statement: asking it as two would let a
         /// session go from empty to non-empty between them and report a
         /// bound-worthy session as idle.
         has_admissible_work = "SELECT EXISTS(
-                SELECT 1 FROM session_roots
+                SELECT 1 FROM session_runs
                 WHERE session_id = ?1
                   AND admission_json IS NOT NULL
                   AND terminal_kind IS NULL
@@ -136,14 +136,14 @@ crate::statements! {
                 SELECT 1
                 FROM queued_work_batches qwb
                 WHERE qwb.session_id = ?1
-                  AND qwb.admitted_root IS NULL
+                  AND qwb.admitted_run IS NULL
                   AND qwb.terminal_cause IS NULL
              ) OR EXISTS(
                 SELECT 1
                 FROM pending_turn_inputs pti
                 WHERE pti.session_id = ?1
                   AND {{undelivered_turn_input_state(pti.state)}}
-                  AND pti.admitted_root IS NULL
+                  AND pti.admitted_run IS NULL
              )";
 
         /// The earliest open session command and open turn input of session
@@ -151,8 +151,8 @@ crate::statements! {
         ///
         /// Both lanes are projected from one snapshot, so the command-first
         /// decision and the input position describe the same boundary. A
-        /// session command is never admitted, and an input a root admitted is
-        /// that root's: the unfinished root is admitted before either lane.
+        /// session command is never admitted, and an input a run admitted is
+        /// that run's: the unfinished run is admitted before either lane.
         /// At a boundary every open input is next-turn input, whatever turn
         /// its submitted delivery addresses (ADR 0101 §5.1).
         pending_session_work_ordering = "WITH earliest_command AS (
@@ -168,7 +168,7 @@ crate::statements! {
                 FROM pending_turn_inputs AS input
                 WHERE session_id = ?1
                   AND {{undelivered_turn_input_state(input.state)}}
-                  AND input.admitted_root IS NULL
+                  AND input.admitted_run IS NULL
                 ORDER BY enqueue_seq ASC
                 LIMIT 1
              )

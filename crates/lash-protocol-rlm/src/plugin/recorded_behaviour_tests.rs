@@ -3,7 +3,7 @@
 //! output limit and soft-warning threshold — never under the configuration
 //! of the deployment that opens, redrives or resumes it (ADR 0105 §1).
 //!
-//! The redrive law crashes a root after its config is resolved and before
+//! The redrive law crashes a run after its config is resolved and before
 //! its first model call on the deployment that created the session, then
 //! redrives it on a deployment whose RLM factory states other bounds and
 //! features. It runs over SQLite file, SQLite memory and PostgreSQL, each on
@@ -17,7 +17,7 @@ use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
 };
 use lash_core::plugin::{PluginFactory, PluginSessionRequest, SessionAuthorityContext};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::{
     CommitBudget, LlmOutputPart, LlmResponse, QueuedWorkBatchingConfig, SessionCreationHead,
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
@@ -185,25 +185,25 @@ pub(super) async fn open_runtime(
     .expect("open the runtime")
 }
 
-/// Crashes a root after its config is recorded and before its first model
+/// Crashes a run after its config is recorded and before its first model
 /// call.
 struct CrashBeforeFirstModelCall;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeFirstModelCall {
     fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
         if phase == lash_core::runtime::RuntimeTurnPhase::PromptBuild {
-            panic!("injected crash after the root's config record and before its model call");
+            panic!("injected crash after the run's config record and before its model call");
         }
     }
 
     fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
-/// A root interrupted after its config is resolved and redriven on a
+/// A run interrupted after its config is resolved and redriven on a
 /// deployment whose RLM factory states other bounds and features runs under
 /// the ones its session recorded: its prompt offers `continue_as` (recorded
 /// decomposition) and its cell runs a loop the redeploying bound would stop.
-async fn a_redriven_root_runs_under_its_recorded_behaviour(
+async fn a_redriven_run_executes_under_its_recorded_behaviour(
     double: lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     session: &str,
 ) {
@@ -233,7 +233,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
     .await
     .expect("create the session");
     let model = Arc::new(Model::default());
-    let root = TurnId::fixture(format!("{session}-root"));
+    let run = TurnId::fixture(format!("{session}-run"));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let crashing: lash_restate_test::HandlerAttempt = {
         let backend = backend.clone();
@@ -247,7 +247,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
                 let mut runtime = open_runtime(&backend, store, creating_config(), &model).await;
                 runtime.set_turn_phase_probe(Arc::new(CrashBeforeFirstModelCall));
                 let _ = runtime
-                    .drive_turn(
+                    .execute_turn(
                         TurnInput::text("loop it"),
                         lash_core::facade_support::TurnOptions::new(
                             tokio_util::sync::CancellationToken::new(),
@@ -255,7 +255,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
                         ),
                     )
                     .await;
-                panic!("the crash fires before the root's first model call");
+                panic!("the crash fires before the run's first model call");
             })
         })
     };
@@ -271,7 +271,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
             Box::pin(async move {
                 let mut runtime = open_runtime(&backend, store, redeploying_config(), &model).await;
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         TurnInput::text("loop it"),
                         lash_core::facade_support::TurnOptions::new(
                             tokio_util::sync::CancellationToken::new(),
@@ -285,33 +285,33 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
     };
     double
         .run_crashed_then_redriven(
-            lash_core::AdmittedScope::turn(&session_id, root),
+            lash_core::AdmittedScope::turn(&session_id, run),
             crashing,
             redrive,
         )
         .await
-        .expect("the root crashes once and is redriven");
+        .expect("the run crashes once and is redriven");
     let turn = turn_rx
         .recv()
         .await
-        .expect("the redrive ran the root")
-        .unwrap_or_else(|error| panic!("the redriven root runs: {error:?}"));
+        .expect("the redrive ran the run")
+        .unwrap_or_else(|error| panic!("the redriven run executes: {error:?}"));
     let outcome = serde_json::to_string(&turn.outcome).expect("outcome JSON");
     assert!(
         !outcome.contains(LOST_FEATURES_ANSWER),
-        "the redriven root's prompt withheld continue_as: {outcome}"
+        "the redriven run's prompt withheld continue_as: {outcome}"
     );
     assert!(
         matches!(
             turn.outcome,
             lash_core::facade_support::TurnOutcome::Finished(_)
         ) && outcome.contains(&format!("ran {LOOP_ITERATIONS}")),
-        "the redriven root's cell ran its loop under the recorded bound: {outcome}"
+        "the redriven run's cell ran its loop under the recorded bound: {outcome}"
     );
     assert_eq!(
         model.calls.load(Ordering::SeqCst),
         1,
-        "one model call: the cell's finish ends the root"
+        "one model call: the cell's finish ends the run"
     );
     let request = serde_json::to_string(
         model
@@ -319,12 +319,12 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
             .lock()
             .expect("requests")
             .first()
-            .expect("the redriven root's request"),
+            .expect("the redriven run's request"),
     )
     .expect("request JSON");
     assert!(
         request.contains("continue_as"),
-        "the redriven root's prompt offers the recorded decomposition"
+        "the redriven run's prompt offers the recorded decomposition"
     );
 }
 
@@ -418,9 +418,9 @@ pub(super) fn always_replay() -> lash_restate_test::ServerConfig {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_file() {
     let dir = tempfile::tempdir().expect("SQLite directory");
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_file(plain(), &dir).await,
         "recorded-behaviour-sqlite-file",
     )
@@ -428,9 +428,9 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file_always_replay() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_file_always_replay() {
     let dir = tempfile::tempdir().expect("SQLite directory");
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_file(always_replay(), &dir).await,
         "recorded-behaviour-sqlite-file-replay",
     )
@@ -438,8 +438,8 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file_always
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory() {
-    a_redriven_root_runs_under_its_recorded_behaviour(
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_memory() {
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_memory(plain()).await,
         "recorded-behaviour-sqlite-memory",
     )
@@ -447,8 +447,8 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory_always_replay() {
-    a_redriven_root_runs_under_its_recorded_behaviour(
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_memory_always_replay() {
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_memory(always_replay()).await,
         "recorded-behaviour-sqlite-memory-replay",
     )
@@ -457,11 +457,11 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory_alwa
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_postgres() {
     let Some((double, _attachments)) = on_postgres(plain()).await else {
         return;
     };
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         double,
         &format!("recorded-behaviour-pg-{}", nonce()),
     )
@@ -470,11 +470,11 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres_always_replay() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_postgres_always_replay() {
     let Some((double, _attachments)) = on_postgres(always_replay()).await else {
         return;
     };
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         double,
         &format!("recorded-behaviour-pg-replay-{}", nonce()),
     )

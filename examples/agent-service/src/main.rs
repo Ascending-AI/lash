@@ -226,7 +226,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         .map_err(|err| format!("invalid AGENT_SERVICE_RESTATE_ADDR: {err}"))?;
     let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
-    // Parked-root verbs and park recovery run through Restate's admin API.
+    // Parked-run verbs and park recovery run through Restate's admin API.
     let restate_admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:9070".to_string());
     let restate_authority_id = std::env::var("RESTATE_AUTHORITY_ID")
@@ -371,7 +371,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             .map_err(|err| format!("recover pending chat forks: {err}"))?;
 
         // Lash's own services come from the backend, and `LashSession` among
-        // them drives every chat turn; the service binds only its chat-discard
+        // them executes every chat turn; the service binds only its chat-discard
         // and effect-group demo workflows beside them.
         let endpoint = restate_backend
             .endpoint_builder(process_worker)
@@ -530,7 +530,7 @@ async fn shutdown_signal() {
 /// caches live sessions would, at this point, cancel each in-flight send
 /// (`SendHandle::cancel`), then `park()` (or `close()`) each one, and
 /// `revoke_durable_waits` for any driver it stopped mid-turn; rows a stopped
-/// root admitted stay bound to it until that root ends. The host also closes provider transports and flushes its
+/// run admitted stay bound to it until that run ends. The host also closes provider transports and flushes its
 /// trace sink, as this example does below.
 async fn drain(core: &lash::LashCore, provider: &ProviderHandle) -> anyhow_like::Result<()> {
     let mut first_error = None;

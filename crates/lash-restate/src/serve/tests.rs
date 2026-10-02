@@ -548,7 +548,7 @@ impl ServerAttemptProbe {
                 let scope_id =
                     lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Run {
                         session_id: "attempt-law".into(),
-                        root: "root".into(),
+                        run: "run".into(),
                     });
                 let candidate = tracing
                     .scopes()

@@ -23,8 +23,8 @@ not as a supported host lifecycle API.
   redrive from the recorded admission on the in-process Restate server double.
 
 These are instrumentation consumers. Hosts submit through `send()`; the engine
-owns driving, admission and recovery under ADRs 0101, 0109 and 0110. A probe
-cannot settle work, change admission or grant a host turn-driving authority.
+owns executing, admission and recovery under ADRs 0101, 0109 and 0110. A probe
+cannot settle work, change admission or grant a host turn-executing authority.
 
 ## Fixed phases
 
@@ -89,7 +89,7 @@ order across such work and no span identity beyond its name or typed phase.
 A missing probe emits nothing; named methods default to no-ops.
 
 Production measurement callbacks should be short and must not panic, block on
-runtime work or invoke driving. Test-only pause and crash probes deliberately
+runtime work or invoke executing. Test-only pause and crash probes deliberately
 block or panic under a controlled harness. Callback overhead belongs to the
 measurement; durations can overlap and are not disjoint wall-clock partitions.
 The seam is not journaled, serialized or a recovery contract.

@@ -471,7 +471,7 @@ pub(crate) async fn retire_cron_session_and_assert_zombie(
     ))
     .call_object_empty("WorkbenchCronJob", job_key, "run")
     .await
-    .expect("drive retired cron job run");
+    .expect("shift retired cron job run");
     wait_for_cron_trace_record_count(
         trace_path,
         "agent_workbench.cron.restate.zombie_cancelled",

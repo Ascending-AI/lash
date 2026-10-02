@@ -85,7 +85,7 @@ class RetiredTermsTests(unittest.TestCase):
             "sqlite_memory_store_with_options", "law_on_sqlite_memory",
             "EngineOwnedCommitLayer", "open_in_memory",
             "InMemoryLiveReplayStore", "InMemoryLiveReplayStoreConfig",
-            "InMemoryRootLedger", "InMemoryRoots", "InMemoryDriveEpochs",
+            "InMemoryRunLedger", "InMemoryRuns", "InMemoryShiftEpochs",
             "InMemoryLashlangArtifactStore", "InMemoryArtifactState",
             "InMemorySpanExporter", "InMemoryMetricExporter", "InMemory",
             "s3_attachment_store_satisfies_conformance_with_in_memory_object_store",

@@ -1,5 +1,5 @@
 //! FIG-3802's laws over the guarded surfaces `lash-core-execution` owns,
-//! each driven through its production writer and decoder.
+//! each executed through its production writer and decoder.
 
 use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 

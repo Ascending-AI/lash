@@ -827,7 +827,7 @@
         "advisory_duration": {
           "ms_max": 151.366,
           "phases": {
-            "queued_work.supersede_join_drive": {
+            "queued_work.supersede_join_shift": {
               "budget_ms": 3.041,
               "required": true
             },
@@ -843,7 +843,7 @@
               "budget_ms": 9.978,
               "required": true
             },
-            "queued_work.seal_drive_epoch": {
+            "queued_work.seal_shift_epoch": {
               "budget_ms": 2.372,
               "required": true
             },
@@ -2703,7 +2703,7 @@
               "budget_ms": 8.335,
               "required": true
             },
-            "store_hardening.memory.seal_drive_epoch": {
+            "store_hardening.memory.seal_shift_epoch": {
               "budget_ms": 8.911,
               "required": true
             },
@@ -2751,7 +2751,7 @@
               "budget_ms": 320.688,
               "required": true
             },
-            "store_hardening.postgres.seal_drive_epoch": {
+            "store_hardening.postgres.seal_shift_epoch": {
               "budget_ms": 309.862,
               "required": true
             },
@@ -2807,7 +2807,7 @@
               "budget_ms": 62.32,
               "required": true
             },
-            "store_hardening.sqlite.seal_drive_epoch": {
+            "store_hardening.sqlite.seal_shift_epoch": {
               "budget_ms": 44.198,
               "required": true
             },
@@ -3187,11 +3187,11 @@
         "advisory_duration": {
           "ms_max": 253.806,
           "phases": {
-            "turn_input_ingress.supersede_active_drive": {
+            "turn_input_ingress.supersede_active_shift": {
               "budget_ms": 3.892,
               "required": true
             },
-            "turn_input_ingress.supersede_next_drive": {
+            "turn_input_ingress.supersede_next_shift": {
               "budget_ms": 37.725,
               "required": true
             },
@@ -3203,7 +3203,7 @@
               "budget_ms": 31.137,
               "required": true
             },
-            "turn_input_ingress.seal_drive_epoch": {
+            "turn_input_ingress.seal_shift_epoch": {
               "budget_ms": 3.526,
               "required": true
             },

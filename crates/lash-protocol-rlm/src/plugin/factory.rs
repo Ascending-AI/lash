@@ -378,7 +378,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
     }
 
     /// The session's plugin runs under the behaviour the session recorded:
-    /// it is pinned at creation, so the value at build is every root's.
+    /// it is pinned at creation, so the value at build is every run's.
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let behaviour = self.session_behaviour(&ctx.plugin_config.config, ctx.materialization)?;
         let config = self.config.clone().under_recorded_behaviour(&behaviour);

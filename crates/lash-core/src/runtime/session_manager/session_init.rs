@@ -1,6 +1,6 @@
 //! Session initialisation: the `SessionCreateRequest` pipeline that resolves,
 //! materializes, and durably commits a new ordinary session, plus the
-//! process-origin port that initializes a recorded child and drives its first
+//! process-origin port that initializes a recorded child and executes its first
 //! turn through the shared session-turn path.
 //!
 //! This is one of two session-construction APIs, kept deliberately separate
@@ -762,7 +762,7 @@ async fn initialize_session(
 /// An admitted start's model key this worker's models do not register: the
 /// start's admission minted nothing but judged the key, so a worker that
 /// cannot mint it is a deployment that does not serve it. Retried, typed
-/// `LlmProfileUnavailable` naming the key, as a root's per-run key in the same
+/// `LlmProfileUnavailable` naming the key, as a run's per-run key in the same
 /// position is.
 fn unserved_profile_key(
     key: Option<&crate::LlmProfileKey>,
@@ -799,7 +799,7 @@ fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
             crate::PluginError::of_store_error(context, source)
         }
         error @ crate::SessionError::LlmProfileUnconfigured { .. } => {
-            crate::PluginError::Runtime(crate::runtime::drive::llm_profile_unconfigured(error))
+            crate::PluginError::Runtime(crate::runtime::shift::llm_profile_unconfigured(error))
         }
         error => crate::PluginError::Session(error.to_string()),
     }
@@ -1244,18 +1244,18 @@ impl RuntimeSessionServices {
                 ))
             })?;
         for receipt in &receipts {
-            if let crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { root, .. } =
+            if let crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { run, .. } =
                 &receipt.outcome
             {
                 return Err(crate::PluginError::Session(format!(
-                    "cancelled process `{process_id}` child session `{session_id}` still holds this turn's input under root `{root}`"
+                    "cancelled process `{process_id}` child session `{session_id}` still holds this turn's input under run `{run}`"
                 )));
             }
         }
         Ok(())
     }
 
-    /// The shared child-turn drive: the owned runtime's single-writer lock,
+    /// The shared child-turn shift: the owned runtime's single-writer lock,
     /// a fresh task stack for shareable controllers, and the event drain.
     /// `cancel` is the process's token, so a
     /// cancelled process settles an ordinary cancelled turn inside the child.

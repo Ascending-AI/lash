@@ -798,7 +798,7 @@ pub struct AttachmentReclamationPolicy {
 /// in [`AttachmentReclamationReport::stalled_ids`] and, with its typed reason,
 /// in [`AttachmentRootSet::list_condemnations`].
 ///
-/// Reclamation is still driven by the host: the sweep condemns only what it
+/// Reclamation is still executed by the host: the sweep condemns only what it
 /// was about to delete anyway, and lash expires nothing on a timer. Clearing a
 /// condemnation is never host policy; there is no host lever for it.
 ///

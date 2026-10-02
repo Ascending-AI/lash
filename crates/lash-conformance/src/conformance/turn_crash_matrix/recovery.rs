@@ -34,7 +34,7 @@ pub(super) async fn run_crash_matrix_case(
                 &executions,
                 crashed_turn_timings(),
             )
-            .before_drive(move |control| control.arm(point.clone()))
+            .before_shift(move |control| control.arm(point.clone()))
             .attempt(),
             crash,
         )
@@ -50,7 +50,7 @@ pub(super) async fn run_crash_matrix_case(
         &executions,
         nominal_recovery_timings(),
     )
-    .before_drive(SeamControl::clear)
+    .before_shift(SeamControl::clear)
     .reporting();
     law.runner.run_turn(admitted.clone(), successor).await;
     let recovered = reference_turn::reported(recovered)
@@ -87,7 +87,7 @@ pub(super) async fn run_crash_matrix_case(
         );
         texts
     };
-    // The recovered root is one engine admission. Work left in the other
+    // The recovered run is one engine admission. Work left in the other
     // ingress table belongs to a later admission, including a terminal
     // follow-on or a deferred active-turn input.
     let mut drain_turns = 0;
@@ -97,20 +97,20 @@ pub(super) async fn run_crash_matrix_case(
         let pending = reader
             .list_pending_turn_inputs(&identity.session_id)
             .await
-            .expect("read pending inputs before follow-on drive");
+            .expect("read pending inputs before follow-on shift");
         let queued = reader
             .list_queued_work(&identity.session_id)
             .await
-            .expect("read queued work before follow-on drive");
+            .expect("read queued work before follow-on shift");
         if pending.is_empty() && queued.is_empty() {
             break;
         }
         assert!(
             drain_turns < 3,
-            "{scenario}: follow-on drive made no progress; pending={pending:?}; queued={queued:?}"
+            "{scenario}: follow-on shift made no progress; pending={pending:?}; queued={queued:?}"
         );
         drain_turns += 1;
-        Box::pin(drive_drain_turn(
+        Box::pin(execute_drain_turn(
             law,
             scenario,
             &identity,
@@ -174,11 +174,11 @@ pub(super) async fn run_crash_matrix_case(
 
     assert!(
         reader
-            .unfinished_root(&identity.session_id)
+            .unfinished_run(&identity.session_id)
             .await
-            .expect("read the recovered unfinished root")
+            .expect("read the recovered unfinished run")
             .is_none(),
-        "{scenario} ({entry:?}): recovery ends every admitted root"
+        "{scenario} ({entry:?}): recovery ends every admitted run"
     );
     let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
     // The successor replays every effect its predecessor completed from the
@@ -196,9 +196,9 @@ pub(super) async fn run_crash_matrix_case(
     );
 }
 
-/// Drive one further clean turn to absorb inputs the recovered turn deferred to
+/// Execute one further clean turn to absorb inputs the recovered turn deferred to
 /// the next turn.
-async fn drive_drain_turn(
+async fn execute_drain_turn(
     law: &MatrixLaw<'_>,
     scenario: &str,
     identity: &ReferenceIdentity,
@@ -221,7 +221,7 @@ async fn drive_drain_turn(
         executions,
         nominal_recovery_timings(),
     )
-    .before_drive(SeamControl::clear)
+    .before_shift(SeamControl::clear)
     .reporting();
     law.runner
         .run_turn(reference_admitted_scope(&identity), drain)

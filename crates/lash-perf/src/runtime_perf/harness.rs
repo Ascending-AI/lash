@@ -156,11 +156,11 @@ impl BenchmarkCore {
 }
 
 /// Where a benchmark turn's session lives. A turn is always sent to the
-/// session and the engine's session drive runs it (FIG-3600): the host
+/// session and the engine's session shift runs it (FIG-3600): the host
 /// waits on the sent input's answer and never runs the turn itself.
 #[derive(Clone)]
 pub(crate) enum TurnEntry {
-    /// A lane on the Restate server double, whose engine drives the session
+    /// A lane on the Restate server double, whose engine works the session
     /// in its `LashSession` and `LashTurn` handlers. The handle lets a test
     /// watch the double's teardown.
     RestateHandler(lash_restate_test::RestateTestBackend),
@@ -168,8 +168,8 @@ pub(crate) enum TurnEntry {
 
 impl TurnEntry {
     /// Send one turn to `session` and wait for its report. Without a
-    /// `turn_id` the send names the root itself. `cancel` withdraws the
-    /// input, or cancels its running root, when it fires.
+    /// `turn_id` the send names the run itself. `cancel` withdraws the
+    /// input, or cancels its running run, when it fires.
     pub(crate) async fn run(
         &self,
         session: &lash::LashSession,
@@ -913,7 +913,7 @@ fn install_process_worker(
 }
 
 /// A decorated root session store on a SQLite memory store set of its own,
-/// for the store-level scenarios that drive no engine.
+/// for the store-level scenarios that execute no engine.
 pub(crate) async fn memory_perf_store(
     session_id: &SessionId,
 ) -> anyhow::Result<Arc<RuntimePerfStore>> {
@@ -1243,9 +1243,9 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let backend = PerfBackend::over_restate(&restate);
     let backend = if scenario.is_queued_work_contention() {
         // The scenario's workers fence and admit the seeded batches at the
-        // store themselves, so no engine drive may run: the backend's
+        // store themselves, so no engine shift may run: the backend's
         // wall-clock reconcile interval would claim the batches' armed
-        // ingress obligations and race a competing drive's epoch seal and
+        // ingress obligations and race a competing shift's epoch seal and
         // admissions into the measured window.
         backend.with_session_work(restate.explicit_reconcile_session_work())
     } else {

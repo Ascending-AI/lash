@@ -1,7 +1,7 @@
 //! SessionTurn process-runner laws exercised by Restate's durable worker.
 
 use super::*;
-use lash_core::testing::TestTurnDrive;
+use lash_core::testing::TestTurnExecution;
 use lash_core::testing::runtime_helpers::RecordingDeploymentStore;
 
 fn parked_provider(
@@ -1523,7 +1523,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
         .scoped_effect_controller(durable_admission(&durable_turn_scope(&parent_id, &turn_id)))
         .expect("scope parent turn");
     let answer = parent
-        .drive_turn(
+        .execute_turn(
             lash_core::TurnInput::text("continue parent"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),

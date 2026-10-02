@@ -405,10 +405,10 @@ async fn invoke_cron_run_body(endpoint: &Endpoint, body: Bytes) -> Result<Bytes,
         .map_err(|error| format!("cron run endpoint body failed: {error}"))
 }
 
-/// Drive a fresh (non-replay) `run` invocation to completion, answering the
+/// Execute a fresh (non-replay) `run` invocation to completion, answering the
 /// handler's state read, accepting every run proposal it makes, and answering
 /// the scope index for each effect bracket. A call to anything else, or an
-/// attempt that ends without an output, fails the drive instead of leaving
+/// attempt that ends without an output, fails the shift instead of leaving
 /// the handler waiting.
 async fn invoke_cron_run_driven(
     endpoint: &Endpoint,

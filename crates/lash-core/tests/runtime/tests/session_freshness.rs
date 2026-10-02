@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::SessionCommitStore as _;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f502;
 
@@ -178,7 +178,7 @@ async fn append_history(
 }
 
 /// Open the frame `material` keys as a host's frame open, a session command
-/// the runtime's next drive applies (FIG-4202).
+/// the runtime's next shift applies (FIG-4202).
 async fn open_frame(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
@@ -793,7 +793,7 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
 
 /// FIG-1875 pin (b): a successful invalidation reload settles the freshness
 /// facts — `Valid` plus `graph_loaded_from_store`. The turn still reads one
-/// bounded head projection to verify the admitted drive epoch.
+/// bounded head projection to verify the admitted shift epoch.
 #[tokio::test(flavor = "multi_thread")]
 async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
     let double = kernel_double(SEED + 15, lash_restate_test::ServerConfig::default()).await;
@@ -831,8 +831,8 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
-            TurnInput::text("drive the invalidated turn"),
+        .execute_turn(
+            TurnInput::text("shift the invalidated turn"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
@@ -848,12 +848,12 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         1,
         "the invalidation reload performs exactly one full durable read"
     );
-    // The drive admission's pending-follow-on probe answers from the head,
-    // and the root then verifies its epoch once after the full reload.
+    // The shift admission's pending-follow-on probe answers from the head,
+    // and the run then verifies its epoch once after the full reload.
     assert_eq!(
         store.load_session_head_meta_count() - head_probes_before,
         2,
-        "the drive verifies its epoch once after the full freshness reload"
+        "the shift verifies its epoch once after the full freshness reload"
     );
     assert_eq!(
         *runtime.resident_session.validity(),

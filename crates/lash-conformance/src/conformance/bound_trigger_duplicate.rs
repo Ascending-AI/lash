@@ -179,7 +179,7 @@ impl LawRig {
             self.stores
                 .obligation_ledger(crate::store::ObligationKind::ProcessStart),
             self.stores.clock(),
-            crate::drive::relay::RelayPolicy::default(),
+            crate::shift::relay::RelayPolicy::default(),
         )
     }
 

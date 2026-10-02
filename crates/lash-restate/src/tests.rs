@@ -18,7 +18,7 @@ use crate::controller::{
 };
 use crate::durable_wait::{
     DURABLE_WAIT_PROMISE_KEY, LASH_REPLAY_KEY_HEADER, RestateDurableWaitIndexMetadata,
-    RestateDurableWaitRootRequest, RestateTurnCancelWake, durable_wait_address_from_state_key,
+    RestateDurableWaitRunRequest, RestateTurnCancelWake, durable_wait_address_from_state_key,
     durable_wait_index_state_key, restate_await_event_key, restate_await_event_key_for_authority,
     split_cancellable_waits,
 };
@@ -173,7 +173,7 @@ pub(super) async fn deliver_process_start_now(
     port: &Arc<dyn lash_core::ProcessWorkSubstrate>,
     clock: &Arc<dyn Clock>,
     process_id: &ProcessId,
-) -> lash_core::runtime::drive::relay::RelayVerdict {
+) -> lash_core::runtime::shift::relay::RelayVerdict {
     let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
         Arc::clone(start_ledger),
         Arc::clone(registry),
@@ -260,7 +260,6 @@ pub(super) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
 mod bindings;
 mod compat_on_the_double;
 mod determinism;
-mod drive_laws_on_the_double;
 mod effect_group_child_cancel;
 mod effect_group_committed_recovery;
 mod effect_group_conformance;
@@ -297,10 +296,11 @@ mod process_effect_summary;
 mod process_tool_replay;
 mod remote_turn_cancel;
 mod replay_corpus;
-mod root_control_witnesses;
+mod run_control_witnesses;
 mod segment_generation_handoff;
 mod segment_redrive_on_the_double;
-mod session_drive_roll_on_the_double;
+mod session_shift_roll_on_the_double;
+mod shift_laws_on_the_double;
 mod tool_context_conformance;
 mod trigger_authority;
 mod turn_cancel_modes;
@@ -934,7 +934,7 @@ struct Fig1464RunGuardReproInput {
 }
 
 /// FIG-1464 repro fixture: the journaled-effect (`ctx.run`) leg of the durable
-/// controller seam, driven through the one geometry that turns an SDK-level run
+/// controller seam, executed through the one geometry that turns an SDK-level run
 /// failure into a process abort — a second poll after the SDK recorded its
 /// terminal attempt state.
 #[restate_sdk::workflow]
@@ -1099,7 +1099,7 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
             )
             .await;
         // The sleep's recorded outcome is the only cancel signal this body
-        // reads: its lent stop is never a drive input (FIG-3673).
+        // reads: its lent stop is never a shift input (FIG-3673).
         match outcome {
             Ok(RuntimeEffectOutcome::Sleep) => Ok(process_success(serde_json::Value::Null).into()),
             Err(error)
@@ -1572,7 +1572,7 @@ mod completion_routing_on_the_double;
 mod conformance_and_poison;
 mod direct_turn_acceptance_on_the_double;
 mod drain_barrier;
-mod durable_wait_root_retirement;
+mod durable_wait_run_retirement;
 mod durable_wait_turn_gate_peek;
 mod effect_execution;
 mod failure_settlement;

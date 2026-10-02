@@ -13,7 +13,7 @@ A frame handoff also needs recovery without becoming ordinary queued input.
 ## Decision
 
 A session has one logical durable ingress composed from its admission tables.
-The engine drives admitted turns. Callers submit durable data and observe the
+The engine executes admitted turns. Callers submit durable data and observe the
 result; they do not own a turn's continuation.
 
 ### 1. The model
@@ -25,21 +25,21 @@ agrees with the payload.
 admission families. The counter is allocated inside the producer transaction.
 The command lane is selected by kind; input and wakes form the turn lane.
 
-A selected row records `admitted_root` and `admitted_by`. Root and checkpoint
-admissions are fenced writes under the session's `DriveFence`. Admission
+A selected row records `admitted_run` and `admitted_by`. Run and checkpoint
+admissions are fenced writes under the session's `ShiftFence`. Admission
 delivers the row's store-to-engine ingress obligation. `IngressSettlement`
-names the root and its completed inputs, completed batches, released rows, and
+names the run and its completed inputs, completed batches, released rows, and
 dropped rows. There is no durable claim token or queued-run ledger.
 
-Selection is a recorded `AdmitRoot` step. The store records the selected result
-on `session_roots` in the same transaction as binding rows. Re-execution reads
+Selection is a recorded `AdmitRun` step. The store records the selected result
+on `session_runs` in the same transaction as binding rows. Re-execution reads
 that result instead of choosing again. A checkpoint names its own recorded
-step. A root's fenced commit or terminal write settles or releases its rows.
-The session has at most one admitted unfinished root. A terminal root's owed
-scope close holds no admission and does not block the next root.
+step. A run's fenced commit or terminal write settles or releases its rows.
+The session has at most one admitted unfinished run. A terminal run's owed
+scope close holds no admission and does not block the next run.
 
 Evidence: `crates/lash-core-store/src/store/admission_plan.rs:1`, `:31`, `:67`,
-`crates/lash-core-store/src/store/root.rs`,
+`crates/lash-core-store/src/store/run.rs`,
 `crates/lash-sqlite-store/src/persistence/admission.rs`,
 `crates/lash-postgres-store/src/postgres/runtime_persistence/admission.rs`, and
 `crates/lash-store-sql/src/session_ingress.rs`.
@@ -50,7 +50,7 @@ Process wake delivery outboxes and allocation floors belong to the process
 registry. Receiver wake-redelivery fences outlive queue rows. Turn cancellation
 is arbitrated through the keyed-promise contract of
 [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md).
-Engine lane serialization controls driving, not ingress order. The host's
+Engine lane serialization controls executing, not ingress order. The host's
 `QueuedDrainPolicy` bounds composition. None is another turn ingress.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs:112`,
@@ -64,25 +64,25 @@ A frame switch records `PendingFollowOn` atomically with its frame pointer in
 follow-on turn id, frame id, task, options, resolved run, chain depth, recovery
 count, and the recovery bound of its logical run. It is not a queue item.
 
-The turn id derives from the logical root and next physical-turn ordinal.
+The turn id derives from the logical run and next physical-turn ordinal.
 Only that follow-on's terminal commit clears the fact or replaces it with the
 next link. Every head write preserves its frame as current; another turn's
 commit or frame open is refused while it is owed. Its own checkpoint admission
 can proceed. Fork heads owe no source follow-on.
 
-Drive admission prioritizes owed follow-on recovery before the unfinished root,
+Shift admission prioritizes owed follow-on recovery before the unfinished run,
 commands, or fresh turn-lane work. The original run continues its chain inline.
-A recovery root records its decision, `RecoverFollowOn`, between its seal and
+A recovery run records its decision, `RecoverFollowOn`, between its seal and
 its turn. The step's body raises the recovery count once in a fenced write, and
 records the raised fact, the exhaustion, or that the head does not owe the
 follow-on. A raised or exhausted answer also records the head the follow-on's
 turn runs on and its turn index, and the step retains that head as an
-admission retains its base. Replay drives the recorded answer on the recorded
+admission retains its base. Replay executes the recorded answer on the recorded
 head and index, and cannot raise the count twice.
-A root records the host's `max_follow_on_recoveries` (default 3) when it
+A run records the host's `max_follow_on_recoveries` (default 3) when it
 resolves, as `follow_on_recoveries` on its `ResolvedRun`. Every fact of the
 logical run carries that record, so the chain carries the bound: every
-recovery decides on the recorded bound, never on the bound of the host driving
+recovery decides on the recorded bound, never on the bound of the host executing
 it or of the host that committed the switch, and the recorded decision carries
 it. Exhaustion commits
 `FollowOnRecoveryExhausted` as a failed follow-on with its task delivered and
@@ -95,22 +95,22 @@ uses frame retention and journal end evidence under
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md).
 
 Evidence: `crates/lash-core-store/src/store/pending_follow_on.rs:20`, `:32`,
-`:76`, `crates/lash-core/src/runtime/drive/admission.rs:213`,
-`crates/lash-core/src/runtime/drive/root.rs:677`, and
+`:76`, `crates/lash-core/src/runtime/shift/admission.rs:213`,
+`crates/lash-core/src/runtime/shift/run.rs:677`, and
 `crates/lash-sqlite-store/src/persistence/session_commit.rs:14`.
 
 ### 4. Session commands are a lane applied at turn boundaries
 
-Commands apply at idle or after a logical root finishes, ahead of fresh
-turn-lane roots. They do not apply mid-turn, at checkpoints, or between the
-physical turns of one logical run. An owed follow-on and an unfinished root
-retain precedence; a parked root whose redrive is unsettled holds the command
+Commands apply at idle or after a logical run finishes, ahead of fresh
+turn-lane runs. They do not apply mid-turn, at checkpoints, or between the
+physical turns of one logical run. An owed follow-on and an unfinished run
+retain precedence; a parked run whose redrive is unsettled holds the command
 lane as it holds inputs, with the typed, retryable `SessionRedriveUnsettled`,
-because the unfinished root owns the head. A checkpoint does not treat an open
+because the unfinished run owns the head. A checkpoint does not treat an open
 command as a barrier.
 
-Commands are not admitted turn rows. The drive selects the leading command run
-and settles it in the applying commit. The drive's fenced read of the run is
+Commands are not admitted turn rows. The shift selects the leading command run
+and settles it in the applying commit. The shift's fenced read of the run is
 the commands' admission: it delivers each row's obligation, and a withdrawal
 reaches a command only before that read. Every command applies alone, with its
 own revision check, recorded resolution and receipt; adjacent commands never
@@ -126,7 +126,7 @@ queued before it. A host requiring an earlier config waits for the input's
 answer before submitting the transaction.
 
 `CompactContext { instructions }` is a command. It applies under its command
-root's sealed fence, journals its summary, opens the frame and records usage
+run's sealed fence, journals its summary, opens the frame and records usage
 with settlement in one commit. Its typed outcome is `Opened`,
 `NothingToCompact`, or `Failed`. A settled replay adopts the published head and
 cannot open another frame. A storeless runtime serializes direct compaction
@@ -147,7 +147,7 @@ open opens its frame and restarts the live interpreter from the seed. A command
 that cannot apply, including one whose commit exceeds the commit budget,
 settles with its typed refusal, so the lane never waits on it. The one command
 that cannot settle is one whose bare settlement exceeds the budget, on a head a
-host lowered the budget below (ADR 0058): its drive stops at the typed
+host lowered the budget below (ADR 0058): its shift stops at the typed
 refusal, and the command settles once the host raises the budget.
 
 Head-writing host commands return their typed `SessionCommandOutcome` through
@@ -157,37 +157,37 @@ a catalog refresh answers `Durable`. A host submits with a stable idempotency
 key and gets a durable receipt (`SessionCommandAdmin::submit`). A resubmission
 with equal key and content returns the first receipt while the command is open
 or retained as a tombstone. `settle` answers the recorded result, `Cancelled`,
-or `Pending` with the receipt when the drive has not applied the command by
+or `Pending` with the receipt when the shift has not applied the command by
 the deadline, and a host reattaches by the receipt. The convenience calls
 (`append_messages`, `append_session_nodes`, `open_agent_frame`, the plugin
 operations, `compact_context`) submit and await. Dropping an await does not
 withdraw the command; `withdraw` does, transactionally, and answers
-`AlreadyAdmitted` once a drive read it. A host's cancel of a plugin task a
-drive admitted resolves the task's cancel signal, a keyed promise
+`AlreadyAdmitted` once a shift read it. A host's cancel of a plugin task a
+shift admitted resolves the task's cancel signal, a keyed promise
 (`SessionCommandCancelSignal`) under the command's session-operation scope that
 only a host's cancel writes; a cancel of a command that already settled
 finds its settlement and writes nothing. The signal is a durable request,
-never a decision: the drive peeks it before the task runs, fires the task's
+never a decision: the shift peeks it before the task runs, fires the task's
 cancellation token when the cancel lands, and peeks it again the moment the
 task's code returns. A cancel requested by then settles the command
 `PluginOperationCommandOutcome::Cancelled` with nothing of the task
 committed; otherwise it settles with the task's own outcome. The settling
-commit is the one record of that decision (FIG-4453): a drive that dies
+commit is the one record of that decision (FIG-4453): a shift that dies
 before it leaves nothing decided, and its redrive runs the task's code again
 under the same live signal, or none of it once the cancel was requested. A
-cancel landing after the drive's last peek reaches nothing, and the
+cancel landing after the shift's last peek reaches nothing, and the
 settlement says so. Neither the withdrawal nor the cancel takes the runtime
-writer, which the drive applying the commands holds. The runtime
-writer is never held while a settlement is awaited. A command root, once it drained the lane, writes its
-`RootTerminalCause::CommandsApplied` terminal and arms its scope close, so its
-journal is retired like a turn root's.
+writer, which the shift applying the commands holds. The runtime
+writer is never held while a settlement is awaited. A command run, once it drained the lane, writes its
+`RunTerminalCause::CommandsApplied` terminal and arms its scope close, so its
+journal is retired like a turn run's.
 
-Evidence: `crates/lash-core/src/runtime/drive/admission.rs:213`,
+Evidence: `crates/lash-core/src/runtime/shift/admission.rs:213`,
 `crates/lash-core/src/runtime/session_api.rs:1375`,
 `crates/lash-core/src/runtime/compact_context.rs:1`,
 `crates/lash-core/src/runtime/host_commands.rs:1`,
 `crates/lash-core/src/runtime/host_commands/task_cancel.rs:1`,
-`crates/lash-core/src/runtime/drive/root.rs` (`run_commands_root`),
+`crates/lash-core/src/runtime/shift/run.rs` (`execute_commands_run`),
 `crates/lash/src/admin/host_commands.rs:1`, and
 `crates/lash-core-store/src/store/mod.rs:1591`.
 
@@ -199,7 +199,7 @@ stop. Clock values can bound age; they cannot decide order. Lash implements no
 authentication or security policy.
 
 Evidence: `crates/lash-core-store/src/store/admission_plan.rs:285`,
-`crates/lash-core/src/runtime/drive/admission.rs:289`,
+`crates/lash-core/src/runtime/shift/admission.rs:289`,
 `crates/lash-core-execution/src/runtime/park.rs::turn_lane_head`, and
 `crates/lash-core-store/src/store/queued_work.rs:244`.
 
@@ -211,13 +211,13 @@ while T runs. Once T is not running it is eligible as next-turn input at its
 existing sequence position, by rule rather than stored delivery mutation: an
 open row is next-turn input when its delivery is next-turn, or when it
 addresses a turn other than the running one, and with no turn running every
-open row is. A root's release hands an accepted row back open in the state its
+open row is. A run's release hands an accepted row back open in the state its
 delivery names, and deferral at a cancel writes nothing.
 
 Admission accepts the address only if T is this session's running turn or has
-ended. T is running when it is a physical turn of the unfinished root, of a
-member that root's admission composed, or of the follow-on the head owes. T
-has ended when its final commit or its root's terminal is recorded. An unknown
+ended. T is running when it is a physical turn of the unfinished run, of a
+member that run's admission composed, or of the follow-on the head owes. T
+has ended when its final commit or its run's terminal is recorded. An unknown
 turn, another session's running turn included, is refused with
 `StoreError::IngressTurnAddressUnknown` (`TurnAddressUnknown` to the runtime)
 before any row or sequence number is allocated. A resubmission of an admitted
@@ -226,7 +226,7 @@ row is answered by its digest before the address is consulted.
 Evidence: `crates/lash-core-store/src/turn_input_vocabulary.rs:292`,
 `crates/lash-core-store/src/store_backend_support/queued_work_admission.rs:77`,
 `crates/lash-store-sql/src/turn_ingress/pending_inputs.rs`
-(`earliest_next_turn_candidate_seq`, `release_root`), and
+(`earliest_next_turn_candidate_seq`, `release_run`), and
 `crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
 
 #### 5.2 Composition
@@ -243,17 +243,17 @@ and `merge_key` are per-item data for policy and traces, not equality gates
 for composition: a host that keeps principals apart does so in its
 `QueuedDrainPolicy`, which sees each candidate's authority and merge key; host
 input carries neither. The default policy takes one row at a time, so each
-next-turn input is its own root and a cancel of one never reaches another.
+next-turn input is its own run and a cancel of one never reaches another.
 
 Evidence: `crates/lash-core-store/src/store/queued_work.rs`
 (`select_turn_work_indices`),
 `crates/lash-core-store/src/store/admission_plan.rs`
 (`plan_next_turn_input_admission`),
 `crates/lash-core-store/src/queued_drain_policy.rs`, and
-`crates/lash-conformance/src/conformance/queued_input_roots.rs`.
+`crates/lash-conformance/src/conformance/queued_input_runs.rs`.
 
-One root answers every input it admits, at idle or at its checkpoints. Each
-input retains its own application evidence even when inputs share a root's
+One run answers every input it admits, at idle or at its checkpoints. Each
+input retains its own application evidence even when inputs share a run's
 answer.
 
 ### 6. Render order
@@ -268,15 +268,15 @@ Evidence: `crates/lash-core/src/runtime/logical_turn.rs`,
 
 ### 7. Admission, deferral and redrive
 
-An interrupted selection replays its root's recorded admission. `Defer`
+An interrupted selection replays its run's recorded admission. `Defer`
 releases the row binding at its own sequence position; subsequent admission
-recomposes open rows. A stale drive fence refuses admission and settlement
-without writing. Settlement checks that every named row belongs to the root.
-Completed input carries application evidence. Root terminal writes release
-remaining bindings, so terminal roots cannot retain admitted rows.
+recomposes open rows. A stale shift fence refuses admission and settlement
+without writing. Settlement checks that every named row belongs to the run.
+Completed input carries application evidence. Run terminal writes release
+remaining bindings, so terminal runs cannot retain admitted rows.
 
 Evidence: `crates/lash-core-store/src/store/admission_plan.rs:67`, `:197`,
-`crates/lash-core-store/src/store/root.rs`, and
+`crates/lash-core-store/src/store/run.rs`, and
 `crates/lash-sqlite-store/src/persistence/ingress_settlement.rs`.
 
 ### 8. Dedup, digest and tombstones
@@ -309,8 +309,8 @@ from `state`, `ingress_json` and `terminal_at_ms`. Cancelled items cannot reopen
 distinguish delivered input or wake, applied command, stale config revision,
 and cancellation.
 Open-row selection excludes tombstones. Host vacuum removes queued-work
-tombstones and withdrawn input; an input a root took keeps its tombstone
-beside that root's terminal evidence until session deletion.
+tombstones and withdrawn input; an input a run took keeps its tombstone
+beside that run's terminal evidence until session deletion.
 
 Evidence: `crates/lash-core-store/src/store/ingress_terminal.rs`,
 `crates/lash-core-store/src/store_backend_support/queued_work_admission.rs:29`,
@@ -341,7 +341,7 @@ Evidence: `crates/lash-core-store/src/store/admission_plan.rs:332`,
 
 A turn cancel applies its accepted undelivered-input policy to host input
 addressed to that turn. `Defer` is the default and writes nothing; `Drop`
-records cancellation. Once the turn's root has terminal evidence, the root's
+records cancellation. Once the turn's run has terminal evidence, the run's
 terminal write has already applied the disposition, and a later teardown of
 that turn reaches no input. Other held input is released. Every held wake is deferred at its existing
 position with its floor unchanged. `TurnCancelInputOutcome` records affected
@@ -389,14 +389,14 @@ Evidence: `crates/lash-core-store/src/config_transaction.rs`,
 
 Sequence order is per-session commit order across admission families.
 Turn selection stops at the first ineligible unaddressed row; command priority
-applies only at turn boundaries. Recorded root admission survives redrive.
-Scope-close work cannot retain the root's turn admission. Follow-on frame and
+applies only at turn boundaries. Recorded run admission survives redrive.
+Scope-close work cannot retain the run's turn admission. Follow-on frame and
 recovery bounds survive reopen. Wake terminal writes and floor writes are atomic.
 
 ### 16. Conformance laws
 
 Conformance covers shared sequence allocation, command-lane precedence,
-contiguous turn-lane selection, root admission replay, stale-fence refusal,
+contiguous turn-lane selection, run admission replay, stale-fence refusal,
 follow-on head invariants and bounded recovery, cancellation of withheld inputs
 and wakes, wake floors, and config compare-and-set.
 
@@ -404,7 +404,7 @@ Store tiers are SQLite file, SQLite memory, and PostgreSQL. Host tiers are the
 in-process Restate server double, live Restate, and lash-sim's in-process effect
 host. Upgrade proofs use synthetic-next. Evidence lives in
 `crates/lash-conformance/src/conformance/session_ingress.rs`,
-`crates/lash-conformance/src/conformance/drive_admission.rs`,
+`crates/lash-conformance/src/conformance/shift_admission.rs`,
 `crates/lash-conformance/src/conformance/runtime_persistence/pending_follow_on.rs`,
 `crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`,
 `crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`,
@@ -412,7 +412,7 @@ and `crates/lash-restate-test/tests/follow_on_crash_replay.rs`.
 
 ### A1. The ingress is the only way a turn starts
 
-The caller submits with `session.send(input)`. Restate owns production driving
+The caller submits with `session.send(input)`. Restate owns production execution
 and continuation under
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
 SQL stores persist state. Process-owned child-session turns execute under their
@@ -422,9 +422,9 @@ fast path past queued work.
 ### A2. The caller observes through a handle
 
 `send` returns a handle with `events()` and `outcome()`. Cancellation withdraws
-queued input or requests durable cancellation of its running root. Dropping the
+queued input or requests durable cancellation of its running run. Dropping the
 handle stops observation, not execution. Outcomes distinguish answers, failure,
-cancellation, and a parked root.
+cancellation, and a parked run.
 
 Evidence: `crates/lash/src/send.rs:634`, `:644`, and
 `crates/lash-core/src/runtime/session_manager/session_init.rs:1`.
@@ -432,29 +432,29 @@ Evidence: `crates/lash/src/send.rs:634`, `:644`, and
 ### A3. Continuation belongs to the engine
 
 Program failure commits a failed outcome. Infrastructure faults redrive through
-the engine under the same recorded root and journal. Lash does not synthesize
+the engine under the same recorded run and journal. Lash does not synthesize
 settlement because a caller or worker disappears.
 
-### A4. Parked is a generic state of a driver-run turn
+### A4. Parked is a generic state of an engine-executed turn
 
-A parked root is visible and blocks ordinary new work until resolution.
+A parked run is visible and blocks ordinary new work until resolution.
 Explicit control supports redrive, cancel, and fork. A park is neither a
 program failure nor a fabricated answer. Restate owns retry policy under
 [ADR 0110](0110-the-engine-owns-process-recovery.md).
 
-Evidence: `crates/lash-core/src/runtime/drive/admission.rs:112`, and
+Evidence: `crates/lash-core/src/runtime/shift/admission.rs:112`, and
 `crates/lash-core-execution/src/runtime/park.rs`.
 
 ### A5. Session commands, and the session model as durable config
 
 The session's provider/model route and generation settings are persisted config.
-Creation records them; commands change them at boundaries. The root records its
+Creation records them; commands change them at boundaries. The run records its
 resolved execution snapshot. Durable input may carry a `RunSpec` whose overrides
 apply to that run without overwriting the sticky session config.
 
 Evidence: `crates/lash-core-store/src/session_policy.rs:125`,
 `crates/lash-core-store/src/run_spec.rs`, and
-`crates/lash-conformance/src/conformance/run_spec_drive.rs`.
+`crates/lash-conformance/src/conformance/run_spec_shift.rs`.
 
 ### A6. Everything on a sent input is durable data
 
@@ -469,7 +469,7 @@ marker. Committed history and explicit host input supply model context.
 
 ## Alternatives considered
 
-A single physical admission table is unnecessary for shared ordering and root
+A single physical admission table is unnecessary for shared ordering and run
 binding; the existing tables share one counter and admission protocol.
 Timestamp arbitration cannot order concurrent producers reliably. Input-before-
 wake priority can starve earlier wakes. A strict command FIFO barrier delays

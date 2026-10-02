@@ -3,7 +3,7 @@
 //! maximum — never under the configuration of the deployment that opens,
 //! redrives or resumes it (ADR 0105 §1).
 //!
-//! The redrive law crashes a root after its config is resolved and before
+//! The redrive law crashes a run after its config is resolved and before
 //! its first model call on the deployment that created the session, then
 //! redrives it on a deployment that withholds `batch`. It runs over SQLite
 //! file, SQLite memory and PostgreSQL, each on the Restate server double
@@ -16,7 +16,7 @@ use lash_core::facade_support::{
     EmbeddedRuntimeHost, LashRuntime, PersistentRuntimeServices, PluginHost, RuntimeHostConfig,
 };
 use lash_core::plugin::{PluginSessionRequest, SessionAuthorityContext};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_core::{
     CommitBudget, LlmResponse, QueuedWorkBatchingConfig, SessionCreationHead, SessionPolicy,
     SessionRelation, SessionStoreCreateRequest, TurnBudget, TurnInput,
@@ -161,24 +161,24 @@ async fn open_runtime(
     .expect("open the runtime")
 }
 
-/// Crashes a root after its config is recorded and before its first model
+/// Crashes a run after its config is recorded and before its first model
 /// call.
 struct CrashBeforeFirstModelCall;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashBeforeFirstModelCall {
     fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
         if phase == lash_core::runtime::RuntimeTurnPhase::PromptBuild {
-            panic!("injected crash after the root's config record and before its model call");
+            panic!("injected crash after the run's config record and before its model call");
         }
     }
 
     fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
-/// A root interrupted after its config is resolved and redriven on a
+/// A run interrupted after its config is resolved and redriven on a
 /// deployment that withholds `batch` runs under the batch choice and maximum
 /// its session recorded.
-async fn a_redriven_root_runs_under_its_recorded_behaviour(
+async fn a_redriven_run_executes_under_its_recorded_behaviour(
     double: lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     session: &str,
 ) {
@@ -208,7 +208,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
     .await
     .expect("create the session");
     let model = Arc::new(Model::default());
-    let root = TurnId::fixture(format!("{session}-root"));
+    let run = TurnId::fixture(format!("{session}-run"));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let crashing: lash_restate_test::HandlerAttempt = {
         let backend = backend.clone();
@@ -222,7 +222,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
                 let mut runtime = open_runtime(&backend, store, creating_config(), &model).await;
                 runtime.set_turn_phase_probe(Arc::new(CrashBeforeFirstModelCall));
                 let _ = runtime
-                    .drive_turn(
+                    .execute_turn(
                         TurnInput::text("batch it"),
                         lash_core::facade_support::TurnOptions::new(
                             tokio_util::sync::CancellationToken::new(),
@@ -230,7 +230,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
                         ),
                     )
                     .await;
-                panic!("the crash fires before the root's first model call");
+                panic!("the crash fires before the run's first model call");
             })
         })
     };
@@ -246,7 +246,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
             Box::pin(async move {
                 let mut runtime = open_runtime(&backend, store, redeploying_config(), &model).await;
                 let turn = runtime
-                    .drive_turn(
+                    .execute_turn(
                         TurnInput::text("batch it"),
                         lash_core::facade_support::TurnOptions::new(
                             tokio_util::sync::CancellationToken::new(),
@@ -260,33 +260,33 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
     };
     double
         .run_crashed_then_redriven(
-            lash_core::AdmittedScope::turn(&session_id, root),
+            lash_core::AdmittedScope::turn(&session_id, run),
             crashing,
             redrive,
         )
         .await
-        .expect("the root crashes once and is redriven");
+        .expect("the run crashes once and is redriven");
     let turn = turn_rx
         .recv()
         .await
-        .expect("the redrive ran the root")
-        .unwrap_or_else(|error| panic!("the redriven root runs: {error:?}"));
+        .expect("the redrive ran the run")
+        .unwrap_or_else(|error| panic!("the redriven run executes: {error:?}"));
     assert_eq!(
         turn.outcome,
         TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: RECORDED_ANSWER.to_string(),
         }),
-        "the redriven root's prompt offers batch at the recorded maximum"
+        "the redriven run's prompt offers batch at the recorded maximum"
     );
     assert_eq!(model.calls.load(Ordering::SeqCst), 1);
     let requests = model.requests.lock().expect("requests");
-    let request = requests.first().expect("the redriven root's request");
+    let request = requests.first().expect("the redriven run's request");
     assert!(
         request
             .tools
             .iter()
             .any(|tool| tool.name == batch::BATCH_TOOL_NAME),
-        "the redriven root's request carries the recorded batch sugar"
+        "the redriven run's request carries the recorded batch sugar"
     );
 }
 
@@ -380,9 +380,9 @@ fn always_replay() -> lash_restate_test::ServerConfig {
 }
 
 #[tokio::test]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_file() {
     let dir = tempfile::tempdir().expect("SQLite directory");
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_file(plain(), &dir).await,
         "standard-recorded-behaviour-sqlite-file",
     )
@@ -390,9 +390,9 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file() {
 }
 
 #[tokio::test]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file_always_replay() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_file_always_replay() {
     let dir = tempfile::tempdir().expect("SQLite directory");
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_file(always_replay(), &dir).await,
         "standard-recorded-behaviour-sqlite-file-replay",
     )
@@ -400,8 +400,8 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_file_always
 }
 
 #[tokio::test]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory() {
-    a_redriven_root_runs_under_its_recorded_behaviour(
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_memory() {
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_memory(plain()).await,
         "standard-recorded-behaviour-sqlite-memory",
     )
@@ -409,8 +409,8 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory() {
 }
 
 #[tokio::test]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory_always_replay() {
-    a_redriven_root_runs_under_its_recorded_behaviour(
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_sqlite_memory_always_replay() {
+    a_redriven_run_executes_under_its_recorded_behaviour(
         on_sqlite_memory(always_replay()).await,
         "standard-recorded-behaviour-sqlite-memory-replay",
     )
@@ -419,11 +419,11 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_sqlite_memory_alwa
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_postgres() {
     let Some((double, _attachments)) = on_postgres(plain()).await else {
         return;
     };
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         double,
         &format!("standard-recorded-behaviour-pg-{}", nonce()),
     )
@@ -432,11 +432,11 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres() {
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
-async fn a_redriven_root_runs_under_its_recorded_behaviour_on_postgres_always_replay() {
+async fn a_redriven_run_executes_under_its_recorded_behaviour_on_postgres_always_replay() {
     let Some((double, _attachments)) = on_postgres(always_replay()).await else {
         return;
     };
-    a_redriven_root_runs_under_its_recorded_behaviour(
+    a_redriven_run_executes_under_its_recorded_behaviour(
         double,
         &format!("standard-recorded-behaviour-pg-replay-{}", nonce()),
     )
@@ -485,7 +485,7 @@ fn a_child_session_records_its_parents_behaviour() {
 }
 
 /// The render a deployment configures is recorded behaviour: a session's
-/// driver resolves a root's render over the recorded one, never over the
+/// driver resolves a run's render over the recorded one, never over the
 /// opening deployment's (FIG-4527).
 #[test]
 fn the_configured_render_is_recorded_behaviour() {
@@ -620,7 +620,7 @@ fn run_options_have_no_field_for_the_prompt_or_the_behaviour() {
     assert_eq!(stated, ["render"], "a run restates only its render");
 }
 
-/// FIG-4652: the driver reads the root's namespace as the recorded type. A
+/// FIG-4652: the driver reads the run's namespace as the recorded type. A
 /// render it refuses is a typed refusal in the protocol's own type, and a
 /// namespace it cannot read is corruption, not a refused shape.
 #[test]

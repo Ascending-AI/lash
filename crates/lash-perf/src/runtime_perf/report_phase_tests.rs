@@ -520,9 +520,9 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "pool wait value must be absent when it is unobservable"
     );
     for counter in [
-        "durable_contention.root_admission_attempts",
-        "durable_contention.root_admission_refusals",
-        "durable_contention.root_admissions",
+        "durable_contention.run_admission_attempts",
+        "durable_contention.run_admission_refusals",
+        "durable_contention.run_admissions",
         "durable_contention.epoch_checks",
         "durable_contention.resumes",
         "durable_contention.store_contention_retries",
@@ -536,8 +536,8 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         );
     }
     let completed = result.extra_counters["durable_contention.completed_batches"];
-    let admission_attempts = result.extra_counters["durable_contention.root_admission_attempts"];
-    let admission_refusals = result.extra_counters["durable_contention.root_admission_refusals"];
+    let admission_attempts = result.extra_counters["durable_contention.run_admission_attempts"];
+    let admission_refusals = result.extra_counters["durable_contention.run_admission_refusals"];
     let cas_failures = result.extra_counters["durable_contention.cas_failures"];
     let admission_waits = *result
         .extra_counters
@@ -570,54 +570,53 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         cas_failures, 0,
         "same-process commit admission must eliminate receipt/head CAS losses"
     );
-    // The session admits one root at a time (FIG-3927), so workers contend
-    // at root admission rather than at the commit queue.
+    // The session admits one run at a time (FIG-3927), so workers contend
+    // at run admission rather than at the commit queue.
     assert!(
         workers == 1 || admission_attempts > completed,
-        "multiple workers must poll concurrently: root_admission_attempts={admission_attempts}, completed_batches={completed}"
+        "multiple workers must poll concurrently: run_admission_attempts={admission_attempts}, completed_batches={completed}"
     );
     assert!(
         workers == 1 || admission_refusals + cas_failures > 0,
-        "multiple workers must witness contention: root_admission_refusals={admission_refusals}, cas_failures={cas_failures}"
+        "multiple workers must witness contention: run_admission_refusals={admission_refusals}, cas_failures={cas_failures}"
     );
 
-    let root_admissions = result.extra_counters["durable_contention.root_admissions"];
+    let run_admissions = result.extra_counters["durable_contention.run_admissions"];
     let epoch_checks = result.extra_counters["durable_contention.epoch_checks"];
     let resumes = result.extra_counters["durable_contention.resumes"];
     assert_eq!(
-        root_admissions, completed,
-        "every root admission ends in exactly one completed batch"
+        run_admissions, completed,
+        "every run admission ends in exactly one completed batch"
     );
     assert_eq!(
         epoch_checks,
-        root_admissions / 3,
-        "epoch checks must follow every third root admission"
+        run_admissions / 3,
+        "epoch checks must follow every third run admission"
     );
     assert_eq!(
         resumes,
-        root_admissions / 2,
-        "resumes must follow every second root admission"
+        run_admissions / 2,
+        "resumes must follow every second run admission"
     );
     assert_eq!(
         result.extra_counters["durable_contention.epoch_probe_current"], workers as u64,
-        "each worker must observe the controller drive epoch"
+        "each worker must observe the controller shift epoch"
     );
 
-    let root_admission_wait =
-        &result.metric_samples_ms["durable_contention.root_admission_wait_ms"];
+    let run_admission_wait = &result.metric_samples_ms["durable_contention.run_admission_wait_ms"];
     let service = &result.metric_samples_ms["durable_contention.service_ms"];
     assert_eq!(
-        root_admission_wait.len(),
+        run_admission_wait.len(),
         service.len(),
-        "root admission wait and service samples must describe the same completed units"
+        "run admission wait and service samples must describe the same completed units"
     );
     assert!(
-        root_admission_wait.len() >= completed as usize,
+        run_admission_wait.len() >= completed as usize,
         "latency samples must cover every completed batch: samples={}, completed_batches={completed}",
-        root_admission_wait.len()
+        run_admission_wait.len()
     );
     for (metric, samples) in [
-        ("root_admission_wait_ms", root_admission_wait),
+        ("run_admission_wait_ms", run_admission_wait),
         ("service_ms", service),
     ] {
         assert!(

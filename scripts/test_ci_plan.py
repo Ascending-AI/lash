@@ -117,10 +117,10 @@ class ClassifyTests(unittest.TestCase):
             ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true", "false"),
             ("crates/lash-store-sql/src/lib.rs", "true", "false"),
             ("crates/lash-sim/src/lib.rs", "true", "false"),
-            ("crates/lash-core/src/runtime/drive/admission.rs", "false", "true"),
+            ("crates/lash-core/src/runtime/shift/admission.rs", "false", "true"),
             ("crates/lash-core/src/runtime/turn_loop.rs", "false", "true"),
             ("crates/lash-restate/src/turn_handler.rs", "false", "true"),
-            ("crates/lash-restate/src/session_driver.rs", "false", "true"),
+            ("crates/lash-restate/src/session_shifts.rs", "false", "true"),
             ("examples/agent-service/src/main.rs", "false", "true"),
             ("crates/lash-core/src/session/mod.rs", "false", "false"),
             ("crates/lash-restate/src/lib.rs", "false", "false"),
@@ -1659,7 +1659,7 @@ class LawTickLaneTests(unittest.TestCase):
                            '// RelayLanes::new(clock, budget)\n'
                            'const EXAMPLE: &str = "RelayLanes::new(clock, budget)";\n')
             self.assertEqual([], check_law_tick_lanes.violations(root))
-            law.write_text('use lash_core::drive::RelayLanes as Lanes;\n'
+            law.write_text('use lash_core::shift::RelayLanes as Lanes;\n'
                            'fn tick() { Lanes::new(clock, budget); }\n')
             self.assertEqual(["src/new_laws.rs:2"], check_law_tick_lanes.violations(root))
             law.write_text("fn tick() { law_tick_lanes(clock); }")
@@ -1698,11 +1698,11 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["restate-suites"]
         self.assertEqual("${{ fromJSON(needs.plan.outputs.restate_matrix) }}", job["strategy"]["matrix"])
 
-    def test_root_control_runs_both_legs_in_the_derived_matrix(self) -> None:
-        self.assert_suite_legs_selected({"root-control"})
+    def test_run_control_runs_both_legs_in_the_derived_matrix(self) -> None:
+        self.assert_suite_legs_selected({"run-control"})
 
-    def test_session_driver_runs_both_legs_in_the_derived_matrix(self) -> None:
-        self.assert_suite_legs_selected({"session-driver"})
+    def test_session_shifts_runs_both_legs_in_the_derived_matrix(self) -> None:
+        self.assert_suite_legs_selected({"session-shifts"})
 
     def test_load_replay_suites_run_both_legs_in_the_derived_matrix(self) -> None:
         import tomllib

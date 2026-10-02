@@ -1695,8 +1695,8 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
     Ok(())
 }
 
-/// The engine's session drive runs the frame handoff: a post-commit graph
-/// append must not strand it (D5: the drive is the only executor).
+/// The engine's session shift runs the frame handoff: a post-commit graph
+/// append must not strand it (D5: the shift is the only executor).
 #[cfg(feature = "rlm")]
 #[test]
 pub(super) fn engine_driven_continue_as_survives_post_commit_graph_append() -> Result<()> {
@@ -1766,13 +1766,13 @@ fn rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn() -> Result<
         let double = Box::pin(continue_as_seed_and_follow_turn(true)).await?;
         let server = double.server();
         let invocations = server.invocations();
-        let root_service = format!(
+        let run_service = format!(
             "{}/",
             double.service_name(lash_restate_test::TURN_DRIVER_SERVICE)
         );
         assert!(
             invocations.iter().any(|invocation| {
-                invocation.target.starts_with(&root_service) && invocation.attempts > 1
+                invocation.target.starts_with(&run_service) && invocation.attempts > 1
             }),
             "the follow turn must replay after its cell sealed"
         );
@@ -1884,7 +1884,7 @@ finish({ established: established.total });"#,
                         }
                         2 => {
                             if replay_follow {
-                                double.crash_turn_drive(lash_restate_test::CrashPoint::BeforeRunResultEnding {
+                                double.crash_run_execution(lash_restate_test::CrashPoint::BeforeRunResultEnding {
                                     suffix: ":lk2:~seal".into(),
                                 });
                             }
@@ -1939,10 +1939,10 @@ finish({ established: established.total });"#,
         .await
         .expect("first provider call should start")
         .expect("first provider call signal should arrive");
-    // The admitted root runs on; the engine admits nothing more while the
+    // The admitted run executes on; the engine admits nothing more while the
     // input sent during the frame switch stays pending.
     let _hold = double
-        .hold_session_drive(&SessionId::from(session_id))
+        .hold_session_shift(&SessionId::from(session_id))
         .await;
     session
         .durable()

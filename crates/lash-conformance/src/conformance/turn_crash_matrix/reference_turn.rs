@@ -8,9 +8,9 @@ use super::*;
 pub(super) type DrainReport =
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>;
 
-/// Arms a scenario's seam once the runtime is built, before the turn drives:
+/// Arms a scenario's seam once the runtime is built, before the turn executes:
 /// the runtime's own construction crosses seams the scenario must not see.
-pub(super) type BeforeDrive = Arc<dyn Fn(&SeamControl) + Send + Sync>;
+pub(super) type BeforeShift = Arc<dyn Fn(&SeamControl) + Send + Sync>;
 
 /// One reference drain run on the tier's runner: every execution of it
 /// builds the reference runtime over the tier's host behind `seam`, arms the
@@ -30,8 +30,8 @@ pub(super) struct ReferenceTurn {
     pub(super) trace_tool: TraceTool,
     pub(super) lease_timings: crate::LeaseTimings,
     pub(super) fail_post_commit_delivery: bool,
-    pub(super) before_drive: BeforeDrive,
-    /// The active-turn inputs the seam store steers into the root once it is
+    pub(super) before_shift: BeforeShift,
+    /// The active-turn inputs the seam store steers into the run once it is
     /// admitted: the reference input, then any the scenario adds.
     pub(super) steer: Vec<PendingTurnInputDraft>,
     /// Where an execution that ends reports its drain. A crashing turn has
@@ -66,21 +66,21 @@ impl ReferenceTurn {
             },
             lease_timings,
             fail_post_commit_delivery: false,
-            before_drive: Arc::new(|_| {}),
+            before_shift: Arc::new(|_| {}),
             steer: vec![reference_steer(identity)],
             reports: None,
         }
     }
 
-    pub(super) fn before_drive(
+    pub(super) fn before_shift(
         mut self,
-        before_drive: impl Fn(&SeamControl) + Send + Sync + 'static,
+        before_shift: impl Fn(&SeamControl) + Send + Sync + 'static,
     ) -> Self {
-        self.before_drive = Arc::new(before_drive);
+        self.before_shift = Arc::new(before_shift);
         self
     }
 
-    /// Steer `steer` into the root as well, after the reference input.
+    /// Steer `steer` into the run as well, after the reference input.
     pub(super) fn steering(
         mut self,
         steer: impl IntoIterator<Item = PendingTurnInputDraft>,
@@ -136,12 +136,12 @@ impl ReferenceTurn {
                 ))
                 .await
                 .expect("build the reference runtime");
-                (turn.before_drive)(&turn.seam.control);
+                (turn.before_shift)(&turn.seam.control);
                 let options = crate::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     turn.seam.clone().over_scoped(scoped),
                 );
-                let drain = Box::pin(runtime.drive_one_admitted_queued_root(options)).await;
+                let drain = Box::pin(runtime.execute_one_admitted_queued_run(options)).await;
                 let end = crate::ConformanceTurnEnd::of(&drain);
                 match &turn.reports {
                     Some(reports) => {

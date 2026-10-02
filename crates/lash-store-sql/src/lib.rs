@@ -80,7 +80,7 @@ pub mod process;
 pub mod recovery_leader;
 pub mod session;
 pub mod session_ingress;
-pub mod session_roots;
+pub mod session_runs;
 pub mod trigger;
 pub mod turn_ingress;
 pub mod worker_recovery;
@@ -98,7 +98,7 @@ pub use render::{
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
     usage::usage_facts::TABLE,
-    usage::usage_runs::TABLE,
+    usage::usage_meters::TABLE,
     usage::usage_owner_retirements::TABLE,
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,
@@ -161,9 +161,9 @@ pub const TABLES: &[&str] = &[
     session::release_stamp::TABLE,
     session::revisions::TABLE,
     session::turn_commits::TABLE,
-    session_roots::control_intents::TABLE,
-    session_roots::root_inputs::TABLE,
-    session_roots::roots::TABLE,
+    session_runs::control_intents::TABLE,
+    session_runs::run_inputs::TABLE,
+    session_runs::runs::TABLE,
     session_ingress::sequence::TABLE,
 ];
 
@@ -176,7 +176,7 @@ pub const TABLES: &[&str] = &[
 pub fn all_statements() -> Vec<Statement> {
     let mut statements = Vec::new();
     statements.extend_from_slice(usage::usage_facts::UsageFactsStatements::NEUTRAL);
-    statements.extend_from_slice(usage::usage_runs::UsageRunsStatements::NEUTRAL);
+    statements.extend_from_slice(usage::usage_meters::UsageMetersStatements::NEUTRAL);
     statements.extend_from_slice(
         usage::usage_owner_retirements::UsageOwnerRetirementsStatements::NEUTRAL,
     );
@@ -223,14 +223,14 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::revisions::SessionRevisionStatements::NEUTRAL);
     statements.extend_from_slice(session::turn_commits::TurnCommitStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::roots::SessionRootStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::root_inputs::RootInputVerbStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::control_intents::ControlVerbStatements::NEUTRAL);
-    statements.extend_from_slice(session::meta::MetaRootVerbStatements::NEUTRAL);
-    statements.extend_from_slice(turn_ingress::pending_inputs::PendingRootVerbStatements::NEUTRAL);
-    statements.extend_from_slice(turn_ingress::queued_batches::BatchRootVerbStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::root_inputs::SessionRootInputStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::control_intents::ControlIntentStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::runs::SessionRunStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::run_inputs::RunInputVerbStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::control_intents::ControlVerbStatements::NEUTRAL);
+    statements.extend_from_slice(session::meta::MetaRunVerbStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::pending_inputs::PendingRunVerbStatements::NEUTRAL);
+    statements.extend_from_slice(turn_ingress::queued_batches::BatchRunVerbStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::run_inputs::SessionRunInputStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::control_intents::ControlIntentStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::TurnIngressStatements::NEUTRAL);
     statements.extend_from_slice(turn_ingress::cancel_requests::CancelRequestStatements::NEUTRAL);
     statements.extend_from_slice(
@@ -255,15 +255,15 @@ pub fn all_statements() -> Vec<Statement> {
     statements
         .extend_from_slice(turn_ingress::queued_batches::QueuedBatchObligationStatements::NEUTRAL);
     statements.extend_from_slice(
-        session_roots::control_intents::ControlIntentObligationStatements::NEUTRAL,
+        session_runs::control_intents::ControlIntentObligationStatements::NEUTRAL,
     );
-    statements.extend_from_slice(session_roots::roots::SessionRootObligationStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::runs::SessionRunObligationStatements::NEUTRAL);
     statements.extend_from_slice(session::meta::SessionMetaObligationStatements::NEUTRAL);
     statements
         .extend_from_slice(process::parent_end_plans::ParentEndPlanObligationStatements::NEUTRAL);
     statements.extend_from_slice(process::processes::ProcessObligationStatements::NEUTRAL);
     statements.extend_from_slice(session::meta::SessionMetaDeleteStatements::NEUTRAL);
-    statements.extend_from_slice(session_roots::roots::SessionRootCleanupStatements::NEUTRAL);
+    statements.extend_from_slice(session_runs::runs::SessionRunCleanupStatements::NEUTRAL);
     statements
         .extend_from_slice(process::parent_end_plans::ParentEndPlanCleanupStatements::NEUTRAL);
     statements

@@ -44,10 +44,10 @@ named here. Any provider request invalidates the rehearsal.
 Run from the repository root. The values below are one example; concurrent runs must use
 different explicit ports and a different shell-safe slug.
 
-`run_root` is the run's artifact directory, supplied fresh by the drive the same way every
+`execute_run` is the run's artifact directory, supplied fresh by the shift the same way every
 other row in the inventory gets one — not a `/tmp` scratch dir. Phase 5 preserves it as the
 evidence bundle and the scorecard cites files inside it by name, so it has to live where
-the drive keeps artifacts; a `mktemp -d /tmp/...` root leaves the scorecard pointing at a
+the shift keeps artifacts; a `mktemp -d /tmp/...` run leaves the scorecard pointing at a
 path nobody retains. It must be empty before Phase 0 and must not be inside another row's
 tree.
 
@@ -58,10 +58,10 @@ run_id="${run_slug}-retirement-witness"
 authority_id="agent-service-runbook:$run_slug"
 group_key="agent-service:effect-group:$run_id"
 group_path=${group_key//:/%3A}
-run_root="<fresh artifact directory for this row>"
-mkdir -p "$run_root"
-test -z "$(ls -A "$run_root")"
-data_dir="$run_root/agent-service-data"
+execute_run="<fresh artifact directory for this row>"
+mkdir -p "$execute_run"
+test -z "$(ls -A "$execute_run")"
+data_dir="$execute_run/agent-service-data"
 app_port=29200
 admin_port=29270
 ingress_port=29280
@@ -80,7 +80,7 @@ docker run -d --name "$container" --network host \
   -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
   -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
   -e RESTATE_BIND_PORT="$node_port" \
-  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b | tee "$run_root/container-id.txt"
+  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b | tee "$execute_run/container-id.txt"
 ```
 
 Poll the admin and ingress TCP ports with a 60-second deadline. On failure, save only
@@ -100,7 +100,7 @@ the shell replaced by Cargo so `$!` remains the exact host PID:
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
   export RESTATE_AUTHORITY_ID="$authority_id"
   exec cargo run -p agent-service --profile judged --locked
-) >>"$run_root/agent-service.log" 2>&1 &
+) >>"$execute_run/agent-service.log" 2>&1 &
 host_pid=$!
 ```
 
@@ -115,10 +115,10 @@ deployment:
 
 ```sh
 restate -y deployments register "http://127.0.0.1:$old_endpoint_port" \
-  | tee "$run_root/register-old.txt"
-restate deployments list | tee "$run_root/deployments-old.txt"
+  | tee "$execute_run/register-old.txt"
+restate deployments list | tee "$execute_run/deployments-old.txt"
 curl -fsS "http://127.0.0.1:$app_port/api/settings" \
-  | tee "$run_root/settings.json"
+  | tee "$execute_run/settings.json"
 ```
 
 Require `EffectGroupIndex`, `EffectGroupPayload`, `EffectGroupDispatch`,
@@ -147,7 +147,7 @@ process is delivered, but every other cleanup step that expects the app to answe
 curl -sS -X POST "http://127.0.0.1:$app_port/api/effect-groups" \
   -H 'content-type: application/json' \
   --data "{\"run_id\":\"$run_id\"}" \
-  -w '\nHTTP %{http_code}\n' >"$run_root/group-post.txt" 2>&1 &
+  -w '\nHTTP %{http_code}\n' >"$execute_run/group-post.txt" 2>&1 &
 group_post_pid=$!
 
 deadline=$((SECONDS + 10))
@@ -157,7 +157,7 @@ while (( SECONDS < deadline )); do
   if [[ "$phase" == *'"type":"preparing"'* ]]; then
     test "$(ps -o comm= -p "$host_pid" | tr -d ' ')" = agent-service
     kill -STOP "$host_pid"
-    printf '%s\n' "$phase" | tee "$run_root/stopped-phase.json"
+    printf '%s\n' "$phase" | tee "$execute_run/stopped-phase.json"
     break
   fi
   if [[ "$phase" == *'"type":"ready"'* || "$phase" == *'"type":"closed"'* ]]; then
@@ -167,7 +167,7 @@ while (( SECONDS < deadline )); do
     exit 1
   fi
 done
-test -s "$run_root/stopped-phase.json"
+test -s "$execute_run/stopped-phase.json"
 ```
 
 Read the index while the endpoint is stopped, require `preparing` plus an `adopted`
@@ -175,8 +175,8 @@ dispatcher, and copy its exact ID:
 
 ```sh
 restate state get EffectGroupIndex "$group_key" --plain \
-  | tee "$run_root/wedged-index.json"
-dispatcher_id=$(python3 - "$run_root/wedged-index.json" <<'PY'
+  | tee "$execute_run/wedged-index.json"
+dispatcher_id=$(python3 - "$execute_run/wedged-index.json" <<'PY'
 import json, sys
 state = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]
 lifecycle = state["lifecycle"]
@@ -187,8 +187,8 @@ print(dispatcher["id"])
 PY
 )
 restate invocations describe "$dispatcher_id" \
-  | tee "$run_root/wedged-dispatcher.txt"
-grep -F "EffectGroupDispatch/$group_key/run" "$run_root/wedged-dispatcher.txt"
+  | tee "$execute_run/wedged-dispatcher.txt"
+grep -F "EffectGroupDispatch/$group_key/run" "$execute_run/wedged-dispatcher.txt"
 ```
 
 If either gate above fails, the process is still suspended. Resume it before you abort, so
@@ -227,7 +227,7 @@ old endpoint port down.
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
   export RESTATE_AUTHORITY_ID="$authority_id"
   exec cargo run -p agent-service --profile judged --locked
-) >>"$run_root/agent-service.log" 2>&1 &
+) >>"$execute_run/agent-service.log" 2>&1 &
 host_pid=$!
 ```
 
@@ -237,8 +237,8 @@ register the replacement:
 ```sh
 test "$(ps -o comm= -p "$host_pid" | tr -d ' ')" = agent-service
 restate -y deployments register --force "http://127.0.0.1:$new_endpoint_port" \
-  | tee "$run_root/register-replacement.txt"
-restate deployments list | tee "$run_root/deployments.txt"
+  | tee "$execute_run/register-replacement.txt"
+restate deployments list | tee "$execute_run/deployments.txt"
 ```
 
 Require the replacement at the newer revision while the old URL remains in inventory, and
@@ -255,16 +255,16 @@ Neither rendering is a product surface: both come from `restate-cli 1.7.12`, mat
 inventory half only — both URLs still present.
 
 ```sh
-grep -F 'SERVICES THAT WILL BE UPDATED:' "$run_root/register-replacement.txt"
-! grep -qF 'SERVICES THAT WILL BE ADDED:' "$run_root/register-replacement.txt"
+grep -F 'SERVICES THAT WILL BE UPDATED:' "$execute_run/register-replacement.txt"
+! grep -qF 'SERVICES THAT WILL BE ADDED:' "$execute_run/register-replacement.txt"
 for svc in EffectGroupIndex EffectGroupPayload EffectGroupDispatch \
            LashDurableWaitWorkflow LashDurableWaitIndex; do
-  grep -qE "^ $svc +2 *$" "$run_root/register-replacement.txt"
+  grep -qE "^ $svc +2 *$" "$execute_run/register-replacement.txt"
 done
-test "$(grep -cF 'Revision: 1 -> 2' "$run_root/register-replacement.txt")" \
-  = "$(grep -cF 'Revision: ' "$run_root/register-replacement.txt")"
-grep -F "http://127.0.0.1:$old_endpoint_port/" "$run_root/deployments.txt"
-grep -F "http://127.0.0.1:$new_endpoint_port/" "$run_root/deployments.txt"
+test "$(grep -cF 'Revision: 1 -> 2' "$execute_run/register-replacement.txt")" \
+  = "$(grep -cF 'Revision: ' "$execute_run/register-replacement.txt")"
+grep -F "http://127.0.0.1:$old_endpoint_port/" "$execute_run/deployments.txt"
+grep -F "http://127.0.0.1:$new_endpoint_port/" "$execute_run/deployments.txt"
 ```
 
 Every service the replacement registers must be an update from revision 1 to revision 2: an
@@ -277,7 +277,7 @@ Start the retirement saga synchronously in the background:
 curl -sS -X POST \
   "http://127.0.0.1:$ingress_port/EffectGroupDispatch/$group_path/retire" \
   -H 'content-type: application/json' --data "\"$group_key\"" \
-  -w '\nHTTP %{http_code}\n' >"$run_root/retirement-response.txt" 2>&1 &
+  -w '\nHTTP %{http_code}\n' >"$execute_run/retirement-response.txt" 2>&1 &
 retirement_curl_pid=$!
 ```
 
@@ -291,11 +291,11 @@ dispatcher is backing off against the dead old endpoint:
 retirement_id=$(restate sql --json \
   "select id from sys_invocation where target_service_name = 'EffectGroupDispatch' and target_service_key = '$group_key' and target_handler_name = 'retire' order by created_at desc limit 1" \
   2>/dev/null | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert len(rows)==1; print(rows[0]["id"])')
-restate invocations describe "$retirement_id" | tee "$run_root/retirement-pending.txt"
-restate invocations describe "$dispatcher_id" | tee "$run_root/dispatcher-backing-off.txt"
-grep -F "Status:       running" "$run_root/retirement-pending.txt"
-grep -F "EffectGroupDispatch/$group_key/run" "$run_root/dispatcher-backing-off.txt"
-grep -F "127.0.0.1:$old_endpoint_port" "$run_root/dispatcher-backing-off.txt"
+restate invocations describe "$retirement_id" | tee "$execute_run/retirement-pending.txt"
+restate invocations describe "$dispatcher_id" | tee "$execute_run/dispatcher-backing-off.txt"
+grep -F "Status:       running" "$execute_run/retirement-pending.txt"
+grep -F "EffectGroupDispatch/$group_key/run" "$execute_run/dispatcher-backing-off.txt"
+grep -F "127.0.0.1:$old_endpoint_port" "$execute_run/dispatcher-backing-off.txt"
 ```
 
 ## Phase 3 — Kill only the index-recorded dispatcher, then read the tombstone
@@ -305,8 +305,8 @@ wedged index in Phase 1 and already cross-checked against a described
 `EffectGroupDispatch/<group-key>/run` invocation:
 
 ```sh
-restate -y invocation kill "$dispatcher_id" | tee "$run_root/dispatcher-kill.txt"
-grep -F 'Killed 1 invocations' "$run_root/dispatcher-kill.txt"
+restate -y invocation kill "$dispatcher_id" | tee "$execute_run/dispatcher-kill.txt"
+grep -F 'Killed 1 invocations' "$execute_run/dispatcher-kill.txt"
 ```
 
 The kill releases the `EffectGroupIndex` object lock, so the queued `retire` handler runs
@@ -319,8 +319,8 @@ lands; both are a pass, and the dispatcher fact is required in either shape.
 deadline=$((SECONDS + 60))
 while (( SECONDS < deadline )); do
   restate state get EffectGroupIndex "$group_key" --plain \
-    >"$run_root/retired-index.json"
-  if python3 - "$run_root/retired-index.json" "$dispatcher_id" <<'PY'
+    >"$execute_run/retired-index.json"
+  if python3 - "$execute_run/retired-index.json" "$dispatcher_id" <<'PY'
 import json, sys
 lifecycle = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]["lifecycle"]
 if lifecycle.get("type") != "retired":
@@ -335,7 +335,7 @@ PY
   fi
   sleep 1
 done
-python3 - "$run_root/retired-index.json" "$dispatcher_id" <<'PY'
+python3 - "$execute_run/retired-index.json" "$dispatcher_id" <<'PY'
 import json, sys
 lifecycle = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]["lifecycle"]
 assert lifecycle["type"] == "retired", lifecycle
@@ -356,13 +356,13 @@ equal `{"type":"retired"}`:
 ```sh
 curl -sS -X POST \
   "http://127.0.0.1:$ingress_port/EffectGroupIndex/$group_path/probe" \
-  | tee "$run_root/index-probe.json"
+  | tee "$execute_run/index-probe.json"
 curl -sS -X POST \
   "http://127.0.0.1:$ingress_port/EffectGroupIndex/$group_path/read_rank" \
   -H 'content-type: application/json' --data '{"rank":1}' \
-  | tee "$run_root/index-rank-1.json"
-grep -F '"type":"retired"' "$run_root/index-probe.json"
-grep -Fx '{"type":"retired"}' "$run_root/index-rank-1.json"
+  | tee "$execute_run/index-rank-1.json"
+grep -F '"type":"retired"' "$execute_run/index-probe.json"
+grep -Fx '{"type":"retired"}' "$execute_run/index-rank-1.json"
 ```
 
 The group index answers its own notices (READY, RANK, the drain barrier, a child's cancel
@@ -378,9 +378,9 @@ for notice in '{"type":"ready"}' '{"type":"rank","rank":1}'; do
     -H 'content-type: application/json' \
     --data "{\"notice\":$notice,\"awakeable_id\":\"runbook-late-subscriber\"}"
   echo
-done | tee "$run_root/late-ready-rank.txt"
+done | tee "$execute_run/late-ready-rank.txt"
 test "$(grep -cFx '{"type":"notified","notification":{"type":"retired"}}' \
-  "$run_root/late-ready-rank.txt")" = 2
+  "$execute_run/late-ready-rank.txt")" = 2
 ```
 
 Finally derive the payload object's exact address and attempt a late write:
@@ -390,8 +390,8 @@ payload_digest=$(printf '%s' "$group_key" | sha256sum | cut -d' ' -f1)
 curl -sS -X POST \
   "http://127.0.0.1:$ingress_port/EffectGroupPayload/$payload_digest%3A0/put" \
   -H 'content-type: application/json' --data '{"bytes":[108,97,116,101]}' \
-  | tee "$run_root/late-payload-put.json"
-grep -Fx '{"type":"retired"}' "$run_root/late-payload-put.json"
+  | tee "$execute_run/late-payload-put.json"
+grep -Fx '{"type":"retired"}' "$execute_run/late-payload-put.json"
 ```
 
 ## Phase 5 — Teardown and score
@@ -406,7 +406,7 @@ docker rm -f "$container"
 if docker inspect "$container" >/dev/null 2>&1; then exit 1; fi
 ```
 
-Preserve `run_root` as evidence. It may contain infrastructure addresses and invocation
+Preserve `execute_run` as evidence. It may contain infrastructure addresses and invocation
 IDs; review it before sharing.
 
 | Item | Objective gate | Evidence |

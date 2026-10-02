@@ -453,7 +453,7 @@ impl ReopenHandles {
 /// How long a read waits for the engine to deliver a session's open runs.
 const DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Wait until every usage run `session`'s owner admitted is resolved:
+/// Wait until every usage meter `session`'s owner admitted is resolved:
 /// delivery is asynchronous to the turn (ADR 0125), so a read taken the
 /// moment a turn ends can precede its last settlement.
 async fn await_settled_usage(

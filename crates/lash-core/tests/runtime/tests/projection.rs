@@ -8,7 +8,7 @@ use lash_core::PartKind;
 use lash_core::SessionCommitStore as _;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::core_support::*;
 
 const SEED: u64 = 0x5_f505;
@@ -209,7 +209,7 @@ async fn presentation_step_only_changes_model_observation() {
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "run the tool".to_string(),
@@ -323,7 +323,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         .await
         .expect("open the turn's handler");
     let _turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "where did this go?".to_string(),
@@ -626,7 +626,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         .await
         .expect("open the turn's handler");
     let _turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "where did this go?".to_string(),

@@ -207,7 +207,7 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
     let scope = lash_core::ExecutionScope::process(id);
     let refused = backend
         .usage_accounting()
-        .admit_usage_run(&lash_core::UsageRunAdmission {
+        .admit_usage_meter(&lash_core::UsageMeterAdmission {
             owner,
             effect: lash_core::UsageEffectKey::for_effect(
                 &lash_sansio::EffectAddress::new(scope.clone(), "after-prune")
@@ -218,7 +218,7 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
                 .expect("process identity")
                 .key()
                 .into(),
-            run: lash_core::UsageRunId::mint(),
+            meter: lash_core::UsageMeterId::mint(),
             source: "process-direct".into(),
             profile_key: lash_core::LlmProfileKey::new("mock-model"),
             requested_model: "mock-model".into(),

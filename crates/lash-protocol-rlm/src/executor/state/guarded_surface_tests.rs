@@ -1,5 +1,5 @@
 //! FIG-3802's laws over the guarded surfaces `lash-protocol-rlm` owns, each
-//! driven through its production writer and decoder: the RLM snapshot root,
+//! executed through its production writer and decoder: the RLM snapshot root,
 //! the native transport envelopes in session history, and the native driver
 //! state parked in the protocol driver-state slot.
 

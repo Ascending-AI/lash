@@ -21,11 +21,11 @@ impl HistoryChecker for TranscriptOrder {
             if let Fact::HostOp {
                 op: HostOp::Send | HostOp::SendBatch,
                 session,
-                roots,
+                runs,
                 outcome: HostOutcome::Known,
             } = &record.fact
                 && !deleted.contains(session.as_str())
-                && roots.iter().all(|root| !root.starts_with("held-"))
+                && runs.iter().all(|run| !run.starts_with("held-"))
             {
                 pairs += usize::from(previous.insert(session, record.at).is_some());
             }
@@ -44,8 +44,8 @@ impl HistoryChecker for TranscriptOrder {
                 let mut positions = BTreeMap::new();
                 for (message, (role, text)) in transcript.messages.iter().enumerate() {
                     if role == "user" {
-                        for (byte, root) in markers(text, "input:") {
-                            positions.entry(root).or_insert((message, byte));
+                        for (byte, run) in markers(text, "input:") {
+                            positions.entry(run).or_insert((message, byte));
                         }
                     }
                 }
@@ -54,20 +54,20 @@ impl HistoryChecker for TranscriptOrder {
                     let Fact::HostOp {
                         op: HostOp::Send | HostOp::SendBatch,
                         session,
-                        roots,
+                        runs,
                         outcome: HostOutcome::Known,
                     } = &record.fact
                     else {
                         continue;
                     };
                     if session != &transcript.session
-                        || roots.iter().any(|root| root.starts_with("held-"))
+                        || runs.iter().any(|run| run.starts_with("held-"))
                     {
                         continue;
                     }
-                    let found: Vec<_> = roots
+                    let found: Vec<_> = runs
                         .iter()
-                        .filter_map(|root| positions.get(root.as_str()).copied())
+                        .filter_map(|run| positions.get(run.as_str()).copied())
                         .collect();
                     if let (Some((before, last)), Some(first)) = (prior, found.iter().min())
                         && last >= *first

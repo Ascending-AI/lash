@@ -1,6 +1,6 @@
 //! The core's seat in the recovery leader election (ADR 0109 §1.6–§1.7).
 //!
-//! One slot per core, shared by the core and its session driver: the driver's
+//! One slot per core, shared by the core and its `SessionShifts`: the driver's
 //! reconcile tick joins the election on its first pass and asks which duties
 //! it runs, and the core resigns at shutdown. The election runs on a
 //! background task of its own, which keeps the lease's cadence and resigns

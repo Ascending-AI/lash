@@ -457,7 +457,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     );
 
     // A cancel that withdraws the parked turn's held input cancels the park:
-    // the parked root holds no admission, so its bound input stays open and
+    // the parked run holds no admission, so its bound input stays open and
     // withdrawable.
     let withdraw_session = SessionId::from("park-feed-withdraw");
     let withdraw_store = create_bound_store(&factory, &withdraw_session).await;
@@ -470,13 +470,13 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .await
         .expect("enqueue the held input");
     withdraw_store
-        .bind_root_inputs(
+        .bind_run_inputs(
             &withdraw_session,
             &TurnId::from("turn-3"),
             std::slice::from_ref(&input.input_id),
         )
         .await
-        .expect("bind the held input to the parked root");
+        .expect("bind the held input to the parked run");
     withdraw_store
         .record_turn_park(&park_write(
             &withdraw_session,
@@ -511,13 +511,13 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         .await
         .expect("enqueue the held input");
     suffix_store
-        .bind_root_inputs(
+        .bind_run_inputs(
             &suffix_session,
             &TurnId::from("turn-3s"),
             std::slice::from_ref(&held.input_id),
         )
         .await
-        .expect("bind the held input to the parked root");
+        .expect("bind the held input to the parked run");
     suffix_store
         .record_turn_park(&park_write(
             &suffix_session,
@@ -643,57 +643,57 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     );
 }
 
-/// L3b (FIG-4780): a root's end is what ends its park, whatever kind of root
-/// it is. A command root commits no turn, so its `CommandsApplied` end clears
+/// L3b (FIG-4780): a run's end is what ends its park, whatever kind of run
+/// it is. A command run commits no turn, so its `CommandsApplied` end clears
 /// its park and writes exactly one `Unparked{CommandsApplied}` naming that
 /// park; a replay of the end writes nothing more.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_command_roots_end_unparks_it(factory: Arc<dyn crate::store::ConformanceDeployment>) {
-    let session = SessionId::from("park-feed-command-root");
+pub async fn a_command_runs_end_unparks_it(factory: Arc<dyn crate::store::ConformanceDeployment>) {
+    let session = SessionId::from("park-feed-command-run");
     let store = create_bound_store(&factory, &session).await;
-    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+    let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
         &store,
         &session,
-        "command-root-owner",
+        "command-run-owner",
     )
     .await;
-    let root = TurnId::from("drive-commands:park-feed-command-root");
+    let run = TurnId::from("shift-commands:park-feed-command-run");
     let park = store
         .record_turn_park(&park_write(
             &session,
-            root.as_str(),
+            run.as_str(),
             divergence("commands"),
             10,
         ))
         .await
-        .expect("park the command root");
+        .expect("park the command run");
 
-    let crate::store::RootEnd::Ended(terminal) = store
-        .end_command_root(&fence, &root, 20)
+    let crate::store::RunEndOutcome::Ended(terminal) = store
+        .end_command_run(&fence, &run, 20)
         .await
-        .expect("end the command root")
+        .expect("end the command run")
     else {
-        panic!("the command root's run owns the session and ends its root");
+        panic!("the command run's execution owns the session and ends its run");
     };
     assert_eq!(
         terminal.cause,
-        crate::store::RootTerminalCause::CommandsApplied
+        crate::store::RunTerminalCause::CommandsApplied
     );
     assert!(
         store
             .load_turn_park(&session)
             .await
-            .expect("read the park after the root's end")
+            .expect("read the park after the run's end")
             .is_none(),
-        "a root with terminal evidence holds no park"
+        "a run with terminal evidence holds no park"
     );
     let feed = factory
         .turn_park_feed(crate::store::ParkFeedCursor::initial(), limit(100))
         .await
-        .expect("read the feed after the root's end");
+        .expect("read the feed after the run's end");
     let kinds: Vec<&crate::store::ParkEventKind> =
         feed.events.iter().map(|event| &event.kind).collect();
     assert_eq!(
@@ -706,21 +706,21 @@ pub async fn a_command_roots_end_unparks_it(factory: Arc<dyn crate::store::Confo
                 cause: crate::store::UnparkCause::CommandsApplied,
             },
         ],
-        "the command root's end writes exactly one unparked event"
+        "the command run's end writes exactly one unparked event"
     );
     let closed = &feed.events[1];
     assert_eq!(closed.park_id, park.park_id, "the event names the park");
     assert_eq!(closed.target.session_id, session);
-    assert_eq!(closed.target.turn_id, root);
-    assert_eq!(closed.at_ms, 20, "the park ends at the root's end");
+    assert_eq!(closed.target.turn_id, run);
+    assert_eq!(closed.at_ms, 20, "the park ends at the run's end");
 
     assert!(
         matches!(
             store
-                .end_command_root(&fence, &root, 30)
+                .end_command_run(&fence, &run, 30)
                 .await
-                .expect("replay the command root's end"),
-            crate::store::RootEnd::AlreadyEnded(_)
+                .expect("replay the command run's end"),
+            crate::store::RunEndOutcome::AlreadyEnded(_)
         ),
         "a replayed end answers the stored terminal"
     );

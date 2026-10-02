@@ -29,12 +29,12 @@ async fn emitted_ids(run: &OracleRun, event_type: &str) -> Vec<String> {
         .collect()
 }
 
-/// Waits until the driven turn has ended, without consuming it: the turn's end
+/// Waits until the executed turn has ended, without consuming it: the turn's end
 /// has then closed every group it held (ADR 0099 §7). The budget is a
 /// deadlock bound, never an ordering device.
-async fn await_turn_end(driven: &DrivenOracle) {
+async fn await_turn_end(executed: &DrivenOracle) {
     let deadline = tokio::time::Instant::now() + RENDEZVOUS_BUDGET;
-    while !driven.turn.is_finished() {
+    while !executed.turn.is_finished() {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the turn never ended"
@@ -50,7 +50,7 @@ async fn await_turn_end(driven: &DrivenOracle) {
 /// cannot be closed — before `slow` has started: the loser's attempt is a
 /// rendezvous, not a wall-clock race against the turn's end.
 async fn a_race_resumes_on_its_timer_while_a_held_tool_runs(tier: &JournaledTier) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-race-timeout",
         vec![typescript_block(
@@ -64,17 +64,17 @@ finish({ timedOut: winner === undefined });"#,
     )
     .await?;
 
-    driven.theatre.await_started("after").await;
-    driven.theatre.await_started("slow").await;
+    executed.theatre.await_started("after").await;
+    executed.theatre.await_started("slow").await;
     assert!(
-        !driven.theatre.settled().contains(&"slow".to_string()),
+        !executed.theatre.settled().contains(&"slow".to_string()),
         "{}: the race resumed on its timer while the held tool had not settled, saw {:?}",
         tier.name,
-        driven.theatre.settled()
+        executed.theatre.settled()
     );
-    driven.theatre.release("slow");
-    driven.theatre.release("after");
-    let run = driven.finish().await?;
+    executed.theatre.release("slow");
+    executed.theatre.release("after");
+    let run = executed.finish().await?;
     assert_eq!(
         run.final_value(),
         &serde_json::json!({ "timedOut": true }),
@@ -91,7 +91,7 @@ finish({ timedOut: winner === undefined });"#,
 async fn finishing_right_after_a_race_cancels_the_unfinished_loser(
     tier: &JournaledTier,
 ) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-race-finish",
         vec![typescript_block(
@@ -106,15 +106,15 @@ finish(winner);"#,
     )
     .await?;
 
-    driven.theatre.await_started("parked").await;
-    driven.theatre.await_started("gate").await;
+    executed.theatre.await_started("parked").await;
+    executed.theatre.await_started("gate").await;
     // The committed loser finishes while the opener is still live.
-    driven.theatre.release("committed");
-    driven.theatre.await_settled("committed").await;
-    driven.theatre.release("gate");
+    executed.theatre.release("committed");
+    executed.theatre.await_settled("committed").await;
+    executed.theatre.release("gate");
     // Nothing resolves `parked`: the turn's end must cancel it for the turn to
     // finish at all.
-    let run = driven.finish().await?;
+    let run = executed.finish().await?;
     assert_eq!(
         run.final_value(),
         &serde_json::json!({ "id": "winner" }),
@@ -139,7 +139,7 @@ finish(winner);"#,
 /// operand is admitted first, and the losing tool runs on under the live
 /// opener — its declared intent is realized before the turn ends.
 async fn a_plain_value_decides_a_race_whose_loser_still_runs(tier: &JournaledTier) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-race-plain",
         vec![typescript_block(
@@ -155,12 +155,12 @@ finish({ winner });"#,
 
     // The loser was admitted and dispatched even though a plain value won,
     // and the aggregate resumed while it was still inside its attempt.
-    driven.theatre.await_started("loser").await;
-    driven.theatre.await_started("gate").await;
-    driven.theatre.release("loser");
-    driven.theatre.await_settled("loser").await;
-    driven.theatre.release("gate");
-    let run = driven.finish().await?;
+    executed.theatre.await_started("loser").await;
+    executed.theatre.await_started("gate").await;
+    executed.theatre.release("loser");
+    executed.theatre.await_settled("loser").await;
+    executed.theatre.release("gate");
+    let run = executed.finish().await?;
     assert_eq!(run.final_value(), &serde_json::json!({ "winner": 7 }));
     assert_eq!(
         emitted_ids(&run, INTENT_EVENT).await,
@@ -188,15 +188,15 @@ async fn literal_and_bound_arrays_race_alike(tier: &JournaledTier) -> Result<()>
 finish(await Promise.race(leaves));"#,
         ),
     ] {
-        let driven = drive_cells(
+        let executed = drive_cells(
             tier,
             "aggregate-oracle-race-arrays",
             vec![typescript_block(cell)],
         )
         .await?;
-        driven.theatre.await_consumed(1).await;
-        driven.theatre.release("held");
-        let run = driven.finish().await?;
+        executed.theatre.await_consumed(1).await;
+        executed.theatre.release("held");
+        let run = executed.finish().await?;
         assert_eq!(
             run.final_value(),
             &serde_json::json!({ "id": "quick" }),
@@ -266,7 +266,7 @@ try {
 async fn an_intent_refusal_turns_a_would_be_any_winner_into_a_rejection(
     tier: &JournaledTier,
 ) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-any-refused-intent",
         vec![typescript_block(
@@ -277,16 +277,16 @@ async fn an_intent_refusal_turns_a_would_be_any_winner_into_a_rejection(
         )],
     )
     .await?;
-    driven.theatre.await_consumed(1).await;
-    driven
+    executed.theatre.await_consumed(1).await;
+    executed
         .theatre
         .settle_deferred(
-            &driven.core,
+            &executed.core,
             "later",
             lash_core::Resolution::Ok(serde_json::json!({ "id": "later" })),
         )
         .await?;
-    let run = driven.finish().await?;
+    let run = executed.finish().await?;
     assert_eq!(
         run.final_value(),
         &serde_json::json!({ "id": "later" }),
@@ -306,7 +306,7 @@ async fn an_intent_refusal_turns_a_would_be_any_winner_into_a_rejection(
 /// and close the group — until it is released, so the loser is inside its
 /// attempt by rendezvous rather than by a start-versus-close race.
 async fn a_losers_final_after_the_close_is_refused(tier: &JournaledTier) -> Result<()> {
-    let driven = drive_cells(
+    let executed = drive_cells(
         tier,
         "aggregate-oracle-race-stale-writer",
         vec![typescript_block(
@@ -317,12 +317,12 @@ async fn a_losers_final_after_the_close_is_refused(tier: &JournaledTier) -> Resu
         )],
     )
     .await?;
-    driven.theatre.await_started("stale").await;
-    driven.theatre.release("winner");
-    driven.theatre.await_settled("winner").await;
-    await_turn_end(&driven).await;
-    driven.theatre.release("stale");
-    let run = driven.finish().await?;
+    executed.theatre.await_started("stale").await;
+    executed.theatre.release("winner");
+    executed.theatre.await_settled("winner").await;
+    await_turn_end(&executed).await;
+    executed.theatre.release("stale");
+    let run = executed.finish().await?;
     assert_eq!(run.final_value(), &serde_json::json!({ "id": "winner" }));
     assert!(
         emitted_ids(&run, INTENT_EVENT).await.is_empty(),

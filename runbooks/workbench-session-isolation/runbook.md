@@ -4,7 +4,7 @@
 > screenshots, real-token use, port-derived stacks, the isolation-void rule below,
 > Abort/RCA, and teardown ownership.
 
-**Purpose.** Drive two durable sessions concurrently through one workbench process and
+**Purpose.** Shift two durable sessions concurrently through one workbench process and
 deliberately hunt for cross-session leaks in transcripts, trigger registrations, trigger
 delivery, and durable process projections. The two sessions use the same trigger source
 and deliberately similar process names so superficial partitioning cannot pass.
@@ -23,7 +23,7 @@ markers and structural API state, never exact assistant prose.
 3. **Use confusable fixtures, from one pinned cell.** Both registrations must have the same
    derived display
    name, `subscription_key`, button color, source type/configuration, and process label.
-   Drive both tabs with the same literal cell rather than the same prose request: these
+   Execute both tabs with the same literal cell rather than the same prose request: these
    values are content-addressed over the cell that was written, so prose cannot pin them.
    Only `subscription_id`, process ids, and session ownership distinguish them.
 4. **Prove non-membership.** Presence in the expected session is only half a gate. Every

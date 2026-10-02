@@ -1,0 +1,100 @@
+//! The recorded body of a logical run's scope close (FIG-3600 S7, FIG-3607
+//! item 7, ADR 0109 §3): it reads the run's terminal evidence and delivers
+//! the close the terminal transaction armed as the `ScopeClose` obligation's
+//! immediate attempt. It runs only inside the engine's recorded `CloseRunScope`
+//! step, and only after the run's final commit wrote that evidence; a
+//! replay decodes the evidence it closed and never runs it.
+//!
+//! A store, ledger or scope owner that did not answer is the attempt's
+//! fault, never the step's outcome: the body marks it with derivation retry
+//! authority, so an engine runs the close again until it is handed to the
+//! obligation ledger (whose retries and stalls it then owns) or the owner
+//! acknowledges it.
+
+use std::sync::Arc;
+
+use crate::engine::ScopeCloseSink;
+use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
+use crate::runtime::shift::deliver_scope_close;
+use crate::runtime::shift::relay::ObligationRelay;
+use crate::{
+    Clock, RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectOutcome, RuntimeErrorCode, SessionId, StoreError, TurnId,
+};
+
+/// The first execution of one `CloseRunScope` step.
+pub(super) struct CloseRunScopeRunner {
+    /// The store that holds the run's terminal evidence: the session's
+    /// history store when the close runs on the session's runtime, and the
+    /// deployment's catalog when an engine runs it beside the session's next
+    /// run (FIG-4035). Both answer for any session they hold.
+    pub(super) terminals: Arc<dyn crate::store::RuntimeStore>,
+    pub(super) session: SessionId,
+    pub(super) run: TurnId,
+    pub(super) sink: Arc<dyn ScopeCloseSink>,
+    /// The `ScopeClose` kind's relay (ADR 0109 §3): the close is its
+    /// obligation's immediate delivery.
+    pub(super) relay: Arc<dyn ObligationRelay>,
+    pub(super) clock: Arc<dyn Clock>,
+}
+
+fn attempt_fault(context: &str, error: StoreError) -> RuntimeEffectControllerError {
+    let mut fault =
+        RuntimeEffectControllerError::from(crate::runtime::runtime_error_from_store_commit(error));
+    fault.message = format!("{context}: {}", fault.message);
+    fault.retryable_uncommitted_derivation()
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for CloseRunScopeRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: RuntimeEffectEnvelope,
+        _usage_meter: Option<crate::UsageMeter>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let RuntimeEffectCommand::CloseRunScope { run } = &envelope.command else {
+            return Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "run scope close executor cannot execute {} command",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        if *run != self.run {
+            return Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "run scope close executor was bound to `{}` but asked to close `{run}`",
+                    self.run
+                ),
+            ));
+        }
+        let terminal = self
+            .terminals
+            .run_terminal(&self.session, &self.run)
+            .await
+            .map_err(|error| attempt_fault("run terminal read", error))?
+            .ok_or_else(|| {
+                RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    format!(
+                        "run `{}` of session `{}` closes only after its terminal evidence, \
+                         and the store holds none",
+                        self.run, self.session
+                    ),
+                )
+            })?;
+        deliver_scope_close(
+            self.relay.as_ref(),
+            self.sink.as_ref(),
+            &terminal,
+            self.clock.as_ref(),
+        )
+        .await
+        .map_err(|error| attempt_fault("run scope close", error))?;
+        Ok(RuntimeEffectOutcome::CloseRunScope {
+            terminal: Box::new(terminal),
+        })
+    }
+}

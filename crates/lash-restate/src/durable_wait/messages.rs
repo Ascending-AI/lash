@@ -143,13 +143,13 @@ pub struct RestateDurableWaitSettleRequest {
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitRootRequest {
+pub struct RestateDurableWaitRunRequest {
     pub session_id: SessionId,
-    pub root: lash_core::TurnId,
-    /// The physical turn whose commit ended the root, when a commit did. That
+    pub run: lash_core::TurnId,
+    /// The physical turn whose commit ended the run, when a commit did. That
     /// commit publishes its turn's terminal one-way after it, so the terminal
-    /// may still be in flight when the root retires; `None` says no commit
-    /// ended the root (FIG-4025).
+    /// may still be in flight when the run retires; `None` says no commit
+    /// ended the run (FIG-4025).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub committed_turn: Option<lash_core::TurnId>,
 }

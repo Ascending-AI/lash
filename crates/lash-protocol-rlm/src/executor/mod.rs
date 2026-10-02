@@ -185,7 +185,7 @@ fn fail_cell_on_nested_error(
     ));
 }
 
-/// Feature-gated fixture that lets the repository's performance harness drive
+/// Feature-gated fixture that lets the repository's performance harness shift
 /// the production RLM execution-state capture without exposing executor
 /// internals as public protocol API.
 #[cfg(feature = "testing")]

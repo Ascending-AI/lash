@@ -6,7 +6,7 @@
 > slack-clone scenario, and extends the cross-check to **four** layers.
 
 **Purpose.** Referee the **integration shape**, not a host's own UI. Every other browser
-runbook drives an app that *owns* its surface: the browser talks to Lash, and Lash's
+runbook executes an app that *owns* its surface: the browser talks to Lash, and Lash's
 projection is the thing under test. This one is inverted, which is the shape most real
 integrations have — somebody else's product already exists, it has its own users, its own
 database and its own wire contract, and the agent is one more app in it reached only over
@@ -445,22 +445,22 @@ the missing process; launch it non-blocking) and poll the bot's `/healthz`. Boot
 walks the unfinished ledger rows.
 
 **The answer is not always immediate, and a deferral is not a failure.** The dead
-boot's sealed drive epoch stands until this boot's drive supersedes it, and the
-engine re-drives the interrupted invocation on the restarted endpoint. Two recovery
+boot's sealed shift epoch stands until this boot's shift supersedes it, and the
+engine redrives the interrupted invocation on the restarted endpoint. Two recovery
 paths are both correct:
 
-- **Deferred path** (the interrupted turn is still re-driving, or the open races a
+- **Deferred path** (the interrupted turn is still redriving, or the open races a
   lane still held): recovery logs
   `Deferred { reason: "session_admission_contended" }` or `Deferred { reason: "turn_not_settled" }`,
   leaves the ledger row non-terminal, then a retry settles
   `settled deferred event … Replied { source: Turn }` (or `Transcript`, when this boot's engine
   committed the turn before the retry looked).
-- **Direct path** (the interrupted turn already settled, or this boot's drive has
+- **Direct path** (the interrupted turn already settled, or this boot's shift has
   already sealed over the dead epoch): the new boot replies directly
   (`handled … Replied`).
 
 Gate on outcome facts (exactly one reply in DOM, platform, ledger, and bot log; a
-newer `session_meta.drive_epoch` than the dead boot's sealed epoch; one replacement
+newer `session_meta.shift_epoch` than the dead boot's sealed epoch; one replacement
 turn), then classify the path from those durable facts. Do not assert a wall-clock
 latency band.
 

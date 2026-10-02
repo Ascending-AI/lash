@@ -54,7 +54,7 @@ async fn submit_config(
 }
 
 #[expect(clippy::expect_used, reason = "conformance fixture engine execution")]
-async fn drive_and_settle(
+async fn work_and_settle(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     parts: &ConfigParts,
     receipt: crate::SessionCommandReceipt,
@@ -75,7 +75,7 @@ async fn drive_and_settle(
                 Box::pin(async move {
                     let mut runtime = build_runtime(parts).await;
                     runtime
-                        .drive_next_root(
+                        .execute_next_run(
                             request,
                             crate::TurnOptions::new(
                                 tokio_util::sync::CancellationToken::new(),
@@ -83,7 +83,7 @@ async fn drive_and_settle(
                             ),
                         )
                         .await
-                        .expect("engine drives the command");
+                        .expect("engine executes the command");
                     settled_tx
                         .send(
                             runtime
@@ -143,7 +143,7 @@ async fn command_law(
     } else {
         submit_config(&mut runtime, "first-key", 0, SECOND_PROFILE).await
     };
-    let first_settlement = drive_and_settle(&runner, &parts, first.clone(), "apply-first").await;
+    let first_settlement = work_and_settle(&runner, &parts, first.clone(), "apply-first").await;
     let first_outcome = if matches!(law, Law::ConfigOnce | Law::Stale) {
         let outcome = config_outcome(first_settlement);
         assert!(matches!(
@@ -172,7 +172,7 @@ async fn command_law(
     if matches!(law, Law::Stale) {
         let stale = submit_config(&mut runtime, "stale-key", 0, "must-not-apply").await;
         let stale_outcome =
-            config_outcome(drive_and_settle(&runner, &parts, stale.clone(), "apply-stale").await);
+            config_outcome(work_and_settle(&runner, &parts, stale.clone(), "apply-stale").await);
         assert_eq!(
             stale_outcome,
             crate::ConfigTransactionOutcome::Stale {
@@ -182,7 +182,7 @@ async fn command_law(
         );
         let later = submit_config(&mut runtime, "later-key", 1, "newest-model").await;
         assert!(matches!(
-            config_outcome(drive_and_settle(&runner, &parts, later, "apply-later").await),
+            config_outcome(work_and_settle(&runner, &parts, later, "apply-later").await),
             crate::ConfigTransactionOutcome::Applied { revision: 2, .. }
         ));
         let replay = submit_config(&mut runtime, "stale-key", 0, "must-not-apply").await;
@@ -218,7 +218,7 @@ async fn command_law(
             let revision = index as u64 + u64::from(matches!(law, Law::ConfigOnce));
             let later = submit_config(&mut runtime, request, revision, "newest-model").await;
             assert!(
-                matches!(config_outcome(drive_and_settle(&runner, &parts, later, request).await), crate::ConfigTransactionOutcome::Applied { base_revision, revision: next, .. } if base_revision == revision && next == revision + 1)
+                matches!(config_outcome(work_and_settle(&runner, &parts, later, request).await), crate::ConfigTransactionOutcome::Applied { base_revision, revision: next, .. } if base_revision == revision && next == revision + 1)
             );
         }
         if matches!(law, Law::Conflict) {

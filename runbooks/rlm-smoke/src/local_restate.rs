@@ -4,7 +4,7 @@
 //!
 //! The host builds `lash-restate`'s engine over its store set, serves the
 //! engine's endpoint on a loopback port and registers that port with the
-//! server's admin API. The server then drives every turn and process in the
+//! server's admin API. The server then executes every turn and process in the
 //! endpoint's handlers; the host only sends (D5).
 
 use std::sync::Arc;

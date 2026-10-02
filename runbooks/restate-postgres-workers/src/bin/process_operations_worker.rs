@@ -242,7 +242,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         "new wake retained old target: {}",
         new_wake.target_session_id
     );
-    let drive = WakeDeliveryDriver::drive_pending_once(
+    let shift = WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::new(factory) as Arc<dyn lash_core::DeploymentStore>,
         Arc::new(lash::runtime::NoSessionWork::new()),
@@ -250,10 +250,10 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         32,
     )
     .await
-    .context("drive new-target wake")?;
+    .context("shift new-target wake")?;
     anyhow::ensure!(
-        drive.enqueued == 1,
-        "new-target drive was not singular: {drive:?}"
+        shift.enqueued == 1,
+        "new-target shift was not singular: {shift:?}"
     );
     let old_batches = storage
         .store()

@@ -7,16 +7,16 @@
 //! into when it lands, so a check written against this constructor moves to
 //! the double by changing the constructor it calls.
 //!
-//! The drive runs inside a real `restate_sdk` workflow handler, on the
+//! The shift runs inside a real `restate_sdk` workflow handler, on the
 //! handler's own `RestateRuntimeEffectController`, so the SDK's journal and
 //! lash-restate's envelope fence are the code under test:
 //!
-//! - **fresh**: the invocation is driven round by round, each round replaying
+//! - **fresh**: the invocation is executed round by round, each round replaying
 //!   the journal so far with every proposed run acknowledged, until the
 //!   handler writes its output;
 //! - **cold replay**: the whole journal is replayed on the same endpoint;
 //! - **separate worker**: the whole journal is replayed on a freshly built
-//!   endpoint, whose drive the config's worker builds anew, on its own thread
+//!   endpoint, whose shift the config's worker builds anew, on its own thread
 //!   and runtime;
 //! - **perturbed**: a cold replay whose completion notifications are delivered
 //!   in a seeded order.
@@ -26,8 +26,8 @@
 //! plus any command the replay journaled anew, plus its committed output.
 
 use lash_core::engine::testing::{
-    DeterminismCheck, DeterminismEngine, DriveTranscript, EngineRun, FailureCause, ReplayMode,
-    RunFailure, RunMode, SeededRng, TranscriptEntry,
+    DeterminismCheck, DeterminismEngine, EngineRun, FailureCause, ReplayMode, RunFailure, RunMode,
+    SeededRng, ShiftTranscript, TranscriptEntry,
 };
 
 use super::endpoint_protocol::{restate_run_proposals, split_frames};
@@ -36,9 +36,9 @@ use super::*;
 const HOST: &str = "LashDeterminismHost";
 const MAX_ROUNDS: usize = 64;
 
-/// A drive run on one handler execution: effects through the handler's scoped
+/// A shift run on one handler execution: effects through the handler's scoped
 /// controller, returning the bytes it commits.
-type RestateDrive = Arc<
+type RestateShift = Arc<
     dyn for<'a> Fn(
             ScopedEffectController<'a>,
         )
@@ -47,7 +47,7 @@ type RestateDrive = Arc<
         + Sync,
 >;
 
-fn restate_drive<F>(drive: F) -> RestateDrive
+fn restate_shift<F>(shift: F) -> RestateShift
 where
     F: for<'a> Fn(
             ScopedEffectController<'a>,
@@ -57,16 +57,16 @@ where
         + Sync
         + 'static,
 {
-    Arc::new(drive)
+    Arc::new(shift)
 }
 
 /// What one Restate leg runs.
 #[derive(Clone)]
 struct EndpointConfig {
-    /// The scope the drive's controller is admitted for.
+    /// The scope the shift's controller is admitted for.
     scope: ExecutionScope,
-    /// Builds one worker's drive, with whatever process-local state it holds.
-    worker: Arc<dyn Fn() -> RestateDrive + Send + Sync>,
+    /// Builds one worker's shift, with whatever process-local state it holds.
+    worker: Arc<dyn Fn() -> RestateShift + Send + Sync>,
 }
 
 /// The Restate leg under `seed`.
@@ -96,7 +96,7 @@ trait LashDeterminismHost {
 
 struct LashDeterminismHostImpl {
     scope: ExecutionScope,
-    drive: RestateDrive,
+    shift: RestateShift,
 }
 
 impl LashDeterminismHost for LashDeterminismHostImpl {
@@ -113,7 +113,7 @@ impl LashDeterminismHost for LashDeterminismHostImpl {
         let scoped = controller
             .scoped_effect_controller(durable_admission(&self.scope))
             .map_err(TerminalError::from_error)?;
-        let committed = (self.drive)(scoped).await.map_err(TerminalError::new)?;
+        let committed = (self.shift)(scoped).await.map_err(TerminalError::new)?;
         Ok(Json(committed))
     }
 }
@@ -123,7 +123,7 @@ fn determinism_endpoint(config: &EndpointConfig) -> Endpoint {
         .bind(
             LashDeterminismHostImpl {
                 scope: config.scope.clone(),
-                drive: (config.worker)(),
+                shift: (config.worker)(),
             }
             .serve(),
         )
@@ -199,7 +199,7 @@ impl DeterminismEngine for EndpointBackend {
         &self,
         history: &EndpointHistory,
         mode: ReplayMode,
-    ) -> Result<DriveTranscript, RunFailure> {
+    ) -> Result<ShiftTranscript, RunFailure> {
         let output = match mode {
             ReplayMode::Cold => {
                 let body = self.replay_body(history, None)?;
@@ -256,7 +256,7 @@ fn handler_finished(output: &[u8]) -> Result<bool, RunFailure> {
 }
 
 /// The command stream every output journaled, then the committed output.
-fn transcript(outputs: &[Bytes], last: &[u8]) -> Result<DriveTranscript, RunFailure> {
+fn transcript(outputs: &[Bytes], last: &[u8]) -> Result<ShiftTranscript, RunFailure> {
     let undecodable = || engine_failure("a handler output did not decode".to_string());
     let mut entries = Vec::new();
     for output in outputs {
@@ -282,7 +282,7 @@ fn transcript(outputs: &[Bytes], last: &[u8]) -> Result<DriveTranscript, RunFail
     entries.push(TranscriptEntry::Commit {
         bytes: committed.to_string(),
     });
-    Ok(DriveTranscript { entries })
+    Ok(ShiftTranscript { entries })
 }
 
 fn without_handler_output(output: &[u8]) -> Result<Vec<u8>, RunFailure> {
@@ -405,10 +405,10 @@ async fn run_tool(
 /// built from both.
 fn deterministic_worker(
     executions: Arc<AtomicUsize>,
-) -> Arc<dyn Fn() -> RestateDrive + Send + Sync> {
+) -> Arc<dyn Fn() -> RestateShift + Send + Sync> {
     Arc::new(move || {
         let executions = Arc::clone(&executions);
-        restate_drive(move |controller| {
+        restate_shift(move |controller| {
             let executions = Arc::clone(&executions);
             Box::pin(async move {
                 let first = run_tool(&controller, "tool-1", "call-1", &executions).await?;
@@ -426,7 +426,7 @@ fn deterministic_worker(
 }
 
 #[test]
-fn a_deterministic_drive_replays_on_the_restate_endpoint() {
+fn a_deterministic_shift_replays_on_the_restate_endpoint() {
     let executions = Arc::new(AtomicUsize::new(0));
     let engine = backend(
         SEED,
@@ -468,9 +468,9 @@ static RESTATE_WORKERS: AtomicU64 = AtomicU64::new(0);
 /// is refused by the envelope fence on the separate worker.
 #[test]
 fn worker_local_state_in_an_envelope_is_refused_on_a_separate_worker() {
-    let worker: Arc<dyn Fn() -> RestateDrive + Send + Sync> = Arc::new(|| {
+    let worker: Arc<dyn Fn() -> RestateShift + Send + Sync> = Arc::new(|| {
         let worker_ref = RESTATE_WORKERS.fetch_add(1, Ordering::SeqCst);
-        restate_drive(move |controller| {
+        restate_shift(move |controller| {
             Box::pin(async move {
                 let executions = Arc::new(AtomicUsize::new(0));
                 let tool = run_tool(

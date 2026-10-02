@@ -3,7 +3,7 @@
 //! share the frame's buffers instead of each holding a copy of the frame.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::collections::HashSet;
 
 const SEED: u64 = 0x4059;
@@ -54,7 +54,7 @@ async fn retained_committed_views_keep_their_commit_and_share_the_frame() {
             .await
             .expect("open the scope's handler");
         runtime
-            .drive_turn(
+            .execute_turn(
                 TurnInput::text(format!("question {turn}")),
                 lash_core::facade_support::TurnOptions::new(
                     CancellationToken::new(),

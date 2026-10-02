@@ -2,11 +2,11 @@
 //!
 //! A deletion first closes the session: its `CloseSession` intent commits,
 //! the session refuses new work, and the intent's engine half releases the
-//! session's roots and closes its scopes. The intent's acknowledgement arms
+//! session's runs and closes its scopes. The intent's acknowledgement arms
 //! the session's `SessionDelete` obligation on its `session_meta` row, in the
 //! same transaction. That obligation's delivery is the physical delete, and
 //! it runs only once every cleanup obligation the close left behind — the
-//! scope close of each root, the parent-end plan of each scope the session
+//! scope close of each run, the parent-end plan of each scope the session
 //! owns — has been delivered: a finalizer.
 //!
 //! The ledger here answers the two reads the delete's relay makes that the
@@ -23,7 +23,7 @@ use super::obligation::{ObligationId, ObligationState};
 /// delivered (due, claimed, or stalled).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionCleanup {
-    /// Scope-close obligations on the session's roots.
+    /// Scope-close obligations on the session's runs.
     pub scope_close: u64,
     /// Parent-end obligations on the plans of scopes the session owns: the
     /// session's own scope, its turns' and its session operations'.
@@ -75,7 +75,7 @@ pub trait SessionDeleteLedger: Send + Sync {
 
     /// How many sessions are closing: their close committed and their
     /// physical delete has not run. Until it runs, the engine still holds
-    /// what the close's roots registered with it — each root's turn-control
+    /// what the close's runs registered with it — each run's turn-control
     /// waits — for the physical delete to revoke.
     async fn count_closing(&self) -> Result<u64, StoreError>;
 }

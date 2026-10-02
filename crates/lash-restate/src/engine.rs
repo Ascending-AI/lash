@@ -17,7 +17,7 @@ use crate::effect_host::{RestateEffectHost, RestateJournalAuthority};
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 use crate::process::{RestateProcessDeployment, RestateProcessServing};
 use crate::services::{LashServiceParts, RestateNamespace, bind_lash_services};
-use crate::session_driver::RestateSessionWork;
+use crate::session_shifts::RestateSessionWork;
 use crate::turn::RestateTurnAttach;
 
 /// How a [`RestateEngine`] reaches Restate and under which authority and
@@ -30,16 +30,16 @@ pub struct RestateConfig {
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
     admin_connection: RestateConnection,
     namespace: RestateNamespace,
-    root_effect_budget: Option<u64>,
+    run_effect_budget: Option<u64>,
 }
 
 impl RestateConfig {
     /// Reach Restate's ingress at `connection` and its admin API at
-    /// `admin_connection`, under `authority`. The engine's sessions' drives
+    /// `admin_connection`, under `authority`. The engine's sessions' shifts
     /// run on the `LashSession` and `LashTurn` services its endpoint builder
     /// binds, and both record and stamp the build's drain generation.
     ///
-    /// The admin API is required: releasing a cancelled or forked root's
+    /// The admin API is required: releasing a cancelled or forked run's
     /// execution, resuming a redriven one, and reconciling executions Restate
     /// stopped retrying all go through it, and a deployment without it would
     /// refuse every such verb and hold its sessions behind them.
@@ -61,16 +61,16 @@ impl RestateConfig {
             process_event_sink: None,
             admin_connection: admin_connection.into(),
             namespace: RestateNamespace::default(),
-            root_effect_budget: None,
+            run_effect_budget: None,
         }
     }
 
-    /// End a root's `LashTurn` invocation at the run's next quiet point once
+    /// End a run's `LashTurn` invocation at the execution's next quiet point once
     /// it has executed `effects` effects, instead of the default 10,000
     /// (FIG-4739): the run goes on in a new invocation with a journal of its
     /// own. A replay observes the same count and ends at the same point.
-    pub fn with_root_effect_budget(mut self, effects: u64) -> Self {
-        self.root_effect_budget = Some(effects.max(1));
+    pub fn with_run_effect_budget(mut self, effects: u64) -> Self {
+        self.run_effect_budget = Some(effects.max(1));
         self
     }
 
@@ -141,7 +141,7 @@ impl RestateEngine {
             process_event_sink,
             admin_connection,
             namespace,
-            root_effect_budget,
+            run_effect_budget,
         } = config.clone();
         let effect_host = Arc::new(RestateEffectHost::on_generation(
             connection.clone(),
@@ -166,12 +166,12 @@ impl RestateEngine {
         effect_host.bind_usage_accounting(stores.usage_accounting());
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
-            crate::RestateSessionDriverSlot::new().with_root_effect_budget(root_effect_budget),
+            crate::RestateSessionShiftsSlot::new().with_run_effect_budget(run_effect_budget),
             generation.clone(),
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
                 lost_processes: Default::default(),
-                lost_roots: Default::default(),
+                lost_runs: Default::default(),
                 admin: admin.clone(),
                 ingress: RestateIngressClient::new(connection.clone()),
                 namespace: namespace.clone(),
@@ -199,7 +199,7 @@ impl RestateEngine {
     /// bound: the durable-wait workflow and index, process attach, the
     /// process workflow over `processes` (a [`DurableProcessWorker`], or a
     /// [`RestateProcessServing`] that also sets the segment policy), and the
-    /// effect-group index, payload and dispatcher, and the session driver
+    /// effect-group index, payload and dispatcher, and the `SessionShifts`
     /// (`LashSession`, `LashTurn`) that runs every session's turns. The host
     /// binds only its own services — its triggers and cron — on the builder,
     /// then builds it and serves it with [`crate::serve_endpoint`].
@@ -260,7 +260,7 @@ impl RestateEngine {
                     build_generation.clone(),
                     self.stores.attachment_referrers(),
                 ),
-                session_driver: self.session_work.driver_slot().clone(),
+                session_shifts: self.session_work.shifts_slot().clone(),
                 build_generation,
                 namespace: self.namespace.clone(),
                 fleet: crate::object_state::FleetView::of(self.stores.process_registry()),
@@ -398,7 +398,7 @@ impl RestateEngine {
     }
 
     /// Another build of this engine's code in the same process: the same
-    /// stores, effect host, process deployment and session driver, stamping
+    /// stores, effect host, process deployment and `SessionShifts`, stamping
     /// `build_generation` on the endpoint its
     /// [`endpoint_builder`](Self::endpoint_builder) builds. What a test
     /// double registers as a second deployment to stand up two builds over
@@ -481,7 +481,7 @@ impl RestateEngine {
         )
     }
 
-    /// The engine that runs this backend's session drives: a drive is a send
+    /// The engine that runs this backend's session shifts: a shift is a send
     /// to the session's `LashSession` object.
     pub fn session_work_engine(&self) -> &Arc<RestateSessionWork> {
         &self.session_work

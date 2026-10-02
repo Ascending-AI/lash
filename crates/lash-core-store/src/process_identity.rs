@@ -22,7 +22,7 @@ use std::fmt;
 /// registers the process. The id is a UUIDv7 — time-ordered with 74 random
 /// bits — and is never reused, so it is the one identity a process has
 /// (ADR 0107). Minting reads the clock and the random source; the durable
-/// drive never calls it, it reads the id back off the start's recorded result.
+/// shift never calls it, it reads the id back off the start's recorded result.
 #[must_use]
 #[expect(
     clippy::expect_used,

@@ -71,7 +71,7 @@ write transaction for the fence); PostgreSQL uses `REPEATABLE READ`.
 
 The check is the head-path probe in
 `lash-core-store/src/store_backend_support/head_path.rs`, which both backends
-drive with the same two indexed reads: the head leaf's `(node_id, session_id,
+shift with the same two indexed reads: the head leaf's `(node_id, session_id,
 generation)`, and, per owning session, that owner's lowest-generation row and
 the row its parent edge names.
 

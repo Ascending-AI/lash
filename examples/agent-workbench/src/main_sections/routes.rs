@@ -250,8 +250,8 @@ pub(crate) async fn retrieve_attachment(
 }
 
 /// Show the user's row, hand the input to the session's `send()`, and follow
-/// the root it starts. The claim passes to the follower, which releases it
-/// once the root is settled on the page.
+/// the run it starts. The claim passes to the follower, which releases it
+/// once the run is settled on the page.
 pub(crate) async fn commit_and_start_user_turn(
     state: AppState,
     cleanup: ActiveTurnSubmissionGuard,

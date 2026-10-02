@@ -9,7 +9,7 @@
 //! keeps both and counts the refusal in `attempts`.
 
 use super::*;
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestShiftExt as _;
 
 fn park(
     session_id: &SessionId,
@@ -41,21 +41,21 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
         None
     );
 
-    // The parked root holds its input, bound to it as its answer of record,
+    // The parked run holds its input, bound to it as its answer of record,
     // and parks.
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "parked"))
         .await
         .expect("enqueue the parked turn's input");
-    let lease = seal_drive_fence_for_test(&store, &session_id, "parking-owner").await;
+    let lease = seal_shift_fence_for_test(&store, &session_id, "parking-owner").await;
     store
-        .bind_root_inputs(
+        .bind_run_inputs(
             &session_id,
             &parked_turn,
             std::slice::from_ref(&input.input_id),
         )
         .await
-        .expect("bind the drive's input to the parked root");
+        .expect("bind the shift's input to the parked run");
     let divergence = store
         .record_turn_park(&park(
             &session_id,
@@ -67,9 +67,9 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
         .await
         .expect("record the park");
     store
-        .supersede_drive_epoch_for_test(&lease)
+        .supersede_shift_epoch_for_test(&lease)
         .await
-        .expect("seal a successor drive after parking");
+        .expect("seal a successor shift after parking");
     assert_eq!(
         divergence.since_ms, 1_234,
         "the first park stamps its refusal time"
@@ -85,7 +85,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
             .await
             .expect("read the park"),
         Some(divergence.clone()),
-        "the park reads back as recorded after the drive is superseded"
+        "the park reads back as recorded after the shift is superseded"
     );
 
     // Parking the same turn again keeps the park's identity and first-park
@@ -172,7 +172,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
 
     // Another turn's commit leaves the park; the parked turn's own commit
     // settles it, in its own transaction.
-    let withdrawn_root = parked_turn;
+    let withdrawn_run = parked_turn;
     let parked_turn = TurnId::from("parked-after-withdrawal");
     let cutover = store
         .record_turn_park(&park(
@@ -231,13 +231,13 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeSto
             store
                 .record_turn_park(&park(
                     &session_id,
-                    &withdrawn_root,
+                    &withdrawn_run,
                     crate::store::ParkReason::ReplayDivergence {
                         message: "stale retry after withdrawal".to_string(),
                     },
                 ))
                 .await,
-            Err(crate::StoreError::RootInputWithdrawn { .. })
+            Err(crate::StoreError::RunInputWithdrawn { .. })
         ),
         "a retry cannot restore a park after its only input was withdrawn"
     );

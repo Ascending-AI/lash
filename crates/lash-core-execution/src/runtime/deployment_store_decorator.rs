@@ -11,7 +11,7 @@ use std::sync::Arc;
 use super::DeploymentStore;
 use crate::store::{
     ControlIntent, ControlIntentId, MaintenanceResult, ParkFeedCursor, ParkFeedPage,
-    RetentionBound, RetentionReport, RootTerminal, RuntimeStoreDecorator, TurnPark, TurnParkQuery,
+    RetentionBound, RetentionReport, RunTerminal, RuntimeStoreDecorator, TurnPark, TurnParkQuery,
     TurnParkTarget, UnsettledTurnCounts,
 };
 use crate::{ExecutionScope, StoreError};
@@ -30,8 +30,8 @@ macro_rules! deployment_operations {
             fn list_turn_parks(&self, query: &TurnParkQuery) -> Result<Vec<TurnPark>, StoreError>;
             fn turn_park_feed(&self, after: ParkFeedCursor, limit: NonZeroUsize) -> Result<ParkFeedPage<TurnParkTarget>, StoreError>;
             fn compact_turn_park_feed(&self, through: ParkFeedCursor) -> Result<(), StoreError>;
-            fn non_terminal_roots_page(&self, after: Option<&crate::engine::RootRef>, limit: NonZeroUsize) -> Result<Vec<crate::engine::OpenRoot>, StoreError>;
-            fn end_lost_root(&self, target: &crate::engine::RootRef, loss: crate::engine::RootRunLoss, at_ms: u64) -> Result<Option<RootTerminal>, StoreError>;
+            fn non_terminal_runs_page(&self, after: Option<&crate::engine::RunRef>, limit: NonZeroUsize) -> Result<Vec<crate::engine::OpenRun>, StoreError>;
+            fn end_lost_run(&self, target: &crate::engine::RunRef, loss: crate::engine::RunLoss, at_ms: u64) -> Result<Option<RunTerminal>, StoreError>;
             fn list_control_intents(&self, after: Option<ControlIntentId>, limit: NonZeroUsize) -> Result<Vec<ControlIntent>, StoreError>;
             fn retire_turn_cancel_closure_scope(&self, scope: &ExecutionScope) -> Result<(), StoreError>;
             fn reclaim_retained_evidence(&self, bound: RetentionBound) -> MaintenanceResult<RetentionReport>;

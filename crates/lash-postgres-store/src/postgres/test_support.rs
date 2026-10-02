@@ -261,7 +261,7 @@ impl StoreTestSupport for PostgresStore {
 }
 
 impl PostgresStore {
-    /// Drive transaction admission time independently of record timestamps.
+    /// Shift transaction admission time independently of record timestamps.
     pub fn with_lease_clock_for_testing(
         mut self,
         clock: Arc<dyn lash_core_execution::Clock>,

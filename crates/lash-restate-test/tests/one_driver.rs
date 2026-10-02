@@ -1,19 +1,19 @@
-//! One driver (FIG-3837, ruling D5): the engine's session drive is the only
+//! One `SessionShifts` (FIG-3837, ruling D5): the engine's session shift is the only
 //! executor of a turn, and a host's submission executes none of it.
 //!
 //! A host submits from its own Restate handler through `send()` and waits on
 //! its journal (`accept_restate`, `outcome_restate`). The law holds the turn's
 //! model call on a barrier and reads the double's journals while it is held:
-//! the turn's work (drive admission, the root's steps, the model call) is
+//! the turn's work (shift admission, the run's steps, the model call) is
 //! journaled only on the engine's own invocations, never on the host's, whose
 //! journal holds its binding steps alone. Once released, the turn ran exactly
-//! once: one model call, one root invocation, one applied input.
+//! once: one model call, one run invocation, one applied input.
 //!
-//! Before the cutover a host could lend the drive its handler's controller
+//! Before the cutover a host could lend the shift its handler's controller
 //! (`stream_to_with_effects(.., &controller)`, #2325's `engine_scoped`): the
-//! drive's admission and root then ran on the host's journal while the
-//! acceptance scheduled the engine's own drive of the same session, so two
-//! drives of one session were in flight at once.
+//! shift's admission and run then ran on the host's journal while the
+//! acceptance scheduled the engine's own shift of the same session, so two
+//! shifts of one session were in flight at once.
 
 #![expect(
     clippy::expect_used,
@@ -33,7 +33,7 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::testing::wait_until;
 use lash_restate_test::{
-    RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
+    RestateTestBackend, SESSION_SHIFT_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::endpoint::Endpoint;
@@ -54,7 +54,7 @@ struct Barrier {
 fn core(backend: &RestateTestBackend, barrier: &Arc<Barrier>) -> lash::LashCore {
     let barrier = Arc::clone(barrier);
     let provider = lash_core::testing::TestProvider::builder()
-        .kind("one-driver")
+        .kind("one-SessionShifts")
         .complete(move |_request: LlmRequest| {
             let barrier = Arc::clone(&barrier);
             async move {
@@ -87,7 +87,7 @@ fn core(backend: &RestateTestBackend, barrier: &Arc<Barrier>) -> lash::LashCore 
         )
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-test",
-            "one-driver",
+            "one-SessionShifts",
         ))
         .expect("build the lash core")
 }
@@ -105,8 +105,8 @@ impl OneDriverHost for Host {
     async fn run(&self, ctx: WorkflowContext<'_>) -> HandlerResult<bool> {
         let outcome = self
             .session
-            .send(lash::TurnInput::text("drive me once"))
-            .id("one-driver-root")
+            .send(lash::TurnInput::text("shift me once"))
+            .id("one-SessionShifts-run")
             .accept_restate(&ctx)
             .await?
             .outcome_restate(
@@ -138,9 +138,9 @@ fn journaled_steps(backend: &RestateTestBackend, service: &str) -> Vec<(String, 
         .collect()
 }
 
-/// The root's `run` invocations and their steps: its scope close runs on the
+/// The run's `run` invocations and their steps: its scope close runs on the
 /// same key's `close` handler, which runs no turn (FIG-4035).
-fn root_runs(backend: &RestateTestBackend) -> Vec<(String, Vec<String>)> {
+fn run_executions(backend: &RestateTestBackend) -> Vec<(String, Vec<String>)> {
     journaled_steps(backend, TURN_DRIVER_SERVICE)
         .into_iter()
         .filter(|(target, _)| target.ends_with("/run"))
@@ -157,7 +157,7 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
         .expect("build the Restate test backend");
     let barrier = Arc::new(Barrier::default());
     let core = core(&backend, &barrier);
-    let session = created_session(&core, "one-driver")
+    let session = created_session(&core, "one-SessionShifts")
         .await
         .open()
         .await
@@ -189,7 +189,7 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
         barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
-    // Give a second driver every chance to start while the first is held.
+    // Give a second `SessionShifts` every chance to start while the first is held.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let host = journaled_steps(&backend, HOST);
@@ -204,15 +204,15 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
             "the host {target} executed the turn's steps {foreign:?}"
         );
     }
-    let engine = root_runs(&backend);
+    let engine = run_executions(&backend);
     assert_eq!(
         engine.len(),
         1,
-        "exactly one root invocation runs the turn: {engine:?}"
+        "exactly one run invocation runs the turn: {engine:?}"
     );
     assert!(
-        !journaled_steps(&backend, SESSION_DRIVER_SERVICE).is_empty(),
-        "the engine's session drive admitted the turn"
+        !journaled_steps(&backend, SESSION_SHIFT_SERVICE).is_empty(),
+        "the engine's session shift admitted the turn"
     );
     assert_eq!(barrier.most_in_flight.load(Ordering::SeqCst), 1);
 
@@ -233,9 +233,9 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
         1
     );
     assert_eq!(
-        root_runs(&backend).len(),
+        run_executions(&backend).len(),
         1,
-        "no second root invocation ran the turn again"
+        "no second run invocation ran the turn again"
     );
 }
 

@@ -226,7 +226,7 @@ fn park_list_events_and_redrive_preserve_the_park_token() {
                     .open()
                     .await
                     .unwrap()
-                    .root("operator-park")
+                    .run("operator-park")
                     .outcome()
                     .await
                     .unwrap();
@@ -318,7 +318,7 @@ fn stalled_delivery_listing_and_rearm_use_the_owning_ledger() {
         let h = OperatorHarness::new(false, false).await;
         let hold = h
             .double
-            .hold_session_drive(&h.state.current_session_id())
+            .hold_session_shift(&h.state.current_session_id())
             .await;
         let session = h
             .state
@@ -517,7 +517,7 @@ fn command_submit_settle_withdraw_and_compact_preserve_receipts() {
         let h = OperatorHarness::new(true, false).await;
         let hold = h
             .double
-            .hold_session_drive(&h.state.current_session_id())
+            .hold_session_shift(&h.state.current_session_id())
             .await;
         let withdrawn = h.ok("POST", &h.session_path("/commands"), Some(json!({"id":"withdraw-first","command":{"kind":"refresh_tool_catalog","reason":"withdrawn"}}))).await;
         assert_eq!(

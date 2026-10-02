@@ -1,7 +1,7 @@
 use super::{LawBackend, law_session_store};
 use crate::*;
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, LlmRole, LlmToolChoice};
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
@@ -211,7 +211,7 @@ pub async fn attachment_materialization_turn_witnesses(
                         .await
                         .expect("runtime");
                         let result = runtime
-                            .drive_turn(
+                            .execute_turn(
                                 input,
                                 TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                             )

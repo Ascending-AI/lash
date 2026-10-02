@@ -7,7 +7,7 @@
 
 use super::effect::{RecordingEffectController, host_with_effect_recorder, scoped_test_turn};
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 use lash_sansio::sync::MutexExt;
 
@@ -119,12 +119,12 @@ fn journaled_raw_completion(recorder: &RecordingEffectController) -> LlmResponse
         .expect("phase 1's journaled outcome is the raw provider completion, never a hook error")
 }
 
-/// One physical drive of the same logical turn.
+/// One physical shift of the same logical turn.
 ///
-/// The input's trace id is the turn id, so a second drive re-sends the same
-/// input under the same source key and replays the same admission and root
-/// journal entries, which is what the engine's redrive of the root is.
-async fn drive_turn(
+/// The input's trace id is the turn id, so a second shift re-sends the same
+/// input under the same source key and replays the same admission and run
+/// journal entries, which is what the engine's redrive of the run is.
+async fn execute_turn(
     runtime: &mut LashRuntime,
     backend: &lash_core::Backend,
     recorder: &RecordingEffectController,
@@ -133,7 +133,7 @@ async fn drive_turn(
     let mut input = TurnInput::text("produce a completion");
     input.trace_turn_id = Some(turn_id.clone());
     runtime
-        .drive_turn(
+        .execute_turn(
             input,
             lash_core::facade_support::TurnOptions::new(
                 CancellationToken::new(),
@@ -164,7 +164,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
     )
     .await;
 
-    let failed = drive_turn(
+    let failed = execute_turn(
         &mut runtime,
         &backend,
         &recorder,
@@ -203,7 +203,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
         "an incomplete derivation must not be sealed into phase 2's entry"
     );
 
-    let redriven = drive_turn(
+    let redriven = execute_turn(
         &mut runtime,
         &backend,
         &recorder,
@@ -246,7 +246,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
     )
     .await;
 
-    let crashed = drive_turn(
+    let crashed = execute_turn(
         &mut runtime,
         &backend,
         &recorder,
@@ -268,7 +268,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
         "phase 1 was durable before the crash window opened"
     );
 
-    let redriven = drive_turn(
+    let redriven = execute_turn(
         &mut runtime,
         &backend,
         &recorder,
@@ -306,7 +306,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
     )
     .await;
 
-    let first = drive_turn(
+    let first = execute_turn(
         &mut runtime,
         &backend,
         &recorder,
@@ -349,7 +349,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
         host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
-    let replayed = drive_turn(
+    let replayed = execute_turn(
         &mut redriven_runtime,
         &backend,
         &recorder,
@@ -537,7 +537,7 @@ async fn phase_two_on_another_worker_derives_from_the_journaled_stream_state() {
         host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
-    drive_turn(&mut streaming_worker, &backend, &recorder, &turn_id)
+    execute_turn(&mut streaming_worker, &backend, &recorder, &turn_id)
         .await
         .expect_err("the streaming worker dies between the phases");
     drop(streaming_worker);
@@ -549,7 +549,7 @@ async fn phase_two_on_another_worker_derives_from_the_journaled_stream_state() {
         host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
-    let redriven = drive_turn(&mut other_worker, &backend, &recorder, &turn_id)
+    let redriven = execute_turn(&mut other_worker, &backend, &recorder, &turn_id)
         .await
         .expect("another worker completes phase 2 from the journal");
 

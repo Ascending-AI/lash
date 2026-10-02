@@ -9,7 +9,7 @@
 //! One responsibility: carry a spending effect's journaled usage settlement
 //! into storage once, independently of the execution that journaled it. The
 //! model-call execution journals a one-way `settle` send to this object right
-//! after the spending effect's entry and before the drive sees the outcome.
+//! after the spending effect's entry and before the shift sees the outcome.
 //! A send is not a child of its caller, so no cancel, kill, park, fork,
 //! refusal or deletion of the caller recalls it; Restate retains its payload
 //! until the handler completes, and the handler's completion is the
@@ -46,7 +46,7 @@ use crate::compat::{Call, Reply};
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-core-store/src/usage_accounting.rs",
-///         cover(UsageSettlement, UsageAttemptFact, AttemptFactOutcome, RunAccounting),
+///         cover(UsageSettlement, UsageAttemptFact, AttemptFactOutcome, MeterAccounting),
 ///     ),
 ///     file(
 ///         path = "crates/lash-sansio/src/identity.rs",
@@ -65,7 +65,7 @@ pub struct UsageAccountingSettle {
     pub settlement: UsageSettlement,
 }
 
-/// Resolve the open runs of one killed or lost execution of the owner.
+/// Resolve the open meters of one killed or lost execution of the owner.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UsageExecutionRetirement {
@@ -134,7 +134,7 @@ pub(crate) fn usage_accounting_object_key(owner: &RuntimeOwner) -> String {
 pub trait LashUsageAccounting {
     /// Project one settlement: one SQL transaction.
     async fn settle(call: Call<UsageAccountingSettle>) -> HandlerResult<Reply<()>>;
-    /// Resolve a killed or lost execution's open runs
+    /// Resolve a killed or lost execution's open meters
     /// `unknown(execution_ended)`, after every settle it issued.
     async fn retire_execution(call: Call<UsageExecutionRetirement>) -> HandlerResult<Reply<u64>>;
     /// Retire the owner, after every settle its executions issued.
@@ -199,7 +199,7 @@ impl LashUsageAccounting for LashUsageAccountingImpl {
         let store = self.store()?;
         // A store fault retries without end: a projection waits out a
         // database outage and is never given up. A conflict is answered, not
-        // retried: it is marked on the runs in SQL.
+        // retried: it is marked on the meters in SQL.
         project_usage_settlement(store.as_ref(), &settlement, now_ms())
             .await
             .map_err(|error| retryable("settle", error))?;
@@ -248,7 +248,7 @@ impl LashUsageAccounting for LashUsageAccountingImpl {
 
 /// The continuation's handler options: a projection waits out any outage.
 /// It is never killed by policy, because a settle that stopped retrying
-/// would leave its run open forever. The attempt budget is the largest the
+/// would leave its meter open forever. The attempt budget is the largest the
 /// discovery document carries (a `u32`), about eight thousand years at the
 /// minute-long cap, and reaching it pauses the invocation with its request
 /// kept, never drops it.
@@ -316,7 +316,7 @@ pub(crate) async fn retire_usage_execution(
         .await
 }
 
-/// The journal key of `scope`, as a usage run records it.
+/// The journal key of `scope`, as a usage meter records it.
 pub(crate) fn execution_scope_key(
     scope: &lash_core::ExecutionScope,
 ) -> Result<String, lash_core::RuntimeError> {
@@ -331,17 +331,17 @@ pub(crate) fn execution_scope_key(
         })
 }
 
-/// Resolve the open runs of a root's killed or lost turn execution: its
-/// session owns every run the execution admitted under the root's turn
-/// scope. A follow-on turn of the root that ran under a scope of its own
+/// Resolve the open meters of a run's killed or lost turn execution: its
+/// session owns every meter the execution admitted under the run's turn
+/// scope. A follow-on turn of the run that ran under a scope of its own
 /// resolves when the session is drained.
-pub(crate) async fn retire_root_usage(
+pub(crate) async fn retire_run_usage(
     ingress: &crate::RestateIngressClient,
     namespace: &crate::RestateNamespace,
     session: &lash_core::SessionId,
-    root: &lash_core::TurnId,
+    run: &lash_core::TurnId,
 ) -> Result<u64, lash_core::engine::EngineRefusal> {
-    let scope = lash_core::ExecutionScope::turn(session.clone(), root.clone());
+    let scope = lash_core::ExecutionScope::turn(session.clone(), run.clone());
     let key = execution_scope_key(&scope).map_err(|error| {
         lash_core::engine::EngineRefusal::from(lash_core::PluginError::Runtime(error))
     })?;
@@ -355,7 +355,7 @@ pub(crate) async fn retire_root_usage(
     .map_err(crate::session_control::refusal)
 }
 
-/// Resolve the open runs of a process's lost execution under its process
+/// Resolve the open meters of a process's lost execution under its process
 /// scope. A process runtime spends under its own owner only: it runs in no
 /// session of its own.
 pub(crate) async fn retire_process_usage(

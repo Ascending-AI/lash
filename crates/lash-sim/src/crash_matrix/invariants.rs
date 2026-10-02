@@ -1,19 +1,19 @@
 //! The end-state invariants every crash-matrix case must reach:
 //!
-//! 1. **Exactly once.** Every accepted input was driven exactly once: its root
+//! 1. **Exactly once.** Every accepted input was executed exactly once: its run
 //!    has terminal evidence, the committed transcript carries its user
 //!    message once and the answer to it once, and no ingress row is left
-//!    open. No loss, no double root.
+//!    open. No loss, no double run.
 //! 2. **Settled or stalled.** Every obligation is settled, or stalled with a
 //!    typed reason: each [`ObligationProbe`] reports nothing unsettled.
 //! 3. **No orphan.** No child process outlives its ended parent scope
 //!    uncancelled.
-//! 4. **Scopes closed.** Every terminal root the case names has its scope
+//! 4. **Scopes closed.** Every terminal run the case names has its scope
 //!    closed: its parent-end plan is recorded and settled, and its
 //!    scope-close obligation (ADR 0109 §3) is delivered or stalled typed.
 //! 5. **Deleted.** Every session the host asked to delete is deleted.
-//! 6. **Not wedged.** No lash drive of a live session is paused or left
-//!    running, and a fresh input sent after recovery is driven
+//! 6. **Not wedged.** No lash shift of a live session is paused or left
+//!    running, and a fresh input sent after recovery is executed
 //!    ([`probe_live_sessions`]).
 //! 7. **Detected in bound.** The first tick at which 1–6 hold comes within
 //!    the cell's ADR 0109 §1.8 bound, in sim time (checked by the case
@@ -30,32 +30,32 @@ use super::world::CrashWorld;
 
 const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::MIN.saturating_add(255);
 
-/// The text of the input a case sends as root `root`. The token is
+/// The text of the input a case sends as run `run`. The token is
 /// terminated, so inputs a claim batches into one user message stay
 /// countable one by one.
 #[must_use]
-pub fn input_text(root: &str) -> String {
-    format!("input:{root};")
+pub fn input_text(run: &str) -> String {
+    format!("input:{run};")
 }
 
-/// The answer the scripted model gives for [`input_text`]`(root)` in the
+/// The answer the scripted model gives for [`input_text`]`(run)` in the
 /// user message it answers.
 #[must_use]
-pub fn answer_text(root: &str) -> String {
-    format!("answer:{root};")
+pub fn answer_text(run: &str) -> String {
+    format!("answer:{run};")
 }
 
-/// The roots named by every [`input_text`] token in `text`, in order.
+/// The runs named by every [`input_text`] token in `text`, in order.
 #[must_use]
-pub fn input_roots(text: &str) -> Vec<String> {
+pub fn input_runs(text: &str) -> Vec<String> {
     text.match_indices("input:")
         .filter_map(|(at, _)| {
             let rest = &text[at + "input:".len()..];
             let end = rest.find(';')?;
-            let root = &rest[..end];
-            root.chars()
+            let run = &rest[..end];
+            run.chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                .then(|| root.to_owned())
+                .then(|| run.to_owned())
         })
         .collect()
 }
@@ -64,7 +64,7 @@ pub fn input_roots(text: &str) -> Vec<String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AcceptedInput {
     pub session: SessionId,
-    pub root: TurnId,
+    pub run: TurnId,
 }
 
 /// A child process registered to live until `parent` ends.
@@ -88,7 +88,7 @@ pub struct Expected {
     pub children: Vec<ChildOf>,
     pub closed_scopes: Vec<ScopeId>,
     pub deleted_sessions: Vec<SessionId>,
-    /// Sessions the host closed: no drive of theirs may stay live.
+    /// Sessions the host closed: no shift of theirs may stay live.
     pub closed_sessions: Vec<SessionId>,
     pub live_sessions: Vec<SessionId>,
     pub custom: Vec<(&'static str, CustomCheck)>,
@@ -275,7 +275,7 @@ impl ObligationProbe for TurnProbe {
 }
 
 /// Accepted inputs whose `Ingress` obligation (S8-I, ADR 0109 §3) is due or
-/// claimed: the drive's claim of the row delivers it, so an input the end
+/// claimed: the shift's claim of the row delivers it, so an input the end
 /// state drove owes nothing. A deleted session's rows left with it, and a
 /// stalled obligation carries its reason, typed.
 struct IngressObligationProbe;
@@ -298,7 +298,7 @@ impl ObligationProbe for IngressObligationProbe {
         for input in &expected.inputs {
             let item = lash_core::PendingTurnInputDraft::keyed_input_id(
                 &input.session,
-                input.root.as_str(),
+                input.run.as_str(),
             );
             let id = lash_core::store::ObligationKey::Ingress {
                 session_id: input.session.clone(),
@@ -316,8 +316,8 @@ impl ObligationProbe for IngressObligationProbe {
                     Ok(SessionLookup::Deleted)
                 ) => {}
                 state => unsettled.push(format!(
-                    "input `{}` of `{}` owes its drive: its ingress obligation is {state:?}",
-                    input.root, input.session
+                    "input `{}` of `{}` owes its shift: its ingress obligation is {state:?}",
+                    input.run, input.session
                 )),
             }
         }
@@ -583,12 +583,12 @@ async fn check_inputs(world: &CrashWorld, expected: &Expected, violations: &mut 
         if expected.deleted_sessions.contains(&input.session) {
             continue;
         }
-        let root = input.root.as_str();
-        // The input's own root is evidence for the report, not the
+        let run = input.run.as_str();
+        // The input's own run is evidence for the report, not the
         // invariant: a claim batches inputs accepted before it ran into the
-        // head's root, so a batched input never gets a root of its own.
+        // head's run, so a batched input never gets a run of its own.
         let terminal = factory
-            .root_terminal(&input.session, &input.root)
+            .run_terminal(&input.session, &input.run)
             .await
             .ok()
             .flatten();
@@ -597,16 +597,16 @@ async fn check_inputs(world: &CrashWorld, expected: &Expected, violations: &mut 
                 let asked: usize = messages
                     .iter()
                     .filter(|(role, _)| role == "user")
-                    .map(|(_, text)| mentions(text, &input_text(root)))
+                    .map(|(_, text)| mentions(text, &input_text(run)))
                     .sum();
                 let answered: usize = messages
                     .iter()
                     .filter(|(role, _)| role == "assistant")
-                    .map(|(_, text)| mentions(text, &answer_text(root)))
+                    .map(|(_, text)| mentions(text, &answer_text(run)))
                     .sum();
                 if asked != 1 || answered != 1 {
                     violations.push(format!(
-                        "input `{root}` of `{}` committed {asked} time(s) and was answered {answered} time(s); exactly once each is required (terminal: {:?}; transcript: {:?})",
+                        "input `{run}` of `{}` committed {asked} time(s) and was answered {answered} time(s); exactly once each is required (terminal: {:?}; transcript: {:?})",
                         input.session,
                         terminal.as_ref().map(|terminal| (terminal.kind(), &terminal.cause)),
                         messages
@@ -684,18 +684,18 @@ async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut 
         .obligation_ledger(ObligationKind::ScopeClose);
     let factory = world.backend().session_store_factory();
     for scope in &expected.closed_scopes {
-        // A root with terminal evidence owes its scope close as an ADR 0109
-        // obligation on its root row: it must be delivered, or stalled typed.
+        // A run with terminal evidence owes its scope close as an ADR 0109
+        // obligation on its run row: it must be delivered, or stalled typed.
         if let Some(lash_core::EffectOpener::Turn {
             session_id,
             turn_id,
         }) = scope.opener()
         {
-            match factory.root_terminal(session_id, turn_id).await {
+            match factory.run_terminal(session_id, turn_id).await {
                 Ok(Some(_)) => {
                     let id = lash_core::store::ObligationKey::ScopeClose {
                         session_id: session_id.clone(),
-                        root: turn_id.clone(),
+                        run: turn_id.clone(),
                     }
                     .id();
                     match scope_closes.state(&id).await {
@@ -705,7 +705,7 @@ async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut 
                         // scope close it owed (ADR 0109 §4).
                         Ok(None) if matches!(factory.lookup_session(session_id).await, Ok(SessionLookup::Deleted)) => {}
                         Ok(state) => violations.push(format!(
-                            "the scope-close obligation `{id}` of terminal root `{scope}` is {state:?}, neither delivered nor stalled"
+                            "the scope-close obligation `{id}` of terminal run `{scope}` is {state:?}, neither delivered nor stalled"
                         )),
                         Err(error) => {
                             violations.push(format!("read the scope-close obligation `{id}`: {error}"));
@@ -741,7 +741,7 @@ async fn check_deletions(world: &CrashWorld, expected: &Expected, violations: &m
     }
 }
 
-/// No lash drive of a live session is paused, backing off, or running.
+/// No lash shift of a live session is paused, backing off, or running.
 async fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
     if expected.live_sessions.is_empty()
         && expected.deleted_sessions.is_empty()
@@ -750,9 +750,9 @@ async fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut 
         return;
     }
     for view in world.invocations().await {
-        let lash_drive =
+        let lash_shift =
             view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/");
-        if !lash_drive || view.status == "completed" || view.status == "suspended" {
+        if !lash_shift || view.status == "completed" || view.status == "suspended" {
             continue;
         }
         if expected
@@ -763,7 +763,7 @@ async fn check_engine(world: &CrashWorld, expected: &Expected, violations: &mut 
             .any(|session| view.target.contains(session.as_str()))
         {
             violations.push(format!(
-                "engine drive {} is {} after {} attempt(s); last failure {:?}",
+                "engine shift {} is {} after {} attempt(s); last failure {:?}",
                 view.target, view.status, view.attempts, view.last_failure
             ));
         }
@@ -800,7 +800,7 @@ pub async fn check(world: &CrashWorld, expected: &Expected) -> Vec<String> {
     violations
 }
 
-/// Invariant 6's second half: each live session drives a fresh input sent
+/// Invariant 6's second half: each live session shifts a fresh input sent
 /// after recovery, within `ticks` recovery ticks. Returns the violations.
 pub async fn probe_live_sessions(
     world: &CrashWorld,
@@ -809,8 +809,8 @@ pub async fn probe_live_sessions(
 ) -> Vec<String> {
     let mut violations = Vec::new();
     for session in &expected.live_sessions {
-        let root = format!("probe-{}", world.seed() % 100_000);
-        if let Err(error) = super::cases::send(world, session, &root).await {
+        let run = format!("probe-{}", world.seed() % 100_000);
+        if let Err(error) = super::cases::send(world, session, &run).await {
             violations.push(format!(
                 "`{session}` refused a fresh input after recovery: {error}"
             ));
@@ -819,7 +819,7 @@ pub async fn probe_live_sessions(
         let probe = Expected {
             inputs: vec![AcceptedInput {
                 session: session.clone(),
-                root: TurnId::fixture(root.as_str()),
+                run: TurnId::fixture(run.as_str()),
             }],
             ..Expected::default()
         };
@@ -843,7 +843,7 @@ pub async fn probe_live_sessions(
             let mut last = Vec::new();
             check_inputs(world, &probe, &mut last).await;
             violations.push(format!(
-                "`{session}` is wedged: a fresh input sent after recovery was not driven within {ticks} tick(s): {last:?}"
+                "`{session}` is wedged: a fresh input sent after recovery was not executed within {ticks} tick(s): {last:?}"
             ));
         }
     }

@@ -201,14 +201,14 @@ impl SessionCommitStore for PostgresStore {
 
     async fn admit_session_state(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        require_drive_fence_tx(&mut tx, fence).await?;
+        require_shift_fence_tx(&mut tx, fence).await?;
         let version =
             read_session_state_version_tx(&mut tx, fence.session(), true, self.fence.fleet())
                 .await?;
@@ -216,13 +216,13 @@ impl SessionCommitStore for PostgresStore {
         Ok(lash_core_execution::store::SessionStateAdmission {
             session_id: fence.session().clone(),
             version,
-            drive_epoch: fence.epoch(),
+            shift_epoch: fence.epoch(),
         })
     }
 
     async fn retain_admission_base(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
@@ -230,7 +230,7 @@ impl SessionCommitStore for PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        require_drive_fence_tx(&mut tx, fence).await?;
+        require_shift_fence_tx(&mut tx, fence).await?;
         sqlx::query(session_sql().meta.retain_admission_base.sql())
             .bind(fence.session().as_str())
             .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
@@ -243,7 +243,7 @@ impl SessionCommitStore for PostgresStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        fence: &lash_core_execution::store::DriveFence,
+        fence: &lash_core_execution::store::ShiftFence,
         follow_on_turn_id: &lash_core_execution::TurnId,
         recovering: &lash_core_execution::engine::BuildGeneration,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
@@ -252,7 +252,7 @@ impl SessionCommitStore for PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        require_drive_fence_tx(&mut tx, fence).await?;
+        require_shift_fence_tx(&mut tx, fence).await?;
         let session_id = fence.session();
         let not_pending = || StoreError::FollowOnNotPending {
             session_id: session_id.clone(),
@@ -277,16 +277,16 @@ impl SessionCommitStore for PostgresStore {
         if updated.rows_affected() != 1 {
             return Err(not_pending());
         }
-        // The recovering build holds the root from here on. A follow-on whose
-        // root was never admitted through a drive has no stamp to move.
+        // The recovering build holds the run from here on. A follow-on whose
+        // run was never admitted through a shift has no stamp to move.
         sqlx::query(
-            crate::session_roots::session_roots_sql()
-                .roots
+            crate::session_runs::session_runs_sql()
+                .runs
                 .restamp_admitted_generation
                 .sql(),
         )
         .bind(session_id.as_str())
-        .bind(raised.root_turn_id().as_str())
+        .bind(raised.run_turn_id().as_str())
         .bind(recovering.as_str())
         .execute(&mut **tx)
         .await
@@ -452,13 +452,13 @@ impl PostgresStore {
                 session_id: commit.session_id.clone(),
             });
         }
-        // A root's commit is fenced by the admission its root was sealed
+        // A run's commit is fenced by the admission its run was sealed
         // under: a successor's seal refuses it before anything is written
         // (ADR 0105 §2). A commit already stored still answers from its
-        // receipt below, since a drive that runs several roots in one journal
-        // replays an earlier root's commit after a later root's seal
+        // receipt below, since a shift that runs several runs in one journal
+        // replays an earlier run's commit after a later run's seal
         // (FIG-4498).
-        let superseded = super::drive_epoch::commit_fence_superseded_tx(&mut tx, commit).await?;
+        let superseded = super::shift_epoch::commit_fence_superseded_tx(&mut tx, commit).await?;
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -466,9 +466,9 @@ impl PostgresStore {
             load_session_head_meta_tx(&mut tx, &commit.session_id, false, encoded_under).await?;
         planner.validate_node_derivation()?;
         {
-            // A root's commit settles its park (FIG-3586, FIG-3600 S7) in the
+            // A run's commit settles its park (FIG-3586, FIG-3600 S7) in the
             // same round trip as its receipt read, whichever of its physical
-            // turns committed; another root's commit leaves it, and so does a
+            // turns committed; another run's commit leaves it, and so does a
             // commit under a superseded fence.
             let prior = sqlx::query(
                 session_sql()
@@ -480,9 +480,9 @@ impl PostgresStore {
             .bind(planner.operation_key())
             .bind(
                 commit
-                    .settled_park_root()
+                    .settled_park_run()
                     .filter(|_| superseded.is_none())
-                    .map(|root| root.as_str()),
+                    .map(|run| run.as_str()),
             )
             .fetch_optional(&mut **tx)
             .await
@@ -562,18 +562,18 @@ impl PostgresStore {
             return Err(superseded);
         }
         // The bound turn owns the head (FIG-4202): a write outside every
-        // drive is refused while a root, an owed follow-on or an open command
-        // owns it. The drive epoch's row lock, taken before the head's in the
+        // shift is refused while a run, an owed follow-on or an open command
+        // owns it. The shift epoch's row lock, taken before the head's in the
         // order a fenced commit takes them, serializes the read with every
         // admission, which is fenced. A replayed receipt above answered its
         // first outcome already; the plan's own refusals (a follow-on the
         // commit would drop, a moved head) answer before the ownership's.
         let head_ownership = if lash_core_execution::store::head_write_needs_ownership(
-            commit.drive_fence.is_some(),
+            commit.shift_fence.is_some(),
             existing.as_ref().is_some_and(|head| !head.is_created()),
         ) {
-            match super::drive_epoch::drive_epoch_locked_tx(&mut tx, &commit.session_id).await {
-                Ok(_) | Err(StoreError::DriveEpochUnavailable { .. }) => {}
+            match super::shift_epoch::shift_epoch_locked_tx(&mut tx, &commit.session_id).await {
+                Ok(_) | Err(StoreError::ShiftEpochUnavailable { .. }) => {}
                 Err(error) => return Err(error),
             }
             let owed_follow_on = lash_core_execution::store::follow_on_owning_the_head(
@@ -583,7 +583,7 @@ impl PostgresStore {
                 commit.pending_follow_on.as_ref(),
             );
             Some(
-                crate::session_roots::head_ownership_facts_conn(
+                crate::session_runs::head_ownership_facts_conn(
                     &mut tx,
                     &commit.session_id,
                     owed_follow_on,
@@ -692,7 +692,7 @@ impl PostgresStore {
                     ),
                     session_id: commit.session_id.clone(),
                     config: commit.config.clone(),
-                    published_by_drive: false,
+                    published_by_shift: false,
                 },
                 0,
                 None,
@@ -1000,7 +1000,7 @@ impl PostgresStore {
         {
             retire_unreachable_ancestry_tx(&mut tx, old_leaf_node_id).await?;
         }
-        // Every row the commit names is settled under the root that admitted
+        // Every row the commit names is settled under the run that admitted
         // it, each verdict taken under the row's lock (FIG-3927).
         let turn_cancel_input_outcome =
             super::ingress_settlement::settle_commit_ingress_tx(&mut tx, commit, now).await?;
@@ -1015,10 +1015,10 @@ impl PostgresStore {
             now,
         )
         .await?;
-        // The root's final commit writes its terminal evidence in this
+        // The run's final commit writes its terminal evidence in this
         // transaction (FIG-3600 S7).
-        if let Some(write) = commit.root_terminal.as_deref().cloned() {
-            crate::session_roots::write_root_terminal_conn(
+        if let Some(write) = commit.run_terminal.as_deref().cloned() {
+            crate::session_runs::write_run_terminal_conn(
                 &mut tx,
                 &write.into_terminal(commit.session_id.clone(), plan.next_head_revision(), now),
             )
@@ -1026,7 +1026,7 @@ impl PostgresStore {
         }
         // `until_gc` releases nothing here and reads no pin. The other
         // policies release what this publication moved out of their window,
-        // once the root's terminal names it.
+        // once the run's terminal names it.
         if retention.releases_at_commit() {
             crate::revisions::release_unretained_tx(&mut tx, false, Some(&commit.session_id))
                 .await?;

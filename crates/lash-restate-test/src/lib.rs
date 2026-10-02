@@ -3,7 +3,7 @@
 //!
 //! It is a test double for the Restate *server*, not a second effect engine.
 //! The code under test is the real thing: lash-restate's services bound on a
-//! real `restate_sdk::endpoint::Endpoint`, driven through
+//! real `restate_sdk::endpoint::Endpoint`, executed through
 //! `Endpoint::handle` by synthetic invocation streams, with the pinned
 //! `restate-sdk-shared-core` VM running inside. What the double replaces is
 //! `restate-server`: [`RestateTestServer`] keeps each invocation's journal,
@@ -40,7 +40,7 @@ pub mod protocol;
 pub mod server;
 
 pub use backend::{
-    BackendError, HandlerAttempt, RestateTestBackend, SESSION_DRIVER_SERVICE, SeparateBuild,
+    BackendError, HandlerAttempt, RestateTestBackend, SESSION_SHIFT_SERVICE, SeparateBuild,
     TURN_DRIVER_SERVICE, backend, backend_with, backend_with_build, backend_with_segment_budget,
     backend_with_store_set, backend_with_store_set_and_segment_budget,
 };

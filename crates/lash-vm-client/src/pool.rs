@@ -14,7 +14,7 @@ use crate::{PoolConfig, PoolError};
 use lash_vm_protocol::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Parent-owned accounting. Carry this same value across substrate re-drives
+/// Parent-owned accounting. Carry this same value across substrate redrives
 /// and replacement checkouts. The pool never rewinds it or retries execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionBudget(Arc<Mutex<BudgetTotals>>);

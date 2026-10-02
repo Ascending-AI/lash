@@ -574,10 +574,10 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     let metadata_only = core.session("metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
     assert!(metadata_only.pending_turn_inputs().await?.is_empty());
-    // A facade send asks the engine to drive; the pending input below must
+    // A facade send asks the engine to work; the pending input below must
     // stay pending for the read, so it is written through the store port
     // instead (the send path's enqueue event is not under test here), which
-    // asks no drive.
+    // asks no shift.
     let accepted = lash_core::runtime::live_session_view(
         &double.lash_backend().session_store_factory(),
         &SessionId::from("metadata-only"),
@@ -605,12 +605,12 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     );
 
     // Checkpointed: a committed turn behind it. The send needs the engine's
-    // queued-work port, so this leg runs on a second core whose driver is
+    // queued-work port, so this leg runs on a second core whose `SessionShifts` is
     // dropped before the pending reads below.
-    let drive_core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+    let shift_core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = drive_core
+    let session = shift_core
         .session("checkpointed")
         .created()
         .await
@@ -621,7 +621,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
         .output()
         .await?;
     drop(session);
-    drop(drive_core);
+    drop(shift_core);
     let checkpointed = core.session("checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
     assert!(checkpointed.read().await?.is_some());
@@ -674,10 +674,10 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     crate::tests::create_catalog_session(&core, "sqlite-metadata-only").await?;
     let metadata_only = core.session("sqlite-metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
-    // Acceptance does not keep an input pending: hold its engine drive for
+    // Acceptance does not keep an input pending: hold its engine shift for
     // the queue read, as well as the checkpointed queue read below.
-    let _metadata_drive = double
-        .hold_session_drive(&SessionId::from("sqlite-metadata-only"))
+    let _metadata_shift = double
+        .hold_session_shift(&SessionId::from("sqlite-metadata-only"))
         .await;
     metadata_only
         .send(TurnInput::text("queued on sqlite metadata"))
@@ -697,11 +697,11 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .output()
         .await?;
     drop(session);
-    // The answer precedes scope cleanup. Finish that drive before holding
+    // The answer precedes scope cleanup. Finish that shift before holding
     // the next input pending through the queue read and physical deletion.
-    settle_session_drive(&core, "sqlite-checkpointed").await;
-    let _checkpointed_drive = double
-        .hold_session_drive(&SessionId::from("sqlite-checkpointed"))
+    settle_session_shift(&core, "sqlite-checkpointed").await;
+    let _checkpointed_shift = double
+        .hold_session_shift(&SessionId::from("sqlite-checkpointed"))
         .await;
     let checkpointed = core.session("sqlite-checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
@@ -748,9 +748,9 @@ async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() ->
         .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "traced-send").await?;
     let durable = core.session("traced-send").durable().await?;
-    // Acceptance does not keep an input pending: hold its engine drive.
+    // Acceptance does not keep an input pending: hold its engine shift.
     let _drive = double
-        .hold_session_drive(&SessionId::from("traced-send"))
+        .hold_session_shift(&SessionId::from("traced-send"))
         .await;
     let context = |producer: u8| {
         lash_core::TraceCarrier::parse_w3c(&format!("00-{producer:032x}-{producer:016x}-01"), None)
@@ -816,10 +816,10 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
     let cursor = session.observe().current_observation().cursor;
     // The enqueue must publish `Enqueued` yet stay pending for the cancel:
     // the engine claims admitted input on its own schedule, so the session's
-    // drive is held while the input is queued and cancelled.
+    // shift is held while the input is queued and cancelled.
     let _hold = held_double(&core)
         .expect("the core runs on its held double")
-        .hold_session_drive(&SessionId::from("durable-observation"))
+        .hold_session_shift(&SessionId::from("durable-observation"))
         .await;
 
     // A handle acquired from the core, not from the open session.
@@ -920,11 +920,11 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
         .await?;
 
     let recorded_parent_before = writer.parent_session_id().map(ToString::to_string);
-    // The engine drives an accepted input on its own schedule; hold the
-    // session's drive so the read below sees both writes still pending.
+    // The engine executes an accepted input on its own schedule; hold the
+    // session's shift so the read below sees both writes still pending.
     let hold = held_double(&core)
         .expect("the core runs on its held double")
-        .hold_session_drive(&session_id)
+        .hold_session_shift(&session_id)
         .await;
     let first = core.session(session_id.clone()).durable().await?;
     let second = core.session(session_id.clone()).durable().await?;
@@ -1160,7 +1160,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     // A core that carries the session's tool source, to persist tool state.
     // Its send needs the engine's queued-work port; the pending enqueue that
     // follows must stay pending, so it goes through the grantless core — the
-    // only core left without a driver once this one is dropped.
+    // only core left without a `SessionShifts` once this one is dropped.
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
@@ -1188,12 +1188,12 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     Box::pin(granted.close()).await?;
     drop(granting_core);
 
-    // The engine may still run a session drive the send or close scheduled —
-    // a reconcile, say — and under the double that drive's admit materialises
+    // The engine may still run a session shift the send or close scheduled —
+    // a reconcile, say — and under the double that shift's admit materialises
     // a runtime on the grantless core's session-work handle, landing after
-    // the counter baseline below. Gate the drive for the measurement window;
+    // the counter baseline below. Gate the shift for the measurement window;
     // the durable ops under test are store reads and never need it.
-    let _hold = double.hold_session_drive(&session_id).await;
+    let _hold = double.hold_session_shift(&session_id).await;
 
     let tool_state_before = persisted_tool_state_bytes(factory.as_ref(), &session_id).await?;
 
@@ -1249,8 +1249,8 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     counters.process_admissions.store(0, Ordering::SeqCst);
 
     // The FIG-3353 poll, through the Durable Session. The pending input is
-    // seeded through the store port, which asks no drive: a facade send
-    // would ask the engine to drive, and its claim would race the pending
+    // seeded through the store port, which asks no shift: a facade send
+    // would ask the engine to work, and its claim would race the pending
     // reads below.
     let durable = grantless_core.session(session_id.clone()).durable().await?;
     let queued = lash_core::runtime::live_session_view(&factory, &session_id)
@@ -1416,10 +1416,10 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         .open()
         .await?;
     // The engine claims an accepted row on its own schedule: hold the
-    // session's drive so the pre-claim read sees the row pending.
+    // session's shift so the pre-claim read sees the row pending.
     let hold = held_double(&core)
         .expect("the core runs on its held double")
-        .hold_session_drive(&session_id)
+        .hold_session_shift(&session_id)
         .await;
     let accepted = session
         .durable()
@@ -1461,7 +1461,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
             row.status,
             lash_core::runtime::PendingTurnInputReadStatus::Admitted { .. }
         ),
-        "the input the drain took must read as admitted to its root, got {:?}",
+        "the input the drain took must read as admitted to its run, got {:?}",
         row.status
     );
 
@@ -1513,8 +1513,8 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 
     // ...and `create()` is the explicit two-step's first half. The queued
     // input is seeded through the store port: a facade send would ask the
-    // engine to drive, racing the pending read below. A store-seeded row is
-    // never scheduled, so nothing claims it before the drive core below.
+    // engine to work, racing the pending read below. A store-seeded row is
+    // never scheduled, so nothing claims it before the shift core below.
     let durable = idle
         .session("created-then-queued")
         .create(crate::SessionCreation::root(mock_session_spec()))
@@ -1546,14 +1546,14 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 
     // The session a host creates this way is an ordinary session: opening it
     // runs the input that was waiting. The store-seeded row was never
-    // scheduled, so a second core supplies the drive that reconciles it.
-    let drive_core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+    // scheduled, so a second core supplies the shift that reconciles it.
+    let shift_core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    // `idle`'s created handle still holds a writer claim: the drive core's
+    // `idle`'s created handle still holds a writer claim: the shift core's
     // open races its release under the double.
     let session =
-        retry_when_claim_frees(|| drive_core.session("created-then-queued").open()).await?;
+        retry_when_claim_frees(|| shift_core.session("created-then-queued").open()).await?;
     let drained = session.attach(accepted.input_id.clone()).output().await?;
     assert_eq!(
         drained.assistant_message(),
@@ -1596,7 +1596,7 @@ async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Re
 
     let first = core.session("create-retried").create(creation()).await?;
     // Seeded through the store port: a facade send would ask the engine to
-    // drive, racing the pending read after the retry. A store-seeded row is
+    // shift, racing the pending read after the retry. A store-seeded row is
     // never scheduled, so nothing claims it.
     let accepted = lash_core::runtime::live_session_view(
         &core.store_factory,

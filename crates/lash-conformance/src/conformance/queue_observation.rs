@@ -60,7 +60,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         };
         let ops = crate::facade_support::DurableSessionOps::new(
             session_id.clone(),
-            lash_core::drive::IngressRelay::over_backend(
+            lash_core::shift::IngressRelay::over_backend(
                 &backend,
                 Arc::new(crate::NoSessionWork::new()),
                 backend.clock(),
@@ -249,7 +249,7 @@ pub async fn queue_publication_failure_preserves_committed_mutation(backend: cra
         });
         let ops = crate::facade_support::DurableSessionOps::new(
             id.clone(),
-            lash_core::drive::IngressRelay::over_backend(
+            lash_core::shift::IngressRelay::over_backend(
                 &backend,
                 Arc::new(crate::NoSessionWork::new()),
                 backend.clock(),
@@ -292,14 +292,14 @@ pub async fn queue_publication_failure_preserves_committed_mutation(backend: cra
 struct CountingQueueDriver(std::sync::atomic::AtomicUsize);
 #[async_trait::async_trait]
 impl crate::SessionWorkEngine for CountingQueueDriver {
-    fn schedule_drive(&self, _session: &SessionId, _request: crate::engine::DriveRequestId) {
+    fn schedule_shift(&self, _session: &SessionId, _request: crate::engine::ShiftRequestId) {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
-    fn install_session_driver(
+    fn install_session_shifts(
         &self,
-        driver: Arc<dyn crate::SessionDriver>,
-    ) -> Arc<dyn crate::SessionDriver> {
-        driver
+        shifts: Arc<dyn crate::SessionShifts>,
+    ) -> Arc<dyn crate::SessionShifts> {
+        shifts
     }
 }
 
@@ -311,9 +311,9 @@ pub async fn absent_or_deleted_durable_operations_emit_no_driver_wake<F, Fut>(
     F: Fn(crate::Backend, SessionId) -> Fut,
     Fut: std::future::Future<Output = (bool, bool, bool)>,
 {
-    let driver = Arc::new(CountingQueueDriver::default());
+    let shifts = Arc::new(CountingQueueDriver::default());
     let backend = crate::testing::runtime_helpers::LayeredBackend::over(backend)
-        .with_session_work(driver.clone())
+        .with_session_work(shifts.clone())
         .into_backend();
     let factory = backend.session_store_factory();
     for deleted in [false, true] {
@@ -336,7 +336,7 @@ pub async fn absent_or_deleted_durable_operations_emit_no_driver_wake<F, Fut>(
             exercise(backend.clone(), id.clone()).await,
             (false, false, false)
         );
-        assert_eq!(driver.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(shifts.0.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(matches!(
             factory
                 .lookup_session(&id)
@@ -356,8 +356,8 @@ pub async fn absent_or_deleted_durable_operations_emit_no_driver_wake<F, Fut>(
         .expect("admit positive control");
     assert_eq!(exercise(backend, id).await, (true, true, true));
     assert_eq!(
-        driver.0.load(std::sync::atomic::Ordering::SeqCst),
+        shifts.0.load(std::sync::atomic::Ordering::SeqCst),
         1,
-        "the witness sees real driver asks"
+        "the witness sees real `SessionShifts` asks"
     );
 }

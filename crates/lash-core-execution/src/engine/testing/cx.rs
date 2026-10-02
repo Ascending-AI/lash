@@ -1,27 +1,27 @@
 //! `LocalTestCx`: the engine-free local test context, and the single-thread
-//! executor that drives a drive future over it.
+//! executor that executes a shift future over it.
 //!
-//! The context records every operation a drive issues — its replay key, kind
-//! and canonical command bytes — into a [`DriveTranscript`], runs the
+//! The context records every operation a shift issues — its replay key, kind
+//! and canonical command bytes — into a [`ShiftTranscript`], runs the
 //! operation's body on a fresh run and journals the outcome, and on a replay
 //! serves the journaled outcome without running the body, after checking the
 //! reissued command against the journaled one.
 //!
-//! The executor is the wake rule. A drive may be resumed only by one of its
+//! The executor is the wake rule. A shift may be resumed only by one of its
 //! operations settling: the executor wakes an operation's waker itself, inside
-//! a marked region, and any other wake of the drive — a Tokio channel, a
+//! a marked region, and any other wake of the shift — a Tokio channel, a
 //! spawned task, a timer, a `yield_now`, a wake from another thread — fails the
-//! run as [`RunFailure::NonOpWake`]. A drive that is pending while no
+//! run as [`RunFailure::NonOpWake`]. A shift that is pending while no
 //! operation is in flight is awaiting something that is not an operation, and
 //! fails as [`RunFailure::NonOpAwait`]. This is Temporal's non-SDK-wake rule
 //! (TMPRL1100) and the engine-free generalization of the synchronous-wake
 //! tracker the Restate adapter guards its context futures with.
 //!
-//! Operation bodies are the execution side, not drive code. They run under a
+//! Operation bodies are the execution side, not shift code. They run under a
 //! Tokio runtime the executor owns, polled with a step waker that never reaches
-//! the drive: a body's own wakes, from any thread, only tell the executor the
-//! body has progressed. Drive code runs outside any runtime context, so a
-//! `tokio::spawn` or a Tokio timer in drive code fails loudly.
+//! the shift: a body's own wakes, from any thread, only tell the executor the
+//! body has progressed. Shift code runs outside any runtime context, so a
+//! `tokio::spawn` or a Tokio timer in shift code fails loudly.
 
 use std::cell::Cell;
 use std::fmt;
@@ -39,11 +39,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::schedule::{Schedule, Scheduler};
-use super::transcript::{DriveTranscript, TranscriptEntry, byte_difference};
+use super::transcript::{ShiftTranscript, TranscriptEntry, byte_difference};
 
 thread_local! {
     /// Set while the executor wakes a settled operation's waker: the one wake
-    /// of the drive that is caused by an operation.
+    /// of the shift that is caused by an operation.
     static OPERATION_WAKE: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -51,7 +51,7 @@ thread_local! {
 /// progress before it fails the run.
 pub const DEFAULT_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// One journaled operation: the command a drive issued and, once the body
+/// One journaled operation: the command a shift issued and, once the body
 /// settled, its outcome.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalEntry {
@@ -67,12 +67,12 @@ pub struct JournalEntry {
 
 /// The recorded history of one fresh run: what a replay is served from.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DriveJournal {
+pub struct ShiftJournal {
     /// Every operation the fresh run issued, in issue order.
     pub entries: Vec<JournalEntry>,
 }
 
-impl DriveJournal {
+impl ShiftJournal {
     /// Encode the journal for another worker.
     pub fn to_bytes(&self) -> Result<Vec<u8>, RunFailure> {
         serde_json::to_vec(self).map_err(|error| RunFailure::Codec {
@@ -140,16 +140,16 @@ impl fmt::Display for ReplayDivergence {
 pub enum RunFailure {
     /// A replayed command did not match its journal.
     Divergence(ReplayDivergence),
-    /// Something other than an operation woke the drive.
+    /// Something other than an operation woke the shift.
     NonOpWake { round: u64 },
-    /// The drive was pending while no operation was in flight: it awaited a
+    /// The shift was pending while no operation was in flight: it awaited a
     /// future that is not an operation.
     NonOpAwait { round: u64 },
     /// An operation body made no progress within the body timeout.
     BodyTimeout { key: String },
     /// A command, outcome or commit did not encode or decode.
     Codec { key: String, message: String },
-    /// The drive panicked.
+    /// The shift panicked.
     Panicked { message: String },
     /// The engine under test refused the run, in its own words.
     Engine { message: String },
@@ -161,18 +161,18 @@ impl fmt::Display for RunFailure {
             Self::Divergence(divergence) => write!(formatter, "replay divergence: {divergence}"),
             Self::NonOpWake { round } => write!(
                 formatter,
-                "round {round}: the drive was woken by something other than an operation"
+                "round {round}: the shift was woken by something other than an operation"
             ),
             Self::NonOpAwait { round } => write!(
                 formatter,
-                "round {round}: the drive is pending with no operation in flight; it awaits a \
+                "round {round}: the shift is pending with no operation in flight; it awaits a \
                  future that is not an operation"
             ),
             Self::BodyTimeout { key } => {
                 write!(formatter, "the body of `{key}` made no progress in time")
             }
             Self::Codec { key, message } => write!(formatter, "`{key}` did not encode: {message}"),
-            Self::Panicked { message } => write!(formatter, "the drive panicked: {message}"),
+            Self::Panicked { message } => write!(formatter, "the shift panicked: {message}"),
             Self::Engine { message } => write!(formatter, "the engine refused the run: {message}"),
         }
     }
@@ -184,10 +184,10 @@ impl std::error::Error for RunFailure {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunRecord {
     /// The run's command stream and commit bytes.
-    pub transcript: DriveTranscript,
+    pub transcript: ShiftTranscript,
     /// The run's journal: what it recorded on a fresh run, what it was served
     /// from on a replay.
-    pub journal: DriveJournal,
+    pub journal: ShiftJournal,
 }
 
 /// Whether a context records a fresh run or replays a journal.
@@ -196,7 +196,7 @@ pub enum CxMode {
     /// Run every body and journal its outcome.
     Fresh,
     /// Serve outcomes from this journal.
-    Replay(Arc<DriveJournal>),
+    Replay(Arc<ShiftJournal>),
 }
 
 /// The engine-free local test context. See the module documentation.
@@ -215,7 +215,7 @@ struct Shared {
 struct State {
     scheduler: Scheduler,
     slots: Vec<Slot>,
-    transcript: DriveTranscript,
+    transcript: ShiftTranscript,
     failure: Option<RunFailure>,
 }
 
@@ -234,9 +234,9 @@ enum SlotStatus {
     Running,
     /// The outcome is known and waits for delivery.
     Settled(String),
-    /// The drive received the outcome.
+    /// The shift received the outcome.
     Delivered(String),
-    /// The drive dropped the operation before its outcome was delivered.
+    /// The shift dropped the operation before its outcome was delivered.
     Dropped,
     /// The operation diverged from the journal; the run is over.
     Refused,
@@ -264,7 +264,7 @@ impl LocalTestCx {
                 state: Mutex::new(State {
                     scheduler: Scheduler::new(schedule),
                     slots: Vec::new(),
-                    transcript: DriveTranscript::default(),
+                    transcript: ShiftTranscript::default(),
                     failure: None,
                 }),
                 progress: Condvar::new(),
@@ -283,7 +283,7 @@ impl LocalTestCx {
     /// `body` runs and its outcome is journaled; on a replay the journaled
     /// outcome is served and `body` is dropped unpolled, unless the journal
     /// holds the command without an outcome, when the body runs live as an
-    /// engine would. Either way the drive receives the outcome decoded from its
+    /// engine would. Either way the shift receives the outcome decoded from its
     /// journaled bytes, so a fresh run and its replay see the same value.
     pub fn op<'a, C, T, F>(
         &'a self,
@@ -415,7 +415,7 @@ impl LocalTestCx {
         }
     }
 
-    /// Record the bytes the drive commits. A drive's commit is part of what
+    /// Record the bytes the shift commits. A shift's commit is part of what
     /// every run of it must repeat exactly.
     pub fn record_commit<C: Serialize + ?Sized>(&self, commit: &C) {
         let mut state = self.shared.state.lock_recover();
@@ -449,19 +449,19 @@ impl LocalTestCx {
         keys
     }
 
-    /// Drive `drive` to completion on this thread.
+    /// Shift `shift` to completion on this thread.
     ///
-    /// The drive may be `!Send`. It is polled only here, and resumed only when
+    /// The shift may be `!Send`. It is polled only here, and resumed only when
     /// one of its operations settles.
-    pub fn run<F: Future<Output = ()>>(&self, drive: F) -> Result<RunRecord, RunFailure> {
+    pub fn run<F: Future<Output = ()>>(&self, shift: F) -> Result<RunRecord, RunFailure> {
         let root = Arc::new(RootWake::default());
         let waker = Waker::from(Arc::clone(&root));
-        let mut drive = std::pin::pin!(drive);
+        let mut shift = std::pin::pin!(shift);
         let mut round: u64 = 0;
         loop {
             round += 1;
             let polled = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                drive.as_mut().poll(&mut Context::from_waker(&waker))
+                shift.as_mut().poll(&mut Context::from_waker(&waker))
             }));
             let ready = match polled {
                 Ok(poll) => poll.is_ready(),
@@ -484,7 +484,7 @@ impl LocalTestCx {
         }
     }
 
-    /// Wait until at least one operation can be delivered to the drive, then
+    /// Wait until at least one operation can be delivered to the shift, then
     /// wake the released operations in scheduling order.
     fn release_next(&self, round: u64) -> Result<(), RunFailure> {
         let mut state = self.shared.state.lock_recover();
@@ -529,7 +529,7 @@ impl LocalTestCx {
                 return Ok(());
             }
             if held {
-                // A held operation counts down one round per drive poll.
+                // A held operation counts down one round per shift poll.
                 return Ok(());
             }
             let Some(running) = running else {
@@ -561,7 +561,7 @@ impl LocalTestCx {
         let transcript = std::mem::take(&mut state.transcript);
         let journal = match &self.shared.mode {
             CxMode::Replay(journal) => journal.as_ref().clone(),
-            CxMode::Fresh => DriveJournal {
+            CxMode::Fresh => ShiftJournal {
                 entries: state
                     .slots
                     .iter()
@@ -591,7 +591,7 @@ impl LocalTestCx {
     }
 }
 
-/// The drive's own waker. Every wake that is not an operation's is recorded
+/// The shift's own waker. Every wake that is not an operation's is recorded
 /// as foreign and fails the run.
 #[derive(Default)]
 struct RootWake {
@@ -610,7 +610,7 @@ impl Wake for RootWake {
     }
 }
 
-/// The waker an operation body is polled with. It never reaches the drive: it
+/// The waker an operation body is polled with. It never reaches the shift: it
 /// marks the body as progressed and wakes the executor.
 struct StepWake {
     shared: Arc<Shared>,

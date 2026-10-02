@@ -317,8 +317,8 @@ async fn a_worker_lost_after_its_request_settles_the_operation_before_failing_re
     );
     assert_eq!(fixture.journal.dispatches().len(), 1);
     assert_eq!(fixture.pool.stats().discards, 1);
-    // The substrate re-drives: the recorded operation is served, not run.
-    let end = fixture.run(&program).await.expect("the re-drive completes");
+    // The substrate redrives: the recorded operation is served, not run.
+    let end = fixture.run(&program).await.expect("the redrive completes");
     assert_eq!(results(&end).len(), 1);
     assert_eq!(
         fixture.journal.dispatches().len(),
@@ -389,7 +389,7 @@ async fn a_partial_frame_is_refused_and_the_last_checkpoint_stands() {
         .broker()
         .run(resumed, &CancellationToken::new())
         .await
-        .expect("the re-drive from the last checkpoint completes");
+        .expect("the redrive from the last checkpoint completes");
     assert_eq!(results(&end).len(), 2);
     assert_eq!(
         fixture.journal.dispatches().len(),

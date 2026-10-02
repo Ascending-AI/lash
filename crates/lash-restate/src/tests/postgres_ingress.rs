@@ -485,7 +485,7 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(false).await
-        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+        }; (a_redrive_assembles_the_terminal_its_run_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
 
         // FIG-4652: a recorded namespace its owner cannot read is corruption.
         lash_conformance::turn_config_tests!(@law [
@@ -505,7 +505,7 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(false).await
-        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
@@ -518,13 +518,13 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(false).await
-        }; (a_config_command_after_a_pinned_root_resolves_over_the_sticky_config, "run-spec-sticky-command"));
+        }; (a_config_command_after_a_pinned_run_resolves_over_the_sticky_config, "run-spec-sticky-command"));
 
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(false).await
-        }; (a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resolved, "run-spec-follow-on-bound"));
+        }; (a_redriven_switch_owes_its_follow_on_under_the_bound_its_run_resolved, "run-spec-follow-on-bound"));
     }
 
     mod always_replay {
@@ -532,7 +532,7 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(true).await
-        }; (a_redrive_assembles_the_terminal_its_root_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
+        }; (a_redrive_assembles_the_terminal_its_run_recorded_termination_decides, "turn-config-recorded-termination-redrive"));
 
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
@@ -545,7 +545,7 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(true).await
-        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]

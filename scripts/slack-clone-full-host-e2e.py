@@ -200,12 +200,12 @@ class Journey:
 
     def session_snapshot(self) -> dict[str, Any]:
         tables = {
-            "pending": "SELECT input_id, session_id, source_key, state, input_json, admitted_root, "
+            "pending": "SELECT input_id, session_id, source_key, state, input_json, admitted_run, "
             "admitted_by FROM pending_turn_inputs ORDER BY enqueue_seq",
             "nodes": "SELECT session_id, node_id, parent_node_id, generation, node_json FROM graph_nodes "
             "WHERE tombstoned = 0 ORDER BY session_id, generation",
             "turns": "SELECT session_id, turn_id, result_json FROM runtime_turn_commits ORDER BY committed_at_ms",
-            "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id, drive_epoch, drive_admission_id "
+            "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id, shift_epoch, shift_admission_id "
             "FROM session_meta ORDER BY session_id",
             "lineage": "SELECT session_id, ancestor_session_id, fork_node_id, fork_generation "
             "FROM fork_lineage ORDER BY session_id, ancestor_session_id",
@@ -648,7 +648,7 @@ class Journey:
                 for r in self.session_snapshot()["pending"]
                 if r["input_id"] == ledger["input_id"]
             ]
-            if len(pending) == 1 and pending[0]["admitted_root"]:
+            if len(pending) == 1 and pending[0]["admitted_run"]:
                 return ledger, pending
             return None
 
@@ -671,15 +671,15 @@ class Journey:
                 raise
             print(error, file=sys.stderr)
             killed_ledger, pending = {}, []
-        self.kill_admitted_root = pending[0]["admitted_root"] if pending else ""
+        self.kill_admitted_root = pending[0]["admitted_run"] if pending else ""
         killed_session = self.session_snapshot()
         killed_meta = next(
             (row for row in killed_session["meta"] if row["session_id"] == f"channel:{self.channel}"),
             None,
         )
-        self.kill_drive_epoch = killed_meta["drive_epoch"] if killed_meta else 0
-        self.kill_drive_admission = killed_meta["drive_admission_id"] if killed_meta else ""
-        self.gate("05-killed", "bot", "ledger is accepted and the admitted input stays bound to its root", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["admitted_root"] and killed_meta is not None and self.kill_drive_epoch > 0, "05-killed-four-layers.json")
+        self.kill_drive_epoch = killed_meta["shift_epoch"] if killed_meta else 0
+        self.kill_drive_admission = killed_meta["shift_admission_id"] if killed_meta else ""
+        self.gate("05-killed", "bot", "ledger is accepted and the admitted input stays bound to its root", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["admitted_run"] and killed_meta is not None and self.kill_drive_epoch > 0, "05-killed-four-layers.json")
         self.gate("05-killed", "trace", "interrupted turn emitted no turn_completed", len(self.turn_traces()) == before_turns, "05-killed-four-layers.json")
         self.screenshot("05-killed")
         self.write_extract("05-killed")
@@ -696,8 +696,8 @@ class Journey:
         deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*(?:session_admission_contended|turn_not_settled)[^\n]*", recovery_log)
         settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: (?:Turn|Transcript)[^\n]*", recovery_log)
         handled = re.search(rf"handled {re.escape(self.kill_event)}: Replied \{{", recovery_log)
-        # Post-lease the engine's own drive outlives the killed bot: boot
-        # recovery settles the dead incarnation's root itself and logs
+        # Post-lease the engine's own shift outlives the killed bot: boot
+        # recovery settles the dead incarnation's run itself and logs
         # `recovered event <id> (...): Replied`; a platform redelivery that
         # reaches `ingest` first still logs `handled <id>: Replied`.
         recovered_replied = re.search(rf"recovered event {re.escape(self.kill_event)} \([^)]*\): Replied \{{[^\n]*source: (?:Turn|Transcript)", recovery_log)
@@ -708,17 +708,17 @@ class Journey:
             for r in bot_rows
         )
         # The input stays bound to its root across the kill, and a new boot
-        # resumes that root under the *same* sealed admission, so the epoch
+        # resumes that run under the *same* sealed admission, so the epoch
         # legitimately stays put. Fencing holds when the epoch advanced (a
-        # later admission sealed over the dead drive) or the session's sealed
-        # admission is still the one the killed input's root was admitted
+        # later admission sealed over the dead shift) or the session's sealed
+        # admission is still the one the killed input's run was admitted
         # under — never regressed, never cleared.
         fencing_held = (
-            channel_meta["drive_epoch"] > self.kill_drive_epoch
+            channel_meta["shift_epoch"] > self.kill_drive_epoch
             or (
-                channel_meta["drive_epoch"] == self.kill_drive_epoch
-                and channel_meta["drive_admission_id"]
-                and channel_meta["drive_admission_id"] == self.kill_drive_admission
+                channel_meta["shift_epoch"] == self.kill_drive_epoch
+                and channel_meta["shift_admission_id"]
+                and channel_meta["shift_admission_id"] == self.kill_drive_admission
             )
         )
         if deferred_lines:
@@ -732,7 +732,7 @@ class Journey:
         self.gate(
             "05-recovered",
             "bot",
-            f"root {self.kill_admitted_root} at drive epoch {self.kill_drive_epoch} recovered via {path_note}",
+            f"run {self.kill_admitted_root} at shift epoch {self.kill_drive_epoch} recovered via {path_note}",
             path_ok and fencing_held and reply_matches_platform,
             "05-recovered-four-layers.json + bot log",
         )

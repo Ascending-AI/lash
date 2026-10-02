@@ -1481,7 +1481,7 @@ mod window_anchor {
     }
 
     #[test]
-    fn a_root_frame_window_has_no_external_parent() {
+    fn a_run_frame_window_has_no_external_parent() {
         let base = frame_open("first-frame", None);
         let base_id = base.node_id.to_string();
         let anchor = anchor_at(&base, 0);

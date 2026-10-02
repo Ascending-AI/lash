@@ -1,7 +1,7 @@
 //! FIG-4236: model usage is engine-owned accounting delivered per call
 //! (ADR 0125), stated as laws a tier's engine must keep.
 //!
-//! Every law drives real turns through the tier's
+//! Every law executes real turns through the tier's
 //! [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): a fresh runtime
 //! over the tier's host and stores per execution, and a scripted model that
 //! counts every provider invocation and reports fixed usage per attempt. The
@@ -19,7 +19,7 @@
 //! - each provider attempt that returned is exactly one fact, however the
 //!   turn's executions were cut and replayed;
 //! - a dispatch the engine journaled no record of is an explicit `unknown`
-//!   run, never an invented fact;
+//!   meter, never an invented fact;
 //! - the provider invocation count after journaling equals the count before:
 //!   a replay asks the provider nothing it already answered.
 
@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{SessionId, TurnId};
 
@@ -36,7 +36,7 @@ use lash_sansio::{SessionId, TurnId};
 #[derive(Clone)]
 pub struct UsageAccountingTier {
     /// Distinguishes this tier's sessions from every other tier's, and every
-    /// run's from the last on a tier whose state outlives a run.
+    /// meter's from the last on a tier whose state outlives a meter.
     pub prefix: String,
     /// The engine's host: the one whose controller journals each spending
     /// effect's usage and delivers its settlement.
@@ -113,7 +113,7 @@ pub(crate) enum Kill {
     /// No kill.
     None,
     /// At call `n`'s provider entry, before the provider did anything: the
-    /// run was admitted, nothing was sent (crash table `p1`).
+    /// meter was admitted, nothing was sent (crash table `p1`).
     AtDispatch(usize),
     /// Inside call `n`'s provider, after it counted the invocation and
     /// before it answered: billed, never journaled (crash table `p2`).
@@ -490,7 +490,7 @@ impl World {
         .expect("build the usage-accounting runtime")
     }
 
-    async fn drive(
+    async fn shift(
         &self,
         scope: crate::ScopedEffectController<'_>,
     ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
@@ -499,7 +499,7 @@ impl World {
         input.trace_turn_id = Some(self.turn_id());
         tokio::time::timeout(
             TURN_BUDGET,
-            runtime.drive_turn(input, crate::TurnOptions::new(self.cancel.clone(), scope)),
+            runtime.execute_turn(input, crate::TurnOptions::new(self.cancel.clone(), scope)),
         )
         .await
         .unwrap_or_else(|_| {
@@ -510,7 +510,7 @@ impl World {
         })
     }
 
-    /// An attempt that drives the turn and hands its result to `report`.
+    /// An attempt that executes the turn and hands its result to `report`.
     fn attempt(
         &self,
         report: tokio::sync::mpsc::UnboundedSender<
@@ -525,20 +525,20 @@ impl World {
                 if world.kill.has_fired() {
                     world.recovering.cancel();
                 }
-                let mut driven = world.drive(scope).await;
-                let terminal = if let Err(error) = &driven
+                let mut executed = world.shift(scope).await;
+                let terminal = if let Err(error) = &executed
                     && error.code == crate::RuntimeErrorCode::StoreCommitSuperseded
                 {
                     match world
                         .tier
                         .stores
                         .session_store_factory()
-                        .root_terminal(&world.session_id, &world.turn_id())
+                        .run_terminal(&world.session_id, &world.turn_id())
                         .await
                     {
                         Ok(terminal) => terminal,
                         Err(error) => {
-                            driven = Err(crate::RuntimeEffectControllerError::from(error)
+                            executed = Err(crate::RuntimeEffectControllerError::from(error)
                                 .into_runtime_error());
                             None
                         }
@@ -546,8 +546,8 @@ impl World {
                 } else {
                     None
                 };
-                let end = crate::ConformanceTurnEnd::of_root(&driven, terminal.as_ref());
-                let _ = report.send(driven);
+                let end = crate::ConformanceTurnEnd::of_run(&executed, terminal.as_ref());
+                let _ = report.send(executed);
                 end
             })
         })
@@ -564,8 +564,8 @@ impl World {
                     () = world.kill.fired() => {
                         panic!("the usage law's kill cut the turn's execution")
                     }
-                    driven = world.drive(scope) => {
-                        panic!("the killed execution ended ({:?}) before its kill fired", driven.map(|_| ()))
+                    executed = world.shift(scope) => {
+                        panic!("the killed execution ended ({:?}) before its kill fired", executed.map(|_| ()))
                     }
                 }
             })
@@ -598,8 +598,8 @@ impl World {
             assert!(self.kill.has_fired(), "the usage law's kill fired");
         }
         let mut last = None;
-        while let Ok(driven) = reports.try_recv() {
-            last = Some(driven);
+        while let Ok(executed) = reports.try_recv() {
+            last = Some(executed);
         }
         last.expect("an execution of the usage law's turn reported")
     }
@@ -615,7 +615,7 @@ impl World {
             .await;
     }
 
-    /// The owner's accounting once every run it admitted is resolved.
+    /// The owner's accounting once every meter it admitted is resolved.
     pub(crate) async fn settled(&self) -> crate::OwnerUsage {
         settled_usage(&self.tier, &self.owner()).await
     }
@@ -647,7 +647,7 @@ impl World {
     }
 }
 
-/// The owner's accounting once every run it admitted is resolved, or the
+/// The owner's accounting once every meter it admitted is resolved, or the
 /// law fails: the engine delivers each settlement after the effect it rides
 /// is journaled, asynchronously to the turn.
 #[expect(
@@ -757,7 +757,7 @@ impl crate::ToolProvider for Probe {
 /// Asserts the accounting of a world whose kills were all at `killed_runs`
 /// dispatches the engine journaled no record of: one reported fact per
 /// provider attempt that returned, each once, summing to what the provider
-/// reported; one `unknown` run per such dispatch; nothing open.
+/// reported; one `unknown` meter per such dispatch; nothing open.
 pub(crate) async fn assert_each_returned_attempt_once(world: &World, killed_runs: u64, what: &str) {
     let usage = world.settled().await;
     let facts = world.facts().await;
@@ -793,7 +793,7 @@ pub(crate) async fn assert_each_returned_attempt_once(world: &World, killed_runs
     assert_eq!(usage.completeness.open_runs, 0, "{what}: nothing is open");
     assert_eq!(
         usage.completeness.unknown_runs, killed_runs,
-        "{what}: each dispatch the engine journaled no record of is one explicit unknown run: {:?}",
+        "{what}: each dispatch the engine journaled no record of is one explicit unknown meter: {:?}",
         usage.completeness
     );
     assert_eq!(usage.completeness.conflicted_runs, 0, "{what}: no conflict");
@@ -849,7 +849,7 @@ pub enum UsageCrashEnding {
 /// The crash table's points a tier's runner can cut on this tier.
 #[derive(Clone, Copy, Debug)]
 pub enum UsageCrashPoint {
-    /// Killed after the run's admission, before the provider was sent
+    /// Killed after the meter's admission, before the provider was sent
     /// anything.
     AdmittedNotDispatched,
     /// Killed after the provider was invoked, before its answer was
@@ -860,14 +860,14 @@ pub enum UsageCrashPoint {
 /// E3: one cell of the crash table. A three-call turn is killed at `point`
 /// in its second call and recovered by the tier, then ends as `ending`.
 ///
-/// - `AdmittedNotDispatched`: no fact for the killed run and no provider
+/// - `AdmittedNotDispatched`: no fact for the killed meter and no provider
 ///   invocation for it; the rerun's settlement resolves it
-///   `unknown(superseded_run)`. No token is invented.
-/// - `ChargedNotJournaled`: the facts are the journaled run's only; the
-///   killed run is one `unknown` run; the provider was asked twice for that
+///   `unknown(superseded_meter)`. No token is invented.
+/// - `ChargedNotJournaled`: the facts are the journaled meter's only; the
+///   killed meter is one `unknown` meter; the provider was asked twice for that
 ///   call, and the rebuy is visible, not hidden.
 ///
-/// `ParkedForever` never recovers the kill: the killed run stays `open`
+/// `ParkedForever` never recovers the kill: the killed meter stays `open`
 /// until the owner is retired, and only then becomes `unknown`.
 pub async fn usage_crash_cell(
     tier: &UsageAccountingTier,
@@ -932,7 +932,7 @@ pub async fn usage_crash_cell(
     }
 }
 
-/// A killed run no execution recovers is `open` until the owner is retired;
+/// A killed meter no execution recovers is `open` until the owner is retired;
 /// the deletion drain then resolves it `unknown(owner_retired)` and refuses
 /// every later admission.
 async fn assert_parked_forever(tier: &UsageAccountingTier, world: &World, point: UsageCrashPoint) {
@@ -960,7 +960,7 @@ async fn assert_parked_forever(tier: &UsageAccountingTier, world: &World, point:
     };
     assert_eq!(
         usage.completeness.open_runs, 1,
-        "the killed run stays open until retirement: {:?}",
+        "the killed meter stays open until retirement: {:?}",
         usage.completeness
     );
     let expected_invocations = match point {
@@ -974,7 +974,7 @@ async fn assert_parked_forever(tier: &UsageAccountingTier, world: &World, point:
     assert_eq!(drained.completeness.open_runs, 0);
     assert_eq!(
         drained.completeness.unknown_runs, 1,
-        "the killed run is unknown(owner_retired), never silent"
+        "the killed meter is unknown(owner_retired), never silent"
     );
     assert_eq!(world.facts().await.len(), 1, "no fact was invented for it");
     assert_admission_refused(tier, world).await;
@@ -1054,7 +1054,7 @@ async fn assert_admission_refused(tier: &UsageAccountingTier, world: &World) {
     let refused = tier
         .stores
         .usage_accounting()
-        .admit_usage_run(&crate::UsageRunAdmission {
+        .admit_usage_meter(&crate::UsageMeterAdmission {
             owner: world.owner(),
             effect: crate::UsageEffectKey::for_effect(
                 &lash_sansio::EffectAddress::new(
@@ -1064,7 +1064,7 @@ async fn assert_admission_refused(tier: &UsageAccountingTier, world: &World) {
                 .unwrap_or_else(|error| panic!("an effect address: {error}")),
             ),
             execution_scope_key: "usage-law-after-retirement".to_string(),
-            run: crate::UsageRunId::mint(),
+            meter: crate::UsageMeterId::mint(),
             source: "turn".to_string(),
             profile_key: crate::LlmProfileKey::new("usage-law-key"),
             requested_model: "usage-law".to_string(),
@@ -1076,7 +1076,7 @@ async fn assert_admission_refused(tier: &UsageAccountingTier, world: &World) {
             refused,
             Err(crate::UsageAdmissionError::OwnerRetired { .. })
         ),
-        "a retired owner admits no run: {refused:?}"
+        "a retired owner admits no meter: {refused:?}"
     );
 }
 
@@ -1211,7 +1211,7 @@ usage_crash_cells![
 mod deletion;
 pub use deletion::session_delete_drains_accounting_first;
 mod park;
-pub use park::usage_of_a_root_parked_forever_before_finalization_is_read_without_driving;
+pub use park::usage_of_a_run_parked_forever_before_finalization_is_read_without_executing;
 mod children;
 pub use children::tool_child_spend_counts_once_without_settlement_charging;
 mod endings;

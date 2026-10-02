@@ -1,14 +1,14 @@
-//! Following one input or root to its answer (FIG-3600 S5b, D1 §1.3–§1.5).
+//! Following one input or run to its answer (FIG-3600 S5b, D1 §1.3–§1.5).
 //!
 //! A follower subscribes to the session's live replay from its cursor, adopts
-//! the activity of the root that applies its subject, and resolves the
-//! subject from the store on every wake: the engine's drive barrier, a
-//! commit or queue change on the observation, a settled root's report landing
-//! in this process's mailbox, a root's park recorded in this process, and a
-//! bounded poll. Once it knows its root, it
-//! also holds one open wait on the root's published terminal, which wakes it
-//! as soon as a root that ran in another process settles; a follower with no
-//! resident runtime probes for that root at the poll floor (FIG-3981). It
+//! the activity of the run that applies its subject, and resolves the
+//! subject from the store on every wake: the engine's shift barrier, a
+//! commit or queue change on the observation, a settled run's report landing
+//! in this process's mailbox, a run's park recorded in this process, and a
+//! bounded poll. Once it knows its run, it
+//! also holds one open wait on the run's published terminal, which wakes it
+//! as soon as a run that ran in another process settles; a follower with no
+//! resident runtime probes for that run at the poll floor (FIG-3981). It
 //! never answers from events or from the wait: a follower whose replay window
 //! is gone still answers from the store, and so does one whose engine cannot
 //! answer the wait (FIG-4345).
@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use lash_core::engine::{DriveAbort, DriveOutcome, DriveRequestId};
+use lash_core::engine::{ShiftAbort, ShiftOutcome, ShiftRequestId};
 use lash_core::facade_support::LiveReplayGap;
 use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
@@ -41,14 +41,14 @@ const POLL_FLOOR: Duration = Duration::from_millis(25);
 /// The longest wait between store reads.
 const POLL_CEILING: Duration = Duration::from_secs(1);
 /// The longest a follower waits for a live report once the store shows the
-/// root settled, while a run in this process may still deposit it and the
-/// engine's drive has not stopped. A root no run here can report answers
+/// run settled, while an execution in this process may still deposit it and the
+/// engine's shift has not stopped. A run no execution here can report answers
 /// from the store at once.
 const LIVE_REPORT_GRACE: Duration = Duration::from_secs(5);
-/// How long an applied input's terminal may stay unreadable after its drive
+/// How long an applied input's terminal may stay unreadable after its shift
 /// stopped before the follower answers [`SendError::Unresolved`].
 const UNRESOLVED_CEILING: Duration = Duration::from_secs(30);
-/// The pause before re-asking an engine whose drive attempt failed.
+/// The pause before re-asking an engine whose shift attempt failed.
 const RETRY_PAUSE: Duration = Duration::from_millis(50);
 /// Unadopted activities a follower buffers before dropping the oldest.
 const BUFFER_CAPACITY: usize = 4096;
@@ -60,25 +60,25 @@ type AwaitedTerminal =
 /// What a follower follows.
 #[derive(Clone, Debug)]
 pub(super) enum Subject {
-    /// An accepted input: its root is the one whose turn applies it.
+    /// An accepted input: its run is the one whose turn applies it.
     Input(TurnInputAcceptanceReceipt),
-    /// A logical root, by id.
-    Root(TurnId),
+    /// A logical run, by id.
+    Run(TurnId),
 }
 
 impl Subject {
-    /// The drive request a follower first waits on: an accepted row's
+    /// The shift request a follower first waits on: an accepted row's
     /// request is the one its ingress obligation delivers (ADR 0109 §3), so
-    /// waiting attaches to that drive, or starts it when no delivery reached
+    /// waiting attaches to that execute, or starts it when no delivery reached
     /// the engine yet. A follower moves on to the relay's later ask when the
     /// engine lost this one ([`moved_ask`]).
-    fn drive_request(&self) -> DriveRequestId {
+    fn shift_request(&self) -> ShiftRequestId {
         match self {
-            Self::Input(receipt) => lash_core::drive::ingress_drive_request(
+            Self::Input(receipt) => lash_core::shift::ingress_shift_request(
                 receipt.input_id.as_str(),
-                lash_core::drive::FIRST_INGRESS_ATTEMPT,
+                lash_core::shift::FIRST_INGRESS_ATTEMPT,
             ),
-            Self::Root(root) => DriveRequestId::new(format!("root:{root}")),
+            Self::Run(run) => ShiftRequestId::new(format!("run:{run}")),
         }
     }
 }
@@ -127,7 +127,7 @@ impl Tap<'_> {
 /// The adoption filter: which physical turns' activity is the subject's.
 struct Adoption {
     subject: Subject,
-    root: Option<TurnId>,
+    run: Option<TurnId>,
     buffered: VecDeque<(TurnId, TurnActivity)>,
     collected: Vec<TurnActivity>,
 }
@@ -135,8 +135,8 @@ struct Adoption {
 impl Adoption {
     fn new(subject: &Subject) -> Self {
         Self {
-            root: match subject {
-                Subject::Root(root) => Some(root.clone()),
+            run: match subject {
+                Subject::Run(run) => Some(run.clone()),
                 Subject::Input(_) => None,
             },
             subject: subject.clone(),
@@ -146,17 +146,17 @@ impl Adoption {
     }
 
     fn adopts(&self, turn: &TurnId) -> bool {
-        self.root
+        self.run
             .as_ref()
-            .is_some_and(|root| PhysicalTurn::physical_ordinal_of(root, turn).is_some())
+            .is_some_and(|run| PhysicalTurn::physical_ordinal_of(run, turn).is_some())
     }
 
-    /// Adopt `root`, releasing the buffered activity of its turns.
-    async fn adopt(&mut self, root: TurnId, tap: &mut Tap<'_>) {
-        if self.root.is_some() {
+    /// Adopt `run`, releasing the buffered activity of its turns.
+    async fn adopt(&mut self, run: TurnId, tap: &mut Tap<'_>) {
+        if self.run.is_some() {
             return;
         }
-        self.root = Some(root);
+        self.run = Some(run);
         let buffered = std::mem::take(&mut self.buffered);
         for (turn, activity) in buffered {
             if self.adopts(&turn) {
@@ -178,14 +178,14 @@ impl Adoption {
                     return false;
                 };
                 // An application wakes resolution through the input's durable
-                // binding. Its physical turn's spelling cannot name the root.
-                let applied = self.root.is_none()
+                // binding. Its physical turn's spelling cannot name the run.
+                let applied = self.run.is_none()
                     && matches!((&self.subject, &activity.event),
                         (Subject::Input(receipt), TurnEvent::QueuedInputAccepted { applications })
                         if applications.iter().any(|application| application.input_id == receipt.input_id));
                 if self.adopts(turn) {
                     self.deliver(activity.clone(), tap).await;
-                } else if self.root.is_none() {
+                } else if self.run.is_none() {
                     if self.buffered.len() >= BUFFER_CAPACITY {
                         self.buffered.pop_front();
                     }
@@ -227,12 +227,12 @@ fn replay_gap(
     }
 }
 
-/// Wait on the engine for `request`'s drive, as a `'static` future.
-fn await_drive(
+/// Wait on the engine for `request`'s shift, as a `'static` future.
+fn await_shift(
     ctx: &SendContext,
-    request: &DriveRequestId,
+    request: &ShiftRequestId,
     pause: Option<Duration>,
-) -> BoxFuture<'static, std::result::Result<DriveOutcome, DriveAbort>> {
+) -> BoxFuture<'static, std::result::Result<ShiftOutcome, ShiftAbort>> {
     let work = ctx.parts.work.clone();
     let session = ctx.parts.session_id.clone();
     let request = request.clone();
@@ -240,21 +240,21 @@ fn await_drive(
         if let Some(pause) = pause {
             tokio::time::sleep(pause).await;
         }
-        work.await_drive(&session, &request).await
+        work.await_shift(&session, &request).await
     })
 }
 
-/// The relay's last ask for an input subject's drive, when it moved past
+/// The relay's last ask for an input subject's shift, when it moved past
 /// `request`: the engine lost the ask the follower waited on (an operator
 /// kill) before it admitted the input, so the relay asked again under the
-/// next attempt, `ingress:{input}:{attempt}` — whether or not that drive has
-/// admitted the input yet. The follower attaches to that drive rather than
-/// wait on the lost one. A root subject has no ask.
+/// next attempt, `ingress:{input}:{attempt}` — whether or not that shift has
+/// admitted the input yet. The follower attaches to that shift rather than
+/// wait on the lost one. A run subject has no ask.
 async fn moved_ask(
     ctx: &SendContext,
     subject: &Subject,
-    request: &DriveRequestId,
-) -> Option<DriveRequestId> {
+    request: &ShiftRequestId,
+) -> Option<ShiftRequestId> {
     let Subject::Input(receipt) = subject else {
         return None;
     };
@@ -271,31 +271,31 @@ async fn moved_ask(
                 session_id = %ctx.parts.session_id,
                 input_id = %receipt.input_id.as_str(),
                 error = %error,
-                "send handle could not read its input's current drive ask; waiting on the one it holds"
+                "send handle could not read its input's current shift ask; waiting on the one it holds"
             );
             None
         }
     }
 }
 
-/// One open wait on the adopted root's published terminal (FIG-3981): a
+/// One open wait on the adopted run's published terminal (FIG-3981): a
 /// wake, never an answer.
 ///
-/// A root that ran in another process deposits no report here and publishes
+/// A run that ran in another process deposits no report here and publishes
 /// nothing on this process's replay, so without the wait its follower learns
 /// that it settled only from a store poll that backs off to a second. The
-/// wait is held while a store read has just shown the root undecided and no
-/// run in this process may still deposit the root's report: that deposit
+/// wait is held while a store read has just shown the run undecided and no
+/// run in this process may still deposit the run's report: that deposit
 /// answers first, with the full report. A published terminal wakes the
-/// follower, which reads the answer from the store: the root's commit is
+/// follower, which reads the answer from the store: the run's commit is
 /// durable before its terminal is published. The wait is registered, so it
-/// holds nothing past its root: the commit's publish answers it, and a root
+/// holds nothing past its run: the commit's publish answers it, and a run
 /// that ended without that commit is retired, which releases it. Retirement
-/// never cancels a terminal the root's ending commit still publishes
+/// never cancels a terminal the run's ending commit still publishes
 /// (FIG-4025). Every follower's wait on one physical turn shares one waiter
 /// in the engine, however often followers attach and drop it (FIG-4345).
 struct TerminalWait {
-    /// The root's physical turn waited on: a root that goes on past a
+    /// The run's physical turn waited on: a run that goes on past a
     /// committed turn (a frame switch, a follow-on) goes on in its next
     /// physical turn.
     ordinal: u64,
@@ -303,7 +303,7 @@ struct TerminalWait {
     /// The pause before the next wait, after one that failed.
     pause: Option<Duration>,
     /// A physical turn published a failure, or its wait was released: the
-    /// store reads decide what follows (a park, a redrive, or the root's
+    /// store reads decide what follows (a park, a redrive, or the run's
     /// end), with no wait held.
     ended: bool,
 }
@@ -318,13 +318,13 @@ impl TerminalWait {
         }
     }
 
-    /// Hold the wait on `root`'s current physical turn, unless one is held,
+    /// Hold the wait on `run`'s current physical turn, unless one is held,
     /// no further terminal will be published, or a run in this process may
-    /// still deposit the root's report.
-    fn hold(&mut self, ctx: &SendContext, root: &TurnId) {
+    /// still deposit the run's report.
+    fn hold(&mut self, ctx: &SendContext, run: &TurnId) {
         if self.wait.is_some()
             || self.ended
-            || mailbox::may_deposit(ctx.parts.work.store_binding(), &ctx.parts.session_id, root)
+            || mailbox::may_deposit(ctx.parts.work.store_binding(), &ctx.parts.session_id, run)
         {
             return;
         }
@@ -335,7 +335,7 @@ impl TerminalWait {
         );
         let address = TurnAddress::new(
             ctx.parts.session_id.clone(),
-            PhysicalTurn::derive_turn_id(root, self.ordinal),
+            PhysicalTurn::derive_turn_id(run, self.ordinal),
         );
         let pause = self.pause.take();
         self.wait = Some(Box::pin(async move {
@@ -355,8 +355,8 @@ impl TerminalWait {
     }
 
     /// Take the held wait's answer. The follower resolves from the store
-    /// after each: a root that settled answers there, and a read that still
-    /// shows the root undecided holds the next wait.
+    /// after each: a run that settled answers there, and a read that still
+    /// shows the run undecided holds the next wait.
     fn answered(
         &mut self,
         ctx: &SendContext,
@@ -364,11 +364,11 @@ impl TerminalWait {
     ) {
         self.wait = None;
         match answer {
-            // The turn committed: the store answers a root it ended, and a
-            // root it did not end goes on in its next physical turn.
+            // The turn committed: the store answers a run it ended, and a
+            // run it did not end goes on in its next physical turn.
             Ok(TurnTerminal::Committed { .. }) => self.ordinal = self.ordinal.saturating_add(1),
             // A failed turn publishes no further terminal, and neither does
-            // a root whose retirement (or its session's revocation) released
+            // a run whose retirement (or its session's revocation) released
             // the wait.
             Ok(TurnTerminal::Failed { .. }) => self.ended = true,
             Err(error)
@@ -391,7 +391,7 @@ impl TerminalWait {
 }
 
 /// Where a follower stands in its subject's live activity: the replay
-/// cursor to go on from, and whether it has observed any of the root's
+/// cursor to go on from, and whether it has observed any of the run's
 /// activity. A windowed follower hands its position to the next window; the
 /// host's Restate wait journals it between probes.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -491,11 +491,11 @@ impl Observation {
 /// Follow `subject` from `from` until it answers, or until `window` closes.
 ///
 /// A follower answers from the store, never from events. Activity is only
-/// what this process's live replay published: a root that ran in another
-/// process is observed through its durable record alone, and a settled root
+/// what this process's live replay published: a run that ran in another
+/// process is observed through its durable record alone, and a settled run
 /// whose activity this follower never saw answers with a reported
 /// [`LiveReplayGapReason::Unavailable`] gap, so a collected activity list is
-/// never mistaken for the root's whole history.
+/// never mistaken for the run's whole history.
 pub(super) async fn follow(
     ctx: &SendContext,
     subject: &Subject,
@@ -510,16 +510,16 @@ pub(super) async fn follow(
     // Where this follow's observation starts: past the gap, when the cursor
     // it was handed is gone, so a later window never meets that gap again.
     let start_cursor = observation.last_cursor.clone();
-    let mut request = subject.drive_request();
-    let mut drive = Some(await_drive(ctx, &request, None));
-    let mut drive_stopped: Option<tokio::time::Instant> = None;
+    let mut request = subject.shift_request();
+    let mut shift = Some(await_shift(ctx, &request, None));
+    let mut shift_stopped: Option<tokio::time::Instant> = None;
     let mut refused: Option<lash_core::RuntimeError> = None;
     let mut settled_at: Option<tokio::time::Instant> = None;
     let mut terminal = TerminalWait::new();
     let mut poll = POLL_FLOOR;
-    // The store poll is due `poll` after the last resolve, and the root probe
+    // The store poll is due `poll` after the last resolve, and the run probe
     // ticks at the floor, whatever wakes in between: a wake that resolves
-    // nothing (a probe that found no root, another root's activity) delays
+    // nothing (a probe that found no run, another run's activity) delays
     // neither.
     let mut poll_at = tokio::time::Instant::now() + poll;
     let mut probe_ticks = tokio::time::interval_at(poll_at, POLL_FLOOR);
@@ -528,7 +528,7 @@ pub(super) async fn follow(
     let mut last_pass = false;
     // Armed before the first store read and again before each read its wake
     // asks for: a park recorded after a read still wakes the wait below.
-    let parked = lash_core::drive::root_park_recorded();
+    let parked = lash_core::shift::run_park_recorded();
     tokio::pin!(parked);
     parked.as_mut().enable();
     loop {
@@ -538,18 +538,18 @@ pub(super) async fn follow(
         tokio::pin!(deposited);
         deposited.as_mut().enable();
         if resolve_now {
-            // A root this process ran to its commit deposited its final turn
+            // A run this process ran to its commit deposited its final turn
             // for every input it drove: the report as it ran, and the
             // evidence that the input settled.
             if let Subject::Input(receipt) = subject
-                && let Some(settled) = mailbox::take_settled_root(
+                && let Some(settled) = mailbox::take_settled_run(
                     ctx.parts.work.store_binding(),
                     &ctx.parts.session_id,
                     &receipt.input_id,
                 )
             {
-                let root = settled.root.clone();
-                adoption.adopt(root.clone(), tap).await;
+                let run = settled.run.clone();
+                adoption.adopt(run.clone(), tap).await;
                 drain(ctx, &mut adoption, &mut observation, tap).await;
                 ctx.refresh_unless_ran_on(Some(&settled)).await?;
                 let outcome = settled.turn.outcome.clone();
@@ -558,7 +558,7 @@ pub(super) async fn follow(
                 return finish_settled(
                     ctx,
                     subject,
-                    root,
+                    run,
                     outcome,
                     Some(turn),
                     adoption.collected,
@@ -574,26 +574,26 @@ pub(super) async fn follow(
                 // store read is doing (FIG-3979).
                 Subject::Input(receipt) => tokio::select! {
                     resolution = resolve::resolve_input(&ctx.parts, receipt) => resolution?,
-                    () = mailbox::settled_root_held(
+                    () = mailbox::settled_run_held(
                         ctx.parts.work.store_binding(),
                         &ctx.parts.session_id,
                         &receipt.input_id,
                     ) => continue,
                 },
-                Subject::Root(root) => resolve::resolve_root(&ctx.parts, root).await?,
+                Subject::Run(run) => resolve::resolve_run(&ctx.parts, run).await?,
             };
             match resolution {
-                Resolution::Settled { root, outcome } => {
-                    adoption.adopt(root.clone(), tap).await;
-                    let live = live_report(ctx, subject, &root).await?;
+                Resolution::Settled { run, outcome } => {
+                    adoption.adopt(run.clone(), tap).await;
+                    let live = live_report(ctx, subject, &run).await?;
                     let settled_since = *settled_at.get_or_insert_with(tokio::time::Instant::now);
                     let waiting_for_live = live.is_none()
                         && !last_pass
-                        && drive_stopped.is_none()
+                        && shift_stopped.is_none()
                         && mailbox::may_deposit(
                             ctx.parts.work.store_binding(),
                             &ctx.parts.session_id,
-                            &root,
+                            &run,
                         )
                         && settled_since.elapsed() < LIVE_REPORT_GRACE;
                     if !waiting_for_live {
@@ -604,7 +604,7 @@ pub(super) async fn follow(
                         return finish_settled(
                             ctx,
                             subject,
-                            root,
+                            run,
                             outcome,
                             live,
                             adoption.collected,
@@ -617,19 +617,19 @@ pub(super) async fn follow(
                     }
                 }
                 Resolution::Parked(parked) => {
-                    adoption.adopt(parked.root.clone(), tap).await;
+                    adoption.adopt(parked.run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
-                    // The park is the recorded answer, whatever the root's
+                    // The park is the recorded answer, whatever the run's
                     // run is doing: a run that still waits on the stopped
                     // work that parked it holds the resident runtime.
-                    ctx.refresh_unless_held_by_run_of(&parked.root).await?;
+                    ctx.refresh_unless_held_by_run_of(&parked.run).await?;
                     return Ok(Followed::Answered(Box::new(SendOutcome::Parked {
                         parked,
                         gaps: observation.gaps,
                     })));
                 }
-                Resolution::Refused { root, refusal } => {
-                    adoption.adopt(root, tap).await;
+                Resolution::Refused { run, refusal } => {
+                    adoption.adopt(run, tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Err(EmbedError::Runtime(refusal));
                 }
@@ -645,7 +645,7 @@ pub(super) async fn follow(
                     })));
                 }
                 Resolution::Withdrawn => {
-                    // A drive refused after it claimed the input leaves no
+                    // A shift refused after it claimed the input leaves no
                     // application behind either: the refusal is the answer.
                     if let Some(error) = refused.take() {
                         return Err(EmbedError::Runtime(error));
@@ -655,24 +655,24 @@ pub(super) async fn follow(
                         gaps: observation.gaps,
                     })));
                 }
-                Resolution::Undecided { root } => {
-                    // The input's drive may have moved on from the one this
-                    // follower waits on: follow it, whatever the lost drive's
+                Resolution::Undecided { run } => {
+                    // The input's shift may have moved on from the one this
+                    // follower waits on: follow it, whatever the lost shift's
                     // own attach is still doing.
                     if let Some(ask) = moved_ask(ctx, subject, &request).await {
                         tracing::debug!(
                             session_id = %ctx.parts.session_id,
                             from = request.as_str(),
                             to = ask.as_str(),
-                            "send handle follows its input's drive to the relay's next ask"
+                            "send handle follows its input's shift to the relay's next ask"
                         );
                         request = ask;
-                        drive = Some(await_drive(ctx, &request, None));
-                        drive_stopped = None;
+                        shift = Some(await_shift(ctx, &request, None));
+                        shift_stopped = None;
                     }
-                    if let Some(root) = root {
-                        adoption.adopt(root, tap).await;
-                        if let Some(stopped) = drive_stopped
+                    if let Some(run) = run {
+                        adoption.adopt(run, tap).await;
+                        if let Some(stopped) = shift_stopped
                             && stopped.elapsed() >= UNRESOLVED_CEILING
                             && let Subject::Input(receipt) = subject
                         {
@@ -685,19 +685,19 @@ pub(super) async fn follow(
                         return Err(EmbedError::Runtime(error));
                     }
                     // Wait on the terminal only while a store read has just
-                    // shown the root undecided: a root this read shows ended
+                    // shown the run undecided: a run this read shows ended
                     // may already be retired, which releases no wait
                     // registered after it.
-                    if let Some(root) = adoption.root.as_ref() {
-                        terminal.hold(ctx, root);
+                    if let Some(run) = adoption.run.as_ref() {
+                        terminal.hold(ctx, run);
                     }
                 }
             }
             if last_pass {
                 // The window closed on an undecided subject. A follower that
-                // adopted no root yet goes on from where it started, so the
+                // adopted no run yet goes on from where it started, so the
                 // activity it buffered is read again.
-                let cursor = if adoption.root.is_some() {
+                let cursor = if adoption.run.is_some() {
                     observation.last_cursor
                 } else {
                     start_cursor
@@ -714,12 +714,12 @@ pub(super) async fn follow(
         }
         resolve_now = true;
         // Wait for the first wake.
-        let probed = root_probe(ctx, subject, &adoption);
+        let probed = run_probe(ctx, subject, &adoption);
         let probe = async {
             match probed {
                 Some(input) => {
                     probe_ticks.tick().await;
-                    ctx.parts.store.root_of_input(input).await
+                    ctx.parts.store.run_of_input(input).await
                 }
                 None => std::future::pending().await,
             }
@@ -752,41 +752,41 @@ pub(super) async fn follow(
                 }
             }
             answer = async {
-                match drive.as_mut() {
-                    Some(drive) => drive.await,
+                match shift.as_mut() {
+                    Some(shift) => shift.await,
                     None => std::future::pending().await,
                 }
             } => {
-                drive = None;
+                shift = None;
                 if let Some(ask) = moved_ask(ctx, subject, &request).await {
                     tracing::debug!(
                         session_id = %ctx.parts.session_id,
                         from = request.as_str(),
                         to = ask.as_str(),
-                        "send handle follows its input's drive to the relay's next ask"
+                        "send handle follows its input's shift to the relay's next ask"
                     );
                     request = ask;
-                    drive = Some(await_drive(ctx, &request, None));
-                    drive_stopped = None;
+                    shift = Some(await_shift(ctx, &request, None));
+                    shift_stopped = None;
                     continue;
                 }
                 match answer {
-                    Ok(_) | Err(DriveAbort::Parked { .. }) => {
-                        drive_stopped.get_or_insert_with(tokio::time::Instant::now);
+                    Ok(_) | Err(ShiftAbort::Parked { .. }) => {
+                        shift_stopped.get_or_insert_with(tokio::time::Instant::now);
                     }
                     // The engine retries under its own policy; ask again under
-                    // the same id, which attaches rather than drives twice.
-                    Err(DriveAbort::Retry(error)) => {
+                    // the same id, which attaches rather than executes twice.
+                    Err(ShiftAbort::Retry(error)) => {
                         tracing::debug!(
                             session_id = %ctx.parts.session_id,
                             request = request.as_str(),
                             error = %error,
-                            "send handle's drive attempt failed; waiting on the retry"
+                            "send handle's shift attempt failed; waiting on the retry"
                         );
-                        drive = Some(await_drive(ctx, &request, Some(RETRY_PAUSE)));
+                        shift = Some(await_shift(ctx, &request, Some(RETRY_PAUSE)));
                     }
-                    Err(DriveAbort::Refused(error)) => {
-                        drive_stopped.get_or_insert_with(tokio::time::Instant::now);
+                    Err(ShiftAbort::Refused(error)) => {
+                        shift_stopped.get_or_insert_with(tokio::time::Instant::now);
                         refused = Some(error);
                     }
                 }
@@ -795,38 +795,38 @@ pub(super) async fn follow(
                 terminal.answered(ctx, answer);
             }
             bound = probe => {
-                // A root the probe finds is read at once, which holds its
-                // terminal wait while the root is undecided.
+                // A run the probe finds is read at once, which holds its
+                // terminal wait while the run is undecided.
                 resolve_now = matches!(bound, Ok(Some(_)));
                 match bound {
-                    Ok(Some(root)) => adoption.adopt(root, tap).await,
+                    Ok(Some(run)) => adoption.adopt(run, tap).await,
                     Ok(None) => {}
                     Err(error) => tracing::debug!(
                         session_id = %ctx.parts.session_id,
                         error = %error,
-                        "send handle's root probe failed; the store poll goes on"
+                        "send handle's run probe failed; the store poll goes on"
                     ),
                 }
             }
             () = &mut deposited => {
                 // A run in this process deposited its report or ended:
-                // resolve again when this follower waits on a settled root's
+                // resolve again when this follower waits on a settled run's
                 // report, or when the deposit may be its input's.
                 resolve_now = settled_at.is_some()
                     || match subject {
-                        Subject::Input(receipt) => mailbox::holds_settled_root(
+                        Subject::Input(receipt) => mailbox::holds_settled_run(
                             ctx.parts.work.store_binding(),
                             &ctx.parts.session_id,
                             &receipt.input_id,
                         ),
-                        Subject::Root(_) => false,
+                        Subject::Run(_) => false,
                     };
             }
             () = &mut parked => {
-                // A root's park was recorded in this process, which publishes
+                // A run's park was recorded in this process, which publishes
                 // nothing on the observation: read whether it is this
-                // subject's root that parked.
-                parked.set(lash_core::drive::root_park_recorded());
+                // subject's run that parked.
+                parked.set(lash_core::shift::run_park_recorded());
                 parked.as_mut().enable();
             }
             () = tokio::time::sleep_until(poll_at) => {
@@ -839,22 +839,22 @@ pub(super) async fn follow(
     }
 }
 
-/// The input whose root a follower probes for at the poll floor: an input
-/// subject's, until its root is known, on a follower with no resident
-/// runtime. Such a follower reads a root that may run in another process,
+/// The input whose run a follower probes for at the poll floor: an input
+/// subject's, until its run is known, on a follower with no resident
+/// runtime. Such a follower reads a run that may run in another process,
 /// which publishes nothing on this process's replay, so without the probe it
-/// learns the root, and holds the root's terminal wait, only on a store
+/// learns the run, and holds the run's terminal wait, only on a store
 /// poll that backs off to a second (FIG-3981). The probe is one keyed read
-/// of the input's root binding: the admission that writes the binding runs
+/// of the input's run binding: the admission that writes the binding runs
 /// in the worker's process and announces it to no other, so there is no
 /// event to wait on instead.
-fn root_probe<'a>(
+fn run_probe<'a>(
     ctx: &SendContext,
     subject: &'a Subject,
     adoption: &Adoption,
 ) -> Option<&'a InputId> {
     match subject {
-        Subject::Input(receipt) if adoption.root.is_none() && ctx.live.is_none() => {
+        Subject::Input(receipt) if adoption.run.is_none() && ctx.live.is_none() => {
             Some(&receipt.input_id)
         }
         _ => None,
@@ -878,7 +878,7 @@ async fn next_event(
 }
 
 /// Deliver what the live replay already holds past the last cursor read: the
-/// subject's root stopped, so its activity is published up to here.
+/// subject's run stopped, so its activity is published up to here.
 async fn drain(
     ctx: &SendContext,
     adoption: &mut Adoption,
@@ -905,19 +905,17 @@ async fn drain(
 async fn live_report(
     ctx: &SendContext,
     subject: &Subject,
-    root: &TurnId,
-) -> Result<Option<mailbox::SettledRoot>> {
+    run: &TurnId,
+) -> Result<Option<mailbox::SettledRun>> {
     Ok(match subject {
-        Subject::Input(receipt) => mailbox::take_settled_root(
+        Subject::Input(receipt) => mailbox::take_settled_run(
             ctx.parts.work.store_binding(),
             &ctx.parts.session_id,
             &receipt.input_id,
         ),
-        Subject::Root(_) => mailbox::take_settled_root_of(
-            ctx.parts.work.store_binding(),
-            &ctx.parts.session_id,
-            root,
-        ),
+        Subject::Run(_) => {
+            mailbox::take_settled_run_of(ctx.parts.work.store_binding(), &ctx.parts.session_id, run)
+        }
     })
 }
 
@@ -928,7 +926,7 @@ async fn live_report(
 async fn finish_settled(
     ctx: &SendContext,
     subject: &Subject,
-    root: TurnId,
+    run: TurnId,
     outcome: TurnOutcome,
     live: Option<std::sync::Arc<lash_core::facade_support::AssembledTurn>>,
     activities: Vec<TurnActivity>,
@@ -937,7 +935,7 @@ async fn finish_settled(
     tap: &mut Tap<'_>,
 ) -> Result<SendOutcome> {
     if !observed {
-        // The root settled, yet none of its activity reached this follower:
+        // The run settled, yet none of its activity reached this follower:
         // it ran in another process, or before this follower's cursor.
         let gap = replay_gap(
             ctx,
@@ -948,7 +946,7 @@ async fn finish_settled(
     }
     let acceptance = match subject {
         Subject::Input(receipt) => Some(receipt.clone()),
-        Subject::Root(_) => None,
+        Subject::Run(_) => None,
     };
     let result = match live {
         Some(turn) => {
@@ -961,13 +959,13 @@ async fn finish_settled(
         None => durable_report(ctx, outcome, acceptance).await?,
     };
     Ok(SendOutcome::Settled {
-        root,
+        run,
         output: Box::new(TurnOutput { result, activities }),
         gaps: observation.gaps,
     })
 }
 
-/// The report of a root that ran elsewhere, rebuilt from the store: honest
+/// The report of a run that ran elsewhere, rebuilt from the store: honest
 /// and thin (D1 §1.5 3b).
 pub(super) async fn durable_report(
     ctx: &SendContext,

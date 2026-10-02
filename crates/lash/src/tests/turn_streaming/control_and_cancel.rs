@@ -194,7 +194,7 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
 }
 
 #[tokio::test]
-pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()> {
+pub(super) async fn cancel_before_shift_yields_cancelled_outcome() -> Result<()> {
     let (core, _double) = double_standard_core().await;
     let session = core.session("pre-cancelled").created().await.open().await?;
     let handle = session.send(TurnInput::text("never runs")).await?;
@@ -204,7 +204,7 @@ pub(super) async fn cancel_before_drive_yields_cancelled_outcome() -> Result<()>
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert!(
         outcome.output().is_none(),
-        "no root ran for a withdrawn input"
+        "no run ran for a withdrawn input"
     );
     Ok(())
 }
@@ -225,11 +225,11 @@ pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
         .await?;
     let handle = session
         .send(TurnInput::text("hang here"))
-        .id("origin-root")
+        .id("origin-run")
         .await?;
     let input_id = handle.input_id().clone();
     let outcome = tokio::spawn(async move { handle.outcome().await });
-    started_rx.await.expect("root reached the provider");
+    started_rx.await.expect("run reached the provider");
     let receipt = session
         .cancel(crate::CancelTarget::Input(input_id))
         .request_id("origin-stop")
@@ -238,7 +238,7 @@ pub(super) async fn send_cancel_preserves_explicit_origin_hint() -> Result<()> {
     assert!(matches!(receipt, crate::CancelReceipt::Requested { .. }));
     let outcome = outcome.await.expect("send task")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
-    let output = outcome.output().expect("running root has a report");
+    let output = outcome.output().expect("running run has a report");
     let evidence = output.result.cancellation().expect("cancellation evidence");
     assert_eq!(evidence.request_id, "origin-stop");
     assert_eq!(evidence.origin.as_deref(), Some("shutdown"));
@@ -300,7 +300,7 @@ pub(super) async fn an_input_cancel_stops_its_inflight_turn() -> Result<()> {
             ..
         }) if origin == "user"
     ));
-    // A cancel after the root settled finds nothing left to stop.
+    // A cancel after the run settled finds nothing left to stop.
     assert!(matches!(
         session.cancel(crate::CancelTarget::Input(input_id)).await?,
         crate::CancelReceipt::AlreadySettled { .. }
@@ -395,7 +395,7 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
         .await?;
     let entered = first_entered.notified();
     let foreground = session.send(TurnInput::text("foreground turn")).await?;
-    // This core runs no session work: a waiter drives the input in its own
+    // This core runs no session work: a waiter executes the input in its own
     // task, so the events follower is what starts the turn.
     let _foreground_events = foreground.events();
     entered.await;
@@ -439,11 +439,11 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
 }
 
 #[tokio::test]
-pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_the_queued_one()
+pub(super) async fn cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one()
 -> Result<()> {
-    // One session drives one root at a time, so a second send waits queued
-    // behind the running root. Cancelling each must reach both: the running
-    // root commits its stop, and the queued input is withdrawn before it
+    // One session shifts one run at a time, so a second send waits queued
+    // behind the running run. Cancelling each must reach both: the running
+    // run commits its stop, and the queued input is withdrawn before it
     // starts a fresh provider call after the user pressed stop.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
@@ -479,10 +479,7 @@ pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_t
     let first = first_outcome.await.expect("first send task")?;
     let second = second.outcome().await?;
     assert_eq!(first.status(), crate::TurnStatus::Cancelled);
-    assert!(
-        first.output().is_some(),
-        "the running root commits its stop"
-    );
+    assert!(first.output().is_some(), "the running run commits its stop");
     assert_eq!(second.status(), crate::TurnStatus::Cancelled);
     assert!(second.output().is_none(), "the queued input is withdrawn");
     assert!(matches!(
@@ -495,7 +492,7 @@ pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_t
 #[tokio::test]
 pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_handle() -> Result<()>
 {
-    // A cancel is a durable request on the root's cancellation gate, not a
+    // A cancel is a durable request on the run's cancellation gate, not a
     // process-local lever: a handle opened separately for the same session
     // reaches a send another handle made, and cancels nothing else.
     let (started_tx, started_rx) = oneshot::channel::<()>();
@@ -509,7 +506,7 @@ pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_h
     let handle_b = core.session("cancel-scope").created().await.open().await?;
 
     let hanging = handle_a.send(TurnInput::text("hang here")).await?;
-    // This core runs no session work: a waiter drives the input in its own
+    // This core runs no session work: a waiter executes the input in its own
     // task, so the events follower is what starts the turn.
     let _hanging_events = hanging.events();
     started_rx.await.expect("turn reached the provider");
@@ -535,7 +532,7 @@ pub(super) async fn an_input_cancel_reaches_a_send_through_a_separately_opened_h
 
 #[tokio::test]
 pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Result<()> {
-    // An input cancel reaches the running root as a durable request on its
+    // An input cancel reaches the running run as a durable request on its
     // cancellation gate, under its default request id (FIG-3672 P9). The
     // turn honours it at its journaled peek, so the committed report names
     // that one request: one cancellation is one identity.
@@ -572,7 +569,7 @@ pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Re
     assert_eq!(result.status(), crate::TurnStatus::Cancelled);
     let output = result
         .output()
-        .expect("the running root commits a cancelled turn");
+        .expect("the running run commits a cancelled turn");
     let evidence = output
         .result
         .cancellation()
@@ -583,9 +580,9 @@ pub(super) async fn an_input_cancel_commits_the_request_it_was_placed_as() -> Re
 }
 
 #[tokio::test]
-pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_drives() -> Result<()> {
+pub(super) async fn a_session_cancel_reaches_a_sent_input_its_waiter_executes() -> Result<()> {
     // On the inline double the input runs in the task that waits on it; a
-    // cancel from the session still reaches that root through its gate.
+    // cancel from the session still reaches that run through its gate.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let double = restate_double(SEED).await;
@@ -665,7 +662,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     let undelivered_id = undelivered.input_id().clone();
     let request_id = format!("{session_id}:cancel");
     let cancel = session
-        .cancel(crate::CancelTarget::Root(turn_id.clone()))
+        .cancel(crate::CancelTarget::Run(turn_id.clone()))
         .request_id(request_id.clone())
         .origin("test-host")
         .reason("undelivered active input");
@@ -675,7 +672,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
         cancel.undelivered(disposition)
     };
     let crate::CancelReceipt::Requested { receipt, .. } = cancel.await? else {
-        panic!("the running root must receive a cancellation request");
+        panic!("the running run must receive a cancellation request");
     };
     assert!(matches!(
         receipt.outcome,
@@ -727,7 +724,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
                 pending
                     .iter()
                     .all(|input| input.input.input_id != undelivered_id),
-                "the session drive consumes the deferred input as the next root"
+                "the session shift consumes the deferred input as the next run"
             );
         }
     }
@@ -744,7 +741,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
 }
 
 #[tokio::test]
-pub(super) async fn a_root_cancel_with_the_drop_disposition_drops_undelivered_active_input()
+pub(super) async fn a_run_cancel_with_the_drop_disposition_drops_undelivered_active_input()
 -> Result<()> {
     assert_session_turn_cancel_disposition(
         &SessionId::from("session-cancel-explicit-drop"),
@@ -837,13 +834,13 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     assert!(cancelled.outcome.is_cancelled());
 
     let stopped = session
-        .cancel(crate::CancelTarget::Root(TurnId::from(active_turn_id)))
+        .cancel(crate::CancelTarget::Run(TurnId::from(active_turn_id)))
         .undelivered(lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer)
         .await?;
     assert!(matches!(stopped, crate::CancelReceipt::Requested { .. }));
     let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)
         .await
-        .expect("cancelled root settles")
+        .expect("cancelled run settles")
         .expect("turn task")?;
     assert_eq!(interrupted.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
@@ -981,17 +978,17 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .expect("second provider signal");
 
     let stopped = session
-        .cancel(crate::CancelTarget::Root(TurnId::from(active_turn_id)))
+        .cancel(crate::CancelTarget::Run(TurnId::from(active_turn_id)))
         .await?;
     assert!(matches!(stopped, crate::CancelReceipt::Requested { .. }));
     let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)
         .await
-        .expect("first root settles")
+        .expect("first run settles")
         .expect("turn task")?;
     assert_eq!(interrupted.status(), crate::TurnStatus::Cancelled);
     assert!(
         interrupted.output().is_some(),
-        "the interrupted root commits its cancelled turn"
+        "the interrupted run commits its cancelled turn"
     );
     assert_eq!(
         active.outcome().await?.status(),
@@ -1011,7 +1008,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
             .filter(|application| application.input_id == active_id)
             .count(),
         1,
-        "the accepted steer applies to the interrupted root once"
+        "the accepted steer applies to the interrupted run once"
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(
@@ -1026,7 +1023,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
 }
 
 #[tokio::test]
-pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_root() -> Result<()> {
+pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
     let (first_started_tx, first_started_rx) = oneshot::channel::<()>();
     let (release_first_tx, release_first_rx) = oneshot::channel::<()>();
     let (second_started_tx, second_started_rx) = oneshot::channel::<()>();
@@ -1115,17 +1112,17 @@ pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_root() -> Resul
         .expect("second provider signal");
 
     // The steer is checkpoint-admitted and its turn is in flight: the input's
-    // cancel resolves the consuming root from the admission's record.
+    // cancel resolves the consuming run from the admission's record.
     let stopped = session
         .cancel(crate::CancelTarget::Input(active_id.clone()))
         .await?;
-    let crate::CancelReceipt::Requested { root, .. } = &stopped else {
-        panic!("a checkpoint-admitted input's cancel reaches its root: {stopped:?}");
+    let crate::CancelReceipt::Requested { run, .. } = &stopped else {
+        panic!("a checkpoint-admitted input's cancel reaches its run: {stopped:?}");
     };
-    assert_eq!(root.as_str(), active_turn_id);
+    assert_eq!(run.as_str(), active_turn_id);
     let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)
         .await
-        .expect("the cancelled root settles")
+        .expect("the cancelled run settles")
         .expect("turn task")?;
     assert_eq!(interrupted.status(), crate::TurnStatus::Cancelled);
     assert_eq!(

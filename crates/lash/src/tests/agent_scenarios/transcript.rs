@@ -37,24 +37,24 @@ use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, Chec
 /// text reads `root` instead of an alias that shifts when an unrelated session
 /// appears first.
 #[cfg(feature = "rlm")]
-pub(super) fn agent_scenario_transcript(run: &AgentScenarioRun, root: &str) -> String {
+pub(super) fn agent_scenario_transcript(executed: &AgentScenarioRun, root: &str) -> String {
     let mut transcript = lash_core::testing::behavior_transcript::Transcript::new();
-    transcript.pin(run.session_id.clone(), root.to_string());
-    let root_actor = || Actor::session(run.session_id.clone());
+    transcript.pin(executed.session_id.clone(), root.to_string());
+    let root_actor = || Actor::session(executed.session_id.clone());
 
     transcript.record(Entry::new(Kind::Ingress, root_actor(), "turn.start"));
 
-    for activity in &run.streamed_events {
-        if let Some(entry) = activity_entry(&activity.event, &run.session_id) {
+    for activity in &executed.streamed_events {
+        if let Some(entry) = activity_entry(&activity.event, &executed.session_id) {
             transcript.record(entry);
         }
     }
 
-    for write in ordered_checkpoint_writes(&run.checkpoint_writes, &run.session_id) {
+    for write in ordered_checkpoint_writes(&executed.checkpoint_writes, &executed.session_id) {
         transcript.record(commit_entry(write));
     }
 
-    let mut processes = run.final_process_list.clone();
+    let mut processes = executed.final_process_list.clone();
     processes.sort_by(|left, right| {
         (left.label.as_deref(), left.process_id.as_str())
             .cmp(&(right.label.as_deref(), right.process_id.as_str()))

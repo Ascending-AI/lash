@@ -372,7 +372,7 @@ define_plugin_errors! {
     /// Submit host head writes as boundary session commands, or retry once
     /// the owner releases the head. The refused write changes nothing.
     #[error(
-        "session `{session_id}`'s head is owned by {owner}; a head write outside the drive is refused"
+        "session `{session_id}`'s head is owned by {owner}; a head write outside the shift is refused"
     )]
     SessionHeadOwned {
         session_id: SessionId,
@@ -1039,7 +1039,7 @@ impl PluginError {
     pub fn class(&self) -> PluginErrorClass {
         use PluginErrorClass::{Redrivable, Retryable, Terminal};
         match self {
-            // the substrate faulted, or the owning drive releases the head
+            // the substrate faulted, or the owning shift releases the head
             // at its boundary.
             Self::StoreUnavailable { .. } | Self::SessionHeadOwned { .. } => Retryable,
             Self::Runtime(error) => {
@@ -1371,8 +1371,8 @@ mod classification_tests {
     fn head_ownership_survives_plugin_journaling_and_error_conversions() {
         let session_id = SessionId::from("busy-session");
         for owner in [
-            crate::store::SessionHeadOwner::Root {
-                root: crate::TurnId::from("bound-root"),
+            crate::store::SessionHeadOwner::Run {
+                run: crate::TurnId::from("bound-run"),
             },
             crate::store::SessionHeadOwner::FollowOn {
                 follow_on: crate::TurnId::from("owed-follow-on"),

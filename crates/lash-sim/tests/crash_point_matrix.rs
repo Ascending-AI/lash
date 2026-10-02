@@ -5,9 +5,9 @@
 //! in-process Restate server double, or with `LASH_CRASH_MATRIX_ENGINE=live`
 //! on a live `restate-server` (`just crash-matrix-restate-e2e`): the
 //! deployment dies at the cell's crash point, a fresh one comes up, and the
-//! recovery interval ticks until every input was driven exactly once, every
+//! recovery interval ticks until every input was executed exactly once, every
 //! obligation settled or stalled typed, no child is orphaned, no session
-//! wedged, every terminal root's scope closed, within the ADR 0109 §1.8
+//! wedged, every terminal run's scope closed, within the ADR 0109 §1.8
 //! bound. The harness is `lash_sim::crash_matrix`; its module docs say how a
 //! cell is built, and `lash_sim::crash_matrix::engine` how each engine runs
 //! it.
@@ -142,10 +142,10 @@ fn every_registered_cell_has_one_generated_test() {
 }
 
 /// The checker's red side: an input the recovery never drove is reported
-/// lost, and one input committed by two roots is reported driven twice. A
+/// lost, and one input committed by two runs is reported executed twice. A
 /// checker that passed either would pass the matrix vacuously.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_checker_reports_a_lost_input_and_a_double_drive() {
+async fn the_checker_reports_a_lost_input_and_a_double_shift() {
     let lost = Box::pin(crash_matrix::cases::lost_input_control(0x3849_0001))
         .await
         .expect("stage the lost-input control");
@@ -157,20 +157,20 @@ async fn the_checker_reports_a_lost_input_and_a_double_drive() {
                 .any(|violation| violation.contains("open ingress row")),
         "a lost input is reported: {lost:#?}"
     );
-    let twice = Box::pin(crash_matrix::cases::double_drive_control(0x3849_0002))
+    let twice = Box::pin(crash_matrix::cases::double_shift_control(0x3849_0002))
         .await
-        .expect("stage the double-drive control");
+        .expect("stage the double-shift control");
     assert!(
         twice
             .iter()
             .any(|violation| violation.contains("committed 2 time(s)")),
-        "an input driven twice is reported: {twice:#?}"
+        "an input executed twice is reported: {twice:#?}"
     );
 }
 
-/// FIG-3879: a waiter on an input whose drive the engine lost before it
+/// FIG-3879: a waiter on an input whose shift the engine lost before it
 /// admitted anything follows the relay's ask under the next attempt to the
-/// input's answer, instead of waiting on the lost drive.
+/// input's answer, instead of waiting on the lost shift.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_waiter_follows_its_input_past_a_lost_ask() {
     let violations =

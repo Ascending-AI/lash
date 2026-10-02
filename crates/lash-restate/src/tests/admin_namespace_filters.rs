@@ -24,12 +24,12 @@ use std::num::NonZeroUsize;
 
 #[restate_sdk::object]
 trait NamespaceFilterProbe {
-    async fn drive(input: Json<()>) -> HandlerResult<()>;
+    async fn shift(input: Json<()>) -> HandlerResult<()>;
     async fn run(input: Json<()>) -> HandlerResult<()>;
 }
 struct NamespaceFilterProbeImpl;
 impl NamespaceFilterProbe for NamespaceFilterProbeImpl {
-    async fn drive(&self, _ctx: ObjectContext<'_>, _input: Json<()>) -> HandlerResult<()> {
+    async fn shift(&self, _ctx: ObjectContext<'_>, _input: Json<()>) -> HandlerResult<()> {
         Err(HandlerError::from(std::io::Error::other(
             "pause the admin filter fixture",
         )))
@@ -57,7 +57,7 @@ async fn every_admin_filter_excludes_foreign_and_dotted_namespaces() {
         RestateNamespace::new("foreign-admin-pin").expect("named namespace"),
     ];
     let bases = [
-        ("LashSession", "drive"),
+        ("LashSession", "shift"),
         ("LashTurn", "run"),
         ("LashProcessWorkflow", "run"),
     ];
@@ -142,12 +142,12 @@ async fn every_admin_filter_excludes_foreign_and_dotted_namespaces() {
                 own(base)
             );
         }
-        let drives = admin
-            .paused_session_drives(namespace, "same-key")
+        let shifts = admin
+            .paused_session_shifts(namespace, "same-key")
             .await
-            .expect("paused session drives");
+            .expect("paused session shifts");
         assert_eq!(
-            drives
+            shifts
                 .into_iter()
                 .map(|row| row.id)
                 .collect::<std::collections::BTreeSet<_>>(),
@@ -178,13 +178,12 @@ async fn every_admin_filter_excludes_foreign_and_dotted_namespaces() {
         }
         assert_eq!(page_ids, expected);
         let keys = ["same-key".to_string()];
-        let roots = admin
-            .root_runs(namespace, &keys)
+        let runs = admin
+            .run_executions(namespace, &keys)
             .await
-            .expect("root runs in all lanes");
+            .expect("run executes in all lanes");
         assert_eq!(
-            roots
-                .into_iter()
+            runs.into_iter()
                 .map(|row| row.id)
                 .collect::<std::collections::BTreeSet<_>>(),
             own("LashTurn")

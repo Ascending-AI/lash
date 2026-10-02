@@ -8,8 +8,8 @@
 //! crash matrix is generated from that trace: every operation has a boundary
 //! crash, every durable write has an inside-call lost-response crash, and the
 //! scripted provider contributes its own mid-stream crash points. Recovery
-//! replays the recorded drive admission and the root's recorded admissions,
-//! and a stale drive fence refuses settlement.
+//! replays the recorded shift admission and the run's recorded admissions,
+//! and a stale shift fence refuses settlement.
 //!
 //! Trace drift covers the operations explicitly decorated by this module.
 //! Durable-store methods that [`SeamStore`] passes through undecorated are
@@ -25,7 +25,7 @@
 //! entry that requires a ticket and exact violations.
 //!
 //! The outcome table is hand-written in `turn_crash_outcomes.json`. Its rulings
-//! follow ADR 0101's root admission and stale-drive-fence rules, ADR 0045's stateless
+//! follow ADR 0101's run admission and stale-shift-fence rules, ADR 0045's stateless
 //! service rule, and the current-head CAS/floor semantics. In particular, a
 //! crash after an external effect but before its outcome reaches the runtime
 //! must re-execute that effect; this suite deliberately asserts at-least-once
@@ -44,7 +44,7 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
@@ -57,7 +57,7 @@ use serde::{Deserialize, Serialize};
 use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{RuntimeCommit, RuntimeCommitReceipt, SessionWindowRead};
-use crate::{DriveFence, PendingTurnInputDraft, RuntimeStore, SessionHeadMeta, StoreError};
+use crate::{PendingTurnInputDraft, RuntimeStore, SessionHeadMeta, ShiftFence, StoreError};
 
 mod admission_crash_cells;
 mod after_commit_redrive;
@@ -69,7 +69,7 @@ mod held_turn_input;
 mod layered_group_child;
 mod recovery;
 mod reference_turn;
-mod root_end_crash_cells;
+mod run_end_crash_cells;
 mod seam_controllers;
 
 use recovery::run_crash_matrix_case;
@@ -94,8 +94,8 @@ use expectations::{
 pub use held_turn_input::admitted_turn_input_visibility_survives_worker_crash;
 pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
 use pretty_assertions::assert_eq;
-pub use root_end_crash_cells::{
-    root_end_commit_crash_after_write_replays_once, root_end_commit_crash_before_write_replays_once,
+pub use run_end_crash_cells::{
+    run_end_commit_crash_after_write_replays_once, run_end_commit_crash_before_write_replays_once,
 };
 pub(crate) use seam_controllers::{LawSeamHost, SeamLayer};
 
@@ -138,11 +138,11 @@ impl TurnSeamOperation {
         matches!(
             self,
             Self::Store(
-                StoreOperation::AdmitRoot
+                StoreOperation::AdmitRun
                     | StoreOperation::OpenSessionCommandRun
                     | StoreOperation::AdmitAtCheckpoint { .. }
                     | StoreOperation::CommitFinalHead { .. }
-                    | StoreOperation::CommitRootEnd
+                    | StoreOperation::CommitRunEnd
                     | StoreOperation::AuthorizeTurnCancelClosure
                     | StoreOperation::ApplyTurnCancelEffectsAndConsume
             ) | Self::TurnControl(_)
@@ -157,8 +157,8 @@ enum StoreOperation {
     LoadSessionWindow,
     LoadSessionHeadMeta,
     OpenSessionCommandRun,
-    UnfinishedRoot,
-    AdmitRoot,
+    UnfinishedRun,
+    AdmitRun,
     AdmitAtCheckpoint {
         checkpoint: String,
     },
@@ -166,7 +166,7 @@ enum StoreOperation {
         settles_queue: bool,
         settles_turn_input: bool,
     },
-    CommitRootEnd,
+    CommitRunEnd,
     AuthorizeTurnCancelClosure,
     ApplyTurnCancelEffectsAndConsume,
 }
@@ -424,9 +424,9 @@ impl SeamControl {
 struct SeamStore {
     inner: Arc<dyn RuntimeStore>,
     control: SeamControl,
-    /// Active-turn inputs written the moment the admission of the root they
+    /// Active-turn inputs written the moment the admission of the run they
     /// address returns: the store's view of a client steering the running
-    /// root ([`reference_steer`]).
+    /// run ([`reference_steer`]).
     steer: Vec<PendingTurnInputDraft>,
 }
 
@@ -435,7 +435,7 @@ impl SeamStore {
         Self::steering(inner, control, Vec::new())
     }
 
-    /// A seam store that writes each of `steer` once the root it addresses
+    /// A seam store that writes each of `steer` once the run it addresses
     /// is admitted.
     fn steering(
         inner: Arc<dyn RuntimeStore>,
@@ -449,18 +449,18 @@ impl SeamStore {
         })
     }
 
-    /// Admit the root, then steer every input addressed to it. Each steer
+    /// Admit the run, then steer every input addressed to it. Each steer
     /// carries a source key, so a redrive's admission writes nothing new.
-    async fn admit_root_and_steer(
+    async fn admit_run_and_steer(
         &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
-        let admission = self.inner.admit_root(request).await?;
+        request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
+        let admission = self.inner.admit_run(request).await?;
         if admission.is_some() {
             for draft in &self.steer {
                 if matches!(
                     &draft.ingress,
-                    crate::TurnInputIngress::ActiveTurn { turn_id, .. } if *turn_id == request.root
+                    crate::TurnInputIngress::ActiveTurn { turn_id, .. } if *turn_id == request.run
                 ) {
                     self.inner.enqueue_pending_turn_input(draft.clone()).await?;
                 }
@@ -472,26 +472,26 @@ impl SeamStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for SeamStore {
-    async fn unfinished_root(
+    async fn unfinished_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<crate::store::UnfinishedRoot>, StoreError> {
+    ) -> Result<Option<crate::store::UnfinishedRun>, StoreError> {
         self.control
             .around(
-                TurnSeamOperation::Store(StoreOperation::UnfinishedRoot),
-                self.inner.unfinished_root(session_id),
+                TurnSeamOperation::Store(StoreOperation::UnfinishedRun),
+                self.inner.unfinished_run(session_id),
             )
             .await
     }
 
-    async fn admit_root(
+    async fn admit_run(
         &self,
-        request: &crate::store::AdmitRootRequest,
-    ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+        request: &crate::store::AdmitRunRequest,
+    ) -> Result<Option<crate::store::RunAdmission>, StoreError> {
         self.control
             .around(
-                TurnSeamOperation::Store(StoreOperation::AdmitRoot),
-                self.admit_root_and_steer(request),
+                TurnSeamOperation::Store(StoreOperation::AdmitRun),
+                self.admit_run_and_steer(request),
             )
             .await
     }
@@ -530,8 +530,8 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let operation = if commit.turn_commit.operation.key == "root-end" {
-            TurnSeamOperation::Store(StoreOperation::CommitRootEnd)
+        let operation = if commit.turn_commit.operation.key == "run-end" {
+            TurnSeamOperation::Store(StoreOperation::CommitRunEnd)
         } else if commit.interrupted_turn.is_some() {
             TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
         } else {
@@ -553,7 +553,7 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &DriveFence,
+        session_execution_lease: &ShiftFence,
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
         self.control
@@ -567,7 +567,7 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
 
     async fn open_session_command_run(
         &self,
-        fence: &DriveFence,
+        fence: &ShiftFence,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         self.control
             .around(
@@ -981,8 +981,8 @@ const REFERENCE_STEER_KEY: &str = "reference-active-checkpoint-input";
 
 /// The reference turn's active-turn input. An input addressed to a turn that
 /// has not started is refused (ADR 0101 §5.1), so the reference seam store
-/// steers it into the root the moment the root's admission returns, as a
-/// client steers a running turn; the root's after-work checkpoint admits it.
+/// steers it into the run the moment the run's admission returns, as a
+/// client steers a running turn; the run's after-work checkpoint admits it.
 fn reference_steer(identity: &ReferenceIdentity) -> PendingTurnInputDraft {
     PendingTurnInputDraft::new(
         &identity.session_id,
@@ -1005,11 +1005,11 @@ async fn seed_reference_ingress(store: &Arc<dyn RuntimeStore>, identity: &Refere
     seed_reference_ingress_as(store, identity, Some(&identity.turn_id)).await;
 }
 
-/// The reference ingress for a drain through the session drive: the
+/// The reference ingress for a drain through the session shift: the
 /// next-turn input carries the reference turn id as its host id, so the
-/// drive admits it as the root of that id and the active-turn input and any
-/// cancellation addressed to the turn reach the root (FIG-3600 ruling Q4).
-async fn seed_reference_ingress_for_drive(
+/// shift admits it as the run of that id and the active-turn input and any
+/// cancellation addressed to the turn reach the run (FIG-3600 ruling Q4).
+async fn seed_reference_ingress_for_shift(
     store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
 ) {
@@ -1023,7 +1023,7 @@ async fn seed_reference_ingress_for_drive(
 async fn seed_reference_ingress_as(
     store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
-    root: Option<&TurnId>,
+    run: Option<&TurnId>,
 ) {
     admit_reference_session(store, identity).await;
     let draft = PendingTurnInputDraft::new(
@@ -1031,8 +1031,8 @@ async fn seed_reference_ingress_as(
         crate::TurnInputIngress::NextTurn,
         crate::TurnInput::text("durable next-turn input"),
     );
-    let draft = match root {
-        Some(root) => draft.with_source_key(root.as_str()),
+    let draft = match run {
+        Some(run) => draft.with_source_key(run.as_str()),
         None => draft,
     };
     store
@@ -1051,14 +1051,14 @@ async fn seed_reference_ingress_as(
         .expect("seed queued work");
 }
 
-/// Drain the reference turn through the session drive on the controller a
+/// Drain the reference turn through the session shift on the controller a
 /// tier's runner lent it.
-async fn drive_root_on(
+async fn execute_run_on(
     mut runtime: crate::LashRuntime,
     scoped: crate::ScopedEffectController<'_>,
 ) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
     Box::pin(
-        runtime.drive_one_admitted_queued_root(crate::TurnOptions::new(
+        runtime.execute_one_admitted_queued_run(crate::TurnOptions::new(
             tokio_util::sync::CancellationToken::new(),
             scoped,
         )),
@@ -1090,7 +1090,7 @@ fn reference_admitted_scope(identity: &ReferenceIdentity) -> crate::AdmittedScop
 /// The level-one crash points of `trace`, in trace order.
 ///
 /// A crash is armed on an operation and fires at its first occurrence, so an
-/// operation the trace repeats (the drive admission's pending follow-on probe
+/// operation the trace repeats (the shift admission's pending follow-on probe
 /// and the turn's own head read are both a head-meta read) names one point:
 /// its first.
 fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
@@ -1177,7 +1177,7 @@ pub async fn turn_crash_trace_drift_check<F, S>(
         &executions,
         nominal_recovery_timings(),
     )
-    .before_drive(SeamControl::clear)
+    .before_shift(SeamControl::clear)
     .reporting();
     runner
         .run_turn(reference_admitted_scope(&identity), attempt)
@@ -1258,7 +1258,7 @@ fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
 /// `turn_runner` module docs). `make` returns fresh outer handles over the
 /// substrate selected by its semantic scenario key.
 ///
-/// Every generated crash point runs under the tier's session drive.
+/// Every generated crash point runs under the tier's session shift.
 pub async fn turn_crash_matrix_level_1<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,

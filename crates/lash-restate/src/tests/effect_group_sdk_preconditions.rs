@@ -529,7 +529,7 @@ async fn witness_retry_exhaustion_pauses_until_resumed(
     let _ = admin.kill_invocation(&id).await;
 }
 
-/// Drives `cancellation_coverage` and reads the two children back out of
+/// Executes `cancellation_coverage` and reads the two children back out of
 /// `sys_invocation`.
 ///
 /// Deadlines here are generous on purpose. The prelude banks that this box's

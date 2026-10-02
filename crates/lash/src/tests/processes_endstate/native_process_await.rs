@@ -41,7 +41,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     wait_for_waiting_signal(&core, &process_id, "ready").await;
 
     // Hold the terminal await while the process is still running; it must resolve
-    // only once the signal drives the process to finish.
+    // only once the signal executes the process to finish.
     let await_core = core.clone();
     let await_id = process_id.clone();
     let started = std::time::Instant::now();

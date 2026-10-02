@@ -59,7 +59,7 @@ the model's surrounding prose.
 
 - Use a free port from this row's allocation in the **3200-3299** range per
   [RULES.md](../RULES.md). Verify it is free before
-  boot. Use a fresh per-row directory under the drive's run root with `data` and `run`
+  boot. Use a fresh per-row directory under the shift's run root with `data` and `run`
   subdirectories, exported as `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR`.
   (Earlier wording pinned `/workspace/tmp/fig1116-*/` paths and warned off ports 3056/3057;
   that is an older layout and conflicts with RULES.md.)

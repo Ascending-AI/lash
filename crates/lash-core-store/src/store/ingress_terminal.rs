@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IngressTerminalCause {
-    /// A root delivered the input or wake into a turn it committed.
+    /// A run delivered the input or wake into a turn it committed.
     Delivered,
     /// The command lane applied the session command.
     Applied,

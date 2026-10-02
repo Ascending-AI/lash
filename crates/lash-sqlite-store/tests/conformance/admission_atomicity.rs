@@ -30,14 +30,14 @@ async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
         let case = law::prepare(store as Arc<dyn RuntimeStore>, entry).await;
         let conn = backend.raw(SqliteDatabase::DurableCore);
         let second = case.ids[1].replace('\'', "''");
-        conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_root ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
+        conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_run ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
         assert!(
             case.admit().await.is_err(),
             "{entry:?}: a partial admission is refused"
         );
         let bound: i64 = conn
             .query_row(
-                "SELECT count(*) FROM queued_work_batches WHERE admitted_root IS NOT NULL",
+                "SELECT count(*) FROM queued_work_batches WHERE admitted_run IS NOT NULL",
                 [],
                 |row| row.get(0),
             )

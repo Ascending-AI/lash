@@ -48,7 +48,7 @@ impl Generator<'_> {
     ///
     /// The response is padded to the sampled output size. A cell whose planned
     /// work does not fit the sampled bucket is served whole and unpadded: the
-    /// durable work it drives matters more than the byte bucket.
+    /// durable work it executes matters more than the byte bucket.
     pub fn provider_response(&self, plan: &TurnPlan, attempt: u32) -> Result<ProviderResponse> {
         ensure!(attempt > 0, "attempts start at one");
         let id = &plan.operation;
@@ -83,8 +83,8 @@ impl Generator<'_> {
         })
     }
 
-    /// One cell executes every input admitted by a root. Each plan has its
-    /// own lexical scope, and only the combined cell finishes the root.
+    /// One cell executes every input admitted by a run. Each plan has its
+    /// own lexical scope, and only the combined cell finishes the run.
     pub fn admitted_response(&self, keys: &[String], attempt: u32) -> Result<ProviderResponse> {
         ensure!(!keys.is_empty(), "no admitted inputs");
         if let [key] = keys {

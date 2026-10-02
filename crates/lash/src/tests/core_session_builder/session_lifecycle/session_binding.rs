@@ -136,7 +136,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let turn_id = lash_sansio::TurnId::from("owner-preserved-turn");
     assert!(matches!(
         resumed
-            .cancel(crate::CancelTarget::Root(turn_id.clone()))
+            .cancel(crate::CancelTarget::Run(turn_id.clone()))
             .request_id("resume-owner-request")
             .origin("test")
             .await?,
@@ -229,7 +229,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
 
     let administration = core.session_administration().await;
     let relay = lash_core::session_delete::SessionDeleteRelay::new(administration);
-    let pass = lash_core::runtime::drive::relay::relay_due(
+    let pass = lash_core::runtime::shift::relay::relay_due(
         &relay,
         &lash_core::testing::TestClock::new(core_now_ms(&core) + 2_000),
         std::num::NonZeroUsize::new(8).expect("non-zero page"),

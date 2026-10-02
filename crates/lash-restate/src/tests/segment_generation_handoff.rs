@@ -478,7 +478,7 @@ impl Roll {
                         generation(build),
                         &crate::services::DEFAULT_NAMESPACE,
                     ),
-                    session_driver: crate::RestateSessionDriverSlot::new(),
+                    session_shifts: crate::RestateSessionShiftsSlot::new(),
                     build_generation: generation(build),
                     namespace: crate::RestateNamespace::default(),
                     fleet: crate::object_state::FleetView::default(),

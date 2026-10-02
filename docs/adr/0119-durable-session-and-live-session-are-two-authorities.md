@@ -10,7 +10,7 @@ Reading or changing durable queues does not require a runtime capable of
 executing the session. Opening a runtime reconciles tool sources and protocol
 state and materializes plugins. A host that only needs durable input or a
 settled read needs an operation that remains valid beside an engine-owned
-session drive, without performing that runtime initialization.
+session shift, without performing that runtime initialization.
 
 ## Decision
 
@@ -72,8 +72,8 @@ Sources: `crates/lash/src/session.rs:164`, `:203`, `:254`, `:525`, and `:978`;
 ### Membership rule
 
 The Durable Session owns operations that remain correct beside an engine-owned
-session drive. It exposes `send`, `send_batch`, attachment to accepted input,
-root handles and cancellation; pending-input and queued-work reads and
+session shift. It exposes `send`, `send_batch`, attachment to accepted input,
+run handles and cancellation; pending-input and queued-work reads and
 cancels; settled input applications; and `read`, `exists` and `was_deleted`.
 User input and non-user queued work remain separate row classes.
 
@@ -81,12 +81,12 @@ The live session owns runtime configuration and views that include the shared
 in-memory token ledger. Session deletion uses its scoped delete context and
 closure-pin checks. Forking names a destination session and reconciles its
 observers. Runtime administration and effect-host wait revocation require
-their own authority. Restate serializes session drives; the sealed drive fence
+their own authority. Restate serializes session shifts; the sealed shift fence
 gates execution writes.
 
 Sources: `crates/lash/src/durable_session.rs:209`,
 `crates/lash-core/src/runtime/durable_queue.rs:160`, and
-`crates/lash-restate/src/session_driver.rs`.
+`crates/lash-restate/src/session_shifts.rs`.
 
 ### Acquisition never creates
 
@@ -197,7 +197,7 @@ Sources: `crates/lash/src/session.rs:142`,
 ## Consequences
 
 Durable queue access cannot orphan tools or emit runtime restoration events.
-Multiple correctly bound handles can operate beside the serialized drive.
+Multiple correctly bound handles can operate beside the serialized shift.
 Acquiring a runtime for a poll would perform reconciliation without an
 execution need. Inferring execution completion from a queue row disappearing
 would confuse claimed, cancelled and completed work; handles and observation

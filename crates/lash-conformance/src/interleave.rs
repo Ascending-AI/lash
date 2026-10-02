@@ -328,7 +328,7 @@ impl Schedule<'_> {
         outputs.into_iter().flatten().collect()
     }
 
-    /// Drive the actors until each is held before a call or finished.
+    /// Execute the actors until each is held before a call or finished.
     async fn settle<T>(&self, futures: &mut [Actor<'_, T>], outputs: &mut [Option<T>]) {
         let settled = join_all(
             futures
@@ -696,10 +696,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "no schedule reached `admit_root`")]
+    #[should_panic(expected = "no schedule reached `admit_run`")]
     async fn a_held_operation_no_actor_calls_fails_the_law() {
         two_increments(
-            Explorer::over("stale", None).holding(&[WRITE.into(), StoreOp::admit_root.into()]),
+            Explorer::over("stale", None).holding(&[WRITE.into(), StoreOp::admit_run.into()]),
         )
         .await;
     }

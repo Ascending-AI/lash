@@ -438,7 +438,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             checkpoint_ref: Some(checkpoint_ref),
             leaf_node_id: self.committed_leaf_node_id.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
-            published_by_drive: self.commit.drive_fence.is_some(),
+            published_by_shift: self.commit.shift_fence.is_some(),
         }
     }
 
@@ -520,7 +520,7 @@ fn derive_appended_node_facts(
     Ok((planned, parent.map(|parent| parent.frame_node_id)))
 }
 
-/// A commit settles one lane (ADR 0101 §4): a root's turn commit settles the
+/// A commit settles one lane (ADR 0101 §4): a run's turn commit settles the
 /// ingress rows its admission bound, and a session-command run's applying
 /// commit settles its command rows — never both in one commit.
 fn validate_commit_lane(commit: &RuntimeCommit) -> Result<(), StoreError> {
@@ -529,7 +529,7 @@ fn validate_commit_lane(commit: &RuntimeCommit) -> Result<(), StoreError> {
     {
         return Err(StoreError::IngressAndSessionCommandRun {
             session_id: commit.session_id.clone(),
-            root: ingress.root.clone(),
+            run: ingress.run.clone(),
         });
     }
     Ok(())
@@ -571,7 +571,7 @@ mod tests {
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state)
             .settling_ingress(crate::store::IngressSettlement::new(crate::TurnId::from(
-                "root-1",
+                "run-1",
             )))
             .applying_commands(crate::QueuedWorkCompletion {
                 session_id: SessionId::from("ingress-and-command-run"),
@@ -581,16 +581,16 @@ mod tests {
         let error =
             match RuntimeCommitPlanner::prepare(commit, crate::store::FleetFormat::current()) {
                 Ok(_) => {
-                    panic!("a commit settles a root's ingress or a session-command run, not both")
+                    panic!("a commit settles a run's ingress or a session-command run, not both")
                 }
                 Err(error) => error,
             };
         assert!(
             matches!(
                 &error,
-                StoreError::IngressAndSessionCommandRun { session_id, root }
+                StoreError::IngressAndSessionCommandRun { session_id, run }
                     if session_id.as_str() == "ingress-and-command-run"
-                        && root.as_str() == "root-1"
+                        && run.as_str() == "run-1"
             ),
             "{error:?}"
         );

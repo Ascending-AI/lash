@@ -29,8 +29,7 @@ pub use queued_work_admission::{
     turn_address_evidence, validate_queued_work_draft, validate_turn_input_source_key,
 };
 pub use run_spec_admission::{
-    RunSpecAdmission, check_running_root_run_spec, check_steering_run_spec,
-    steering_run_spec_target,
+    RunSpecAdmission, check_running_run_spec, check_steering_run_spec, steering_run_spec_target,
 };
 pub use session_meta::{
     CausalColumns, SessionMetaCodec, StoredObserverIntent, StoredRelation, guard_rebind_lineage,
@@ -46,9 +45,9 @@ pub use turn_input_lifecycle_sql::{
     undelivered_turn_input_state_predicate_sql,
 };
 pub use usage_records::{
-    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageRun,
-    decode_usage_completeness, usage_corrupt, usage_effect_key, usage_integer, usage_ordinal,
-    usage_owner, usage_run_resolution_columns, usage_unsigned,
+    StoredOutstandingAttempt, StoredUsageAggregate, StoredUsageFact, StoredUsageMeter,
+    decode_usage_completeness, usage_corrupt, usage_effect_key, usage_integer,
+    usage_meter_resolution_columns, usage_ordinal, usage_owner, usage_unsigned,
 };
 
 /// Durable receipt identity of one turn's final commit.
@@ -140,25 +139,25 @@ pub fn terminal_turn_input_states_sql() -> String {
 
 pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
 
-/// The fence a backend's [`DriveEpochStore::seal_drive_epoch`] returns for
+/// The fence a backend's [`ShiftEpochStore::seal_shift_epoch`] returns for
 /// the epoch its compare-and-set raised, or the one a retried seal of the
-/// same admission finds. It is the only constructor of a [`DriveFence`]
+/// same admission finds. It is the only constructor of a [`ShiftFence`]
 /// outside `lash-core-store`, and only store backends call it.
 ///
-/// [`DriveEpochStore::seal_drive_epoch`]: crate::store::DriveEpochStore::seal_drive_epoch
-/// [`DriveFence`]: crate::store::DriveFence
+/// [`ShiftEpochStore::seal_shift_epoch`]: crate::store::ShiftEpochStore::seal_shift_epoch
+/// [`ShiftFence`]: crate::store::ShiftFence
 #[must_use]
-pub fn sealed_drive_fence(
+pub fn sealed_shift_fence(
     session_id: SessionId,
     epoch: u64,
     admission: crate::store::AdmissionId,
-) -> crate::store::DriveFence {
-    crate::store::DriveFence::sealed_by_store(session_id, epoch, admission)
+) -> crate::store::ShiftFence {
+    crate::store::ShiftFence::sealed_by_store(session_id, epoch, admission)
 }
 /// The admission verdicts every backend takes alike; see
 /// [`crate::store::admission_plan`].
 pub use crate::store::admission_plan::{
-    deferred_wake_records, require_admitted_to_root, require_open_command,
+    deferred_wake_records, require_admitted_to_run, require_open_command,
 };
 /// One verdict function per fencing decision; see [`crate::store::fencing`].
 pub use crate::store::fencing::{

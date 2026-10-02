@@ -241,9 +241,9 @@ where
     /// retrying its faults as `engine_faults` says.
     ///
     /// A spending effect (`LlmCall`, `Direct`, `ToolAttempt`) runs under a
-    /// usage run the local executor begins, and its recorded entry carries
+    /// usage meter the local executor begins, and its recorded entry carries
     /// the run's usage beside its outcome. Right after the entry — fresh or
-    /// replayed, before the outcome reaches the drive — the controller
+    /// replayed, before the outcome reaches the shift — the controller
     /// journals the run's one-way settle send to the owner's accounting
     /// continuation (ADR 0125). An admission fault, or a fault that ended the
     /// attempt inside its body, ends the attempt retryably and journals

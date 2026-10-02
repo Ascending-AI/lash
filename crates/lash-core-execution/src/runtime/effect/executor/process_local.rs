@@ -157,12 +157,12 @@ impl ProcessLocalExecution {
                 // claimed or delivered it.
                 if let Some(starts) = &process_starts {
                     match starts.deliver_start(&record.id).await {
-                        Ok(crate::runtime::drive::relay::RelayVerdict::NotDue) => {}
+                        Ok(crate::runtime::shift::relay::RelayVerdict::NotDue) => {}
                         Ok(
-                            verdict @ (crate::runtime::drive::relay::RelayVerdict::Retried {
+                            verdict @ (crate::runtime::shift::relay::RelayVerdict::Retried {
                                 ..
                             }
-                            | crate::runtime::drive::relay::RelayVerdict::Stalled(_)),
+                            | crate::runtime::shift::relay::RelayVerdict::Stalled(_)),
                         ) => {
                             // The first attempt failed: the settlement wrote
                             // `last_error` on the row, which the reconcile
@@ -392,7 +392,7 @@ impl ProcessLocalExecution {
                 // arming command must return so the turn can park — and it is
                 // deliberately not the durability story. Durability is the
                 // journaled arming itself: a crash loses the task, the turn is
-                // re-driven, the arming replays, and a new task is armed
+                // redriven, the arming replays, and a new task is armed
                 // against a wait that is still open. Resolution is idempotent,
                 // so an arming that races a terminal it already missed resolves
                 // immediately and a duplicate resolve reports

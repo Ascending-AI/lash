@@ -535,7 +535,7 @@ async fn process_cancel_watch_definitive_refusal_ends_without_retry() {
     );
     let error = tokio::time::timeout(
         Duration::from_secs(2),
-        delivery.drive(std::future::pending::<()>()),
+        delivery.shift(std::future::pending::<()>()),
     )
     .await
     .expect("a definitive answer ends the attempt")
@@ -640,9 +640,9 @@ async fn bounded_idempotent_send_retries_only_transient_failures_under_the_same_
         .send_object_json_idempotent_bounded(
             "LashSession",
             "session",
-            "drive",
-            &serde_json::json!({"request": "drive-1"}),
-            "drive-1",
+            "shift",
+            &serde_json::json!({"request": "shift-1"}),
+            "shift-1",
         )
         .await
         .expect("an idempotent send survives an unavailable ingress");
@@ -657,7 +657,7 @@ async fn bounded_idempotent_send_retries_only_transient_failures_under_the_same_
             requests[0]
                 .headers
                 .iter()
-                .any(|(name, value)| name == "idempotency-key" && value == "drive-1")
+                .any(|(name, value)| name == "idempotency-key" && value == "shift-1")
         );
     }
 
@@ -670,7 +670,7 @@ async fn bounded_idempotent_send_retries_only_transient_failures_under_the_same_
     ] {
         let ingress = ScriptedIngress::new(vec![refusal]);
         let error = RestateIngressClient::new(ingress.connection())
-            .send_object_json_idempotent_bounded("LashSession", "session", "drive", &(), "drive-1")
+            .send_object_json_idempotent_bounded("LashSession", "session", "shift", &(), "shift-1")
             .await
             .expect_err("a definitive refusal cannot improve with a retry");
         assert_eq!(

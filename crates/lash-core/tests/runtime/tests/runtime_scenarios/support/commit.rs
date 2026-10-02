@@ -1,4 +1,4 @@
-use super::admission::SCENARIO_ROOT;
+use super::admission::SCENARIO_RUN;
 use super::*;
 
 impl RuntimeScenarioContext {
@@ -11,16 +11,16 @@ impl RuntimeScenarioContext {
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
         let mut final_commit = RuntimeCommit::persisted_state_for_test(&self.state);
-        final_commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
+        final_commit.shift_fence = Some(Box::new(self.owner_and_lease().1.clone()));
         final_commit.applied_commands = self.command_completion();
         if self.admission.is_some() || self.checkpoint_admission.is_some() {
             final_commit.ingress = Some(self.root_settlement());
-            let root = TurnId::from(SCENARIO_ROOT);
-            final_commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
-                commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
-                turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-                root,
-                outcome: lash_core::store::RootCommittedOutcome::Finished(
+            let run = TurnId::from(SCENARIO_RUN);
+            final_commit.run_terminal = Some(Box::new(lash_core::store::RunTerminalWrite {
+                commit: lash_core::store::TurnCommitId::new(run.clone(), 0),
+                turn: lash_core::store::PhysicalTurn::derive_turn_id(&run, 0),
+                run,
+                outcome: lash_core::store::RunCommittedOutcome::Finished(
                     lash_core::facade_support::TurnFinish::AssistantMessage {
                         text: String::new(),
                     },

@@ -1,4 +1,4 @@
-//! Commit-bytes pins for turn shapes a controller double drives: a code cell,
+//! Commit-bytes pins for turn shapes a controller double executes: a code cell,
 //! a cancel observed after the model call, and an after-step cancel honoured
 //! at the step boundary. Captured before commit content moved onto the
 //! driver's recorded state (FIG-3672 P6). During the pre-1.0 version freeze,
@@ -9,8 +9,8 @@
 //! FIG-2002's removed policy session id and FIG-4655's output-token limits;
 //! every other committed byte retains its check.
 //!
-//! Re-pinned once for a change of value and not of shape (FIG-3600): drive
-//! admission mints a turn's root from its durable input, so a direct turn's
+//! Re-pinned once for a change of value and not of shape (FIG-3600): shift
+//! admission mints a turn's run from its durable input, so a direct turn's
 //! accepted input now carries its turn id in the existing optional
 //! `source_key` field. That field is the only difference in the committed
 //! bytes.
@@ -36,7 +36,7 @@
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f460;
 
@@ -77,7 +77,7 @@ async fn run_pinned_controller_turn(
         .await
         .expect("open the turn's handler");
     let turn = runtime
-        .drive_turn(
+        .execute_turn(
             TurnInput::text(prompt),
             TurnOptions::new(
                 CancellationToken::new(),

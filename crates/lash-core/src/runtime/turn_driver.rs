@@ -57,19 +57,19 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// FIG-3157: work admitted at a terminal checkpoint and withheld from its
     /// delivery, so the committed finish stays this turn's answer. It is never
     /// settled as this turn's completed work. A finished turn's logical run
-    /// drives it in a follow-on turn. When this turn is cancelled that
+    /// executes it in a follow-on turn. When this turn is cancelled that
     /// follow-on never runs: the final commit hands withheld turn input to the
     /// cancellation's undelivered disposition (FIG-3531) and releases withheld
     /// wakes (FIG-3543).
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
-    /// The fence of the drive admission the turn's root runs under: the
+    /// The fence of the shift admission the turn's run executes under: the
     /// authority its checkpoint admissions present (FIG-3927). `None` for a
-    /// turn that runs under no admitted root, which admits nothing.
-    pub(super) drive_fence: Option<DriveFence>,
-    /// The logical root the turn's checkpoint admissions bind rows to.
-    pub(super) drive_root: Option<crate::TurnId>,
-    /// The build generation the turn's root invocation runs on: the one its
+    /// turn that runs under no admitted run, which admits nothing.
+    pub(super) shift_fence: Option<ShiftFence>,
+    /// The logical run the turn's checkpoint admissions bind rows to.
+    pub(super) shift_run: Option<crate::TurnId>,
+    /// The build generation the turn's run invocation runs on: the one its
     /// admission stamped (FIG-4742), whose drain mark the turn reads at a
     /// quiet point (FIG-4739).
     pub(super) drive_generation: Option<crate::engine::BuildGeneration>,
@@ -96,14 +96,14 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// the winning cell charged.
     pub(super) opener_state: crate::session::OpenerState,
     /// The cancellation this turn recorded honouring: the answer of a
-    /// journaled gate peek, and nothing else (FIG-3672 P9). Drive decisions
+    /// journaled gate peek, and nothing else (FIG-3672 P9). Shift decisions
     /// that depend on the turn's cancellation read this, never a live token.
     pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
     /// The cooperative stop the turn lends to the tool children its
-    /// live-opener registration serves (FIG-2266). The drive fires it when it
+    /// live-opener registration serves (FIG-2266). The shift fires it when it
     /// records the turn's cancellation, at a recorded point, so a replay
     /// fires it at the same point; the children record what they observed in
-    /// their own settlements. No drive code reads it (FIG-3672 P9).
+    /// their own settlements. No shift code reads it (FIG-3672 P9).
     pub(super) children_stop: CancellationToken,
     /// The turn-scope observation cursor: every host-facing emission the
     /// driver makes outside an effect body sequences under the turn scope's
@@ -111,7 +111,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// effect body's emissions key under that effect's invocation replay key
     /// instead.
     pub(super) turn_observations: crate::engine::ObservationCursor,
-    /// Where this driver stands when it observes: the turn's drive, which
+    /// Where this driver stands when it observes: the turn's shift, which
     /// may emit once a step body of this attempt has really run, or, on the
     /// copy a recorded step's body runs on, that body's live step.
     pub(super) trace: crate::trace::TraceStanding,

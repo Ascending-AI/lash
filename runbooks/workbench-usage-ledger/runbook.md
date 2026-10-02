@@ -48,7 +48,7 @@ commit (ADR 0125), so no resident ledger can poison a later turn. A turn that fa
 `token usage counter ... overflowed while accumulating turn usage` overflowed its own
 in-turn context-window count; the attempt facts it had already delivered stay counted. The
 display report saturates rather than failing (`saturated == true`, golden rule 6). Retain the
-database evidence (`usage_facts`, `usage_runs`) for RCA; do not edit accounting rows.
+database evidence (`usage_facts`, `usage_meters`) for RCA; do not edit accounting rows.
 
 ## Working material
 

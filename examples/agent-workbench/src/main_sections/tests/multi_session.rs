@@ -4,7 +4,7 @@ use lash::SessionId;
 // The multi-session workbench: a roster of sessions surviving the web process
 // that created them (FIG-1306).
 //
-// Every fixture here drives the production route handlers rather than the
+// Every fixture here executes the production route handlers rather than the
 // roster type, because the mechanism under test is not "does a map remember a
 // string" — it is whether a session an operator created is still the session
 // the *executor* runs after the handle that created it is gone.

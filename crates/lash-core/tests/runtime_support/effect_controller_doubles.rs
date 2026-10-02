@@ -109,7 +109,7 @@ impl lash_core::testing::EffectLayer for RejectingEffectController {
         ) {
             return Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
         }
-        // The root's recorded session config is the funnel's, not the turn's:
+        // The run's recorded session config is the funnel's, not the turn's:
         // this double judges the turn's own effects.
         if matches!(
             &envelope.command,
@@ -159,7 +159,7 @@ impl lash_core::testing::EffectLayer for WrongOutcomeEffectController {
         ) {
             return Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
         }
-        // The root's recorded session config is the funnel's, not the turn's:
+        // The run's recorded session config is the funnel's, not the turn's:
         // this double judges the turn's own effects.
         if matches!(
             &envelope.command,
@@ -633,13 +633,13 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             command @ (RuntimeEffectCommand::BeforeLlmCall { .. }
             | RuntimeEffectCommand::SyncExecutionEnvironment
             | RuntimeEffectCommand::AcceptTurnInput { .. }
-            | RuntimeEffectCommand::AdmitRoot { .. }
+            | RuntimeEffectCommand::AdmitRun { .. }
             | RuntimeEffectCommand::InspectAdmittedHead { .. }
             | RuntimeEffectCommand::ObserveDrainMark { .. }
             | RuntimeEffectCommand::RecoverFollowOn { .. }
-            | RuntimeEffectCommand::AdmitDrive { .. }
-            | RuntimeEffectCommand::DrawRootStart { .. }
-            | RuntimeEffectCommand::SealDriveAdmission { .. }
+            | RuntimeEffectCommand::AdmitShift { .. }
+            | RuntimeEffectCommand::DrawRunStart { .. }
+            | RuntimeEffectCommand::SealShiftAdmission { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }
             | RuntimeEffectCommand::RecordCompactionBase { .. }
             | RuntimeEffectCommand::RenderCompactionPrompt { .. }
@@ -647,7 +647,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::IngestTriggerOccurrence { .. }
             | RuntimeEffectCommand::AdmitTriggerDelivery { .. }
             | RuntimeEffectCommand::ReadSessionCommandRun { .. }
-            | RuntimeEffectCommand::CloseRootScope { .. }
+            | RuntimeEffectCommand::CloseRunScope { .. }
             | RuntimeEffectCommand::BeginSessionClose { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))

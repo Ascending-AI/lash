@@ -204,7 +204,7 @@ lash_store_sql::statements! {
         /// living `Until` the session itself, and those living `Until` a turn
         /// in `[?2, ?3)` or a session operation in `[?4, ?5)` of it whose scope has
         /// no ledger row of its own — a turn the session never admitted as a
-        /// root, which its close proved can no longer become one. A scope
+        /// run, which its close proved can no longer become one. A scope
         /// with its own row is its own plan's to sweep. After `?6`, at most
         /// `?7`. Same cursor-cast fork.
         ///

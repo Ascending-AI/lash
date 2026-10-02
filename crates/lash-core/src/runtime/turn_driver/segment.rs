@@ -27,7 +27,7 @@ pub(in crate::runtime) struct BoundaryTaken {
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct TurnSegment {
     /// Whether this turn may end at a boundary. A turn that runs under no
-    /// drive has nothing to recover its continuation, and a turn carrying
+    /// shift has nothing to recover its continuation, and a turn carrying
     /// work an earlier turn withheld for the run's follow-on must reach the
     /// commit that hands that work on.
     pub(in crate::runtime) allowed: bool,
@@ -187,7 +187,7 @@ impl RuntimeTurnDriver<'_> {
     }
 
     /// The turn's recorded read of its build's drain mark at the quiet point
-    /// before model call `iteration`. A turn under no drive root runs on no
+    /// before model call `iteration`. A turn under no shift root runs on no
     /// build of its own and reads nothing.
     async fn observe_drain_mark(&self, iteration: usize) -> Result<bool, RuntimeError> {
         let Some(generation) = self.drive_generation.clone() else {
@@ -234,7 +234,7 @@ impl RuntimeTurnDriver<'_> {
     }
 }
 
-/// The first execution of a turn's drain-mark read: the same mark a drive's
+/// The first execution of a turn's drain-mark read: the same mark a shift's
 /// admission and the recovery leader's hand-over duty read (ADR 0106 §1).
 struct ObserveDrainMarkRunner {
     marks: Arc<dyn crate::store::generation_drain::GenerationDrainStore>,
@@ -246,7 +246,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ObserveDrain
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_run: Option<crate::UsageRun>,
+        _usage_meter: Option<crate::UsageMeter>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ObserveDrainMark { generation } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

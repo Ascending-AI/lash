@@ -25,7 +25,7 @@ use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
     SubscriptionRevisionStanding,
 };
-use lash_core::runtime::drive::relay::{
+use lash_core::runtime::shift::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
     relay_due,
 };

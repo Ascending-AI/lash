@@ -230,7 +230,7 @@ host. Upgrade proofs use synthetic-next.
 ## Model usage accounting
 
 The pre-journal limit is an explicit liability, not silent loss. A provider
-attempt is dispatched only under an admitted usage run, so a charge the
+attempt is dispatched only under an admitted usage meter, so a charge the
 journal cannot describe (a body re-run after an unrecorded fault, an execution
 killed between its entry and its send, facts too large to journal beside a
 poison entry) is an `unknown` run with a reason, readable through

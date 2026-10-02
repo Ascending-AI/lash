@@ -1,10 +1,10 @@
-//! A session's park, root-addressed (FIG-3600 S7, D2 §1.3): the one record
-//! a parked root holds, read and written inside the caller's transaction.
+//! A session's park, run-addressed (FIG-3600 S7, D2 §1.3): the one record
+//! a parked run holds, read and written inside the caller's transaction.
 //!
 //! Every write is decided by [`decide_turn_park_write`] against the stored
-//! park, read under a row lock, after the root's terminal evidence was found
-//! absent: a root with terminal evidence never parks (P2), so a zombie
-//! execution of a root an operator already ended leaves nothing behind.
+//! park, read under a row lock, after the run's terminal evidence was found
+//! absent: a run with terminal evidence never parks (P2), so a zombie
+//! execution of a run an operator already ended leaves nothing behind.
 
 use lash_core_execution::store::{
     ControlIntent, ControlIntentId, ControlIntentState, ParkEventKind, ParkId, StoreError,
@@ -32,7 +32,7 @@ fn stored_u64(field: &str, value: i64) -> Result<u64, StoreError> {
 /// Decode a `turn_parks` row read with the record projection.
 pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPark, StoreError> {
     let session_id: String = row.try_get(0).map_err(store_sqlx_error)?;
-    let root: String = row.try_get(1).map_err(store_sqlx_error)?;
+    let run: String = row.try_get(1).map_err(store_sqlx_error)?;
     let park_id: i64 = row.try_get(2).map_err(store_sqlx_error)?;
     let reason_code: String = row.try_get(3).map_err(store_sqlx_error)?;
     let reason_json: String = row.try_get(4).map_err(store_sqlx_error)?;
@@ -45,7 +45,7 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
     let child_engine_refs: Option<String> = row.try_get(11).map_err(store_sqlx_error)?;
     TurnPark::decode(
         SessionId::parse(session_id)?,
-        root.try_into()?,
+        run.try_into()?,
         ParkId::from_feed_sequence(stored_u64("park_id", park_id)?),
         &reason_code,
         &reason_json,
@@ -108,7 +108,7 @@ async fn record_child_tx(
     Ok(())
 }
 
-/// Record `write` inside `tx`: refuse a root with terminal evidence (P2),
+/// Record `write` inside `tx`: refuse a run with terminal evidence (P2),
 /// then open, supersede, re-park or attach the engine's handle as
 /// [`decide_turn_park_write`] rules.
 pub(crate) async fn record_turn_park_tx(
@@ -119,11 +119,11 @@ pub(crate) async fn record_turn_park_tx(
     super::lock_session_history_mutation_tx(tx, session_id).await?;
     let turn_parks = &crate::turn_ingress::turn_ingress_sql().turn_parks;
     if let Some(terminal) =
-        crate::session_roots::root_terminal_conn(tx, session_id, &write.turn_id).await?
+        crate::session_runs::run_terminal_conn(tx, session_id, &write.turn_id).await?
     {
-        return Err(StoreError::RootAlreadyTerminal {
+        return Err(StoreError::RunAlreadyTerminal {
             session_id: session_id.clone(),
-            root: write.turn_id.clone(),
+            run: write.turn_id.clone(),
             by: Box::new(terminal.cause),
         });
     }
@@ -133,7 +133,7 @@ pub(crate) async fn record_turn_park_tx(
     let states: Vec<String> = sqlx::query_scalar(
         crate::turn_ingress::turn_ingress_sql()
             .family_postgres
-            .root_bound_input_states
+            .run_bound_input_states
             .sql(),
     )
     .bind(session_id.as_str())
@@ -146,9 +146,9 @@ pub(crate) async fn record_turn_park_tx(
             state == lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()
         })
     {
-        return Err(StoreError::RootInputWithdrawn {
+        return Err(StoreError::RunInputWithdrawn {
             session_id: session_id.clone(),
-            root: write.turn_id.clone(),
+            run: write.turn_id.clone(),
         });
     }
     let stored = turn_park_for_update(tx, session_id).await?;
@@ -171,11 +171,11 @@ pub(crate) async fn record_turn_park_tx(
     let (head, redrive) = match stored.as_ref() {
         Some(park) => {
             let redrive = match park.resume_intent {
-                Some(intent) => crate::session_roots::load_intent_conn(tx, intent).await?,
+                Some(intent) => crate::session_runs::load_intent_conn(tx, intent).await?,
                 None => None,
             };
             let head = StoredTurnParkHead {
-                root: park.turn_id.clone(),
+                run: park.turn_id.clone(),
                 engine: park.engine.clone(),
                 children: park.children.clone(),
                 redrive: park.resume_intent.map(|intent| StoredParkRedrive {
@@ -207,7 +207,7 @@ pub(crate) async fn record_turn_park_tx(
             return Ok(park);
         }
         (TurnParkWriteDecision::Repark, Some(mut park)) => {
-            // A same-root re-park keeps `park_id` and `since_ms`, refreshes
+            // A same-run re-park keeps `park_id` and `since_ms`, refreshes
             // the reason and `last_refused_ms`, counts the refusal and
             // clears a requested redrive — no feed event.
             sqlx::query(turn_parks.update_same_turn.sql())
@@ -222,17 +222,17 @@ pub(crate) async fn record_turn_park_tx(
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
-            // The root ran past a redrive the park still named open: its
+            // The run ran past a redrive the park still named open: its
             // resume reached the execution and only its acknowledgement was
-            // lost. Settle it here, so it never resumes the root again. Only
-            // the root's own refusal re-parks past an open redrive: a
+            // lost. Settle it here, so it never resumes the run again. Only
+            // the run's own refusal re-parks past an open redrive: a
             // reconcile write is decided `Unchanged` against one.
             if let Some(open) =
                 redrive.filter(|redrive| matches!(redrive.state, ControlIntentState::Pending))
             {
                 let mut settled = open.clone();
                 settled.state = ControlIntentState::Acknowledged { at_ms: write.at_ms };
-                if !crate::session_roots::write_intent_state_conn(tx, &open, &settled).await? {
+                if !crate::session_runs::write_intent_state_conn(tx, &open, &settled).await? {
                     return Err(StoreError::Contended);
                 }
             }
@@ -252,7 +252,7 @@ pub(crate) async fn record_turn_park_tx(
             return Ok(park);
         }
         (TurnParkWriteDecision::Supersede, Some(superseded)) => {
-            // A different root's park supersedes the stored one: close it on
+            // A different run's park supersedes the stored one: close it on
             // the feed, then open the new park.
             let deleted = sqlx::query(turn_parks.delete_for_supersede_returning.sql())
                 .bind(session_id.as_str())
@@ -331,7 +331,7 @@ pub(crate) async fn record_turn_park_tx(
 /// the redrive's store half.
 #[expect(
     dead_code,
-    reason = "the redrive's store half lands with the parked-root verbs"
+    reason = "the redrive's store half lands with the parked-run verbs"
 )]
 pub(crate) async fn set_resume_intent_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -354,16 +354,16 @@ pub(crate) async fn set_resume_intent_tx(
     Ok(())
 }
 
-/// End `root`'s park on `conn` (inside the transaction that writes the
-/// root's terminal), with the feed event its end `cause` names (FIG-4780).
-/// A root's end is what ends its park, whatever kind of root it is: a
-/// command root commits no turn, so no commit would. A session parked on
-/// another root, or on none, is left as it is and appends nothing.
-pub(crate) async fn end_root_park_conn(
+/// End `run`'s park on `conn` (inside the transaction that writes the
+/// run's terminal), with the feed event its end `cause` names (FIG-4780).
+/// A run's end is what ends its park, whatever kind of run it is: a
+/// command run commits no turn, so no commit would. A session parked on
+/// another run, or on none, is left as it is and appends nothing.
+pub(crate) async fn end_run_park_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
-    root: &lash_sansio::TurnId,
-    cause: &lash_core_execution::store::RootTerminalCause,
+    run: &lash_sansio::TurnId,
+    cause: &lash_core_execution::store::RunTerminalCause,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let ended = sqlx::query(
@@ -373,7 +373,7 @@ pub(crate) async fn end_root_park_conn(
             .sql(),
     )
     .bind(session_id.as_str())
-    .bind(root.as_str())
+    .bind(run.as_str())
     .fetch_optional(&mut *conn)
     .await
     .map_err(store_sqlx_error)?;
@@ -384,9 +384,9 @@ pub(crate) async fn end_root_park_conn(
     log_turn_park_closed_tx(
         conn,
         session_id,
-        root.as_str(),
+        run.as_str(),
         park_id,
-        &ParkEventKind::ending_root_park(cause),
+        &ParkEventKind::ending_run_park(cause),
         at_ms,
     )
     .await

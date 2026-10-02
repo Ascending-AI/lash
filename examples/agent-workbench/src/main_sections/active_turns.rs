@@ -80,9 +80,9 @@ pub(crate) struct ActiveTurn {
 pub(crate) struct ActiveTurns {
     inner: Arc<Mutex<ActiveTurnLedger>>,
     pub(crate) path: Option<Arc<PathBuf>>,
-    /// The roots this process follows to settlement, and the sessions it
-    /// watches for roots its engine starts on its own. In-process only.
-    pub(crate) follows: crate::restate::RootFollows,
+    /// The runs this process follows to settlement, and the sessions it
+    /// watches for runs its engine starts on its own. In-process only.
+    pub(crate) follows: crate::restate::RunFollows,
 }
 
 #[derive(Default)]
@@ -266,7 +266,7 @@ impl ActiveTurns {
                 retirements: BTreeMap::new(),
             })),
             path: Some(Arc::new(path)),
-            follows: crate::restate::RootFollows::default(),
+            follows: crate::restate::RunFollows::default(),
         };
         active.persist();
         Ok(active)

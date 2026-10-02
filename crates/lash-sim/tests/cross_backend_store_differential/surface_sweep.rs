@@ -2,7 +2,7 @@
 //!
 //! `trait_surface_gate.rs` refuses any fallible method of the gated store
 //! traits that this binary never calls. The drivers live here: one
-//! [`SurfaceMethod`] per trait method, each driven as its own compared step so
+//! [`SurfaceMethod`] per trait method, each executed as its own compared step so
 //! the error class, the mutated-or-not verdict, and the post-state digest are
 //! all compared across the three backends, and so the no-residue law is
 //! checked on any step that refuses.
@@ -16,20 +16,20 @@ use super::*;
 use corrupt_input_cases::CorruptBackup;
 use lash_core::usage_accounting::*;
 
-/// A well-formed but never-sealed drive fence, for the inventory steps that
-/// take a fence in a case that holds no drive. Presenting it is itself a
+/// A well-formed but never-sealed shift fence, for the inventory steps that
+/// take a fence in a case that holds no shift. Presenting it is itself a
 /// refusal driver: no backend may act on an unsealed epoch.
-fn unheld_drive_fence(session_id: &SessionId) -> lash_core::store::DriveFence {
-    lash_core::store_backend_support::sealed_drive_fence(
+fn unheld_shift_fence(session_id: &SessionId) -> lash_core::store::ShiftFence {
+    lash_core::store_backend_support::sealed_shift_fence(
         session_id.clone(),
         0,
-        lash_core::store::AdmissionId::new("fig-2841-no-drive"),
+        lash_core::store::AdmissionId::new("fig-2841-no-shift"),
     )
 }
 
-/// The root the sweep's checkpoint admission is keyed by. It is never
-/// admitted as a root: a checkpoint admission needs no root record.
-const SURFACE_CHECKPOINT_ROOT_ID: &str = "fig-2841-surface-checkpoint-root";
+/// The run the sweep's checkpoint admission is keyed by. It is never
+/// admitted as a run: a checkpoint admission needs no run record.
+const SURFACE_CHECKPOINT_RUN_ID: &str = "fig-2841-surface-checkpoint-run";
 
 /// Scratch state the sweep threads between its own steps.
 #[derive(Default)]
@@ -41,8 +41,8 @@ pub(super) struct SurfaceScratch {
     /// The first open turn-work batch the last open-queue read found, the
     /// head [`SurfaceMethod::AdmitListedQueuedHead`] presents.
     pub(super) listed_turn_work_head: Option<lash_core::BatchId>,
-    pub(super) root_admission: Option<serde_json::Value>,
-    pub(super) queued_root_admission: Option<serde_json::Value>,
+    pub(super) run_admission: Option<serde_json::Value>,
+    pub(super) queued_run_admission: Option<serde_json::Value>,
     /// The `CloseSession` intent this backend's ledger minted for the case's
     /// session: ids are the backend's own clock, so answers compare it by
     /// identity, never by value.
@@ -52,7 +52,7 @@ pub(super) struct SurfaceScratch {
     pub(super) intent_claim: Option<lash_core::store::ClaimToken>,
 }
 
-/// One fallible store-trait method, driven as a compared differential step.
+/// One fallible store-trait method, executed as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
     LoadSession,
@@ -64,32 +64,32 @@ pub(super) enum SurfaceMethod {
         known: bool,
     },
     ListTurnInputApplications,
-    /// [`RootStore::admit_root`](lash_core::store::RootStore::admit_root) of
-    /// the sweep's input-headed root, under the first lease and replayed
+    /// [`RunStore::admit_run`](lash_core::store::RunStore::admit_run) of
+    /// the sweep's input-headed run, under the first lease and replayed
     /// under its successor.
-    AdmitRoot {
+    AdmitRun {
         lease: LeaseSlot,
     },
-    AdmitRootAfterHeadSettled,
-    /// [`RootStore::admit_root`](lash_core::store::RootStore::admit_root) of
-    /// the drain root headed by the case's first pending turn-work batch
-    /// (FIG-3927); a second drive replays the recorded admission.
-    AdmitQueuedRoot,
-    /// [`RootStore::admit_root`](lash_core::store::RootStore::admit_root) of
-    /// the drain root headed by the batch the last open-queue read found: the
-    /// admission's own read of that head, driven where the list reads refuse.
+    AdmitRunAfterHeadSettled,
+    /// [`RunStore::admit_run`](lash_core::store::RunStore::admit_run) of
+    /// the drain run headed by the case's first pending turn-work batch
+    /// (FIG-3927); a second shift replays the recorded admission.
+    AdmitQueuedRun,
+    /// [`RunStore::admit_run`](lash_core::store::RunStore::admit_run) of
+    /// the drain run headed by the batch the last open-queue read found: the
+    /// admission's own read of that head, executed where the list reads refuse.
     AdmitListedQueuedHead,
-    /// [`RootStore::unfinished_root`](lash_core::store::RootStore::unfinished_root)
+    /// [`RunStore::unfinished_run`](lash_core::store::RunStore::unfinished_run)
     /// of the case's session.
-    UnfinishedRoot,
+    UnfinishedRun,
     EnqueueLateTurnInput,
     ReadSessionStateVersion,
     AdmitSessionState,
     LoadKnownNode,
     LoadUnknownNode,
-    ReadDriveEpoch,
+    ReadShiftEpoch,
     /// The session fault's whole life (ADR 0109 §9): recorded once, kept
-    /// against a second recording, read alone, on the drive epoch and in the
+    /// against a second recording, read alone, on the shift epoch and in the
     /// listing, then cleared once.
     SessionFault,
     ListQueuedWork,
@@ -99,7 +99,7 @@ pub(super) enum SurfaceMethod {
     /// [`IngressStore::open_session_command_run`](lash_core::IngressStore::open_session_command_run):
     /// the command lane's bindless read of its leading ready run.
     OpenSessionCommandRun,
-    /// [`RootStore::admit_at_checkpoint`](lash_core::store::RootStore::admit_at_checkpoint)
+    /// [`RunStore::admit_at_checkpoint`](lash_core::store::RunStore::admit_at_checkpoint)
     /// of an after-work checkpoint, which the sweep's rows do not reach.
     AdmitAtCheckpoint,
     QueuedWorkBatchCompletion,
@@ -109,7 +109,7 @@ pub(super) enum SurfaceMethod {
     CancelPendingTurnInputSuffix,
     CommittedTurnExists,
     UncommittedTurnExists,
-    /// [`SessionCommitStore::raise_pending_follow_on_attempts`], driven over a
+    /// [`SessionCommitStore::raise_pending_follow_on_attempts`], executed over a
     /// live fact for the turn it names (`owed`) and for a turn it does not.
     RaisePendingFollowOnAttempts {
         owed: bool,
@@ -118,28 +118,28 @@ pub(super) enum SurfaceMethod {
     /// follow-on as committed, read on an unowed head, beside a live fact,
     /// and after the fact's clearing commit.
     LoadPendingFollowOn,
-    /// [`RootStore::root_terminal`](lash_core::store::RootStore::root_terminal)
-    /// of the sweep's drain root: none while it is unfinished, and its lost
+    /// [`RunStore::run_terminal`](lash_core::store::RunStore::run_terminal)
+    /// of the sweep's drain run: none while it is unfinished, and its lost
     /// end's evidence after it (FIG-3600 S7).
-    RootTerminal,
-    NonTerminalRootsPage,
-    EndLostRoot,
-    /// [`RootStore::end_refused_root`](lash_core::store::RootStore::end_refused_root)
-    /// of the sweep's drain root: its refusal's end, then nothing more
+    RunTerminal,
+    NonTerminalRunsPage,
+    EndLostRun,
+    /// [`RunStore::end_refused_run`](lash_core::store::RunStore::end_refused_run)
+    /// of the sweep's drain run: its refusal's end, then nothing more
     /// (FIG-4018).
-    EndRefusedRoot,
-    /// [`RootStore::end_command_root`](lash_core::store::RootStore::end_command_root)
-    /// of a command root run under the sweep's lease: its end with the
+    EndRefusedRun,
+    /// [`RunStore::end_command_run`](lash_core::store::RunStore::end_command_run)
+    /// of a command run run under the sweep's lease: its end with the
     /// commands-applied cause, then the recorded end again (FIG-4202).
-    EndCommandRoot,
-    /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
+    EndCommandRun,
+    /// [`RunStore::run_binding`](lash_core::store::RunStore::run_binding)
     /// of the sweep's next-turn input.
-    RootBinding,
-    /// [`RootStore::root_of_input`](lash_core::store::RootStore::root_of_input)
+    RunBinding,
+    /// [`RunStore::run_of_input`](lash_core::store::RunStore::run_of_input)
     /// of the sweep's next-turn input.
-    RootOfInput,
-    /// [`RootStore::bound_turn_scopes`](lash_core::store::RootStore::bound_turn_scopes)
-    /// of the sweep's root: the turn scopes its bound inputs name.
+    RunOfInput,
+    /// [`RunStore::bound_turn_scopes`](lash_core::store::RunStore::bound_turn_scopes)
+    /// of the sweep's run: the turn scopes its bound inputs name.
     BoundTurnScopes,
     /// [`IngressStore::enqueue_pending_turn_input`] of a keyed next-turn
     /// input under a non-default run spec, which interns the spec (FIG-3838).
@@ -162,10 +162,10 @@ pub(super) enum SurfaceMethod {
     LoadRunSpec {
         known: bool,
     },
-    /// [`RootStore::bind_root_inputs`](lash_core::store::RootStore::bind_root_inputs)
-    /// of the sweep's next-turn input: to the sweep root, and then to another
-    /// root (`conflicting`), which every backend refuses without residue.
-    BindRootInputs {
+    /// [`RunStore::bind_run_inputs`](lash_core::store::RunStore::bind_run_inputs)
+    /// of the sweep's next-turn input: to the sweep run, and then to another
+    /// run (`conflicting`), which every backend refuses without residue.
+    BindRunInputs {
         conflicting: bool,
     },
     /// [`ControlIntentStore::begin_session_close`](lash_core::store::ControlIntentStore::begin_session_close)
@@ -195,8 +195,8 @@ pub(super) enum SurfaceMethod {
     AcknowledgeIntent {
         known: bool,
     },
-    RecordRootPark,
-    OpenRootIntent {
+    RecordRunPark,
+    OpenRunIntent {
         fork: bool,
         stale: bool,
     },
@@ -231,22 +231,22 @@ impl SurfaceMethod {
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
             Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
             Self::ListTurnInputApplications => "surface:list_turn_input_applications",
-            Self::AdmitRoot {
+            Self::AdmitRun {
                 lease: LeaseSlot::First,
-            } => "surface:admit_root",
-            Self::AdmitRoot {
+            } => "surface:admit_run",
+            Self::AdmitRun {
                 lease: LeaseSlot::Successor,
-            } => "surface:replay_admit_root",
-            Self::AdmitRootAfterHeadSettled => "surface:admit_root_after_head_settled",
-            Self::AdmitQueuedRoot => "surface:admit_queued_root",
+            } => "surface:replay_admit_run",
+            Self::AdmitRunAfterHeadSettled => "surface:admit_run_after_head_settled",
+            Self::AdmitQueuedRun => "surface:admit_queued_run",
             Self::AdmitListedQueuedHead => "surface:admit_listed_queued_head",
-            Self::UnfinishedRoot => "surface:unfinished_root",
+            Self::UnfinishedRun => "surface:unfinished_run",
             Self::EnqueueLateTurnInput => "surface:enqueue_late_turn_input",
             Self::ReadSessionStateVersion => "surface:read_session_state_version",
             Self::AdmitSessionState => "surface:admit_session_state",
             Self::LoadKnownNode => "surface:load_node_known",
             Self::LoadUnknownNode => "surface:load_node_unknown",
-            Self::ReadDriveEpoch => "surface:read_drive_epoch",
+            Self::ReadShiftEpoch => "surface:read_shift_epoch",
             Self::SessionFault => "surface:session_fault",
             Self::ListQueuedWork => "surface:list_queued_work",
             Self::ListPendingQueuedWork => "surface:list_open_queued_work",
@@ -268,13 +268,13 @@ impl SurfaceMethod {
                 "surface:raise_pending_follow_on_attempts_unowed"
             }
             Self::LoadPendingFollowOn => "surface:load_pending_follow_on",
-            Self::RootTerminal => "surface:root_terminal",
-            Self::NonTerminalRootsPage => "surface:non_terminal_roots_page",
-            Self::EndLostRoot => "surface:end_lost_root",
-            Self::EndRefusedRoot => "surface:end_refused_root",
-            Self::EndCommandRoot => "surface:end_command_root",
-            Self::RootBinding => "surface:root_binding",
-            Self::RootOfInput => "surface:root_of_input",
+            Self::RunTerminal => "surface:run_terminal",
+            Self::NonTerminalRunsPage => "surface:non_terminal_runs_page",
+            Self::EndLostRun => "surface:end_lost_run",
+            Self::EndRefusedRun => "surface:end_refused_run",
+            Self::EndCommandRun => "surface:end_command_run",
+            Self::RunBinding => "surface:run_binding",
+            Self::RunOfInput => "surface:run_of_input",
             Self::BoundTurnScopes => "surface:bound_turn_scopes",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
             Self::EnqueueTurnInputBatch { conflicting: false } => {
@@ -286,8 +286,8 @@ impl SurfaceMethod {
             Self::AdmitTurnInputBatch => "surface:admit_turn_input_batch",
             Self::LoadRunSpec { known: true } => "surface:load_run_spec",
             Self::LoadRunSpec { known: false } => "surface:load_run_spec_unknown",
-            Self::BindRootInputs { conflicting: false } => "surface:bind_root_inputs",
-            Self::BindRootInputs { conflicting: true } => "surface:bind_root_inputs_conflicting",
+            Self::BindRunInputs { conflicting: false } => "surface:bind_run_inputs",
+            Self::BindRunInputs { conflicting: true } => "surface:bind_run_inputs_conflicting",
             Self::BeginSessionClose {
                 known_session: true,
             } => "surface:begin_session_close",
@@ -303,16 +303,16 @@ impl SurfaceMethod {
             Self::RefuseIntent => "surface:refuse_intent",
             Self::AcknowledgeIntent { known: true } => "surface:acknowledge_intent",
             Self::AcknowledgeIntent { known: false } => "surface:acknowledge_intent_unknown",
-            Self::RecordRootPark => "surface:record_root_park",
-            Self::OpenRootIntent { stale: true, .. } => "surface:open_root_intent_stale",
-            Self::OpenRootIntent {
+            Self::RecordRunPark => "surface:record_run_park",
+            Self::OpenRunIntent { stale: true, .. } => "surface:open_run_intent_stale",
+            Self::OpenRunIntent {
                 stale: false,
                 fork: false,
-            } => "surface:open_root_intent_cancel",
-            Self::OpenRootIntent {
+            } => "surface:open_run_intent_cancel",
+            Self::OpenRunIntent {
                 stale: false,
                 fork: true,
-            } => "surface:open_root_intent_fork",
+            } => "surface:open_run_intent_fork",
             Self::ListControlIntents => "surface:list_control_intents",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::AcquireUnknownAttachmentRefs => "surface:acquire_attachment_refs_unknown",
@@ -376,7 +376,7 @@ fn surface_run_spec_hash() -> Option<lash_core::RunSpecHash> {
     surface_run_spec().hash().ok().flatten()
 }
 /// A turn id no case ever commits. Paired with [`SURFACE_COMMITTED_TURN_ID`]
-/// so the membership read is driven over both answers, not just the one a
+/// so the membership read is executed over both answers, not just the one a
 /// backend could return by refusing to look.
 const UNCOMMITTED_TURN_ID: &str = "fig-2841-uncommitted-turn";
 /// The turn id the surface sweep's seed commit stamps.
@@ -387,10 +387,10 @@ const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
 /// and whatever a backend answers, the no-residue law still applies.
 const UNKNOWN_ATTACHMENT_ID: &str = "fig-2841-unknown-attachment";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
-/// The root the sweep binds its next-turn input to, and the other root a
+/// The run the sweep binds its next-turn input to, and the other run a
 /// second binding names.
-const SURFACE_ROOT_ID: &str = "fig-3600-root";
-const SURFACE_OTHER_ROOT_ID: &str = "fig-3600-other-root";
+const SURFACE_RUN_ID: &str = "fig-3600-run";
+const SURFACE_OTHER_RUN_ID: &str = "fig-3600-other-run";
 /// A session no case ever creates: closing it closes nothing.
 const UNKNOWN_CLOSE_SESSION_ID: &str = "fig-3600-never-created-session";
 /// An intent id no ledger mints within this run: the unknown-intent refusal
@@ -402,9 +402,9 @@ const CLOSE_AT_MS: u64 = 5_000;
 const CLOSE_FAILED_AT_MS: u64 = 6_000;
 const CLOSE_ACKNOWLEDGED_AT_MS: u64 = 7_000;
 const CLOSE_CLAIMED_AT_MS: u64 = 6_500;
-/// The queue drain whose root the sweep admits on a queued-work head and
-/// ends. Its scope names the root, so every backend admits the same root and
-/// the reads before admission ask about a root that genuinely does not exist
+/// The queue drain whose run the sweep admits on a queued-work head and
+/// ends. Its scope names the run, so every backend admits the same run and
+/// the reads before admission ask about a run that genuinely does not exist
 /// yet.
 const SURFACE_DRAIN_ID: &str = "fig-2841-surface-drain";
 /// The turn whose terminal commit writes the follow-on fact (ADR 0101 §3).
@@ -420,22 +420,22 @@ fn surface_drain_scope(session_id: &SessionId) -> lash_core::ExecutionScope {
     lash_core::ExecutionScope::turn(session_id.clone(), SURFACE_DRAIN_ID)
 }
 
-/// The drain root the sweep admits on a queued-work head.
-fn surface_queued_root(session_id: &SessionId) -> lash_core::TurnId {
+/// The drain run the sweep admits on a queued-work head.
+fn surface_queued_run(session_id: &SessionId) -> lash_core::TurnId {
     lash_core::TurnId::fixture(surface_drain_scope(session_id).id())
 }
 
-/// An admission request for `root` headed by `head` under `fence`.
+/// An admission request for `run` headed by `head` under `fence`.
 fn surface_admit_request(
-    fence: &lash_core::store::DriveFence,
-    root: lash_core::TurnId,
+    fence: &lash_core::store::ShiftFence,
+    run: lash_core::TurnId,
     head: lash_core::store::AdmittedHead,
-) -> lash_core::store::AdmitRootRequest {
+) -> lash_core::store::AdmitRunRequest {
     let mut request =
-        lash_core::testing::store_fixtures::admit_root_request_for_test(fence, &root, head);
+        lash_core::testing::store_fixtures::admit_run_request_for_test(fence, &run, head);
     request.max_inputs = 8;
     request.policy = lash_core::testing::queued_work_admission_policy(1);
-    request.admitted_generation = lash_core::engine::BuildGeneration::for_test("surface-root");
+    request.admitted_generation = lash_core::engine::BuildGeneration::for_test("surface-run");
     request
 }
 
@@ -453,18 +453,18 @@ fn control_intent_summary(
         other => format!("{other:?}"),
     };
     let kind = match &intent.kind {
-        lash_core::store::ControlIntentKind::Cancel { root, .. } => {
-            format!("Cancel {{ root: {root} }}")
+        lash_core::store::ControlIntentKind::Cancel { run, .. } => {
+            format!("Cancel {{ run: {run} }}")
         }
-        lash_core::store::ControlIntentKind::Redrive { root, .. } => {
-            format!("Redrive {{ root: {root} }}")
+        lash_core::store::ControlIntentKind::Redrive { run, .. } => {
+            format!("Redrive {{ run: {run} }}")
         }
-        lash_core::store::ControlIntentKind::Fork { root, new_root, .. } => format!(
-            "Fork {{ root: {root}, direct: {}, derived_root: {} }}",
-            new_root.is_some(),
-            new_root
+        lash_core::store::ControlIntentKind::Fork { run, new_run, .. } => format!(
+            "Fork {{ run: {run}, direct: {}, derived_root: {} }}",
+            new_run.is_some(),
+            new_run
                 .as_ref()
-                .is_none_or(|new| *new == lash_core::store::forked_root(root, intent.id)),
+                .is_none_or(|new| *new == lash_core::store::forked_run(run, intent.id)),
         ),
         other => format!("{other:?}"),
     };
@@ -480,12 +480,12 @@ fn control_intent_summary(
     )
 }
 
-/// Every fallible method in the inventory, driven against a live session.
+/// Every fallible method in the inventory, executed against a live session.
 pub(super) fn surface_sweep_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::StoreSurfaceSweep,
         operations: vec![
-            // The seed commit stamps a turn so the inventory can drive
+            // The seed commit stamps a turn so the inventory can work
             // `committed_turn_exists` over a turn that is actually committed.
             StoreOperation::Commit {
                 label: "seed_surface_sweep_graph",
@@ -513,7 +513,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
             surface(SurfaceMethod::LoadUnknownNode),
-            surface(SurfaceMethod::ReadDriveEpoch),
+            surface(SurfaceMethod::ReadShiftEpoch),
             surface(SurfaceMethod::SessionFault),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
@@ -525,28 +525,28 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CancelQueuedWorkBatch),
             surface(SurfaceMethod::CommittedTurnExists),
             surface(SurfaceMethod::UncommittedTurnExists),
-            // One queued-headed root end to end (FIG-3927): no unfinished
-            // root, then its admission and a replay of it, and its lost end.
-            surface(SurfaceMethod::UnfinishedRoot),
-            surface(SurfaceMethod::AdmitQueuedRoot),
-            surface(SurfaceMethod::UnfinishedRoot),
-            surface(SurfaceMethod::AdmitQueuedRoot),
-            surface(SurfaceMethod::RootTerminal),
-            surface(SurfaceMethod::EndLostRoot),
-            // The lost end wrote its root's evidence (FIG-3600 S7).
-            surface(SurfaceMethod::RootTerminal),
-            surface(SurfaceMethod::UnfinishedRoot),
-            // An input's root binding: unbound, bound once, read back, and a
-            // second binding to another root refused.
-            surface(SurfaceMethod::RootBinding),
+            // One queued-headed run end to end (FIG-3927): no unfinished
+            // run, then its admission and a replay of it, and its lost end.
+            surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::AdmitQueuedRun),
+            surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::AdmitQueuedRun),
+            surface(SurfaceMethod::RunTerminal),
+            surface(SurfaceMethod::EndLostRun),
+            // The lost end wrote its run's evidence (FIG-3600 S7).
+            surface(SurfaceMethod::RunTerminal),
+            surface(SurfaceMethod::UnfinishedRun),
+            // An input's run binding: unbound, bound once, read back, and a
+            // second binding to another run refused.
+            surface(SurfaceMethod::RunBinding),
             surface(SurfaceMethod::BoundTurnScopes),
-            surface(SurfaceMethod::BindRootInputs { conflicting: false }),
-            surface(SurfaceMethod::RootBinding),
-            surface(SurfaceMethod::RootOfInput),
+            surface(SurfaceMethod::BindRunInputs { conflicting: false }),
+            surface(SurfaceMethod::RunBinding),
+            surface(SurfaceMethod::RunOfInput),
             surface(SurfaceMethod::BoundTurnScopes),
-            surface(SurfaceMethod::BindRootInputs { conflicting: false }),
-            surface(SurfaceMethod::BindRootInputs { conflicting: true }),
-            surface(SurfaceMethod::RootBinding),
+            surface(SurfaceMethod::BindRunInputs { conflicting: false }),
+            surface(SurfaceMethod::BindRunInputs { conflicting: true }),
+            surface(SurfaceMethod::RunBinding),
             // A spec is unknown until an input naming it is admitted, then
             // reads back exactly; a retry interns nothing new.
             surface(SurfaceMethod::LoadRunSpec { known: true }),
@@ -588,13 +588,13 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
     }
 }
 
-/// A failed engine run settles the same open root on every SQL backend.
-pub(super) fn lost_root_recovery_case() -> GeneratedCase {
+/// A failed engine execution settles the same open run on every SQL backend.
+pub(super) fn lost_run_recovery_case() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::LostRootRecovery,
+        name: CaseName::LostRunRecovery,
         operations: vec![
             StoreOperation::Commit {
-                label: "seed_lost_root_graph",
+                label: "seed_lost_run_graph",
                 expected_head_revision: 0,
                 graph: append(
                     vec![
@@ -610,27 +610,27 @@ pub(super) fn lost_root_recovery_case() -> GeneratedCase {
             StoreOperation::EnqueueAdmittableQueuedWork,
             StoreOperation::AcquireSessionLease {
                 slot: LeaseSlot::First,
-                owner: "lost-root-owner",
+                owner: "lost-run-owner",
             },
-            surface(SurfaceMethod::AdmitQueuedRoot),
-            surface(SurfaceMethod::NonTerminalRootsPage),
-            surface(SurfaceMethod::EndLostRoot),
-            surface(SurfaceMethod::RootTerminal),
-            surface(SurfaceMethod::EndLostRoot),
-            surface(SurfaceMethod::NonTerminalRootsPage),
+            surface(SurfaceMethod::AdmitQueuedRun),
+            surface(SurfaceMethod::NonTerminalRunsPage),
+            surface(SurfaceMethod::EndLostRun),
+            surface(SurfaceMethod::RunTerminal),
+            surface(SurfaceMethod::EndLostRun),
+            surface(SurfaceMethod::NonTerminalRunsPage),
         ],
     }
 }
 
-/// A root whose run met a typed refusal ends the same way on every SQL
-/// backend, once: a second end, and the lost-root end after it, write
+/// A run whose execution met a typed refusal ends the same way on every SQL
+/// backend, once: a second end, and the lost-run end after it, write
 /// nothing (FIG-4018).
-pub(super) fn refused_root_end_case() -> GeneratedCase {
+pub(super) fn refused_run_end_case() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::RootEnd,
+        name: CaseName::RunEndOutcome,
         operations: vec![
             StoreOperation::Commit {
-                label: "seed_refused_root_graph",
+                label: "seed_refused_run_graph",
                 expected_head_revision: 0,
                 graph: append(
                     vec![
@@ -646,35 +646,35 @@ pub(super) fn refused_root_end_case() -> GeneratedCase {
             StoreOperation::EnqueueAdmittableQueuedWork,
             StoreOperation::AcquireSessionLease {
                 slot: LeaseSlot::First,
-                owner: "refused-root-owner",
+                owner: "refused-run-owner",
             },
-            surface(SurfaceMethod::AdmitQueuedRoot),
-            surface(SurfaceMethod::UnfinishedRoot),
-            surface(SurfaceMethod::EndRefusedRoot),
-            surface(SurfaceMethod::RootTerminal),
-            surface(SurfaceMethod::UnfinishedRoot),
-            surface(SurfaceMethod::EndRefusedRoot),
-            surface(SurfaceMethod::EndLostRoot),
-            surface(SurfaceMethod::RootTerminal),
-            surface(SurfaceMethod::EndCommandRoot),
-            surface(SurfaceMethod::EndCommandRoot),
-            surface(SurfaceMethod::NonTerminalRootsPage),
+            surface(SurfaceMethod::AdmitQueuedRun),
+            surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::EndRefusedRun),
+            surface(SurfaceMethod::RunTerminal),
+            surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::EndRefusedRun),
+            surface(SurfaceMethod::EndLostRun),
+            surface(SurfaceMethod::RunTerminal),
+            surface(SurfaceMethod::EndCommandRun),
+            surface(SurfaceMethod::EndCommandRun),
+            surface(SurfaceMethod::NonTerminalRunsPage),
         ],
     }
 }
 
-/// The root's admission is replayed after a lease handoff, even when another
+/// The run's admission is replayed after a lease handoff, even when another
 /// input becomes eligible between the admission commit and the journal write.
-pub(super) fn root_admission_replay_case() -> GeneratedCase {
+pub(super) fn run_admission_replay_case() -> GeneratedCase {
     GeneratedCase {
-        name: CaseName::RootAdmissionReplay,
+        name: CaseName::RunAdmissionReplay,
         operations: vec![
             StoreOperation::EnqueueNextTurnInput,
             StoreOperation::AcquireSessionLease {
                 slot: LeaseSlot::First,
-                owner: "root-admission-first",
+                owner: "run-admission-first",
             },
-            surface(SurfaceMethod::AdmitRoot {
+            surface(SurfaceMethod::AdmitRun {
                 lease: LeaseSlot::First,
             }),
             StoreOperation::ReleaseSessionLease {
@@ -683,14 +683,14 @@ pub(super) fn root_admission_replay_case() -> GeneratedCase {
             surface(SurfaceMethod::EnqueueLateTurnInput),
             StoreOperation::AcquireSessionLease {
                 slot: LeaseSlot::Successor,
-                owner: "root-admission-successor",
+                owner: "run-admission-successor",
             },
-            surface(SurfaceMethod::AdmitRoot {
+            surface(SurfaceMethod::AdmitRun {
                 lease: LeaseSlot::Successor,
             }),
-            surface(SurfaceMethod::UnfinishedRoot),
+            surface(SurfaceMethod::UnfinishedRun),
             surface(SurfaceMethod::CancelPendingTurnInputs),
-            surface(SurfaceMethod::AdmitRootAfterHeadSettled),
+            surface(SurfaceMethod::AdmitRunAfterHeadSettled),
         ],
     }
 }
@@ -775,7 +775,7 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             StoreOperation::DeleteSession,
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::LoadUnknownNode),
-            surface(SurfaceMethod::ReadDriveEpoch),
+            surface(SurfaceMethod::ReadShiftEpoch),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
             surface(SurfaceMethod::PendingSessionWorkOrdering),
@@ -783,8 +783,8 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::OpenSessionCommandRun),
             surface(SurfaceMethod::AdmitAtCheckpoint),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
-            surface(SurfaceMethod::UnfinishedRoot),
-            surface(SurfaceMethod::AdmitQueuedRoot),
+            surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::AdmitQueuedRun),
             surface(SurfaceMethod::RaisePendingFollowOnAttempts { owed: true }),
             surface(SurfaceMethod::LoadPendingFollowOn),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
@@ -799,8 +799,8 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
 }
 
 /// A session's close through the factory's control-intent ledger (FIG-3600
-/// S7): the store half ends the session's open roots — an input's bound
-/// root and an admitted queued-headed root — `Cancelled` by the close, a retry
+/// S7): the store half ends the session's open runs — an input's bound
+/// run and an admitted queued-headed run — `Cancelled` by the close, a retry
 /// answers the kept intent, and the engine half's lifecycle is claimed,
 /// failed retryably, claimed again, acknowledged and then done. An unknown
 /// session closes nothing, and an unknown intent is refused without residue.
@@ -825,9 +825,9 @@ pub(super) fn session_close_ledger_case() -> GeneratedCase {
                 slot: LeaseSlot::First,
                 owner: "session-close-owner",
             },
-            surface(SurfaceMethod::BindRootInputs { conflicting: false }),
-            surface(SurfaceMethod::AdmitQueuedRoot),
-            surface(SurfaceMethod::RootTerminal),
+            surface(SurfaceMethod::BindRunInputs { conflicting: false }),
+            surface(SurfaceMethod::AdmitQueuedRun),
+            surface(SurfaceMethod::RunTerminal),
             surface(SurfaceMethod::BeginSessionClose {
                 known_session: false,
             }),
@@ -841,9 +841,9 @@ pub(super) fn session_close_ledger_case() -> GeneratedCase {
             surface(SurfaceMethod::BeginSessionClose {
                 known_session: true,
             }),
-            // The close ended the drain root by the session's deletion.
-            surface(SurfaceMethod::RootTerminal),
-            surface(SurfaceMethod::UnfinishedRoot),
+            // The close ended the drain run by the session's deletion.
+            surface(SurfaceMethod::RunTerminal),
+            surface(SurfaceMethod::UnfinishedRun),
             surface(SurfaceMethod::LoadIntent { known: true }),
             surface(SurfaceMethod::ClaimIntentApplication { known: true }),
             surface(SurfaceMethod::AcknowledgeIntent { known: true }),
@@ -856,22 +856,22 @@ pub(super) fn session_close_ledger_case() -> GeneratedCase {
     }
 }
 
-pub(super) fn root_control_case(fork: bool) -> GeneratedCase {
+pub(super) fn run_control_case(fork: bool) -> GeneratedCase {
     let mut case = session_close_ledger_case();
     case.name = if fork {
-        CaseName::RootForkLedger
+        CaseName::RunForkLedger
     } else {
-        CaseName::RootCancelLedger
+        CaseName::RunCancelLedger
     };
     case.operations.truncate(5);
     case.operations.extend([
-        surface(SurfaceMethod::RecordRootPark),
-        surface(SurfaceMethod::OpenRootIntent { fork, stale: true }),
-        surface(SurfaceMethod::OpenRootIntent { fork, stale: false }),
+        surface(SurfaceMethod::RecordRunPark),
+        surface(SurfaceMethod::OpenRunIntent { fork, stale: true }),
+        surface(SurfaceMethod::OpenRunIntent { fork, stale: false }),
         surface(SurfaceMethod::LoadIntent { known: true }),
         surface(SurfaceMethod::ListControlIntents),
         surface(SurfaceMethod::ListPendingTurnInputs),
-        surface(SurfaceMethod::RootBinding),
+        surface(SurfaceMethod::RunBinding),
         surface(SurfaceMethod::ClaimIntentApplication { known: true }),
         surface(SurfaceMethod::AcknowledgeIntent { known: true }),
     ]);
@@ -879,7 +879,7 @@ pub(super) fn root_control_case(fork: bool) -> GeneratedCase {
 }
 
 impl BackendRunner {
-    /// Drive one inventory method. Returns `Err` verbatim: the step loop owns
+    /// Execute one inventory method. Returns `Err` verbatim: the step loop owns
     /// the refusal comparison and the no-residue check.
     pub(super) async fn drive_surface(
         &mut self,
@@ -892,7 +892,7 @@ impl BackendRunner {
         let lease_fence = self
             .first_lease
             .clone()
-            .unwrap_or_else(|| unheld_drive_fence(&session_id));
+            .unwrap_or_else(|| unheld_shift_fence(&session_id));
         let answer = match method {
             SurfaceMethod::LoadSession => {
                 format!(
@@ -914,7 +914,7 @@ impl BackendRunner {
             }
             SurfaceMethod::PendingTurnInput { known } => {
                 // The keyed point read answers what the list answers for the
-                // row: `Open`, `Admitted` naming its root, or nothing once
+                // row: `Open`, `Admitted` naming its run, or nothing once
                 // the row is terminal or unknown (FIG-3976).
                 let input = lash_core::InputId::fixture(if known {
                     format!("{session_id}:input")
@@ -924,8 +924,8 @@ impl BackendRunner {
                 match store.pending_turn_input(&session_id, &input).await? {
                     Some(read) => match &read.status {
                         lash_core::PendingTurnInputReadStatus::Open => "status=open".to_string(),
-                        lash_core::PendingTurnInputReadStatus::Admitted { root } => {
-                            format!("status=admitted:{root}")
+                        lash_core::PendingTurnInputReadStatus::Admitted { run } => {
+                            format!("status=admitted:{run}")
                         }
                         other => format!("status={other:?}"),
                     },
@@ -938,34 +938,34 @@ impl BackendRunner {
                     store.list_turn_input_applications(&session_id).await?.len()
                 )
             }
-            SurfaceMethod::AdmitRoot { lease } => {
+            SurfaceMethod::AdmitRun { lease } => {
                 let lease_slot = lease;
                 let lease = self.lease(lease_slot).clone();
                 let head = lash_core::InputId::fixture(format!("{session_id}:input"));
                 let request = surface_admit_request(
                     &lease,
-                    lash_core::TurnId::from(SURFACE_ROOT_ID),
+                    lash_core::TurnId::from(SURFACE_RUN_ID),
                     lash_core::store::AdmittedHead::Input(head.clone()),
                 );
                 // A replay that differs, a refusal or a widened prefix is a
                 // law violation on this backend, never an answer to compare.
-                let Some(admission) = store.admit_root(&request).await? else {
-                    panic!("{}: root admission did not reach its head", self.name);
+                let Some(admission) = store.admit_run(&request).await? else {
+                    panic!("{}: run admission did not reach its head", self.name);
                 };
                 let encoded = serde_json::to_value(&admission)
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
-                match &self.surface.root_admission {
+                match &self.surface.run_admission {
                     Some(recorded) => assert_eq!(
                         *recorded, encoded,
-                        "{}: a successor's root admission must return the recorded result",
+                        "{}: a successor's run admission must return the recorded result",
                         self.name
                     ),
-                    None => self.surface.root_admission = Some(encoded),
+                    None => self.surface.run_admission = Some(encoded),
                 }
                 assert_eq!(
                     admission.input_ids(),
                     vec![head],
-                    "{}: the root admission must not widen past its recorded prefix",
+                    "{}: the run admission must not widen past its recorded prefix",
                     self.name
                 );
                 format!(
@@ -978,14 +978,14 @@ impl BackendRunner {
                 )
             }
             SurfaceMethod::EnqueueLateTurnInput => {
-                // Queued between a root's claim commit and its replay: it must
+                // Queued between a run's claim commit and its replay: it must
                 // never widen the recorded prefix.
                 store
                     .enqueue_pending_turn_input(
                         PendingTurnInputDraft::new(
                             &session_id,
                             TurnInputIngress::NextTurn,
-                            TurnInput::text("late input after root claim"),
+                            TurnInput::text("late input after run claim"),
                         )
                         .with_input_id(lash_core::InputId::fixture(
                             format!("{session_id}:late-input"),
@@ -994,26 +994,26 @@ impl BackendRunner {
                     .await?;
                 "enqueued".to_string()
             }
-            SurfaceMethod::AdmitRootAfterHeadSettled => {
-                // The row may have settled, but the root's admission remains
+            SurfaceMethod::AdmitRunAfterHeadSettled => {
+                // The row may have settled, but the run's admission remains
                 // the answer of record and cannot widen to the later row.
                 let lease = self.lease(LeaseSlot::Successor).clone();
                 let request = surface_admit_request(
                     &lease,
-                    lash_core::TurnId::from(SURFACE_ROOT_ID),
+                    lash_core::TurnId::from(SURFACE_RUN_ID),
                     lash_core::store::AdmittedHead::Input(lash_core::InputId::fixture(format!(
                         "{session_id}:input"
                     ))),
                 );
-                let Some(admission) = store.admit_root(&request).await? else {
-                    panic!("{}: recorded root admission disappeared", self.name);
+                let Some(admission) = store.admit_run(&request).await? else {
+                    panic!("{}: recorded run admission disappeared", self.name);
                 };
                 let encoded = serde_json::to_value(admission)
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
-                assert_eq!(self.surface.root_admission.as_ref(), Some(&encoded));
+                assert_eq!(self.surface.run_admission.as_ref(), Some(&encoded));
                 "recorded".to_string()
             }
-            SurfaceMethod::AdmitQueuedRoot => {
+            SurfaceMethod::AdmitQueuedRun => {
                 // The head is the case's first pending turn-work batch, read
                 // rather than assumed: backends mint their own batch ids.
                 let head = store
@@ -1025,9 +1025,9 @@ impl BackendRunner {
                     })
                     .min_by_key(|batch| batch.enqueue_seq)
                     .map(|batch| batch.batch_id);
-                let head = match (&self.surface.queued_root_admission, head) {
+                let head = match (&self.surface.queued_run_admission, head) {
                     (Some(recorded), _) => {
-                        serde_json::from_value::<lash_core::store::RootAdmission>(recorded.clone())
+                        serde_json::from_value::<lash_core::store::RunAdmission>(recorded.clone())
                             .map_err(|error| StoreError::Backend(error.to_string()))?
                             .head
                     }
@@ -1037,13 +1037,13 @@ impl BackendRunner {
                     ),
                 };
                 let request =
-                    surface_admit_request(&lease_fence, surface_queued_root(&session_id), head);
-                match store.admit_root(&request).await? {
+                    surface_admit_request(&lease_fence, surface_queued_run(&session_id), head);
+                match store.admit_run(&request).await? {
                     None => "admitted=false".to_string(),
                     Some(admission) => {
                         let encoded = serde_json::to_value(&admission)
                             .map_err(|error| StoreError::Backend(error.to_string()))?;
-                        let replay = match &self.surface.queued_root_admission {
+                        let replay = match &self.surface.queued_run_admission {
                             Some(recorded) => {
                                 assert_eq!(
                                     *recorded, encoded,
@@ -1053,7 +1053,7 @@ impl BackendRunner {
                                 true
                             }
                             None => {
-                                self.surface.queued_root_admission = Some(encoded);
+                                self.surface.queued_run_admission = Some(encoded);
                                 false
                             }
                         };
@@ -1071,14 +1071,14 @@ impl BackendRunner {
                     }
                 }
             }
-            SurfaceMethod::UnfinishedRoot => match store.unfinished_root(&session_id).await? {
+            SurfaceMethod::UnfinishedRun => match store.unfinished_run(&session_id).await? {
                 None => "unfinished=none".to_string(),
                 Some(unfinished) => format!(
-                    "unfinished_root={} head={}",
-                    if unfinished.root == surface_queued_root(&session_id) {
+                    "unfinished_run={} head={}",
+                    if unfinished.run == surface_queued_run(&session_id) {
                         "drain".to_string()
                     } else {
-                        unfinished.root.to_string()
+                        unfinished.run.to_string()
                     },
                     match unfinished.head {
                         lash_core::store::AdmittedHead::Input(_) => "input",
@@ -1094,8 +1094,8 @@ impl BackendRunner {
                         .unwrap_or_else(|| lash_core::BatchId::from(UNKNOWN_BATCH_ID)),
                 );
                 let request =
-                    surface_admit_request(&lease_fence, surface_queued_root(&session_id), head);
-                let admission = store.admit_root(&request).await?;
+                    surface_admit_request(&lease_fence, surface_queued_run(&session_id), head);
+                let admission = store.admit_run(&request).await?;
                 format!("admitted={}", admission.is_some())
             }
             SurfaceMethod::ReadSessionStateVersion => {
@@ -1137,8 +1137,8 @@ impl BackendRunner {
                     .await?;
                 format!("present={}", !page.nodes.is_empty())
             }
-            SurfaceMethod::ReadDriveEpoch => {
-                let observed = store.drive_epoch(&session_id).await?;
+            SurfaceMethod::ReadShiftEpoch => {
+                let observed = store.shift_epoch(&session_id).await?;
                 format!(
                     "epoch={} admission_present={}",
                     observed.epoch,
@@ -1159,7 +1159,7 @@ impl BackendRunner {
                     .record_session_fault(&session_id, &record("second"), 9)
                     .await?;
                 let read = store.session_fault(&session_id).await?;
-                let gate = store.drive_epoch(&session_id).await?.fault;
+                let gate = store.shift_epoch(&session_id).await?.fault;
                 let listed = store
                     .list_session_faults(None, std::num::NonZeroUsize::MAX)
                     .await?
@@ -1219,14 +1219,14 @@ impl BackendRunner {
                 format!("source_key={:?}", batch.source_key)
             }
             SurfaceMethod::OpenSessionCommandRun => {
-                let run = store.open_session_command_run(&lease_fence).await?;
-                format!("commands={}", run.len())
+                let command_run = store.open_session_command_run(&lease_fence).await?;
+                format!("commands={}", command_run.len())
             }
             SurfaceMethod::AdmitAtCheckpoint => {
                 let admission = store
                     .admit_at_checkpoint(&lash_core::store::CheckpointAdmissionRequest {
                         fence: lease_fence.clone(),
-                        root: lash_core::TurnId::from(SURFACE_CHECKPOINT_ROOT_ID),
+                        run: lash_core::TurnId::from(SURFACE_CHECKPOINT_RUN_ID),
                         turn_id: lash_core::TurnId::from("fig-2841-surface-turn"),
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "fig-2841-surface-checkpoint".to_string(),
@@ -1339,14 +1339,14 @@ impl BackendRunner {
                     None => "owed=none".to_string(),
                 }
             }
-            SurfaceMethod::RootTerminal => {
+            SurfaceMethod::RunTerminal => {
                 // The kind and cause are caller-supplied facts; the instant
                 // is the backend clock's and is not compared.
-                let root = lash_core::TurnId::fixture(surface_drain_scope(&session_id).id());
-                match store.root_terminal(&session_id, &root).await? {
+                let run = lash_core::TurnId::fixture(surface_drain_scope(&session_id).id());
+                match store.run_terminal(&session_id, &run).await? {
                     Some(terminal) => {
                         let cause = match &terminal.cause {
-                            lash_core::store::RootTerminalCause::SessionDeleted { intent } => {
+                            lash_core::store::RunTerminalCause::SessionDeleted { intent } => {
                                 format!(
                                     "SessionDeleted(by_own_close={})",
                                     Some(*intent) == self.surface.close_intent
@@ -1359,13 +1359,13 @@ impl BackendRunner {
                     None => "terminal=none".to_string(),
                 }
             }
-            SurfaceMethod::NonTerminalRootsPage => {
+            SurfaceMethod::NonTerminalRunsPage => {
                 let factory = self.factory();
                 let mut after = None;
                 let mut own_executors = Vec::new();
                 loop {
                     let page = factory
-                        .non_terminal_roots_page(
+                        .non_terminal_runs_page(
                             after.as_ref(),
                             std::num::NonZeroUsize::MIN.saturating_add(127),
                         )
@@ -1381,90 +1381,90 @@ impl BackendRunner {
                     after = page.last().map(|open| open.target.clone());
                 }
                 format!(
-                    "own_open_roots={} executors={own_executors:?}",
+                    "own_open_runs={} executors={own_executors:?}",
                     own_executors.len()
                 )
             }
-            SurfaceMethod::EndLostRoot => {
-                let root = lash_core::engine::RootRef {
+            SurfaceMethod::EndLostRun => {
+                let run = lash_core::engine::RunRef {
                     session: session_id.clone(),
-                    root: lash_core::TurnId::fixture(surface_drain_scope(&session_id).id()),
+                    run: lash_core::TurnId::fixture(surface_drain_scope(&session_id).id()),
                 };
                 match self
                     .factory()
-                    .end_lost_root(&root, lash_core::engine::RootRunLoss::NoRun, 1)
+                    .end_lost_run(&run, lash_core::engine::RunLoss::NoRun, 1)
                     .await?
                 {
                     Some(terminal) => format!("ended={:?}", terminal.kind()),
                     None => "ended=none".to_string(),
                 }
             }
-            SurfaceMethod::EndRefusedRoot => {
-                let root = lash_core::TurnId::fixture(surface_drain_scope(&session_id).id());
+            SurfaceMethod::EndRefusedRun => {
+                let run = lash_core::TurnId::fixture(surface_drain_scope(&session_id).id());
                 let refusal = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::StoreCommitSuperseded,
-                    "the head moved under the root's commit",
+                    "the head moved under the run's commit",
                 );
                 match store
-                    .end_refused_root(&lease_fence, &root, &refusal, 1)
+                    .end_refused_run(&lease_fence, &run, &refusal, 1)
                     .await?
                 {
-                    lash_core::store::RootEnd::Ended(terminal) => {
+                    lash_core::store::RunEndOutcome::Ended(terminal) => {
                         format!("ended={:?}", terminal.kind())
                     }
-                    lash_core::store::RootEnd::AlreadyEnded(terminal) => {
+                    lash_core::store::RunEndOutcome::AlreadyEnded(terminal) => {
                         format!("already_ended={:?}", terminal.kind())
                     }
-                    lash_core::store::RootEnd::Superseded => "superseded".to_string(),
-                    lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
+                    lash_core::store::RunEndOutcome::Superseded => "superseded".to_string(),
+                    lash_core::store::RunEndOutcome::Unknown => "ended=none".to_string(),
                 }
             }
-            SurfaceMethod::EndCommandRoot => {
-                let root =
-                    lash_core::TurnId::fixture(format!("drive-commands:{session_id}-surface"));
-                let end = match store.end_command_root(&lease_fence, &root, 1).await? {
-                    lash_core::store::RootEnd::Ended(terminal) => {
+            SurfaceMethod::EndCommandRun => {
+                let run =
+                    lash_core::TurnId::fixture(format!("shift-commands:{session_id}-surface"));
+                let end = match store.end_command_run(&lease_fence, &run, 1).await? {
+                    lash_core::store::RunEndOutcome::Ended(terminal) => {
                         format!("ended={:?}/{:?}", terminal.kind(), terminal.cause)
                     }
-                    lash_core::store::RootEnd::AlreadyEnded(terminal) => {
+                    lash_core::store::RunEndOutcome::AlreadyEnded(terminal) => {
                         format!("already_ended={:?}/{:?}", terminal.kind(), terminal.cause)
                     }
-                    lash_core::store::RootEnd::Superseded => "superseded".to_string(),
-                    lash_core::store::RootEnd::Unknown => "ended=none".to_string(),
+                    lash_core::store::RunEndOutcome::Superseded => "superseded".to_string(),
+                    lash_core::store::RunEndOutcome::Unknown => "ended=none".to_string(),
                 };
                 let recorded = store
-                    .root_terminal(&session_id, &root)
+                    .run_terminal(&session_id, &run)
                     .await?
                     .map(|terminal| format!("{:?}", terminal.kind()));
                 format!("{end} recorded={recorded:?}")
             }
-            SurfaceMethod::RootBinding => {
+            SurfaceMethod::RunBinding => {
                 let input = lash_core::InputId::fixture(format!("{session_id}:input"));
-                match store.root_binding(&session_id, &input).await? {
-                    Some(root) => {
+                match store.run_binding(&session_id, &input).await? {
+                    Some(run) => {
                         let forked = self.surface.close_intent.is_some_and(|intent| {
-                            root == lash_core::store::forked_root(&SURFACE_ROOT_ID.into(), intent)
+                            run == lash_core::store::forked_run(&SURFACE_RUN_ID.into(), intent)
                         });
                         if forked {
                             "bound=own_fork".to_string()
                         } else {
-                            format!("bound={root}")
+                            format!("bound={run}")
                         }
                     }
                     None => "bound=none".to_string(),
                 }
             }
-            SurfaceMethod::RootOfInput => {
+            SurfaceMethod::RunOfInput => {
                 let input = lash_core::InputId::fixture(format!("{session_id}:input"));
-                match store.root_of_input(&session_id, &input).await? {
-                    Some(root) => format!("root={root}"),
-                    None => "root=none".to_string(),
+                match store.run_of_input(&session_id, &input).await? {
+                    Some(run) => format!("run={run}"),
+                    None => "run=none".to_string(),
                 }
             }
             SurfaceMethod::BoundTurnScopes => {
-                let root = lash_core::TurnId::from(SURFACE_ROOT_ID);
+                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
                 let scopes = store
-                    .bound_turn_scopes(&session_id, &root)
+                    .bound_turn_scopes(&session_id, &run)
                     .await?
                     .iter()
                     .map(|scope| scope.as_str().replace(session_id.as_str(), "<session>"))
@@ -1582,14 +1582,14 @@ impl BackendRunner {
                     None => "spec=none".to_string(),
                 }
             }
-            SurfaceMethod::BindRootInputs { conflicting } => {
-                let root = lash_core::TurnId::from(if conflicting {
-                    SURFACE_OTHER_ROOT_ID
+            SurfaceMethod::BindRunInputs { conflicting } => {
+                let run = lash_core::TurnId::from(if conflicting {
+                    SURFACE_OTHER_RUN_ID
                 } else {
-                    SURFACE_ROOT_ID
+                    SURFACE_RUN_ID
                 });
                 let input = lash_core::InputId::fixture(format!("{session_id}:input"));
-                store.bind_root_inputs(&session_id, &root, &[input]).await?;
+                store.bind_run_inputs(&session_id, &run, &[input]).await?;
                 "bound".to_string()
             }
             SurfaceMethod::BeginSessionClose { known_session } => {
@@ -1671,11 +1671,11 @@ impl BackendRunner {
                     lash_core::store::IntentSettle::ClaimLost => "claim_lost".to_string(),
                 }
             }
-            SurfaceMethod::RecordRootPark => {
+            SurfaceMethod::RecordRunPark => {
                 let park = store
                     .record_turn_park(&lash_core::store::TurnParkWrite::refusal(
                         session_id.clone(),
-                        SURFACE_ROOT_ID.into(),
+                        SURFACE_RUN_ID.into(),
                         lash_core::store::ParkReason::ReplayDivergence {
                             message: "differential".into(),
                         },
@@ -1684,35 +1684,35 @@ impl BackendRunner {
                     .await?;
                 format!("parked={}", park.attempts)
             }
-            SurfaceMethod::OpenRootIntent { fork, stale } => {
+            SurfaceMethod::OpenRunIntent { fork, stale } => {
                 let park = store
                     .load_turn_park(&session_id)
                     .await?
                     .ok_or(StoreError::Contended)?;
-                let request = lash_core::store::RootIntentRequest {
+                let request = lash_core::store::RunIntentRequest {
                     session_id: session_id.clone(),
-                    root: SURFACE_ROOT_ID.into(),
+                    run: SURFACE_RUN_ID.into(),
                     park: lash_core::store::ParkId::from_feed_sequence(
                         park.park_id.feed_sequence() + u64::from(stale),
                     ),
                     verb: if fork {
-                        lash_core::store::RootVerb::Fork
+                        lash_core::store::RunVerb::Fork
                     } else {
-                        lash_core::store::RootVerb::Cancel
+                        lash_core::store::RunVerb::Cancel
                     },
                 };
                 let intent = self
                     .factory()
-                    .open_root_intent(&request, CLOSE_AT_MS)
+                    .open_run_intent(&request, CLOSE_AT_MS)
                     .await
                     .map_err(|error| match error {
-                        lash_core::store::RootIntentRefused::Store(error) => error,
-                        error => StoreError::Backend(format!("root intent refused: {error}")),
+                        lash_core::store::RunIntentRefused::Store(error) => error,
+                        error => StoreError::Backend(format!("run intent refused: {error}")),
                     })?;
                 let returned_park = match &intent.kind {
                     lash_core::store::ControlIntentKind::Cancel { park, .. }
                     | lash_core::store::ControlIntentKind::Fork { park, .. } => *park,
-                    other => panic!("unexpected root intent: {other:?}"),
+                    other => panic!("unexpected run intent: {other:?}"),
                 };
                 assert_eq!(returned_park, request.park);
                 self.surface.close_intent = Some(intent.id);
@@ -1849,7 +1849,7 @@ impl BackendRunner {
     /// The case's close intent, or an id no ledger minted.
     #[expect(
         clippy::expect_used,
-        reason = "test support: the case drives its close before any known-intent step; a missing intent panics the harness with its case name by design"
+        reason = "test support: the case executes its close before any known-intent step; a missing intent panics the harness with its case name by design"
     )]
     fn case_intent(&self, known: bool) -> lash_core::store::ControlIntentId {
         if known {
@@ -1876,11 +1876,12 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
         )
         .expect("effect address"),
     );
-    let run = UsageRunId::try_from("run:00000000000040008000000000000001".to_owned()).expect("run");
-    let admission = UsageRunAdmission {
+    let meter =
+        UsageMeterId::try_from("run:00000000000040008000000000000001".to_owned()).expect("run");
+    let admission = UsageMeterAdmission {
         owner: owner.clone(),
         effect: effect.clone(),
-        run: run.clone(),
+        meter: meter.clone(),
         execution_scope_key: "sweep".into(),
         source: "turn".into(),
         profile_key: lash_core::LlmProfileKey::new("model-key"),
@@ -1889,16 +1890,22 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
     };
     let mut out = vec![format!(
         "admit {:?}",
-        accounting.admit_usage_run(&admission).await.expect("admit")
+        accounting
+            .admit_usage_meter(&admission)
+            .await
+            .expect("admit")
     )];
     out.push(format!(
         "admit retry {:?}",
-        accounting.admit_usage_run(&admission).await.expect("retry")
+        accounting
+            .admit_usage_meter(&admission)
+            .await
+            .expect("retry")
     ));
     let settlement = UsageSettlement {
         owner: owner.clone(),
         effect: effect.clone(),
-        run,
+        meter,
         facts: vec![UsageAttemptFact {
             call_ordinal: 0,
             provider_attempt: 0,
@@ -1911,7 +1918,7 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
                 generation_id: Some("generation".into()),
             },
         }],
-        accounting: RunAccounting::Complete,
+        accounting: MeterAccounting::Complete,
     };
     out.push(format!(
         "settle {:?}",
@@ -1998,7 +2005,7 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
     out.push(format!(
         "runs {:?}",
         accounting
-            .load_usage_run_page(&owner, UsageRunFilter::All, None, limit)
+            .load_usage_meter_page(&owner, UsageMeterFilter::All, None, limit)
             .await
             .expect("run page")
     ));

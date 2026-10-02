@@ -32,7 +32,7 @@
 //!    is reported parked, to be attached to by its identity, never
 //!    dispatched again;
 //! 3. returns [`BrokerFailure::WorkerLost`], a typed, retryable
-//!    infrastructure failure, so the owning substrate invocation is re-driven.
+//!    infrastructure failure, so the owning substrate invocation is redriven.
 //!
 //! The broker never restarts a run inside a live invocation: its ordinals are
 //! positions in the invocation's journal, and a local restart would append new
@@ -54,7 +54,7 @@
 //! [`ParentEffects::observe_cancellation`]. A live stop sends a cooperative
 //! `Cancel` and kills the worker after [`BrokerBounds::cancel_grace`]; either
 //! way, a run the journal did not observe cancelled ends
-//! [`BrokerFailure::Interrupted`], and the re-driven invocation's next
+//! [`BrokerFailure::Interrupted`], and the redriven invocation's next
 //! journaled observation decides. An unsolicited stop is never recorded, so it
 //! never changes what a replay branches on.
 //!
@@ -207,7 +207,7 @@ pub struct SettledOperation {
 }
 
 /// An operation still unsettled at the settle bound: it stays addressable by
-/// its identity, and the re-driven invocation attaches to it.
+/// its identity, and the redriven invocation attaches to it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParkedOperation {
     pub ordinal: u64,
@@ -242,7 +242,7 @@ pub enum BrokeredEnd {
 }
 
 /// Why a run did not end. Every variant is typed; [`Self::is_retryable`]
-/// says whether re-driving the owning invocation can succeed.
+/// says whether redriving the owning invocation can succeed.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BrokerFailure {
     #[error("the worker was lost: {outcome}")]
@@ -267,7 +267,7 @@ pub enum BrokerFailure {
 }
 
 impl BrokerFailure {
-    /// Whether re-driving the owning invocation can succeed. A drifted
+    /// Whether redriving the owning invocation can succeed. A drifted
     /// request or a refused committed state fails the same way on every
     /// attempt, and so does a limit the run itself exhausted.
     pub fn is_retryable(&self) -> bool {

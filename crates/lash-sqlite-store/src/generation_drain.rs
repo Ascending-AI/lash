@@ -139,8 +139,8 @@ impl GenerationDrainStore for SqliteGenerationDrain {
                     |row| row.get(0),
                 )?;
                 let in_flight: i64 = conn.query_row(
-                    crate::session_roots::session_roots_sql()
-                        .roots
+                    crate::session_runs::session_runs_sql()
+                        .runs
                         .count_unfinished_by_admitted_generation
                         .sql(),
                     rusqlite::params![stamp],
@@ -204,8 +204,8 @@ impl GenerationDrainStore for SqliteGenerationDrain {
             .core
             .call(move |conn| {
                 let mut statement = conn.prepare_cached(
-                    crate::session_roots::session_roots_sql()
-                        .roots
+                    crate::session_runs::session_runs_sql()
+                        .runs
                         .list_unfinished_sessions_by_admitted_generation
                         .sql(),
                 )?;

@@ -18,7 +18,7 @@ host's policy once. Replay reads the recorded decision instead of re-running
 policy. Root starts may be detached or use a host-looked-up session scope.
 
 `ScopeId` is an effect opener or a session. A process opener names the minted
-`ProcessId`, which identifies one lifetime. A logical turn uses its root scope;
+`ProcessId`, which identifies one lifetime. A logical turn uses its run scope;
 a session scope closes at deletion. Registration validates the selected grant
 against ancestry. These scope rules belong to
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md), and process

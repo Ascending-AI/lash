@@ -216,7 +216,7 @@ async fn run_error_return_case(
         &executions,
         crashed_turn_timings(),
     )
-    .before_drive(move |control| control.arm_error_return(placement))
+    .before_shift(move |control| control.arm_error_return(placement))
     .reporting();
     law.runner
         .run_turn(reference_admitted_scope(identity), attempt)
@@ -240,9 +240,9 @@ async fn run_error_return_case(
     });
     let continued = &trace[error_index + 1..];
     let injected_code = crate::RuntimeErrorCode::RuntimeStore;
-    // The scripted turn is a queued drain, and an unfinished root keeps a live
+    // The scripted turn is a queued drain, and an unfinished run keeps a live
     // fault for a redrive (FIG-3575): a retryable fault reaches the caller as
-    // itself, any other as the retained root's typed `SessionRootPending`. A
+    // itself, any other as the retained run's typed `SessionRunPending`. A
     // session retirement is no live fault: the turn aborts on it without
     // recording, and the run settles on the refusal itself (FIG-3630).
     let expected_code = if ruling.placement == ErrorReturnPlacement::ToolAttemptSessionRetirement {
@@ -250,7 +250,7 @@ async fn run_error_return_case(
     } else if injected_code.is_retryable() {
         injected_code
     } else {
-        crate::RuntimeErrorCode::SessionRootPending
+        crate::RuntimeErrorCode::SessionRunPending
     };
     let observation = FailStopObservation {
         durable_commits: continued.iter().filter(|op| is_commit_seam(op)).count(),

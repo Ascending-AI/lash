@@ -18,7 +18,7 @@ fn carrier(span: u64) -> TraceCarrier {
 fn run_scope() -> TraceScopeId {
     TraceScopeId::admission(TraceScopeOwner::Run {
         session_id: SessionId::from("session"),
-        root: TurnId::from("root"),
+        run: TurnId::from("run"),
     })
 }
 
@@ -222,7 +222,7 @@ fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
     assert_eq!(
         stored,
         json!({
-            "scope": { "owner": { "kind": "run", "session_id": "session", "root": "root" } },
+            "scope": { "owner": { "kind": "run", "session_id": "session", "run": "run" } },
             "cause": {
                 "relation": "linked",
                 "from": { "contexts": [{ "traceparent": carrier(3).traceparent() }] },

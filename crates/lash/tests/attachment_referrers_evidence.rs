@@ -56,7 +56,7 @@ impl Witness {
 
     /// Reconcile until `hold` has started `count` times. External terminal
     /// publication is an obligation too, so waiting only on the tool's
-    /// notification would leave the PostgreSQL terminal relay undriven.
+    /// notification would leave the PostgreSQL terminal relay unexecuted.
     async fn held_times(&self, fixture: &Fixture, count: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(30), async {
             let observed = async {
@@ -697,11 +697,9 @@ async fn delivered_attachment_survives_prune(
         // The turn's attempt dies before the hold's result is journaled:
         // the redrive replays the recorded delivery and reaches the hold
         // again without a second child run.
-        fixture
-            .double
-            .crash_turn_drive(lash_restate_test::server::CrashPoint::BeforeRunResult {
-                name: None,
-            });
+        fixture.double.crash_run_execution(
+            lash_restate_test::server::CrashPoint::BeforeRunResult { name: None },
+        );
         witness.release_one();
         witness.held_times(&fixture, 2).await;
     }
@@ -897,11 +895,9 @@ finish(value);",
         "the parked resolver acquired before it resolved: {held:?}"
     );
     if crash {
-        fixture
-            .double
-            .crash_turn_drive(lash_restate_test::server::CrashPoint::BeforeRunResult {
-                name: None,
-            });
+        fixture.double.crash_run_execution(
+            lash_restate_test::server::CrashPoint::BeforeRunResult { name: None },
+        );
         witness.release_one();
         witness.held_times(&fixture, 2).await;
     }
@@ -1273,7 +1269,7 @@ async fn queued_input_outlives_its_upload_expiry(backend: Backend) {
 
     let hold = fixture
         .double
-        .hold_session_drive(&lash_core::SessionId::from(session_id))
+        .hold_session_shift(&lash_core::SessionId::from(session_id))
         .await;
     let accepted = session
         .send(

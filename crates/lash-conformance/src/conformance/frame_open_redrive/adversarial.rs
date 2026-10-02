@@ -5,7 +5,7 @@
 //!   the redrive's admitted window hashes to the request identity the first
 //!   execution journaled its summary under, so it reads the summary back.
 //! - An administrative compaction queued before an input applies before it
-//!   (FIG-4201), killed at every crash point: the input's root runs in the
+//!   (FIG-4201), killed at every crash point: the input's run executes in the
 //!   compaction frame and its pressure hook sees no stale prompt usage.
 //! - A session deleted while an administrative compaction opens its frame
 //!   keeps nothing of the open, and a fork made meanwhile sees the point it
@@ -48,13 +48,13 @@ fn recovery_records(head: &super::LawHead) -> Vec<serde_json::Value> {
         .collect()
 }
 
-type DriveResult =
+type ShiftResult =
     Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>;
 
 impl LawSession {
-    /// Submits an administrative compaction and runs the drive that applies
+    /// Submits an administrative compaction and runs the shift that applies
     /// it once on the tier's runner, holding the compaction after its
-    /// journaled summary while `during` runs, and answers how the drive
+    /// journaled summary while `during` runs, and answers how the shift
     /// ended with the command's receipt.
     #[expect(
         clippy::expect_used,
@@ -62,34 +62,34 @@ impl LawSession {
     )]
     async fn compact_holding<F: std::future::Future<Output = ()>>(
         &self,
-        drive: &str,
+        shift: &str,
         during: F,
-    ) -> (DriveResult, crate::SessionCommandReceipt) {
+    ) -> (ShiftResult, crate::SessionCommandReceipt) {
         let hold = self
             .parts
             .compaction
             .hold
             .clone()
             .expect("the law holds its compaction's summarizer");
-        let receipt = self.submit_compaction(drive).await;
+        let receipt = self.submit_compaction(shift).await;
         let (drove, ()) = tokio::time::timeout(
             std::time::Duration::from_secs(90),
-            futures_util::future::join(self.run_root_to_any_end(drive), hold.while_held(during)),
+            futures_util::future::join(self.execute_run_to_any_end(shift), hold.while_held(during)),
         )
         .await
-        .expect("the held compaction's drive ends");
+        .expect("the held compaction's shift ends");
         (drove, receipt)
     }
 
-    /// Runs the root queued next once and answers how its drive ended,
+    /// Executes the run queued next once and answers how its shift ended,
     /// whatever that was: the attempt reports itself settled either way.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    pub(super) async fn run_root_to_any_end(
+    pub(super) async fn execute_run_to_any_end(
         &self,
-        drive: &str,
+        shift: &str,
     ) -> Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>
     {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -99,12 +99,12 @@ impl LawSession {
             let tx = tx.clone();
             Box::pin(async move {
                 let mut runtime = build_runtime(&parts, None).await;
-                let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+                let shift = Box::pin(runtime.execute_next_queued_run(crate::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     scope,
                 )))
                 .await;
-                let _ = tx.send(drive);
+                let _ = tx.send(shift);
                 crate::ConformanceTurnEnd::Settled
             })
         });
@@ -113,14 +113,14 @@ impl LawSession {
             self.runner.run_turn(
                 admit(crate::ExecutionScope::turn(
                     &self.session_id,
-                    crate::TurnId::fixture(format!("{}-{drive}", self.prefix)),
+                    crate::TurnId::fixture(format!("{}-{shift}", self.prefix)),
                 )),
                 attempt,
             ),
         )
         .await
-        .expect("the drive ends");
-        rx.recv().await.expect("the tier's runner ran the drive")
+        .expect("the shift ends");
+        rx.recv().await.expect("the tier's runner ran the shift")
     }
 }
 
@@ -147,15 +147,15 @@ fn count(texts: &[String], wanted: impl Fn(&str) -> bool) -> usize {
     texts.iter().filter(|text| wanted(text)).count()
 }
 
-/// The production standard compactor, killed at `crash` in the root its
+/// The production standard compactor, killed at `crash` in the run its
 /// pressure threshold compacts and redriven, opens one frame: the summary
 /// is journaled under the request identity the admitted window hashes to,
 /// so the redrive reads it back (one summarizer call, or two when the crash
 /// lost a paid answer before its journal record), and the seed lands once.
 ///
-/// FIG-4072 (ADR 0112 §14.4): every execution of the root, the redrive of a
+/// FIG-4072 (ADR 0112 §14.4): every execution of the run, the redrive of a
 /// crash before the terminal commit included (it reloads the window the
-/// root was admitted on, after the frame's commit moved the head), derives
+/// run was admitted on, after the frame's commit moved the head), derives
 /// the same compaction session id and turn id, and they are the ids the
 /// summarizer's provider requests carry.
 pub async fn a_standard_compaction_frame_opens_once_whatever_its_crash(
@@ -212,7 +212,7 @@ pub(super) async fn standard_pressure_crash_case(
     model.arm(crash, &mut law.parts);
 
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let first_frame = law
         .head()
         .await
@@ -220,14 +220,14 @@ pub(super) async fn standard_pressure_crash_case(
         .expect("the session stands in its first frame");
     law.enqueue("second question").await;
     let before = law.head().await.head_revision;
-    law.run_root_crashed_at("root-2", crash).await;
+    law.execute_run_crashed_at("run-2", crash).await;
 
     assert_standard_frame_opened_once(&law, &model, crash, before, &first_frame).await;
     let derived = request_ids
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    // Every crash but the one after the terminal commit leaves the root to a
+    // Every crash but the one after the terminal commit leaves the run to a
     // redrive that prepares it again, from its admitted window.
     let executions = if crash == FrameOpenCrash::AfterTurnCommit {
         1
@@ -236,7 +236,7 @@ pub(super) async fn standard_pressure_crash_case(
     };
     assert!(
         derived.len() >= executions,
-        "each execution of the root derives its compaction's ids: {derived:?}"
+        "each execution of the run derives its compaction's ids: {derived:?}"
     );
     assert!(
         derived.windows(2).all(|pair| pair[0] == pair[1]),
@@ -277,7 +277,7 @@ async fn assert_standard_frame_opened_once(
     assert_eq!(
         model.turn_calls.load(Ordering::SeqCst),
         2,
-        "one model call per root"
+        "one model call per run"
     );
     let head = law.head().await;
     assert_eq!(
@@ -297,13 +297,13 @@ async fn assert_standard_frame_opened_once(
     );
     assert!(
         path.iter().any(|text| text == "second question"),
-        "the compacted root runs in the new frame: {path:?}"
+        "the compacted run executes in the new frame: {path:?}"
     );
 }
 
 /// The standard compactor's overflow recovery, killed at `crash` in the
-/// root that recovers and redriven: the provider refused the first root as
-/// too long, and the next root records `Completed` in the frame it leaves
+/// run that recovers and redriven: the provider refused the first run as
+/// too long, and the next run records `Completed` in the frame it leaves
 /// and opens one recovery frame, each exactly once.
 pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
     prefix: &str,
@@ -354,7 +354,7 @@ pub(super) async fn overflow_recovery_crash_case(
     model.arm(crash, &mut law.parts);
 
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let overflowed = law.head().await;
     let first_frame = overflowed
         .current_frame_node_id
@@ -363,7 +363,7 @@ pub(super) async fn overflow_recovery_crash_case(
     assert_eq!(
         recovery_records(&overflowed),
         [serde_json::json!({"kind": "pending"})],
-        "the refused root leaves a typed recovery node outside conversation"
+        "the refused run leaves a typed recovery node outside conversation"
     );
     assert!(
         !every_message(&overflowed)
@@ -372,7 +372,7 @@ pub(super) async fn overflow_recovery_crash_case(
     );
     law.enqueue("second question").await;
     let before = overflowed.head_revision;
-    law.run_root_crashed_at("root-2", crash).await;
+    law.execute_run_crashed_at("run-2", crash).await;
 
     assert_standard_frame_opened_once(&law, &model, crash, before, &first_frame).await;
     let head = law.head().await;
@@ -394,7 +394,7 @@ pub(super) async fn overflow_recovery_crash_case(
 
 /// A failed summarizer invocation leaves the stored recovery pending. Repeated
 /// live faults and replay divergences spend no attempt and keep their typed cause;
-/// the next healthy drive can still complete the recovery.
+/// the next healthy shift can still complete the recovery.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: setup establishes each result"
@@ -421,7 +421,7 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
     .await;
     law.parts.compaction.compactor = LawCompactor::Standard;
     law.enqueue("first question").await;
-    law.run_root("overflow").await;
+    law.execute_run("overflow").await;
     let before = law.head().await;
     for code in [
         crate::RuntimeErrorCode::RuntimeStore,
@@ -473,7 +473,7 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
         }
     }
     law.enqueue("continue after the journal recovers").await;
-    law.run_root("healthy").await;
+    law.execute_run("healthy").await;
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         recovery_records(&law.head().await),
@@ -485,9 +485,9 @@ pub async fn an_overflow_recovery_summarizer_fault_aborts_without_a_record(
 }
 
 /// An administrative compaction queued before an input applies before it
-/// (FIG-4201): one drive applies the command at its boundary, then runs the
-/// input's root in the compaction frame. The root's pressure hook sees no
-/// stale prompt usage, though the root before the compaction crossed its
+/// (FIG-4201): one shift applies the command at its boundary, then runs the
+/// input's run in the compaction frame. The run's pressure hook sees no
+/// stale prompt usage, though the run before the compaction crossed its
 /// threshold. Killed at `crash` and redriven, the compaction opens once, its
 /// summary is requested once (twice only when the crash lost a paid answer
 /// before its journal record), and the input runs once, after it.
@@ -538,7 +538,7 @@ pub async fn a_session_deleted_during_an_open_keeps_nothing_of_it(
     .await;
     law.parts.compaction.hold = Some(SummaryHold::default());
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
 
     let store = Arc::clone(&law.store);
     let session_id = law.session_id.clone();
@@ -596,7 +596,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
     .await;
     law.parts.compaction.hold = Some(SummaryHold::default());
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let forked_from = law.head().await;
     let fork_id = SessionId::fixture(format!("{}-fork", law.session_id));
 
@@ -625,7 +625,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
         .await;
     assert!(
         drove.is_ok(),
-        "the compaction's drive ends: {:?}",
+        "the compaction's shift ends: {:?}",
         drove.map(crate::facade_support::QueuedTurnDrain::ran)
     );
     let source = law.head().await;
@@ -655,7 +655,7 @@ pub async fn a_fork_made_during_an_open_never_sees_its_seed(
 }
 
 /// An explicit empty pressure seed opens one frame, killed at `crash` and
-/// redriven: no summary, one frame after the first, and the root runs in it.
+/// redriven: no summary, one frame after the first, and the run executes in it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -686,7 +686,7 @@ pub async fn an_empty_pressure_seed_opens_one_frame(
     .await;
     law.parts.compaction.seed = LawSeed::Empty;
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let first_frame = law
         .head()
         .await
@@ -694,7 +694,7 @@ pub async fn an_empty_pressure_seed_opens_one_frame(
         .expect("the session stands in its first frame");
     law.enqueue("second question").await;
     let before = law.head().await.head_revision;
-    law.run_root_crashed_at("root-2", crash).await;
+    law.execute_run_crashed_at("run-2", crash).await;
 
     assert_eq!(model.summary_calls.load(Ordering::SeqCst), 0);
     let head = law.head().await;
@@ -710,7 +710,7 @@ pub async fn an_empty_pressure_seed_opens_one_frame(
     assert_eq!(
         path[opened_at + 1..],
         ["second question", "answer 2"],
-        "the empty seed adds nothing, and the root runs in the new frame"
+        "the empty seed adds nothing, and the run executes in the new frame"
     );
 }
 
@@ -743,15 +743,15 @@ pub async fn a_refused_frame_commit_leaves_nothing_visible(
     .await;
     law.parts.compaction.seed = LawSeed::Oversized;
     law.enqueue("first question").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
     let first_frame = law
         .head()
         .await
         .current_frame_node_id
         .expect("the session stands in its first frame");
     law.enqueue("second question").await;
-    let drive = law
-        .run_root_to_any_end("root-2")
+    let shift = law
+        .execute_run_to_any_end("run-2")
         .await
         .map(crate::facade_support::QueuedTurnDrain::ran);
 
@@ -760,7 +760,7 @@ pub async fn a_refused_frame_commit_leaves_nothing_visible(
     assert_eq!(
         chain.len(),
         1,
-        "no frame opened: {chain:?} (the root: {drive:?})"
+        "no frame opened: {chain:?} (the run: {shift:?})"
     );
     assert_eq!(head.current_frame_node_id.as_ref(), Some(&first_frame));
     let messages = every_message(&head);
@@ -799,7 +799,7 @@ pub async fn pressure_hooks_sharing_an_id_keep_their_records_apart(
     .await;
     law.parts.compaction.compactor = LawCompactor::DuplicateHookIds;
     law.enqueue("first question").await;
-    law.run_root_crashed_at("root-1", crash).await;
+    law.execute_run_crashed_at("run-1", crash).await;
 
     let path = active_path(&law.head().await.graph);
     for (plugin_id, record) in DUPLICATE_HOOK_PLUGINS {
@@ -814,11 +814,11 @@ pub async fn pressure_hooks_sharing_an_id_keep_their_records_apart(
 /// How [`every_open_restarts_the_live_execution_state`] opens its frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiveResetPath {
-    /// A host's frame open: a session command the drive applies at a turn
-    /// boundary, on the runtime whose drive applies it (FIG-4202).
+    /// A host's frame open: a session command the shift applies at a turn
+    /// boundary, on the runtime whose shift applies it (FIG-4202).
     HostOpen,
     /// An administrative compaction the command lane applies, on the
-    /// runtime whose drive applies it.
+    /// runtime whose shift applies it.
     Compact,
     /// A storeless runtime's direct compaction.
     StorelessCompact,
@@ -879,7 +879,7 @@ pub async fn every_open_restarts_the_live_execution_state(
     )
     .await;
     law.enqueue("set the global").await;
-    law.run_root("root-1").await;
+    law.execute_run("run-1").await;
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let parts = law.parts.clone();
@@ -910,14 +910,14 @@ pub async fn every_open_restarts_the_live_execution_state(
                         )
                         .await
                         .expect("accept the frame-open command");
-                    let drained = Box::pin(runtime.drive_next_queued_root(
+                    let drained = Box::pin(runtime.execute_next_queued_run(
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     ))
                     .await
-                    .expect("the drive applies the frame open");
+                    .expect("the shift applies the frame open");
                     assert!(
                         drained.ran().is_none(),
-                        "the drive only applies the command lane"
+                        "the shift only applies the command lane"
                     );
                     runtime
                 }
@@ -935,14 +935,14 @@ pub async fn every_open_restarts_the_live_execution_state(
                         )
                         .await
                         .expect("accept the compaction command");
-                    let drained = Box::pin(runtime.drive_next_queued_root(
+                    let drained = Box::pin(runtime.execute_next_queued_run(
                         crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
                     ))
                     .await
-                    .expect("the drive applies the compaction");
+                    .expect("the shift applies the compaction");
                     assert!(
                         drained.ran().is_none(),
-                        "the drive only applies the command lane"
+                        "the shift only applies the command lane"
                     );
                     runtime
                 }
@@ -951,7 +951,7 @@ pub async fn every_open_restarts_the_live_execution_state(
                         .snapshot_execution_state()
                         .await
                         .expect("read the live execution state")
-                        .expect("the first root left execution state");
+                        .expect("the first run left execution state");
                     let mut storeless_parts = parts.clone();
                     storeless_parts.compaction.storeless = true;
                     let mut storeless = build_runtime(&storeless_parts, None).await;
@@ -999,7 +999,7 @@ pub async fn every_open_restarts_the_live_execution_state(
     }
     assert!(
         before,
-        "the reopened runtime's interpreter holds the first root's global"
+        "the reopened runtime's interpreter holds the first run's global"
     );
     assert!(
         !after,

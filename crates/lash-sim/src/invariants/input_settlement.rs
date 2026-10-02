@@ -1,15 +1,15 @@
 //! Every admitted input settles exactly once.
 //!
-//! ADR 0101 §7: an admitted input is either driven
-//! by exactly one root, bound to it in `session_root_inputs`, and settled
-//! when that root ends (completed, or cancelled with it); or it is cancelled
-//! undriven. At the end of a history no input is still open, no completed
-//! input lacks its one root, and no input is settled while the root bound to
+//! ADR 0101 §7: an admitted input is either executed
+//! by exactly one run, bound to it in `session_run_inputs`, and settled
+//! when that run ends (completed, or cancelled with it); or it is cancelled
+//! unexecuted. At the end of a history no input is still open, no completed
+//! input lacks its one run, and no input is settled while the run bound to
 //! it still runs. An input left open because its delivery stalled with a
 //! typed reason (its ingress obligation is `stalled`: an operator's to act
 //! on, ADR 0109 §1.5) is surfaced, not lost; the settled-or-stalled checker
-//! judges that stall. A queued-work batch a root admitted is
-//! settled with it, so none is left behind an ended root or unadmitted.
+//! judges that stall. A queued-work batch a run admitted is
+//! settled with it, so none is left behind an ended run or unadmitted.
 
 use std::collections::BTreeMap;
 
@@ -31,40 +31,40 @@ impl HistoryChecker for InputSettlement {
     fn check(&self, history: &History) -> Vec<Violation> {
         let mut violations = Vec::new();
         for store in &history.stores {
-            let roots = store
-                .roots
+            let runs = store
+                .runs
                 .iter()
-                .map(|root| ((root.session.as_str(), root.root.as_str()), root))
+                .map(|run| ((run.session.as_str(), run.run.as_str()), run))
                 .collect::<BTreeMap<_, _>>();
             let bindings = store
-                .root_inputs
+                .run_inputs
                 .iter()
-                .map(|(session, input, root)| ((session.as_str(), input.as_str()), root.as_str()))
+                .map(|(session, input, run)| ((session.as_str(), input.as_str()), run.as_str()))
                 .collect::<BTreeMap<_, _>>();
             for input in &store.inputs {
                 let bound = bindings
                     .get(&(input.session.as_str(), input.id.as_str()))
                     .copied();
-                let root_of = |root: &str| roots.get(&(input.session.as_str(), root)).copied();
+                let run_of = |run: &str| runs.get(&(input.session.as_str(), run)).copied();
                 let problem = match (input.table.as_str(), input.state.as_deref()) {
                     ("pending_turn_inputs", Some("completed")) => match bound {
-                        None => Some("completed, but no root is bound to it".to_owned()),
-                        Some(root) => match root_of(root) {
+                        None => Some("completed, but no run is bound to it".to_owned()),
+                        Some(run) => match run_of(run) {
                             Some(row) if row.terminal_kind.is_some() => None,
                             Some(_) => {
-                                Some(format!("completed while its root {root} is not terminal"))
+                                Some(format!("completed while its run {run} is not terminal"))
                             }
-                            None => Some(format!("completed by root {root}, which has no row")),
+                            None => Some(format!("completed by run {run}, which has no row")),
                         },
                     },
                     ("pending_turn_inputs", Some("cancelled")) => {
-                        bound.and_then(|root| match root_of(root) {
+                        bound.and_then(|run| match run_of(run) {
                             Some(row) if row.terminal_kind.is_some() => None,
                             Some(_) => Some(format!(
-                                "cancelled while root {root}, which drives it, still runs"
+                                "cancelled while run {run}, which executes it, still runs"
                             )),
                             None => Some(format!(
-                                "cancelled, and bound to root {root}, which has no row"
+                                "cancelled, and bound to run {run}, which has no row"
                             )),
                         })
                     }
@@ -79,19 +79,19 @@ impl HistoryChecker for InputSettlement {
                     )),
                     // A settled batch stays as its tombstone (ADR 0101 §8).
                     ("queued_work_batches", Some(_)) => None,
-                    _ => Some(match &input.admitted_root {
+                    _ => Some(match &input.admitted_run {
                         None => "queued batch left unadmitted at the end of the history".to_owned(),
-                        Some(root) => format!(
-                            "queued batch left behind its root {root} ({})",
-                            root_of(root)
+                        Some(run) => format!(
+                            "queued batch left behind its run {run} ({})",
+                            run_of(run)
                                 .and_then(|row| row.terminal_kind.as_deref())
                                 .unwrap_or("not terminal")
                         ),
                     }),
                 };
-                let twice = match (&input.admitted_root, bound) {
+                let twice = match (&input.admitted_run, bound) {
                     (Some(admitted), Some(bound)) if admitted != bound => Some(format!(
-                        "admitted by root {admitted} but bound to root {bound}"
+                        "admitted by run {admitted} but bound to run {bound}"
                     )),
                     _ => None,
                 };
@@ -112,8 +112,8 @@ impl HistoryChecker for InputSettlement {
                         .then_some(record.at)
                     }))
                     .row(input.render());
-                    if let Some(root) = bound.and_then(root_of) {
-                        violation = violation.row(root.render());
+                    if let Some(run) = bound.and_then(run_of) {
+                        violation = violation.row(run.render());
                     }
                     violations.push(violation);
                 }

@@ -21,8 +21,8 @@ pub(super) struct GeneratedRuntimeWorld {
     /// The world's own engine, under the workload's seed: effect boundaries
     /// run in its handlers and triggers land in its store. No core runs on it.
     engine: crate::backend::SimEngine,
-    /// Each session's engine, by session alias. An engine runs every drive
-    /// of the one core built over it (FIG-3600: one driver per engine), so
+    /// Each session's engine, by session alias. An engine runs every shift
+    /// of the one core built over it (FIG-3600: one `SessionShifts` per engine), so
     /// each session, with its own provider and tools, runs on its own
     /// server double.
     session_engines: BTreeMap<String, crate::backend::SimEngine>,
@@ -102,7 +102,7 @@ struct FinishedSuspend {
 
 struct GeneratedRuntimeSession {
     _core: lash::LashCore,
-    /// The session's own engine: its core's drive runs every turn of it.
+    /// The session's own engine: its core's shift runs every turn of it.
     engine: crate::backend::SimEngine,
     /// The engine's session factory and accounting, for reading the session
     /// back.
@@ -117,13 +117,13 @@ struct GeneratedRuntimeSession {
     /// Every modeled provider turn that has started: a turn input may
     /// address (ADR 0101 §5.1), running or ended.
     started_provider_turns: BTreeSet<String>,
-    /// The engine's drive of the session, held from a queued ingress until
+    /// The engine's shift of the session, held from a queued ingress until
     /// its paired cancellation (or the next modeled provider turn): the
-    /// engine drives an input as soon as it is accepted, and each modeled
+    /// engine executes an input as soon as it is accepted, and each modeled
     /// provider turn owns exactly one scripted exchange, so an input the
     /// model queues must stay pending on the held engine until the model
-    /// withdraws it or a provider turn's root takes it with its own input.
-    drive_hold: Option<lash_restate_test::Hold>,
+    /// withdraws it or a provider turn's run takes it with its own input.
+    shift_hold: Option<lash_restate_test::Hold>,
 }
 
 struct ActiveProviderTurn {
@@ -412,7 +412,7 @@ impl GeneratedRuntimeWorld {
                 active_provider_turns: BTreeMap::new(),
                 finished_provider_turns: BTreeMap::new(),
                 started_provider_turns: BTreeSet::new(),
-                drive_hold: None,
+                shift_hold: None,
             },
         );
         Ok(json!({
@@ -442,20 +442,20 @@ impl GeneratedRuntimeWorld {
             .get("source_key")
             .and_then(Value::as_str)
             .unwrap_or(&event.boundary_id);
-        if runtime_session.drive_hold.is_none() {
-            // A drive running a modeled provider turn stops at the call it
-            // awaits; with none running, the last drive settles first, so the
-            // hold always meets the drive at the same point.
+        if runtime_session.shift_hold.is_none() {
+            // A shift running a modeled provider turn stops at the call it
+            // awaits; with none running, the last shift settles first, so the
+            // hold always meets the shift at the same point.
             if runtime_session.active_provider_turns.is_empty() {
                 runtime_session
                     .engine
-                    .settle_session_drive(&runtime_session.session)
+                    .settle_session_shift(&runtime_session.session)
                     .await;
             }
-            runtime_session.drive_hold = Some(
+            runtime_session.shift_hold = Some(
                 runtime_session
                     .engine
-                    .hold_session_drive(&runtime_session.session)
+                    .hold_session_shift(&runtime_session.session)
                     .await,
             );
         }
@@ -475,7 +475,7 @@ impl GeneratedRuntimeWorld {
             .as_deref()
             .unwrap_or(&event.boundary_id);
         // A host addresses a turn that is running or has ended (ADR 0101
-        // §5.1). A modeled provider turn is its own root, so its boundary id
+        // §5.1). A modeled provider turn is its own run, so its boundary id
         // is the turn's id; one that has not started yet, as serialized
         // provider turns can leave it, has nothing to address, and the input
         // is next-turn input.
@@ -588,13 +588,13 @@ impl GeneratedRuntimeWorld {
         let task_event = event.clone();
         // A queued input the model still holds pending is admitted with this
         // turn's input: the hold ends once this input is accepted. With no
-        // hold, the input goes to a settled session, so the drive that admits
+        // hold, the input goes to a settled session, so the shift that admits
         // it is the one its own acceptance schedules.
-        let drive_hold = runtime_session.drive_hold.take();
-        if drive_hold.is_none() {
+        let shift_hold = runtime_session.shift_hold.take();
+        if shift_hold.is_none() {
             runtime_session
                 .engine
-                .settle_session_drive(&runtime_session.session)
+                .settle_session_shift(&runtime_session.session)
                 .await;
         }
         let mut handle = tokio::spawn(async move {
@@ -604,7 +604,7 @@ impl GeneratedRuntimeWorld {
                 transport,
                 provider_kind,
                 task_event,
-                drive_hold,
+                shift_hold,
             )
             .await
         });
@@ -927,7 +927,7 @@ impl GeneratedRuntimeWorld {
     /// until the turn finishes and its completion lands in the scheduler, so the
     /// completion is always delivered at its own `at` ahead of later boundaries —
     /// making the delivery order independent of how long the (sync in-memory vs
-    /// async durable) store takes to drive the turn to completion.
+    /// async durable) store takes to execute the turn to completion.
     pub(super) fn min_active_final_ready_at(&self) -> Option<u64> {
         self.sessions
             .values()
@@ -1015,9 +1015,9 @@ impl GeneratedRuntimeWorld {
             .cancel_pending_turn_input(&lash_core::InputId::fixture(input_id.as_str()))
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        // The model's queue-then-withdraw pair is over: the engine may drive
+        // The model's queue-then-withdraw pair is over: the engine may work
         // the session again.
-        drop(runtime_session.drive_hold.take());
+        drop(runtime_session.shift_hold.take());
         let (cancelled, cancel_outcome) = match &outcome {
             lash::PendingTurnInputCancelOutcome::Cancelled(_) => (true, "cancelled"),
             lash::PendingTurnInputCancelOutcome::AlreadyAdmitted { .. } => {
@@ -1119,23 +1119,23 @@ impl GeneratedRuntimeWorld {
         let turn_session = session.clone();
         let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
         let prompt = format!("await {suspend_kind_label} completion");
-        // The session's own engine serves its drive, so its server is the
+        // The session's own engine serves its shift, so its server is the
         // one that sees the send's ask.
-        let drive_engine = turn_engine.clone();
-        let server = drive_engine.restate().server();
-        let drive_prefix = format!(
+        let shift_engine = turn_engine.clone();
+        let server = shift_engine.restate().server();
+        let shift_prefix = format!(
             "{}/{}/",
-            lash_restate_test::SESSION_DRIVER_SERVICE,
+            lash_restate_test::SESSION_SHIFT_SERVICE,
             session.session_id()
         );
-        let session_drives = || {
+        let session_shifts = || {
             server
                 .invocations()
                 .iter()
-                .filter(|view| view.target.starts_with(&drive_prefix))
+                .filter(|view| view.target.starts_with(&shift_prefix))
                 .count()
         };
-        let drives_before = session_drives();
+        let shifts_before = session_shifts();
         let turn_id = format!("{session_alias}:suspend-turn");
         let handle = tokio::spawn(async move {
             turn_engine
@@ -1151,20 +1151,20 @@ impl GeneratedRuntimeWorld {
                 .map(|output| output.result)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
         });
-        // The spawned turn's send asks the engine to drive its session on its
+        // The spawned turn's send asks the engine to work its session on its
         // first poll, over the same wall-clock accept every outside request
         // crosses. Two turns opened by near boundaries land that ask in
         // whichever outside pass their connect happened to reach, so one
         // seed's grant order moved with TCP timing (FIG-3600). Waiting until
-        // the server registered this session's drive pins its arrival to the
+        // the server registered this session's shift pins its arrival to the
         // boundary's own order — the same pinning the provider turn's
         // first-gate wait gives a provider task.
         let mut polls = 0_u32;
-        while session_drives() <= drives_before {
+        while session_shifts() <= shifts_before {
             polls += 1;
             if polls > 100_000 {
                 return Err(FixedScriptRunnerError::Assertion(format!(
-                    "suspend ingress `{session_alias}`: the spawned turn's session drive never reached the server"
+                    "suspend ingress `{session_alias}`: the spawned turn's session shift never reached the server"
                 )));
             }
             tokio::task::yield_now().await;
@@ -1464,7 +1464,7 @@ async fn run_provider_turn_task(
     transport: Arc<ScriptedLlmHttpTransport>,
     provider_kind: String,
     event: BoundaryEvent,
-    drive_hold: Option<lash_restate_test::Hold>,
+    shift_hold: Option<lash_restate_test::Hold>,
 ) -> Result<Value, FixedScriptRunnerError> {
     let expected_text = event
         .payload
@@ -1485,7 +1485,7 @@ async fn run_provider_turn_task(
             Arc::new(move |session: &lash::LashSession| {
                 Ok(session.send(lash::TurnInput::text(prompt.clone())))
             }),
-            drive_hold,
+            shift_hold,
         )
         .await?
         .map_err(|err| {
@@ -1625,11 +1625,11 @@ mod recovery_tests {
         let (events, _) =
             super::super::generated_driver::drive_generated_workload(&mut world, &workload)
                 .await
-                .expect("drive fixture workload");
+                .expect("shift fixture workload");
         world
             .global_history("before-timeout", &events)
             .await
-            .expect("settle drives");
+            .expect("settle shifts");
         let engine = world
             .session_engines
             .get("suspend-exec-code")
@@ -1645,11 +1645,11 @@ mod recovery_tests {
         let due = engine.restate().server().now_ms();
         assert_eq!(
             connection.execute(
-                "UPDATE session_roots SET obligation_state = 'due', obligation_due_at_ms = ?1, \
+                "UPDATE session_runs SET obligation_state = 'due', obligation_due_at_ms = ?1, \
                  obligation_attempts = 1, obligation_claim_token = NULL, obligation_settled_at_ms = NULL, \
                  obligation_last_error = 'the delivery ran past its 30000 ms attempt budget', \
                  obligation_last_error_code = 'obligation_attempt_budget_exceeded' \
-                 WHERE session_id = 'suspend-exec-code' AND root = 'suspend-exec-code:suspend-turn'",
+                 WHERE session_id = 'suspend-exec-code' AND run = 'suspend-exec-code:suspend-turn'",
                 [due],
             ).expect("plant the CI timeout's durable retry"),
             1,
@@ -1663,7 +1663,7 @@ mod recovery_tests {
             .iter()
             .flat_map(|store| &store.obligations)
             .find(|row| {
-                row.table == "session_roots"
+                row.table == "session_runs"
                     && row.key == "suspend-exec-code/suspend-exec-code:suspend-turn"
             })
             .expect("scope close");

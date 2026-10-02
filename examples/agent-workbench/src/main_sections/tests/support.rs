@@ -61,7 +61,7 @@ pub(crate) fn memory_trigger_store() -> Arc<lash_sqlite_store::SqliteTriggerStor
 
 /// The Restate double a workbench test runs on (FIG-3600 S5c): lash-restate's
 /// engine and services over a fresh SQLite memory store set, connected to an
-/// in-process server double. Its engine drives every accepted input through
+/// in-process server double. Its engine executes every accepted input through
 /// its `LashSession` service, as a deployment's does.
 ///
 /// Keep the returned double alive to the end of the test (FIG-3723); hand
@@ -89,8 +89,8 @@ pub(crate) fn install_test_process_worker(
     );
 }
 
-/// Open `session_id` once the engine's drive of it released the session: a
-/// drive that just settled a root may still hold the session's store for a
+/// Open `session_id` once the engine's shift of it released the session: a
+/// shift that just settled a run may still hold the session's store for a
 /// moment, and an open meanwhile is refused as contended.
 pub(crate) async fn open_session_once_released(
     core: &lash::LashCore,
@@ -112,7 +112,7 @@ pub(crate) async fn open_session_once_released(
         }
     })
     .await
-    .expect("the engine's drive releases the session")
+    .expect("the engine's shift releases the session")
 }
 
 /// Work a test runs under a handler's scoped controller.
@@ -171,7 +171,7 @@ pub(crate) type SessionDeleteAttempt = Arc<
 pub(crate) use super::session_delete_workflow::run_session_delete_in_handler;
 
 /// Delete `session_id` through `core` inside a handler of `double`'s
-/// deployment until the delete is physical. A session whose drive still
+/// deployment until the delete is physical. A session whose shift still
 /// runs is only closing (ADR 0109 §4), and the delete owes another attempt
 /// once that work ends; the test retries its step, as the workbench's delete
 /// workflow retries its own.
@@ -251,7 +251,7 @@ impl DecoratedBackend {
         }
     }
 
-    /// Drive processes through `wiring`, built over the backend's (possibly
+    /// Shift processes through `wiring`, built over the backend's (possibly
     /// decorated) registry so the two stay one registry.
     pub(crate) fn with_process_work(self, wiring: lash::process::ProcessWorkWiring) -> Self {
         Self {
@@ -267,7 +267,7 @@ impl From<DecoratedBackend> for lash::Backend {
 }
 
 /// A process registry of its own under `data_dir`'s sessions root, on
-/// `clock` and with `wake_delivery`, for a test that drives registrations and
+/// `clock` and with `wake_delivery`, for a test that executes registrations and
 /// wake deliveries directly rather than through the core.
 pub(crate) async fn standalone_process_registry(
     data_dir: &std::path::Path,

@@ -67,8 +67,8 @@ structure rather than exact assistant wording.
   an ordinary composer **send** also lands there, with `ingress {"scope":"next_turn"}`, so a
   one-send run holds three rows, not two — and
   `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and
-  `ingress.settled` (payload `root` and `input_ids`, settled by root and turn per ADR 0101's
-  FIG-3927 amendment). An admitted row names its root in `admitted_root` and `admitted_by`;
+  `ingress.settled` (payload `run` and `input_ids`, settled by run and turn per ADR 0101's
+  FIG-3927 amendment). An admitted row names its run in `admitted_run` and `admitted_by`;
   there are no claim columns and no `claimed_turn_id` column, and selecting one fails with
   `no such column`.
 - Provider truth is the `llm_call_started` trace record, **not** `provider_request`. A
@@ -80,9 +80,9 @@ structure rather than exact assistant wording.
   messages, before scoring any exactly-once gate.
 - The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
   active input id completes exactly once under the in-flight turn, the queued draft
-  dispatches only after settle. ADR 0101 defines current root admission and
-  drive-fence settlement; its store-law evidence lives in
-  `crates/lash-conformance/src/conformance/runtime_persistence/root_admissions.rs`. The recipe
+  dispatches only after settle. ADR 0101 defines current run admission and
+  shift-fence settlement; its store-law evidence lives in
+  `crates/lash-conformance/src/conformance/runtime_persistence/run_admissions.rs`. The recipe
   takes no filter, and the unfiltered suite is roughly 45 live Restate tests behind a cold
   workspace build — tens of minutes before the one test this row needs even starts. To run
   this row's law alone, call the suite runner directly with `--only`, beside a disposable
@@ -163,7 +163,7 @@ a fixed delay. Gate in this order:
 1. the first provider request after the admitted checkpoint — read from `llm_call_started`,
    per Working material — contains the injected marker exactly once as a user message,
    proving the model received it during the initial turn;
-   exactly one `ingress.settled` record also places its input id under that turn id and root;
+   exactly one `ingress.settled` record also places its input id under that turn id and run;
 2. the injected marker appears exactly once as a committed user message in the durable
    session graph, `GET /api/state`, and the rendered page; capture all three surfaces and
    require their message text and ordering to agree;

@@ -49,7 +49,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "crash-reopen-runtime-rebuild",
         kind: DurableFaultKind::CrashReopen,
-        contract: "A deployment that dies mid journal step and comes up fresh recovers its process to one terminal, with no input lost or driven twice.",
+        contract: "A deployment that dies mid journal step and comes up fresh recovers its process to one terminal, with no input lost or executed twice.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-sim",
             test_target: Some("crash_point_matrix"),
@@ -112,9 +112,9 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         },
     },
     DurableFaultMatrixRow {
-        id: "stale-drive-fence-writes-nothing",
+        id: "stale-shift-fence-writes-nothing",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "After a later drive seals, the earlier fence's root admission, checkpoint admission, settling commit and command commit are each refused without mutation.",
+        contract: "After a later shift seals, the earlier fence's run admission, checkpoint admission, settling commit and command commit are each refused without mutation.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
@@ -123,13 +123,13 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         }),
     },
     DurableFaultMatrixRow {
-        id: "settlement-predicated-on-the-root",
+        id: "settlement-predicated-on-the-run",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "A commit settling a row bound to another root, or to none, is refused and writes nothing; the owning root still settles it once.",
+        contract: "A commit settling a row bound to another run, or to none, is refused and writes nothing; the owning run still settles it once.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
-            filter: Some("settlement_is_predicated_on_the_root"),
+            filter: Some("settlement_is_predicated_on_the_run"),
             required_env: None,
         }),
     },
@@ -532,7 +532,7 @@ fn run_fast_gate_with_fake_cargo_inheriting(
     for (name, value) in inherited {
         command.env(name, value);
     }
-    // The probe drives the gate with a `fast:<shard>` selector. Every
+    // The probe executes the gate with a `fast:<shard>` selector. Every
     // Confidence stage exports these, and the gate routes on them: a stage
     // selector makes it source `scripts/ci/confidence-stage.sh`, which refuses
     // anything but the unscoped `full` lane, and the sim variables re-shard a
@@ -572,7 +572,7 @@ fn run_fast_gate_with_fake_cargo_inheriting(
 
 /// The repository root, both under Cargo (an absolute path two levels above
 /// the crate) and under Buck2, where `CARGO_MANIFEST_DIR` is the
-/// runfiles-relative package directory and the root is the working directory.
+/// runfiles-relative package directory and the run is the working directory.
 fn repository_root() -> &'static std::path::Path {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

@@ -1,11 +1,11 @@
 use super::*;
 
-/// The root every scenario's admissions bind their rows to.
-pub(super) const SCENARIO_ROOT: &str = "runtime-scenario-root";
+/// The run every scenario's admissions bind their rows to.
+pub(super) const SCENARIO_RUN: &str = "runtime-scenario-run";
 
 impl RuntimeScenarioContext {
     /// The session's earliest open turn-lane batch, the head a batch-headed
-    /// root is admitted on.
+    /// run is admitted on.
     async fn turn_lane_head(&self) -> Option<lash_core::BatchId> {
         self.store()
             .list_open_queued_work(&self.session_id)
@@ -17,21 +17,21 @@ impl RuntimeScenarioContext {
             .map(|batch| batch.batch_id)
     }
 
-    /// Admit the scenario's root headed by `head`; `None` when the admission
+    /// Admit the scenario's run headed by `head`; `None` when the admission
     /// cannot reach it.
-    pub(super) async fn admit_scenario_root(&self, head: AdmittedHead) -> Option<RootAdmission> {
+    pub(super) async fn admit_scenario_run(&self, head: AdmittedHead) -> Option<RunAdmission> {
         let (_, fence) = self.owner_and_lease();
-        let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+        let mut request = lash_core::testing::store_fixtures::admit_run_request_for_test(
             fence,
-            &TurnId::from(SCENARIO_ROOT),
+            &TurnId::from(SCENARIO_RUN),
             head,
         );
         request.policy = lash_core::testing::queued_work_admission_policy(10);
         request.max_inputs = 10;
         self.store()
-            .admit_root(&request)
+            .admit_run(&request)
             .await
-            .unwrap_or_else(|err| panic!("{} failed to admit its root: {err}", self.name))
+            .unwrap_or_else(|err| panic!("{} failed to admit its run: {err}", self.name))
     }
 
     pub(super) async fn leading_command_run(&mut self, phase: RuntimeLeadingCommandRunPhase) {
@@ -41,7 +41,7 @@ impl RuntimeScenarioContext {
                 .turn_lane_head()
                 .await
                 .expect("the command gate expectation needs turn work behind it");
-            let blocked_turn = self.admit_scenario_root(AdmittedHead::Batch(head)).await;
+            let blocked_turn = self.admit_scenario_run(AdmittedHead::Batch(head)).await;
             assert_eq!(
                 blocked_turn.is_none(),
                 expected,
@@ -71,9 +71,9 @@ impl RuntimeScenarioContext {
             AdmissionBoundary::Idle => match self.turn_lane_head().await {
                 Some(head) => {
                     let admission = self
-                        .admit_scenario_root(AdmittedHead::Batch(head))
+                        .admit_scenario_run(AdmittedHead::Batch(head))
                         .await
-                        .unwrap_or_else(|| panic!("{} root admission missed its head", self.name));
+                        .unwrap_or_else(|| panic!("{} run admission missed its head", self.name));
                     let batches = admission.batch_ids();
                     self.admission = Some(admission);
                     batches
@@ -82,13 +82,13 @@ impl RuntimeScenarioContext {
             },
             AdmissionBoundary::ActiveTurnCheckpoint => {
                 let (_, fence) = self.owner_and_lease();
-                let root = TurnId::from(SCENARIO_ROOT);
+                let run = TurnId::from(SCENARIO_RUN);
                 let admission = self
                     .store()
                     .admit_at_checkpoint(&lash_core::store::CheckpointAdmissionRequest {
                         fence: fence.clone(),
-                        root: root.clone(),
-                        turn_id: root,
+                        run: run.clone(),
+                        turn_id: run,
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "runtime-scenario-checkpoint".to_string(),
                         max_inputs: 10,
@@ -148,9 +148,9 @@ impl RuntimeScenarioContext {
         let head =
             head.unwrap_or_else(|| panic!("{} expected an admissible next-turn input", self.name));
         let admission = self
-            .admit_scenario_root(AdmittedHead::Input(head))
+            .admit_scenario_run(AdmittedHead::Input(head))
             .await
-            .unwrap_or_else(|| panic!("{} root admission missed its input head", self.name));
+            .unwrap_or_else(|| panic!("{} run admission missed its input head", self.name));
         let inputs = admission
             .inputs
             .as_ref()
@@ -216,10 +216,10 @@ impl RuntimeScenarioContext {
                 reads.iter().all(|read| {
                     read.status
                         == lash_core::PendingTurnInputReadStatus::Admitted {
-                            root: TurnId::from(SCENARIO_ROOT),
+                            run: TurnId::from(SCENARIO_RUN),
                         }
                 }),
-                "{} admitted turn inputs must report their root",
+                "{} admitted turn inputs must report their run",
                 self.name
             );
         }
@@ -238,7 +238,7 @@ impl RuntimeScenarioContext {
                     && read.input.state.is_next_turn_input(
                         self.admission
                             .as_ref()
-                            .map(|_| TurnId::from(SCENARIO_ROOT))
+                            .map(|_| TurnId::from(SCENARIO_RUN))
                             .as_ref(),
                     )
             })

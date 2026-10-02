@@ -1,7 +1,7 @@
 //! FIG-4044: work withheld at a terminal checkpoint across a frame switch.
 
 use super::*;
-use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::TestTurnExecution as _;
 
 const SEED: u64 = 0x5_f470;
 
@@ -11,15 +11,15 @@ const SEED: u64 = 0x5_f470;
 /// A terminal checkpoint that also delivers something (here a plugin's
 /// message) re-enters the protocol loop, and the next model call may switch
 /// frames. The switch's own follow-on turn then runs before the FIG-3157
-/// follow-on that drives the withheld wake. That frame turn still owes the
-/// FIG-3157 follow-on, so its commit writes no root terminal and releases
-/// nothing: the wake stays bound to the root, and the follow-on completes it
+/// follow-on that executes the withheld wake. That frame turn still owes the
+/// FIG-3157 follow-on, so its commit writes no run terminal and releases
+/// nothing: the wake stays bound to the run, and the follow-on completes it
 /// in the same run.
 #[tokio::test]
 pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on() {
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     const SESSION_ID: &str = "withheld-across-frame-switch";
-    let root = TurnId::from("withheld-across-frame-switch-turn");
+    let run = TurnId::from("withheld-across-frame-switch-turn");
 
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
@@ -158,35 +158,38 @@ pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on(
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from(SESSION_ID),
-            root.clone(),
+            run.clone(),
         ))
         .await
         .expect("open the turn's handler");
-    let run = runtime
-        .drive_turn_frames(
+    let executed = runtime
+        .execute_turn_frames(
             TurnInput::text("hello"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
         )
         .await
-        .expect("the run drives the switch and the withheld wake");
+        .expect("the run executes the switch and the withheld wake");
     handler.close().await.expect("close the turn's handler");
 
-    let outcomes = run
+    let outcomes = executed
         .turns
         .iter()
         .map(|turn| format!("{:?}", turn.outcome))
         .collect::<Vec<_>>();
     assert_eq!(
-        run.turns.len(),
+        executed.turns.len(),
         3,
         "the switched turn, its frame's follow-on and the wake's follow-on: {outcomes:?}"
     );
     assert!(
-        matches!(run.turns[0].outcome, TurnOutcome::AgentFrameSwitch { .. }),
+        matches!(
+            executed.turns[0].outcome,
+            TurnOutcome::AgentFrameSwitch { .. }
+        ),
         "the terminal checkpoint's delivery led to a frame switch: {:?}",
-        run.turns[0].outcome
+        executed.turns[0].outcome
     );
-    for (index, turn) in run.turns.iter().enumerate() {
+    for (index, turn) in executed.turns.iter().enumerate() {
         assert!(
             turn.errors
                 .iter()
@@ -195,8 +198,8 @@ pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on(
             turn.errors
         );
     }
-    assert_eq!(run.turns[1].assistant_output.safe_text, "frame answer");
-    assert_eq!(run.turns[2].assistant_output.safe_text, "wake answer");
+    assert_eq!(executed.turns[1].assistant_output.safe_text, "frame answer");
+    assert_eq!(executed.turns[2].assistant_output.safe_text, "wake answer");
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 3);
     assert!(
@@ -213,17 +216,17 @@ pub(super) async fn work_withheld_before_a_frame_switch_waits_for_its_follow_on(
         "the wake's follow-on completed it"
     );
     assert!(
-        lash_core::store::RootStore::root_terminal(store.as_ref(), &session, &root)
+        lash_core::store::RunStore::run_terminal(store.as_ref(), &session, &run)
             .await
-            .expect("read the root's terminal")
+            .expect("read the run's terminal")
             .is_some(),
-        "the root ends with the run"
+        "the run ends with the execution"
     );
     assert!(
-        lash_core::store::RootStore::unfinished_root(store.as_ref(), &session)
+        lash_core::store::RunStore::unfinished_run(store.as_ref(), &session)
             .await
-            .expect("read the unfinished root")
+            .expect("read the unfinished run")
             .is_none(),
-        "no unfinished root holds the session"
+        "no unfinished run holds the session"
     );
 }

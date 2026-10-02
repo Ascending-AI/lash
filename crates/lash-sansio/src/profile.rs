@@ -2,7 +2,7 @@
 //!
 //! Profiling is observational only: a mark measures how long an instruction
 //! ran for the host's `observe_profile` report and feeds no runtime decision,
-//! so the wall read lives here — outside the scanned drive paths — behind a
+//! so the wall read lives here — outside the scanned shift paths — behind a
 //! name that says what it is for (FIG-3672).
 
 /// A monotonic instant taken for profiling; [`ProfileMark::elapsed_nanos`]

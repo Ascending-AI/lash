@@ -82,7 +82,7 @@ impl CurrentOwnerCapability {
         commit.turn_commit = append_stamp;
         commit.debug_assert_append_envelope_scope();
         let commit_result = super::super::state::commit_in_lane_context(
-            session.held_drive_fence.as_ref(),
+            session.held_shift_fence.as_ref(),
             store.clone(),
             commit,
             &session.resident_graph_head_stale,

@@ -133,7 +133,7 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         "the same request id is the same durable effect even when request content differs"
     );
     // The recording double answers the direct effect itself: no provider was
-    // dispatched, so no usage run was admitted and nothing is accounted. Only
+    // dispatched, so no usage meter was admitted and nothing is accounted. Only
     // a dispatched call is spend (ADR 0125).
     let usage = settled_runtime_usage(&runtime).await;
     assert!(

@@ -31,8 +31,8 @@ impl RlmProtocolSession {
     /// The session's system prompt (FIG-4588), rendered from recorded data:
     /// the prompt config the RLM namespace of `plugin_config` recorded, the
     /// recorded `tool_catalog`, the session's bindings and its subagent
-    /// authority. `plugin_config` is the admitted root's, so a prompt
-    /// command applied while a root runs reaches the next root. A session
+    /// authority. `plugin_config` is the admitted run's, so a prompt
+    /// command applied while a run executes reaches the next run. A session
     /// that has recorded no RLM namespace yet renders the built-in prompt,
     /// as it runs under the behaviour its plugin was built with (a reopened
     /// session with no namespace never gets here: its plugin refuses to
@@ -82,7 +82,7 @@ impl RlmProtocolSession {
         if ctx.checkpoint != CheckpointKind::AfterWork {
             return Ok(Vec::new());
         }
-        // The threshold the running root was admitted under; a session that
+        // The threshold the running run was admitted under; a session that
         // has recorded no RLM namespace yet runs under the behaviour its
         // plugin was built with.
         let configured = match ctx
@@ -338,11 +338,11 @@ mod tests {
 
     /// FIG-4588: the session's system prompt renders from the prompt config
     /// the given plugin config recorded, over the session's bindings and the
-    /// given catalog and subagent authority. A root admitted before a prompt
-    /// command renders the prompt it was admitted under and the next root
+    /// given catalog and subagent authority. A run admitted before a prompt
+    /// command renders the prompt it was admitted under and the next run
     /// the new one; a plugin config with no RLM namespace is refused typed.
     #[tokio::test]
-    async fn the_system_prompt_renders_from_the_admitted_roots_recorded_config() {
+    async fn the_system_prompt_renders_from_the_admitted_runs_recorded_config() {
         let deployment = RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::plugin::InstructionBound::unbounded())
@@ -396,13 +396,13 @@ mod tests {
         let running_prompt = session
             .system_prompt(&running, &catalog, Some(&subagent), TURN)
             .await
-            .expect("the running root's prompt");
+            .expect("the running run's prompt");
         assert!(running_prompt.starts_with(crate::RLM_BUILTIN_INTRO));
         assert!(!running_prompt.contains("## Context"));
         let next_prompt = session
             .system_prompt(&next, &catalog, Some(&subagent), TURN)
             .await
-            .expect("the next root's prompt");
+            .expect("the next run's prompt");
         assert!(next_prompt.starts_with("You are the release assistant.\n\n"));
         assert!(next_prompt.ends_with("## Context\n\nRelease 4.2 freezes on Friday."));
         for prompt in [&running_prompt, &next_prompt] {

@@ -1,7 +1,7 @@
 //! Projection of a sans-io [`Effect`] stream into the
 //! shared behavior-transcript vocabulary.
 //!
-//! The protocol scenario harnesses each drive a `TurnMachine` and drain effects,
+//! The protocol scenario harnesses each shift a `TurnMachine` and drain effects,
 //! so they render from one shared projection instead of growing private ones.
 //! Every line comes from an effect the machine really yielded.
 //!

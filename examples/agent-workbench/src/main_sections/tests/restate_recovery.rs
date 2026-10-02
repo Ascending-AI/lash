@@ -890,7 +890,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() -
         assistant.text
     );
     let session_id = session.session_id();
-    // This handle predates the externally driven Restate turn. Dropping it
+    // This handle predates the externally executed Restate turn. Dropping it
     // releases the observation snapshot without flushing that stale graph over
     // the workflow's committed transcript.
     drop(session);
@@ -1702,7 +1702,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         );
     }
     wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
-    // The next-turn input is a root the session's engine starts on its own:
+    // The next-turn input is a run the session's engine starts on its own:
     // no route follows it, and its reply reaches the page through the
     // committed transcript.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -1751,7 +1751,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         1,
         "active-turn input must reach the next provider iteration exactly once"
     );
-    // Settlement is keyed by the root and the turn (ADR 0101, FIG-3927
+    // Settlement is keyed by the run and the turn (ADR 0101, FIG-3927
     // amendment), and the durable record is what replay must preserve:
     // `turn_input_applications` is read back out of the committed turn
     // receipts, which carry one application per input per commit, so a
@@ -1938,7 +1938,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     );
     wait_for_trace_event_count(&data_dir.join("trace.jsonl"), "llm_call_completed", 1, hang).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let first_generation = session_drive_epoch(&data_dir, backend, &session_id).await;
+    let first_generation = session_shift_epoch(&data_dir, backend, &session_id).await;
 
     first.stop_and_reap();
 
@@ -2003,8 +2003,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         .expect("recovered turn must commit a cancellation terminal")
         .expect("attach recovered turn terminal");
     assert!(
-        session_drive_epoch(&data_dir, backend, &session_id).await >= first_generation,
-        "replacement must preserve the durable drive epoch through recovery"
+        session_shift_epoch(&data_dir, backend, &session_id).await >= first_generation,
+        "replacement must preserve the durable shift epoch through recovery"
     );
     let lash::TurnTerminal::Committed { outcome, .. } = terminal else {
         panic!("recovered turn returned non-committed terminal: {terminal:#?}");
@@ -2329,7 +2329,7 @@ async fn wait_for_active_turns_empty(state: &AppState, session_id: &SessionId, t
     }
 }
 
-async fn session_drive_epoch(
+async fn session_shift_epoch(
     data_dir: &std::path::Path,
     backend: &str,
     session_id: &SessionId,
@@ -2348,11 +2348,11 @@ async fn session_drive_epoch(
             )
             .expect("open recovery E2E SQLite durable core")
             .query_row(
-                "SELECT drive_epoch FROM session_meta WHERE session_id = ?1",
+                "SELECT shift_epoch FROM session_meta WHERE session_id = ?1",
                 [session_id.as_str()],
                 |row| row.get(0),
             )
-            .expect("read recovery E2E SQLite drive epoch")
+            .expect("read recovery E2E SQLite shift epoch")
         }
         "postgres" => {
             let database_url = std::env::var("AGENT_WORKBENCH_E2E_DATABASE_URL")
@@ -2361,13 +2361,13 @@ async fn session_drive_epoch(
                 .await
                 .expect("connect to recovery E2E Postgres");
             sqlx::query_scalar(
-                "SELECT drive_epoch FROM lash_session_meta
+                "SELECT shift_epoch FROM lash_session_meta
                  WHERE session_id = $1",
             )
             .bind(session_id.as_str())
             .fetch_one(&pool)
             .await
-            .expect("read recovery E2E Postgres drive epoch")
+            .expect("read recovery E2E Postgres shift epoch")
         }
         other => panic!("unsupported recovery E2E backend `{other}`"),
     }

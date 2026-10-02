@@ -78,15 +78,15 @@ pub trait EffectHost: AwaitEventResolver {
         scope: &ExecutionScope,
     ) -> Result<u64, RuntimeError>;
 
-    /// Release a terminal root's wait-index rows after the scope-close sink
+    /// Release a terminal run's wait-index rows after the scope-close sink
     /// records its end. `committed_turn` is the physical turn whose commit
-    /// ended the root, when one did: that commit still owes its turn's
+    /// ended the run, when one did: that commit still owes its turn's
     /// terminal to every waiter, so it is never released as cancelled
     /// (FIG-4025). Hosts without a per-session wait index owe no work.
-    async fn retire_closed_root_waits(
+    async fn retire_closed_run_waits(
         &self,
         _session_id: &SessionId,
-        _root: &TurnId,
+        _run: &TurnId,
         _committed_turn: Option<&TurnId>,
     ) -> Result<(), RuntimeError> {
         Ok(())
@@ -425,10 +425,10 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         None
     }
 
-    /// Whether the process execution this controller drives has a committed
+    /// Whether the process execution this controller executes has a committed
     /// cancellation, observed as a recorded operation (FIG-3673).
     ///
-    /// A process's cancellation is a durable first-writer fact, and its drive
+    /// A process's cancellation is a durable first-writer fact, and its shift
     /// observes it only through recorded operations: a race on each durable
     /// wait it records, this peek at each cancel checkpoint of its body and
     /// before its first command, and this peek once after a `SessionTurn`
@@ -448,16 +448,16 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         Ok(lent_stop.is_cancelled())
     }
 
-    /// Whether the effect-group child this controller drives has a durable
+    /// Whether the effect-group child this controller executes has a durable
     /// cancel fact, read as a recorded peek at one of its step boundaries
     /// (ADR 0105 §4, FIG-3904).
     ///
-    /// A tool child's drive never races its cancel at handler level: it reads
+    /// A tool child's shift never races its cancel at handler level: it reads
     /// the fact here before each attempt, and each attempt body watches it
     /// through [`group_child_cancel_watch`](Self::group_child_cancel_watch).
     /// An engine that records the fact answers the answer it recorded, so a
     /// replay takes the branch the first execution took. A controller that
-    /// drives no group child answers `false`. Forwarding wrappers forward.
+    /// executes no group child answers `false`. Forwarding wrappers forward.
     async fn observe_group_child_cancel(&self) -> Result<bool, RuntimeEffectControllerError> {
         Ok(false)
     }
@@ -467,7 +467,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     ///
     /// Execution-side only: the step records whatever its body returned, so a
     /// replay serves that and never consults the watch. `None` for every
-    /// controller that drives no group child. Forwarding wrappers forward.
+    /// controller that executes no group child. Forwarding wrappers forward.
     fn group_child_cancel_watch(&self) -> Option<Arc<dyn GroupChildCancelWatch>> {
         None
     }

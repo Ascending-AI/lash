@@ -38,7 +38,7 @@ pub struct RuntimeObservation {
     pub cursor: SessionCursor,
     pub read_view: crate::SessionReadView,
     /// The session's current durable frame identity at publication time.
-    /// Together with `session_id` it is the scope root the frame-scoped
+    /// Together with `session_id` it is the scope run the frame-scoped
     /// process listing and host probes build from.
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     /// The committed turn index at publication time.
@@ -58,7 +58,7 @@ pub struct RuntimeObservation {
     pub effect_host: Arc<dyn crate::EffectHost>,
     /// The ingress relay an acceptance through this observation delivers
     /// with (ADR 0109 §3).
-    pub ingress: super::drive::IngressRelay,
+    pub ingress: super::shift::IngressRelay,
     /// Fingerprint of the resident authority at publication time, compared
     /// across publishes to detect revision-stable resident changes without
     /// retaining the resident state itself.
@@ -251,8 +251,8 @@ fn export_observation_state(runtime: &LashRuntime) -> (crate::SessionReadView, V
     // Observation publication is synchronous. When resident state has been
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
-    // An observer reads the session's record, never a root's execution
-    // view: that view outlives its root on resident state, and a replay
+    // An observer reads the session's record, never a run's execution
+    // view: that view outlives its run on resident state, and a replay
     // re-installs it (FIG-4529).
     let read_view = crate::SessionReadView::recorded_from_runtime_state(&runtime.state);
     (read_view, authority_fingerprint(&runtime.state))

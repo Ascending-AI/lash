@@ -34,7 +34,7 @@ crate::statements! {
         /// and the append in a single round trip. An item already recorded
         /// is not recorded again: an input the interrupted turn's commit
         /// recorded is still addressed to that turn, its delivery unchanged,
-        /// when the root's terminal write sweeps the turns it ends.
+        /// when the run's terminal write sweeps the turns it ends.
         append_at_next_ordinal = "INSERT INTO turn_cancel_affected_inputs (
                  session_id, turn_id, ordinal, input_id, disposition, input_json, item_kind,
                  batch_id

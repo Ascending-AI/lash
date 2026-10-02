@@ -99,11 +99,11 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLaneBusy => Retryable,
             // the park's redrive settles within a tick; the identical admission then proceeds.
             Self::SessionRedriveUnsettled => Retryable,
-            // the owning drive releases the head at its boundary; the identical write then lands.
+            // the owning shift releases the head at its boundary; the identical write then lands.
             Self::SessionHeadOwned => Retryable,
             // the same direct call on a store-backed session is refused the same way.
             Self::SessionCommandRequired => Terminal,
-            // the drive is journaled, so re-running the same turn cedes the same way.
+            // the shift is journaled, so re-running the same turn cedes the same way.
             Self::AcceptedTurnInputCeded => Terminal,
             // the deployment runs no session work; the identical wait is refused identically.
             Self::SessionWorkUnavailable => Terminal,
@@ -111,8 +111,8 @@ impl RuntimeErrorCode {
             Self::TurnExecutionRequiresReconciledToolSurface => Terminal,
             // transactional write authority was contended; the identical commit is safe to retry.
             Self::StoreCommitContended => Retryable,
-            // the unfinished root or owed follow-on is resumed by a later drive.
-            Self::SessionRootPending => Retryable,
+            // the unfinished run or owed follow-on is resumed by a later shift.
+            Self::SessionRunPending => Retryable,
             // a follow-on owns the session; it runs first, then a redrive finds the head free.
             Self::FollowOnPending => Redrivable,
             // a newer commit moved the head; a redrive reloads it and re-establishes authority.
@@ -139,7 +139,7 @@ impl RuntimeErrorCode {
             Self::CheckpointComponentEncodingVersionMismatch => Terminal,
             // serializing the same value with the same build fails the same way.
             Self::RecordEncodingFailed => Terminal,
-            // the root has no recorded policy; retrying cannot supply its missing authority.
+            // the run has no recorded policy; retrying cannot supply its missing authority.
             Self::RecordedTerminationUnavailable => Terminal,
             // the process execution has no persisted id; wiring, not the attempt.
             Self::MissingProcessExecutionId => Terminal,
@@ -324,7 +324,7 @@ impl RuntimeErrorCode {
             Self::EngineProcessTerminalEncode => Terminal,
             // engine interaction failed; re-attaching is safe.
             Self::EngineTurnTerminalAttach => Retryable,
-            Self::EngineRootSubstrateLost => Terminal,
+            Self::EngineRunSubstrateLost => Terminal,
             // the engine's control API did not carry out the ask; a later attempt asks again.
             Self::EngineControlRequest => Redrivable,
             // the installed engine has no such verb; only another engine changes that.
@@ -394,8 +394,8 @@ impl RuntimeErrorCode {
             // the child request names an inconsistent call id.
             // the child request names an inconsistent opener.
             Self::RuntimeEffectToolChildRequestOpener => Terminal,
-            // a dispatch site outside every usage run is wiring, not the attempt.
-            Self::UsageRunMissing => Terminal,
+            // a dispatch site outside every usage meter is wiring, not the attempt.
+            Self::UsageMeterMissing => Terminal,
             // the ledger store faulted; the identical admission succeeds later.
             Self::UsageAdmissionFault => Retryable,
             // retirement permanently fences this owner's spending.
@@ -447,8 +447,8 @@ impl RuntimeErrorCode {
             Self::SessionCommandRun => Terminal,
             // the idempotency key is bound to a different command.
             Self::SessionCommandIdempotencyKey => Terminal,
-            // the post-drive refresh read failed; a retry reads again.
-            Self::SessionCommandPostDriveRefresh => Retryable,
+            // the post-shift refresh read failed; a retry reads again.
+            Self::SessionCommandPostShiftRefresh => Retryable,
             // the refresh read failed; a retry reads again.
             Self::SessionCommandRefresh => Retryable,
             // the tool refresh failed; a retry refreshes again.

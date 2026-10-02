@@ -13,13 +13,13 @@ Sam's ruling binds this decision:
 - Each provider attempt's identity is recorded before dispatch, and its result
   when it is available. Settled accounting is projected into SQL idempotently,
   then acknowledged.
-- Root cancellation, refusal, parking, fork or loss never cancel accounting
+- Run cancellation, refusal, parking, fork or loss never cancel accounting
   delivery. The delivery payload is retained until projection is acknowledged.
   Session deletion drains accounting first.
 - There is one writer for ordinary, direct, compaction, tool-child and process
   calls, including failed attempts and corrections. The turn-end drains and
   the duplicate tool-settlement charging go.
-- SQL accounting never advances the head and never needs the drive fence.
+- SQL accounting never advances the head and never needs the shift fence.
 - Facts are keyed by owner, stable effect, provider attempt and fact kind. An
   identical retry is a no-op, a conflicting payload is a typed conflict, and a
   correction has its own identity.
@@ -39,7 +39,7 @@ incorporation.
 
 That model lost money in every ending that is not a commit:
 
-- A root that was refused, cancelled by an operator, forked while parked, or
+- A run that was refused, cancelled by an operator, forked while parked, or
   lost with its substrate never reached the commit that would have carried its
   calls.
 - A runtime that died between a call and its commit took the resident rows
@@ -48,7 +48,7 @@ That model lost money in every ending that is not a commit:
   and recorded once.
 - Deleting a session deleted its ledger rows with it.
 
-The commit also made usage depend on the head and the drive fence. That tied
+The commit also made usage depend on the head and the shift fence. That tied
 billing evidence to conversation authority it has nothing to do with.
 
 ## Decision
@@ -56,7 +56,7 @@ billing evidence to conversation authority it has nothing to do with.
 ### The model
 
 - **Owner.** A `RuntimeOwner`: `Session(s)` or `Process(p)`. This is the
-  runtime the spend is attributed to. The dispatch site names it, and one run
+  runtime the spend is attributed to. The dispatch site names it, and one meter
   has one owner. Until FIG-4215 deletes them, a process runtime's calls are
   owned by its synthetic sessions `process-env:{pid}` and
   `process-session-turn:{pid}`.
@@ -64,9 +64,9 @@ billing evidence to conversation authority it has nothing to do with.
   effect: the effects whose body may dispatch a provider call. It is named by
   `UsageEffectKey`, the effect address's graph key. A tool attempt's nested
   direct completions never journal on their own; they are calls of the
-  attempt's run.
-- **Run.** One execution of a spending effect's body (`UsageRun`, a minted
-  `UsageRunId`). It is admitted as one SQL `usage_runs` row before the body's
+  attempt's meter.
+- **Meter.** One execution of a spending effect's body (`UsageMeter`, a minted
+  `UsageMeterId`). It is admitted as one SQL `usage_meters` row before the body's
   first provider attempt, and never admitted if the body dispatches nothing.
   A read records admission evidence only when admission wrote it. A settlement
   can create a resolved row without admission, and never invents its scope,
@@ -74,69 +74,69 @@ billing evidence to conversation authority it has nothing to do with.
   `Resolved { at_ms, outcome }`. A conflicted outcome keeps the typed fact
   identity and both payload hashes in SQL columns. Repeating the same
   resolution preserves its timestamp.
-- **Fact.** One provider attempt of one call of the recorded run, or one
+- **Fact.** One provider attempt of one call of the recorded meter, or one
   correction of such an attempt. Its identity is
   `(owner, effect, call_ordinal, provider_attempt, kind)`. `LlmCallId` rides
   on the fact as trace attribution only, because it is not unique: every
   session direct call is `"{session}:direct"`.
-  `UsageFactRecord.body` is `Attempt { run, outcome }` or
+  `UsageFactRecord.body` is `Attempt { meter, outcome }` or
   `Correction { usage, generation_id }`. Kind and reporting disposition derive
   from that body. A correction keeps its attempt's attribution and replaces
-  the body as one value; it has no run and always has a generation id.
-- **Liability.** The run row. It is `open` until a settlement names it,
+  the body as one value; it has no meter and always has a generation id.
+- **Liability.** The meter row. It is `open` until a settlement names it,
   `settled` when its facts land, `unknown` when it provably dispatched and no
   journaled result will ever describe it, and `conflicted` when its settlement
   disagreed with stored facts.
 
 Invariants:
 
-- **I1.** No provider attempt is dispatched without an admitted run. This is
+- **I1.** No provider attempt is dispatched without an admitted meter. This is
   structural: `ProviderHandle::complete_prepared` takes a
   `&dyn DispatchAdmission`, and the kernel's `UsageCall` is the only
   production admission. The standalone host `DirectLlmClient`, which no lash
   execution owns, passes `<dyn DispatchAdmission>::host_owned()`: the host
   owns that call's billing.
-- **I2.** Only one run of a spending effect is ever journaled. Its settlement
-  settles it and resolves every other open run of the effect
-  `unknown(superseded_run)`.
+- **I2.** Only one meter of a spending effect is ever journaled. Its settlement
+  settles it and resolves every other open meter of the effect
+  `unknown(superseded_meter)`.
 - **I3.** A fact identity maps to one payload forever. A repeat is a no-op; a
   difference is a typed conflict that appends nothing.
-- **I4.** Accounting writes touch only `usage_facts`, `usage_runs` and
-  `usage_owner_retirements`. They never read or write the head, the drive
-  fence, receipts or root rows.
-- **I5.** After an owner is retired no run of it is admitted, and a
-  settlement of a run admitted before the retirement still lands.
+- **I4.** Accounting writes touch only `usage_facts`, `usage_meters` and
+  `usage_owner_retirements`. They never read or write the head, the shift
+  fence, receipts or run rows.
+- **I5.** After an owner is retired no meter of it is admitted, and a
+  settlement of a meter admitted before the retirement still lands.
 
-### Before dispatch: the SQL run row
+### Before dispatch: the SQL meter row
 
-"Journaled before dispatch" is realized as the run's admission row. This is
+"Journaled before dispatch" is realized as the meter's admission row. This is
 the one non-literal reading of the ruling. Every provider attempt of a call
 happens inside one recorded engine step (the retry loop in
 `complete_prepared`), so no journal entry can sit between two attempts. A body
 that Restate re-runs after an unrecorded fault also leaves nothing in the
-journal at all. A journal entry written before the step would cover every run
-of the step as one, and could not tell a paid, unrecorded run from the
-recorded one. The SQL run row can: every run that may have dispatched has its
+journal at all. A journal entry written before the step would cover every meter
+of the step as one, and could not tell a paid, unrecorded meter from the
+recorded one. The SQL meter row can: every meter that may have dispatched has its
 own row before dispatch, and a row no journaled settlement ever claims becomes
 an explicit unknown liability.
 
 The dispatch gate runs before every attempt. Each attempt re-checks the
-durable owner-retirement fence through the run's idempotent admission, and
-the run records each attempt ordinal it admitted. Only one run row is inserted:
+durable owner-retirement fence through the meter's idempotent admission, and
+the meter records each attempt ordinal it admitted. Only one meter row is inserted:
 
 - A retired owner refuses the dispatch with `TurnFailureCode::UsageOwnerRetired`,
   not retryable, and nothing is sent. Managed direct calls carry it as
   `RuntimeErrorCode::UsageOwnerRetired` through the existing
   `PluginError::Runtime` carrier.
-- A store fault is not a refusal. The attempt is refused retryably, the run
+- A store fault is not a refusal. The attempt is refused retryably, the meter
   records the fault, and the engine ends the effect retryably **without
   journaling**, for all three kinds. This is FIG-3683's `Retried` rule applied
   to admission, even where the effect's faults are otherwise recorded.
 
 ### Beside the outcome: the recorded facts
 
-When the body returns, `UsageRun::finish` yields the run's `EffectUsage`
-(owner, run, facts, accounting), or `None` when no call was admitted. The
+When the body returns, `UsageMeter::finish` yields the meter's `EffectUsage`
+(owner, meter, facts, accounting), or `None` when no call was admitted. The
 facts come from the sealed attempt records, one per attempt the gate
 admitted:
 
@@ -150,8 +150,8 @@ admitted:
 
 A call admitted but dropped before its record was sealed (a cancellation
 inside the provider handle) makes the accounting
-`RunAccounting::CallWithoutRecord { calls }`, and the settlement resolves the
-run `unknown(call_without_record)`.
+`MeterAccounting::CallWithoutRecord { calls }`, and the settlement resolves the
+meter `unknown(call_without_record)`.
 
 `EffectUsage` is journaled beside the outcome, as
 `RecordedRuntimeEffect.usage`, outside `outcome`. An `Err` outcome keeps its
@@ -164,7 +164,7 @@ Right after the spending effect's entry, fresh or replayed, the controller
 journals a one-way `settle` send to the Restate virtual object
 `LashUsageAccounting`, keyed by the owner's `Display`. On replay the send is
 matched, not sent again. No code runs between the entry and the send, and
-only then is the outcome returned to the drive.
+only then is the outcome returned to the shift.
 
 The object:
 
@@ -178,41 +178,41 @@ The object:
 - answers a request body version it does not read with a terminal error
   (`USAGE_ACCOUNTING_WIRE_VERSION`, drain policy), a store fault with a
   retryable error, and a fact conflict with `Ok`, the conflict marked on the
-  runs in SQL;
+  meters in SQL;
 - acknowledges by completing. Until then Restate holds the send's payload,
   which is the retention the ruling asks for, independent of the caller's
   journal.
 
 `project_usage_settlement` is the one production writer of settlements. It
-calls `settle_usage` in one transaction and, on a conflict, marks the runs
+calls `settle_usage` in one transaction and, on a conflict, marks the meters
 `conflicted` and answers `Projected::Conflicted`.
 
 An engine that journals nothing (the local and test controllers) projects the
 settlement directly when the body returns.
 
-A run whose attempt ends with a fault after one of its calls was sealed is
+A meter whose attempt ends with a fault after one of its calls was sealed is
 never journaled: a tool attempt whose later direct completion cannot bind its
 recorded model (ADR 0030) ends there, and the engine retries it under a new
-run. Its sealed facts are known, so they are not left to become an unknown
+meter. Its sealed facts are known, so they are not left to become an unknown
 liability. The executor projects them when the attempt ends, on every engine,
-under the key of the effect and the run (`UsageEffectKey::for_unrecorded_run`),
-and then resolves the run's admitted row, which carries no fact under the
-effect's own key. The facts of the run the effect is later recorded with keep
-the effect's key, so I2 and I3 hold: the two runs' facts never share an
+under the key of the effect and the meter (`UsageEffectKey::for_unrecorded_meter`),
+and then resolves the meter's admitted row, which carries no fact under the
+effect's own key. The facts of the meter the effect is later recorded with keep
+the effect's key, so I2 and I3 hold: the two meters' facts never share an
 identity. If the store refuses the projection the admitted row stays `open`
-and is resolved `unknown` like any other run nothing settled (FIG-4632).
+and is resolved `unknown` like any other meter nothing settled (FIG-4632).
 
 ### Why delivery survives every ending
 
-- The settle is a detached send journaled before the drive sees the outcome.
-  Every later event (the root's commit, a refusal, a park, an operator cancel,
-  a fork, a lost run, a deletion) happens after it is in Restate's log.
+- The settle is a detached send journaled before the shift sees the outcome.
+  Every later event (the run's commit, a refusal, a park, an operator cancel,
+  a fork, a lost meter, a deletion) happens after it is in Restate's log.
 - A killed or cancelled caller does not recall a send.
 - A paused (parked) invocation keeps its journal, and its sends are already
   out.
 
 The one window left is an operator kill between the effect's entry and its
-send. No code runs there, so only a kill fits. That run stays `open` until
+send. No code runs there, so only a kill fits. That meter stays `open` until
 `retire_execution` or the owner's drain resolves it
 `unknown(execution_ended | owner_retired)`. The result is explicit, never
 silent, and the provider was not called again.
@@ -223,33 +223,33 @@ When an outcome cannot be journaled, the poison substitute replaces only
 `outcome`. The record keeps its usage in three tiers:
 
 1. the full `EffectUsage`;
-2. if that does not fit, `usage.without_facts()`: the owner and run stamp stay,
+2. if that does not fit, `usage.without_facts()`: the owner and meter stamp stay,
    the facts are dropped, and the accounting becomes
-   `FactsUnjournalable { dropped_facts }`, so the settlement resolves the run
+   `FactsUnjournalable { dropped_facts }`, so the settlement resolves the meter
    `unknown(facts_unjournalable)`;
-3. if even the stamp does not fit, no usage. The run stays `open` until the
+3. if even the stamp does not fit, no usage. The meter stays `open` until the
    execution or owner retirement resolves it.
 
 The give-up proof measures its substitute with a maximal stamp (an owner of
-256 bytes, a run id and a zero-fact `EffectUsage`), so "the poison fits"
+256 bytes, a meter id and a zero-fact `EffectUsage`), so "the poison fits"
 stays a proof. The pre-flight `GaveUp` entry carries no usage: the body never
-ran, so no run was admitted.
+ran, so no meter was admitted.
 
 ### Endings
 
 | Ending | Accounting |
 |---|---|
 | Committed (completed, cancelled, failed stop), Refused, Parked | Nothing. Every settled call's send precedes it. |
-| Operator cancel, fork of a parked root (`release_root`) | After the kill: `retire_usage_execution(Session(s), turn(s, root))`. |
-| Lost root (`end_lost_root`), reconcile kill of a gone or terminal target | After the end or kill: `retire_usage_execution` for the root's turn scope. |
+| Operator cancel, fork of a parked run (`release_run`) | After the kill: `retire_usage_execution(Session(s), turn(s, run))`. |
+| Lost run (`end_lost_run`), reconcile kill of a gone or terminal target | After the end or kill: `retire_usage_execution` for the run's turn scope. |
 | Lost process run (`end_lost_run`) | After the end: `retire_usage_execution` for the process's owners. |
 | Session delete | The deletion drain, below. |
 | Process prune | `drain_usage_accounting` for `Process(pid)` and its synthetic sessions, before the journal retirement. |
 
-`retire_execution` runs on the owner's object after every send the killed
-execution issued (per-key FIFO), so it resolves only runs that can never
-settle. It is scoped to the root's own turn scope: a run of a follow-on
-physical turn of that root, and a group child that outlives its killed
+`retire_execution` meters on the owner's object after every send the killed
+execution issued (per-key FIFO), so it resolves only meters that can never
+settle. It is scoped to the run's own turn scope: a meter of a follow-on
+physical turn of that run, and a group child that outlives its killed
 opener, stay open until they settle or the owner is drained. A process whose
 terminal segment is released is resolved at its prune drain.
 
@@ -267,13 +267,13 @@ The close's engine half killed the session's executions before its
 acknowledgement armed the delete, so the drain reaches the owner's object
 after every send they issued. The drain inserts the retirement row, and
 admission is refused from then on (I5). A still-running group child is
-refused before dispatch, typed `UsageOwnerRetired`. The remaining open runs
+refused before dispatch, typed `UsageOwnerRetired`. The remaining open meters
 become `unknown(owner_retired)`. A settle that arrives later still lands, and
 the facts outlive the physical delete until retention reclaims them.
 
 ### Lock order
 
-Accounting writes take no session lock, head row or drive fence (I4).
+Accounting writes take no session lock, head row or shift fence (I4).
 
 - **SQLite** serializes every accounting transaction as an immediate write
   transaction.
@@ -288,8 +288,8 @@ Accounting writes take no session lock, head row or drive fence (I4).
 
 ### Reads, reconciliation, retention
 
-- `LashCore::owner_usage(owner)`, `usage_fact_page` and `usage_run_page` read
-  by owner only. They open no session and drive nothing, and they answer for
+- `LashCore::owner_usage(owner)`, `usage_fact_page` and `usage_meter_page` read
+  by owner only. They open no session and execute nothing, and they answer for
   live, parked, refused, deleted-but-retained and pruned-but-retained owners.
 - `LashSession::usage()`, `DurableSession::usage()` and `LashRuntime::usage()`
   are async durable reads of `OwnerUsage` for their session.
@@ -308,9 +308,9 @@ Accounting writes take no session lock, head row or drive fence (I4).
   provider, and appends one `UsageCorrection` per recovered attempt through
   `append_usage_corrections`. A retried correction is a no-op. A conflicting
   or refused correction leaves the attempt `unresolved`. Attempts without a
-  generation id and `unknown` runs are not reconcilable, because no provider
+  generation id and `unknown` meters are not reconcilable, because no provider
   in lash offers a lookup by lash's request id.
-- The factory evidence sweep reclaims a retired owner's facts, runs and
+- The factory evidence sweep reclaims a retired owner's facts, meters and
   retirement row once the retirement is older than the host's horizon. A live
   owner's usage is never reclaimed.
 - Lash has no spend policy. Completeness is exposed, and a host that gates
@@ -324,7 +324,7 @@ usage-ledger semantic boundary; `ToolUsageDelta`, `ToolUsageLedger` and the
 settlement charge at incorporation; the resident totals on
 `RuntimeSessionState`, `SessionSnapshot`, `SessionWindowRead` and the runtime
 observation; the `usage_deltas` and `usage_delta_holes` tables, replaced in
-place by `usage_facts`, `usage_runs` and `usage_owner_retirements` under the
+place by `usage_facts`, `usage_meters` and `usage_owner_retirements` under the
 same schema version.
 
 ## Consequences
@@ -336,7 +336,7 @@ same schema version.
   session was refused, forked from, deleted or pruned.
 - The fenced commit carries no usage, so a commit's size and identity are
   independent of how many calls the turn made.
-- A reader right after a turn may see open runs. That is the honest answer
+- A reader right after a turn may see open meters. That is the honest answer
   while delivery is in flight.
 - Each provider attempt checks admission before dispatch, and each recorded
   spending effect entry costs one send.

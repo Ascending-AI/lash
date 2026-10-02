@@ -1,5 +1,5 @@
 //! FIG-3802's laws over the guarded surfaces `lash-core-store` owns, each
-//! driven through its production writer and decoder. In N's build every
+//! executed through its production writer and decoder. In N's build every
 //! surface reads its one version; in the synthetic N+1's it reads N's
 //! through the registered lift, before and after finalize.
 
@@ -172,7 +172,7 @@ fn write_head(fleet: FleetFormat) -> Vec<u8> {
         schema_version: meta.schema_version,
         session_id: session,
         config: meta.config,
-        published_by_drive: meta.published_by_drive,
+        published_by_shift: meta.published_by_shift,
     })
     .expect("encode the head")
 }

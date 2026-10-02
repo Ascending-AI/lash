@@ -128,7 +128,7 @@ async fn acquire_runtime_connection(
 // Bumped to 12 for claim generation fencing: `lash_queued_work_batches`
 // and `lash_pending_turn_inputs` replace their per-claim claimed-at and expiry
 // columns with a single column pinning the session-execution-lease generation
-// the claim was taken under (since replaced by root admission, FIG-3927). This
+// the claim was taken under (since replaced by run admission, FIG-3927). This
 // is a reject-and-recreate boundary; pre-12 databases are rejected at open.
 //
 // Bumped to 15 for FIG-546 owner-bound attachment intents, following the
@@ -202,7 +202,7 @@ async fn acquire_runtime_connection(
 // Version 41 indexes the bounded non-terminal registry scan by process id.
 // Version 42 replaces the fixed checkpoint slots with a complete keyed
 // component descriptor set carrying per-component encoding versions. Older
-// roots are rejected under the existing drain-and-recreate policy.
+// runs are rejected under the existing drain-and-recreate policy.
 // Version 43 removes the CLI-era session name, creation timestamp, model, and
 // working-directory keys from the session metadata JSON payload. Older stores
 // are rejected and recreated; there is no compatibility read path.
@@ -476,7 +476,7 @@ async fn acquire_runtime_connection(
 // "C"`. A lashlang run's recorded-frontier read is one key range bounded by a
 // sentinel that must sort after every ordinal, and a locale collation that
 // ignores punctuation moves it. The same version adds `lash_turn_parks`, the
-// typed parked state of a driver-run turn that `drain_status` counts, and the
+// typed parked state of an engine-executed turn that `drain_status` counts, and the
 // durable error-code vocabulary gains the lashlang replay refusals. A
 // collation change is not creation-only, so component-120 catalogs are
 // rejected and recreated.
@@ -563,8 +563,8 @@ async fn acquire_runtime_connection(
 // relation changes: `lash migrate` restamps a component-136 catalog through
 // the expand step of the same name.
 //
-// Version 138 (FIG-3815) adds `lash_session_meta.drive_root_start`, the start
-// marker of the execution of an admitted root that sealed the session's
+// Version 138 (FIG-3815) adds `lash_session_meta.shift_run_start`, the start
+// marker of the execution of an admitted run that sealed the session's
 // current admission (ADR 0105 L-S8): a later seal of the same admission by
 // another execution is refused. `lash migrate` carries a component-137
 // catalog forward by adding the nullable column and restamping.
@@ -580,8 +580,8 @@ async fn acquire_runtime_connection(
 // catalog carries no 138→139 step: component-138 and older catalogs are
 // rejected and recreated.
 //
-// Version 140 (FIG-3600 S7) adds the logical-root family: the
-// `lash_session_roots`, `lash_session_root_inputs` and
+// Version 140 (FIG-3600 S7) adds the logical-run family: the
+// `lash_session_runs`, `lash_session_run_inputs` and
 // `lash_control_intents` tables, `lash_session_meta.closing_intent`,
 // `lash_turn_parks.engine_ref` and `resume_intent`, and the
 // `redrive_requested` park-event kind. `lash migrate` carries a
@@ -613,18 +613,18 @@ async fn acquire_runtime_connection(
 // `park_build_generation`; and `lash_process_segment_handovers` gains
 // `written_generation` and `route` (both non-null: every write names the
 // generation that made it and the route its send took); and
-// `lash_session_roots` records each root's admission (`admission_json`) and
-// `admitted_generation` — the drain generation of the drive that admitted
+// `lash_session_runs` records each run's admission (`admission_json`) and
+// `admitted_generation` — the drain generation of the shift that admitted
 // it — plus the drain's in-flight count index over it (FIG-3795 S9) and at
-// most one unfinished root per session; the queued-run ledger is gone and a
-// queued-work head is admitted as an ordinary root (FIG-3927, changed in
-// place under the version freeze); and `lash_session_roots` gains
-// `executor_json`, the executor the seal of a root's admission recorded
+// most one unfinished run per session; the queued-run ledger is gone and a
+// queued-work head is admitted as an ordinary run (FIG-3927, changed in
+// place under the version freeze); and `lash_session_runs` gains
+// `executor_json`, the executor the seal of a run's admission recorded
 // (FIG-4814, changed in place likewise). A catalog provisioned before the
 // change fails the open-time shape check and is recreated.
 //
 // Version 141 also lets a turn park record the engine's handles on stopped
-// work its root waits on (FIG-4630, changed in place under the version
+// work its run waits on (FIG-4630, changed in place under the version
 // freeze): `lash_turn_parks` gains `child_engine_refs`. A catalog provisioned
 // before the change fails the open-time shape check and is recreated.
 //
@@ -1545,8 +1545,8 @@ mod release_stamp;
 mod rendered_statement_sets_tests;
 #[path = "postgres/revisions.rs"]
 mod revisions;
-#[path = "postgres/root_verbs.rs"]
-mod root_verbs;
+#[path = "postgres/run_verbs.rs"]
+mod run_verbs;
 #[path = "postgres/runtime_persistence/mod.rs"]
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
@@ -1568,8 +1568,8 @@ mod session_factory;
 mod session_ingress;
 #[path = "postgres/session_meta.rs"]
 mod session_meta;
-#[path = "postgres/session_roots.rs"]
-mod session_roots;
+#[path = "postgres/session_runs.rs"]
+mod session_runs;
 #[path = "postgres/session_sql.rs"]
 mod session_sql;
 #[path = "postgres/support.rs"]

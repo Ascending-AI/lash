@@ -189,7 +189,7 @@ impl RuntimeExecutionContext<'_> {
     /// consumption handle (ADR 0099 §3).
     ///
     /// Formation retains, per child, the complete [`ToolChildRequest`] the
-    /// journal needs to reconstruct and re-drive the child with no opener in
+    /// journal needs to reconstruct and redrive the child with no opener in
     /// scope: the pinned admission, the batch-derived attempt identity (so
     /// attempt envelopes hash identically to the pre-group batch path), the
     /// checked opener/scope pair, the recorded cancellation authority, the

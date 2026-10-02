@@ -444,13 +444,13 @@ async fn paused_group_dispatch_work_parks_its_opener(
             let created = created_on(&core, session_id, KIMI).await;
             created
                 .send(TurnInput::text("run the tool"))
-                .id("dispatch-work-root")
+                .id("dispatch-work-run")
                 .await
-                .expect("the root is accepted");
+                .expect("the run is accepted");
             session = Some(created);
             lash::ParkedWorkRef::Turn {
                 session_id: lash::SessionId::from(session_id),
-                turn_id: lash::TurnId::from("dispatch-work-root"),
+                turn_id: lash::TurnId::from("dispatch-work-run"),
             }
         };
         if handler == "retire" {
@@ -597,7 +597,7 @@ async fn paused_group_dispatch_work_parks_its_opener(
         }
         if let Some(session) = session {
             assert_eq!(
-                answer_after_redrive(&session, "dispatch-work-root").await,
+                answer_after_redrive(&session, "dispatch-work-run").await,
                 "dispatch completed"
             );
         } else if let lash::ParkedWorkRef::Process { process_id } = &work {
@@ -646,9 +646,9 @@ macro_rules! dispatch_law {
     };
 }
 
-dispatch_law!(a_paused_group_run_parks_its_root_opener, false, "run");
+dispatch_law!(a_paused_group_run_parks_its_run_opener, false, "run");
 dispatch_law!(a_paused_group_run_parks_its_process_opener, true, "run");
-dispatch_law!(a_paused_group_retire_parks_its_root_opener, false, "retire");
+dispatch_law!(a_paused_group_retire_parks_its_run_opener, false, "retire");
 dispatch_law!(
     a_paused_group_retire_parks_its_process_opener,
     true,

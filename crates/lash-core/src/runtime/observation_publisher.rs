@@ -9,10 +9,10 @@ use tokio::sync::mpsc;
 
 /// How many observations one task poll publishes at most before it yields, so
 /// a host sink that is always ready, fed by a publisher that never pauses,
-/// cannot keep the task from returning and the drive from being polled.
+/// cannot keep the task from returning and the shift from being polled.
 const PUBLISH_BUDGET: usize = 32;
 
-/// Where [`drive_with_observations`] takes its observations from.
+/// Where [`work_with_observations`] takes its observations from.
 pub trait ObservationSource {
     type Item;
 
@@ -23,7 +23,7 @@ pub trait ObservationSource {
     /// The observation last returned has been published to the host.
     fn published_one(&mut self) {}
 
-    /// The drive is over: take nothing more, but keep what is queued.
+    /// The shift is over: take nothing more, but keep what is queued.
     fn close(&mut self);
 }
 
@@ -39,23 +39,23 @@ impl<T> ObservationSource for mpsc::UnboundedReceiver<T> {
     }
 }
 
-/// Drive `future` to completion while `publish` delivers `observations` to the
-/// host, outside the drive (ADR 0105 §1: observation never decides).
+/// Shift `future` to completion while `publish` delivers `observations` to the
+/// host, outside the shift (ADR 0105 §1: observation never decides).
 ///
-/// The drive and the publication keep separate wakers. The drive is polled
+/// The shift and the publication keep separate wakers. The shift is polled
 /// only when its own waker fired, and at most once per task poll (FIG-790):
 /// durable substrates signal a terminal attempt state, a genuine suspension
 /// included, by waking synchronously and returning `Pending`, and rely on
 /// their handler wrapper consuming that state on the next poll, so re-polling
-/// the drive inside one task poll would re-enter an already-completed
+/// the shift inside one task poll would re-enter an already-completed
 /// combinator. A publication that is slow, stalls or wakes often never polls
-/// the drive, and the drive never waits on one. One task poll publishes at
+/// the shift, and the shift never waits on one. One task poll publishes at
 /// most [`PUBLISH_BUDGET`] observations, then yields.
 ///
-/// When the drive completes, the source is closed: the observations already
+/// When the shift completes, the source is closed: the observations already
 /// queued are published, anything a stray publisher sends later is dropped,
-/// and the drive's output is returned.
-pub async fn drive_with_observations<F, S, P, Fut>(
+/// and the shift's output is returned.
+pub async fn work_with_observations<F, S, P, Fut>(
     future: Pin<&mut F>,
     observations: &mut S,
     publish: P,
@@ -66,10 +66,10 @@ where
     P: FnMut(S::Item) -> Fut,
     Fut: Future<Output = ()>,
 {
-    ObservedDrive {
-        drive: future,
+    ObservedShift {
+        shift: future,
         output: None,
-        drive_wake: Arc::new(SideWake::woken()),
+        shift_wake: Arc::new(SideWake::woken()),
         observations,
         publish,
         publishing: None,
@@ -79,7 +79,7 @@ where
     .await
 }
 
-/// One side of an [`ObservedDrive`]: it remembers that its own future was
+/// One side of an [`ObservedShift`]: it remembers that its own future was
 /// woken, and wakes the task.
 struct SideWake {
     woken: AtomicBool,
@@ -110,10 +110,10 @@ impl Wake for SideWake {
     }
 }
 
-struct ObservedDrive<'d, 'o, F: Future + ?Sized, S: ?Sized, P, Fut> {
-    drive: Pin<&'d mut F>,
+struct ObservedShift<'d, 'o, F: Future + ?Sized, S: ?Sized, P, Fut> {
+    shift: Pin<&'d mut F>,
     output: Option<F::Output>,
-    drive_wake: Arc<SideWake>,
+    shift_wake: Arc<SideWake>,
     observations: &'o mut S,
     publish: P,
     publishing: Option<Pin<Box<Fut>>>,
@@ -121,12 +121,12 @@ struct ObservedDrive<'d, 'o, F: Future + ?Sized, S: ?Sized, P, Fut> {
     publish_wake: Arc<SideWake>,
 }
 
-// No field is structurally pinned: the drive is pinned by reference, the
+// No field is structurally pinned: the shift is pinned by reference, the
 // in-flight publication is boxed, and the output and publisher are only ever
 // moved or called through `&mut`.
-impl<F: Future + ?Sized, S: ?Sized, P, Fut> Unpin for ObservedDrive<'_, '_, F, S, P, Fut> {}
+impl<F: Future + ?Sized, S: ?Sized, P, Fut> Unpin for ObservedShift<'_, '_, F, S, P, Fut> {}
 
-impl<F, S, P, Fut> ObservedDrive<'_, '_, F, S, P, Fut>
+impl<F, S, P, Fut> ObservedShift<'_, '_, F, S, P, Fut>
 where
     F: Future + ?Sized,
     S: ObservationSource + ?Sized,
@@ -149,7 +149,7 @@ where
             }
             if budget == 0 {
                 // Yield: the next task poll resumes publication after the
-                // drive has had its turn.
+                // shift has had its turn.
                 waker.wake_by_ref();
                 return;
             }
@@ -168,7 +168,7 @@ where
     }
 }
 
-impl<F, S, P, Fut> Future for ObservedDrive<'_, '_, F, S, P, Fut>
+impl<F, S, P, Fut> Future for ObservedShift<'_, '_, F, S, P, Fut>
 where
     F: Future + ?Sized,
     S: ObservationSource + ?Sized,
@@ -179,14 +179,14 @@ where
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<F::Output> {
         let this = self.get_mut();
-        this.drive_wake.task.register(context.waker());
+        this.shift_wake.task.register(context.waker());
         this.publish_wake.task.register(context.waker());
-        if this.output.is_none() && this.drive_wake.take() {
-            let waker = Waker::from(Arc::clone(&this.drive_wake));
-            if let Poll::Ready(output) = this.drive.as_mut().poll(&mut Context::from_waker(&waker))
+        if this.output.is_none() && this.shift_wake.take() {
+            let waker = Waker::from(Arc::clone(&this.shift_wake));
+            if let Poll::Ready(output) = this.shift.as_mut().poll(&mut Context::from_waker(&waker))
             {
                 this.output = Some(output);
-                // Nothing the drive publishes after this point is its own.
+                // Nothing the shift publishes after this point is its own.
                 this.observations.close();
                 this.publish_wake.woken.store(true, Ordering::Release);
             }
@@ -211,7 +211,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Context, Poll};
 
-    use super::drive_with_observations;
+    use super::work_with_observations;
 
     struct PanicsWhenPolledAfterErrorWake {
         polled: bool,
@@ -235,16 +235,16 @@ mod tests {
     fn synchronously_woken_pending_future_is_polled_once_per_task_poll() {
         let (observer, mut observations) = tokio::sync::mpsc::unbounded_channel();
         observer.send(()).expect("pre-queue an observation");
-        let mut driven = Box::pin(PanicsWhenPolledAfterErrorWake { polled: false });
-        let mut drive = Box::pin(drive_with_observations(
-            driven.as_mut(),
+        let mut executed = Box::pin(PanicsWhenPolledAfterErrorWake { polled: false });
+        let mut shift = Box::pin(work_with_observations(
+            executed.as_mut(),
             &mut observations,
             |_| async {},
         ));
         let waker = std::task::Waker::noop();
         let mut context = Context::from_waker(waker);
 
-        assert_eq!(drive.as_mut().poll(&mut context), Poll::Pending);
+        assert_eq!(shift.as_mut().poll(&mut context), Poll::Pending);
     }
 
     /// Counts its polls and completes once its own waker has fired `wakes`
@@ -269,9 +269,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_waking_publication_never_polls_the_drive() {
+    async fn a_waking_publication_never_polls_the_shift() {
         let polls = Arc::new(AtomicUsize::new(0));
-        let mut driven = Box::pin(CountsPolls {
+        let mut executed = Box::pin(CountsPolls {
             polls: Arc::clone(&polls),
             wakes_left: 2,
         });
@@ -280,7 +280,7 @@ mod tests {
             observer.send(observation).expect("queue an observation");
         }
         let published = Arc::new(AtomicUsize::new(0));
-        let output = drive_with_observations(driven.as_mut(), &mut observations, |_| {
+        let output = work_with_observations(executed.as_mut(), &mut observations, |_| {
             let published = Arc::clone(&published);
             async move {
                 // A host sink that is pending and wakes itself several times
@@ -297,45 +297,45 @@ mod tests {
         assert_eq!(
             polls.load(Ordering::SeqCst),
             3,
-            "the drive is polled once per wake of its own, never for a publication"
+            "the shift is polled once per wake of its own, never for a publication"
         );
         assert_eq!(published.load(Ordering::SeqCst), 64);
         drop(observer);
     }
 
     #[tokio::test]
-    async fn a_stalled_publication_never_holds_the_drive() {
+    async fn a_stalled_publication_never_holds_the_shift() {
         let (observer, mut observations) = tokio::sync::mpsc::unbounded_channel();
         let (release, released) = tokio::sync::oneshot::channel::<()>();
         let mut released = Some(released);
-        let drive_finished = Arc::new(AtomicUsize::new(0));
-        let mut driven = Box::pin({
-            let drive_finished = Arc::clone(&drive_finished);
+        let shift_finished = Arc::new(AtomicUsize::new(0));
+        let mut executed = Box::pin({
+            let shift_finished = Arc::clone(&shift_finished);
             async move {
                 for observation in 1..=3 {
                     observer.send(observation).expect("publish");
                     tokio::task::yield_now().await;
                 }
-                drive_finished.store(1, Ordering::SeqCst);
+                shift_finished.store(1, Ordering::SeqCst);
                 // The host sink is still stalled on the first observation.
                 release.send(()).expect("release the stalled sink");
                 "completed"
             }
         });
         let mut published = Vec::new();
-        let output = drive_with_observations(driven.as_mut(), &mut observations, |observation| {
+        let output = work_with_observations(executed.as_mut(), &mut observations, |observation| {
             let stall = released.take();
             published.push(observation);
             async move {
                 if let Some(stall) = stall {
-                    stall.await.expect("the drive releases the sink");
+                    stall.await.expect("the shift releases the sink");
                 }
             }
         })
         .await;
 
         assert_eq!(output, "completed");
-        assert_eq!(drive_finished.load(Ordering::SeqCst), 1);
+        assert_eq!(shift_finished.load(Ordering::SeqCst), 1);
         assert_eq!(published, vec![1, 2, 3]);
     }
 
@@ -343,14 +343,14 @@ mod tests {
     async fn publishes_what_was_queued_and_drops_later_sends() {
         let (observer, mut observations) = tokio::sync::mpsc::unbounded_channel();
         let stray = observer.clone();
-        let mut driven = Box::pin(async move {
+        let mut executed = Box::pin(async move {
             for observation in 1..=3 {
                 observer.send(observation).expect("publish");
             }
             "completed"
         });
         let mut published = Vec::new();
-        let output = drive_with_observations(driven.as_mut(), &mut observations, |observation| {
+        let output = work_with_observations(executed.as_mut(), &mut observations, |observation| {
             published.push(observation);
             async {}
         })
@@ -408,9 +408,9 @@ mod tests {
     }
 
     #[test]
-    fn an_always_ready_host_cannot_starve_the_drive() {
+    fn an_always_ready_host_cannot_starve_the_shift() {
         let polls = Arc::new(AtomicUsize::new(0));
-        let mut driven = Box::pin(CountsPolls {
+        let mut executed = Box::pin(CountsPolls {
             polls: Arc::clone(&polls),
             wakes_left: 4,
         });
@@ -420,8 +420,8 @@ mod tests {
         };
         let mut published = 0_u64;
 
-        let output = block_on(drive_with_observations(
-            driven.as_mut(),
+        let output = block_on(work_with_observations(
+            executed.as_mut(),
             &mut observations,
             |_| {
                 published += 1;
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(polls.load(Ordering::SeqCst), 5);
         assert!(
             published <= 5 * super::PUBLISH_BUDGET as u64,
-            "each task poll publishes a bounded batch, then lets the drive run"
+            "each task poll publishes a bounded batch, then lets the shift run"
         );
     }
 }

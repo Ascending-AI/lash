@@ -91,9 +91,9 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
     )
     .await;
     let commits_before = *store.runtime_commit_count.lock_recover();
-    let request = lash_core::engine::DriveRequest {
+    let request = lash_core::engine::ShiftRequest {
         session: SessionId::from("root"),
-        request: lash_core::engine::DriveRequestId::new("config-transaction"),
+        request: lash_core::engine::ShiftRequestId::new("config-transaction"),
         intended_lane: None,
     };
     let handler = double
@@ -103,13 +103,13 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
         ))
         .await
         .expect("open the drain's handler");
-    let drive = lash_core::drive::drive_session(&mut runtime, &handler.scoped(), &request)
+    let shift = lash_core::shift::work_session(&mut runtime, &handler.scoped(), &request)
         .await
-        .expect("engine drive settles the config transaction");
+        .expect("engine shift settles the config transaction");
     handler.close().await.expect("close the drain's handler");
     assert!(
-        !drive.ran.is_empty(),
-        "engine must admit the queued command root"
+        !shift.ran.is_empty(),
+        "engine must admit the queued command run"
     );
 
     assert_eq!(

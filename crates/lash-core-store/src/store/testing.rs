@@ -58,7 +58,7 @@ pub trait StoreTestSupport: Send + Sync {
     ) -> Result<(), StoreError>;
 
     /// Remove only the head of an admitted session, leaving its catalog row.
-    /// Tests use this corruption to prove reads and drives refuse missing creation state.
+    /// Tests use this corruption to prove reads and shifts refuse missing creation state.
     async fn delete_session_head_for_testing(
         &self,
         session_id: &SessionId,

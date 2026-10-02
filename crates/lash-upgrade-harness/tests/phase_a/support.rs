@@ -110,11 +110,11 @@ pub fn record(leg: &Leg, name: &str, report: &impl serde::Serialize) -> Result<(
 }
 
 /// Wait until no invocation on `session` is still owed: a turn answers
-/// before its drive completes, and a drive left on a node that stops stays
+/// before its shift completes, and a shift left on a node that stops stays
 /// pinned to the node's dead deployment, ahead of every later turn.
 pub fn quiesce(case: &Case, session: &str) -> Result<()> {
     let view = case.view()?;
-    wait_for(&format!("{session}'s drive to complete"), || {
+    wait_for(&format!("{session}'s shift to complete"), || {
         let live = block_on(view.live_invocations("LashSession", session))?;
         Ok(live.is_empty().then_some(()))
     })

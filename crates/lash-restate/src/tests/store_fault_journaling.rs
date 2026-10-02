@@ -2,7 +2,7 @@
 //! is never the step's journaled answer, which every replay would serve
 //! (FIG-4649).
 //!
-//! Each law drives one process command through `execute_effect` over a SQLite
+//! Each law executes one process command through `execute_effect` over a SQLite
 //! registry behind the fault decorator. The contract: the faulted attempt
 //! ends at the step with nothing journaled for it, and the next attempt runs
 //! the step again and answers. A control law pins the other half: a typed

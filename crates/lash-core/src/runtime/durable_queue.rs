@@ -50,7 +50,7 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
 #[derive(Clone)]
 pub struct DurableSessionOps {
     session_id: SessionId,
-    ingress: super::drive::IngressRelay,
+    ingress: super::shift::IngressRelay,
     live_replay_store: Arc<dyn LiveReplayStore>,
 }
 
@@ -60,7 +60,7 @@ impl DurableSessionOps {
     /// events are published through.
     pub fn new(
         session_id: SessionId,
-        ingress: super::drive::IngressRelay,
+        ingress: super::shift::IngressRelay,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         Self {
@@ -88,8 +88,8 @@ impl DurableSessionOps {
         self.ingress.stalled(&self.session_id, item_id).await
     }
 
-    /// The drive the relay's current claim of item `item_id` asked for, while
-    /// one is outstanding ([`IngressRelay::current_ask`](crate::runtime::drive::IngressRelay::current_ask)).
+    /// The shift the relay's current claim of item `item_id` asked for, while
+    /// one is outstanding ([`IngressRelay::current_ask`](crate::runtime::shift::IngressRelay::current_ask)).
     ///
     /// # Errors
     ///
@@ -97,7 +97,7 @@ impl DurableSessionOps {
     pub async fn current_ingress_ask(
         &self,
         item_id: &str,
-    ) -> Result<Option<crate::engine::DriveRequestId>, crate::StoreError> {
+    ) -> Result<Option<crate::engine::ShiftRequestId>, crate::StoreError> {
         self.ingress.current_ask(&self.session_id, item_id).await
     }
 
@@ -158,7 +158,7 @@ impl DurableSessionOps {
     }
 
     /// Durably accept host turn input under `run_spec`, then deliver the
-    /// drive its admission owes (ADR 0109 §3).
+    /// shift its admission owes (ADR 0109 §3).
     ///
     /// Success acknowledges durable acceptance only; a delivery that fails is
     /// retried by the ingress relay from the row's obligation.
@@ -185,7 +185,7 @@ impl DurableSessionOps {
 
     /// Durably accept `inputs`, each filed under its source key, as one
     /// request under one shared `ingress` and `run_spec` (FIG-3842), then
-    /// deliver the drive each admission owes (ADR 0109 §3).
+    /// deliver the shift each admission owes (ADR 0109 §3).
     ///
     /// The rows come back in request order. An input a stored row already
     /// answers returns that row; the others are enqueued in request order as
@@ -193,7 +193,7 @@ impl DurableSessionOps {
     /// whole request and accepts nothing.
     ///
     /// `pin` pins every input in the transaction that accepts it, so the
-    /// revision each one's root publishes is retained before the root can
+    /// revision each one's run publishes is retained before the run can
     /// start (FIG-4731).
     ///
     /// `trace_cause` is what caused the request, as its caller captured it;
@@ -386,7 +386,7 @@ impl DurableSessionOps {
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: SessionId,
     store: crate::store::SessionStore,
-    ingress_relay: &super::drive::IngressRelay,
+    ingress_relay: &super::shift::IngressRelay,
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
@@ -415,12 +415,12 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 
 /// Durably accept `inputs`, each filed under its source key, as one request
 /// under one shared `ingress` and `run_spec` (FIG-3842), then deliver the
-/// drive each admitted row's ingress obligation owes (ADR 0109 §3). The rows
+/// shift each admitted row's ingress obligation owes (ADR 0109 §3). The rows
 /// come back in request order; a refusal accepted nothing.
 ///
 /// The admission is the store's whole round when the backend folds it
 /// (FIG-3975): it answers [`crate::TurnInputAdmission`] with the claims its commit
-/// already took, so the only post-commit operation is the drive ask itself.
+/// already took, so the only post-commit operation is the shift ask itself.
 /// A backend that does not fold answers `Enqueued`; the relay then takes
 /// each row's claim as before. The revision a fused admission read rides
 /// back so the caller's queue event does not read the head again.
@@ -431,7 +431,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     session_id: SessionId,
     store: crate::store::SessionStore,
-    ingress_relay: &super::drive::IngressRelay,
+    ingress_relay: &super::shift::IngressRelay,
     inputs: Vec<(crate::TurnInput, Option<String>)>,
     ingress: crate::TurnInputIngress,
     run_spec: crate::RunSpec,

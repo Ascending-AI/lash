@@ -123,8 +123,8 @@ pub mod trace;
 pub mod triggers;
 pub mod usage_accounting;
 pub use usage_accounting::{
-    EffectUsage, Projected, RecordedEffectExecution, UsageAccountingBinding, UsageCall, UsageRun,
-    UsageRunError, is_spending_effect, project_unrecorded_usage, project_usage_settlement,
+    EffectUsage, Projected, RecordedEffectExecution, UsageAccountingBinding, UsageCall, UsageMeter,
+    UsageMeterError, is_spending_effect, project_unrecorded_usage, project_usage_settlement,
 };
 
 pub mod facade_support {
@@ -634,7 +634,7 @@ impl lash_sansio::TurnProtocol for HostTurnProtocol {
 ///
 /// # Integrator class
 ///
-/// Protocol-engine implementors drive these effects; applications use the facade.
+/// Protocol-engine implementors shift these effects; applications use the facade.
 pub type Effect = lash_sansio::Effect<HostTurnProtocol>;
 /// Host-specialized driver action for protocol-engine implementors.
 ///
@@ -670,7 +670,7 @@ pub type ProjectorContext<'a> = lash_sansio::ProjectorContext<'a, HostTurnProtoc
 ///
 /// # Integrator class
 ///
-/// Protocol-engine implementors complete preparation before driving the machine.
+/// Protocol-engine implementors complete preparation before executing the machine.
 pub type PreparedTurnMachine = lash_sansio::PreparedTurnMachine<HostTurnProtocol>;
 /// Host-specialized input for Sans-I/O protocol-engine implementors.
 ///
@@ -682,7 +682,7 @@ pub type SansIoTurnInput = lash_sansio::SansIoTurnInput<HostTurnProtocol>;
 ///
 /// # Integrator class
 ///
-/// Protocol-engine implementors drive this machine; applications use the facade.
+/// Protocol-engine implementors shift this machine; applications use the facade.
 pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
 /// Host turn-machine configuration for protocol-engine implementors.
 ///
@@ -853,7 +853,7 @@ pub use runtime::{
     WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
     WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
     admit_session_view, apply_parent_end_plan, artifact_referrer_ended, effect_groups_unsupported,
-    end_parent_scope, end_session_roots, lifetime, live_session_view, mint_process_id,
+    end_parent_scope, end_session_runs, lifetime, live_session_view, mint_process_id,
     parent_end_delivery_key, parent_end_requester, park_turn_of_refused_group_child,
     park_turn_refused_by_generation, session_is_live,
 };

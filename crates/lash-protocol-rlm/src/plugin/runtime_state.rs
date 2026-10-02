@@ -654,7 +654,7 @@ mod tests {
         ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
             self.entered.fetch_add(1, Ordering::SeqCst);
             // A self-waking park: every poll re-reads the flag, so a release
-            // is never missed whichever waker happens to drive the future.
+            // is never missed whichever waker happens to execute the future.
             std::future::poll_fn(|cx| {
                 if self.released.load(Ordering::SeqCst) {
                     Poll::Ready(())
@@ -712,7 +712,7 @@ mod tests {
         )
     }
 
-    /// Drive `future` until it is parked inside the resolver, i.e. suspended in
+    /// Shift `future` until it is parked inside the resolver, i.e. suspended in
     /// the middle of a cell with the execution state in hand.
     ///
     /// Each poll runs on the task's own waker and the loop yields between
@@ -757,7 +757,7 @@ mod tests {
                     crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
                         .await;
 
-                // Drive a cell until it is suspended mid-flight, then drop it:
+                // Execute a cell until it is suspended mid-flight, then drop it:
                 // a cancellation with the execution state in the cell's hands.
                 let cancelled_handler = double
                     .open_handler(admitted_scope())
@@ -863,7 +863,7 @@ mod tests {
                     .await
                     .expect("settle the first returned cell");
 
-                // The waiting cell, re-driven, now runs — on that same state.
+                // The waiting cell, redriven, now runs — on that same state.
                 let handler = double
                     .open_handler(admitted_scope())
                     .await

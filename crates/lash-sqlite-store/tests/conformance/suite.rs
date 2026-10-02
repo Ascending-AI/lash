@@ -159,9 +159,9 @@ lash_conformance::frame_open_redrive_tests!({
     )
 });
 
-// FIG-3607 contract 4 (FIG-4489): every logical turn a drive runs, a
-// recovered follow-on's included, is owned by `Turn(logical root)`. Each
-// drive runs inside a handler of the Restate double over this substrate's
+// FIG-3607 contract 4 (FIG-4489): every logical turn a shift runs, a
+// recovered follow-on's included, is owned by `Turn(logical run)`. Each
+// shift runs inside a handler of the Restate double over this substrate's
 // stores.
 lash_conformance::driver_turn_ownership_tests!({
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -188,9 +188,9 @@ lash_conformance::driver_turn_ownership_tests!({
 });
 
 // The ownership law where every await suspends and every resumption replays
-// the handler's journal from its start (FIG-4514): a root replayed after its
+// the handler's journal from its start (FIG-4514): a run replayed after its
 // terminal-checkpoint follow-on committed names that follow-on's effects as
-// its first execution did, so the drive ends.
+// its first execution did, so the shift ends.
 mod driver_turn_ownership_under_replay {
     use super::*;
 
@@ -219,11 +219,11 @@ mod driver_turn_ownership_under_replay {
     });
 }
 
-// FIG-4457: two queued inputs, the second sent while the first one's drive
-// is down, get their own roots under the default drain, and a cancel of one
-// leaves the other untouched. Each drive runs inside a handler of the Restate
+// FIG-4457: two queued inputs, the second sent while the first one's shift
+// is down, get their own runs under the default drain, and a cancel of one
+// leaves the other untouched. Each shift runs inside a handler of the Restate
 // double over this substrate's stores.
-lash_conformance::queued_input_roots_tests!({
+lash_conformance::queued_input_runs_tests!({
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let backend = TestBackend::open(SUBSTRATE).await;
     let stores = backend.as_stores();
@@ -234,13 +234,13 @@ lash_conformance::queued_input_roots_tests!({
         move |_| Arc::clone(&double_stores),
     )
     .await
-    .expect("boot the queued input roots law's handler");
+    .expect("boot the queued input runs law's handler");
     let effect_host = double.restate().restate_effect_host();
     let runner = Arc::new(ScopeLawTurnRunner(double.clone()))
         as Arc<dyn lash_conformance::ConformanceTurnRunner>;
     (
         (backend, double),
-        "sqlite-queued-input-roots",
+        "sqlite-queued-input-runs",
         effect_host,
         stores,
         runner,
@@ -278,7 +278,7 @@ lash_conformance::bound_trigger_duplicate_tests!({
 
 // FIG-4159: the worker-broker laws, each turn inside a handler of the
 // Restate double over this substrate's stores; a lost worker fails the
-// attempt and the double replays the invocation into the re-drive.
+// attempt and the double replays the invocation into the redrive.
 lash_conformance::vm_broker_tests!({
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let backend = TestBackend::open(SUBSTRATE).await;
@@ -297,7 +297,7 @@ lash_conformance::vm_broker_tests!({
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {
+async fn a_joined_inputs_turn_scope_closes_with_its_admitting_run() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let stores = backend.as_stores();
     let double_stores = Arc::clone(&stores);
@@ -311,7 +311,7 @@ async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {
     let effect_host = double.restate().restate_effect_host();
     let runner =
         Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
-    lash_conformance::registration_macro_support::a_joined_inputs_turn_scope_closes_with_its_admitting_root(
+    lash_conformance::registration_macro_support::a_joined_inputs_turn_scope_closes_with_its_admitting_run(
         "sqlite-joined-scope", effect_host, stores, runner,
     ).await;
 }
@@ -1159,7 +1159,7 @@ lash_conformance::append_receipt_rewrite_tests!({
     store
         .admit_session(&root_session_request("root"))
         .await
-        .expect("admit old-format receipt root");
+        .expect("admit old-format receipt run");
     let mutation = backend.clone();
     (
         backend,

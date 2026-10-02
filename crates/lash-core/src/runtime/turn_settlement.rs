@@ -1,9 +1,9 @@
-//! What one turn's commit settles of the rows its root admitted (FIG-3927).
+//! What one turn's commit settles of the rows its run admitted (FIG-3927).
 //!
 //! A turn completes the rows it delivered and hands back, open at their own
 //! positions, the rows it withheld and will not deliver. Every row is named
-//! by its id and settled under the root that holds it; nothing here carries
-//! authority of its own. The root's drive fence, presented by the commit, is
+//! by its id and settled under the run that holds it; nothing here carries
+//! authority of its own. The run's shift fence, presented by the commit, is
 //! the one authority.
 
 use crate::runtime::logical_turn::WithheldTerminalWork;
@@ -14,7 +14,7 @@ pub(super) struct TurnIngressSettlement {
     pub(super) completed_batches: Vec<crate::QueuedWorkCompletion>,
     pub(super) completed_inputs: Vec<crate::TurnInputCompletion>,
     /// Work withheld from a terminal checkpoint that no follow-on turn will
-    /// drive: a cancelled turn's (FIG-3531, FIG-3543), or one whose run spent
+    /// shift: a cancelled turn's (FIG-3531, FIG-3543), or one whose run spent
     /// its follow-on bound. Wakes are released and keep their redelivery
     /// floor; input is released or dropped by the cancellation's
     /// undelivered disposition.
@@ -50,18 +50,18 @@ impl TurnIngressSettlement {
             && self.undelivered.is_empty()
     }
 
-    /// The settlement `root`'s commit carries, each row named once: a row
+    /// The settlement `run`'s commit carries, each row named once: a row
     /// the turn completed is never also handed back, and a row two admitted
     /// sets name (a replayed checkpoint re-delivering its own rows) settles
     /// once. `disposition` is the cancellation's undelivered disposition,
     /// `Defer` when the turn was not cancelled.
     pub(super) fn into_ingress(
         self,
-        root: crate::TurnId,
+        run: crate::TurnId,
         disposition: crate::TurnCancelUndeliveredInputPolicy,
     ) -> IngressSettlement {
         let mut seen = std::collections::BTreeSet::new();
-        let mut settlement = IngressSettlement::new(root);
+        let mut settlement = IngressSettlement::new(run);
         for mut completion in self.completed_inputs {
             completion
                 .data
@@ -136,7 +136,7 @@ mod tests {
             vec![completion(&["i1", "i2"]), completion(&["i2", "i3"])],
         )
         .into_ingress(
-            crate::TurnId::from("root"),
+            crate::TurnId::from("run"),
             crate::TurnCancelUndeliveredInputPolicy::Defer,
         );
         assert_eq!(

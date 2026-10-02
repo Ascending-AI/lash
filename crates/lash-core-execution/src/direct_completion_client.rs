@@ -9,12 +9,12 @@ pub trait DirectCompletionService: Send + Sync {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
     ) -> Result<crate::DirectCompletion, crate::PluginError>;
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "the service boundary receives the controller, lineage, causal link, and usage run separately because each answers from a different authority"
+        reason = "the service boundary receives the controller, lineage, causal link, and usage meter separately because each answers from a different authority"
     )]
     async fn complete_llm(
         &self,
@@ -24,7 +24,7 @@ pub trait DirectCompletionService: Send + Sync {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
-        usage_run: Option<&crate::UsageRun>,
+        usage_meter: Option<&crate::UsageMeter>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError>;
 
     /// Rebinds this service to a tool child's recorded authority, when the
@@ -54,7 +54,7 @@ pub trait DirectCompletionService: Send + Sync {
 
     /// Where a tool attempt's nested completions through this service are
     /// accounted (ADR 0125): the ledger the attempt's
-    /// [`UsageRun`](crate::UsageRun) is admitted to and settled in. `None`
+    /// [`UsageMeter`](crate::UsageMeter) is admitted to and settled in. `None`
     /// means this service dispatches no provider call of its own.
     fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
         None
@@ -111,11 +111,11 @@ pub struct DirectCompletionClient<'run> {
     /// this client is captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     inside_tool_attempt: bool,
-    /// The usage run of the `ToolAttempt` effect this client was minted
+    /// The usage meter of the `ToolAttempt` effect this client was minted
     /// inside (ADR 0125). A completion inside a recorded attempt never
     /// journals its own effect, so every provider call it dispatches is a
     /// call of the attempt's run; without one it is refused before dispatch.
-    usage_run: Option<crate::UsageRun>,
+    usage_meter: Option<crate::UsageMeter>,
 }
 
 impl<'run> DirectCompletionClient<'run> {
@@ -132,16 +132,16 @@ impl<'run> DirectCompletionClient<'run> {
             }),
             parent_invocation: None,
             inside_tool_attempt: false,
-            usage_run: None,
+            usage_meter: None,
         }
     }
 
-    /// Binds the usage run of the `ToolAttempt` effect this client now runs
+    /// Binds the usage meter of the `ToolAttempt` effect this client now runs
     /// inside. Taken by value and returned, so an attempt installs it on the
     /// clone it runs with and the caller's own client is untouched.
     #[must_use]
-    pub fn with_usage_run(mut self, usage_run: Option<crate::UsageRun>) -> Self {
-        self.usage_run = usage_run;
+    pub fn with_usage_meter(mut self, usage_meter: Option<crate::UsageMeter>) -> Self {
+        self.usage_meter = usage_meter;
         self
     }
 
@@ -171,7 +171,7 @@ impl<'run> DirectCompletionClient<'run> {
     /// * `turn_id` and `parent_invocation` — the recorded lineage, so the
     ///   effect's causal parent is the child's, not the opener's current one.
     ///
-    /// No usage run is lent: each of the child's attempts is its own spending
+    /// No usage meter is lent: each of the child's attempts is its own spending
     /// effect and installs its own run.
     ///
     /// A service that cannot prove it executes under the recorded owner and
@@ -225,7 +225,7 @@ impl<'run> DirectCompletionClient<'run> {
             source,
             parent_invocation: parent_invocation.map(Box::new),
             inside_tool_attempt: self.inside_tool_attempt,
-            usage_run: None,
+            usage_meter: None,
         })
     }
 
@@ -255,7 +255,7 @@ impl<'run> DirectCompletionClient<'run> {
             source,
             parent_invocation: self.parent_invocation.clone(),
             inside_tool_attempt: self.inside_tool_attempt,
-            usage_run: self.usage_run.clone(),
+            usage_meter: self.usage_meter.clone(),
         })
     }
 
@@ -297,7 +297,7 @@ impl<'run> DirectCompletionClient<'run> {
             source,
             parent_invocation: self.parent_invocation.clone(),
             inside_tool_attempt: self.inside_tool_attempt,
-            usage_run: self.usage_run.clone(),
+            usage_meter: self.usage_meter.clone(),
         }
     }
 
@@ -365,7 +365,7 @@ impl<'run> DirectCompletionClient<'run> {
                         source.effect_controller.clone(),
                         source.turn_id.as_ref(),
                         position,
-                        self.usage_run.as_ref(),
+                        self.usage_meter.as_ref(),
                     )
                     .await
             }
@@ -421,7 +421,7 @@ impl<'run> DirectCompletionClient<'run> {
                         source.turn_id.as_ref(),
                         self.position(None),
                         caused_by,
-                        self.usage_run.as_ref(),
+                        self.usage_meter.as_ref(),
                     )
                     .await
             }
@@ -444,7 +444,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::Unavailable(message.into()),
             parent_invocation: None,
             inside_tool_attempt: false,
-            usage_run: None,
+            usage_meter: None,
         }
     }
 
@@ -460,7 +460,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::TestFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
-            usage_run: None,
+            usage_meter: None,
         }
     }
 
@@ -478,7 +478,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::TestLlmFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
-            usage_run: None,
+            usage_meter: None,
         }
     }
 }

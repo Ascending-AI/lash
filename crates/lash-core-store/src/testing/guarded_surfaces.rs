@@ -14,7 +14,7 @@ use crate::store::{
     WriterPin,
 };
 
-/// One guarded surface, as its owner's laws drive it.
+/// One guarded surface, as its owner's laws execute it.
 pub struct SurfaceProbe {
     /// The surface's registered constant name.
     pub constant: &'static str,

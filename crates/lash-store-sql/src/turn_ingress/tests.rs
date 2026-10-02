@@ -23,21 +23,21 @@ fn squeezed(sql: &str) -> String {
 #[test]
 fn every_release_statement_clears_the_whole_admission() {
     // `ck_pending_turn_inputs_admission_all_or_none` and its batch twin refuse
-    // a row that names a root without the step that bound it, or the other
+    // a row that names a run without the step that bound it, or the other
     // way round, so a release that clears one column alone is a constraint
     // failure at run time rather than a compile error here. Every statement
     // in this family that lets go of an admission clears both.
     let mut releases = 0;
     for statement in statements() {
         let sql = squeezed(statement.neutral());
-        let clears_root = sql.contains("admitted_root = NULL");
+        let clears_run = sql.contains("admitted_run = NULL");
         let clears_step = sql.contains("admitted_by = NULL");
-        if !clears_root && !clears_step {
+        if !clears_run && !clears_step {
             continue;
         }
         releases += 1;
         assert!(
-            clears_root && clears_step,
+            clears_run && clears_step,
             "`{}` releases half an admission",
             statement.name(),
         );
@@ -51,19 +51,19 @@ fn every_release_statement_clears_the_whole_admission() {
 #[test]
 fn every_admission_write_is_predicated_on_the_rows_binding() {
     // A row is bound only while open, and settled or released only by the
-    // root that holds it (FIG-3927). The predicate is the write's backstop,
+    // run that holds it (FIG-3927). The predicate is the write's backstop,
     // so every statement that sets or clears a binding must carry one.
     for statement in statements() {
         let sql = squeezed(statement.neutral());
-        let writes_binding = sql.contains("SET") && sql.contains("admitted_root =");
-        let deletes_admitted = sql.starts_with("DELETE") && sql.contains("admitted_root");
+        let writes_binding = sql.contains("SET") && sql.contains("admitted_run =");
+        let deletes_admitted = sql.starts_with("DELETE") && sql.contains("admitted_run");
         if !(writes_binding || deletes_admitted) {
             continue;
         }
         let where_clause = sql.rsplit_once("WHERE").map_or("", |(_, tail)| tail);
         assert!(
-            where_clause.contains("admitted_root IS NULL")
-                || where_clause.contains("admitted_root = ?")
+            where_clause.contains("admitted_run IS NULL")
+                || where_clause.contains("admitted_run = ?")
                 || where_clause.contains("nonterminal"),
             "`{}` writes a binding without predicating the row's own",
             statement.name(),

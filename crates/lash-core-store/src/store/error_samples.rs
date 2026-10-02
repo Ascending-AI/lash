@@ -46,15 +46,15 @@ fn attachment() -> crate::AttachmentId {
 }
 
 store_error_samples! {
-    UnfinishedRootConflict { .. } => StoreError::UnfinishedRootConflict {
+    UnfinishedRunConflict { .. } => StoreError::UnfinishedRunConflict {
         session_id: session(),
-        root: turn(),
+        run: turn(),
     },
-    RootHeldByAnotherExecutor { .. } => StoreError::RootHeldByAnotherExecutor {
+    RunHeldByAnotherExecutor { .. } => StoreError::RunHeldByAnotherExecutor {
         session_id: session(),
-        root: turn(),
-        recorded: Box::new(crate::store::RootExecutor::Root),
-        admitting: Box::new(crate::store::RootExecutor::Root),
+        run: turn(),
+        recorded: Box::new(crate::store::RunExecutor::Run),
+        admitting: Box::new(crate::store::RunExecutor::Run),
     },
     FollowOnPending { .. } => StoreError::FollowOnPending {
         session_id: session(),
@@ -287,13 +287,13 @@ store_error_samples! {
     },
     IngressRowNotAdmitted { .. } => StoreError::IngressRowNotAdmitted {
         session_id: session(),
-        root: turn(),
+        run: turn(),
         row: Box::new(super::IngressRowId::Input(InputId::from("ti:sampled"))),
-        admitted_root: None,
+        admitted_run: None,
     },
     IngressSettlementDuplicate { .. } => StoreError::IngressSettlementDuplicate {
         session_id: session(),
-        root: turn(),
+        run: turn(),
         row: Box::new(super::IngressRowId::Input(InputId::from("ti:sampled"))),
     },
     IngressSettlementUnfenced { .. } => StoreError::IngressSettlementUnfenced {
@@ -301,7 +301,7 @@ store_error_samples! {
     },
     IngressAndSessionCommandRun { .. } => StoreError::IngressAndSessionCommandRun {
         session_id: session(),
-        root: turn(),
+        run: turn(),
     },
     SessionCommandWithdrawn { .. } => StoreError::SessionCommandWithdrawn {
         session_id: session(),
@@ -309,23 +309,23 @@ store_error_samples! {
     },
     SessionHeadOwned { .. } => StoreError::SessionHeadOwned {
         session_id: session(),
-        owner: super::SessionHeadOwner::Root { root: turn() },
+        owner: super::SessionHeadOwner::Run { run: turn() },
     },
-    StaleDriveFence { .. } => StoreError::StaleDriveFence {
+    StaleShiftFence { .. } => StoreError::StaleShiftFence {
         session_id: session(),
         fence_epoch: 1,
         current_epoch: 2,
     },
-    RootAlreadyTerminal { .. } => StoreError::RootAlreadyTerminal {
+    RunAlreadyTerminal { .. } => StoreError::RunAlreadyTerminal {
         session_id: session(),
-        root: turn(),
-        by: Box::new(super::RootTerminalCause::OperatorCancelled {
+        run: turn(),
+        by: Box::new(super::RunTerminalCause::OperatorCancelled {
             intent: super::ControlIntentId::from_sequence(1),
         }),
     },
-    RootInputWithdrawn { .. } => StoreError::RootInputWithdrawn {
+    RunInputWithdrawn { .. } => StoreError::RunInputWithdrawn {
         session_id: session(),
-        root: turn(),
+        run: turn(),
     },
     SessionClosing { .. } => StoreError::SessionClosing {
         session_id: session(),
@@ -334,8 +334,8 @@ store_error_samples! {
     ControlIntentUnknown { .. } => StoreError::ControlIntentUnknown {
         intent: super::ControlIntentId::from_sequence(1),
     },
-    DriveEpochUnavailable { .. } => StoreError::DriveEpochUnavailable { session_id: session() },
-    DriveFenceSessionMismatch { .. } => StoreError::DriveFenceSessionMismatch {
+    ShiftEpochUnavailable { .. } => StoreError::ShiftEpochUnavailable { session_id: session() },
+    ShiftFenceSessionMismatch { .. } => StoreError::ShiftFenceSessionMismatch {
         session_id: session(),
         fence_session_id: SessionId::from("sampled-other"),
     },
