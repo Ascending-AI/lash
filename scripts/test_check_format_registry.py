@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
-import dataclasses
+from unittest import mock
 import importlib.util
 from pathlib import Path
+import re
 import sys
 import tempfile
 import textwrap
@@ -21,26 +22,6 @@ SPEC.loader.exec_module(gate)
 
 
 REGISTRY = """
-[[surface]]
-constant = "WIRE_VERSION"
-constant_path = "crates/demo/src/lib.rs"
-upgrade = "migrate"
-description = "fixture durable format"
-manifest = "Wire"
-
-[[surface]]
-constant = "PEER_PROTOCOL_VERSION"
-constant_path = "crates/demo/src/lib.rs"
-upgrade = "coexist"
-description = "fixture wire protocol"
-outside_manifest = "gates a live peer"
-
-[[surface]]
-constant = "KEY_FAMILY_VERSION"
-constant_path = "crates/demo/src/lib.rs"
-upgrade = "coexist"
-description = "fixture hash domain"
-
 [[excluded_class]]
 suffix = "_FAMILY_VERSION"
 reason = "hash-domain tag"
@@ -52,10 +33,15 @@ reason = "mirrors the package version"
 """
 
 SOURCE = """
+/// version_surface = "migrate"
+/// format_manifest = "Wire"
 /// version_guard(items(WireRecord))
 pub const WIRE_VERSION: u16 = 3;
+/// version_surface = "coexist"
+/// format_outside_manifest = "gates a live peer"
 /// version_guard(shapes(cover(Hello)))
 pub const PEER_PROTOCOL_VERSION: u32 = 1;
+/// version_surface = "coexist"
 /// version_guard(unshaped = "a hash-domain tag with no projected shape")
 const KEY_FAMILY_VERSION: u8 = 2;
 /// version_surface = "coexist"
@@ -178,6 +164,35 @@ class FormatRegistryTests(unittest.TestCase):
         self.write("scripts/versioned-surfaces.toml", self.registry_text)
         return gate.check(self.repo, gate.load_registry(config), self.manifest)
 
+    def test_source_markers_are_the_only_surface_declaration_path(self) -> None:
+        self.assertNotIn("[[surface]]", self.registry_text)
+        self.assertEqual(self.problems(), [])
+
+    def test_a_hand_written_surface_registry_is_refused(self) -> None:
+        self.registry_text += '\n[[surface]]\nconstant = "WIRE_VERSION"\n'
+        with self.assertRaisesRegex(gate.RegistryError, "declare version_surface in source"):
+            self.problems()
+
+    def test_source_metadata_is_validated_and_conflicting_tiers_are_refused(self) -> None:
+        for declaration in (
+            '/// version_surface = "migrate"\n/// version_surface = "drain"',
+            '/// version_surface = "migrate"\n/// format_manifest = 7',
+            '/// version_surface = "migrate"\n/// format_manifest = "Wire"\n'
+            '/// format_manifest = "Other"',
+        ):
+            with self.subTest(declaration=declaration):
+                self.write("crates/demo/src/lib.rs", SOURCE.replace(
+                    '/// version_surface = "migrate"', declaration,
+                ))
+                self.assertTrue(any("WIRE_VERSION: invalid" in p for p in self.problems()))
+        self.write("crates/demo/src/lib.rs", SOURCE +
+                   '\n/// version_surface = "drain"\n'
+                   '/// format_manifest = "Wire"\n'
+                   '#[cfg(feature = "synthetic-next")]\n'
+                   'pub const WIRE_VERSION: u16 = 4;\n')
+        self.assertTrue(any("WIRE_VERSION: conflicting source declarations" in p
+                            for p in self.problems()))
+
     def test_a_consistent_registry_passes(self) -> None:
         self.assertEqual(self.problems(), [])
 
@@ -206,17 +221,17 @@ class FormatRegistryTests(unittest.TestCase):
             self.problems()
 
     def test_a_surface_without_a_manifest_disposition_fails(self) -> None:
-        self.registry_text = REGISTRY.replace(
-            'outside_manifest = "gates a live peer"\n', ""
-        )
+        self.write("crates/demo/src/lib.rs", SOURCE.replace(
+            'format_outside_manifest = "gates a live peer"', 'format_outside_manifest = " "'
+        ))
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("PEER_PROTOCOL_VERSION must have exactly one", problems[0])
+        self.assertIn("PEER_PROTOCOL_VERSION: invalid format_outside_manifest", problems[0])
 
     def test_a_surface_with_two_dispositions_fails(self) -> None:
-        self.registry_text = REGISTRY.replace(
-            'manifest = "Wire"\n', 'manifest = "Wire"\noutside_manifest = "both"\n'
-        )
+        self.write("crates/demo/src/lib.rs", SOURCE.replace(
+            '/// format_manifest = "Wire"\n', '/// format_manifest = "Wire"\n/// format_outside_manifest = "both"\n'
+        ))
         problems = self.problems()
         self.assertTrue(
             any("WIRE_VERSION must have exactly one" in problem for problem in problems),
@@ -224,15 +239,15 @@ class FormatRegistryTests(unittest.TestCase):
         )
 
     def test_a_manifest_row_no_surface_claims_fails(self) -> None:
-        self.registry_text = REGISTRY.replace(
-            'manifest = "Wire"', 'outside_manifest = "not reported"'
-        )
+        self.write("crates/demo/src/lib.rs", SOURCE.replace(
+            '/// format_manifest = "Wire"', '/// format_outside_manifest = "not reported"'
+        ))
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("no registered surface claims", problems[0])
 
     def test_a_claim_on_the_wrong_variant_fails(self) -> None:
-        self.registry_text = REGISTRY.replace('manifest = "Wire"', 'manifest = "Other"')
+        self.write("crates/demo/src/lib.rs", SOURCE.replace('/// format_manifest = "Wire"', '/// format_manifest = "Other"'))
         problems = self.problems()
         self.assertTrue(
             any("reports WIRE_VERSION as DurableFormat::Wire" in p for p in problems),
@@ -253,17 +268,15 @@ class FormatRegistryTests(unittest.TestCase):
             self.problems()
 
     def test_a_surface_without_an_upgrade_policy_fails(self) -> None:
-        self.registry_text = REGISTRY.replace('upgrade = "migrate"\n', "")
-        with self.assertRaises(gate.RegistryError):
-            self.problems()
+        self.write("crates/demo/src/lib.rs", SOURCE.replace('/// version_surface = "migrate"\n', ""))
+        self.assertTrue(any("needs version_surface" in p for p in self.problems()))
 
     def test_an_unknown_upgrade_policy_fails(self) -> None:
-        self.registry_text = REGISTRY.replace('upgrade = "migrate"', 'upgrade = "ignore"')
-        with self.assertRaises(gate.RegistryError):
-            self.problems()
+        self.write("crates/demo/src/lib.rs", SOURCE.replace('/// version_surface = "migrate"', '/// version_surface = "ignore"'))
+        self.assertTrue(any("invalid version_surface" in p for p in self.problems()))
 
     def test_a_surface_policy_must_match_the_rust_arm(self) -> None:
-        self.registry_text = REGISTRY.replace('upgrade = "migrate"', 'upgrade = "drain"')
+        self.write("crates/demo/src/lib.rs", SOURCE.replace('/// version_surface = "migrate"', '/// version_surface = "drain"'))
         problems = self.problems()
         self.assertTrue(
             any("upgrade_policy() answers" in problem for problem in problems),
@@ -271,7 +284,7 @@ class FormatRegistryTests(unittest.TestCase):
         )
 
     def test_a_claim_on_a_variant_without_an_arm_fails(self) -> None:
-        self.registry_text = REGISTRY.replace('manifest = "Wire"', 'manifest = "Other"')
+        self.write("crates/demo/src/lib.rs", SOURCE.replace('/// format_manifest = "Wire"', '/// format_manifest = "Other"'))
         problems = self.problems()
         self.assertTrue(
             any("upgrade_policy() has no arm" in problem for problem in problems),
@@ -298,18 +311,10 @@ class FormatRegistryTests(unittest.TestCase):
         self.write("crates/lash-restate/src/formats.rs", ENGINE_REGISTRY)
         self.write(
             "crates/demo/src/engine.rs",
+            '/// version_surface = "drain"\n'
+            '/// format_manifest = "engine:demo.engine_wire"\n'
             '/// version_guard(unshaped = "fixture engine wire")\n'
             "pub const ENGINE_WIRE_VERSION: u8 = 1;\n",
-        )
-        self.registry_text = REGISTRY + textwrap.dedent(
-            """
-            [[surface]]
-            constant = "ENGINE_WIRE_VERSION"
-            constant_path = "crates/demo/src/engine.rs"
-            upgrade = "drain"
-            description = "engine-registered fixture format"
-            manifest = "engine:demo.engine_wire"
-            """
         )
         self.assertEqual(self.problems(), [])
 
@@ -328,15 +333,15 @@ class FormatRegistryTests(unittest.TestCase):
 
     def test_a_stated_unguarded_reason_admits_a_migrate_surface(self) -> None:
         self.write(str(gate.GUARDED_REGISTRY), GUARDED.split("    GuardedSurface {")[0] + "];\n")
-        self.registry_text = REGISTRY.replace(
-            'upgrade = "migrate"\n', 'upgrade = "migrate"\nunguarded = "a DDL stamp"\n'
-        )
+        self.write("crates/demo/src/lib.rs", SOURCE.replace(
+            '/// version_surface = "migrate"\n', '/// version_surface = "migrate"\n/// version_unguarded = "a DDL stamp"\n'
+        ))
         self.assertEqual(self.problems(), [])
 
     def test_a_guarded_row_cannot_also_be_unguarded(self) -> None:
-        self.registry_text = REGISTRY.replace(
-            'upgrade = "migrate"\n', 'upgrade = "migrate"\nunguarded = "a DDL stamp"\n'
-        )
+        self.write("crates/demo/src/lib.rs", SOURCE.replace(
+            '/// version_surface = "migrate"\n', '/// version_surface = "migrate"\n/// version_unguarded = "a DDL stamp"\n'
+        ))
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("also states unguarded", problems[0])
@@ -461,7 +466,7 @@ class RealRepositoryTests(unittest.TestCase):
 
     def test_the_gate_names_the_constants_fig_3521_found_unregistered(self) -> None:
         # The three surviving version constants that were in neither the registry nor the
-        # manifest before FIG-3521. Dropping their entries must fail the gate by
+        # manifest before FIG-3521. Dropping their source declarations must fail the gate by
         # name; a sweep that stopped seeing them would pass silently instead.
         missing = {
             "crates/lash-core-store/src/scope_identity.rs:"
@@ -471,21 +476,28 @@ class RealRepositoryTests(unittest.TestCase):
             "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
         }
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
-        pruned = dataclasses.replace(
-            registry,
-            surfaces={
-                key: value
-                for key, value in registry.surfaces.items()
-                if key not in missing
-            },
-            unregistered={
-                key: value
-                for key, value in registry.unregistered.items()
-                if key not in missing
-            },
-        )
-        manifest = (gate.ROOT / gate.MANIFEST).read_text(encoding="utf-8")
-        problems = gate.check(gate.ROOT, pruned, manifest)
+        view = gate.check_version_bumps.WorktreeView(gate.ROOT)
+        original_content = view.content
+
+        def content(path):
+            text = original_content(path)
+            if text is None:
+                return None
+            for key in missing:
+                constant_path, constant = key.rsplit(":", 1)
+                if path == constant_path:
+                    text = re.sub(
+                        r'(?m)^/// (?:version_surface|format_manifest|format_outside_manifest|version_unguarded) = .*\n'
+                        r'(?=(?:/// .*\n|#\[.*\]\n)*pub const ' + constant + r'\b)',
+                        "", text,
+                    )
+            return text
+
+        with mock.patch.object(view, "content", side_effect=content), mock.patch.object(
+            gate.check_version_bumps, "WorktreeView", return_value=view,
+        ):
+            manifest = (gate.ROOT / gate.MANIFEST).read_text(encoding="utf-8")
+            problems = gate.check(gate.ROOT, registry, manifest)
         unknown = {
             problem.split(" ", 1)[0]
             for problem in problems

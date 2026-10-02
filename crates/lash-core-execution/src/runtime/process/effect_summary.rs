@@ -32,11 +32,15 @@ use super::events::ProcessEventAppendRequest;
 ///     items(path = "crates/lash-core-execution/src/triggers.rs", failure_code),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "ProcessEffectReport"
 pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 1's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "ProcessEffectReport"
 pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 2;
 
 /// Runtime-owned event recording one effect occurrence of one runtime node.

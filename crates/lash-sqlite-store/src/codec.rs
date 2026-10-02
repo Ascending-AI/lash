@@ -16,12 +16,16 @@ use lash_sansio::SessionId;
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_outside_manifest = "backend-local blob encoding: SQLite admits it when reading the blob"
 pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope to 2. Its shape
 /// is 1's; while `F` is N's epoch the fleet pins writers to 1, so every blob
 /// N+1 writes before finalize is one N reads after a rollback.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_outside_manifest = "backend-local blob encoding: SQLite admits it when reading the blob"
 pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 2;
 
 /// Whether this build encodes and decodes envelope `version`: the envelope

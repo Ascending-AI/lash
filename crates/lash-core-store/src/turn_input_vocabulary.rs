@@ -607,6 +607,7 @@ impl PendingTurnInputBatch {
 ///     roots(TurnInput),
 ///     items(turn_input_submission_preimage),
 /// )
+/// version_surface = "coexist"
 pub const TURN_INPUT_SUBMISSION_FAMILY_VERSION: u8 = 1;
 
 /// Permanent tag registry for the turn-input submission preimage.

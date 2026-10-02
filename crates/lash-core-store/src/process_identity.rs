@@ -134,6 +134,7 @@ const START_KEY_PREFIX: &str = "process-start-key";
 ///         for_host, for_keyless_host, write_scope,
 ///     ),
 /// )
+/// version_surface = "coexist"
 pub const START_KEY_FAMILY_VERSION: u8 = 1;
 
 /// The start path a key was derived for. Each has its own tag in the preimage
@@ -760,11 +761,15 @@ impl WakeDeliveryState {
 ///     roots(ProcessWakeDelivery),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "ProcessWakeDelivery"
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 4's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "ProcessWakeDelivery"
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

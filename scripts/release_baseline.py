@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory registered and source-declared constants, check the 1.0 baseline,
+"""Inventory source-declared constants, check the 1.0 baseline,
 or write the value tables generated from the inventory.
 
 The resolver accepts literal counters, string identities and local constant
@@ -115,15 +115,11 @@ def resolve(text: str, name: str, synthetic: bool):
 def surfaces(repo: Path):
     import check_version_bumps as gate
     from discover_version_surfaces import discover
-    rows = tomllib.loads((repo / REGISTRY).read_text())["surface"]
-    keys = [f'{row["constant_path"]}:{row["constant"]}' for row in rows]
-    if not rows or len(set(keys)) != len(keys):
-        raise BaselineError("surface registry is empty or contains duplicate keys")
     try:
-        discovered, _ = discover(gate.WorktreeView(repo), rows)
+        discovered, _ = discover(gate.WorktreeView(repo))
     except gate.CheckError as error:
         raise BaselineError(str(error)) from error
-    return [*rows, *discovered]
+    return discovered
 
 
 def inventory(repo: Path):

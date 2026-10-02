@@ -45,6 +45,8 @@ use crate::{ProcessId, SessionId};
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "coexist"
+/// format_outside_manifest = "referrer vocabulary is checked when edge and fence rows are decoded"
 pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) declares the vocabulary one ahead
@@ -52,6 +54,8 @@ pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 1;
 /// finalize (ADR 0115 §5). A label a later build writes reaches N as an
 /// unknown kind, which N refuses typed and never counts as absent.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "coexist"
+/// format_outside_manifest = "referrer vocabulary is checked when edge and fence rows are decoded"
 pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 2;
 
 /// The label vocabulary version 2 adds: what the stores' laws write as a

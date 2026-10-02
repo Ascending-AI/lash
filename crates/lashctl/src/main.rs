@@ -39,6 +39,8 @@ use serde_json::{Value, json};
 ///         cover(PostgresConnectionBudgetReport, PostgresConnectionBudgetRefusal),
 ///     ),
 /// )
+/// version_surface = "coexist"
+/// format_outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
 const OPERATOR_POOL_MAX: u32 = 2;
 /// The most stalled obligations `drain-status` lists per kind, first by id;

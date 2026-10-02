@@ -28,12 +28,16 @@ use crate::{ProcessId, VersionRange};
 ///     file(path = "crates/lash-sansio/src/identity.rs", cover("string_identity!", ProcessId)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "coexist"
+/// format_outside_manifest = "live host cursor: it is not stored by Lash"
 pub const PROCESS_CURSOR_VERSION: u32 = 3;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the cursor to 4. Its shape is
 /// 3's; while `F` is N's epoch the fleet pins minting to 3, so a cursor N+1
 /// hands a host before finalize is one N parses after a rollback.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "coexist"
+/// format_outside_manifest = "live host cursor: it is not stored by Lash"
 pub const PROCESS_CURSOR_VERSION: u32 = 4;
 
 /// Cursor versions whose identity and position shape this build understands.

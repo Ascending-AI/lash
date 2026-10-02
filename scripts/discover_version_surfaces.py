@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Discover source-declared identity versions and refuse undeclared versions.
+"""Discover source-declared versioned surfaces and refuse undeclared versions.
 
 A constant declares its upgrade policy with `/// version_surface = "coexist"`
 and its grammar with the existing `version_guard` marker. No registry row is
-needed. String versions must be scalar constants so the cut can reset them.
+needed. `format_manifest` names a DurableFormat variant or engine:<id>;
+`format_outside_manifest` states why a surface is not in those manifests.
+`version_unguarded` explains a migrate surface outside the decoder-law table.
+Identity and key grammars without manifest markers are outside the manifest.
+String versions must be scalar constants so the cut can reset them.
 Reservation arrays may declare `version_reservations = "<reason>"`; those
 historical names are immutable and are not current writer versions.
 """
@@ -19,7 +23,10 @@ CONST = re.compile(
 )
 STRING = re.compile(r'r(?P<hashes>\#*)".*?"(?P=hashes)|"(?:\\.|[^"\\])*"', re.DOTALL)
 TAG = re.compile(r'^[A-Za-z][A-Za-z0-9_.:/-]*?[/:-]v[0-9]+(?:[/:-][A-Za-z0-9_./:{}-]*)?$')
-POLICY = re.compile(r'(?m)^\s*///\s*version_surface\s*=\s*"(migrate|drain|coexist)"\s*$')
+DECLARATION = re.compile(
+    r'(?m)^\s*///\s*(version_surface|format_manifest|format_outside_manifest|version_unguarded)'
+    r'\s*=\s*(.*?)\s*$'
+)
 RESERVATIONS = re.compile(r'(?m)^\s*///\s*version_reservations\s*=\s*"([^"\n]+)"\s*$')
 
 
@@ -43,22 +50,26 @@ def production_text(text):
     return ''.join(masked)
 
 
-def discover(view, registered=(), *, unregistered=None, enforce=True):
+def discover(view, *, unregistered=None, enforce=True):
     import check_version_bumps as gate
     registry = tomllib.loads(view.content(gate.REGISTRY) or '')
+    if 'surface' in registry:
+        raise gate.CheckError('[[surface]] declarations are unsupported; declare version_surface in source')
     excluded = {f'{row["constant_path"]}:{row["constant"]}'
                 for row in registry.get('unregistered', [])}
     if unregistered is not None:
         excluded = set(unregistered)
-    known = frozenset(f'{row["constant_path"]}:{row["constant"]}' for row in registered)
     excluded = frozenset(excluded)
     rows, problems = {}, []
-    paths = tuple(p for p in view.matching_paths(gate.RUST_SOURCE_PATTERNS) if production_path(p))
+    paths = view.matching_paths(gate.RUST_SOURCE_PATTERNS)
     view.preload(paths)
     for path in paths:
-        found, errors = _discover_file(path, view.content(path), known, excluded)
+        found, errors = _discover_file(path, view.content(path), excluded)
         for row in found:
-            rows[f'{row["constant_path"]}:{row["constant"]}'] = row.copy()
+            key = f'{row["constant_path"]}:{row["constant"]}'
+            if key in rows and rows[key] != row:
+                problems.append(f'{key}: conflicting source declarations')
+            rows[key] = row.copy()
         problems.extend(errors)
     if enforce and problems:
         raise gate.CheckError('\n'.join(problems))
@@ -66,7 +77,7 @@ def discover(view, registered=(), *, unregistered=None, enforce=True):
 
 
 @lru_cache(maxsize=8192)
-def _discover_file(path, text, known, excluded):
+def _discover_file(path, text, excluded):
     # Mutant trees used by the guard laws change one file. Reuse the scan of
     # each unchanged file while still scanning every tree for new versions.
     import check_version_bumps as gate
@@ -91,7 +102,24 @@ def _discover_file(path, text, known, excluded):
         if match['value'].strip() == 'env!("CARGO_PKG_VERSION")':
             continue
         block = block_for(match)
-        policies = {m[1] for m in POLICY.finditer(block)}
+        metadata = {}
+        invalid = False
+        for marker in DECLARATION.finditer(block):
+            field, expression = marker.groups()
+            try:
+                value = tomllib.loads('value = ' + expression)['value']
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError('expected a non-empty string')
+                if field == 'version_surface' and value not in ('migrate', 'drain', 'coexist'):
+                    raise ValueError('expected migrate, drain or coexist')
+                if field in metadata and metadata[field] != value:
+                    raise ValueError('conflicting source declarations')
+                metadata[field] = value
+            except (tomllib.TOMLDecodeError, KeyError, ValueError) as error:
+                problems.append(f'{key}: invalid {field}: {error}')
+                invalid = True
+        if invalid:
+            continue
         reasons = [m[1] for m in RESERVATIONS.finditer(block)]
         if reasons:
             if match['type'].strip() != '&[&str]' or not all(r.strip() for r in reasons):
@@ -99,24 +127,32 @@ def _discover_file(path, text, known, excluded):
             else:
                 reserved.append(match.span('value'))
             continue
-        if policies:
-            if len(policies) != 1:
-                problems.append(f'{key}: conflicting source upgrade policies')
-                continue
-            row = dict(constant_path=path, constant=name, upgrade=next(iter(policies)),
-                       outside_manifest='source-declared identity or key grammar')
-            if key not in known:
-                rows[key] = row
-        elif (re.search(r'(?:^|_)(?:VERSION|EPOCH|FORMAT|V[0-9]+)$', name) and key not in known and key not in excluded):
+        if 'version_surface' in metadata:
+            row = dict(constant_path=path, constant=name, upgrade=metadata['version_surface'])
+            for marker, field in (('format_manifest', 'manifest'),
+                                  ('format_outside_manifest', 'outside_manifest'),
+                                  ('version_unguarded', 'unguarded')):
+                if marker in metadata:
+                    row[field] = metadata[marker]
+            if not any(field in row for field in ('manifest', 'outside_manifest')):
+                row['outside_manifest'] = 'source-declared identity or key grammar'
+            if key in rows and rows[key] != row:
+                problems.append(f'{key}: conflicting source declarations')
+            rows[key] = row
+        elif metadata:
+            problems.append(f'{key}: format metadata needs version_surface')
+        elif (production_path(path) and re.search(r'(?:^|_)(?:VERSION|EPOCH|FORMAT|V[0-9]+)$', name) and key not in excluded):
             problems.append(f'{key} is a version-shaped constant the registry does not know: '
                             'declare version_surface and version_guard')
+    if not production_path(path):
+        return tuple(rows.values()), tuple(problems)
     for call in re.finditer(
         r'\b(?:IdentityEncoder::new|rendered_hash)\(\s*"(?:\\.|[^"\\])*"\s*,\s*([0-9][0-9_]*(?:u8|u16|u32)?)\b',
         masked,
     ):
         problems.append(f'{path}:{text.count(chr(10), 0, call.start()) + 1}: '
                         f'unregistered inline family version {call[1]}; use a source-declared constant')
-    owned = known | rows.keys() | excluded
+    owned = rows.keys() | excluded
     for literal in STRING.finditer(masked):
         raw = literal.group()
         value = raw[raw.index('"') + 1:raw.rindex('"')]
@@ -140,7 +176,5 @@ def surfaces(view, *, enforce=True):
     text = view.content(gate.REGISTRY)
     if text is None:
         raise gate.CheckError(f'{view.label}: cannot read {gate.REGISTRY}')
-    declared = gate.load_surfaces(text, f'{view.label}:{gate.REGISTRY}')
-    raw = tomllib.loads(text)['surface']
-    discovered, _ = discover(view, raw, enforce=enforce)
-    return (*declared, *(gate.surface_of(row, row['constant']) for row in discovered))
+    discovered, _ = discover(view, enforce=enforce)
+    return tuple(gate.surface_of(row, row['constant']) for row in discovered)

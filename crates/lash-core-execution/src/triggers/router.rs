@@ -17,10 +17,12 @@ use crate::runtime::process::identity_projection::{
 ///         project_trigger_process_input, project_process_payload_leaf, project_process_schema_leaf,
 ///     ),
 /// )
+/// version_surface = "coexist"
 pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
 /// version_guard(
 ///     items(trigger_subscription_address_preimage, project_trigger_owner),
 /// )
+/// version_surface = "coexist"
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 /// version_guard(
 ///     items(
@@ -29,10 +31,12 @@ const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 ///         trigger_source_preimage, project_process_payload_leaf,
 ///     ),
 /// )
+/// version_surface = "coexist"
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 /// version_guard(
 ///     items(derived_trigger_subscription_key),
 /// )
+/// version_surface = "coexist"
 const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
 
 pub fn deterministic_subscription_id(

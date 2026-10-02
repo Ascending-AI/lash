@@ -68,6 +68,8 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "coexist"
+/// format_outside_manifest = "the ModuleArtifact manifest row is claimed by LASHLANG_SEMANTIC_HASH_VERSION; the envelope is checked by the artifact decoder"
 pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope encoding to 2.
@@ -76,6 +78,8 @@ pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 1;
 /// every module it publishes before finalize is one N verifies after a
 /// rollback.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "coexist"
+/// format_outside_manifest = "the ModuleArtifact manifest row is claimed by LASHLANG_SEMANTIC_HASH_VERSION; the envelope is checked by the artifact decoder"
 pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 2;
 
 /// The envelope encoding this build writes: its own, and for the synthetic
@@ -109,6 +113,8 @@ const fn envelope_encoding_admitted(encoding: u64) -> bool {
 /// version_guard(
 ///     roots(path = "crates/lashlang/src/runtime/host.rs", AbilityOp, AbilityOutcome),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "VmAbi"
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

@@ -186,6 +186,8 @@ pub use lashlang_graph::{
 ///         cover(TraceLanguageExecutionFailure),
 ///     ),
 /// )
+/// version_surface = "coexist"
+/// format_outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
 pub const TRACE_SCHEMA_VERSION: u32 = 36;
 
 /// A durable trace record was written under a schema this reader does not support.

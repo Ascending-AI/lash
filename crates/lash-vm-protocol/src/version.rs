@@ -22,9 +22,13 @@ use thiserror::Error;
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "coexist"
+/// format_outside_manifest = "live worker admission; not a parked VM format"
 pub const WORKER_PROTOCOL_VERSION: u32 = 1;
 /// Acceptance builds advertise N+1 before admitting any guest work.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "coexist"
+/// format_outside_manifest = "live worker admission; not a parked VM format"
 pub const WORKER_PROTOCOL_VERSION: u32 = 2;
 /// Oldest worker wire version the parent can read.
 pub const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION: u32 = WORKER_PROTOCOL_VERSION;

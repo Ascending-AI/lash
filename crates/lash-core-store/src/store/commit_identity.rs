@@ -48,6 +48,8 @@ pub struct OperationId {
 ///         optional, sequence, finish, provider_route,
 ///     ),
 /// )
+/// version_surface = "coexist"
+/// format_manifest = "AppendRequestIdentity"
 pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 7;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).

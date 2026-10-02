@@ -13,6 +13,8 @@ const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
 /// version_guard(
 ///     items(derive),
 /// )
+/// version_surface = "coexist"
+/// format_outside_manifest = "hash-domain tag of the agent-frame key preimage: the *_FAMILY_VERSION class under another name (see [[excluded_class]])"
 const FRAME_KEY_VERSION: u8 = 2;
 
 /// A non-empty, deterministically derived key that Lash turns into a durable

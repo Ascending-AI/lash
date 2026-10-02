@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Hold the durable format-version registry exhaustive and the manifest true.
 
-The format table and source-declared identity constants form the inventory.
+Source-declared constants form the inventory.
 `discover_version_surfaces.py` rejects unregistered version strings, inline
 family counters and constants, including those covered by a class exclusion.
 Every ``*_VERSION`` / ``*_EPOCH`` constant defined in non-test Rust under
 ``crates/`` and ``examples/`` must be one of:
 
-- a registered ``[[surface]]`` or a source ``version_surface`` declaration;
+- a source ``version_surface`` declaration;
 - a member of a ``[[excluded_class]]`` suffix, whose reason is written once
   for the whole class; or
 - an ``[[unregistered]]`` entry naming the constant and why it versions no
@@ -18,18 +18,18 @@ cannot rot into a blanket allowance.
 
 The format manifest in ``crates/lash/src/formats.rs`` is checked against the
 same registry, in both directions: every registered surface either names its
-manifest row (``manifest = "<DurableFormat variant>"``, or
-``manifest = "engine:<id>"`` for a row the build's effect engine registers
+manifest row (``format_manifest = "<DurableFormat variant>"``, or
+``format_manifest = "engine:<id>"`` for a row the build's effect engine registers
 through ``lash::restate`` — ADR 0104 §2), states why it is outside the
-manifest (``outside_manifest = "<reason>"``), or belongs to an excluded
+manifest (``format_outside_manifest = "<reason>"``), or belongs to an excluded
 class; and every manifest row is exactly one registered surface whose
 ``manifest`` names it. That is what makes the manifest's exhaustiveness claim
 checkable rather than aspirational.
 
-Every ``upgrade = "migrate"`` surface is held to FIG-3802's decoder laws: it
+Every ``version_surface = "migrate"`` surface is held to FIG-3802's decoder laws: it
 is a row of ``GUARDED_SURFACES`` in
 ``crates/lash-core-store/src/store/fleet_format.rs``, or it states why it is
-not (``unguarded = "<reason>"``). Every row names a registered migrate
+not (``version_unguarded = "<reason>"``). Every row names a registered migrate
 surface, and the crate it names as owner runs the three guarded-surface laws
 under ``const OWNER`` set to its own name, so a row cannot be added without
 its decoders being driven through its supported range.
@@ -62,7 +62,7 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 MANIFEST = Path("crates/lash/src/formats.rs")
 # An engine contributes its durable formats under its own crate
 # (ADR 0104 §2), so the rows are parsed where the engine declares them; a
-# surface claims such a row as ``manifest = "engine:<id>"``.
+# surface claims such a row as ``format_manifest = "engine:<id>"``.
 ENGINE_REGISTRIES = (Path("crates/lash-restate/src/formats.rs"),)
 SWEPT_ROOTS = ("crates", "examples")
 
@@ -184,18 +184,8 @@ def load_registry(path: Path) -> Registry:
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise RegistryError(f"cannot read {path}: {error}") from error
 
-    surfaces: dict[str, dict] = {}
-    for index, raw in enumerate(document.get("surface", []), start=1):
-        key = f"{raw.get('constant_path')}:{raw.get('constant')}"
-        upgrade = raw.get("upgrade")
-        if upgrade not in UPGRADE_POLICIES:
-            raise RegistryError(
-                f"{path}: surface {index} ({key}) needs upgrade = one of "
-                + "|".join(UPGRADE_POLICIES)
-            )
-        surfaces[key] = raw
-    if not surfaces:
-        raise RegistryError(f"{path}: no [[surface]] entries")
+    if "surface" in document:
+        raise RegistryError("[[surface]] declarations are unsupported; declare version_surface in source")
 
     classes: dict[str, str] = {}
     for index, raw in enumerate(document.get("excluded_class", []), start=1):
@@ -225,7 +215,7 @@ def load_registry(path: Path) -> Registry:
         if upgrade is not None:
             unregistered_upgrades[key] = upgrade
         unregistered[key] = _reason(raw, "reason", location)
-    return Registry(surfaces, classes, unregistered, unregistered_upgrades)
+    return Registry({}, classes, unregistered, unregistered_upgrades)
 
 
 def class_of(registry: Registry, key: str) -> str | None:
@@ -296,7 +286,7 @@ def engine_manifest_rows(repo: Path) -> tuple[dict[str, str], dict[str, str]]:
     them with the same strictness as the facade's own literals so a malformed
     row cannot silently un-claim a surface. An engine row's ``upgrade_policy``
     field stands in for the ``upgrade_policy()`` arm a facade variant would
-    carry: the registry's ``upgrade`` is held equal to it all the same.
+    carry: the source's ``version_surface`` is held equal to it all the same.
     """
     toml_of = {rust: toml for toml, rust in RUST_POLICY_NAME.items()}
     rows: dict[str, str] = {}
@@ -387,7 +377,7 @@ def guarded_problems(repo: Path, registry: Registry) -> list[str]:
             problems.append(
                 f"{key} is a migrate surface outside GUARDED_SURFACES: add its row "
                 f"to {GUARDED_REGISTRY} and run the guarded-surface laws over its "
-                "decoders, or state unguarded = \"<reason>\""
+                "decoders, or state version_unguarded = \"<reason>\""
             )
         elif unguarded is not None and (
             not isinstance(unguarded, str) or not unguarded.strip()
@@ -433,16 +423,19 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
     problems: list[str] = []
 
     from discover_version_surfaces import discover
-    discovered, discovery_problems = discover(
-        check_version_bumps.WorktreeView(repo), registry.surfaces.values(), unregistered=registry.unregistered, enforce=False,
-    )
+    try:
+        discovered, discovery_problems = discover(
+            check_version_bumps.WorktreeView(repo), unregistered=registry.unregistered, enforce=False,
+        )
+    except check_version_bumps.CheckError as error:
+        raise RegistryError(str(error)) from error
     problems.extend(sorted(discovery_problems))
     for row in discovered:
         key = f'{row["constant_path"]}:{row["constant"]}'
         if class_of(registry, key) is not None:
             row.pop("outside_manifest", None)
     registry = Registry(
-        {**registry.surfaces, **{f'{r["constant_path"]}:{r["constant"]}': r for r in discovered}},
+        {f'{r["constant_path"]}:{r["constant"]}': r for r in discovered},
         registry.classes, registry.unregistered, registry.unregistered_upgrades,
     )
     swept = sweep(repo)
@@ -451,11 +444,11 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
             continue
         if class_of(registry, key) is not None:
             continue
-        if any(problem.startswith(key + " ") for problem in discovery_problems):
+        if any(problem.startswith((key + " ", key + ":")) for problem in discovery_problems):
             continue
         problems.append(
             f"{key} is a version-shaped constant the registry does not know: "
-            "register it as a [[surface]] in scripts/versioned-surfaces.toml, or "
+            "declare version_surface and version_guard in source, or "
             "add an [[unregistered]] entry stating why it versions no durable format"
         )
     for key in sorted(registry.unregistered):
@@ -534,7 +527,7 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
                 f"no registered surface claims with manifest = {row!r}"
             )
 
-    # The registry's `upgrade` is the one place a policy value is written;
+    # The source's `version_surface` declares the policy;
     # the Rust `upgrade_policy()` arm for the same variant must answer the
     # same policy, and a variant with an arm but no manifest row is a hole in
     # the manifest's exhaustiveness claim.
@@ -596,8 +589,10 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(f"- {problem}", file=sys.stderr)
         return 1
+    from discover_version_surfaces import discover
+    discovered, _ = discover(check_version_bumps.WorktreeView(args.repo))
     print(
-        f"format-registry check passed: {len(registry.surfaces)} surfaces, "
+        f"format-registry check passed: {len(discovered)} surfaces, "
         f"{len(registry.unregistered)} stated exclusions, "
         f"{len(registry.classes)} excluded classes"
     )

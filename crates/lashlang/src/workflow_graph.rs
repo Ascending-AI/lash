@@ -90,6 +90,8 @@ pub use projection::{
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "WorkflowGraphSchema"
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the document with version
@@ -97,6 +99,8 @@ pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
 /// its readers admit the version `F` pins its writers to, and after finalize
 /// an older document is regenerated from its module (FIG-4262).
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "WorkflowGraphSchema"
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 22;
 
 /// A deterministic node identifier minted from structural owner and AST path.

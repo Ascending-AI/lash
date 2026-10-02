@@ -595,6 +595,7 @@ pub struct UsageRunPage {
 ///         correction_payload_bytes, payload_bytes, as_str,
 ///     ),
 /// )
+/// version_surface = "coexist"
 pub const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
 /// BLAKE3 hex under domain `lash-usage-fact-payload/v4` of the framed
 /// projection: kind, disposition tag, source, model key, requested model,

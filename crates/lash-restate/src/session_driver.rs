@@ -180,6 +180,8 @@ use continuation::{continuation_generation, drain_answered, session_drive_contin
 ///     ),
 ///     items(path = "crates/lash-restate/src/sentinel.rs", GENERATION_SENTINEL),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "engine:restate.session_drive"
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
@@ -228,11 +230,15 @@ const TURN_OUTCOME_STATE: &str = "outcome";
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.turn_outcome_format"
 pub const LASH_TURN_OUTCOME_FORMAT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the outcome to format 2 with
 /// format 1's shape, and reads format 1 forever through its lift.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.turn_outcome_format"
 pub const LASH_TURN_OUTCOME_FORMAT_VERSION: u32 = 2;
 
 /// The recorded outcome's stored-format table: the registered surface.

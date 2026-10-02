@@ -146,12 +146,16 @@ use super::exceptions::PendingErrorOrigin;
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "drain"
+/// format_manifest = "VmContinuation"
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 29;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the continuation format, so a
 /// continuation it parks is one N cannot decode: it keeps N+1's deployment
 /// and routes to N+1's generation (ADR 0115 §3.5).
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "drain"
+/// format_manifest = "VmContinuation"
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 30;
 
 /// The execution identity pending-tool handles carry.

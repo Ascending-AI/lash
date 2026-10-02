@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Require a version bump, and its upgrade evidence, when a guarded shape changes.
 
-The inventory combines ``[[surface]]`` rows in ``scripts/versioned-surfaces.toml``
-with constants declaring ``/// version_surface = "coexist"`` in source.
-Source declarations use the same ``migrate``, ``drain`` and ``coexist`` policies. The shapes that constant guards are declared in code, on the
+The inventory reads constants declaring ``/// version_surface = "coexist"``
+in source. Declarations use ``migrate``, ``drain`` and ``coexist`` policies.
+The shapes that constant guards are declared in code, on the
 constant itself, by a marker in its doc comment::
 
     /// The demo record's stored format.
@@ -3019,7 +3019,7 @@ def version_at(view: TreeView, surface: Surface) -> int:
 
 
 def surface_of(raw: dict, location: str) -> Surface:
-    """One `[[surface]]` table of the registry."""
+    """One discovered source declaration."""
     constant = raw.get("constant")
     constant_path = raw.get("constant_path")
     upgrade = raw.get("upgrade")
@@ -3033,28 +3033,6 @@ def surface_of(raw: dict, location: str) -> Surface:
         upgrade,
         decoder_laws=upgrade == "migrate" and "unguarded" not in raw,
     )
-
-
-def load_surfaces(text: str, where: str) -> tuple[Surface, ...]:
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
-        raise CheckError(f"cannot read {where}: {error}") from error
-    raw_surfaces = document.get("surface")
-    if not isinstance(raw_surfaces, list) or not raw_surfaces:
-        raise CheckError(f"{where}: expected at least one [[surface]] entry")
-    surfaces: list[Surface] = []
-    seen: set[str] = set()
-    for index, raw in enumerate(raw_surfaces, start=1):
-        location = f"{where}: surface {index}"
-        if not isinstance(raw, dict):
-            raise CheckError(f"{location} must be a table")
-        surface = surface_of(raw, location)
-        if surface.key in seen:
-            raise CheckError(f"{location} duplicates {surface.key}")
-        seen.add(surface.key)
-        surfaces.append(surface)
-    return tuple(surfaces)
 
 
 def registered_lifts(view: TreeView) -> set[tuple[str, int]]:

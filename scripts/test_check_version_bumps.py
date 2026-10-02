@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for check_version_bumps.py.
 
-Each fixture is a throwaway git repository with a two-surface registry: a
+Each fixture is a throwaway git repository with two source-declared surfaces: a
 decoder-law ``migrate`` surface and a ``coexist`` wire. The four verdicts the
 1.0 cut records (FIG-4494) are the first four tests, each run as the command
 CI runs.
@@ -29,28 +29,18 @@ sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
 
-REGISTRY = """
-[[surface]]
-constant = "WIRE_VERSION"
-constant_path = "crates/demo/src/lib.rs"
-upgrade = "migrate"
-description = "fixture stored record"
-
-[[surface]]
-constant = "PEER_PROTOCOL_VERSION"
-constant_path = "crates/demo/src/peer.rs"
-upgrade = "coexist"
-description = "fixture wire protocol"
-"""
+REGISTRY = "# Surface declarations live in source.\n"
 
 LIB = """
 /// The stored record's format.
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
 /// version_guard(items(Record, encode_record))
 pub const WIRE_VERSION: u32 = 3;
 
 /// The upgrade harness's stand-in successor.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
 pub const WIRE_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +54,7 @@ pub fn encode_record(record: &Record) -> Vec<u8> {
 """
 
 PEER = """
+/// version_surface = "coexist"
 /// version_guard(shapes(path = "crates/demo/src/dto/*.rs", cover(Hello)))
 pub const PEER_PROTOCOL_VERSION: u32 = 1;
 """
@@ -99,16 +90,9 @@ pub const RECORD_UPCASTERS: &[RecordUpcaster] = super::synthetic_next::RECORD_UP
 
 WIDER_RECORD = LIB.replace("pub id: String,", "pub id: String,\n    pub owner: String,")
 
-DDL_SURFACE = """
-[[surface]]
-constant = "SCHEMA_VERSION"
-constant_path = "crates/demo/src/store.rs"
-upgrade = "migrate"
-unguarded = "catalog DDL stamp"
-description = "fixture store DDL"
-"""
-
 STORE = """
+/// version_surface = "migrate"
+/// version_unguarded = "catalog DDL stamp"
 /// version_guard(
 ///     file(path = "crates/demo/schema.sql", cover("CREATE TABLE demo")),
 ///     catalog(path = "crates/demo/src/migrate.rs", MIGRATIONS),
@@ -150,6 +134,7 @@ STEP_FROM_7 = """    Migration {
 
 
 ROOTED_PEER = """
+/// version_surface = "coexist"
 /// version_guard(roots(path = "crates/demo/src/dto/hello.rs", Hello))
 pub const PEER_PROTOCOL_VERSION: u32 = 1;
 """
@@ -414,7 +399,7 @@ class DdlCatalogEvidence(Fixture):
 
     def setUp(self) -> None:
         super().setUp()
-        self.write(gate.REGISTRY, REGISTRY + DDL_SURFACE)
+        self.write(gate.REGISTRY, REGISTRY)
         self.write("crates/demo/src/store.rs", STORE)
         self.write("crates/demo/schema.sql", SCHEMA)
         self.write("crates/demo/src/migrate.rs", MIGRATIONS)
@@ -477,6 +462,8 @@ class DdlCatalogEvidence(Fixture):
         self.write("crates/demo/schema.sql", WIDER_SCHEMA)
         self.write(
             "crates/demo/src/store.rs",
+            '/// version_surface = "migrate"\n'
+            '/// version_unguarded = "catalog DDL stamp"\n'
             '/// version_guard(unshaped = "no longer a stamp")\n'
             "const SCHEMA_VERSION: i32 = 8;\n",
         )
@@ -651,7 +638,7 @@ class GuardSet(Fixture):
         self.assertIn("does not cover Hello", output)
 
     def test_a_surface_without_a_marker_cannot_be_evaluated(self) -> None:
-        self.write("crates/demo/src/peer.rs", "pub const PEER_PROTOCOL_VERSION: u32 = 1;\n")
+        self.write("crates/demo/src/peer.rs", '/// version_surface = "coexist"\npub const PEER_PROTOCOL_VERSION: u32 = 1;\n')
         code, output = self.verdict(self.commit("no marker"))
         self.assertEqual(code, 2, output)
         self.assertIn("declares no version_guard marker", output)
@@ -659,6 +646,7 @@ class GuardSet(Fixture):
     def test_a_stated_reason_stands_in_for_a_guard(self) -> None:
         self.write(
             "crates/demo/src/peer.rs",
+            '/// version_surface = "coexist"\n'
             '/// version_guard(unshaped = "a manual epoch")\n'
             "pub const PEER_PROTOCOL_VERSION: u32 = 1;\n",
         )
@@ -670,6 +658,7 @@ class GuardSet(Fixture):
     def test_a_reason_beside_guards_is_refused(self) -> None:
         self.write(
             "crates/demo/src/peer.rs",
+            '/// version_surface = "coexist"\n'
             '/// version_guard(unshaped = "why", items(Hello))\n'
             "pub const PEER_PROTOCOL_VERSION: u32 = 1;\n",
         )
@@ -678,7 +667,7 @@ class GuardSet(Fixture):
         self.assertIn("unshaped beside other entries", output)
 
     def test_a_marker_set_apart_from_its_constant_is_not_read(self) -> None:
-        self.write("crates/demo/src/peer.rs", PEER.replace(")))\n", ")))\n\n"))
+        self.write("crates/demo/src/peer.rs", PEER.replace('/// version_surface = "coexist"\n', "").replace(")))\n", ')))\n\n/// version_surface = "coexist"\n'))
         code, output = self.verdict(self.commit("blank line"))
         self.assertEqual(code, 2, output)
         self.assertIn("declares no version_guard marker", output)
@@ -686,6 +675,7 @@ class GuardSet(Fixture):
     def test_a_marker_may_span_lines_above_the_attributes(self) -> None:
         self.write(
             "crates/demo/src/peer.rs",
+            '/// version_surface = "coexist"\n'
             "/// The wire.\n///\n/// version_guard(\n///     shapes(\n"
             '///         path = "crates/demo/src/dto/*.rs",\n///         cover(Hello),\n'
             "///     ),\n/// )\n#[allow(dead_code)]\npub const PEER_PROTOCOL_VERSION: u32 = 1;\n",
@@ -876,16 +866,28 @@ class Reachable(Fixture):
 
 
 class RegistryMoves(Fixture):
+    def test_base_revisions_cannot_use_a_second_surface_declaration_path(self) -> None:
+        historical = (
+            '[[surface]]\nconstant = "WIRE_VERSION"\n'
+            'constant_path = "crates/demo/src/lib.rs"\nupgrade = "migrate"\n'
+            '[[surface]]\nconstant = "PEER_PROTOCOL_VERSION"\n'
+            'constant_path = "crates/demo/src/peer.rs"\nupgrade = "coexist"\n'
+        )
+        self.write(gate.REGISTRY, historical)
+        self.write("crates/demo/src/lib.rs", LIB.replace('/// version_surface = "migrate"\n', ""))
+        self.write("crates/demo/src/peer.rs", PEER.replace('/// version_surface = "coexist"\n', ""))
+        base = self.commit("historical declarations")
+        self.write(gate.REGISTRY, REGISTRY)
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        self.write("crates/demo/src/peer.rs", PEER)
+        code, output = self.verdict(self.commit("source cutover with a shape change"), base)
+        self.assertEqual(code, 2, output)
+        self.assertIn("declare version_surface in source", output)
+
     def test_a_new_surface_is_reported_as_registered(self) -> None:
         self.write(
-            gate.REGISTRY,
-            REGISTRY
-            + '\n[[surface]]\nconstant = "CURSOR_VERSION"\n'
-            'constant_path = "crates/demo/src/cursor.rs"\nupgrade = "coexist"\n'
-            'description = "fixture cursor"\n',
-        )
-        self.write(
             "crates/demo/src/cursor.rs",
+            '/// version_surface = "coexist"\n'
             "/// version_guard(items(Cursor))\n"
             "pub const CURSOR_VERSION: u32 = 1;\npub struct Cursor(u64);\n",
         )
@@ -895,10 +897,6 @@ class RegistryMoves(Fixture):
         self.assertIn("3 of 3 surfaces evaluated", output)
 
     def test_a_relocated_constant_keeps_its_base_version(self) -> None:
-        self.write(
-            gate.REGISTRY,
-            REGISTRY.replace("crates/demo/src/peer.rs", "crates/demo/src/wire.rs"),
-        )
         (self.repo / "crates/demo/src/peer.rs").unlink()
         self.write("crates/demo/src/wire.rs", PEER)
         self.write("crates/demo/src/dto/hello.rs", DTO.replace("name: String", "name: u64"))
@@ -907,7 +905,6 @@ class RegistryMoves(Fixture):
         self.assertIn("PEER_PROTOCOL_VERSION is 1 on both sides", output)
 
     def test_a_constant_cannot_leave_while_its_shapes_change(self) -> None:
-        self.write(gate.REGISTRY, REGISTRY.split("[[surface]]\nconstant = \"PEER")[0])
         (self.repo / "crates/demo/src/peer.rs").unlink()
         removed = self.commit("retire the surface, keep the shape")
         self.assertEqual(self.verdict(removed)[0], 0)

@@ -63,6 +63,8 @@ pub use lash_sansio::VersionRange;
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "coexist"
+/// format_manifest = "engine:restate.wire"
 pub const RESTATE_WIRE_VERSION: u32 = 1;
 
 /// The wire versions this build reads and answers.
@@ -72,6 +74,8 @@ pub const RESTATE_WIRE: VersionRange = VersionRange::exactly(RESTATE_WIRE_VERSIO
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the wire to 2 and keeps
 /// answering N's version 1, so a call from either build selects 1.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "coexist"
+/// format_manifest = "engine:restate.wire"
 pub const RESTATE_WIRE_VERSION: u32 = 2;
 
 /// The synthetic N+1 reads and answers N's wire and its own.

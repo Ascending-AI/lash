@@ -13,12 +13,16 @@ use std::collections::HashMap;
 ///     shapes(cover(Envelope, Transport)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "NativeRlmTransport"
 pub const NATIVE_TRANSPORT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 1's shape; its `Lift::Decoder` row admits N's
 /// envelopes, which decode natively.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "NativeRlmTransport"
 pub const NATIVE_TRANSPORT_VERSION: u32 = 2;
 
 const PHASE: &str = "native_transport";

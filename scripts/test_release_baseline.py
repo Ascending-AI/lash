@@ -116,6 +116,30 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         self.assertTrue(any(row["key"].endswith(":TOOL_INTENT_IDENTITY_FAMILY_VERSION")
                             for row in rows))
 
+    def test_inventory_resolves_source_markers_without_surface_tables(self):
+        scratch_root = ROOT / ".buck2/release-baseline-tests"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch_root) as temporary:
+            repo = Path(temporary)
+            (repo / "scripts").mkdir()
+            (repo / "crates/demo/src").mkdir(parents=True)
+            (repo / baseline.REGISTRY).write_text("# No surface registry.\n")
+            (repo / "crates/demo/src/lib.rs").write_text(
+                '/// version_surface = "drain"\n'
+                '/// format_manifest = "Wire"\n'
+                '#[cfg(not(feature = "synthetic-next"))]\nconst WIRE_VERSION: u32 = 3;\n'
+                '/// version_surface = "drain"\n'
+                '/// format_manifest = "Wire"\n'
+                '#[cfg(feature = "synthetic-next")]\nconst WIRE_VERSION: u32 = 4;\n'
+                '/// version_surface = "coexist"\nconst IDENTITY: &str = "demo/v2";\n'
+            )
+            self.assertEqual(baseline.inventory(repo), [
+                dict(key="crates/demo/src/lib.rs:WIRE_VERSION", default=3, synthetic=4,
+                     upgrade="drain", manifest="Wire"),
+                dict(key="crates/demo/src/lib.rs:IDENTITY", default="demo/v2", synthetic="demo/v2",
+                     upgrade="coexist", manifest=None),
+            ])
+
     def test_new_unregistered_identity_versions_are_refused(self):
         scratch_root = ROOT / ".buck2/release-baseline-tests"
         scratch_root.mkdir(parents=True, exist_ok=True)
@@ -124,8 +148,6 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             (repo / "scripts").mkdir()
             (repo / "crates/demo/src").mkdir(parents=True)
             (repo / baseline.REGISTRY).write_text(
-                '\n[[surface]]\nconstant = "KNOWN_VERSION"\n'
-                'constant_path = "crates/demo/src/lib.rs"\nupgrade = "coexist"\n'
                 '\n[[excluded_class]]\nsuffix = "_FAMILY_VERSION"\nreason = "hash tag"\n'
             )
             source = repo / "crates/demo/src/lib.rs"
@@ -134,7 +156,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
                              'fn encode() { IdentityEncoder::new("demo", 2); }',
                              'fn encode() { hash("new-identity/v2"); }',
                              'const TAG: &str = r#"new-identity:v2:blake3:"#;'):
-                source.write_text('const KNOWN_VERSION: u8 = 1;\n' + addition)
+                source.write_text('/// version_surface = "coexist"\nconst KNOWN_VERSION: u8 = 1;\n' + addition)
                 with self.subTest(addition=addition), self.assertRaises(baseline.BaselineError):
                     baseline.inventory(repo)
 

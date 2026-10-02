@@ -61,6 +61,8 @@ use lash_sansio::sync::MutexExt;
 ///     roots(path = "crates/lash-lashlang-runtime/src/host_identity.rs", LashlangHostIdentities),
 ///     roots(path = "crates/lash-core-execution/src/runtime/causal.rs", CommandReplayKey),
 /// )
+/// version_surface = "drain"
+/// format_outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome and the ProcessStarted record, and a run under any other grammar is refused before it issues a command"
 pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 
 /// The journal grammar a code cell writes (FIG-3587): the replay-key grammar
@@ -90,6 +92,8 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/session.rs", tool_dispatch_surface),
 /// )
+/// version_surface = "drain"
+/// format_outside_manifest = "a journal grammar, not a payload: the grammar a cell's journal was written under rides the execution-environment sync outcome, and a cell under any other grammar is refused before it runs"
 pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 6;
 
 /// The executable generation code cells run under (FIG-3571): what a turn's

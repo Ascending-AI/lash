@@ -94,6 +94,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///     ),
 ///     items(path = "crates/lashlang/src/artifact_identity.rs", module_ref),
 /// )
+/// version_surface = "coexist"
+/// format_manifest = "ModuleArtifact"
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v24";
 
 pub use append_vec::AppendVec;

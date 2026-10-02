@@ -12,6 +12,8 @@ use restate_sdk::serde::Json;
 ///         RegisteredProcessStart,
 ///     ),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "engine:restate.process_command_journal"
 pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

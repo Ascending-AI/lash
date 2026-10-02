@@ -7,6 +7,7 @@ use super::model::{ProcessId, SessionId};
 /// version_guard(
 ///     items(process_wake_identity_preimage),
 /// )
+/// version_surface = "coexist"
 const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
 
 /// Permanent tag registry for process-wake identities.

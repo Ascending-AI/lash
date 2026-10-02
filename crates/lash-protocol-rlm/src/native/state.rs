@@ -38,11 +38,15 @@ pub(crate) struct RlmDriverState {
 ///     shapes(cover(RlmDriverState, Envelope)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "NativeRlmDriverState"
 pub const NATIVE_DRIVER_STATE_VERSION: u32 = 2;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 2's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "NativeRlmDriverState"
 pub const NATIVE_DRIVER_STATE_VERSION: u32 = 3;
 
 #[derive(serde::Serialize, serde::Deserialize)]

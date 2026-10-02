@@ -35,6 +35,8 @@ use super::control_intent::ControlIntentId;
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_outside_manifest = "obligation vocabulary is checked by each ledger's typed row decoder"
 pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) declares the vocabulary one ahead
@@ -42,6 +44,8 @@ pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 1;
 /// is N's epoch (ADR 0115 §5). A row a later build writes with a label N
 /// does not know stays outstanding under N, stalled `undecodable`.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_outside_manifest = "obligation vocabulary is checked by each ledger's typed row decoder"
 pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 2;
 
 /// Which ledger an obligation lives on. Its [`label`](Self::label) is the

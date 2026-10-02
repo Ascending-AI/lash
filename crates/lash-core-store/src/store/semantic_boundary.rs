@@ -27,6 +27,8 @@ use crate::SessionId;
 ///     roots(SemanticBoundaryRequestIntent),
 ///     items(semantic_boundary_request_intent_encoding, semantic_boundary_request_identity),
 /// )
+/// version_surface = "coexist"
+/// format_manifest = "RecordConfigRequestIdentity"
 pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// Encoding version of the create-session semantic-boundary request identity;
 /// moves with [`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION`] for the same
@@ -36,6 +38,8 @@ pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 ///     roots(SemanticBoundaryRequestIntent),
 ///     items(semantic_boundary_request_intent_encoding, semantic_boundary_request_identity),
 /// )
+/// version_surface = "coexist"
+/// format_manifest = "CreateSessionRequestIdentity"
 pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///

@@ -32,10 +32,16 @@ use crate::compat::{CompatRefusal, VersionRange};
 ///     roots(FleetFormat, FleetFormatState),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_outside_manifest = "store-resident stamp: recorded in the fleet-format row and read from the deployment through StorePreflight::schema_status, not reported from the build"
+/// version_unguarded = "the fleet epoch every guarded surface's window is computed from: FleetFormat::admit gates it against the writable range, not a record decoder"
 pub const FLEET_FORMAT_VERSION: u32 = 1;
 
 /// Phase A's next release owns epoch 2 while it still writes under epoch 1.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_outside_manifest = "store-resident stamp: recorded in the fleet-format row and read from the deployment through StorePreflight::schema_status, not reported from the build"
+/// version_unguarded = "the fleet epoch every guarded surface's window is computed from: FleetFormat::admit gates it against the writable range, not a record decoder"
 pub const FLEET_FORMAT_VERSION: u32 = 2;
 
 /// The fleet epochs this build writes under: `[F_prev, F_self]` (ADR 0115

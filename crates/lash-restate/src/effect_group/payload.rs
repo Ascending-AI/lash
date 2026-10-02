@@ -22,12 +22,16 @@ const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.effect_group_payload_format"
 pub const EFFECT_GROUP_PAYLOAD_FORMAT_VERSION: u16 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2 with
 /// format 1's shape; its `upgrade` handler rewrites each object after
 /// finalize.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.effect_group_payload_format"
 pub const EFFECT_GROUP_PAYLOAD_FORMAT_VERSION: u16 = 2;
 
 /// The payload object's stored-format table: the family's registered surface.

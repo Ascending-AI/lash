@@ -43,6 +43,8 @@ use super::*;
 ///     ),
 ///     roots(path = "crates/lash-sansio/src/session_model/message.rs", FlatPart, FlatPartRef),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "TurnCheckpoint"
 pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 11;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {

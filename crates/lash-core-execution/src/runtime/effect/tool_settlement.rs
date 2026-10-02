@@ -154,6 +154,8 @@ use crate::{PluginMessage, ProcessId};
 ///     ),
 ///     file(path = "crates/lash-sansio/src/tool_intents.rs", cover(tool_intent_variants)),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "ToolSettlement"
 pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 
 /// The durable format version of one atomic attempt's captured facts.
@@ -181,6 +183,8 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 ///         cover("string_identity!", SessionId, ProcessId, TurnId, InputId),
 ///     ),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "ToolAttemptCapture"
 pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 6;
 
 /// The semantic facts one atomic `ToolAttempt` produced, journaled with it.

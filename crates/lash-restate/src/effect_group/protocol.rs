@@ -25,6 +25,8 @@ use super::*;
 ///         cover(EffectGroupDispatchRequest),
 ///     ),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "engine:restate.effect_group_dispatch_journal"
 pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 
 /// The stored format the group index's retained record stamps into its
@@ -50,6 +52,8 @@ pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 ///     items(EFFECT_GROUP_STATE_FORMATS),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.effect_group_state_format"
 pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2. Its
@@ -58,6 +62,8 @@ pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 1;
 /// pin holds its writes at format 1, and after it the `upgrade` handler
 /// rewrites each object.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.effect_group_state_format"
 pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 2;
 
 /// The group index's stored-format table: the family's registered surface.

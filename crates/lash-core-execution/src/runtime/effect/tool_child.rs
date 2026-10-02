@@ -172,6 +172,8 @@ use super::executor::RuntimeEffectControllerError;
 ///         cover("string_identity!", SessionId, ProcessId, TurnId),
 ///     ),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "ToolChildRequest"
 pub const TOOL_CHILD_REQUEST_VERSION: u16 = 10;
 
 mod session_facts;

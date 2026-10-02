@@ -80,6 +80,8 @@ pub use canonical_messagepack::{
 // captures may reference one. A v13 reader meets an unknown kind, so the bump
 // is what makes its refusal a version boundary.
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "LashlangSnapshot"
 pub const LASHLANG_SNAPSHOT_VERSION: u32 = 14;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the snapshot one version on
@@ -87,6 +89,8 @@ pub const LASHLANG_SNAPSHOT_VERSION: u32 = 14;
 /// snapshots, and the canonical decoder reads them natively: the fixed point
 /// re-encodes at the recorded version, so N's bytes stay N's.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "LashlangSnapshot"
 pub const LASHLANG_SNAPSHOT_VERSION: u32 = 15;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.

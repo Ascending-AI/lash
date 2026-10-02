@@ -53,6 +53,8 @@ use crate::compat::{Call, Reply};
 ///         cover("string_identity!", RuntimeOwner, SessionId, ProcessId),
 ///     ),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "engine:restate.usage_accounting"
 pub const USAGE_ACCOUNTING_WIRE_VERSION: u32 = 1;
 
 /// One spending effect's settlement, sent by the execution that journaled it.

@@ -28,7 +28,7 @@ registered range and upcaster rows decide what it accepts.
 
 Evidence: `crates/lash-core-execution/src/engine/contracts.rs:23`,
 `crates/lash-core-store/src/compat.rs:1`,
-`scripts/versioned-surfaces.toml:1`.
+`scripts/discover_version_surfaces.py:1`.
 
 ### 1. Long-running work and build generations
 
@@ -206,9 +206,13 @@ Evidence: `crates/lash-restate/src/object_state.rs:50`,
 
 ### 4. Per-surface policy
 
-`scripts/versioned-surfaces.toml` registers the formats, owning constants,
-guarded files and upgrade policies. `scripts/check_format_registry.py` checks
-the declaration against the typed manifests. Engine formats are declared by
+Constants declare their upgrade policies with `version_surface` and their
+manifest rows with `format_manifest` in source. Their `version_guard` markers
+name the guarded shapes and files. `scripts/versioned-surfaces.toml` retains
+class exclusions, admission floors, constants that do not version durable
+formats, and permanently reserved retired hash domains.
+`scripts/check_format_registry.py` checks the declaration against the typed
+manifests. Engine formats are declared by
 the engine; the facade includes them only when that engine is enabled.
 
 | Stored shape | Current compatibility mechanism |
@@ -237,7 +241,7 @@ predecessor conversion. A registry policy does not grant blanket additive
 compatibility. The freeze changes normal shapes in place; synthetic-next
 widens the selected ranges and registries for executable upgrade evidence.
 
-Evidence: `scripts/versioned-surfaces.toml:1`,
+Evidence: `scripts/discover_version_surfaces.py:1`,
 `scripts/check_format_registry.py:1`,
 `crates/lash/src/formats.rs:580`,
 `crates/lash-core-store/src/store/fleet_format.rs:215`,

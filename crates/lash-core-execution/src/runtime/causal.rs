@@ -580,6 +580,7 @@ pub fn direct_effect_invocation(
 ///         direct_effect_replay_preimage, direct_request_discriminator, project_direct_causal_ref,
 ///     ),
 /// )
+/// version_surface = "coexist"
 const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
 
 fn direct_effect_replay_preimage(

@@ -85,6 +85,8 @@ use std::sync::Arc;
 ///     items(ADMIT_STEP, START_STEP, stamped_journal_version, decode_stamped_request),
 ///     file(path = "crates/lash-restate/src/process/stamped_requests.rs"),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "engine:restate.process_journal"
 pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
@@ -107,11 +109,15 @@ pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "drain"
+/// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
 pub const JOURNAL_LOGIC_EPOCH: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the epoch, so its `G` and
 /// its generation lanes differ from N's.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "drain"
+/// format_outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
 pub const JOURNAL_LOGIC_EPOCH: u32 = 2;
 
 /// The journal name of the verdict step.

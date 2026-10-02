@@ -1476,11 +1476,13 @@ pub fn evaluate_trigger_prune(
 ///         project_trigger_process_input, project_process_payload_leaf, project_process_schema_leaf,
 ///     ),
 /// )
+/// version_surface = "coexist"
 const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 8;
 /// version_guard(
 ///     items(trigger_operation_receipt_preimage),
 ///     items(path = "crates/lash-core-execution/src/triggers/router.rs", project_trigger_owner),
 /// )
+/// version_surface = "coexist"
 const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied

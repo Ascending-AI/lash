@@ -144,6 +144,8 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 ///         RestateDurableWaitAwaitRequest,
 ///     ),
 /// )
+/// version_surface = "drain"
+/// format_manifest = "engine:restate.durable_wait_request"
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
@@ -164,11 +166,15 @@ pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 ///     shapes(path = "crates/lash-restate/src/object_state.rs", cover(StampedValue)),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.durable_wait_registry_format"
 pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 1;
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2 with
 /// format 1's shape; its `upgrade` handler rewrites each object after
 /// finalize.
 #[cfg(feature = "synthetic-next")]
+/// version_surface = "migrate"
+/// format_manifest = "engine:restate.durable_wait_registry_format"
 pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 2;
 /// The wait registry's stored-format table: the family's registered surface.
 pub(crate) const DURABLE_WAIT_REGISTRY_FORMATS: StoredValueFormats = StoredValueFormats {

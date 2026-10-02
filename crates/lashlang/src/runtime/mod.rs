@@ -196,6 +196,8 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 ///     ),
 ///     file(path = "crates/lashlang/src/runtime/compiler/*.rs"),
 /// )
+/// version_surface = "drain"
+/// format_outside_manifest = "an accounting, not a payload: a cell replays by re-execution, so its checkpoint peeks land where this accounting puts them; it is pinned into LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION, which the execution-environment sync stamps and refuses on mismatch"
 pub const INSTRUCTION_ACCOUNTING_VERSION: u32 = 3;
 
 /// Instructions before a run's first cancel checkpoint (FIG-3672 P9). The VM
