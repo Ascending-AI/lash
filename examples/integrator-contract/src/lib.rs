@@ -1287,6 +1287,13 @@ impl ProcessRetention for Integrator {
     ) -> Result<(), PluginError> {
         unreachable!("external signature witness")
     }
+    async fn release_process_events(
+        &self,
+        process_id: &ProcessId,
+        through: u64,
+    ) -> Result<ProcessEventRelease, PluginError> {
+        unreachable!("external signature witness")
+    }
     async fn list_trigger_delivery_pins(&self) -> Result<Vec<PinnedTriggerDelivery>, PluginError> {
         unreachable!("external signature witness")
     }
