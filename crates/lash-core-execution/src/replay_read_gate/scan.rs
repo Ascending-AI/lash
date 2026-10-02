@@ -662,7 +662,8 @@ struct TypeDefinition {
     idents: Vec<String>,
 }
 
-/// Every `struct` and `type` alias in `tokens`, outside test items.
+/// Every `struct` and free `type` alias in `tokens`, outside test items.
+/// Associated types belong to their impl or trait, not the module's type names.
 fn collect_type_definitions(tokens: &[Token], out: &mut Vec<TypeDefinition>) {
     let mut i = 0;
     let mut skip_next_item = false;
@@ -675,7 +676,7 @@ fn collect_type_definitions(tokens: &[Token], out: &mut Vec<TypeDefinition>) {
             continue;
         }
         let keyword = tokens[i].ident();
-        if skip_next_item {
+        if skip_next_item || matches!(keyword, Some("impl") | Some("trait")) {
             while i < tokens.len() {
                 let done = tokens[i].is_punct(';') || tokens[i].group(Delimiter::Brace).is_some();
                 i += 1;

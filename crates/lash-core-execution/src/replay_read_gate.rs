@@ -994,10 +994,13 @@ mod self_test {
     fn a_type_holding_an_aliased_controller_is_a_replay_path() {
         let found = hits(
             r#"
-            type Controller<'ctx> = RestateRuntimeEffectController<'ctx, WorkflowContext<'ctx>>;
+            mod controllers {
+                type RecordedController<'ctx> = RestateRuntimeEffectController<'ctx, WorkflowContext<'ctx>>;
+                pub type Controller<'ctx> = RecordedController<'ctx>;
+            }
             struct SessionProcessCleanup<'a, 'ctx> {
                 processes: Processes,
-                controller: &'a Controller<'ctx>,
+                controller: &'a controllers::Controller<'ctx>,
             }
             impl WorkloadProcessCleanup for SessionProcessCleanup<'_, '_> {
                 async fn owned(&self, session: &str) -> Vec<ProcessId> {
@@ -1008,6 +1011,25 @@ mod self_test {
         );
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].method, "list_originated_by");
+    }
+
+    #[test]
+    fn a_controller_associated_type_does_not_seed_an_unrelated_target() {
+        for declaration in [
+            "impl std::ops::Deref for Driver { type Target = RestateRuntimeEffectController; }",
+            "trait Driver { type Target = RestateRuntimeEffectController; }",
+        ] {
+            let found = hits(&format!(
+                r#"
+                {declaration}
+                struct Target {{ revision: u64 }}
+                async fn fork_at(target: Target) {{
+                    registry.get_process(&id).await
+                }}
+                "#,
+            ));
+            assert!(found.is_empty(), "{declaration}: {found:?}");
+        }
     }
 
     #[test]
