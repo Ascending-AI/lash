@@ -396,7 +396,7 @@ async fn a_root_end_cancels_its_cancel_children_once_on_restate() {
     assert_eq!(world.cancel_invocations(&bystander), 0);
     assert_eq!(
         plan.obligation_state,
-        Some(lash_core::store::ObligationState::Delivered),
+        lash_core::store::ObligationState::Delivered,
         "the close's apply delivered the plan's obligation: {plan:?}"
     );
     world.harness.finish().await;
@@ -540,7 +540,7 @@ async fn a_process_end_cancels_its_cancel_children_on_restate() {
                 registration,
                 execution_context: lash_core::ProcessExecutionContext::default(),
                 segment_ordinal: 0,
-                sender_generation: None,
+                sender_generation: crate::tests::test_build_generation(),
             },
         )
         .await

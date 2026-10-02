@@ -364,9 +364,6 @@ pub enum RuntimeErrorCode {
     EngineAwaitEventRevoke,
     EngineAwaitEventSessionUpdate,
     EngineEffectController,
-    /// Replay found a retired tool-intent v1 key; re-execution under v2 could
-    /// duplicate or diverge from the committed command, so it is refused.
-    ToolIntentReplayKeyFormatCutover,
     /// A re-executed lashlang run — a code cell or a process body — issued a
     /// command that is not the one its journal recorded at that issue
     /// ordinal, or issued one while the journal still held entries at or
@@ -465,7 +462,6 @@ pub enum RuntimeErrorCode {
     RuntimeEffectEnvelopeCanonicalDecode,
     RuntimeEffectEnvelopeCanonicalHashInvariant,
     RuntimeEffectEnvelopeHash,
-    RuntimeEffectEnvelopeVersion,
     /// A cancelled group await leaves its durable rank untouched for retry.
     RuntimeEffectGroupAwaitCancelled,
     /// A group's `Cancel` loser disposition made this child terminal.
@@ -728,7 +724,6 @@ impl RuntimeErrorCode {
             Self::EngineAwaitEventRevoke => "engine_await_event_revoke",
             Self::EngineAwaitEventSessionUpdate => "engine_await_event_session_update",
             Self::EngineEffectController => "engine_effect_controller",
-            Self::ToolIntentReplayKeyFormatCutover => "tool_intent_replay_key_format_cutover",
             Self::LashlangCellReplayDivergence => "lashlang_cell_replay_divergence",
             Self::RetiredGeneration => "retired_generation",
             Self::LashlangCellBindingDrift => "lashlang_cell_binding_drift",
@@ -781,7 +776,6 @@ impl RuntimeErrorCode {
                 "runtime_effect_envelope_canonical_hash_invariant"
             }
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
-            Self::RuntimeEffectEnvelopeVersion => "runtime_effect_envelope_version_unsupported",
             Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
             Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
             Self::RuntimeEffectGroupChildCancelDecided => {
@@ -876,7 +870,6 @@ impl RuntimeErrorCode {
         matches!(
             self,
             |Self::EngineProcessJournalIdentityDrift| Self::EffectReplayDivergence
-                | Self::ToolIntentReplayKeyFormatCutover
                 | Self::LashlangCellReplayDivergence
                 | Self::RetiredGeneration
                 | Self::LashlangCellBindingDrift
@@ -1026,7 +1019,6 @@ impl RuntimeErrorCode {
             "engine_await_event_revoke" => Self::EngineAwaitEventRevoke,
             "engine_await_event_session_update" => Self::EngineAwaitEventSessionUpdate,
             "engine_effect_controller" => Self::EngineEffectController,
-            "tool_intent_replay_key_format_cutover" => Self::ToolIntentReplayKeyFormatCutover,
             "lashlang_cell_replay_divergence" => Self::LashlangCellReplayDivergence,
             "retired_generation" => Self::RetiredGeneration,
             "lashlang_cell_binding_drift" => Self::LashlangCellBindingDrift,
@@ -1078,7 +1070,6 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectEnvelopeCanonicalHashInvariant
             }
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
-            "runtime_effect_envelope_version_unsupported" => Self::RuntimeEffectEnvelopeVersion,
             "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
             "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
             "runtime_effect_group_child_cancel_decided" => {

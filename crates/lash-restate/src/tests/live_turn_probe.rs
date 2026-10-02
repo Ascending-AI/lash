@@ -606,7 +606,7 @@ impl LiveTurnRunner {
             registration: registration.clone(),
             execution_context: lash_core::ProcessExecutionContext::default(),
             segment_ordinal: 0,
-            sender_generation: None,
+            sender_generation: crate::tests::test_build_generation(),
         };
         tokio::spawn(async move {
             ingress

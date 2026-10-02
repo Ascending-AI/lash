@@ -119,7 +119,8 @@ fn segment_input(
         registration: registration.clone(),
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal,
-        sender_generation: None,
+        // Sent by the build that serves it: `new_for_test`'s generation.
+        sender_generation: lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     }
 }
 
@@ -197,7 +198,7 @@ impl HandedOverSegment {
                 lash_core::PersistedSegmentHandover {
                     writer: String::new(),
                     segment_ordinal: 1,
-                    written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                    written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                     route: "LashProcessWorkflow".to_string(),
                     handover: lash_core::SegmentHandover {
                         reason: lash_core::BoundaryReason::JournalBudget,
@@ -478,7 +479,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: boundary,
             },
@@ -647,7 +648,7 @@ pub(super) async fn a_completed_segment_is_superseded_not_refused() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 2,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -1070,6 +1071,7 @@ pub(super) async fn lost_run_pass_resubmits_the_latest_segment_even_when_its_ref
         &crate::services::DEFAULT_NAMESPACE,
         &segment.registry,
         &segment.continuations,
+        &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         crate::session_control::RecoveryScan {
             limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
             after: &mut None,
@@ -1108,8 +1110,7 @@ pub(super) async fn lost_run_pass_resubmits_the_latest_segment_even_when_its_ref
         .await
         .expect("read the latest handover")
         .expect("segment 1's handover is retained")
-        .written_generation
-        .expect("the handover records its writer's generation");
+        .written_generation;
     assert!(
         requests[1].contains(&format!("\"sender_generation\":\"{written}\"")),
         "the pass stamps the handover writer's generation: {}",
@@ -1433,7 +1434,7 @@ impl ZombieRoot {
                 &self.process_id,
                 lash_core::PersistedSegmentHandover {
                     segment_ordinal: 1,
-                    written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                    written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                     route: "LashProcessWorkflow".to_string(),
                     writer: String::new(),
                     handover: lash_core::SegmentHandover {
@@ -1571,7 +1572,7 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
             &root.process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: lash_core::SegmentHandover {

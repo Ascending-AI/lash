@@ -1212,6 +1212,13 @@ fn watched_process_work(
         authority,
         double.engine_stores().process_registry(),
         double.engine_stores().process_continuations(),
+        lash::EngineGeneration::fixed(
+            double
+                .restate()
+                .build_generation()
+                .expect("the double's generation is bound")
+                .clone(),
+        ),
         Some(Arc::new(ChannelProcessEventSink::new(sink_tx))),
     )
     .process_work();

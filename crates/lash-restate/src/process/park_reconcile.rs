@@ -289,6 +289,7 @@ pub(crate) async fn end_lost_process_runs(
     namespace: &crate::RestateNamespace,
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
+    generation: &lash_core::engine::EngineGeneration,
     scan: crate::session_control::RecoveryScan<'_, lash_core::ProcessRegistryCursor>,
 ) -> Result<LostRunPass, PluginError> {
     let crate::session_control::RecoveryScan {
@@ -301,6 +302,7 @@ pub(crate) async fn end_lost_process_runs(
         namespace.clone(),
         Arc::clone(registry),
         Arc::clone(continuations),
+        generation.clone(),
     );
     let mut pass = LostRunPass::default();
     let page = match crate::session_control::recovery_request(

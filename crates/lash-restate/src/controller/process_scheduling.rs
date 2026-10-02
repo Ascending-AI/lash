@@ -61,7 +61,7 @@ pub(super) async fn schedule_restate_process<'ctx, C>(
     started: lash_core::runtime::RegisteredProcessStart,
     registration: lash_core::ProcessRegistration,
     execution_context: lash_core::ProcessExecutionContext,
-    sender_generation: Option<lash_core::engine::BuildGeneration>,
+    sender_generation: lash_core::engine::BuildGeneration,
     context: &C,
     namespace: &crate::RestateNamespace,
     invocation: &RuntimeEffectInvocation,

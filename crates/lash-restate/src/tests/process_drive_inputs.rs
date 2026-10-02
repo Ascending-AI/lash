@@ -69,7 +69,7 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     // Admitted under a host that cuts every two effects.
@@ -102,5 +102,49 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
         *output,
         process_success(serde_json::json!({ "cuts_after_two": true })),
         "the redrive cuts under the policy its admission recorded, not the live selector"
+    );
+}
+
+/// Every process workflow input names the build that sent it. One that names
+/// none is not an input this build reads: the handler keeps what it can of
+/// it and refuses it typed instead of admitting it from no sender.
+#[test]
+fn an_input_without_its_sender_generation_is_not_read_as_current() {
+    let input = RestateProcessWorkflowInput {
+        process_id: lash_core::ProcessId::fixture("unsent"),
+        registration: executed_registration(),
+        execution_context: ProcessExecutionContext::default(),
+        segment_ordinal: 3,
+        sender_generation: crate::tests::test_build_generation(),
+    };
+    let mut wire = serde_json::to_value(&input).expect("encode the input");
+    assert!(matches!(
+        serde_json::from_value::<RestateProcessWorkflowPayload>(wire.clone())
+            .expect("decode the stamped input"),
+        RestateProcessWorkflowPayload::Current(current)
+            if current.sender_generation == crate::tests::test_build_generation()
+    ));
+
+    wire.as_object_mut()
+        .expect("the input is an object")
+        .remove("sender_generation")
+        .expect("the input names its sender");
+    let payload = serde_json::from_value::<RestateProcessWorkflowPayload>(wire)
+        .expect("an unreadable input still reaches the handler");
+    let RestateProcessWorkflowPayload::Unreadable {
+        process_id,
+        segment_ordinal,
+        sender_generation,
+        error,
+    } = payload
+    else {
+        panic!("an input naming no sender must not decode as current");
+    };
+    assert_eq!(process_id, Some(input.process_id));
+    assert_eq!(segment_ordinal, 3);
+    assert_eq!(sender_generation, None);
+    assert!(
+        error.contains("missing field `sender_generation`"),
+        "{error}"
     );
 }

@@ -1590,9 +1590,13 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     ])
     .await;
 
-    let runner: Arc<dyn lash_core::ProcessWorkSubstrate> = Arc::new(
-        RestateProcessIngressRunner::new(base_url, registry.clone(), continuation_store()),
-    );
+    let runner: Arc<dyn lash_core::ProcessWorkSubstrate> =
+        Arc::new(RestateProcessIngressRunner::new(
+            base_url,
+            registry.clone(),
+            continuation_store(),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+        ));
     let first = deliver_process_start_now(
         &stores.start_ledger,
         &registry,
@@ -1724,9 +1728,13 @@ pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_canc
         },
     ])
     .await;
-    let runner: Arc<dyn lash_core::ProcessWorkSubstrate> = Arc::new(
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store()),
-    );
+    let runner: Arc<dyn lash_core::ProcessWorkSubstrate> =
+        Arc::new(RestateProcessIngressRunner::new(
+            base_url,
+            Arc::clone(&registry),
+            continuation_store(),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+        ));
     for (process_id, label) in [
         (&crashed_before_submit_id, "crashed"),
         (&cancelling.id, "cancelling"),

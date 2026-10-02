@@ -181,7 +181,6 @@ impl World {
             .expect("read the plan's ledger row")
             .expect("the record wrote the row")
             .obligation_id
-            .expect("the record arms the row's obligation due immediately")
     }
 
     /// Register a live `Until` child of `scope` — the child the plan owes a

@@ -134,7 +134,7 @@ lash_sansio::tool_intent_variants!(define_tool_intent);
 /// seam. Process registries persist it so independent facade handles and
 /// crash redrives see the same first writer: a cancel binds its target here
 /// before realization, and every submission retains its first outcome here.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolIntentSubmissionRecord {
     /// Version selecting the admission and realization contract.
     pub protocol_version: u16,
@@ -170,37 +170,6 @@ impl ToolIntentSubmissionRecord {
             payload_hash,
             intent,
             outcome: None,
-        })
-    }
-}
-
-#[derive(Deserialize)]
-struct ToolIntentSubmissionRecordWire {
-    protocol_version: Option<u16>,
-    identity: ToolIntentIdentity,
-    kind: ToolIntentKind,
-    payload_hash: String,
-    intent: ToolIntent,
-    #[serde(default)]
-    outcome: Option<crate::ToolIntentExecutionOutcome>,
-}
-
-impl<'de> Deserialize<'de> for ToolIntentSubmissionRecord {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let wire = ToolIntentSubmissionRecordWire::deserialize(deserializer)?;
-        Ok(Self {
-            // Rows written before the protocol discriminator existed are
-            // classified as v1 solely so ingress can refuse them before
-            // realization. They are never upgraded or accepted implicitly.
-            protocol_version: wire.protocol_version.unwrap_or(1),
-            identity: wire.identity,
-            kind: wire.kind,
-            payload_hash: wire.payload_hash,
-            intent: wire.intent,
-            outcome: wire.outcome,
         })
     }
 }
@@ -723,6 +692,37 @@ mod tests {
         assert!(first.replay_key.starts_with("tool-intent:v2:blake3:"));
         assert!(second.replay_key.starts_with("tool-intent:v2:blake3:"));
         assert_ne!(first.replay_key, second.replay_key);
+    }
+
+    /// The protocol discriminator is part of the row: a submission that
+    /// names none is not a row of any protocol and does not decode.
+    #[test]
+    fn a_submission_row_without_its_protocol_version_fails_decode() {
+        let intent = sample_intent(ToolIntentKind::CancelProcess);
+        let identity = derive_tool_intent_identity(
+            intent.owner(),
+            "turn-7",
+            &crate::ToolCallId::fixture("call"),
+            0,
+        );
+        let record = ToolIntentSubmissionRecord::new(identity, intent).expect("build the row");
+        let mut row = serde_json::to_value(&record).expect("encode the row");
+        let decoded: ToolIntentSubmissionRecord =
+            serde_json::from_value(row.clone()).expect("the stamped row decodes");
+        assert_eq!(decoded.protocol_version, TOOL_INTENT_PROTOCOL_V3);
+
+        row.as_object_mut()
+            .expect("the row is an object")
+            .remove("protocol_version")
+            .expect("the row is stamped");
+        let error = serde_json::from_value::<ToolIntentSubmissionRecord>(row)
+            .expect_err("an unstamped row must not decode");
+        assert!(
+            error
+                .to_string()
+                .contains("missing field `protocol_version`"),
+            "{error}"
+        );
     }
 
     #[test]

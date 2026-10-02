@@ -291,8 +291,6 @@ impl RuntimeErrorCode {
             Self::EngineEffectController => Redrivable,
             // the redrive diverged from the engine's journal; only the build that wrote it serves it.
             Self::EffectReplayDivergence => Parked,
-            // replay met a retired key format; a redrive meets it again.
-            Self::ToolIntentReplayKeyFormatCutover => Terminal,
             // the re-executed program no longer issues its recorded commands; only the build that wrote the journal serves it.
             Self::LashlangCellReplayDivergence => Parked,
             // the turn was admitted under another executable generation; only a build of it serves it.
@@ -369,8 +367,6 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectEnvelopeCanonicalHashInvariant => Terminal,
             // hashing the same envelope fails the same way.
             Self::RuntimeEffectEnvelopeHash => Terminal,
-            // the envelope version is unsupported by this build.
-            Self::RuntimeEffectEnvelopeVersion => Terminal,
             // the await was cancelled in this process and its durable rank is untouched for a redrive.
             Self::RuntimeEffectGroupAwaitCancelled => Redrivable,
             // the group's loser disposition durably made the child terminal.

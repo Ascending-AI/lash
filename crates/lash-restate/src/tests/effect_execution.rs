@@ -14,7 +14,7 @@ pub(super) async fn start_delivery_addresses_latest_segment_without_a_segment_ze
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -30,7 +30,12 @@ pub(super) async fn start_delivery_addresses_latest_segment_without_a_segment_ze
         body: r#"{"invocationId":"inv_mid_chain_3","status":"Accepted"}"#,
     }])
     .await;
-    let runner = RestateProcessIngressRunner::new(base_url, registry.clone(), continuations);
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        registry.clone(),
+        continuations,
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
     let record = registry
         .get_process(&mid_chain_id)
         .await
@@ -96,8 +101,12 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
         body: r#"{"invocationId":"inv_executed","status":"Accepted"}"#,
     }])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        Arc::clone(&registry),
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
     let executed = registry
         .get_process(&executed_id)
         .await
@@ -1111,7 +1120,12 @@ pub(super) async fn restate_process_attach_calls_await_terminal_ingress() {
         .await
         .expect("register attach target");
     let process_ref = record.id.clone();
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        registry,
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
 
     let output = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
@@ -1140,8 +1154,12 @@ pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_termi
         )
         .await
         .expect("complete");
-    let runner =
-        RestateProcessIngressRunner::new("http://127.0.0.1:1", registry, continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        "http://127.0.0.1:1",
+        registry,
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
 
     assert_eq!(
         await_process_terminal_until_terminal(&runner, &record.id.clone(),)
@@ -1164,7 +1182,12 @@ pub(super) async fn restate_process_attach_maps_definitive_ingress_error_to_plug
         .await
         .expect("register attach error target");
     let process_ref = record.id.clone();
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        registry,
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
 
     let err = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
@@ -1192,6 +1215,7 @@ pub(super) async fn restate_process_attach_preserves_re_attach_signal_on_ceiling
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
         registry,
         continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
     );
 
     let wait = runner
@@ -1222,6 +1246,7 @@ pub(super) async fn restate_process_attach_reattaches_after_timeout_until_termin
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
         registry,
         continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
     );
 
     let output = loop {
@@ -1425,7 +1450,12 @@ pub(super) async fn restate_process_attach_maps_malformed_ingress_body_to_plugin
         .await
         .expect("register malformed-body target");
     let process_ref = record.id.clone();
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        registry,
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
 
     let err = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
@@ -1529,7 +1559,12 @@ pub(super) async fn restate_process_attach_is_reentrant_across_sequential_awaits
         .await
         .expect("register reentrant attach target");
     let process_ref = record.id.clone();
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        registry,
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
 
     let first = await_process_terminal_until_terminal(&runner, &process_ref)
         .await
@@ -1633,7 +1668,12 @@ pub(super) async fn a_failed_process_start_delivery_is_retryable() {
         .await
         .expect("read the row")
         .expect("the row is retained");
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
+    let runner = RestateProcessIngressRunner::new(
+        base_url,
+        registry,
+        continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
+    );
     let error = runner
         .deliver_process_start(&record)
         .await

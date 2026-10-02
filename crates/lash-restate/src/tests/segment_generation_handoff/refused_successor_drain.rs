@@ -358,7 +358,7 @@ impl World {
                     registration: executed_registration(),
                     execution_context: ProcessExecutionContext::default(),
                     segment_ordinal: 0,
-                    sender_generation: Some(generation("N")),
+                    sender_generation: generation("N"),
                 }),
             )
             .await
@@ -427,6 +427,7 @@ impl World {
             self.connection.clone(),
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         );
         let drain = self.stores.generation_drain();
         let own = generation("N+1");
@@ -653,7 +654,7 @@ async fn a_crash_between_the_refusal_and_the_re_send_recovers(world: World) {
                 registration: executed_registration(),
                 execution_context: ProcessExecutionContext::default(),
                 segment_ordinal: SUCCESSOR,
-                sender_generation: Some(generation("N")),
+                sender_generation: generation("N"),
             }),
         )
         .await
@@ -769,6 +770,7 @@ async fn a_re_sent_successor_stays_on_its_recorded_lane(world: World) {
         &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
+        &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         crate::session_control::RecoveryScan {
             limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
             after: &mut None,
@@ -849,6 +851,7 @@ async fn a_refused_successor_of_a_gone_generation_keeps_its_work(world: World) {
         world.connection.clone(),
         Arc::clone(&world.registry),
         Arc::clone(&world.continuations),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         namespace,
     );
     let refusal = port

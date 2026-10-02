@@ -260,7 +260,7 @@ table lash_process_segment_handovers
   column route text not-null
   column segment_ordinal bigint not-null
   column started_json text nullable
-  column written_generation text nullable
+  column written_generation text not-null
   primary-key (process_id, segment_ordinal)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_tombstones

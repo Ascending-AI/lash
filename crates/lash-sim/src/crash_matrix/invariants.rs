@@ -225,8 +225,7 @@ impl ObligationProbe for ParentEndPlanProbe {
                 .map_err(|error| format!("read the parent-end plan of `{scope}`: {error}"))?;
             let Some(plan) = plan else { continue };
             match plan.obligation_state {
-                Some(ObligationState::Delivered | ObligationState::Stalled) => {}
-                None if plan.settled_at_ms.is_some() => {}
+                ObligationState::Delivered | ObligationState::Stalled => {}
                 state => unsettled.push(format!(
                     "parent-end plan of `{scope}` (ended at {}) is unsettled: obligation {:?} is {state:?}",
                     plan.ended_at_ms, plan.obligation_id

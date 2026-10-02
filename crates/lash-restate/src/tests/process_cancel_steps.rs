@@ -66,7 +66,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: boundary_handover(1),
             },
@@ -88,7 +88,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
     let key = process_segment_workflow_key(&process_id, 1);
 
@@ -120,7 +120,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: boundary_handover(3),
             },
@@ -203,7 +203,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 2,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: boundary_handover(2),
             },
@@ -271,7 +271,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: boundary_handover(3),
             },

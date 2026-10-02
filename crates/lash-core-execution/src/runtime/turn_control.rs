@@ -669,12 +669,11 @@ pub(crate) enum TurnGateTerminal {
 /// so an escalation row can never carry a second copy that disagrees. Readers
 /// rebuild the effective evidence via [`escalated_cancel_evidence`].
 ///
-/// The variant keeps the `cancel_requested` tag so the two promise spellings
-/// inter-decode in both directions: a row written before this payload existed
-/// simply ignores the extra fields, and a row written now decodes under the
-/// old shape with `undelivered` taking its serde default — which every old
-/// reader then discarded under the accepted base policy anyway.
+/// The promise has its own spelling: the `escalated` tag and exactly these
+/// fields. A base gate's `cancel_requested` evidence is not an escalation and
+/// does not decode as one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TurnEscalationEvidence {
     pub request_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -720,7 +719,6 @@ impl TurnEscalationEvidence {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "state", content = "cancellation", rename_all = "snake_case")]
 enum TurnEscalationTerminal {
-    #[serde(rename = "cancel_requested")]
     Escalated(TurnEscalationEvidence),
     CompletionSealed,
 }

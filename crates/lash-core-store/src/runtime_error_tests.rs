@@ -143,7 +143,6 @@ first_party_codes! {
         Self::EngineAwaitEventSessionUpdate,
         Self::EngineEffectController,
         Self::EffectReplayDivergence,
-        Self::ToolIntentReplayKeyFormatCutover,
         Self::LashlangCellReplayDivergence,
         Self::RetiredGeneration,
         Self::LashlangCellBindingDrift,
@@ -182,7 +181,6 @@ first_party_codes! {
         Self::RuntimeEffectEnvelopeCanonicalDecode,
         Self::RuntimeEffectEnvelopeCanonicalHashInvariant,
         Self::RuntimeEffectEnvelopeHash,
-        Self::RuntimeEffectEnvelopeVersion,
         Self::RuntimeEffectGroupAwaitCancelled,
         Self::RuntimeEffectGroupChildCancelled,
         Self::RuntimeEffectGroupChildCancelDecided,
@@ -264,7 +262,6 @@ fn missing_process_execution_id_round_trips() {
 fn replay_mismatch_classification_covers_every_durable_controller_code() {
     for code in [
         "effect_replay_divergence",
-        "tool_intent_replay_key_format_cutover",
         "lashlang_cell_replay_divergence",
         "retired_generation",
         "lashlang_cell_binding_drift",
@@ -602,7 +599,6 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
     for outcome in [
         RuntimeErrorCode::ProtocolBeforeLlmCall,
         RuntimeErrorCode::EngineProcessJournalIdentityDrift,
-        RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
     ] {
         assert_eq!(
             outcome.turn_failure_cause(),

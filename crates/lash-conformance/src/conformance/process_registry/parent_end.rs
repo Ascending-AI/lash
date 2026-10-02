@@ -65,8 +65,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         "a freshly written ledger row is unsettled"
     );
     assert!(
-        pending.obligation_id.is_some()
-            && pending.obligation_state == Some(lash_core::store::ObligationState::Due),
+        pending.obligation_state == lash_core::store::ObligationState::Due,
         "the record arms the row's ParentEnd obligation due immediately (ADR 0109 §3)"
     );
 
@@ -185,7 +184,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
     );
     assert_eq!(
         settled.obligation_state,
-        Some(lash_core::store::ObligationState::Delivered),
+        lash_core::store::ObligationState::Delivered,
         "the settle that applied the plan also delivered the due obligation \
          the row owed (ADR 0109)"
     );

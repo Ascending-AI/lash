@@ -157,7 +157,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
                 registration: executed_registration(),
                 execution_context: ProcessExecutionContext::default(),
                 segment_ordinal: 0,
-                sender_generation: None,
+                sender_generation: crate::tests::test_build_generation(),
             }),
         )
         .await

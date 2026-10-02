@@ -130,7 +130,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
-        _sender_generation: Option<lash_core::engine::BuildGeneration>,
+        _sender_generation: lash_core::engine::BuildGeneration,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,

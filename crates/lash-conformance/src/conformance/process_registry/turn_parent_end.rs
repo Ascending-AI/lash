@@ -127,7 +127,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
         .expect("the repeat left the one row");
     assert!(
         pending.settled_at_ms.is_none()
-            && pending.obligation_state == Some(lash_core::store::ObligationState::Due),
+            && pending.obligation_state == lash_core::store::ObligationState::Due,
         "the repeat kept the first row unsettled with its obligation still due"
     );
     assert!(
@@ -213,7 +213,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
             .expect("read the settled row after the repeated record")
             .expect("the settled row survives")
             .obligation_state,
-        Some(lash_core::store::ObligationState::Delivered),
+        lash_core::store::ObligationState::Delivered,
         "the settle delivered the obligation the row owed, and a repeated \
          record does not re-arm it"
     );
@@ -373,7 +373,7 @@ pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_root
         .expect("the close records the session's row");
     assert!(
         owed.settled_at_ms.is_none()
-            && owed.obligation_state == Some(lash_core::store::ObligationState::Due),
+            && owed.obligation_state == lash_core::store::ObligationState::Due,
         "the session's plan owes the never-root turn's child its cancel, so it is \
          not settled as childless: {owed:?}"
     );

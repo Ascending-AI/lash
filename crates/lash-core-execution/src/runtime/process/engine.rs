@@ -40,18 +40,13 @@ pub struct PersistedSegmentHandover {
     pub writer: String,
     /// The drain generation of the build that wrote this handover
     /// (FIG-3795 S3): the build the successor's send was made under, which a
-    /// refused successor is re-routed back to. Rows written before the stamp
-    /// existed carry none; a missing stamp is never derived.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub written_generation: Option<crate::engine::BuildGeneration>,
+    /// refused successor is re-routed back to.
+    pub written_generation: crate::engine::BuildGeneration,
     /// The full Restate service name the successor runs under (FIG-3795
     /// S3): the route it was sent under, or, for a successor the newest build
     /// refused, the sender's generation lane, recorded by the segment's start
     /// there (FIG-4750). A cancel, a redrive and the drain's wake address it
-    /// rather than a name recomputed from the running build. Rows
-    /// written before the column existed decode to the stable workflow name —
-    /// the only route a pre-stamp build could have sent under.
-    #[serde(default = "PersistedSegmentHandover::legacy_route")]
+    /// rather than a name recomputed from the running build.
     pub route: String,
     pub handover: SegmentHandover,
 }
@@ -59,14 +54,6 @@ pub struct PersistedSegmentHandover {
 impl PersistedSegmentHandover {
     pub fn program_hash(&self) -> &str {
         &self.handover.program_hash
-    }
-
-    /// The route every handover written before the stamp existed was sent
-    /// under: generation lanes do not exist before FIG-3795 part D, so the
-    /// stable workflow service name is the only possible value. The name is
-    /// frozen history for those rows — it is not the live service constant.
-    fn legacy_route() -> String {
-        "LashProcessWorkflow".to_string()
     }
 }
 
@@ -966,3 +953,47 @@ impl ProcessEngineRegistry {
 #[cfg(test)]
 #[path = "engine_resolve_tests.rs"]
 mod resolve_tests;
+
+#[cfg(test)]
+mod persisted_handover_tests {
+    use super::*;
+
+    /// A parked handover names the generation that wrote it and the route
+    /// its successor was sent under: a row missing either is not a handover.
+    #[test]
+    fn a_handover_row_missing_its_route_or_generation_fails_decode() {
+        let handover = PersistedSegmentHandover {
+            segment_ordinal: 1,
+            writer: String::new(),
+            written_generation: crate::engine::BuildGeneration::for_test("t0"),
+            route: "LashProcessWorkflow".to_string(),
+            handover: SegmentHandover {
+                reason: crate::BoundaryReason::JournalBudget,
+                program_hash: "program".to_string(),
+                engine_state: vec![1, 2, 3],
+            },
+        };
+        let row = serde_json::to_value(&handover).expect("encode the handover");
+        assert_eq!(
+            serde_json::from_value::<PersistedSegmentHandover>(row.clone())
+                .expect("the full row decodes"),
+            handover
+        );
+        for field in ["route", "written_generation"] {
+            let mut partial = row.clone();
+            partial
+                .as_object_mut()
+                .expect("the row is an object")
+                .remove(field)
+                .expect("the row carries the field");
+            let error = serde_json::from_value::<PersistedSegmentHandover>(partial)
+                .expect_err("a partial row must not decode");
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("missing field `{field}`")),
+                "{field}: {error}"
+            );
+        }
+    }
+}

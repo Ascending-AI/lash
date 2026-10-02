@@ -174,6 +174,7 @@ pub(super) fn conformance_restate_process_work(
         connection,
         registry,
         continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
     )) as Arc<dyn lash_core::ProcessWorkSubstrate>;
     (process_work, transport)
 }
@@ -2144,12 +2145,8 @@ pub(super) fn restate_replay_refuses_pre_effect_19_session_list_envelope() {
     };
 
     let error = validate_recorded_effect_envelope(recorded, &reconstructed, None)
-        .expect_err("Restate replay must refuse the pre-effect-19 envelope before comparison");
+        .expect_err("Restate replay must refuse an envelope this build never writes");
     assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
-    );
-    assert_ne!(
         error.code,
         lash_core::RuntimeErrorCode::EffectReplayDivergence
     );

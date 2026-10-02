@@ -158,21 +158,26 @@ fn decode_plan(
                 message: error.to_string(),
             }
         })?;
-    let obligation_state = obligation_state
-        .map(|label| {
-            lash_core_execution::store::ObligationState::from_label(&label).map_err(|error| {
-                PluginError::StoredDataCorrupt {
-                    record_kind: "parent_end_plan".to_string(),
-                    message: error.to_string(),
-                }
-            })
-        })
-        .transpose()?;
+    // The record arms the row in the transaction that writes it, so a
+    // committed row always names its obligation and where it stands.
+    let (Some(obligation_id), Some(obligation_state)) = (obligation_id, obligation_state) else {
+        return Err(PluginError::StoredDataCorrupt {
+            record_kind: "parent_end_plan".to_string(),
+            message: format!("scope `{kind}`/`{id}` closed without its obligation"),
+        });
+    };
+    let obligation_state = lash_core_execution::store::ObligationState::from_label(
+        &obligation_state,
+    )
+    .map_err(|error| PluginError::StoredDataCorrupt {
+        record_kind: "parent_end_plan".to_string(),
+        message: error.to_string(),
+    })?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended.max(0) as u64,
         settled_at_ms: settled.map(|value| value.max(0) as u64),
-        obligation_id: obligation_id.map(lash_core_execution::store::ObligationId::new),
+        obligation_id: lash_core_execution::store::ObligationId::new(obligation_id),
         obligation_state,
     })
 }

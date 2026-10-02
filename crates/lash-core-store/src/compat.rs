@@ -617,12 +617,9 @@ pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 99;
 /// `segment_generation` — the build generation that admitted the process's
 /// current segment — and `park_build_generation` — the build generation of
 /// the checkpoint a parked process resumes — each indexed; and
-/// `process_segment_handovers` gains `written_generation` and `route`.
-/// `written_generation` stays nullable for parity with the Postgres store:
-/// a missing stamp is never derived, and the two backends must accept the
-/// same writes. `route` is non-null — every write names the route its send
-/// took. A registry written before the change lacks the columns; recreate
-/// it.
+/// `process_segment_handovers` gains `written_generation` and `route`, both
+/// non-null: every write names the generation that made it and the route
+/// its send took. A registry without the columns is recreated.
 ///
 /// Version 44 also holds the drain marks (FIG-3799, changed in place under
 /// the same freeze): `draining_generations` names each build generation an

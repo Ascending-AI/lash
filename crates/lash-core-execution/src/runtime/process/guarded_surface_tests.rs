@@ -116,6 +116,24 @@ fn restamp_wake(bytes: &[u8], version: u32) -> Vec<u8> {
     restamp(bytes, "version", version)
 }
 
+/// A wake row states its format: one that carries no `version` is not read
+/// as any format, this build's included.
+#[test]
+fn a_wake_row_without_its_version_fails_decode() {
+    let fleet = FleetFormat::current();
+    let stamped = write_wake(fleet);
+    read_wake(&stamped, fleet).expect("the stamped row decodes");
+
+    let mut row: serde_json::Value = serde_json::from_slice(&stamped).expect("the row is JSON");
+    row.as_object_mut()
+        .expect("the row is an object")
+        .remove("version")
+        .expect("the row is stamped");
+    let error = read_wake(&serde_json::to_vec(&row).expect("encode the row"), fleet)
+        .expect_err("an unstamped row must not decode");
+    assert!(error.contains("missing field `version`"), "{error}");
+}
+
 fn probes() -> Vec<SurfaceProbe> {
     vec![
         SurfaceProbe {

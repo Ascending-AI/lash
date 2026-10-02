@@ -733,7 +733,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     }
                     AwaitEventWaitIdentity::TurnCancelEscalation if self.escalate_after_llm => {
                         Some(Resolution::Ok(serde_json::json!({
-                            "state": "cancel_requested",
+                            "state": "escalated",
                             "cancellation": {
                                 "request_id": "abort-escalated",
                                 "origin": "effect-controller-test",

@@ -96,13 +96,11 @@ pub struct ParentEndPlan {
     pub ended_at_ms: u64,
     /// `None` while children remain to settle.
     pub settled_at_ms: Option<u64>,
-    /// The store→engine obligation the row carries (ADR 0109): `None` only
-    /// on a row written before obligations armed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub obligation_id: Option<crate::store::ObligationId>,
-    /// Where that obligation stands; `None` exactly when `obligation_id` is.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub obligation_state: Option<crate::store::ObligationState>,
+    /// The store→engine obligation the row carries (ADR 0109): the record
+    /// that writes the row arms it in the same transaction.
+    pub obligation_id: crate::store::ObligationId,
+    /// Where that obligation stands.
+    pub obligation_state: crate::store::ObligationState,
 }
 
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
@@ -1024,4 +1022,43 @@ pub async fn release_bound_trigger_delivery_pins(
         released += 1;
     }
     Ok(released)
+}
+
+#[cfg(test)]
+mod parent_end_plan_tests {
+    use super::*;
+
+    /// A scope-close row is its obligation (ADR 0109): one that names no
+    /// obligation, or no state for it, is not a plan.
+    #[test]
+    fn a_plan_row_missing_its_obligation_pair_fails_decode() {
+        let plan = ParentEndPlan {
+            parent: crate::ScopeId::Session(crate::SessionId::from("session")),
+            ended_at_ms: 7,
+            settled_at_ms: None,
+            obligation_id: crate::store::ObligationId::new("obligation"),
+            obligation_state: crate::store::ObligationState::Due,
+        };
+        let row = serde_json::to_value(&plan).expect("encode the plan");
+        assert_eq!(
+            serde_json::from_value::<ParentEndPlan>(row.clone()).expect("the full row decodes"),
+            plan
+        );
+        for field in ["obligation_id", "obligation_state"] {
+            let mut partial = row.clone();
+            partial
+                .as_object_mut()
+                .expect("the row is an object")
+                .remove(field)
+                .expect("the row carries the field");
+            let error = serde_json::from_value::<ParentEndPlan>(partial)
+                .expect_err("a partial row must not decode");
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("missing field `{field}`")),
+                "{field}: {error}"
+            );
+        }
+    }
 }

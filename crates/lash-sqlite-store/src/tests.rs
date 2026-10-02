@@ -758,7 +758,7 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
     let handover = |segment_ordinal| PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal,
-        written_generation: Some(lash_core_execution::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core_execution::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: lash_core_execution::SegmentHandover {
             reason: lash_core_execution::BoundaryReason::JournalBudget,
@@ -792,6 +792,107 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
     );
 }
 
+/// A parked handover names the route its successor was sent under. A row
+/// that names none is refused where it is read, so nothing that would act
+/// on it — a redrive, a cancel, a re-route — sees a handover to act on, and
+/// the re-route leaves the row as it found it.
+#[tokio::test]
+async fn a_handover_row_missing_its_route_is_refused_before_any_effect() {
+    let registry = crate::SqliteStoreSet::memory()
+        .await
+        .expect("memory registry")
+        .process_registry();
+    let process_id = registry
+        .register_process(registration())
+        .await
+        .expect("register")
+        .id;
+    let handover = PersistedSegmentHandover {
+        writer: String::new(),
+        segment_ordinal: 1,
+        written_generation: lash_core_execution::engine::BuildGeneration::for_test("t0"),
+        route: "LashProcessWorkflow".to_string(),
+        handover: lash_core_execution::SegmentHandover {
+            reason: lash_core_execution::BoundaryReason::JournalBudget,
+            program_hash: "program-v1".to_string(),
+            engine_state: vec![1],
+        },
+    };
+    registry
+        .put_segment_handover(&process_id, handover.clone())
+        .await
+        .expect("park the handover");
+
+    let mut row = serde_json::to_value(&handover).expect("encode the handover");
+    row.as_object_mut()
+        .expect("the row is an object")
+        .remove("route")
+        .expect("the row names its route");
+    let without_route = row.to_string();
+    let stored = {
+        let process_id = process_id.clone();
+        move |conn: &rusqlite::Connection| {
+            conn.query_row(
+                "SELECT handover_json FROM process_segment_handovers
+                 WHERE process_id = ?1 AND segment_ordinal = 1",
+                rusqlite::params![process_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+        }
+    };
+    {
+        let process_id = process_id.clone();
+        let without_route = without_route.clone();
+        registry
+            .conn
+            .write(move |tx| {
+                tx.execute(
+                    "UPDATE process_segment_handovers SET handover_json = ?2
+                     WHERE process_id = ?1 AND segment_ordinal = 1",
+                    rusqlite::params![process_id.as_str(), without_route],
+                )
+            })
+            .await
+            .expect("rewrite the row without its route");
+    }
+
+    let refusals = [
+        registry
+            .get_segment_handover(&process_id, 1)
+            .await
+            .map(|_| ())
+            .expect_err("the read by ordinal refuses the row"),
+        registry
+            .latest_segment_handover(&process_id)
+            .await
+            .map(|_| ())
+            .expect_err("the latest read refuses the row"),
+        registry
+            .record_segment_handover_route(&process_id, 1, "LashProcessWorkflow.t0")
+            .await
+            .expect_err("the re-route refuses the row"),
+    ];
+    for refusal in refusals {
+        assert!(
+            matches!(
+                &refusal,
+                lash_core_execution::PluginError::Session(message)
+                    if message.contains("missing field `route`")
+            ),
+            "{refusal}"
+        );
+    }
+    let after = {
+        let stored = stored.clone();
+        registry
+            .conn
+            .call(move |conn| stored(conn))
+            .await
+            .expect("read the row back")
+    };
+    assert_eq!(after, without_route, "the refused re-route wrote nothing");
+}
+
 #[tokio::test]
 async fn terminal_segment_handover_cleanup_removes_continuation_state() {
     let registry = crate::SqliteStoreSet::memory()
@@ -809,9 +910,7 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
             PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
-                written_generation: Some(lash_core_execution::engine::BuildGeneration::for_test(
-                    "t0",
-                )),
+                written_generation: lash_core_execution::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: lash_core_execution::SegmentHandover {
                     reason: lash_core_execution::BoundaryReason::JournalBudget,

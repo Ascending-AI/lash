@@ -608,10 +608,8 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // process resumes — each indexed; `lash_turn_parks`,
 // `lash_turn_park_events` and `lash_process_park_events` gain
 // `park_build_generation`; and `lash_process_segment_handovers` gains
-// `written_generation` (nullable: rows a pre-stamp build wrote never
-// recorded the writer's generation, and a missing stamp is never derived)
-// and `route` (non-null: every write names the route its send took — a
-// pre-lane build could only send under the stable workflow name); and
+// `written_generation` and `route` (both non-null: every write names the
+// generation that made it and the route its send took); and
 // `lash_session_roots` records each root's admission (`admission_json`) and
 // `admitted_generation` — the drain generation of the drive that admitted
 // it — plus the drain's in-flight count index over it (FIG-3795 S9) and at

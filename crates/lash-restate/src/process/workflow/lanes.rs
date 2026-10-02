@@ -109,13 +109,10 @@ where
         }
         match payload {
             RestateProcessWorkflowPayload::Current(input) => {
-                let Some(sender) = input
-                    .sender_generation
-                    .clone()
-                    .filter(|sender| *sender != self.build_generation)
-                else {
+                if input.sender_generation == self.build_generation {
                     return Ok(*input);
-                };
+                }
+                let sender = input.sender_generation.clone();
                 // A new process runs on the newest build, whoever started it.
                 if input.segment_ordinal == 0 {
                     return Ok(*input);

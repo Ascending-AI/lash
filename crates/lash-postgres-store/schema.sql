@@ -999,7 +999,7 @@ CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
     segment_ordinal BIGINT NOT NULL,
     handover_json TEXT NOT NULL,
     started_json TEXT,
-    written_generation TEXT,
+    written_generation TEXT NOT NULL,
     route TEXT NOT NULL,
     PRIMARY KEY (process_id, segment_ordinal)
 );

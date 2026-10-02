@@ -202,7 +202,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
             "recording a plan arms its obligation -> {:?}",
             plan.obligation_state
         ));
-        plan_ids.push(plan.obligation_id.expect("the record armed the plan"));
+        plan_ids.push(plan.obligation_id);
     }
     out.push(cleanup(
         "cleanup with every obligation due",

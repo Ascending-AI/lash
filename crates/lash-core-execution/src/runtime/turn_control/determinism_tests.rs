@@ -280,3 +280,37 @@ fn a_turn_reading_the_live_gate_diverges_on_replay() {
         "{failure}"
     );
 }
+
+/// The escalation promise decodes only its own spelling: the base gate's
+/// `cancel_requested` terminal, and an escalation carrying the base gate's
+/// `undelivered` policy, are refused with the gate's typed decode error.
+#[test]
+fn an_escalation_promise_in_the_base_gates_spelling_fails_decode_typed() {
+    let current = gate_resolution(TurnEscalationTerminal::Escalated(
+        TurnEscalationEvidence::from(&evidence("abort", TurnCancelMode::Immediate)),
+    ))
+    .expect("encode the escalation terminal");
+    assert!(matches!(
+        decode_gate::<TurnEscalationTerminal>(current).expect("the current spelling decodes"),
+        TurnEscalationTerminal::Escalated(escalated) if escalated.request_id == "abort"
+    ));
+
+    let base_spelling = gate_resolution(TurnGateTerminal::CancelRequested(evidence(
+        "abort",
+        TurnCancelMode::Immediate,
+    )))
+    .expect("encode the base gate terminal");
+    let with_base_policy = Resolution::Ok(serde_json::json!({
+        "state": "escalated",
+        "cancellation": { "request_id": "abort", "undelivered": "drop" },
+    }));
+    for refused in [base_spelling, with_base_policy] {
+        let error = decode_gate::<TurnEscalationTerminal>(refused.clone())
+            .expect_err("another spelling is not an escalation");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::TurnCancelGateDecode,
+            "{refused:?}"
+        );
+    }
+}

@@ -27,12 +27,7 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             .bind(process_id.as_str())
             .bind(handover.segment_ordinal as i64)
             .bind(encoded)
-            .bind(
-                handover
-                    .written_generation
-                    .as_ref()
-                    .map(|generation| generation.as_str()),
-            )
+            .bind(handover.written_generation.as_str())
             .bind(handover.route.as_str())
             .execute(&mut **tx)
             .await

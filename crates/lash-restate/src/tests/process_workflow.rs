@@ -20,7 +20,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -209,7 +209,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
             registration,
             execution_context: ProcessExecutionContext::default(),
             segment_ordinal: 0,
-            sender_generation: None,
+            sender_generation: crate::tests::test_build_generation(),
         },
         true,
     )
@@ -1106,9 +1106,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                         lash_core::PersistedSegmentHandover {
                             writer: String::new(),
                             segment_ordinal: next,
-                            written_generation: Some(lash_core::engine::BuildGeneration::for_test(
-                                "t0",
-                            )),
+                            written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                             route: "LashProcessWorkflow".to_string(),
                             handover: boundary,
                         },

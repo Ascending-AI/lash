@@ -629,6 +629,62 @@ fn sealed_continuation(
     )
 }
 
+/// The worker-recovery ledger is part of the envelope (ADR 0123): a segment
+/// state that carries none is refused typed, not resumed with fresh totals.
+#[test]
+fn a_segment_state_without_its_worker_recovery_ledger_is_a_typed_format_rejection() {
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile the boundary program");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
+    let mut vm = lashlang::Vm::from_state(&program, &mut state, &environment)
+        .expect("construct the boundary VM");
+    let mut envelope = serde_json::to_value(LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: sealed_continuation(
+            &vm.suspend().expect("capture the boundary continuation"),
+            &lash_sansio::ProcessId::fixture("boundary"),
+        ),
+        ordinals: ReplayOrdinalsState {
+            commands: crate::LashlangRunOrdinals::start(),
+            event_sequence: 0,
+            signal_wait_ordinals: Default::default(),
+        },
+        started_process_ids: Vec::new(),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: Vec::new(),
+        effect_omissions: Default::default(),
+        outstanding_groups: Vec::new(),
+        held_tool_calls: Default::default(),
+        worker_recovery: Default::default(),
+    })
+    .expect("encode the segment state");
+    let full = serde_json::to_vec(&envelope).expect("encode the full envelope");
+    assert!(
+        decode_lashlang_segment_state(&full).is_ok(),
+        "the full envelope decodes"
+    );
+
+    envelope
+        .as_object_mut()
+        .expect("the envelope is an object")
+        .remove("worker_recovery")
+        .expect("the envelope carries the ledger");
+    let partial = serde_json::to_vec(&envelope).expect("encode the partial envelope");
+    let Err(error) = decode_lashlang_segment_state(&partial) else {
+        panic!("an envelope without its ledger must not decode");
+    };
+    assert!(
+        matches!(
+            &error,
+            LashlangSegmentStateError::FormatMismatch { details }
+                if details.contains("missing field `worker_recovery`")
+        ),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
     let Err(error) = decode_lashlang_segment_state(UNVERSIONED_SEGMENT_STATE) else {
@@ -861,6 +917,10 @@ async fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
         worker_parked_continuation(continuation),
     ))
     .expect("the sealed continuation encodes");
+    // A current envelope carries the worker-recovery ledger (ADR 0123); the
+    // predecessor's had none.
+    fixture["segment_state"]["worker_recovery"] =
+        serde_json::to_value(super::WorkerRecoveryLedger::default()).expect("the ledger encodes");
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current envelope");
     let continuation = worker_continuation_info(&segment.vm)

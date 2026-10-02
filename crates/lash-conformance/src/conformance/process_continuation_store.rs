@@ -31,7 +31,7 @@ pub async fn process_continuation_store(
     let handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
@@ -78,7 +78,7 @@ pub async fn process_continuation_store(
     let written = PersistedSegmentHandover {
         writer: "segment-nonce-a".to_string(),
         segment_ordinal: 2,
-        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
@@ -274,7 +274,7 @@ pub async fn process_continuation_store(
     let pruned_handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
@@ -304,7 +304,7 @@ pub async fn process_continuation_store(
             &pruned_process_id,
             PersistedSegmentHandover {
                 segment_ordinal: 2,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: SegmentHandover {

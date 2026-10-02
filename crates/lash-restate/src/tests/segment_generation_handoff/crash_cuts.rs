@@ -209,6 +209,7 @@ async fn a_wait_answers_the_record_state_on_every_host(fixture: &Fixture) {
                 RestateConnection::with_transport("https://restate.invalid", Arc::new(NoIngress)),
                 registry,
                 fixture.stores.process_continuations(),
+                lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
             )),
         ),
     ];

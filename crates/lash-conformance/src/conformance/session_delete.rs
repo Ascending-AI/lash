@@ -215,8 +215,8 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
             .await
             .expect("read the scope's plan")
             .expect("the plan is recorded");
-        assert_eq!(plan.obligation_state, Some(ObligationState::Due));
-        plans.push(plan.obligation_id.expect("the record armed the plan"));
+        assert_eq!(plan.obligation_state, ObligationState::Due);
+        plans.push(plan.obligation_id);
     }
     assert_eq!(
         ledger

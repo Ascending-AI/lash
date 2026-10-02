@@ -112,7 +112,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
             &process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: lash_core::SegmentHandover {
@@ -161,13 +161,11 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
                     registration,
                     execution_context: lash_core::ProcessExecutionContext::default(),
                     segment_ordinal: 1,
-                    sender_generation: Some(
-                        restate
-                            .restate()
-                            .build_generation()
-                            .expect("the engine's generation is bound")
-                            .clone(),
-                    ),
+                    sender_generation: restate
+                        .restate()
+                        .build_generation()
+                        .expect("the engine's generation is bound")
+                        .clone(),
                 }),
             ),
     )

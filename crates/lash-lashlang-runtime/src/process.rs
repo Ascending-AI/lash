@@ -266,9 +266,7 @@ struct LashlangSegmentState {
     /// reservations rather than counting the groups again or not at all.
     held_tool_calls: BTreeMap<String, usize>,
     /// The worker accounting the body carries across this boundary
-    /// (ADR 0123). Absent from a handover written before it existed: that
-    /// successor reserves boundary 0's successor with fresh totals.
-    #[serde(default)]
+    /// (ADR 0123).
     worker_recovery: WorkerRecoveryLedger,
 }
 

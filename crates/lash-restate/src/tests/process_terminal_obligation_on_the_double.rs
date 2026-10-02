@@ -190,6 +190,7 @@ impl World {
             &crate::services::DEFAULT_NAMESPACE,
             &self.registry,
             &self.continuations,
+            &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
             crate::session_control::RecoveryScan {
                 limit: std::num::NonZeroUsize::new(128).expect("nonzero"),
                 after: &mut None,
@@ -493,6 +494,7 @@ pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_r
             &crate::services::DEFAULT_NAMESPACE,
             &world.registry,
             &world.continuations,
+            &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
             crate::session_control::RecoveryScan {
                 limit: std::num::NonZeroUsize::new(64).expect("non-zero"),
                 after: &mut cursor,
@@ -586,6 +588,7 @@ pub(super) async fn a_started_process_whose_run_restate_purged_ends_substrate_lo
         &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
+        &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         crate::session_control::RecoveryScan {
             limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
             after: &mut None,
@@ -631,6 +634,7 @@ pub(super) async fn a_started_process_whose_run_restate_purged_ends_substrate_lo
         &crate::services::DEFAULT_NAMESPACE,
         &world.registry,
         &world.continuations,
+        &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         crate::session_control::RecoveryScan {
             limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
             after: &mut None,

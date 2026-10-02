@@ -1534,7 +1534,7 @@ fn fixture_handover() -> PersistedSegmentHandover {
     PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,

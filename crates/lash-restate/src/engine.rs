@@ -142,6 +142,7 @@ impl RestateEngine {
             authority,
             stores.process_registry(),
             stores.process_continuations(),
+            generation.clone(),
             process_event_sink,
             namespace.clone(),
         ));
@@ -164,6 +165,7 @@ impl RestateEngine {
                 namespace: namespace.clone(),
                 processes: stores.process_registry(),
                 continuations: stores.process_continuations(),
+                generation: generation.clone(),
                 sessions: stores.session_store_factory(),
             }),
         ));

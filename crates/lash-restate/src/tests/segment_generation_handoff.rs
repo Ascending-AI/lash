@@ -516,7 +516,7 @@ impl Roll {
                     registration: executed_registration(),
                     execution_context: ProcessExecutionContext::default(),
                     segment_ordinal: 0,
-                    sender_generation: Some(generation("N")),
+                    sender_generation: generation("N"),
                 }),
             )
             .await
@@ -632,6 +632,7 @@ impl Roll {
             &crate::services::DEFAULT_NAMESPACE,
             &self.registry,
             &self.continuations,
+            &lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
             crate::session_control::RecoveryScan {
                 limit: std::num::NonZeroUsize::new(16).expect("non-zero"),
                 after: &mut None,
@@ -786,7 +787,7 @@ async fn successor_runs_once_on_the_newest_build(seed: u64, cut: Cut, event: Eve
     );
     assert_eq!(
         handover.written_generation,
-        Some(generation("N")),
+        generation("N"),
         "{case}: the handover names the build that sent it"
     );
 
@@ -995,7 +996,7 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
                 registration: executed_registration(),
                 execution_context: ProcessExecutionContext::default(),
                 segment_ordinal: SUCCESSOR,
-                sender_generation: Some(generation("N")),
+                sender_generation: generation("N"),
             }),
         )
         .await
@@ -1194,7 +1195,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
             registration: executed_registration(),
             execution_context: ProcessExecutionContext::default(),
             segment_ordinal: SUCCESSOR,
-            sender_generation: Some(generation(sender)),
+            sender_generation: generation(sender),
         })
     };
     roll.ingress
@@ -1249,19 +1250,24 @@ async fn a_generation_lane_refuses_a_misrouted_input(seed: u64) {
         let lane = crate::services::DEFAULT_NAMESPACE
             .generation(crate::LashService::ProcessWorkflow, generation("N"));
         let key = process_segment_workflow_key(&process_id, 1);
+        // An input that names no sender is one this build does not decode:
+        // the lane reads what it can of it and refuses it the same way.
+        let mut input = serde_json::to_value(RestateProcessWorkflowInput {
+            process_id: process_id.clone(),
+            registration: executed_registration(),
+            execution_context: ProcessExecutionContext::default(),
+            segment_ordinal: 1,
+            sender_generation: generation("N+1"),
+        })
+        .expect("encode the misrouted input");
+        if sender.is_none() {
+            input
+                .as_object_mut()
+                .expect("the input is an object")
+                .remove("sender_generation");
+        }
         roll.ingress
-            .send_lash_workflow(
-                &lane.name(),
-                &key,
-                "run",
-                &RestateProcessWorkflowPayload::from(RestateProcessWorkflowInput {
-                    process_id: process_id.clone(),
-                    registration: executed_registration(),
-                    execution_context: ProcessExecutionContext::default(),
-                    segment_ordinal: 1,
-                    sender_generation: sender.clone(),
-                }),
-            )
+            .send_lash_workflow(&lane.name(), &key, "run", &input)
             .await
             .expect("send the misrouted input");
         let target = format!("{}/{key}/run", lane.name());

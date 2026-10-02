@@ -30,7 +30,6 @@ impl WorkerRecoveryLedger {
     pub(super) fn carried(handover: Option<&lash_core::SegmentHandover>) -> Self {
         #[derive(serde::Deserialize)]
         struct Probe {
-            #[serde(default)]
             worker_recovery: WorkerRecoveryLedger,
         }
         handover

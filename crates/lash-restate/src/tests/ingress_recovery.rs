@@ -87,6 +87,7 @@ async fn process_wait_reattaches_after_ingress_failure_to_the_real_outcome() {
             ingress.connection(),
             registry.clone(),
             continuation_store(),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         );
 
         assert_eq!(
@@ -146,6 +147,7 @@ async fn a_definitive_process_target_failure_keeps_its_typed_error() {
             ingress.connection(),
             registry.clone(),
             continuation_store(),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         );
 
         let error = runner
@@ -189,6 +191,7 @@ async fn caller_departure_refuses_the_wait_without_contacting_ingress() {
         ingress.connection(),
         registry.clone(),
         continuation_store(),
+        lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
     );
 
     assert!(matches!(runner.await_process_terminal(&process.id).await,

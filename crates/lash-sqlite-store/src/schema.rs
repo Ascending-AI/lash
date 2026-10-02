@@ -1122,7 +1122,7 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     segment_ordinal  INTEGER NOT NULL,
     handover_json    TEXT NOT NULL,
     started_json     TEXT,
-    written_generation TEXT,
+    written_generation TEXT NOT NULL,
     route            TEXT NOT NULL,
     PRIMARY KEY (process_id, segment_ordinal),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE

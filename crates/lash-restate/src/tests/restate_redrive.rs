@@ -857,7 +857,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     let parked = park_process_on_its_timer(&endpoint, &process_id, &input).await;
@@ -931,7 +931,7 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     let parked = park_process_on_its_timer(&endpoint, &process_id, &input).await;
@@ -984,7 +984,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     let persisted = lash_core::PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
@@ -1011,7 +1011,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     let admission = admission_journal(&endpoint, process_id.as_str(), &input)
@@ -1100,7 +1100,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -1126,7 +1126,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     let admission = admission_journal(&endpoint, process_id.as_str(), &input)
@@ -1246,7 +1246,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -1281,7 +1281,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     let effect_suspension = park_process_on_its_timer(&endpoint, &process_id, &input).await;
@@ -1410,7 +1410,7 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
 
     let admission = admission_journal(&endpoint, process_id.as_str(), &input)
@@ -2332,7 +2332,7 @@ pub(super) async fn drive_to_live_segment_boundary() -> (
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     };
     // The first attempt suspends after scheduling its successor, exactly as
     // FIG-788 pins.

@@ -324,6 +324,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             namespace.clone(),
             Arc::clone(&registry),
             Arc::clone(&continuations),
+            lash_core::engine::EngineGeneration::fixed(build_generation.clone()),
         ));
         Self::new_inner(
             runner,
@@ -1414,7 +1415,7 @@ where
         // rather than recomputing one.
         let successor_route = self.route.namespace().stable(LashService::ProcessWorkflow);
         let route = successor_route.name().into_owned();
-        let written_generation = Some(self.build_generation.clone());
+        let written_generation = self.build_generation.clone();
         let reference_id = format!("{route}/{successor_key}");
         let Json(handed_over) = context
             .run_json_or_retry_send::<Result<(), String>, _>(
@@ -1480,7 +1481,7 @@ where
                 registration: input.registration,
                 execution_context: input.execution_context,
                 segment_ordinal: next_segment_ordinal,
-                sender_generation: Some(self.build_generation.clone()),
+                sender_generation: self.build_generation.clone(),
             }),
         )
         .send()

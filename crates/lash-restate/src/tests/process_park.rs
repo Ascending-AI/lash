@@ -65,7 +65,7 @@ fn run_input(
         registration: registration.clone(),
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
-        sender_generation: None,
+        sender_generation: crate::tests::test_build_generation(),
     }
 }
 

@@ -29,7 +29,7 @@ fn registry_row_decode_error(err: serde_json::Error) -> PluginError {
 
 #[derive(serde::Deserialize)]
 struct ProcessWakeDeliveryFormatVersionProbe {
-    version: Option<u32>,
+    version: u32,
 }
 
 /// `fleet_format` is the `F` the bound registry store recorded: the read
@@ -43,8 +43,7 @@ pub(super) fn decode_process_wake_delivery(
 ) -> Result<ProcessWakeDelivery, PluginError> {
     let probe: ProcessWakeDeliveryFormatVersionProbe =
         serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
-    // A delivery written before the format carried a stamp is format 2.
-    let found = probe.version.unwrap_or(2);
+    let found = probe.version;
     let window = fleet_format.read_window(lash_core_store::surface_format!(
         PROCESS_WAKE_DELIVERY_FORMAT_VERSION
     ));

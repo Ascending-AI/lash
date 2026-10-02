@@ -136,8 +136,9 @@ async fn a_boundary_carries_the_totals_the_body_consumed_before_it() {
     );
 }
 
-/// The ledger rides the handover's envelope; a handover written before it
-/// existed carries none, and its successor starts from fresh totals.
+/// The ledger rides the handover's envelope. An envelope that carries none
+/// answers fresh totals here and is refused by the handover's full decode
+/// before any worker launches.
 #[test]
 fn the_ledger_is_read_from_the_handover_envelope() {
     let ledger = WorkerRecoveryLedger::default().crossed(WorkerRecoveryTotals {

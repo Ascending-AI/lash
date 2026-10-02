@@ -578,7 +578,7 @@ impl HandOff {
                         registration: self.registration.clone(),
                         execution_context: ProcessExecutionContext::default(),
                         segment_ordinal: 0,
-                        sender_generation: None,
+                        sender_generation: crate::tests::test_build_generation(),
                     },
                 ),
             )
@@ -659,6 +659,7 @@ impl HandOff {
             crate::RestateNamespace::default(),
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         )
         .deliver_hand_over(
             process_id,
@@ -745,6 +746,7 @@ impl HandOff {
             crate::RestateNamespace::default(),
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         );
         let work = lash_core::NoSessionWork::new();
         let scopes = lash_core::engine::NoScopeClose;

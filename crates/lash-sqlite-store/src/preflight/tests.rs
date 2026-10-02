@@ -462,7 +462,7 @@ mod walk {
         lash_core_execution::PersistedSegmentHandover {
             writer: String::new(),
             segment_ordinal,
-            written_generation: Some(lash_core_execution::engine::BuildGeneration::for_test("t0")),
+            written_generation: lash_core_execution::engine::BuildGeneration::for_test("t0"),
             route: "LashProcessWorkflow".to_string(),
             handover: lash_core_execution::SegmentHandover {
                 reason: lash_core_execution::BoundaryReason::JournalBudget,

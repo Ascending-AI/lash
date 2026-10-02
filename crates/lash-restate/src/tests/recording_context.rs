@@ -717,7 +717,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-        sender_generation: Option<lash_core::engine::BuildGeneration>,
+        sender_generation: lash_core::engine::BuildGeneration,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -2316,7 +2316,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-        _sender_generation: Option<lash_core::engine::BuildGeneration>,
+        _sender_generation: lash_core::engine::BuildGeneration,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,

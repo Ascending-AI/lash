@@ -1786,7 +1786,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
     let persisted = lash_core::PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
-        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
         route: "LashProcessWorkflow".to_string(),
         handover: first_handover,
     };
@@ -2030,7 +2030,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             let persisted = lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: next,
-                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
                 route: "LashProcessWorkflow".to_string(),
                 handover: boundary,
             };

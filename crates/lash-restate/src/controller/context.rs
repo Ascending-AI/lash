@@ -396,7 +396,7 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
         process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-        sender_generation: Option<lash_core::engine::BuildGeneration>,
+        sender_generation: lash_core::engine::BuildGeneration,
     ) -> crate::JournaledFuture<'run, String, ProcessWorkflowStartFailure>
     where
         'ctx: 'run;
@@ -1009,7 +1009,7 @@ macro_rules! impl_restate_controller_context {
                     process_id: lash_core::ProcessId,
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
-                    sender_generation: Option<lash_core::engine::BuildGeneration>,
+                    sender_generation: lash_core::engine::BuildGeneration,
                 ) -> crate::JournaledFuture<'run, String, ProcessWorkflowStartFailure>
                 where
                     'ctx: 'run,

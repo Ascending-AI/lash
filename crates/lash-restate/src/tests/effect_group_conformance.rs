@@ -698,6 +698,9 @@ impl LiveConformanceHarness {
                 namespace: crate::RestateNamespace::default(),
                 processes: self.stores.process_registry(),
                 continuations: self.stores.process_continuations(),
+                generation: lash_core::engine::EngineGeneration::fixed(
+                    lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+                ),
                 sessions: self.stores.session_store_factory(),
             }),
         )

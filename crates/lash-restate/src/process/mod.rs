@@ -556,19 +556,25 @@ pub struct RestateProcessIngressRunner {
     namespace: crate::RestateNamespace,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    /// The generation of the build this runner sends for: the sender every
+    /// root segment it submits names (FIG-3795 S6).
+    generation: lash_core::engine::EngineGeneration,
 }
 
 impl RestateProcessIngressRunner {
-    /// The runner of a deployment in the default namespace.
+    /// The runner of a deployment in the default namespace, sending as the
+    /// build `generation` names.
     pub fn new(
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        generation: lash_core::engine::EngineGeneration,
     ) -> Self {
         Self::in_namespace(
             connection,
             registry,
             continuations,
+            generation,
             crate::RestateNamespace::default(),
         )
     }
@@ -578,6 +584,7 @@ impl RestateProcessIngressRunner {
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        generation: lash_core::engine::EngineGeneration,
         namespace: crate::RestateNamespace,
     ) -> Self {
         Self {
@@ -585,6 +592,7 @@ impl RestateProcessIngressRunner {
             namespace,
             registry,
             continuations,
+            generation,
         }
     }
 
@@ -595,12 +603,14 @@ impl RestateProcessIngressRunner {
         namespace: crate::RestateNamespace,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        generation: lash_core::engine::EngineGeneration,
     ) -> Self {
         Self {
             ingress,
             namespace,
             registry,
             continuations,
+            generation,
         }
     }
 
@@ -654,19 +664,20 @@ impl RestateProcessIngressRunner {
         // the latest handover recorded rather than recomputing a name, and
         // carries the handover writer's generation as its sender, so the lane
         // it reaches judges it as the send it repeats. A root segment, which
-        // has no handover, was sent under the stable name, where a redrive of
-        // segment 0 is admitted from any sender.
-        let route = latest_handover.as_ref().map_or_else(
-            || {
+        // has no handover, is sent under the stable name by this build, and
+        // segment 0 is admitted there from any sender.
+        let (route, sender_generation) = match latest_handover {
+            Some(handover) => (handover.route, handover.written_generation),
+            None => (
                 self.namespace
                     .stable(crate::LashService::ProcessWorkflow)
-                    .to_string()
-            },
-            |handover| handover.route.clone(),
-        );
-        let sender_generation = latest_handover
-            .as_ref()
-            .and_then(|handover| handover.written_generation.clone());
+                    .to_string(),
+                self.generation
+                    .get()
+                    .map_err(|unbound| PluginError::Runtime(unbound.into()))?
+                    .clone(),
+            ),
+        };
         let registration = submitted_registration(record);
         let execution_context = ProcessExecutionContext::default();
         let invocation_id = self
@@ -736,7 +747,7 @@ impl RestateProcessIngressRunner {
         handover: &lash_core::PersistedSegmentHandover,
         generation: &lash_core::engine::BuildGeneration,
     ) -> Result<Option<ProcessRecord>, PluginError> {
-        if handover.written_generation.as_ref() != Some(generation) {
+        if handover.written_generation != *generation {
             return Ok(None);
         }
         let Some(record) = self.registry.get_process(process_id).await? else {
@@ -797,7 +808,7 @@ impl RestateProcessIngressRunner {
                     registration: submitted_registration(record),
                     execution_context: ProcessExecutionContext::default(),
                     segment_ordinal,
-                    sender_generation: Some(generation.clone()),
+                    sender_generation: generation.clone(),
                 },
             )
             .await
@@ -1143,8 +1154,16 @@ impl RestateProcessDeployment {
         authority_id: crate::RestateAuthorityId,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        generation: lash_core::engine::EngineGeneration,
     ) -> Self {
-        Self::new_with_sink(connection, authority_id, registry, continuations, None)
+        Self::new_with_sink(
+            connection,
+            authority_id,
+            registry,
+            continuations,
+            generation,
+            None,
+        )
     }
 
     #[cfg(test)]
@@ -1158,6 +1177,7 @@ impl RestateProcessDeployment {
             crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             registry,
             continuations,
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
         )
     }
 
@@ -1172,6 +1192,7 @@ impl RestateProcessDeployment {
         authority_id: crate::RestateAuthorityId,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        generation: lash_core::engine::EngineGeneration,
         sink: Option<Arc<dyn ProcessEventSink>>,
     ) -> Self {
         Self::in_namespace(
@@ -1179,6 +1200,7 @@ impl RestateProcessDeployment {
             authority_id,
             registry,
             continuations,
+            generation,
             sink,
             crate::RestateNamespace::default(),
         )
@@ -1192,6 +1214,7 @@ impl RestateProcessDeployment {
         authority_id: crate::RestateAuthorityId,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        generation: lash_core::engine::EngineGeneration,
         sink: Option<Arc<dyn ProcessEventSink>>,
         namespace: crate::RestateNamespace,
     ) -> Self {
@@ -1202,6 +1225,7 @@ impl RestateProcessDeployment {
             connection.clone(),
             Arc::clone(&registry),
             Arc::clone(&continuations),
+            generation,
             namespace.clone(),
         ));
         let process_work = ingress_runner;
@@ -1231,6 +1255,7 @@ impl RestateProcessDeployment {
             crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             registry,
             continuations,
+            lash_core::engine::EngineGeneration::fixed(crate::tests::test_build_generation()),
             sink,
         )
     }
@@ -1420,10 +1445,8 @@ pub struct RestateProcessWorkflowInput {
     /// from; for a new process, the build whose turn or segment started it.
     /// A generation lane admits only its own generation's inputs, and the
     /// stable lane holds a successor from another build to its successor
-    /// window. `None` names no build: a controller a host built, or a
-    /// redrive of a handover written before generations were stamped.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sender_generation: Option<lash_core::engine::BuildGeneration>,
+    /// window.
+    pub sender_generation: lash_core::engine::BuildGeneration,
 }
 
 /// What a process workflow invocation was submitted with.
@@ -1469,7 +1492,7 @@ impl RestateProcessWorkflowPayload {
     /// The generation of the build that sent the input, when it names one.
     pub(crate) fn sender_generation(&self) -> Option<&lash_core::engine::BuildGeneration> {
         match self {
-            Self::Current(input) => input.sender_generation.as_ref(),
+            Self::Current(input) => Some(&input.sender_generation),
             Self::Unreadable {
                 sender_generation, ..
             } => sender_generation.as_ref(),

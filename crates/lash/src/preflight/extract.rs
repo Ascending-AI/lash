@@ -428,13 +428,9 @@ fn pending_wake(payload: Payload<'_>) -> Vec<Extraction> {
     };
     match as_u32(root.get("version")) {
         Some(version) => vec![Extraction::Found { format, version }],
-        // The wake payload's decoder defaults an absent version to this
-        // build's, so an unstamped row genuinely opens. Reporting it as a
-        // refusal would flag every row written before the field existed as a
-        // drain blocker it is not.
-        None => vec![Extraction::Found {
+        None => vec![Extraction::Undecodable {
             format,
-            version: crate::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            reason: "wake delivery carries no readable `version`".to_string(),
         }],
     }
 }
@@ -806,18 +802,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unstamped_wake_reads_as_this_builds_version() {
-        // The opposite call from the segment case, and for a stated reason: the
-        // wake payload's own decoder defaults an absent version to this
-        // build's, so the row genuinely opens.
+    async fn an_unstamped_wake_is_undecodable_not_this_builds_version() {
+        // The wake payload's own decoder requires the stamp, so the probe
+        // reports what a read of the row would: it does not open.
         let extractions = extract(&item(
             DurableSurface::PendingWake,
             DurablePayload::Json(serde_json::json!({"wake_id": "w-1"}).to_string()),
         ))
         .await;
-        assert_eq!(
-            versions(&extractions, DurableFormat::ProcessWakeDelivery),
-            vec![crate::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION]
+        assert!(versions(&extractions, DurableFormat::ProcessWakeDelivery).is_empty());
+        let reasons = undecodable(&extractions, DurableFormat::ProcessWakeDelivery);
+        assert_eq!(reasons.len(), 1);
+        assert!(
+            reasons[0].contains("carries no readable `version`"),
+            "{reasons:?}"
         );
 
         let stamped = extract(&item(
@@ -929,7 +927,7 @@ mod tests {
         let payload = serde_json::to_string(&lash_core::PersistedSegmentHandover {
             writer: String::new(),
             segment_ordinal: 1,
-            written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+            written_generation: lash_core::engine::BuildGeneration::for_test("t0"),
             route: "LashProcessWorkflow".to_string(),
             handover: lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,

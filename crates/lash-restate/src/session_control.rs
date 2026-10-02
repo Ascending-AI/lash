@@ -33,6 +33,8 @@ pub(crate) struct RestateSessionControl {
     pub(crate) namespace: crate::RestateNamespace,
     pub(crate) processes: Arc<dyn lash_core::ProcessRegistry>,
     pub(crate) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    /// The generation a lost root segment is resubmitted under.
+    pub(crate) generation: lash_core::engine::EngineGeneration,
     pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
     pub(crate) lost_processes: tokio::sync::Mutex<Option<lash_core::ProcessRegistryCursor>>,
     pub(crate) lost_roots: tokio::sync::Mutex<Option<RootRef>>,
@@ -450,6 +452,7 @@ impl RestateSessionControl {
             &self.namespace,
             &self.processes,
             &self.continuations,
+            &self.generation,
             RecoveryScan {
                 limit: page.limit,
                 after: &mut cursor,

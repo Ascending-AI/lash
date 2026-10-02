@@ -54,10 +54,7 @@ impl SqliteProcessRegistry {
                             process_id.as_str(),
                             handover.segment_ordinal as i64,
                             encoded,
-                            handover
-                                .written_generation
-                                .as_ref()
-                                .map(|generation| generation.as_str()),
+                            handover.written_generation.as_str(),
                             handover.route
                         ],
                     )

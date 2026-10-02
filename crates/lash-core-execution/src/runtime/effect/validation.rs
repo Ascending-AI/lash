@@ -2,10 +2,6 @@
 /// version_guard(items(LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION, capture, verify))
 const LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION: &str = "lash-runtime-effect-envelope/v3";
 
-/// version_surface = "coexist"
-/// version_guard(items(TOOL_INTENT_PREFIX_VERSION, tool_intent_key_format_cutover))
-const TOOL_INTENT_PREFIX_VERSION: &str = "tool-intent:v2:";
-
 pub use lash_core_store::runtime_error::*;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -51,9 +47,6 @@ const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 /// every command, so the hash fixpoint below holds; a journaled model request
 /// just cannot be decoded back into its command, and nothing needs it to.
 ///
-/// Recorded shapes that this build cannot replay are refused by
-/// `validate_replayed_effect_envelope` before hash comparison. The Restate
-/// journal owns the durable record; there is no SQL effect generation to bump.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CanonicalRuntimeEffectEnvelope {
     json: String,
@@ -75,29 +68,6 @@ impl CanonicalRuntimeEffectEnvelope {
             json.as_bytes(),
         );
         Ok(Self { json, hash })
-    }
-
-    /// Refuses recorded shapes this binary cannot replay before any hash work.
-    fn refuse_unsupported_recorded_shape(&self) -> Result<(), RuntimeEffectControllerError> {
-        let value: Value = serde_json::from_str(&self.json).map_err(|err| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
-                format!("failed to decode canonical runtime effect payload: {err}"),
-            )
-        })?;
-        if is_pre_cutover_trigger_list_envelope(&value) {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
-                "pre-effect-19 trigger-list envelope uses the retired filter.session_id encoding; recreate the effect journal instead of replaying it across the cutover",
-            ));
-        }
-        if value.pointer("/command/type").and_then(Value::as_str) == Some("tool_batch") {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
-                "journaled tool-batch envelope predates effect groups (FIG-3397): a batch is a durable effect group of tool-invocation children and the batch command no longer exists; recreate the effect journal instead of replaying it across the cutover",
-            ));
-        }
-        Ok(())
     }
 
     pub fn hash(&self) -> &str {
@@ -141,15 +111,6 @@ impl CanonicalRuntimeEffectEnvelope {
         self.hash = hash.into();
         self
     }
-}
-
-fn is_pre_cutover_trigger_list_envelope(value: &Value) -> bool {
-    value.pointer("/command/type").and_then(Value::as_str) == Some("trigger")
-        && value.pointer("/command/command/op").and_then(Value::as_str) == Some("list")
-        && value
-            .pointer("/command/command/filter")
-            .and_then(Value::as_object)
-            .is_some_and(|filter| filter.contains_key("session_id"))
 }
 
 /// Trace capability dedicated to replay-divergence diagnostics.
@@ -210,7 +171,6 @@ pub fn validate_replayed_effect_envelope(
         mismatch_code.is_replay_mismatch(),
         "replay-validation seam requires a classified replay-mismatch code: {mismatch_code}"
     );
-    recorded.refuse_unsupported_recorded_shape()?;
     recorded.verify("recorded")?;
     reconstructed.verify("reconstructed")?;
 
@@ -237,14 +197,6 @@ pub fn validate_replayed_effect_envelope(
             format!("failed to decode reconstructed canonical envelope: {err}"),
         )
     })?;
-    if let Some((recorded_key, reconstructed_key)) =
-        tool_intent_key_format_cutover(&recorded_value, &reconstructed_value)
-    {
-        return Err(tool_intent_replay_key_format_cutover(
-            recorded_key,
-            reconstructed_key,
-        ));
-    }
     let mut differences = Vec::new();
     collect_differences(
         "",
@@ -295,34 +247,6 @@ pub fn validate_replayed_effect_envelope(
         ),
     )
     .with_summary(summary))
-}
-
-fn tool_intent_replay_key_format_cutover(
-    recorded_replay_key: &str,
-    requested_replay_key: &str,
-) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::ToolIntentReplayKeyFormatCutover,
-        format!(
-            "continuation replay refused at the tool-intent replay-key format cutover: journaled row uses `{recorded_replay_key}` from `tool-intent:v1:`, but this build requested `{requested_replay_key}` from `tool-intent:v2:`; start a fresh post-cutover invocation instead of re-executing the pre-cutover command"
-        ),
-    )
-}
-
-fn tool_intent_key_format_cutover<'a>(
-    recorded: &'a Value,
-    reconstructed: &'a Value,
-) -> Option<(&'a str, &'a str)> {
-    /// version_reservations = "retired tool-intent family recognized only to refuse replay"
-    const RETIRED_TOOL_INTENT_PREFIXES: &[&str] = &["tool-intent:v1:"];
-    const IDENTITY_REPLAY_KEY: &str = "/invocation/replay/attribution/identity/replay_key";
-    let recorded_key = recorded.pointer(IDENTITY_REPLAY_KEY)?.as_str()?;
-    let reconstructed_key = reconstructed.pointer(IDENTITY_REPLAY_KEY)?.as_str()?;
-    (RETIRED_TOOL_INTENT_PREFIXES
-        .iter()
-        .any(|prefix| recorded_key.starts_with(prefix))
-        && reconstructed_key.starts_with(TOOL_INTENT_PREFIX_VERSION))
-    .then_some((recorded_key, reconstructed_key))
 }
 
 fn render_divergent_paths(summary: &RuntimeEffectReplayMismatchReport) -> String {
@@ -475,84 +399,54 @@ mod tests {
         )
     }
 
-    /// Captured from origin/main a285f5f391e28ead3d1b13629757a8825d35dfe7
-    /// (FIG-3397 PR A, the last build with the batch command) by a throwaway
-    /// test that printed `RuntimeEffectEnvelope::canonical_form()` of a
-    /// one-call `ToolBatch` envelope.
+    /// The last shape that carried the batch command (FIG-3397): a one-call
+    /// `ToolBatch` envelope in its canonical form.
     const PREDECESSOR_TOOL_BATCH_ENVELOPE: &str = r#"{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session-blue\",\"turn_id\":\"turn-blue\"},\"replay_key\":\"turn-blue:tool-batch:batch-blue\"},\"effect_id\":\"tool-batch:batch-blue\",\"attribution\":{\"session_id\":\"session-blue\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"batch-blue\",\"calls\":[{\"call\":{\"call_id\":\"call-blue\",\"tool_id\":\"tool:blue\",\"tool_name\":\"blue\",\"args\":{\"q\":1}},\"replay_suffix\":\"child:0:call-blue\"}]}}}","hash":"36052881d682e556eb511c93336435ca2192d8e1a1020ef6032eeca81ae1f0ab"}"#;
 
-    #[test]
-    fn predecessor_tool_batch_envelope_is_typed_version_refusal() {
-        let outer: Value =
-            serde_json::from_str(PREDECESSOR_TOOL_BATCH_ENVELOPE).expect("predecessor fixture");
-        let inner: Value = serde_json::from_str(
-            outer["json"]
-                .as_str()
-                .expect("predecessor canonical envelope json"),
-        )
-        .expect("predecessor runtime envelope");
-        assert_eq!(
-            inner.pointer("/command/type"),
-            Some(&Value::String("tool_batch".to_string())),
-            "fixture must prove it carries the retired batch command"
-        );
-
-        let recorded: CanonicalRuntimeEffectEnvelope =
-            serde_json::from_str(PREDECESSOR_TOOL_BATCH_ENVELOPE).expect("recorded envelope");
-        let reconstructed = session_list_envelope()
-            .canonical_form()
-            .expect("reconstructed envelope");
-        let error = validate_replayed_effect_envelope(
-            &recorded,
-            &reconstructed,
-            crate::RuntimeErrorCode::EffectReplayDivergence,
-            None,
-        )
-        .expect_err("a journaled tool batch must be refused before replay comparison");
-        assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
-        );
-        assert!(!error.code.is_replay_mismatch());
-    }
-
-    /// Captured from origin/main 93aea8f3d6367e3b1a958df0f05caf2a835f20b7
-    /// with the throwaway capture command recorded in the FIG-2886 fix report.
+    /// The last shape whose trigger-list filter carried `session_id`
+    /// (FIG-2886).
     const PREDECESSOR_SESSION_LIST_ENVELOPE: &str = r#"{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session-blue\",\"turn_id\":\"turn-blue\"},\"replay_key\":\"trigger:list\"},\"effect_id\":\"trigger:list\",\"attribution\":{\"session_id\":\"session-blue\"}},\"command\":{\"type\":\"trigger\",\"command\":{\"op\":\"list\",\"owner_scope\":{\"type\":\"session\",\"session_id\":\"session-blue\"},\"filter\":{\"session_id\":\"session-blue\"}}}}","hash":"51ba8b5ff2d3fe2ff5f5009d4f8fc42946b11e86575901a64393b3e01c912db1"}"#;
 
+    /// A recorded envelope this build never writes has no refusal of its own:
+    /// it is what any other divergent journal row is, a replay mismatch under
+    /// the substrate's code.
     #[test]
-    fn predecessor_session_list_envelope_is_typed_version_refusal() {
-        let outer: Value =
-            serde_json::from_str(PREDECESSOR_SESSION_LIST_ENVELOPE).expect("predecessor fixture");
-        let inner: Value = serde_json::from_str(
-            outer["json"]
-                .as_str()
-                .expect("predecessor canonical envelope json"),
-        )
-        .expect("predecessor runtime envelope");
-        assert_eq!(
-            inner.pointer("/command/command/filter/session_id"),
-            Some(&Value::String("session-blue".to_string())),
-            "fixture must prove it carries the retired pre-cutover list shape"
-        );
+    fn a_recorded_shape_this_build_never_writes_is_an_ordinary_replay_divergence() {
+        for retired in [
+            PREDECESSOR_TOOL_BATCH_ENVELOPE,
+            PREDECESSOR_SESSION_LIST_ENVELOPE,
+        ] {
+            let recorded: CanonicalRuntimeEffectEnvelope =
+                serde_json::from_str(retired).expect("recorded envelope");
+            let reconstructed = session_list_envelope()
+                .canonical_form()
+                .expect("reconstructed envelope");
+            let error = validate_replayed_effect_envelope(
+                &recorded,
+                &reconstructed,
+                crate::RuntimeErrorCode::EffectReplayDivergence,
+                None,
+            )
+            .expect_err("a journal row this build did not write must not replay");
+            assert_eq!(
+                error.code,
+                crate::RuntimeErrorCode::EffectReplayDivergence,
+                "{retired}"
+            );
+            assert!(error.summary.is_some(), "{retired}");
+        }
+    }
 
-        let recorded: CanonicalRuntimeEffectEnvelope =
-            serde_json::from_str(PREDECESSOR_SESSION_LIST_ENVELOPE).expect("recorded envelope");
-        let reconstructed = session_list_envelope()
-            .canonical_form()
-            .expect("reconstructed envelope");
-        let error = validate_replayed_effect_envelope(
-            &recorded,
-            &reconstructed,
-            crate::RuntimeErrorCode::EffectReplayDivergence,
-            None,
-        )
-        .expect_err("v3 journal envelope must be refused before replay comparison");
-        assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
+    /// A journaled `tool-intent:v1:` replay key diverges from this build's
+    /// key like any other field: the mismatch names the path.
+    #[test]
+    fn a_tool_intent_replay_key_of_another_format_is_an_ordinary_replay_divergence() {
+        const KEY: &str = "replay_key";
+        let paths = mismatch_paths(
+            json!({ KEY: "tool-intent:v1:blake3:literal" }),
+            json!({ KEY: "tool-intent:v2:blake3:literal" }),
         );
-        assert!(!error.code.is_replay_mismatch());
+        assert_eq!(paths, [format!("command.call.args.{KEY}")]);
     }
 
     #[test]
