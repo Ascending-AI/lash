@@ -127,7 +127,11 @@ impl RuntimeCommit {
         self.validate_measured_byte_budget(&measurement, max_bytes.get())
     }
 
-    pub(super) fn validate_budget_and_record_size(&self) -> Result<(), StoreError> {
+    pub(super) fn validate_budget_and_record_size(
+        &self,
+        metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+        permit: Option<&lash_trace::EmissionPermit>,
+    ) -> Result<(), StoreError> {
         let node_result = self.validate_node_budget();
         let CommitBudgetLimit::Bounded(max_bytes) = self.commit_budget.bytes else {
             if node_result.is_ok() {
@@ -150,6 +154,8 @@ impl RuntimeCommit {
             "admitted"
         };
         crate::operational_metrics::record_runtime_commit_budgeted_size(
+            metrics,
+            permit,
             measurement.total_bytes,
             outcome,
         );

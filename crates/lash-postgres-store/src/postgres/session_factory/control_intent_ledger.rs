@@ -126,7 +126,7 @@ impl ControlIntentStore for PostgresStore {
     }
 
     async fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError> {
-        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
         load_intent_conn(&mut connection, id).await
     }
 }

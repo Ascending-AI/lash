@@ -30,7 +30,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 record_kind: "TurnCancellationBinding".to_string(),
                 message: error.to_string(),
             })?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -136,7 +136,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     }
                 })?;
         }
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -274,7 +274,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         self.validate_turn_cancellation_binding(session_id, fence, binding_id, admitted_scope)
             .await?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let rows: Vec<String> = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .closures
@@ -326,7 +326,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         let operation_key =
             lash_core_execution::OperationId::turn(&address.session_id, &address.turn_id, "final")
                 .storage_key()?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         sqlx::query_scalar(
             crate::session_sql::session_sql()
                 .turn_commits
@@ -346,7 +346,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     ) -> Result<lash_core_execution::TurnCancelRequestRecord, StoreError> {
         let session_id = &request.address.session_id;
         let turn_id = &request.address.turn_id;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -450,14 +450,26 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         address: &lash_core_execution::facade_support::TurnAddress,
     ) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
-        load_turn_cancel_request_pg(&self.pool, &address.session_id, &address.turn_id).await
+        load_turn_cancel_request_pg(
+            &self.pool,
+            &address.session_id,
+            &address.turn_id,
+            &self.observer,
+        )
+        .await
     }
 
     async fn turn_cancel_request_intent(
         &self,
         address: &lash_core_execution::facade_support::TurnAddress,
     ) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
-        load_turn_cancel_intent_snapshot_pg(&self.pool, &address.session_id, &address.turn_id).await
+        load_turn_cancel_intent_snapshot_pg(
+            &self.pool,
+            &address.session_id,
+            &address.turn_id,
+            &self.observer,
+        )
+        .await
     }
 
     async fn reconcile_turn_cancel_winner(
@@ -466,7 +478,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         observed: &lash_core_execution::TurnCancelIntentSnapshot,
         evidence: &lash_core_execution::facade_support::TurnCancellationEvidence,
     ) -> Result<bool, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, &address.session_id).await?;
         let applied = reconcile_turn_cancel_winner_tx(
@@ -487,7 +499,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
     ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
         use lash_core_execution::store_backend_support as support;
         let session_id = batch.session_id();
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -655,7 +667,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
         hash: &lash_core_execution::RunSpecHash,
     ) -> Result<Option<lash_core_execution::RunSpec>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let stored: Option<String> = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .run_specs
@@ -683,7 +695,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // Open and admitted rows, and the rows a checkpoint accepted into a
         // running root, read in one snapshot and listed in `enqueue_seq`
@@ -724,7 +736,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         // One point read by primary key; the list's lifecycle filter is
         // applied to the one row here: a row is listed until it is completed
         // or cancelled, open or admitted to its root alike.
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
@@ -746,7 +758,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let rows = sqlx::query(
             crate::session_sql::session_sql()
                 .turn_commits
@@ -785,7 +797,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
         targets: &[lash_core_execution::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -847,7 +859,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
         anchor: &lash_core_execution::PendingTurnInputCancelTarget,
     ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)

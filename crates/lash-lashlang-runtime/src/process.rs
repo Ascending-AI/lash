@@ -22,10 +22,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use lash_core::facade_support::ToolChildExecutionTraceHook;
 use lash_sansio::sync::MutexExt;
 use lash_trace::{
-    TraceBranchSelection, TraceContext, TraceEvent, TraceLanguageChildExecution,
-    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceNodeAwaited, TraceNodeWaitResolution, TraceRecord,
-    TraceRuntimeScope, TraceRuntimeSubject, TraceSink,
+    TraceBranchSelection, TraceEvent, TraceLanguageChildExecution, TraceLanguageExecution,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    TraceNodeAwaited, TraceNodeWaitResolution, TraceRuntimeScope, TraceRuntimeSubject,
 };
 use lashlang::{ExecutionHost, ExecutionHostError};
 
@@ -599,8 +598,7 @@ async fn run_lashlang_process_scoped(
         .and_then(lash_core::ProcessExecutionWriteAuthority::attempt)
         .expect("process engine runs with attempt-bound write authority");
     let mut lashlang_execution_trace = LashlangProcessExecutionTrace::new(
-        engine.execution_sink.clone(),
-        engine.trace_context.clone(),
+        lash_core::plugin::PluginExecutionTrace::new(context.trace_standing()),
         LashlangProcessTraceIdentity {
             session_id,
             process_id: process_id.clone(),
@@ -1643,8 +1641,7 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
 
 #[derive(Clone)]
 struct LashlangProcessExecutionTrace {
-    sink: Option<Arc<dyn TraceSink>>,
-    base_context: TraceContext,
+    tracing: lash_core::plugin::PluginExecutionTrace,
     session_id: Option<SessionId>,
     process_id: ProcessId,
     source_identity: String,

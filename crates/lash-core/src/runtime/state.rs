@@ -17,12 +17,18 @@ pub(crate) async fn commit_in_lane_context(
     store: crate::store::SessionStore,
     mut commit: crate::RuntimeCommit,
     resident_graph_head_stale: &AtomicBool,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+    permit: Option<&lash_trace::EmissionPermit>,
 ) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
     let Some(fence) = drive_fence else {
-        return store.commit_runtime_state_verified(commit).await;
+        return store
+            .commit_runtime_state_verified(commit, metrics, permit)
+            .await;
     };
     commit.drive_fence = Some(Box::new(fence.clone()));
-    let result = store.commit_runtime_state_verified(commit).await;
+    let result = store
+        .commit_runtime_state_verified(commit, metrics, permit)
+        .await;
     if result.is_ok() {
         // The drive remains current, but this service committed from a
         // snapshot outside the owning runtime. Force a deliberate head

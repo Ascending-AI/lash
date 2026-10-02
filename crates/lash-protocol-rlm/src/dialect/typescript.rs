@@ -449,7 +449,7 @@ mod tests {
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -509,7 +509,7 @@ mod tests {
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -626,7 +626,7 @@ mod tests {
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -711,7 +711,7 @@ mod tests {
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -776,7 +776,7 @@ mod tests {
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -864,7 +864,7 @@ mod tests {
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -1015,8 +1015,7 @@ mod tests {
                         artifact_store: crate::testing::sqlite_memory_artifact_store().await,
                         deferred_tool_resolver: None,
                         deferred_trigger_resolver: None,
-                        execution_trace_config:
-                            crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
                         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                         code_renderer: Default::default(),
                         channel: crate::plugin::RlmChannel::Cell,

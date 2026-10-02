@@ -839,9 +839,14 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
         divergent_hash, first_hash,
         "the receipt identity must cover mutated topology"
     );
-    let err = crate::store::commit_runtime_state_verified(store.as_ref(), divergent_replay)
-        .await
-        .expect_err("the store must reject a mutated commit reusing an operation id");
+    let err = crate::store::commit_runtime_state_verified(
+        store.as_ref(),
+        divergent_replay,
+        &Default::default(),
+        None,
+    )
+    .await
+    .expect_err("the store must reject a mutated commit reusing an operation id");
     assert!(
         matches!(&err, StoreError::RuntimeTurnCommitConflict { .. }),
         "unexpected mutated-commit error: {err:?}"

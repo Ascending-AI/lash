@@ -1685,7 +1685,6 @@ async fn map_provider_installs_transport_decorator() {
 
 #[tokio::test]
 async fn provider_handle_retries_retryable_failures_in_shared_executor() {
-    #[cfg(feature = "otel-trace")]
     let metrics = crate::operational_metrics::TestMetrics::install();
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = FailingProvider {
@@ -1702,8 +1701,21 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
     };
     let mut handle = ProviderHandle::new(provider.into_components());
 
+    let mut request = empty_request();
+    let sideband = handle.prepare_completion(&mut request);
+    let instruments = lash_trace::telemetry::metrics::TelemetryMetrics::default();
+    let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
+        "test-provider-body",
+    ));
     let completion = handle
-        .complete(empty_request(), <dyn DispatchAdmission>::host_owned())
+        .complete_prepared(
+            request,
+            sideband,
+            crate::ChargeSafetyPolicy::default(),
+            <dyn DispatchAdmission>::host_owned(),
+            &instruments,
+            Some(&permit),
+        )
         .await
         .expect("eventual success");
 
@@ -1730,7 +1742,6 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
             .all(|attempt| attempt.retry_budget_consumed)
     );
     assert_eq!(completion.call_record.attempts[2].evidence, None);
-    #[cfg(feature = "otel-trace")]
     assert_eq!(metrics.counter_value("lash.provider.retries"), 2);
 }
 
@@ -1952,7 +1963,6 @@ async fn provider_handle_set_options_affects_retry_behavior() {
 
 #[tokio::test]
 async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
-    #[cfg(feature = "otel-trace")]
     let metrics = crate::operational_metrics::TestMetrics::install();
     let attempts = Arc::new(AtomicUsize::new(0));
     let clock = Arc::new(RecordingClock::default());
@@ -1975,8 +1985,21 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
     let mut handle =
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
+    let mut request = empty_request();
+    let sideband = handle.prepare_completion(&mut request);
+    let instruments = lash_trace::telemetry::metrics::TelemetryMetrics::default();
+    let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
+        "test-provider-body",
+    ));
     let completion = handle
-        .complete(empty_request(), <dyn DispatchAdmission>::host_owned())
+        .complete_prepared(
+            request,
+            sideband,
+            crate::ChargeSafetyPolicy::default(),
+            <dyn DispatchAdmission>::host_owned(),
+            &instruments,
+            Some(&permit),
+        )
         .await
         .expect("success after deferred throttle waits");
 
@@ -1990,7 +2013,6 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
             .all(|attempt| !attempt.retry_budget_consumed)
     );
     assert!(completion.call_record.attempts[3].retry_budget_consumed);
-    #[cfg(feature = "otel-trace")]
     {
         assert_eq!(metrics.counter_value("lash.provider.retries"), 3);
         assert_eq!(

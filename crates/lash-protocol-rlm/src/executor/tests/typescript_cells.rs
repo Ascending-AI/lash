@@ -34,7 +34,7 @@ fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
                 crate::render::CodeRendererSlot::default(),
@@ -102,7 +102,7 @@ fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
             crate::render::CodeRendererSlot(Arc::new(JournalPrintRenderer {
@@ -166,7 +166,7 @@ fn journaled_prints_replay_without_calling_the_renderer() {
                         LashlangSurface::default(),
                         None,
                         RlmProjectedBindings::default(),
-                        RlmLashlangExecutionTraceConfig::default(),
+                        None,
                         lashlang::ExecutionBounds::unbounded(),
                         crate::plugin::RlmChannel::Cell,
                         crate::render::CodeRendererSlot(Arc::new(JournalPrintRenderer {
@@ -305,7 +305,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
@@ -373,10 +373,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig {
-                    sink: Some(sink.clone()),
-                    trace_context: TraceContext::default(),
-                },
+                Some(test_trace(sink.clone())),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             ).await;
@@ -480,7 +477,7 @@ async fn execute_typescript_test_cell(
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -706,7 +703,7 @@ async fn pending_handle_cell(code: &str) -> (lash_core::ExecResponse, usize) {
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -854,7 +851,7 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
@@ -917,7 +914,7 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
@@ -1120,7 +1117,7 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )

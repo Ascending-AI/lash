@@ -45,6 +45,9 @@ impl DurableProcessWorkerConfig {
         queued_work: Arc<dyn crate::SessionWorkEngine>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
+        let plugin_host = Arc::new(
+            Arc::unwrap_or_clone(plugin_host).with_trace_runtime(runtime_host.tracing.clone()),
+        );
         Self {
             plugin_host,
             runtime_host,

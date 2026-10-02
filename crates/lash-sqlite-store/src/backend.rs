@@ -22,6 +22,8 @@ use crate::{
 /// journal and so has no effect-replay options.
 #[derive(Clone, Debug, Default)]
 pub struct SqliteStoreSetOptions {
+    /// Physical store observations; SQLite has no connection-pool wait to report.
+    pub observer: lash_core_execution::facade_support::StoreObserver,
     /// Blob and connection policy for the durable-core catalog.
     pub store: StoreOptions,
     /// Retention and staleness bounds of the process registry's wake

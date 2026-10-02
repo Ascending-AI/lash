@@ -176,8 +176,9 @@ pub(crate) async fn settle_observer_intents_tx(
 pub(crate) async fn load_session_meta(
     pool: &PgPool,
     selected_session_id: Option<&SessionId>,
+    observer: &crate::StoreObserver,
 ) -> Result<Option<SessionMeta>, StoreError> {
-    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut connection = acquire_runtime_connection(pool, observer).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     let row = if let Some(session_id) = selected_session_id {
         sqlx::query(session_sql().meta_postgres.select_relation_for_share.sql())

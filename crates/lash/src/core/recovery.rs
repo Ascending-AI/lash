@@ -38,6 +38,7 @@ impl RecoverySlot {
             LeaseName::new(format!("recovery:{authority}")),
             config,
             Arc::clone(&env.core.clock),
+            lash_core::operational_metrics::StoreObserver::new(env.core.tracing.metrics().clone()),
         )
     }
 
@@ -47,6 +48,7 @@ impl RecoverySlot {
         name: LeaseName,
         config: RecoveryLeaseConfig,
         clock: Arc<dyn lash_core::Clock>,
+        observer: lash_core::operational_metrics::StoreObserver,
     ) -> Self {
         Self {
             lease: Arc::new(RecoveryLease::new(
@@ -55,6 +57,7 @@ impl RecoverySlot {
                 config.generation_rank,
                 config.timings,
                 Arc::clone(&clock),
+                observer,
             )),
             started: std::sync::atomic::AtomicBool::new(false),
             first: Arc::new(tokio::sync::watch::channel(false).0),
@@ -268,6 +271,7 @@ mod tests {
                 },
             },
             Arc::new(lash_core::facade_support::SystemClock),
+            lash_core::operational_metrics::StoreObserver::default(),
         ));
         let tick = tokio::spawn({
             let slot = Arc::clone(&slot);

@@ -703,7 +703,10 @@ impl LashRuntime {
             self.turn_phase_probe.clone(),
             SESSION_COMMAND_STAGED_PHASE,
         ));
-        match store.commit_runtime_state_verified(commit).await {
+        match store
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+            .await
+        {
             Ok(result) => {
                 let receipt_replayed = result.receipt_replayed;
                 self.state.apply_persisted_commit_result(result);

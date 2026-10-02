@@ -43,7 +43,7 @@ pub(crate) async fn admit_root_postgres(
     request: &lash_core_execution::store::AdmitRootRequest,
 ) -> Result<Option<RootAdmission>, StoreError> {
     let session_id = request.session_id();
-    let mut connection = acquire_runtime_connection(&store.pool).await?;
+    let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
     let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
@@ -199,7 +199,7 @@ pub(crate) async fn admit_at_checkpoint_postgres(
     store
         .checkpoint_probe_count
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if !checkpoint_work_pending_postgres(&store.pool, request).await? {
+    if !checkpoint_work_pending_postgres(&store.pool, request, &store.observer).await? {
         return Ok(CheckpointAdmission::default());
     }
     #[cfg(test)]
@@ -207,7 +207,7 @@ pub(crate) async fn admit_at_checkpoint_postgres(
         .checkpoint_write_transaction_count
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let session_id = request.session_id();
-    let mut connection = acquire_runtime_connection(&store.pool).await?;
+    let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
     let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
@@ -290,7 +290,7 @@ pub(crate) async fn open_session_command_run_postgres(
     fence: &lash_core_execution::store::DriveFence,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let session_id = fence.session();
-    let mut connection = acquire_runtime_connection(&store.pool).await?;
+    let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
     let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
@@ -340,8 +340,9 @@ pub(crate) async fn open_session_command_run_postgres(
 async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
     request: &CheckpointAdmissionRequest,
+    observer: &crate::StoreObserver,
 ) -> Result<bool, StoreError> {
-    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut connection = acquire_runtime_connection(pool, observer).await?;
     super::drive_epoch::require_fence_conn(&mut connection, request.session_id(), &request.fence)
         .await?;
     // One statement per checkpoint, chosen exhaustively: the admitted

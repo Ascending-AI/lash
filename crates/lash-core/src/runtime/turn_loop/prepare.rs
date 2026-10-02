@@ -148,7 +148,8 @@ impl LashRuntime {
                     self.state.turn_scope(&trace_turn_id),
                     self.host.core.durability.commit_budget,
                 )
-                .with_definition_engines(self.host.core.process_engines.clone());
+                .with_definition_engines(self.host.core.process_engines.clone())
+                .with_metrics(self.host.core.tracing.metrics().clone());
                 turn_pipeline.apply_prepared_messages(&messages);
                 return Box::pin(self.finish_turn(TurnCommitContext {
                     finish: TurnFinishInput {

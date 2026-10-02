@@ -489,6 +489,7 @@ impl Processes {
         crate::support::build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
+            &self.core.env.core.tracing,
         )?
         .resolve_creation_plugin_config(
             self.core

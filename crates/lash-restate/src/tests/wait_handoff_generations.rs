@@ -705,6 +705,7 @@ fn law_lease(roll: &HandOff, generation_rank: i64) -> RecoveryLease {
             min_tenure: Duration::ZERO,
         },
         Arc::new(lash_core::facade_support::SystemClock),
+        lash_core::operational_metrics::StoreObserver::default(),
     )
 }
 

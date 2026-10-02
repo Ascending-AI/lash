@@ -220,7 +220,12 @@ async fn reconcile_process_work(
         .park_process_with_authority(&record.id, park, &authority)
         .await?;
     let reason = lash_core::store::ParkReasonCode::EngineRetryExhausted;
-    lash_core::operational_metrics::record_work_parked("process", reason.as_str());
+    lash_core::operational_metrics::record_work_parked(
+        &Default::default(),
+        None,
+        "process",
+        reason.as_str(),
+    );
     tracing::warn!(
         event = "process.parked",
         process_id = record.id.as_str(),

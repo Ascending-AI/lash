@@ -10,7 +10,7 @@ impl PostgresStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -33,7 +33,7 @@ impl PostgresStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -59,7 +59,7 @@ impl PostgresStore {
         session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -100,7 +100,7 @@ impl PostgresStore {
         session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<lash_core_execution::store::RuntimeCommitReceipt>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
@@ -129,7 +129,7 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(
             crate::connection_sql::connection_sql()
@@ -164,7 +164,7 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -206,7 +206,7 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // One snapshot for the batch rows and their item rows; see
         // `list_queued_work`.

@@ -9,6 +9,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct PluginHost {
+    trace_runtime: crate::trace::TraceRuntime,
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
@@ -144,7 +145,17 @@ impl PluginHost {
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry,
+            trace_runtime: crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
         }
+    }
+
+    pub fn with_trace_runtime(mut self, trace_runtime: crate::trace::TraceRuntime) -> Self {
+        self.trace_runtime = trace_runtime;
+        self
+    }
+
+    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
+        &self.trace_runtime
     }
 
     pub fn with_extensions(mut self, extensions: PluginExtensions) -> Self {
@@ -159,6 +170,7 @@ impl PluginHost {
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry: Arc::clone(&self.config_registry),
+            trace_runtime: self.trace_runtime.clone(),
         }
     }
 
@@ -261,14 +273,12 @@ impl PluginHost {
         mut runtime_host: crate::RuntimeHostConfig,
         process_lifecycle_available: bool,
     ) -> Result<crate::RuntimeHostConfig, PluginError> {
-        let trace_context = runtime_host.process_engine_trace_context().clone();
-        let observation_sink = runtime_host.process_observation_sink();
+        let trace_runtime = runtime_host.tracing.clone();
         let ctx = super::ProcessEngineContributionContext::new(
             self,
-            &trace_context,
+            &trace_runtime,
             process_lifecycle_available,
-        )
-        .with_process_observation_sink(observation_sink);
+        );
         for factory in self.factories() {
             for engine in factory.process_engine_contributions(&ctx)? {
                 runtime_host.install_contributed_process_engine(engine)?;
@@ -317,6 +327,8 @@ impl PluginHost {
             .transpose()?;
         let snapshot = decoded_snapshot.as_ref();
         let ctx = PluginSessionContext {
+            tracing: self.trace_runtime.clone(),
+            trace: None,
             owner,
             tool_access: authority.tool_access.clone(),
             subagent: authority.subagent.clone(),
@@ -371,6 +383,8 @@ impl PluginHost {
                 PluginStateStore::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
             let probe = state.retention_probe();
             plugin.session_ready(SessionReadyContext {
+                tracing: self.trace_runtime.clone(),
+                trace: None,
                 owner: session.owner.clone(),
                 host: self.plugin_view(),
                 state,

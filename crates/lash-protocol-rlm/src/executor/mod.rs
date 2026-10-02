@@ -22,9 +22,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{
-    ExecRequest, ExecResponse, RuntimeExecutionContext, TraceContext,
-    facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
-    facade_support::TraceSink,
+    ExecRequest, ExecResponse, RuntimeExecutionContext, facade_support::TraceRuntimeScope,
+    facade_support::TraceRuntimeSubject,
 };
 // Cell execution itself is infallible, so the only fallible surface left in
 // this module is the feature-gated performance fixture.
@@ -52,12 +51,6 @@ fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
     EXECUTION_BOUND_EXHAUSTION_LOUD.swap(loud, Ordering::SeqCst)
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct RlmLashlangExecutionTraceConfig {
-    pub(crate) sink: Option<Arc<dyn TraceSink>>,
-    pub(crate) trace_context: TraceContext,
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     dialect: &dyn crate::dialect::Dialect,
@@ -69,7 +62,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
@@ -127,7 +119,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         deferred_tool_resolver,
         deferred_trigger_resolver,
         session_projected_bindings,
-        lashlang_execution_trace_config,
         execution_bounds,
         channel,
         Arc::clone(&prints),
@@ -288,7 +279,6 @@ impl RlmCheckpointPerfFixture {
             None,
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
             crate::render::CodeRendererSlot::default(),
@@ -344,7 +334,6 @@ async fn execute_code_inner(
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
@@ -392,7 +381,6 @@ async fn execute_code_inner(
         deferred_tool_resolver,
         deferred_trigger_resolver,
         session_projected_bindings,
-        lashlang_execution_trace_config,
         execution_bounds,
         channel,
         prints,
@@ -419,7 +407,6 @@ async fn execute_code_in_worker_scope(
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
@@ -631,7 +618,6 @@ async fn execute_code_in_worker_scope(
                     Err(error) => {
                         emit_step_trace(
                             &ctx,
-                            &lashlang_execution_trace_config,
                             Err(&format!("invalid Lashlang host tool surface: {error}")),
                         );
                         return exec_setup_failure_or_stop(
@@ -717,17 +703,12 @@ async fn execute_code_in_worker_scope(
             );
         }
         Err(error) => {
-            emit_step_trace(
-                &ctx,
-                &lashlang_execution_trace_config,
-                Err(&error.to_string()),
-            );
+            emit_step_trace(&ctx, Err(&error.to_string()));
             return worker_setup_failure(state, &ctx, error);
         }
     };
     emit_step_trace(
         &ctx,
-        &lashlang_execution_trace_config,
         compile_result
             .as_ref()
             .map(|_| ())
@@ -788,12 +769,8 @@ async fn execute_code_in_worker_scope(
             .map(deferred_execution_grants)
             .unwrap_or_default(),
     };
-    let lashlang_execution_trace = foreground_lashlang_execution_trace(
-        &ctx,
-        &linked_module.artifact,
-        &lashlang_execution_trace_config,
-        dialect.language_id(),
-    );
+    let lashlang_execution_trace =
+        foreground_lashlang_execution_trace(&ctx, &linked_module.artifact, dialect.language_id());
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
@@ -1514,44 +1491,47 @@ fn deferred_execution_grants(
         .collect()
 }
 
-fn emit_step_trace(
-    ctx: &RuntimeExecutionContext<'_>,
-    config: &RlmLashlangExecutionTraceConfig,
-    result: Result<(), &str>,
-) {
-    let Some(sink) = &config.sink else { return };
+fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) {
     let Some(invocation) = ctx.parent_invocation() else {
         return;
     };
-    let context = lash_core::facade_support::trace_context_for_runtime_invocation(
-        config.trace_context.clone(),
-        invocation,
-    );
-    let Some(step_index) = context.protocol_iteration else {
+    let Some(step_index) = invocation.attribution.protocol_iteration else {
         return;
     };
-    let outcome = match result {
-        Ok(()) => lash_trace::TraceRlmStepOutcome::Ok,
-        Err(diagnostic) => lash_trace::TraceRlmStepOutcome::Failure {
-            diagnostic: lash_sansio::session_model::truncate_raw_error(diagnostic),
-        },
+    let Some(standing) = ctx.trace_standing() else {
+        return;
     };
-    let _ = sink.append(&lash_trace::TraceRecord::new(
-        context,
-        lash_trace::TraceEvent::RlmStep {
-            step_index,
-            outcome,
-        },
-    ));
+    let tracing = lash_core::plugin::PluginExecutionTrace::new(standing);
+    tracing.emit(|| {
+        let context = lash_core::facade_support::trace_context_for_runtime_invocation(
+            tracing.trace_runtime().base_context().clone(),
+            invocation,
+        );
+        let outcome = match result {
+            Ok(()) => lash_trace::TraceRlmStepOutcome::Ok,
+            Err(diagnostic) => lash_trace::TraceRlmStepOutcome::Failure {
+                diagnostic: lash_sansio::session_model::truncate_raw_error(diagnostic),
+            },
+        };
+        (
+            context,
+            lash_trace::TraceEvent::RlmStep {
+                step_index,
+                outcome,
+            },
+        )
+    });
 }
 
 fn foreground_lashlang_execution_trace(
     ctx: &RuntimeExecutionContext<'_>,
     artifact: &lash_vm_client::InspectedArtifact,
-    config: &RlmLashlangExecutionTraceConfig,
     language: &'static str,
 ) -> Option<LashlangExecutionTrace> {
-    let sink = config.sink.as_ref()?.clone();
+    let tracing = lash_core::plugin::PluginExecutionTrace::new(ctx.trace_standing()?);
+    if !tracing.observes_language() {
+        return None;
+    }
     let invocation = ctx.parent_invocation()?;
     let effect_id = invocation.effect_id()?;
     let address = invocation.effect_address()?.clone();
@@ -1562,9 +1542,8 @@ fn foreground_lashlang_execution_trace(
         None => None,
     };
     Some(LashlangExecutionTrace::new(
-        sink,
+        tracing,
         language,
-        config.trace_context.clone(),
         TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope {
                 session_id: invocation.attribution.session_id.clone(),

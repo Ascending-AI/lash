@@ -384,7 +384,7 @@ impl LashRuntime {
         .await
         .map_err(super::runtime_error_from_store_commit)?;
         let result = store
-            .commit_runtime_state_verified(commit)
+            .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         self.state.apply_persisted_commit_result(result);

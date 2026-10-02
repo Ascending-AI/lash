@@ -43,7 +43,7 @@ impl RlmRuntimeState {
             artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
             deferred_tool_resolver,
             deferred_trigger_resolver: None,
-            execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
             code_renderer: Default::default(),
             channel: crate::plugin::RlmChannel::Cell,

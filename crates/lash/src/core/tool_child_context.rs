@@ -104,6 +104,7 @@ impl ToolChildContextSource for CoreToolChildContextSource {
         let plugin_host = super::build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
+            &env.core.tracing,
         )
         .map_err(|error| PluginError::Session(error.to_string()))?;
         env.core = plugin_host

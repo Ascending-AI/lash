@@ -48,6 +48,7 @@ pub(crate) async fn process_event_host_failure_stops_execution(
     );
     let identities = crate::LashlangHostIdentities::process_body(process_id.clone());
     let hash = lashlang::ContentHash::new("host-law");
+    let execution_trace = lash_core::plugin::PluginExecutionTrace::new(context.trace_standing());
     let host = LashlangProcessHost {
         ctx,
         host_environment: Default::default(),
@@ -62,8 +63,7 @@ pub(crate) async fn process_event_host_failure_stops_execution(
         identities,
         producer: serde_json::json!({}),
         lashlang_execution_trace: LashlangProcessExecutionTrace::new(
-            None,
-            Default::default(),
+            execution_trace,
             LashlangProcessTraceIdentity {
                 session_id: None,
                 process_id,

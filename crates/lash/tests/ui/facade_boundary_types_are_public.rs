@@ -304,7 +304,7 @@ async fn verified_commit_chokepoint_is_nameable(
     store: &dyn SessionCommitStore,
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
-    commit_runtime_state_verified(store, commit).await
+    commit_runtime_state_verified(store, commit, &Default::default(), None).await
 }
 
 fn wrapped_session_store_refusal_is_nameable(error: lash::EmbedError) -> bool {

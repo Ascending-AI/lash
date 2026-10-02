@@ -363,7 +363,10 @@ impl LashRuntime {
                     },
                 );
             }
-            let error = match store.commit_runtime_state_verified(commit).await {
+            let error = match store
+                .commit_runtime_state_verified(commit, self.host.core.tracing.metrics(), None)
+                .await
+            {
                 Ok(result) => {
                     self.state.apply_persisted_commit_result(result);
                     self.state.mark_node_ids_persisted(persisted_node_ids);

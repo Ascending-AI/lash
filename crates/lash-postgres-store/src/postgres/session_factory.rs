@@ -279,7 +279,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
     ) -> Result<Vec<lash_core_execution::engine::OpenRoot>, StoreError> {
         let session = after.map_or("", |key| key.session.as_str());
         let root = after.map_or("", |key| key.root.as_str());
-        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
         let rows = sqlx::query(
             crate::session_roots::session_roots_sql()
                 .roots
@@ -325,7 +325,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         loss: lash_core_execution::engine::RootRunLoss,
         at_ms: u64,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
-        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        let mut connection = crate::acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
         let result = crate::session_roots::end_lost_root_tx(&mut tx, target, loss, at_ms).await?;
         tx.commit().await.map_err(crate::store_sqlx_error)?;
@@ -395,7 +395,9 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         session_id: &SessionId,
     ) -> Result<lash_core_execution::SessionLookup, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        let meta = crate::session_meta::load_session_meta(&self.pool, Some(session_id)).await?;
+        let meta =
+            crate::session_meta::load_session_meta(&self.pool, Some(session_id), &self.observer)
+                .await?;
         let deleted: bool = sqlx::query_scalar(session_sql().deleted_postgres.exists.sql())
             .bind(session_id.as_str())
             .fetch_one(&self.pool)

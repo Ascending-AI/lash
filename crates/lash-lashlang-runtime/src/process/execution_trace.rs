@@ -2,13 +2,11 @@ use super::*;
 
 impl LashlangProcessExecutionTrace {
     pub(super) fn new(
-        sink: Option<Arc<dyn TraceSink>>,
-        base_context: TraceContext,
+        tracing: lash_core::plugin::PluginExecutionTrace,
         identity: LashlangProcessTraceIdentity,
     ) -> Self {
         Self {
-            sink,
-            base_context,
+            tracing,
             session_id: identity.session_id,
             process_id: identity.process_id,
             source_identity: identity.source_identity,
@@ -112,7 +110,7 @@ impl LashlangProcessExecutionTrace {
     }
 
     pub(super) fn emit_observation(&self, observation: lashlang::LashlangExecutionObservation) {
-        if self.sink.is_none() {
+        if !self.tracing.observes_language() {
             return;
         }
         match &observation {
@@ -271,7 +269,7 @@ impl LashlangProcessExecutionTrace {
         call_site: &lashlang::LashlangExecutionCallSite,
         awaited: TraceNodeAwaited,
     ) {
-        if self.sink.is_none() {
+        if !self.tracing.observes_language() {
             return;
         }
         let site = &call_site.site;
@@ -298,7 +296,7 @@ impl LashlangProcessExecutionTrace {
         call_site: &lashlang::LashlangExecutionCallSite,
         resolution: TraceNodeWaitResolution,
     ) {
-        if self.sink.is_none() {
+        if !self.tracing.observes_language() {
             return;
         }
         let site = &call_site.site;
@@ -371,7 +369,7 @@ impl LashlangProcessExecutionTrace {
         call_site: &lashlang::LashlangExecutionCallSite,
         call_id: &lash_core::ToolCallId,
     ) {
-        if self.sink.is_none() {
+        if !self.tracing.observes_language() {
             return;
         }
         let key = (call_site.site.node_id.clone(), call_site.occurrence);
@@ -426,7 +424,9 @@ impl LashlangProcessExecutionTrace {
         &self,
         call_site: lashlang::LashlangExecutionCallSite,
     ) -> Option<ToolChildExecutionTraceHook> {
-        self.sink.as_ref()?;
+        if !self.tracing.observes_language() {
+            return None;
+        }
         let trace = self.clone();
         let parent_node_id = call_site.site.node_id;
         let occurrence = call_site.occurrence;
@@ -457,18 +457,17 @@ impl LashlangProcessExecutionTrace {
     }
 
     pub(super) fn emit(&self, event: TraceLanguageExecution) {
-        let Some(sink) = &self.sink else {
-            return;
-        };
-        let mut context = self.base_context.clone();
-        context.session_id = self.session_id.clone();
-        context.graph_node_id = language_event_node_id(&event.payload).map(str::to_string);
-        let _ = sink.append(&TraceRecord::new(
-            context,
-            TraceEvent::LanguageExecution {
-                language: LASHLANG_ENGINE_KIND.to_string(),
-                event,
-            },
-        ));
+        self.tracing.observe_language(&event.event_key, || {
+            let mut context = self.tracing.trace_runtime().base_context().clone();
+            context.session_id = self.session_id.clone();
+            context.graph_node_id = language_event_node_id(&event.payload).map(str::to_string);
+            (
+                context,
+                TraceEvent::LanguageExecution {
+                    language: LASHLANG_ENGINE_KIND.to_string(),
+                    event: event.clone(),
+                },
+            )
+        });
     }
 }

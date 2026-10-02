@@ -72,6 +72,7 @@ pub(super) struct TurnBoundary {
     definition_engines: crate::ProcessEngineRegistry,
     operation_scope: crate::ExecutionScope,
     commit_budget: crate::CommitBudget,
+    metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     /// In-turn graph appends riding this turn's commit. Held here as well as
     /// on the draft so services created after finalization still share it.
     graph_appends: TurnGraphAppendDraft,
@@ -116,6 +117,14 @@ struct FinalizedTurnCommitStage {
 }
 
 impl TurnBoundary {
+    pub(super) fn with_metrics(
+        mut self,
+        metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
     pub(super) fn with_definition_engines(mut self, engines: crate::ProcessEngineRegistry) -> Self {
         self.definition_engines = engines;
         self
@@ -175,6 +184,7 @@ impl TurnBoundary {
             definition_engines: crate::ProcessEngineRegistry::new(),
             operation_scope,
             commit_budget,
+            metrics: Default::default(),
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
             drive_commit: None,
@@ -654,6 +664,7 @@ impl TurnBoundary {
         // read from `self` are hoisted before the state borrow begins.
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
+        let metrics = self.metrics.clone();
         let drive_commit = self.drive_commit.clone();
         let park_root = self.park_root.clone();
         // A switch this turn makes ends the frame the turn was admitted on;
@@ -688,6 +699,7 @@ impl TurnBoundary {
                 &definition_engines,
                 state,
                 commit_budget,
+                &metrics,
                 store,
                 graph,
                 failure_evidence,
@@ -720,6 +732,7 @@ impl TurnBoundary {
         definition_engines: &crate::ProcessEngineRegistry,
         state: &mut RuntimeSessionState,
         commit_budget: crate::CommitBudget,
+        metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
         store: &crate::store::SessionStore,
         mut graph: GraphAppend,
         failure_evidence: &[crate::TurnFailureEvidence],
@@ -818,7 +831,10 @@ impl TurnBoundary {
         // iteration that honoured an AfterStep request) which a raw promise
         // peek cannot reconstruct.
         let result = loop {
-            match store.commit_runtime_state_verified(commit.clone()).await {
+            match store
+                .commit_runtime_state_verified(commit.clone(), metrics, None)
+                .await
+            {
                 Ok(result) => break result,
                 Err(error @ crate::StoreError::TurnCancelIntentChanged { .. }) => {
                     // Only a commit closing an interrupted turn carries the

@@ -76,7 +76,7 @@ async fn run_in(
         RlmProjectedBindings::new()
             .bind_json("host_config", serde_json::json!({ "label": "from-host" }))
             .expect("the projected binding is unique"),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )

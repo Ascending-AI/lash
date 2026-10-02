@@ -150,7 +150,7 @@ impl Fixture {
                         self.surface.clone(),
                         None,
                         RlmProjectedBindings::default(),
-                        RlmLashlangExecutionTraceConfig::default(),
+                        None,
                         lashlang::ExecutionBounds::unbounded(),
                         crate::plugin::RlmChannel::Cell,
                     ),
@@ -322,7 +322,7 @@ async fn an_execution_that_is_not_resumed_drops_the_suspended_cell() {
         fixture.surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )

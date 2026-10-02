@@ -620,7 +620,12 @@ pub async fn park_turn_of_refused_group_child(
         &crate::store::TurnParkWrite::refusal(session_id.clone(), root, reason, at_ms),
     )
     .await?;
-    crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
+    crate::operational_metrics::record_work_parked(
+        &Default::default(),
+        None,
+        "turn",
+        park.reason.code().as_str(),
+    );
     Ok(Some(park))
 }
 
@@ -683,6 +688,11 @@ pub async fn park_turn_refused_by_generation(
         ),
     )
     .await?;
-    crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
+    crate::operational_metrics::record_work_parked(
+        &Default::default(),
+        None,
+        "turn",
+        park.reason.code().as_str(),
+    );
     Ok(Some(park))
 }

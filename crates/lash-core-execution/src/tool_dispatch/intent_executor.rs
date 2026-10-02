@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tracing::Instrument as _;
 
 use super::ToolDispatchContext;
 
@@ -64,22 +65,21 @@ pub async fn execute_final_tool_intents(
             intent_kind = intent.kind().as_str(),
             replay_key = %identity.replay_key,
         );
-        let _entered = span.enter();
         if let crate::ToolIntent::RegisterTrigger(registration) = intent
             && let Some(refusal) = validate_trigger_registration_authority(context, registration)
         {
-            outcomes.push(refused(index, intent.kind(), Some(identity), refusal));
+            outcomes.push(span.in_scope(|| refused(index, intent.kind(), Some(identity), refusal)));
             continue;
         }
-        let result = execute_one(context, intent, &identity, child_trace_hook).await;
+        let result = execute_one(context, intent, &identity, child_trace_hook)
+            .instrument(span.clone())
+            .await;
+        let _entered = span.enter();
         let outcome = match result {
-            Ok(result) => {
-                record_executed_metric(intent.kind());
-                crate::ToolIntentExecutionOutcome::Executed {
-                    identity,
-                    realized: result,
-                }
-            }
+            Ok(result) => crate::ToolIntentExecutionOutcome::Executed {
+                identity,
+                realized: result,
+            },
             Err(crate::PluginError::RuntimeEffectController(error))
                 if error.code.is_replay_mismatch() =>
             {
@@ -160,7 +160,6 @@ pub(crate) async fn realize_declared_start(
                         .map(|identity| identity.kind.as_str().to_string()),
                 });
             }
-            record_executed_metric(kind);
             Ok(crate::ToolIntentExecutionOutcome::Executed {
                 identity,
                 realized: crate::ToolIntentRealized::StartProcess(handle),
@@ -305,8 +304,7 @@ fn refuse_all(
                 intent_kind = intent.kind().as_str(),
                 replay_key = identity.as_ref().map_or("<unavailable>", |identity| identity.replay_key.as_str()),
             );
-            let _entered = span.enter();
-            refused(index, intent.kind(), identity, refusal.clone())
+            span.in_scope(|| refused(index, intent.kind(), identity, refusal.clone()))
         })
         .collect()
 }
@@ -351,7 +349,6 @@ fn refused(
     identity: Option<crate::ToolIntentIdentity>,
     refusal: crate::ToolIntentRefusalReason,
 ) -> crate::ToolIntentExecutionOutcome {
-    record_refused_metric(kind, &refusal);
     tracing::warn!(
         target: "lash::tool_intent",
         intent_kind = kind.as_str(),
@@ -412,29 +409,6 @@ pub(super) fn validate_trigger_registration_authority(
         recorded: intent.actor.clone(),
     })
 }
-
-#[cfg(feature = "otel-trace")]
-fn tool_intent_metrics() -> &'static lash_trace::otel::ToolIntentMetrics {
-    static METRICS: std::sync::LazyLock<lash_trace::otel::ToolIntentMetrics> =
-        std::sync::LazyLock::new(lash_trace::otel::ToolIntentMetrics::from_global_provider);
-    &METRICS
-}
-
-#[cfg(feature = "otel-trace")]
-fn record_executed_metric(kind: crate::ToolIntentKind) {
-    tool_intent_metrics().record_executed(kind.as_str());
-}
-
-#[cfg(not(feature = "otel-trace"))]
-fn record_executed_metric(_kind: crate::ToolIntentKind) {}
-
-#[cfg(feature = "otel-trace")]
-fn record_refused_metric(kind: crate::ToolIntentKind, refusal: &crate::ToolIntentRefusalReason) {
-    tool_intent_metrics().record_refused(kind.as_str(), refusal.code().as_ref());
-}
-
-#[cfg(not(feature = "otel-trace"))]
-fn record_refused_metric(_kind: crate::ToolIntentKind, _refusal: &crate::ToolIntentRefusalReason) {}
 
 #[expect(
     clippy::expect_used,

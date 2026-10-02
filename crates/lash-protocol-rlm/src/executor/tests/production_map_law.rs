@@ -139,10 +139,7 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })),
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig {
-            sink: Some(sink.clone()),
-            trace_context: TraceContext::default(),
-        },
+        Some(test_trace(sink.clone())),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -448,17 +445,13 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
             table.backend().worker_recovery(),
         )
         .with_worker_service(workers.clone())
-        .with_execution_trace(
-            Some(sink.clone() as Arc<dyn TraceSink>),
-            TraceContext::default(),
-        )
     };
     let module_store = Arc::clone(engine_store.store());
     let worker_backend =
         lash_core::testing::runtime_helpers::LayeredBackend::over(table.backend().clone())
             .map_module_artifacts(move |_| module_store)
             .into_backend();
-    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+    let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         worker_backend,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
@@ -466,6 +459,7 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
     .with_process_engine_registration(
         lash_lashlang_runtime::lashlang_process_engine_registration(traced_engine()),
     );
+    runtime_host.tracing = runtime_host.tracing.with_product_observer(sink.clone());
     // The worker serves the shipped process-control tools, so a process
     // body emits and starts the literal nested in it.
     table.install_worker(
@@ -518,7 +512,7 @@ async fn process_map_fixture(workers: lash_vm_client::service::Service) {
         surface,
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )

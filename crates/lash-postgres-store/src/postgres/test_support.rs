@@ -156,7 +156,7 @@ impl StoreTestSupport for PostgresStore {
         schema_version: u32,
         tool_access: Option<serde_json::Value>,
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let head_json: String = sqlx::query_scalar(
             crate::session_sql::session_sql()
@@ -203,7 +203,7 @@ impl StoreTestSupport for PostgresStore {
         session_id: &SessionId,
         version: u32,
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         sqlx::query(
             crate::session_sql::session_sql()
                 .meta
@@ -228,7 +228,7 @@ impl StoreTestSupport for PostgresStore {
         session_id: &SessionId,
         version: u32,
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(
             crate::session_sql::session_sql()

@@ -192,7 +192,12 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
             }
             Ok(park) => {
-                crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
+                crate::operational_metrics::record_work_parked(
+                    &Default::default(),
+                    None,
+                    "turn",
+                    park.reason.code().as_str(),
+                );
                 tracing::warn!(
                     session_id = %session,
                     root = %root,
@@ -307,7 +312,12 @@ impl StoreParkRecovery<'_> {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
             }
             Ok(park) => {
-                crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
+                crate::operational_metrics::record_work_parked(
+                    &Default::default(),
+                    None,
+                    "turn",
+                    park.reason.code().as_str(),
+                );
                 tracing::warn!(
                     session_id = %session,
                     root = %root,

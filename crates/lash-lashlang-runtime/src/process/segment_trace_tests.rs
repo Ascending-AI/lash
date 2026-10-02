@@ -32,8 +32,7 @@ fn traced_process() -> (LashlangProcessExecutionTrace, Arc<TraceLashlangGraphSto
     let hash = lashlang::ContentHash::new("trace-occurrence-tests");
     let store = Arc::new(TraceLashlangGraphStore::default());
     let trace = LashlangProcessExecutionTrace::new(
-        Some(store.clone()),
-        lash_trace::TraceContext::default(),
+        product_trace(Some(store.clone()), lash_trace::TraceContext::default()),
         LashlangProcessTraceIdentity {
             session_id: None,
             process_id: lash_core::ProcessId::fixture("process"),
@@ -226,8 +225,10 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
     let identity = |originator: lash_core::ProcessOriginator, attempt, process: &str| {
         let hash = lashlang::ContentHash::new("trace-provenance");
         LashlangProcessExecutionTrace::new(
-            None,
-            lash_trace::TraceContext::default().for_session("ambient-capability"),
+            product_trace(
+                None,
+                lash_trace::TraceContext::default().for_session("ambient-capability"),
+            ),
             LashlangProcessTraceIdentity {
                 session_id: process_trace_session_id(&originator),
                 process_id: lash_core::ProcessId::fixture(process),
@@ -290,8 +291,7 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
     let trace_for_attempt = |attempt| {
         let hash = lashlang::ContentHash::new("retried-resource-trace");
         LashlangProcessExecutionTrace::new(
-            Some(graphs.clone()),
-            lash_trace::TraceContext::default(),
+            product_trace(Some(graphs.clone()), lash_trace::TraceContext::default()),
             LashlangProcessTraceIdentity {
                 session_id: None,
                 process_id: lash_core::ProcessId::fixture("recovered-process"),
@@ -379,8 +379,7 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
 fn untraced_completed_resource_calls_retain_no_correlation_state() {
     let hash = lashlang::ContentHash::new("untraced-resource-correlation");
     let trace = LashlangProcessExecutionTrace::new(
-        None,
-        lash_trace::TraceContext::default(),
+        product_trace(None, lash_trace::TraceContext::default()),
         LashlangProcessTraceIdentity {
             session_id: None,
             process_id: lash_core::ProcessId::fixture("process"),
@@ -392,7 +391,10 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
             engine_execution_id: None,
         },
     );
-    assert!(trace.sink.is_none(), "the witness must run without tracing");
+    assert!(
+        !trace.tracing.observes_language(),
+        "the witness must run without tracing"
+    );
 
     for occurrence in 1..=8 {
         let site = lashlang::LashlangExecutionSite {
@@ -991,4 +993,76 @@ async fn worker_continuation_info(
         lash_vm_client::service::Response::Refused { message, .. } => Err(message),
         other => Err(format!("unexpected continuation response: {other:?}")),
     }
+}
+
+fn product_trace(
+    sink: Option<Arc<dyn lash_trace::TraceSink>>,
+    context: lash_trace::TraceContext,
+) -> lash_core::plugin::PluginExecutionTrace {
+    let mut runtime = lash_core::trace::TraceRuntime::new(Arc::new(lash_core::SystemClock))
+        .with_base_context(context);
+    if let Some(sink) = sink {
+        runtime = runtime.with_product_observer(sink);
+    }
+    lash_core::plugin::PluginExecutionTrace::new(runtime.unreplayed(None))
+}
+
+#[test]
+fn process_graph_replay_uses_the_shared_runtime_without_exporting_again() {
+    #[derive(Default)]
+    struct Records(std::sync::Mutex<Vec<lash_trace::TraceRecord>>);
+    impl lash_trace::TraceSink for Records {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            self.0.lock_recover().push(record.clone());
+            Ok(())
+        }
+    }
+    let (mut trace, graphs) = traced_process();
+    let records = Arc::new(Records::default());
+    let runtime = lash_core::trace::TraceRuntime::new(Arc::new(
+        lash_core::testing::TestClock::new(1_700_000_000_123),
+    ))
+    .with_trace_sink(records.clone())
+    .with_product_observer(graphs.clone());
+    let scope = lash_trace::DurableTraceScope {
+        scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
+            process_id: trace.process_id.clone(),
+        }),
+        cause: lash_trace::TraceCause::Root,
+        anchor: lash_trace::TraceAnchor::Untraced,
+        started_at_ms: 1_700_000_000_000,
+    };
+    trace.tracing =
+        lash_core::plugin::PluginExecutionTrace::new(runtime.unreplayed(Some(scope.clone())));
+    let observation = || lashlang::LashlangExecutionObservation::NodeStarted {
+        site: execution_site("shared-node", ExecutionNodeKind::Sleep),
+        occurrence: 1,
+    };
+    trace.emit_observation(observation());
+    let original = graphs.graphs();
+    assert_eq!(original.len(), 1);
+    let emitted = records.0.lock_recover().clone();
+    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted[0].timestamp.timestamp_millis(), 1_700_000_000_123);
+    assert_eq!(trace.tracing.trace_scope(), Some(&scope));
+    let controller = lash_core::ScopedEffectController::shared(
+        Arc::new(lash_core::testing::UnavailableEffectController),
+        lash_core::AdmittedScope::process(trace.process_id.clone()),
+    )
+    .expect("the process controller");
+    graphs.clear();
+    trace.tracing = lash_core::plugin::PluginExecutionTrace::new(
+        runtime.drive(Some(scope.clone()), &controller),
+    );
+    trace.emit_observation(observation());
+    assert_eq!(trace.tracing.trace_scope(), Some(&scope));
+    assert_eq!(graphs.graphs(), original);
+    assert_eq!(
+        *records.0.lock_recover(),
+        emitted,
+        "product replay exports no copies"
+    );
 }

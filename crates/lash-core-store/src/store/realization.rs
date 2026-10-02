@@ -8,6 +8,8 @@ use super::{RuntimeCommit, RuntimeCommitReceipt, SessionCommitStore, StoreError}
 pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+    permit: Option<&lash_trace::EmissionPermit>,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let meta = store
         .load_session_meta_for_commit(&commit.session_id)
@@ -24,7 +26,7 @@ pub async fn commit_runtime_state_verified(
             ),
         });
     }
-    commit.validate_budget_and_record_size()?;
+    commit.validate_budget_and_record_size(metrics, permit)?;
     let expected_revision = commit.expected_head_revision;
     let receipt = store.commit_runtime_state(commit).await?;
     assert!(
@@ -40,6 +42,22 @@ mod tests {
     use crate::SessionId;
     use crate::session_graph::RealizedNodeTimestamp;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    async fn commit_runtime_state_verified(
+        store: &dyn SessionCommitStore,
+        commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
+        let permit = lash_trace::EmissionPermit::live_execution(lash_trace::TraceAttemptId::new(
+            "test-commit-body",
+        ));
+        super::commit_runtime_state_verified(
+            store,
+            commit,
+            &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
+            Some(&permit),
+        )
+        .await
+    }
 
     #[derive(Default)]
     struct FacadeTestStore {
@@ -184,7 +202,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "otel-trace")]
     #[tokio::test]
     async fn verified_commit_records_one_budget_histogram_observation_across_planner_validation() {
         let metrics = crate::operational_metrics::TestMetrics::install();
@@ -211,7 +228,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "otel-trace")]
     #[tokio::test]
     async fn verified_commit_records_node_budget_rejection_after_binding() {
         let metrics = crate::operational_metrics::TestMetrics::install();
@@ -246,7 +262,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "otel-trace")]
     #[tokio::test]
     async fn verified_commit_does_not_record_budget_before_binding_fences() {
         let metrics = crate::operational_metrics::TestMetrics::install();
@@ -288,7 +303,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "otel-trace")]
     #[tokio::test]
     async fn verified_commit_skips_histogram_for_unbounded_byte_budget() {
         let metrics = crate::operational_metrics::TestMetrics::install();

@@ -230,7 +230,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         surface,
         deferred_resolver,
         projected_bindings,
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
     )
     .await;
     handler.close().await.expect("close the cell's handler");
@@ -428,10 +428,7 @@ pub(super) async fn execute_and_collect_inventory(
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })),
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig {
-            sink: Some(sink.clone()),
-            trace_context: TraceContext::default(),
-        },
+        Some(test_trace(sink.clone())),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
@@ -540,7 +537,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
@@ -570,7 +567,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 ),
@@ -644,7 +641,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
@@ -683,7 +680,7 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
@@ -760,7 +757,7 @@ pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         ));
@@ -805,7 +802,7 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
@@ -853,7 +850,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 )
@@ -915,7 +912,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 )
@@ -950,7 +947,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    RlmLashlangExecutionTraceConfig::default(),
+                    None,
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 )
@@ -1399,12 +1396,8 @@ pub(super) async fn foreground_trace_carries_the_enclosing_restate_process_invoc
         .expect("valid fixture module")
         .artifact;
     let trace = foreground_lashlang_execution_trace(
-        &context,
+        &context.with_trace_standing(test_trace(Arc::new(NoopTraceSink)).into_standing()),
         &artifact,
-        &RlmLashlangExecutionTraceConfig {
-            sink: Some(Arc::new(NoopTraceSink)),
-            trace_context: TraceContext::default(),
-        },
         "typescript",
     )
     .expect("foreground trace");
@@ -1437,12 +1430,9 @@ pub(super) async fn foreground_trace_carries_the_enclosing_restate_process_invoc
     .build()
     .into_runtime();
     let non_process_trace = foreground_lashlang_execution_trace(
-        &non_process_context,
+        &non_process_context
+            .with_trace_standing(test_trace(Arc::new(NoopTraceSink)).into_standing()),
         &artifact,
-        &RlmLashlangExecutionTraceConfig {
-            sink: Some(Arc::new(NoopTraceSink)),
-            trace_context: TraceContext::default(),
-        },
         "typescript",
     )
     .expect("non-process foreground trace");
@@ -1493,10 +1483,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig {
-            sink: trace_sink,
-            trace_context: TraceContext::default(),
-        },
+        trace_sink.map(test_trace),
     )
     .await;
     handler.close().await.expect("close the cell's handler");
@@ -1612,7 +1599,7 @@ pub(super) async fn execute_test_code(
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
     ))
     .await;
     handler.close().await.expect("close the cell's handler");
@@ -1752,7 +1739,7 @@ pub(super) async fn execute_with_host_environment(
         surface,
         None,
         RlmProjectedBindings::default(),
-        RlmLashlangExecutionTraceConfig::default(),
+        None,
         lashlang::ExecutionBounds::new(
             lashlang::ExecutionBound::instructions(1_000_000),
             lashlang::ExecutionBound::Unbounded,
@@ -1786,7 +1773,7 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1),
                 lashlang::ExecutionBound::Unbounded,
@@ -1820,7 +1807,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1),
                 lashlang::ExecutionBound::Unbounded,
@@ -1869,7 +1856,7 @@ pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1900,7 +1887,7 @@ pub(super) fn execute_code_reuses_reset_worker_for_repeat_source() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            RlmLashlangExecutionTraceConfig::default(),
+            None,
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -1960,7 +1947,7 @@ fn typed_worker_size_limits_are_recorded_cell_failures_across_the_plugin_boundar
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
             )
             .await;

@@ -55,6 +55,7 @@ pub struct RecoveryLease {
     claim: LeaseClaim,
     timings: RecoveryLeaseTimings,
     clock: Arc<dyn Clock>,
+    observer: crate::operational_metrics::StoreObserver,
     standing: Mutex<Standing>,
     /// Serializes attempts, so the background cadence and an inline step
     /// never race each other's term.
@@ -82,6 +83,7 @@ impl RecoveryLease {
         generation_rank: i64,
         timings: RecoveryLeaseTimings,
         clock: Arc<dyn Clock>,
+        observer: crate::operational_metrics::StoreObserver,
     ) -> Self {
         Self {
             store,
@@ -94,6 +96,7 @@ impl RecoveryLease {
             },
             timings,
             clock,
+            observer,
             standing: Mutex::new(Standing::Follower),
             attempt: tokio::sync::Mutex::new(()),
         }
@@ -129,11 +132,8 @@ impl RecoveryLease {
             Standing::Leader { term, .. } => (true, u64::try_from(term).unwrap_or_default()),
             Standing::Follower => (false, 0),
         };
-        crate::operational_metrics::record_recovery_leadership(
-            self.claim.name.as_str(),
-            leading,
-            term,
-        );
+        self.observer
+            .recovery_leadership(self.claim.name.as_str(), leading, term);
     }
 
     /// Whether this process leads at `now_ms` (host clock) within its trust

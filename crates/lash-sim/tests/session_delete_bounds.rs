@@ -613,6 +613,7 @@ async fn obligation_transaction_lease_and_delete_recovery_matrix() {
                     rank,
                     timings,
                     Arc::clone(&deployment.clock) as Arc<dyn lash_core::Clock>,
+                    lash_core::operational_metrics::StoreObserver::default(),
                 )
             };
             let (first, second) = (lease(0), lease(0));

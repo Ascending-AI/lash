@@ -12,10 +12,7 @@ use std::sync::Arc;
 use lash_core::ExecRequest;
 use lash_lashlang_runtime::LashlangSurface;
 
-use crate::executor::{
-    ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig,
-    execute_parked_cell_for_tests,
-};
+use crate::executor::{ParkedCellEvidence, RlmExecutionState, execute_parked_cell_for_tests};
 use crate::projection::{RlmProjectedBindings, flow_to_json_value};
 use crate::testing::execute_code_with_channel_and_bounds;
 
@@ -201,7 +198,7 @@ impl Session {
                 LashlangSurface::default(),
                 None,
                 host_bindings,
-                RlmLashlangExecutionTraceConfig::default(),
+                None,
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
                 crate::render::CodeRendererSlot::default(),

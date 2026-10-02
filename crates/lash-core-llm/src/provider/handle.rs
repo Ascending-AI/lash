@@ -1,5 +1,7 @@
 use super::support::*;
 use futures_util::FutureExt as _;
+use lash_trace::EmissionPermit;
+use lash_trace::telemetry::metrics::TelemetryMetrics;
 
 fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTransportError {
     LlmTransportError::new(conflict.to_string())
@@ -260,6 +262,8 @@ impl ProviderHandle {
             sideband,
             crate::ChargeSafetyPolicy::default(),
             admission,
+            &TelemetryMetrics::default(),
+            None,
         )
         .await
     }
@@ -279,8 +283,15 @@ impl ProviderHandle {
         admission: &dyn DispatchAdmission,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
-        self.complete_prepared(request, sideband, charge_safety, admission)
-            .await
+        self.complete_prepared(
+            request,
+            sideband,
+            charge_safety,
+            admission,
+            &TelemetryMetrics::default(),
+            None,
+        )
+        .await
     }
 
     pub(crate) fn prepare_completion(
@@ -332,6 +343,8 @@ impl ProviderHandle {
         sideband: ProviderCompletionSideband,
         charge_safety: crate::ChargeSafetyPolicy,
         admission: &dyn DispatchAdmission,
+        metrics: &TelemetryMetrics,
+        permit: Option<&EmissionPermit>,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let call_id = call_id_for_scope(&request.scope);
         let serving_route = sideband.serving_route();
@@ -583,10 +596,14 @@ impl ProviderHandle {
                         RetryVerdict::Throttle { wait, class } => {
                             budget.charge_throttle(wait, unsafe_retry);
                             crate::operational_metrics::record_provider_retry(
+                                metrics,
+                                permit,
                                 self.kind(),
                                 "throttle",
                             );
                             crate::operational_metrics::record_provider_throttle_wait(
+                                metrics,
+                                permit,
                                 self.kind(),
                                 wait,
                             );
@@ -611,6 +628,8 @@ impl ProviderHandle {
                         RetryVerdict::Backoff { class } => {
                             let delay = delay.expect("backoff delay was selected before sealing");
                             crate::operational_metrics::record_provider_retry(
+                                metrics,
+                                permit,
                                 self.kind(),
                                 "backoff",
                             );
@@ -1414,8 +1433,10 @@ pub async fn complete_prepared(
     sideband: ProviderCompletionSideband,
     charge_safety: crate::ChargeSafetyPolicy,
     admission: &dyn DispatchAdmission,
+    metrics: &TelemetryMetrics,
+    permit: Option<&EmissionPermit>,
 ) -> Result<ProviderCompletion, ProviderCompletionError> {
     handle
-        .complete_prepared(request, sideband, charge_safety, admission)
+        .complete_prepared(request, sideband, charge_safety, admission, metrics, permit)
         .await
 }

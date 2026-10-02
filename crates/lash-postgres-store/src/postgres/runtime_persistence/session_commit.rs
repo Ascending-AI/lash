@@ -180,7 +180,7 @@ impl SessionCommitStore for PostgresStore {
         let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
             session_id, turn_id,
         )?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let exists: bool = sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
             .bind(session_id.as_str())
             .bind(&key)
@@ -191,7 +191,7 @@ impl SessionCommitStore for PostgresStore {
     }
 
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let version =
             read_session_state_version_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
@@ -203,7 +203,7 @@ impl SessionCommitStore for PostgresStore {
         &self,
         fence: &lash_core_execution::store::DriveFence,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -225,7 +225,7 @@ impl SessionCommitStore for PostgresStore {
         fence: &lash_core_execution::store::DriveFence,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -247,7 +247,7 @@ impl SessionCommitStore for PostgresStore {
         follow_on_turn_id: &lash_core_execution::TurnId,
         recovering: &lash_core_execution::engine::BuildGeneration,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
@@ -300,7 +300,7 @@ impl SessionCommitStore for PostgresStore {
         session_id: &SessionId,
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.read_session_state_version(session_id).await?;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let meta =
             load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
@@ -339,7 +339,7 @@ impl SessionCommitStore for PostgresStore {
         session_id: &SessionId,
         remaining: Vec<lash_core_execution::facade_support::SessionObserverIntent>,
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         let present: Option<i32> = sqlx::query_scalar(
@@ -365,14 +365,14 @@ impl SessionCommitStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionMeta>, StoreError> {
-        crate::session_meta::load_session_meta(&self.pool, Some(session_id)).await
+        crate::session_meta::load_session_meta(&self.pool, Some(session_id), &self.observer).await
     }
 
     async fn load_session_meta_for_commit(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionMeta>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -383,7 +383,7 @@ impl SessionCommitStore for PostgresStore {
         &self,
         park: &lash_core_execution::store::TurnParkWrite,
     ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
         let recorded = super::turn_park::record_turn_park_tx(&mut tx, park).await?;
@@ -422,7 +422,7 @@ impl PostgresStore {
     ) -> Result<Result<RuntimeCommitReceipt, FleetMoved>, StoreError> {
         let commit = planner.commit();
         let now = self.clock.timestamp_ms();
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         if let Err(moved) = tx.require_encoded_under(encoded_under) {
             return Ok(Err(moved));
