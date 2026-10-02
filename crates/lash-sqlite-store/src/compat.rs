@@ -395,6 +395,26 @@ pub(crate) fn check_set_files(location: &SqliteLocation) -> rusqlite::Result<boo
     }
 }
 
+/// Whether the stamps of one store's databases, in [`SqliteDatabase::ALL`]
+/// order, agree.
+///
+/// Each database counts in its own schema version, so the numbers differ
+/// between databases of one consistent store. What a migration moves
+/// together is each stamp's distance from the version this build writes for
+/// its database, the reader floor's included: the set agrees when that
+/// distance is the same for every database.
+pub(crate) fn stamps_agree(stamps: &[CompatStamp]) -> rusqlite::Result<bool> {
+    let mut positions = Vec::with_capacity(stamps.len());
+    for (database, stamp) in SqliteDatabase::ALL.into_iter().zip(stamps) {
+        let written = i64::from(crate::migration::target_version(database)?);
+        positions.push((
+            i64::from(stamp.version) - written,
+            i64::from(stamp.min_reader) - written,
+        ));
+    }
+    Ok(positions.windows(2).all(|pair| pair[0] == pair[1]))
+}
+
 /// Detect a crash between the three independent database commits before any
 /// component open can mistake the set for a consistent fleet epoch.
 pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
@@ -417,10 +437,8 @@ pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
         };
         rows.push((database.name().to_owned(), stamp, fleet));
     }
-    if rows
-        .windows(2)
-        .any(|pair| pair[0].1 != pair[1].1 || pair[0].2 != pair[1].2)
-    {
+    let stamps: Vec<CompatStamp> = rows.iter().map(|row| row.1).collect();
+    if !stamps_agree(&stamps)? || rows.windows(2).any(|pair| pair[0].2 != pair[1].2) {
         Err(incompatible(CompatRefusal::PartiallyAdvanced {
             databases: rows,
             writing_release: release,

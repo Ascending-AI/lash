@@ -285,8 +285,13 @@ async fn operator_json_contract_postgres() {
         &preflight["result"],
         &["databases", "fleet_format", "outcome", "release"],
     );
-    assert_eq!(preflight["result"]["databases"][0]["expected"], 1);
-    assert_eq!(preflight["result"]["databases"][0]["min_reader"], 1);
+    // The component version `schema.sql` provisions is also its reader floor.
+    let provisioned = lash_postgres_store::PostgresStorage::schema_version();
+    assert_eq!(preflight["result"]["databases"][0]["expected"], provisioned);
+    assert_eq!(
+        preflight["result"]["databases"][0]["min_reader"],
+        provisioned
+    );
     assert_eq!(preflight["result"]["databases"][0]["verdict"], "matches");
     // `migrate` seeded the fleet epoch before any worker opened the store
     // (FIG-4075), so no first opener decides it.
@@ -423,7 +428,8 @@ async fn operator_json_contract_postgres() {
     );
 
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = 2 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = version + 1
+         WHERE component = 'lash-postgres-store'",
     )
     .execute(&mut scratch)
     .await
@@ -431,11 +437,15 @@ async fn operator_json_contract_postgres() {
     let (code, expanded) = run(&["preflight", "--json"], Some(&scratch_url));
     assert_eq!(code, 0);
     assert_eq!(expanded["result"]["databases"][0]["verdict"], "expanded");
-    assert_eq!(expanded["result"]["databases"][0]["found"], 2);
-    assert_eq!(expanded["result"]["databases"][0]["min_reader"], 1);
+    assert_eq!(expanded["result"]["databases"][0]["found"], provisioned + 1);
+    assert_eq!(
+        expanded["result"]["databases"][0]["min_reader"],
+        provisioned
+    );
 
     sqlx::query(
-        "UPDATE lash_schema_versions SET min_reader = 2 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET min_reader = version
+         WHERE component = 'lash-postgres-store'",
     )
     .execute(&mut scratch)
     .await
@@ -447,7 +457,10 @@ async fn operator_json_contract_postgres() {
     assert_eq!(incompatible["error"]["code"], "incompatible_store");
     assert_eq!(incompatible["result"]["outcome"], "refused");
     assert_eq!(incompatible["result"]["databases"][0]["verdict"], "refused");
-    assert_eq!(incompatible["result"]["databases"][0]["min_reader"], 2);
+    assert_eq!(
+        incompatible["result"]["databases"][0]["min_reader"],
+        provisioned + 1
+    );
     assert_eq!(
         incompatible["result"]["databases"][0]["refusal"]["refusal"],
         "reader_floor_above"

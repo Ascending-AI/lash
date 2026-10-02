@@ -151,7 +151,8 @@ fn finalize(
     ensure!(
         matches!(
             refusal,
-            lash_core::compat::CompatRefusal::ReaderFloorAbove { min_reader: 2, .. }
+            lash_core::compat::CompatRefusal::ReaderFloorAbove { found, min_reader, .. }
+                if min_reader == found
         ),
         "N opened the contracted store with {refusal:?}"
     );

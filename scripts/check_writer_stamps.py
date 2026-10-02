@@ -40,13 +40,14 @@ SWEPT_ROOTS = check_format_registry.SWEPT_ROOTS
 
 # A migrate surface whose stamp cannot consult `F`, with the reason.
 EXEMPT_CONSTANTS = {
-    # The catalog components stamp themselves: `F` lives inside the catalog
-    # whose admission these stamps gate, so a lookup could not precede the
-    # write. Their writable window is FIG-3797's
-    # [MIN_SUPPORTED, SCHEMA_VERSION] range check at admission instead.
-    "SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
-    "PROCESS_SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
-    "TRIGGER_SCHEMA_VERSION": "catalog DDL stamp; the fleet row lives inside the catalog it admits",
+    # The store components stamp themselves: `F` lives inside the catalog
+    # whose admission these versions gate, so a lookup could not precede the
+    # write. Their window is the compat descriptor's range at admission
+    # instead (ADR 0115 §1.3).
+    "POSTGRES_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
+    "SQLITE_CORE_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
+    "SQLITE_REGISTRY_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
+    "SQLITE_TRIGGERS_SCHEMA_VERSION": "store schema version; the fleet row lives inside the catalog it admits",
     # The row every other writer consults has nothing upstream of it.
     "FLEET_FORMAT_VERSION": "the fleet-format row is what writers consult",
 }

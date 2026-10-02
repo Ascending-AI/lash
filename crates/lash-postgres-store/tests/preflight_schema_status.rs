@@ -28,18 +28,33 @@ mod harness;
 
 use harness::ScratchSchema;
 
+/// The component version `schema.sql` provisions, which is also its reader
+/// floor.
+fn provisioned() -> i64 {
+    i64::from(PostgresStorage::schema_version())
+}
+
+/// The first component version past the one `schema.sql` provisions.
+fn next() -> i64 {
+    provisioned() + 1
+}
+
 #[test]
 fn synthetic_feature_selects_the_owning_compatibility_descriptor() {
     use lash_core_execution::compat::{ComponentId, VersionRange, descriptor};
 
     let descriptor = descriptor(ComponentId::POSTGRES).expect("PostgreSQL descriptor");
-    let next = if cfg!(feature = "synthetic-next") {
-        2
+    let written = if cfg!(feature = "synthetic-next") {
+        next()
     } else {
-        1
+        provisioned()
     };
-    assert_eq!(descriptor.reads, VersionRange::between(1, next));
-    assert_eq!(descriptor.writes, VersionRange::exactly(next));
+    let range = |version: i64| u32::try_from(version).expect("component version");
+    assert_eq!(
+        descriptor.reads,
+        VersionRange::between(range(provisioned()), range(written))
+    );
+    assert_eq!(descriptor.writes, VersionRange::exactly(range(written)));
 }
 
 #[tokio::test]
@@ -59,7 +74,12 @@ async fn stamp_one_preflight_open_and_migrate_agree() {
         .fetch_one(&scratch.pool)
         .await
         .expect("read stamp after preflight and open");
-    assert_eq!(stamp, (1, 1), "preflight and open do not migrate");
+    let provisioned = PostgresStorage::schema_version();
+    assert_eq!(
+        stamp,
+        (provisioned, provisioned),
+        "preflight and open do not migrate"
+    );
 
     let separator = if database_url.contains('?') { '&' } else { '?' };
     let url = format!(
@@ -78,11 +98,11 @@ async fn stamp_one_preflight_open_and_migrate_agree() {
         .await
         .expect("read migrated stamp");
     let expected = if cfg!(feature = "synthetic-next") {
-        2
+        provisioned + 1
     } else {
-        1
+        provisioned
     };
-    assert_eq!(stamp, (expected, 1));
+    assert_eq!(stamp, (expected, provisioned));
     let after = preflight.schema_status().await.expect("migrated status");
     assert_eq!(after.databases[0].verdict, StoreSchemaVerdict::Matches);
     scratch
@@ -107,7 +127,7 @@ async fn stamp_two_preflight_and_open_agree_on_synthetic_shape() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 2, min_reader = 1;
+            "UPDATE lash_schema_versions SET version = version + 1;
              ALTER TABLE lash_session_head ADD COLUMN synthetic_next_note TEXT;
              CREATE TABLE lash_synthetic_next (id BIGSERIAL PRIMARY KEY, note TEXT);
              CREATE INDEX idx_lash_synthetic_next_note ON lash_synthetic_next(note)",
@@ -117,7 +137,7 @@ async fn stamp_two_preflight_and_open_agree_on_synthetic_shape() {
     let expected = if cfg!(feature = "synthetic-next") {
         StoreSchemaVerdict::Matches
     } else {
-        StoreSchemaVerdict::Expanded { found: 2 }
+        StoreSchemaVerdict::Expanded { found: next() }
     };
     assert_eq!(
         preflight
@@ -356,7 +376,7 @@ async fn status_holds_the_schema_lock_through_optional_probes_and_migration() {
         "migration must not acquire the schema key between shape and release observations"
     );
     assert_eq!(status.databases[0].verdict, before.databases[0].verdict);
-    assert_eq!(status.databases[0].min_reader, Some(1));
+    assert_eq!(status.databases[0].min_reader, Some(provisioned()));
     assert_release(&status, "before");
 
     sqlx::query("SELECT pg_advisory_lock($1, $2)")
@@ -369,7 +389,7 @@ async fn status_holds_the_schema_lock_through_optional_probes_and_migration() {
         .await
         .expect("begin migration");
     sqlx::raw_sql(
-        "UPDATE lash_schema_versions SET version = 3, min_reader = 1;
+        "UPDATE lash_schema_versions SET version = version + 2;
          ALTER TABLE lash_session_head ADD CONSTRAINT observation_restriction CHECK (TRUE);
          UPDATE lash_release_stamp SET release_version = 'after', written_at_epoch_ms = 2",
     )
@@ -394,7 +414,7 @@ async fn status_holds_the_schema_lock_through_optional_probes_and_migration() {
             refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { findings, .. }
         } if findings.iter().any(|finding| finding.contains("observation_restriction"))
     ));
-    assert_eq!(after.databases[0].min_reader, Some(1));
+    assert_eq!(after.databases[0].min_reader, Some(provisioned()));
     assert_release(&after, "after");
     scratch.cleanup().await;
 }
@@ -587,7 +607,7 @@ async fn status_takes_its_first_snapshot_after_a_waiting_migration_commits() {
     .expect("status must wait behind the migration");
     sqlx::raw_sql(
         "BEGIN;
-         UPDATE lash_schema_versions SET version = 3, min_reader = 1;
+         UPDATE lash_schema_versions SET version = version + 2;
          ALTER TABLE lash_session_head ADD COLUMN observation_note TEXT;
          UPDATE lash_release_stamp SET release_version = 'after', written_at_epoch_ms = 2;
          COMMIT",
@@ -605,9 +625,9 @@ async fn status_takes_its_first_snapshot_after_a_waiting_migration_commits() {
     let status = status.await.expect("status task").expect("schema status");
     assert_eq!(
         status.databases[0].verdict,
-        StoreSchemaVerdict::Expanded { found: 3 }
+        StoreSchemaVerdict::Expanded { found: next() + 1 }
     );
-    assert_eq!(status.databases[0].min_reader, Some(1));
+    assert_eq!(status.databases[0].min_reader, Some(provisioned()));
     assert_release(&status, "after");
     scratch.cleanup().await;
 }
@@ -621,7 +641,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
     seed_release(&scratch).await;
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 3, min_reader = 1;
+            "UPDATE lash_schema_versions SET version = version + 2;
              ALTER TABLE lash_session_head ADD COLUMN observation_note TEXT",
         )
         .await;
@@ -652,12 +672,12 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
         .expect("read expanded status");
     assert_eq!(
         expanded.databases[0].verdict,
-        StoreSchemaVerdict::Expanded { found: 3 }
+        StoreSchemaVerdict::Expanded { found: next() + 1 }
     );
     assert_release(&expanded, "before");
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 2;
+            "UPDATE lash_schema_versions SET version = version - 1;
              ALTER TABLE lash_session_head DROP COLUMN observation_note;
              ALTER TABLE lash_session_head ADD COLUMN synthetic_next_note TEXT;
              CREATE TABLE lash_synthetic_next (id BIGSERIAL PRIMARY KEY, note TEXT);
@@ -674,7 +694,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
     } else {
         assert_eq!(
             synthetic.databases[0].verdict,
-            StoreSchemaVerdict::Expanded { found: 2 }
+            StoreSchemaVerdict::Expanded { found: next() }
         );
     }
     scratch
@@ -694,14 +714,15 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
     } else {
         assert_eq!(
             missing.databases[0].verdict,
-            StoreSchemaVerdict::Expanded { found: 2 }
+            StoreSchemaVerdict::Expanded { found: next() }
         );
     }
     let stamp: (i32, i32) = sqlx::query_as("SELECT version, min_reader FROM lash_schema_versions")
         .fetch_one(&scratch.pool)
         .await
         .expect("read unchanged compatibility stamp");
-    assert_eq!(stamp, (2, 1));
+    let provisioned = PostgresStorage::schema_version();
+    assert_eq!(stamp, (provisioned + 1, provisioned));
     assert_release(&missing, "before");
     readonly.close().await;
     scratch.cleanup().await;

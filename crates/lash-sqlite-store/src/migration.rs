@@ -76,27 +76,28 @@ CREATE INDEX IF NOT EXISTS idx_lash_synthetic_next_note ON lash_synthetic_next(n
 /// Every migration this build can run, in version order per database. 1.0
 /// is the clean-slate release, so its catalog is empty; each later release
 /// appends its steps, and a database it provisions runs them too
-/// ([`provisioning_steps`]).
+/// ([`provisioning_steps`]). The synthetic successor's steps are written
+/// against each database's schema-version constant, so they follow it.
 pub(crate) const CATALOG: &[SqliteMigration] = &[
     #[cfg(feature = "synthetic-next")]
     SqliteMigration {
         database: SqliteDatabase::DurableCore,
-        from: 1,
-        to: 2,
+        from: compat::SQLITE_CORE_SCHEMA_VERSION,
+        to: compat::SQLITE_CORE_SCHEMA_VERSION + 1,
         ddl: SYNTHETIC_NEXT_DDL,
     },
     #[cfg(feature = "synthetic-next")]
     SqliteMigration {
         database: SqliteDatabase::ProcessRegistry,
-        from: 1,
-        to: 2,
+        from: compat::SQLITE_REGISTRY_SCHEMA_VERSION,
+        to: compat::SQLITE_REGISTRY_SCHEMA_VERSION + 1,
         ddl: SYNTHETIC_NEXT_DDL,
     },
     #[cfg(feature = "synthetic-next")]
     SqliteMigration {
         database: SqliteDatabase::Triggers,
-        from: 1,
-        to: 2,
+        from: compat::SQLITE_TRIGGERS_SCHEMA_VERSION,
+        to: compat::SQLITE_TRIGGERS_SCHEMA_VERSION + 1,
         ddl: SYNTHETIC_NEXT_DDL,
     },
 ];
@@ -118,7 +119,13 @@ mod release_catalog_tests {
                     .filter(|step| step.database == database)
                     .collect();
                 assert_eq!(steps.len(), 1, "one adjacent step for {database:?}");
-                assert_eq!((steps[0].from, steps[0].to), (1, 2));
+                let descriptor = compat::descriptor(database.component()).expect("descriptor");
+                assert_eq!(
+                    (steps[0].from, steps[0].to),
+                    (descriptor.reads.min(), descriptor.writes.max()),
+                    "the step carries {database:?} from the version before to the one this \
+                     build writes"
+                );
             }
         }
     }
@@ -136,7 +143,7 @@ pub(crate) fn target_version(database: SqliteDatabase) -> rusqlite::Result<u32> 
 /// The catalog DDL a database this build creates runs after its schema and
 /// fragments: every step up to the version it writes.
 pub(crate) fn provisioning_steps(database: SqliteDatabase) -> impl Iterator<Item = &'static str> {
-    let target = target_version(database).unwrap_or(1);
+    let target = target_version(database).unwrap_or(0);
     CATALOG
         .iter()
         .filter(move |step| step.database == database && step.to <= target)

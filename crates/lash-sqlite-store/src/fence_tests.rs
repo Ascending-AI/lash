@@ -699,7 +699,7 @@ async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
                     Ok((row.get(0)?, row.get(1)?))
                 })
                 .expect("read the partial set");
-            assert_eq!(schema, 2);
+            assert_eq!(schema, database.expected_version());
             assert_eq!(
                 fleet,
                 if database <= cut { 2 } else { 1 },
@@ -814,7 +814,7 @@ async fn sqlite_finalize_cold_reopen_refuses_changed_stamp_or_intent() {
     for fault in ["stamp", "retirement", "target", "malformed"] {
         if fault == "stamp" {
             raw(&location, SqliteDatabase::Triggers)
-                .execute("UPDATE lash_compat SET min_reader = 2", [])
+                .execute("UPDATE lash_compat SET min_reader = version", [])
                 .expect("change the last database's stamp");
         } else {
             let mut intent: serde_json::Value =
@@ -861,7 +861,7 @@ async fn sqlite_finalize_cold_reopen_refuses_changed_stamp_or_intent() {
             );
         }
         raw(&location, SqliteDatabase::Triggers)
-            .execute("UPDATE lash_compat SET min_reader = 1", [])
+            .execute("UPDATE lash_compat SET min_reader = version - 1", [])
             .expect("restore the original stamp");
         std::fs::write(&intent_path, &original).expect("restore the original authorization");
     }

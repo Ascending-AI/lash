@@ -36,11 +36,6 @@ use lash_core_execution::ProcessInput;
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[test]
-fn public_session_schema_version_tracks_the_internal_schema_version() {
-    assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
-}
-
 lash_conformance::tool_access_persistence_tests!({
     let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
     let stores = SqliteStoreSet::open(dir.path())

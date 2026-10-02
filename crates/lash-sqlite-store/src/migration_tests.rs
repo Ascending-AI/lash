@@ -1,6 +1,7 @@
 //! The open-time migration's laws, driven by the synthetic successor
-//! (ADR 0115 §6): this build writes every database at version 2, and a
-//! store stamped 1 without the successor's objects is the release before it.
+//! (ADR 0115 §6): this build writes every database one version past its
+//! schema-version constant, and a store stamped at the constant without the
+//! successor's objects is the release before it.
 #![expect(
     clippy::expect_used,
     reason = "test module: clippy's allow-expect-in-tests only exempts #[test] functions, and the fixture helpers here are test code too"
@@ -131,22 +132,35 @@ async fn predecessor() -> (tempfile::TempDir, Vec<Vec<u8>>) {
                 "{};
                  DROP INDEX idx_lash_synthetic_next_note;
                  DROP TABLE lash_synthetic_next;
-                 UPDATE lash_compat SET version = 1 WHERE singleton = 1;",
+                 UPDATE lash_compat SET version = version - 1 WHERE singleton = 1;",
                 fixture_row(database).1
             ))
             .expect("write the predecessor's shape");
     }
     let before = bytes(root.path());
-    assert_eq!(stamps(root.path()), vec![1, 1, 1]);
+    assert_eq!(stamps(root.path()), vec![0, 0, 0]);
     (root, before)
 }
 
+/// The predecessor's version of `database` and the one this build writes.
+fn versions(database: SqliteDatabase) -> (i64, i64) {
+    let descriptor = lash_core_execution::compat::descriptor(database.component())
+        .expect("the build declares every database");
+    (
+        i64::from(descriptor.reads.min()),
+        i64::from(descriptor.writes.max()),
+    )
+}
+
+/// How far each database's stamp is past the predecessor's version: 0 before
+/// its migration, 1 after it.
 fn stamps(root: &Path) -> Vec<i64> {
     ALL.into_iter()
         .map(|database| {
-            raw(root, database)
+            let version: i64 = raw(root, database)
                 .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
-                .expect("read the stamp")
+                .expect("read the stamp");
+            version - versions(database).0
         })
         .collect()
 }
@@ -154,7 +168,7 @@ fn stamps(root: &Path) -> Vec<i64> {
 /// The store is at this build's version, kept every fixture row, carries the
 /// successor's objects, and its components read and write it.
 async fn assert_migrated(root: &Path) {
-    assert_eq!(stamps(root), vec![2, 2, 2], "every database is migrated");
+    assert_eq!(stamps(root), vec![1, 1, 1], "every database is migrated");
     for database in ALL {
         let connection = raw(root, database);
         let (table, _) = fixture_row(database);
@@ -245,8 +259,8 @@ fn assert_backup_holds(directory: &Path, manifest: &serde_json::Value, before: &
             .iter()
             .find(|entry| entry["file"] == database.file_name())
             .expect("the manifest names every database");
-        assert_eq!(entry["from"], 1);
-        assert_eq!(entry["to"], 2);
+        assert_eq!(entry["from"], versions(database).0);
+        assert_eq!(entry["to"], versions(database).1);
         assert_eq!(entry["bytes"], before[index].len());
     }
 }
@@ -471,9 +485,9 @@ async fn sqlite_migration_resume_failure_restores_original_set() {
                 assert_eq!(
                     stamps(root.path()),
                     if committed == SqliteDatabase::DurableCore {
-                        vec![2, 1, 1]
+                        vec![1, 0, 0]
                     } else {
-                        vec![2, 2, 1]
+                        vec![1, 1, 0]
                     },
                     "{context}: prior commits are durable"
                 );
@@ -614,7 +628,7 @@ async fn sqlite_migration_resume_failure_retains_backup_until_store_is_owned() {
     assert_eq!(pending[0].0, original[0].0);
     assert_eq!(pending[0].1["state"], "restoring");
     assert_backup_holds(&pending[0].0, &pending[0].1, &before);
-    assert_eq!(stamps(root.path()), vec![2, 1, 1]);
+    assert_eq!(stamps(root.path()), vec![1, 0, 0]);
     drop(holder.lock().expect("holder").take());
     let restored = open(root.path(), options(None))
         .await
@@ -888,11 +902,11 @@ async fn sqlite_component_open_refuses_an_unmigrated_database() {
             error,
             StoreError::Incompatible {
                 refusal: lash_core_execution::compat::CompatRefusal::MigrationPending {
-                    found: 1,
-                    target: 2,
+                    found,
+                    target,
                     ..
                 }
-            }
+            } if (i64::from(found), i64::from(target)) == versions(SqliteDatabase::Triggers)
         ),
         "{error}"
     );

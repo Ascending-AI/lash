@@ -1643,7 +1643,7 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
     def test_the_markers_derive_the_surface_files(self) -> None:
         paths = ci_plan.versioned_surface_paths()
         self.assertIn("crates/lash-restate/src/process/admission.rs", paths)
-        self.assertIn("crates/lash-postgres-store/src/lib.rs", paths)
+        self.assertIn("crates/lash-core-store/src/compat.rs", paths)
         self.assertIn("crates/lash-sqlite-store/src/schema.rs", paths)
         self.assertIn("crates/lash-postgres-store/schema.sql", paths)
         self.assertIn("crates/lash-sqlite-store/src/migration.rs", paths)
@@ -1681,7 +1681,8 @@ class RollingUpgradeSelectionTests(unittest.TestCase):
     def test_a_surface_file_or_the_harness_selects_the_gate(self) -> None:
         for path in (
             "crates/lash-restate/src/process/admission.rs",
-            "crates/lash-postgres-store/src/lib.rs",
+            "crates/lash-core-store/src/compat.rs",
+            "crates/lash-postgres-store/src/postgres/migrate.rs",
             "crates/lash-sqlite-store/src/schema.rs",
             "crates/lash-upgrade-harness/src/node.rs",
             "crates/lash-upgrade-harness/Cargo.toml",

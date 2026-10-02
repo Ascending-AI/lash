@@ -142,28 +142,27 @@ fn the_published_ddl_seeds_every_required_row() {
         .lines()
         .next()
         .expect("the DDL artifact must have a header line")
-        .strip_prefix("-- lash-postgres-store schema, DDL revision ")
-        .expect("the DDL header must declare its revision")
-        .strip_suffix("; compatibility stamp 1/1.")
-        .expect("the DDL header must declare the compatibility stamp")
+        .strip_prefix("-- lash-postgres-store schema, component version ")
+        .expect("the DDL header must declare its component version")
+        .strip_suffix('.')
+        .expect("the DDL header ends after the component version")
         .parse()
-        .expect("the DDL revision must be an integer");
+        .expect("the component version must be an integer");
     let seed = ddl
         .lines()
         .find(|line| line.starts_with(&format!("VALUES ('{SCHEMA_COMPONENT}', ")))
         .expect("the DDL artifact must seed the compatibility stamp");
     assert_eq!(header_version, SCHEMA_VERSION);
-    assert_eq!(seed, format!("VALUES ('{SCHEMA_COMPONENT}', 1, 1)"));
+    assert_eq!(
+        seed,
+        format!("VALUES ('{SCHEMA_COMPONENT}', {SCHEMA_VERSION}, {SCHEMA_VERSION})")
+    );
     for (table, _) in SEED_ROWS {
         assert!(
             ddl.contains(&format!("INSERT INTO {table} ")),
             "the DDL artifact must seed {table}"
         );
     }
-    assert!(
-        ddl.contains(&format!("VALUES ('{SCHEMA_COMPONENT}', 1, 1)")),
-        "the DDL artifact must stamp compatibility version 1 and floor 1"
-    );
     // Every seed is re-applied on each lash-managed open, so each must be a
     // no-op the second time.
     assert_eq!(
@@ -513,7 +512,7 @@ async fn a_freshly_provisioned_scratch_schema_is_conformant() {
         Some(scratch.as_str()),
         "the check must report the schema it actually resolved, not `public`"
     );
-    assert_eq!(report.found_version, Some(1));
+    assert_eq!(report.found_version, Some(SCHEMA_VERSION));
     drop_scratch_schema(connection, &scratch).await;
 }
 

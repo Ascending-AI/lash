@@ -28,7 +28,7 @@ async fn postgres_refuses_pre_submission_digest_catalog_at_open() {
         .await
         .expect("rewrite the pending-input table to its component-117 shape");
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = 2, min_reader = 1
+        "UPDATE lash_schema_versions SET version = version + 1
          WHERE component = 'lash-postgres-store'",
     )
     .execute(&pool)

@@ -177,12 +177,6 @@ use pending_turn_inputs::*;
 use queued_work::*;
 use schema::{apply_pragmas, ensure_versioned_schema};
 
-/// The pre-1.0 durable-core DDL revision retained for schema artifacts.
-///
-/// Compatibility admission uses [`SqliteDatabase::expected_version`] and the
-/// `lash_compat` row in each physical database.
-pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
-
 pub use triggers::SqliteTriggerStore;
 
 /// SQLite-backed store for checkpoint blobs, runtime session state, and

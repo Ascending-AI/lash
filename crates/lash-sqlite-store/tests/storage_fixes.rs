@@ -625,13 +625,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
     assert_eq!(
         found.verdict,
         StoreSchemaVerdict::Refused {
-            refusal: CompatRefusal::ReaderFloorAbove {
-                component: "sqlite-core".to_owned(),
-                found: 51,
-                min_reader: 51,
-                reads: crate::sqlite_core().reads,
-                writing_release: None,
-            },
+            refusal: crate::retired_core_refusal(51),
         }
     );
     assert!(SqliteStore::open_file_for_testing(&path).await.is_err());

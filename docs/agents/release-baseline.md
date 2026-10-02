@@ -48,10 +48,14 @@ ReleaseBaselineTests.test_release_values_match_declared_baseline` through
 `kiln gate`. At the cut, remove that law's skip gate and update the preparation
 gate's selection. The tooling laws run against both the pre-cut and reset trees.
 
-`test_sqlite_stamps_equal_their_catalog_numbers` is cut-gated the same way.
-After the reset each SQLite schema stamp must equal the version its
-database's compat descriptor writes, in the default and synthetic-next
-builds, and every catalog step must lie inside that stamp's range: the
-version-bump gate reads a stamp's catalog steps in the stamp's own numbers.
-`release_baseline.py check` and `release_reset.py --apply` enforce it, and the
-scratch reset law proves it on the reset tree with two red mutants.
+Each store component has one schema version: the PostgreSQL schema and the
+three SQLite databases each have a guarded constant in
+`crates/lash-core-store/src/compat.rs`, and the component's compat descriptor,
+its stamp, its release-stamp entry and its catalog's step numbers all read it.
+The synthetic-next build writes the version after it, so its catalog steps are
+written as `CONSTANT` to `CONSTANT + 1` and follow the reset without an edit.
+`schema.sql` states the PostgreSQL version in its header and its seed row;
+`release_reset.py` rewrites both. `release_baseline.py check` and
+`release_reset.py --apply` hold the artifact, the backends and the catalogs to
+the constants on every tree, before and after the cut, and the scratch reset
+law proves it on the reset tree with red mutants.

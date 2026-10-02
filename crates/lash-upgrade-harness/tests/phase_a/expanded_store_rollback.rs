@@ -252,46 +252,47 @@ async fn expanded_store_rollback() -> Result<()> {
 
     postgres_execute(
         &mut pg,
-        "UPDATE lash_schema_versions SET min_reader = 2 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET min_reader = version
+         WHERE component = 'lash-postgres-store'",
     )
     .await?;
     ensure!(
         matches!(
             builds.n.probe_refusal(&postgres)?,
-            CompatRefusal::ReaderFloorAbove { min_reader: 2, .. }
+            CompatRefusal::ReaderFloorAbove { found, min_reader, .. } if min_reader == found
         ),
         "N admitted PostgreSQL above its reader floor"
     );
     for database in databases {
         let path = sqlite_path(&sqlite_root, database);
-        sqlite_execute(&path, "UPDATE lash_compat SET min_reader = 2")?;
+        sqlite_execute(&path, "UPDATE lash_compat SET min_reader = version")?;
         ensure!(
             matches!(
                 sqlite_refusal(&path, database).await?,
-                CompatRefusal::ReaderFloorAbove { min_reader: 2, .. }
+                CompatRefusal::ReaderFloorAbove { found, min_reader, .. } if min_reader == found
             ),
             "N admitted {} above its reader floor",
             database.name()
         );
-        sqlite_execute(&path, "UPDATE lash_compat SET min_reader = 1")?;
+        sqlite_execute(&path, "UPDATE lash_compat SET min_reader = version - 1")?;
     }
     for database in databases {
         sqlite_execute(
             &sqlite_path(&sqlite_root, database),
-            "UPDATE lash_compat SET min_reader = 2",
+            "UPDATE lash_compat SET min_reader = version",
         )?;
     }
     ensure!(
         matches!(
             builds.n.probe_refusal(&sqlite)?,
-            CompatRefusal::ReaderFloorAbove { min_reader: 2, .. }
+            CompatRefusal::ReaderFloorAbove { found, min_reader, .. } if min_reader == found
         ),
         "N SQLite process admitted the raised reader floor"
     );
     for database in databases {
         sqlite_execute(
             &sqlite_path(&sqlite_root, database),
-            "UPDATE lash_compat SET min_reader = 1",
+            "UPDATE lash_compat SET min_reader = version - 1",
         )?;
     }
 

@@ -159,177 +159,171 @@ def mismatches(rows: list[dict]):
     return errors
 
 
-SQLITE_STAMPS = Path("crates/lash-sqlite-store/src/schema.rs")
+STORE_VERSIONS = Path("crates/lash-core-store/src/compat.rs")
+SQLITE_SCHEMA = Path("crates/lash-sqlite-store/src/schema.rs")
 SQLITE_CATALOG = Path("crates/lash-sqlite-store/src/migration.rs")
-COMPAT_DESCRIPTORS = Path("crates/lash-core-store/src/compat.rs")
+POSTGRES_ALIAS = Path("crates/lash-postgres-store/src/lib.rs")
+POSTGRES_CATALOG = Path("crates/lash-postgres-store/src/postgres/migrate.rs")
+POSTGRES_SCHEMA = Path("crates/lash-postgres-store/schema.sql")
 CFG = r'(?P<attrs>(?:#\[cfg\([^\]]*\)\]\s*)*)'
-STAMP_DATABASE = re.compile(
-    r"version_guard\((?:(?!version_guard\().)*?rows\s*=\s*\"SqliteDatabase::(?P<database>\w+)\""
-    r"(?:(?!version_guard\().)*?const\s+(?P<stamp>[A-Z][A-Z0-9_]*)\s*:", re.DOTALL,
+STORE_DESCRIPTOR = re.compile(
+    r"\bstore\(\s*ComponentId::(?P<component>\w+)\s*,\s*(?P<constant>[A-Z][A-Z0-9_]*)\s*,?\s*\)"
 )
 DATABASE_COMPONENT = re.compile(r"Self::(\w+)\s*=>\s*ComponentId::(\w+)")
-DESCRIPTOR = re.compile(
-    CFG + r"CompatDescriptor\s*\{\s*component:\s*ComponentId::(?P<component>\w+),"
-    r"\s*reads:[^,]*(?:\([^)]*\))?,\s*writes:\s*VersionRange::(?P<range>exactly|between)"
-    r"\((?P<bounds>[^)]*)\)"
-)
-CATALOG_ROW = re.compile(
+SQLITE_STEP = re.compile(
     CFG + r"SqliteMigration\s*\{\s*database:\s*SqliteDatabase::(?P<database>\w+),"
-    r"\s*from:\s*(?P<from>\d+),\s*to:\s*(?P<to>\d+),"
-)
-
-
-def sqlite_stamp_mismatches(repo: Path):
-    """Where a SQLite schema stamp and its migration catalog count differently.
-
-    The catalog's steps, and the `lash_compat` row a store carries, are in the
-    compatibility descriptor's numbers. A stamp's bump owes a catalog step
-    from its old value to its new one (check_version_bumps.py), so that chain
-    can only be read when the stamp is the descriptor's version. After the
-    reset each stamp must therefore equal the version its database's
-    descriptor writes, in the default and the synthetic-next build, and every
-    catalog step must lie inside the stamp's own range.
-    """
-    schema = (repo / SQLITE_STAMPS).read_text()
-    stamps = {m["stamp"]: m["database"] for m in STAMP_DATABASE.finditer(schema)}
-    components = dict(DATABASE_COMPONENT.findall(without_comments(schema)))
-    descriptors = without_comments((repo / COMPAT_DESCRIPTORS).read_text())
-    catalog = without_comments((repo / SQLITE_CATALOG).read_text())
-    if not stamps or set(stamps.values()) - components.keys():
-        raise BaselineError("cannot read the SQLite stamps and their databases")
-    errors = []
-    for stamp, database in sorted(stamps.items()):
-        values = {}
-        for synthetic in (False, True):
-            tier = "synthetic-next" if synthetic else "default"
-            written = [
-                int(m["bounds"].split(",")[-1])
-                for m in DESCRIPTOR.finditer(descriptors)
-                if m["component"] == components[database] and enabled(m["attrs"], synthetic)
-            ]
-            if len(written) != 1:
-                raise BaselineError(f"{database}: expected one {tier} compat descriptor, found {len(written)}")
-            values[synthetic] = value = resolve(schema, stamp, synthetic)
-            if value != written[0]:
-                errors.append(
-                    f"{SQLITE_STAMPS}:{stamp}: {tier} stamp {value}, but the "
-                    f"{components[database]} descriptor and its catalog write {written[0]}"
-                )
-            for row in CATALOG_ROW.finditer(catalog):
-                if row["database"] != database or not enabled(row["attrs"], synthetic):
-                    continue
-                start, end = int(row["from"]), int(row["to"])
-                if not 1 <= start < end <= value:
-                    errors.append(
-                        f"{SQLITE_CATALOG}: {database} step {start} to {end} is outside "
-                        f"the {tier} stamp {stamp} = {value}"
-                    )
-        steps = {
-            (int(row["from"]), int(row["to"]))
-            for row in CATALOG_ROW.finditer(catalog)
-            if row["database"] == database and enabled(row["attrs"], True)
-        }
-        at = values[False]
-        while at < values[True] and any(start == at for start, _ in steps):
-            at = max(end for start, end in steps if start == at)
-        if at != values[True]:
-            errors.append(
-                f"{SQLITE_CATALOG}: {database} has no step chain from the default stamp "
-                f"{values[False]} to the synthetic-next stamp {values[True]} ({stamp})"
-            )
-    return errors
-
-
-POSTGRES_STAMPS = Path("crates/lash-postgres-store/src/lib.rs")
-POSTGRES_CATALOG = Path("crates/lash-postgres-store/src/postgres/migrate.rs")
-STAMP_POSTGRES = re.compile(
-    r"version_guard\((?:(?!version_guard\().)*?"
-    r"catalog\(\s*path\s*=\s*\"(?P<path>[^\"]+)\"\s*,\s*(?P<table>[A-Z][A-Z0-9_]*)\s*\)"
-    r"(?:(?!version_guard\().)*?const\s+(?P<stamp>[A-Z][A-Z0-9_]*)\s*:", re.DOTALL,
-)
-POSTGRES_COMPONENT = re.compile(
-    r"descriptor\(\s*lash_core_execution::compat::ComponentId::(?P<component>\w+)"
+    r"\s*from:\s*(?P<from>[^,{}]+),\s*to:\s*(?P<to>[^,{}]+),"
 )
 EXPAND_TABLE = re.compile(
     r"static\s+EXPAND_MIGRATIONS\s*:[^=]*?=\s*&\[(?P<body>.*?)\];", re.DOTALL,
 )
 EXPAND_STEP = re.compile(
-    CFG + r"ExpandMigration\s*\{\s*id:\s*\"[^\"]*\",\s*from_version:\s*(?P<from>\d+),"
-    r"\s*to_version:\s*(?P<to>\d+),"
+    CFG + r"ExpandMigration\s*\{\s*id:\s*\"[^\"]*\",\s*from_version:\s*(?P<from>[^,{}]+),"
+    r"\s*to_version:\s*(?P<to>[^,{}]+),"
 )
+POSTGRES_ALIAS_DEFINITION = re.compile(
+    r"const\s+SCHEMA_VERSION\s*:\s*i32\s*=\s*lash_core_execution::compat::"
+    r"(?P<constant>[A-Z][A-Z0-9_]*)\s+as\s+i32\s*;"
+)
+POSTGRES_HEADER = re.compile(r"\A-- lash-postgres-store schema, component version (\d+)\.\n")
+POSTGRES_SEED = re.compile(r"VALUES \('lash-postgres-store', (\d+), (\d+)\)")
+STEP_BOUND = re.compile(r"(?:(?:\w+::)*(?P<name>[A-Z][A-Z0-9_]*)(?:\s*\+\s*(?P<add>\d+))?|(?P<literal>\d+))\Z")
+
+
+def store_versions(repo: Path):
+    """Each store component's schema-version constant and its value.
+
+    The constants live in compat.rs, where `DESCRIPTORS` hands each one to
+    `store(..)`: the component's descriptor, the stamp a store carries and the
+    numbers its catalog steps are written in are that one constant. The
+    default build writes it and the synthetic-next build writes the version
+    after it, so a constant has one definition for both tiers.
+    """
+    text = (repo / STORE_VERSIONS).read_text()
+    rows = {m["component"]: m["constant"] for m in STORE_DESCRIPTOR.finditer(without_comments(text))}
+    if not rows:
+        raise BaselineError("cannot read the store descriptors and their schema-version constants")
+    versions = {}
+    for component, constant in rows.items():
+        default, synthetic = resolve(text, constant, False), resolve(text, constant, True)
+        if type(default) is not int or default != synthetic:
+            raise BaselineError(f"{constant}: a store schema version is one integer in both tiers")
+        versions[component] = (constant, default)
+    return versions
+
+
+def step_bound(expression: str, names: dict[str, int], where: str):
+    """A catalog step's `from` or `to`: an integer, or the store's own
+    schema-version constant with an optional `+ N`."""
+    match = STEP_BOUND.match(expression.strip())
+    if match is None or (match["name"] and match["name"] not in names):
+        raise BaselineError(f"{where}: step bound {expression.strip()!r} is not the store's own version")
+    if match["literal"]:
+        return int(match["literal"])
+    return names[match["name"]] + int(match["add"] or 0)
+
+
+def catalog_mismatches(catalog: Path, label: str, constant: str, value: int, rows):
+    """Where a catalog's steps leave the range of the version they are numbered in.
+
+    `rows` are `(attrs, from, to)`. A default-build step lies inside
+    `[1, value]`; the synthetic-next build writes `value + 1`, and its steps
+    must chain there from `value`.
+    """
+    errors = []
+    for synthetic in (False, True):
+        tier = "synthetic-next" if synthetic else "default"
+        written = value + (1 if synthetic else 0)
+        for attrs, start, end in rows:
+            if enabled(attrs, synthetic) and not 1 <= start < end <= written:
+                errors.append(
+                    f"{catalog}: {label} step {start} to {end} is outside "
+                    f"the {tier} stamp {constant} = {written}"
+                )
+    steps = {(start, end) for attrs, start, end in rows if enabled(attrs, True)}
+    at = value
+    while at < value + 1 and any(start == at for start, _ in steps):
+        at = max(end for start, end in steps if start == at)
+    if at != value + 1:
+        errors.append(
+            f"{catalog}: {label} has no step chain from the default stamp "
+            f"{value} to the synthetic-next stamp {value + 1} ({constant})"
+        )
+    return errors
+
+
+def sqlite_stamp_mismatches(repo: Path):
+    """Where a SQLite database's catalog and its schema version count differently.
+
+    Each database's `lash_compat` row, its descriptor and its catalog steps
+    are in the one constant compat.rs declares for it. The backend must not
+    restate that number, every catalog step must lie inside the version's own
+    range, and the synthetic-next build's steps must carry the database from
+    the constant to the version after it.
+    """
+    schema = (repo / SQLITE_SCHEMA).read_text()
+    components = dict(DATABASE_COMPONENT.findall(without_comments(schema)))
+    versions = store_versions(repo)
+    if not components or set(components.values()) - versions.keys():
+        raise BaselineError("cannot read the SQLite databases and their components")
+    errors = [
+        f"{SQLITE_SCHEMA}:{match['name']}: a SQLite schema version is restated outside {STORE_VERSIONS}"
+        for match in definitions(schema) if match["name"].endswith("SCHEMA_VERSION")
+    ]
+    catalog = without_comments((repo / SQLITE_CATALOG).read_text())
+    for database, component in sorted(components.items()):
+        constant, value = versions[component]
+        where = f"{SQLITE_CATALOG}: {database}"
+        rows = [
+            (row["attrs"], step_bound(row["from"], {constant: value}, where),
+             step_bound(row["to"], {constant: value}, where))
+            for row in SQLITE_STEP.finditer(catalog) if row["database"] == database
+        ]
+        errors += catalog_mismatches(SQLITE_CATALOG, database, constant, value, rows)
+    return errors
 
 
 def postgres_stamp_mismatches(repo: Path):
-    """Where the PostgreSQL schema stamp and its expand catalog count differently.
+    """Where the PostgreSQL schema, its catalog and its schema version count differently.
 
-    The catalog's steps, and the `lash_schema_versions` row a store carries,
-    are in the compatibility descriptor's numbers. A stamp's bump owes a
-    catalog step from its old value to its new one (check_version_bumps.py),
-    so that chain can only be read when the stamp is the descriptor's
-    version. After the reset the stamp a store carries must therefore equal
-    the version the POSTGRES descriptor writes, in the default and the
-    synthetic-next build, and every catalog step must lie inside the stamp's
-    own range. SCHEMA_VERSION is one constant in both tiers: provisioning
-    stamps the catalog's own number, and the synthetic build's built-in
-    expand (apply_synthetic_expand) then carries a store one step to the
-    version that tier writes.
+    The stamp `schema.sql` seeds, the header it carries, the descriptor and
+    the expand catalog's steps are in the one constant compat.rs declares for
+    the POSTGRES component. The backend names it only through its `i32`
+    alias; the artifact's header and seed row must state it; every catalog
+    step must lie inside the version's own range; and the synthetic-next
+    build's steps must carry a store from the constant to the version after
+    it.
     """
-    schema = (repo / POSTGRES_STAMPS).read_text()
-    stamps = {m["stamp"]: (m["path"], m["table"]) for m in STAMP_POSTGRES.finditer(schema)}
-    components = set(POSTGRES_COMPONENT.findall(schema))
-    descriptors = without_comments((repo / COMPAT_DESCRIPTORS).read_text())
+    constant, value = store_versions(repo)["POSTGRES"]
+    aliases = POSTGRES_ALIAS_DEFINITION.findall(without_comments((repo / POSTGRES_ALIAS).read_text()))
     catalog = without_comments((repo / POSTGRES_CATALOG).read_text())
     table = EXPAND_TABLE.search(catalog)
-    rows = list(EXPAND_STEP.finditer(table["body"])) if table else []
+    steps = list(EXPAND_STEP.finditer(table["body"])) if table else []
     declared = len(re.findall(r"ExpandMigration\s*\{", table["body"])) if table else -1
-    if (list(stamps.values()) != [(str(POSTGRES_CATALOG), "EXPAND_MIGRATIONS")]
-            or len(components) != 1 or len(rows) != declared):
-        raise BaselineError("cannot read the PostgreSQL stamp, its component and its catalog")
-    stamp = next(iter(stamps))
-    component = next(iter(components))
+    if len(steps) != declared:
+        raise BaselineError("cannot read the PostgreSQL expand catalog")
     errors = []
-    values = {}
-    for synthetic in (False, True):
-        tier = "synthetic-next" if synthetic else "default"
-        written = [
-            int(m["bounds"].split(",")[-1])
-            for m in DESCRIPTOR.finditer(descriptors)
-            if m["component"] == component and enabled(m["attrs"], synthetic)
-        ]
-        if len(written) != 1:
-            raise BaselineError(f"{component}: expected one {tier} compat descriptor, found {len(written)}")
-        values[synthetic] = value = resolve(schema, stamp, synthetic)
-        # A store carries SCHEMA_VERSION under a default build; the synthetic
-        # build's expand moves it exactly one version (`version + 1 == next`).
-        carried = value + (1 if synthetic else 0)
-        if carried != written[0]:
-            errors.append(
-                f"{POSTGRES_STAMPS}:{stamp}: {tier} stamp {carried}, but the "
-                f"{component} descriptor and its catalog write {written[0]}"
-            )
-        for row in rows:
-            if not enabled(row["attrs"], synthetic):
-                continue
-            start, end = int(row["from"]), int(row["to"])
-            if not 1 <= start < end <= value:
-                errors.append(
-                    f"{POSTGRES_CATALOG}: expand step {start} to {end} is outside "
-                    f"the {tier} stamp {stamp} = {value}"
-                )
-    steps = {
-        (int(row["from"]), int(row["to"]))
-        for row in rows
-        if enabled(row["attrs"], True)
-    }
-    at = values[False]
-    while at < values[True] and any(start == at for start, _ in steps):
-        at = max(end for start, end in steps if start == at)
-    if at != values[True]:
+    if aliases != [constant]:
         errors.append(
-            f"{POSTGRES_CATALOG}: expand has no step chain from the default stamp "
-            f"{values[False]} to the synthetic-next stamp {values[True]} ({stamp})"
+            f"{POSTGRES_ALIAS}:SCHEMA_VERSION: must be the i32 alias of {STORE_VERSIONS}:{constant}"
         )
-    return errors
+    artifact = (repo / POSTGRES_SCHEMA).read_text()
+    header, seeds = POSTGRES_HEADER.match(artifact), POSTGRES_SEED.findall(artifact)
+    if header is None or len(seeds) != 1:
+        raise BaselineError(f"cannot read the component version {POSTGRES_SCHEMA} states")
+    stated = (int(header[1]), int(seeds[0][0]), int(seeds[0][1]))
+    if stated != (value, value, value):
+        errors.append(
+            f"{POSTGRES_SCHEMA}: header {stated[0]} and seed stamp {stated[1]}/{stated[2]}, "
+            f"but POSTGRES is at {constant} = {value}"
+        )
+    names = {constant: value, "SCHEMA_VERSION": value}
+    rows = [
+        (row["attrs"], step_bound(row["from"], names, str(POSTGRES_CATALOG)),
+         step_bound(row["to"], names, str(POSTGRES_CATALOG)))
+        for row in steps
+    ]
+    return errors + catalog_mismatches(POSTGRES_CATALOG, "expand", constant, value, rows)
 
 
 def verify_build(rows: list[dict], report: Path, synthetic: bool):
@@ -375,7 +369,7 @@ def main():
             return 1
         print(
             f"release baseline: {len(rows)} surfaces, zero mismatches; "
-            "SQLite and PostgreSQL stamps equal their catalog numbers"
+            "SQLite and PostgreSQL catalogs and artifacts are in their compat.rs versions"
         )
         return 0
     except (BaselineError, OSError, KeyError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:

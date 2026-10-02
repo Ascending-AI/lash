@@ -93,10 +93,9 @@ async fn fleet(database: &IsolatedDatabase) -> (PostgresStorage, PostgresStorage
         let pool = sqlx::PgPool::connect(database.url())
             .await
             .expect("connect for the expand");
-        crate::migrate::expand_synthetic_next_for_testing(
+        crate::migrate::expand_for_testing(
             &pool,
             &crate::guarded_tx::WriterFence::new(NEXT, lash_core_execution::FleetFormat::current()),
-            2,
         )
         .await
         .expect("N+1 expands the store");
@@ -684,7 +683,7 @@ async fn contract_refuses_until_backfills_complete() {
             .expect("read the stamp");
     assert_eq!(
         (stamp_version, min_reader),
-        (2, 1),
+        (crate::SCHEMA_VERSION + 1, crate::SCHEMA_VERSION),
         "a refused contract moved no floor"
     );
 
@@ -708,7 +707,7 @@ async fn contract_refuses_until_backfills_complete() {
     .fetch_one(next.pool())
     .await
     .expect("read the floor and the constraint");
-    assert_eq!(min_reader, 2);
+    assert_eq!(min_reader, crate::SCHEMA_VERSION + 1);
     assert!(
         validated,
         "contract validated the constraint the backfill added"

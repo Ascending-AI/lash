@@ -77,7 +77,8 @@ const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_form
 
 /// Phase A's single post-cut expand. None of these objects constrains writes
 /// made by N: the column is nullable, the table is new, and the index is not
-/// unique. The compatibility stamp moves to 2 in the same transaction.
+/// unique. Its catalog step moves the component stamp to the next version in
+/// the same transaction, as every catalog step does.
 #[cfg(feature = "synthetic-next")]
 const SYNTHETIC_NEXT_EXPAND_DDL: &str = "ALTER TABLE lash_session_head
     ADD COLUMN IF NOT EXISTS synthetic_next_note TEXT;
@@ -192,8 +193,10 @@ CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
 
 /// One expand-phase step this build's migrate runner can apply.
 ///
-/// `from_version`/`to_version` chain steps together so planning can walk the
-/// catalog from any stamped predecessor to `SCHEMA_VERSION`. `statements` are
+/// `from_version`/`to_version` are component versions, the numbers the stamp
+/// in `lash_schema_versions` holds: they chain steps together so planning can
+/// walk the catalog from any stamped predecessor to the version this build
+/// writes, and applying a step sets the stamp to its `to_version`. `statements` are
 /// all idempotent (`IF NOT EXISTS` or constraint guards) so a step can replay
 /// after a crash without tripping on its own committed output.
 struct ExpandMigration {
@@ -222,6 +225,8 @@ struct ExpandMigration {
 /// typed recreate refusal. The sixth step adds the logical-root family and
 /// carries 139 to 140 (FIG-3600); the seventh restamps 140 to 141 when the
 /// journaled effect envelope gains the session close (FIG-3600).
+/// Phase A's synthetic successor (ADR 0115 §6) appends the one step past the
+/// version `schema.sql` provisions.
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
         id: "0134-migrations-ledger",
@@ -264,6 +269,13 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 140,
         to_version: 141,
         statements: "-- component 141 (FIG-3600): envelope-vocabulary-only change; nothing to apply.",
+    },
+    #[cfg(feature = "synthetic-next")]
+    ExpandMigration {
+        id: "synthetic-next-expand",
+        from_version: SCHEMA_VERSION,
+        to_version: SCHEMA_VERSION + 1,
+        statements: SYNTHETIC_NEXT_EXPAND_DDL,
     },
 ];
 
@@ -323,7 +335,7 @@ static CONTRACT_MIGRATIONS: &[ContractMigration] = &[
         after_fleet: 2,
         after_backfills: &["synthetic-next-session-note"],
         statements: SYNTHETIC_NEXT_CONTRACT_DDL,
-        min_reader: 2,
+        min_reader: SCHEMA_VERSION + 1,
     },
 ];
 
@@ -521,9 +533,9 @@ pub struct MigrationReport {
 struct MigrationState {
     /// The resolved installation, or `None` on an unprovisioned database.
     installation: Option<Installation>,
-    /// The last DDL step recorded by the migration ledger. Compatibility
-    /// versions are a separate sequence in `lash_schema_versions`.
-    ddl_version: Option<i32>,
+    /// The component version the stamp in `lash_schema_versions` holds: the
+    /// one number the planner walks the catalog from.
+    stamped_version: Option<i32>,
     /// Ledger rows already committed.
     applied: Vec<MigrationStep>,
     /// The writing release, when the release stamp could still be read.
@@ -603,7 +615,7 @@ async fn read_state(
     let Some(installation) = resolve_installation(tx, &search_path).await? else {
         return Ok(MigrationState {
             installation: None,
-            ddl_version: None,
+            stamped_version: None,
             applied: Vec::new(),
             writing_release: None,
             fleet: None,
@@ -637,19 +649,7 @@ async fn read_state(
     } else {
         Vec::new()
     };
-    let ddl_version = if !ledger_present {
-        // A catalog older than the ledger (component 134) recorded its DDL
-        // revision only in its pre-1.0 stamp, so that is the revision the
-        // planner refuses by name.
-        read_legacy_stamp_version(tx, &installation).await?
-    } else if applied.is_empty() {
-        // Hosts may install the published schema.sql directly. Its 1.0
-        // compatibility stamp is not the pre-1.0 DDL migration counter.
-        let report = verify_schema_shape(&mut *tx).await?;
-        report.is_conformant().then_some(SCHEMA_VERSION)
-    } else {
-        applied.iter().map(|step| step.to_version).max()
-    };
+    let stamped_version = read_stamp_version(tx, &installation).await?;
     let fleet = match crate::fleet_format::read_state_in_tx(tx)
         .await
         .map_err(store_sqlx_error)?
@@ -662,42 +662,33 @@ async fn read_state(
     let writing_release = crate::release_stamp::read_release_in_tx(tx).await;
     Ok(MigrationState {
         installation: Some(installation),
-        ddl_version,
+        stamped_version,
         applied,
         writing_release,
         fleet,
     })
 }
 
-/// The DDL revision a pre-1.0 stamp records: `lash_schema_versions.version`
-/// on a stamp table without `min_reader`, the shape every catalog had before
-/// the 1.0 compatibility stamp (ADR 0115 §1.2). A stamp that carries
-/// `min_reader` is a compatibility stamp, whose version is no DDL revision,
-/// and a catalog with no stamp table has none; both answer `None`.
-async fn read_legacy_stamp_version(
+/// The component version the stamp records: `lash_schema_versions.version`
+/// for this component. A catalog older than the reader floor carries the
+/// stamp table without `min_reader`, and its version is read the same way, so
+/// the planner refuses it by the number it holds. A catalog with no stamp
+/// table, or no row for the component, has none.
+async fn read_stamp_version(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     installation: &Installation,
 ) -> Result<Option<i32>, StoreError> {
-    let (stamp_present, compat_stamp): (bool, bool) = sqlx::query_as(
+    let stamp_present: bool = sqlx::query_scalar(
         "SELECT EXISTS (
-                 SELECT 1 FROM pg_catalog.pg_class
-                 WHERE relnamespace = $1 AND relname = 'lash_schema_versions'
-                   AND relkind IN ('r', 'p')),
-             EXISTS (
-                 SELECT 1 FROM pg_catalog.pg_class AS relation
-                 JOIN pg_catalog.pg_attribute AS attribute
-                   ON attribute.attrelid = relation.oid
-                 WHERE relation.relnamespace = $1
-                   AND relation.relname = 'lash_schema_versions'
-                   AND relation.relkind IN ('r', 'p')
-                   AND attribute.attname = 'min_reader'
-                   AND NOT attribute.attisdropped)",
+             SELECT 1 FROM pg_catalog.pg_class
+             WHERE relnamespace = $1 AND relname = 'lash_schema_versions'
+               AND relkind IN ('r', 'p'))",
     )
     .bind(installation.namespace_oid())
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    if !stamp_present || compat_stamp {
+    if !stamp_present {
         return Ok(None);
     }
     sqlx::query_scalar(&format!(
@@ -710,50 +701,65 @@ async fn read_legacy_stamp_version(
     .map_err(store_sqlx_error)
 }
 
-/// Turns a read of the database into the ordered steps a run still owes it.
-///
-/// The walk is the whole planning algorithm: from the found stamp, chain
-/// catalog steps whose ids are not yet in the ledger until `SCHEMA_VERSION` is
-/// reached. A stamp with no chain is a recreate boundary, refused by the same
-/// typed error an open would raise — "no applicable migration" is the honest
-/// statement there too.
-fn plan(state: &MigrationState) -> Result<Vec<PlannedStep<'_>>, StoreError> {
-    let Some(installation) = &state.installation else {
-        // Nothing provisioned: the bootstrap applies this build's schema.sql,
-        // whose seed statements stamp the current component.
-        return Ok(vec![PlannedStep::Bootstrap]);
-    };
-    let installed = Some(installation.namespace());
-    let release = state.writing_release.as_deref();
-    let Some(mut at) = state.ddl_version else {
-        return Err(version_mismatch_error(installed, None, release));
-    };
-    let found = Some(at);
-    if at > SCHEMA_VERSION {
-        // A newer build's catalog: Lash never migrates backwards, and the
-        // typed refusal says so.
-        return Err(version_mismatch_error(installed, found, release));
-    }
-    let mut pending = Vec::new();
-    while at < SCHEMA_VERSION {
+/// The component version this build's migrate leaves a store at: the version
+/// its compatibility descriptor writes.
+fn written_version() -> Result<i32, StoreError> {
+    let descriptor =
+        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+            .ok_or_else(|| {
+                StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
+            })?;
+    i32::try_from(descriptor.writes.max()).map_err(|error| StoreError::Backend(error.to_string()))
+}
+
+/// The catalog steps that carry a store stamped `from` to `target`, in
+/// order, or the version the catalog has no step forward from.
+fn chain(from: i32, target: i32) -> Result<Vec<&'static ExpandMigration>, i32> {
+    let mut steps = Vec::new();
+    let mut at = from;
+    while at < target {
         let Some(migration) = EXPAND_MIGRATIONS
             .iter()
             .find(|migration| migration.from_version == at)
         else {
-            return Err(version_mismatch_error(installed, found, release));
+            return Err(at);
         };
-        // A committed ledger row means this step finished; skip it and keep
-        // walking, which is what makes a resumed run pick up where it stopped.
-        if !state
-            .applied
-            .iter()
-            .any(|step| step.migration == migration.id)
-        {
-            pending.push(PlannedStep::Migration(migration));
-        }
+        steps.push(migration);
         at = migration.to_version;
     }
-    Ok(pending)
+    Ok(steps)
+}
+
+/// Turns a read of the database into the ordered steps a run still owes it.
+///
+/// The walk is the whole planning algorithm: from the found stamp, chain
+/// catalog steps until the version this build writes is reached. A step's
+/// commit moves the stamp, so a resumed run starts from the stamp the last
+/// committed step left. An unprovisioned database is bootstrapped at the
+/// version `schema.sql` seeds and walks the catalog from there like any other
+/// store. A stamp with no chain is a recreate boundary, refused by the same
+/// typed error an open would raise — "no applicable migration" is the honest
+/// statement there too.
+fn plan(state: &MigrationState) -> Result<Vec<PlannedStep<'static>>, StoreError> {
+    let target = written_version()?;
+    let (installed, found, bootstrap) = match &state.installation {
+        Some(installation) => (Some(installation.namespace()), state.stamped_version, None),
+        None => (None, Some(SCHEMA_VERSION), Some(PlannedStep::Bootstrap)),
+    };
+    let release = state.writing_release.as_deref();
+    let Some(at) = found else {
+        return Err(version_mismatch_error(installed, None, release));
+    };
+    if at > target {
+        // A newer build's catalog: Lash never migrates backwards, and the
+        // typed refusal says so.
+        return Err(version_mismatch_error(installed, found, release));
+    }
+    let steps = chain(at, target).map_err(|_| version_mismatch_error(installed, found, release))?;
+    Ok(bootstrap
+        .into_iter()
+        .chain(steps.into_iter().map(PlannedStep::Migration))
+        .collect())
 }
 
 /// The server clock's current instant in epoch milliseconds — the ledger's
@@ -837,36 +843,41 @@ async fn apply_step(
             )
         }
         PlannedStep::Migration(migration) => {
-            // plan only produces a catalog step for a resolved installation.
-            let Some(installation) = installation else {
-                return Err(StoreError::Backend(
-                    "a catalog migration was planned for a database with no lash installation"
-                        .to_string(),
-                ));
+            // A step that follows this run's bootstrap has no installation
+            // resolved yet: the bootstrap created the relations in the
+            // search_path's first schema, where the unqualified names resolve.
+            let relation = |name: &str| match installation {
+                Some(installation) => format!("{}.{name}", installation.quoted_namespace()),
+                None => name.to_string(),
             };
             sqlx::raw_sql(migration.statements)
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
             // Moving the stamp is part of the step: a later open sees either
-            // the whole committed step or the version it started from.
-            sqlx::query(&format!(
-                "INSERT INTO {}.lash_schema_versions (component, version, min_reader)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (component) DO NOTHING",
-                installation.quoted_namespace()
+            // the whole committed step or the version it started from. The
+            // reader floor is a contract step's to raise, never an expand's.
+            let moved = sqlx::query(&format!(
+                "UPDATE {} SET version = $1 WHERE component = $2 AND version = $3",
+                relation("lash_schema_versions")
             ))
+            .bind(migration.to_version)
             .bind(SCHEMA_COMPONENT)
-            .bind(1_i32)
-            .bind(1_i32)
+            .bind(migration.from_version)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
+            if moved.rows_affected() != 1 {
+                return Err(StoreError::Backend(format!(
+                    "expand step {} found no `{SCHEMA_COMPONENT}` stamp at version {} to move",
+                    migration.id, migration.from_version
+                )));
+            }
             (
                 migration.id.to_string(),
                 Some(migration.from_version),
                 migration.to_version,
-                format!("{}.lash_migrations", installation.quoted_namespace()),
+                relation("lash_migrations"),
             )
         }
     };
@@ -898,106 +909,15 @@ async fn apply_step(
     })
 }
 
-/// Phase A's synthetic expand: the one post-cut expand step, moving the
-/// component stamp to `next`, the version the synthetic build writes.
-#[cfg(feature = "synthetic-next")]
-async fn apply_synthetic_expand(
-    connection: &mut sqlx::PgConnection,
-    fence: &WriterFence,
-    next: i32,
-) -> Result<Option<MigrationStep>, StoreError> {
-    let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
-    let version: i32 =
-        sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
-            .bind(SCHEMA_COMPONENT)
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    if version == next {
-        return Ok(None);
-    }
-    if version + 1 != next {
-        let descriptor = lash_core_execution::compat::descriptor(
-            lash_core_execution::compat::ComponentId::POSTGRES,
-        )
-        .ok_or_else(|| {
-            StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
-        })?;
-        return Err(StoreError::Incompatible {
-            refusal: lash_core_execution::compat::CompatRefusal::TooOld {
-                component: descriptor.component.as_str().to_owned(),
-                found: u32::try_from(version).unwrap_or_default(),
-                reads: descriptor.reads,
-                writing_release: None,
-            },
-        });
-    }
-    let started_at_ms = server_clock_ms(&mut tx).await?;
-    sqlx::raw_sql(SYNTHETIC_NEXT_EXPAND_DDL)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    sqlx::query("UPDATE lash_schema_versions SET version = $1 WHERE component = $2")
-        .bind(next)
-        .bind(SCHEMA_COMPONENT)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let migration = "synthetic-next-expand";
-    let (release, state, started_at_ms, finished_at_ms) = record_step(
-        &mut tx,
-        "lash_migrations",
-        MigrationPhase::Expand.name(),
-        migration,
-        Some(SCHEMA_VERSION),
-        SCHEMA_VERSION,
-        started_at_ms,
-    )
-    .await?;
-    crate::release_stamp::write(&mut tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(Some(MigrationStep {
-        phase: MigrationPhase::Expand.name().to_string(),
-        migration: migration.to_string(),
-        release,
-        state,
-        from_version: Some(SCHEMA_VERSION),
-        to_version: SCHEMA_VERSION,
-        started_at_ms: Some(started_at_ms),
-        finished_at_ms,
-        backfill_cursor: None,
-        backfill_rows: None,
-    }))
-}
-
-/// The component version the synthetic build's expand writes: its
-/// descriptor's.
-#[cfg(feature = "synthetic-next")]
-fn synthetic_next_component_version() -> Result<i32, StoreError> {
-    let descriptor =
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
-            .ok_or_else(|| {
-                StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
-            })?;
-    i32::try_from(descriptor.writes.max()).map_err(|error| StoreError::Backend(error.to_string()))
-}
-
-/// Run Phase A's synthetic expand to component `next` under the exclusive
-/// schema lock, as a build whose fence is `fence`: the laws' way to stand in
-/// N+1's `lashctl migrate` on a store both builds then open with explicit
-/// writable ranges.
+/// Run the expand phase under the exclusive schema lock, as a build whose
+/// fence is `fence`: the laws' way to stand in N+1's `lashctl migrate` on a
+/// store both builds then open with explicit writable ranges.
 #[cfg(all(test, feature = "synthetic-next"))]
-pub(crate) async fn expand_synthetic_next_for_testing(
+pub(crate) async fn expand_for_testing(
     pool: &PgPool,
     fence: &WriterFence,
-    next: i32,
 ) -> Result<(), StoreError> {
-    let mut connection = lock_connection(pool, false).await?;
-    let result = apply_synthetic_expand(&mut connection, fence, next).await;
-    let _ = sqlx::Connection::close(connection).await;
-    result.map(|_| ())
+    expand_on(pool, fence).await.map(drop)
 }
 
 /// Seeds `F` at this build's [`FleetFormat::seed`] when the store records
@@ -1030,7 +950,7 @@ fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationRepo
             .installation
             .as_ref()
             .map(|installation| installation.namespace().to_string()),
-        found_version: state.ddl_version,
+        found_version: state.stamped_version,
         applied: state.applied.clone(),
         executed,
         planned: Vec::new(),
@@ -1124,15 +1044,16 @@ fn planned_step(step: &PlannedStep<'_>) -> MigrationStep {
     }
 }
 
-/// A backfill or contract step not yet recorded, as a plan lists it.
-fn planned_later_step(phase: MigrationPhase, migration: &str) -> MigrationStep {
+/// A backfill or contract step not yet recorded, as a plan lists it. Neither
+/// phase moves the component version, so both record the one the store is at.
+fn planned_later_step(phase: MigrationPhase, migration: &str, version: i32) -> MigrationStep {
     MigrationStep {
         phase: phase.name().to_string(),
         migration: migration.to_string(),
         release: String::new(),
         state: String::new(),
-        from_version: Some(SCHEMA_VERSION),
-        to_version: SCHEMA_VERSION,
+        from_version: Some(version),
+        to_version: version,
         started_at_ms: None,
         finished_at_ms: None,
         backfill_cursor: None,
@@ -1222,6 +1143,7 @@ pub(crate) async fn plan_on(
     let mut connection = lock_connection(pool, true).await?;
     let result = async {
         let state = read_state_under_lock(&mut connection).await?;
+        let version = written_version()?;
         let planned = match phase {
             MigrationPhase::Expand => plan(&state)?.iter().map(planned_step).collect(),
             MigrationPhase::Backfill | MigrationPhase::Contract if state.installation.is_none() => {
@@ -1232,11 +1154,11 @@ pub(crate) async fn plan_on(
             }
             MigrationPhase::Backfill => pending_backfills(&state)?
                 .into_iter()
-                .map(|backfill| planned_later_step(phase, backfill.id))
+                .map(|backfill| planned_later_step(phase, backfill.id, version))
                 .collect(),
             MigrationPhase::Contract => pending_contracts(&state)?
                 .into_iter()
-                .map(|contract| planned_later_step(phase, contract.id))
+                .map(|contract| planned_later_step(phase, contract.id, version))
                 .collect(),
         };
         let mut planned_report = report(&state, Vec::new());
@@ -1293,13 +1215,6 @@ async fn expand_on(pool: &PgPool, fence: &WriterFence) -> Result<MigrationReport
             executed
                 .push(apply_step(&mut connection, fence, state.installation.as_ref(), step).await?);
         }
-        #[cfg(feature = "synthetic-next")]
-        if let Some(step) =
-            apply_synthetic_expand(&mut connection, fence, synthetic_next_component_version()?)
-                .await?
-        {
-            executed.push(step);
-        }
         seed_fleet_format(&mut connection, fence).await?;
         let mut result = report(&state, executed);
         if !result.executed.is_empty() {
@@ -1324,20 +1239,28 @@ async fn verify_changed_catalog(
     steps: usize,
 ) -> Result<Option<String>, StoreError> {
     let verification = verify_schema_shape(&mut *connection).await?;
+    // The shape a run must leave is the one its last catalog step produces:
+    // this build's `schema.sql` shape, plus, in the synthetic successor, the
+    // objects its expand declares. The refusal names what differs from it.
     #[cfg(not(feature = "synthetic-next"))]
-    let conformant = verification.is_conformant();
+    let findings = if verification.is_conformant() {
+        Vec::new()
+    } else {
+        vec![verification.to_string()]
+    };
     #[cfg(feature = "synthetic-next")]
-    let conformant = {
+    let findings = {
         let begin = sqlx::Connection::begin(&mut *connection);
         let mut tx = begin.await.map_err(store_sqlx_error)?;
         let findings = crate::schema_shape::synthetic_next_findings(&mut tx, &verification).await?;
         tx.rollback().await.map_err(store_sqlx_error)?;
-        findings.is_empty()
+        findings
     };
-    if !conformant {
+    if !findings.is_empty() {
         return Err(StoreError::Backend(format!(
             "`lashctl migrate` applied {steps} step(s) but the resulting schema is not \
-             conformant — do not start workers against it: {verification}"
+             conformant — do not start workers against it: {}",
+            findings.join("; ")
         )));
     }
     Ok(verification.schema)
@@ -1413,7 +1336,7 @@ pub(crate) async fn start_backfill(
         )
         .bind(backfill.id)
         .bind(crate::release_stamp::BUILD_RELEASE)
-        .bind(SCHEMA_VERSION)
+        .bind(written_version()?)
         .bind(started_at_ms)
         .execute(&mut **tx)
         .await
@@ -1638,6 +1561,7 @@ async fn apply_contract(
         applied.iter().any(|name| name == backfill)
     })?;
     let started_at_ms = server_clock_ms(&mut tx).await?;
+    let version = written_version()?;
     sqlx::raw_sql(contract.statements)
         .execute(&mut **tx)
         .await
@@ -1656,8 +1580,8 @@ async fn apply_contract(
         "lash_migrations",
         MigrationPhase::Contract.name(),
         contract.id,
-        Some(SCHEMA_VERSION),
-        SCHEMA_VERSION,
+        Some(version),
+        version,
         started_at_ms,
     )
     .await?;
@@ -1670,8 +1594,8 @@ async fn apply_contract(
         migration: contract.id.to_string(),
         release,
         state,
-        from_version: Some(SCHEMA_VERSION),
-        to_version: SCHEMA_VERSION,
+        from_version: Some(version),
+        to_version: version,
         started_at_ms: Some(started_at_ms),
         finished_at_ms,
         backfill_cursor: None,

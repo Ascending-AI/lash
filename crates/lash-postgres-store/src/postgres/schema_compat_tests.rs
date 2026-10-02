@@ -178,7 +178,7 @@ async fn postgres_refuses_each_unsafe_addition() {
     ] {
         let scratch = Scratch::new(&url).await;
         scratch.apply(ddl).await;
-        scratch.apply("UPDATE lash_schema_versions SET version = 2 WHERE component = 'lash-postgres-store'").await;
+        scratch.apply("UPDATE lash_schema_versions SET version = version + 1 WHERE component = 'lash-postgres-store'").await;
         let error = scratch.open().await.expect_err(kind);
         assert!(
             matches!(

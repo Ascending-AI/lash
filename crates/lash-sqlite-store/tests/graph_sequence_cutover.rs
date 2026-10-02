@@ -38,20 +38,14 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         .expect("retain an envelope with the deleted kind field");
     connection
         .execute("UPDATE lash_compat SET version = 70, min_reader = 70", [])
-        .expect("stamp a predecessor whose reader floor excludes this build");
+        .expect("stamp a retired predecessor");
     drop(connection);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
     assert_eq!(
         found.verdict,
         StoreSchemaVerdict::Refused {
-            refusal: CompatRefusal::ReaderFloorAbove {
-                component: "sqlite-core".to_owned(),
-                found: 70,
-                min_reader: 70,
-                reads: crate::sqlite_core().reads,
-                writing_release: None,
-            },
+            refusal: crate::retired_core_refusal(70),
         }
     );
     assert!(SqliteStore::open_file_for_testing(&path).await.is_err());

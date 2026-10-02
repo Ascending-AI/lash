@@ -24,6 +24,21 @@ mod boundary_retry;
 /// The durable core's compatibility descriptor in the active tier: N's in the
 /// default build, the synthetic successor's under `synthetic-next`, so every
 /// expectation below derives from the tier it runs in (FIG-4262).
+/// What the admission rule answers for a durable core stamped `{found,
+/// found}` that this build does not open: older than it reads, or
+/// contracted past it, whichever side of the build's range `found` is on.
+fn retired_core_refusal(found: u32) -> lash_core_execution::compat::CompatRefusal {
+    use lash_core_execution::compat::{CompatStamp, StampRead, admit};
+    admit(
+        sqlite_core(),
+        StampRead::Present(CompatStamp {
+            version: found,
+            min_reader: found,
+        }),
+    )
+    .expect_err("a retired stamp is refused")
+}
+
 fn sqlite_core() -> &'static lash_core_execution::compat::CompatDescriptor {
     lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::SQLITE_CORE)
         .expect("the build declares the durable core")

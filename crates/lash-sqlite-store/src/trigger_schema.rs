@@ -1,6 +1,6 @@
 //! The trigger store's database: subscriptions, occurrences and the
 //! tombstones of reclaimed ones, the deliveries an occurrence reserved (each a
-//! `TriggerDelivery` obligation, ADR 0109) and mutation receipts. Its version is `crate::schema::TRIGGER_SCHEMA_VERSION`.
+//! `TriggerDelivery` obligation, ADR 0109) and mutation receipts. Its version is `lash_core_store::compat::SQLITE_TRIGGERS_SCHEMA_VERSION`.
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (

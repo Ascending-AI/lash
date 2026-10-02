@@ -64,16 +64,20 @@ class ReleaseBaselineTests(unittest.TestCase):
         self.assertEqual(len(rows), len(baseline.surfaces(ROOT)))
         by_name = {row["key"]: row for row in rows}
         at_cut = not baseline.mismatches(rows)
+        # A store schema version is one constant in both tiers: the synthetic
+        # build's descriptor writes the version after it.
+        compat = "crates/lash-core-store/src/compat.rs"
         for path, constant, default, synthetic in [
-            ("crates/lash-sqlite-store/src/schema.rs", "SCHEMA_VERSION", 99, 100),
-            ("crates/lash-sqlite-store/src/schema.rs", "PROCESS_SCHEMA_VERSION", 44, 45),
-            ("crates/lash-sqlite-store/src/schema.rs", "TRIGGER_SCHEMA_VERSION", 12, 13),
+            (compat, "POSTGRES_SCHEMA_VERSION", 141, 141),
+            (compat, "SQLITE_CORE_SCHEMA_VERSION", 99, 99),
+            (compat, "SQLITE_REGISTRY_SCHEMA_VERSION", 44, 44),
+            (compat, "SQLITE_TRIGGERS_SCHEMA_VERSION", 12, 12),
             ("crates/lash-restate/src/process/admission.rs", "JOURNAL_LOGIC_EPOCH", 1, 2),
             ("crates/lashlang/src/workflow_graph.rs", "WORKFLOW_GRAPH_SCHEMA_VERSION", 21, 22),
         ]:
             row = by_name[f"{path}:{constant}"]
             if at_cut:
-                default, synthetic = 1, 2
+                default, synthetic = 1, 1 if default == synthetic else 2
             self.assertEqual((row["default"], row["synthetic"]), (default, synthetic))
         self.assertTrue(all(row["upgrade"] and row["default"] is not None for row in rows))
 
@@ -84,8 +88,8 @@ class ReleaseBaselineTests(unittest.TestCase):
             return
         self.assertEqual(result.returncode, 1, result.stderr)
         for name in ["REMOTE_PROTOCOL_VERSION", "RESTATE_PROCESS_JOURNAL_VERSION",
-                     "WORKFLOW_GRAPH_SCHEMA_VERSION", "PROCESS_SCHEMA_VERSION",
-                     "TRIGGER_SCHEMA_VERSION", "lash-postgres-store/src/lib.rs:SCHEMA_VERSION"]:
+                     "WORKFLOW_GRAPH_SCHEMA_VERSION", "SQLITE_REGISTRY_SCHEMA_VERSION",
+                     "SQLITE_TRIGGERS_SCHEMA_VERSION", "compat.rs:POSTGRES_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
     @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
@@ -93,36 +97,31 @@ class ReleaseBaselineTests(unittest.TestCase):
         result = self.command("check")
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
-    def test_sqlite_stamps_equal_their_catalog_numbers(self):
+    def test_sqlite_catalogs_are_in_their_compat_versions(self):
         self.assertEqual(baseline.sqlite_stamp_mismatches(ROOT), [])
 
-    @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
-    def test_postgres_stamp_equals_its_catalog_number(self):
+    def test_postgres_schema_and_catalog_are_in_its_compat_version(self):
         self.assertEqual(baseline.postgres_stamp_mismatches(ROOT), [])
 
-    def test_pre_cut_postgres_stamp_is_named_against_its_descriptor(self):
-        errors = baseline.postgres_stamp_mismatches(ROOT)
-        if not baseline.mismatches(baseline.inventory(ROOT)):
-            self.assertEqual(errors, [])
-            return
-        self.assertTrue(
-            any(":SCHEMA_VERSION: default stamp" in error and "POSTGRES" in error
-                for error in errors), errors)
-        self.assertTrue(
-            any(":SCHEMA_VERSION: synthetic-next stamp" in error and "POSTGRES" in error
-                for error in errors), errors)
+    def test_each_store_component_has_one_schema_version_constant(self):
+        versions = baseline.store_versions(ROOT)
+        self.assertEqual(
+            {component: constant for component, (constant, _) in versions.items()},
+            {"POSTGRES": "POSTGRES_SCHEMA_VERSION", "SQLITE_CORE": "SQLITE_CORE_SCHEMA_VERSION",
+             "SQLITE_REGISTRY": "SQLITE_REGISTRY_SCHEMA_VERSION",
+             "SQLITE_TRIGGERS": "SQLITE_TRIGGERS_SCHEMA_VERSION"})
+        registered = {f'{row["constant_path"]}:{row["constant"]}' for row in baseline.surfaces(ROOT)}
+        for constant, _ in versions.values():
+            self.assertIn(f"{baseline.STORE_VERSIONS}:{constant}", registered)
 
-    def test_pre_cut_sqlite_stamps_are_named_against_their_catalog_numbers(self):
-        errors = baseline.sqlite_stamp_mismatches(ROOT)
-        if not baseline.mismatches(baseline.inventory(ROOT)):
-            self.assertEqual(errors, [])
-            return
-        for stamp, component in [("SCHEMA_VERSION", "SQLITE_CORE"),
-                                 ("PROCESS_SCHEMA_VERSION", "SQLITE_REGISTRY"),
-                                 ("TRIGGER_SCHEMA_VERSION", "SQLITE_TRIGGERS")]:
-            self.assertTrue(any(f":{stamp}: default stamp" in error and component in error
-                                for error in errors), errors)
+    def test_a_step_bound_is_an_integer_or_the_store_s_own_constant(self):
+        names = {"SQLITE_CORE_SCHEMA_VERSION": 7}
+        self.assertEqual(baseline.step_bound(" 3 ", names, "t"), 3)
+        self.assertEqual(baseline.step_bound("compat::SQLITE_CORE_SCHEMA_VERSION", names, "t"), 7)
+        self.assertEqual(baseline.step_bound("compat::SQLITE_CORE_SCHEMA_VERSION + 1", names, "t"), 8)
+        for expression in ["compat::SQLITE_REGISTRY_SCHEMA_VERSION", "next()", "1 + 1"]:
+            with self.subTest(expression=expression), self.assertRaises(baseline.BaselineError):
+                baseline.step_bound(expression, names, "t")
 
     def test_resolver_rejects_ambiguous_missing_and_unsupported_constants(self):
         for text, name in [("const V: u32 = 1;\nconst V: u32 = 2;", "V"),
@@ -170,6 +169,9 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
                           "crates/lash-core-store/src/store/synthetic_next.rs",
                           "crates/lash-postgres-store/src/postgres/migrate.rs",
                           "crates/lash-sqlite-store/src/migration.rs",
+                          "crates/lash-sqlite-store/src/schema.rs",
+                          "crates/lash-postgres-store/src/lib.rs",
+                          "crates/lash-postgres-store/schema.sql",
                           "crates/lash-core-store/src/compat.rs",
                           "crates/lash-typescript/tests/workflow_graph_schema.rs",
                           "examples/workflow-graph-roundtrip/frontend/scripts/generate-contract-types.mjs",
@@ -196,35 +198,52 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             errors = baseline.mismatches(baseline.inventory(repo))
             self.assertTrue(any("REMOTE_PROTOCOL_VERSION" in error for error in errors))
 
-            # After the reset every SQLite stamp is its catalog's number, in
-            # both tiers; a stamp that keeps an old value, and a catalog step
-            # numbered past its stamp, are red. The PostgreSQL stamp's law is
-            # the same.
+            # After the reset every store is at version 1 in compat.rs alone,
+            # schema.sql states it, and the catalogs are numbered in it. An
+            # artifact that keeps an old number, a backend that restates the
+            # version, and a catalog step numbered past it are red.
             self.assertEqual(baseline.sqlite_stamp_mismatches(repo), [])
             self.assertEqual(baseline.postgres_stamp_mismatches(repo), [])
+            self.assertEqual({value for _, value in baseline.store_versions(repo).values()}, {1})
             check = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/release_baseline.py"), "--repo", str(repo), "check"],
                 capture_output=True, text=True, cwd=ROOT,
             )
             self.assertIn("REMOTE_PROTOCOL_VERSION", check.stderr)
             self.assertNotIn("stamp", check.stderr)
-            lib = repo / "crates/lash-postgres-store/src/lib.rs"
-            reset_lib = lib.read_text()
-            self.assertIn("const SCHEMA_VERSION: i32 = 1;", reset_lib)
-            lib.write_text(reset_lib.replace("const SCHEMA_VERSION: i32 = 1;",
-                                             "const SCHEMA_VERSION: i32 = 2;"))
+            artifact = repo / "crates/lash-postgres-store/schema.sql"
+            reset_artifact = artifact.read_text()
+            self.assertTrue(reset_artifact.startswith("-- lash-postgres-store schema, component version 1.\n"))
+            self.assertIn("VALUES ('lash-postgres-store', 1, 1)", reset_artifact)
+            artifact.write_text(reset_artifact.replace("VALUES ('lash-postgres-store', 1, 1)",
+                                                       "VALUES ('lash-postgres-store', 141, 141)"))
             errors = baseline.postgres_stamp_mismatches(repo)
-            self.assertTrue(errors and all("SCHEMA_VERSION" in error for error in errors), errors)
-            self.assertTrue(any("stamp 2" in error and "POSTGRES" in error for error in errors))
+            self.assertTrue(any("seed stamp 141/141" in error and "POSTGRES_SCHEMA_VERSION = 1" in error
+                                for error in errors), errors)
             check = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/release_baseline.py"), "--repo", str(repo), "check"],
                 capture_output=True, text=True, cwd=ROOT,
             )
-            self.assertIn("POSTGRES", check.stderr)
+            self.assertIn("seed stamp 141/141", check.stderr)
+            artifact.write_text(reset_artifact)
+            lib = repo / "crates/lash-postgres-store/src/lib.rs"
+            reset_lib = lib.read_text()
+            alias = "const SCHEMA_VERSION: i32 = lash_core_execution::compat::POSTGRES_SCHEMA_VERSION as i32;"
+            self.assertIn(alias, reset_lib)
+            lib.write_text(reset_lib.replace(alias, "const SCHEMA_VERSION: i32 = 1;"))
+            errors = baseline.postgres_stamp_mismatches(repo)
+            self.assertTrue(any("must be the i32 alias" in error for error in errors), errors)
             lib.write_text(reset_lib)
             expand = repo / "crates/lash-postgres-store/src/postgres/migrate.rs"
             reset_expand = expand.read_text()
             self.assertIn("static EXPAND_MIGRATIONS: &[ExpandMigration] = &[", reset_expand)
+            # The reset removes the production chain and keeps the synthetic
+            # successor's row, cfg and all.
+            self.assertNotIn('id: "0141-begin-session-close"', reset_expand)
+            self.assertIn('    #[cfg(feature = "synthetic-next")]\n    ExpandMigration {\n'
+                          '        id: "synthetic-next-expand",\n'
+                          "        from_version: SCHEMA_VERSION,\n"
+                          "        to_version: SCHEMA_VERSION + 1,", reset_expand)
             expand.write_text(reset_expand.replace(
                 "static EXPAND_MIGRATIONS: &[ExpandMigration] = &[",
                 "static EXPAND_MIGRATIONS: &[ExpandMigration] = &[\n"
@@ -239,21 +258,26 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             expand.write_text(reset_expand)
             schema = repo / "crates/lash-sqlite-store/src/schema.rs"
             reset_schema = schema.read_text()
-            self.assertIn("const BASE_PROCESS_SCHEMA_VERSION: i32 = 1;", reset_schema)
-            schema.write_text(reset_schema.replace("const BASE_PROCESS_SCHEMA_VERSION: i32 = 1;",
-                                                   "const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;"))
+            schema.write_text(reset_schema + "\nconst PROCESS_SCHEMA_VERSION: i32 = 44;\n")
             errors = baseline.sqlite_stamp_mismatches(repo)
-            self.assertTrue(errors and all("PROCESS_SCHEMA_VERSION" in error for error in errors), errors)
-            self.assertTrue(any("default stamp 44" in error and "SQLITE_REGISTRY" in error for error in errors))
+            self.assertTrue(errors and all("PROCESS_SCHEMA_VERSION" in error and "restated" in error
+                                           for error in errors), errors)
             schema.write_text(reset_schema)
             catalog = repo / "crates/lash-sqlite-store/src/migration.rs"
             reset_catalog = catalog.read_text()
-            self.assertIn("from: 1,\n        to: 2,", reset_catalog)
-            catalog.write_text(reset_catalog.replace("from: 1,\n        to: 2,", "from: 2,\n        to: 3,", 1))
+            step = ("from: compat::SQLITE_CORE_SCHEMA_VERSION,\n"
+                    "        to: compat::SQLITE_CORE_SCHEMA_VERSION + 1,")
+            self.assertIn(step, reset_catalog)
+            catalog.write_text(reset_catalog.replace(step, "from: 2,\n        to: 3,", 1))
             errors = baseline.sqlite_stamp_mismatches(repo)
             self.assertTrue(any("DurableCore step 2 to 3 is outside" in error for error in errors), errors)
             self.assertTrue(any("DurableCore has no step chain from the default stamp 1" in error
                                 for error in errors), errors)
+            catalog.write_text(reset_catalog.replace(
+                step, "from: compat::SQLITE_REGISTRY_SCHEMA_VERSION,\n"
+                      "        to: compat::SQLITE_REGISTRY_SCHEMA_VERSION + 1,", 1))
+            with self.assertRaises(baseline.BaselineError):
+                baseline.sqlite_stamp_mismatches(repo)
 
 
 if __name__ == "__main__":

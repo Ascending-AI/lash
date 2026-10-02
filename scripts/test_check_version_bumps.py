@@ -1009,8 +1009,8 @@ AUDITED_GUARDS = {
     "crates/lashlang/src/artifact.rs:LASHLANG_VM_ABI_VERSION": (
         "AbilityOutcome", "ResourceOperationOutcome", "ResourceOperationBatchOutcome",
     ),
-    "crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION": ("TurnCancelUndeliveredInputPolicy",),
-    "crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION": (
+    "crates/lash-core-store/src/compat.rs:POSTGRES_SCHEMA_VERSION": ("TurnCancelUndeliveredInputPolicy",),
+    "crates/lash-core-store/src/compat.rs:SQLITE_CORE_SCHEMA_VERSION": (
         "TurnCancelUndeliveredInputPolicy", "SESSION_INGRESS_TABLE", "SESSION_ROOTS_TABLES",
     ),
     "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
@@ -1069,18 +1069,18 @@ AUDITED_GUARDS = {
 
 # Each DDL stamp, and a row of its catalog that steps `{at}` to `{to}`.
 DDL_STAMPS = {
-    "crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION": (
+    "crates/lash-core-store/src/compat.rs:POSTGRES_SCHEMA_VERSION": (
         'ExpandMigration {{ id: "planted", from_version: {at}, to_version: {to}, statements: "" }},'
     ),
-    "crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION": (
+    "crates/lash-core-store/src/compat.rs:SQLITE_CORE_SCHEMA_VERSION": (
         "SqliteMigration {{ database: SqliteDatabase::DurableCore, from: {at}, to: {to}, "
         'ddl: "" }},'
     ),
-    "crates/lash-sqlite-store/src/schema.rs:PROCESS_SCHEMA_VERSION": (
+    "crates/lash-core-store/src/compat.rs:SQLITE_REGISTRY_SCHEMA_VERSION": (
         "SqliteMigration {{ database: SqliteDatabase::ProcessRegistry, from: {at}, to: {to}, "
         'ddl: "" }},'
     ),
-    "crates/lash-sqlite-store/src/schema.rs:TRIGGER_SCHEMA_VERSION": (
+    "crates/lash-core-store/src/compat.rs:SQLITE_TRIGGERS_SCHEMA_VERSION": (
         "SqliteMigration {{ database: SqliteDatabase::Triggers, from: {at}, to: {to}, "
         'ddl: "" }},'
     ),
@@ -1264,7 +1264,7 @@ class RealRepository(unittest.TestCase):
                 assert ddl is not None
                 constant_file = ddl.content(surface.constant_path)
                 bumped_file, bumps = re.subn(
-                    rf"(const (?:BASE_)?{surface.constant}\s*:[^=;]+=\s*){at};",
+                    rf"(const {surface.constant}\s*:[^=;]+=\s*){at};",
                     rf"\g<1>{at + 1};",
                     constant_file,
                 )

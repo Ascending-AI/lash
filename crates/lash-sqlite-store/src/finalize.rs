@@ -51,7 +51,7 @@ impl AuthorizedFinalize {
         if self.store != location.identity()
             || !self.retired.drained()
             || self.from >= self.target
-            || self.stamps.windows(2).any(|pair| pair[0] != pair[1])
+            || !crate::compat::stamps_agree(&self.stamps)?
         {
             return Err(invalid(
                 "the recorded store, retirement or transition does not match",
@@ -217,7 +217,7 @@ fn advance(
                 )?;
             }
             if database == SqliteDatabase::Triggers && pending.is_none() {
-                if stamps.windows(2).any(|pair| pair[0] != pair[1])
+                if !crate::compat::stamps_agree(&stamps)?
                     || epochs.windows(2).any(|pair| pair[0] != pair[1])
                 {
                     return Err(invalid("a fresh finalize requires a consistent store set"));

@@ -82,12 +82,17 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     stamp_compat(&path, 43, 43);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
-    assert!(matches!(
-        found.verdict,
-        StoreSchemaVerdict::Refused {
-            refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove { found: 43, .. }
-        }
-    ));
+    // Which side of the build's range 43 falls on is the admission rule's
+    // to say; either way the stamp is refused typed.
+    let refusal = lash_core_execution::compat::admit(
+        descriptor,
+        lash_core_execution::compat::StampRead::Present(lash_core_execution::compat::CompatStamp {
+            version: 43,
+            min_reader: 43,
+        }),
+    )
+    .expect_err("a retired stamp is refused");
+    assert_eq!(found.verdict, StoreSchemaVerdict::Refused { refusal });
     assert_eq!(found.expected, expected);
     assert!(
         found.verdict.refuses_open(),

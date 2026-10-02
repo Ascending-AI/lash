@@ -127,14 +127,32 @@ def plan(repo: Path):
         match = re.search(pattern, text, re.DOTALL)
         if match is None:
             raise baseline.BaselineError(f"cannot find {table}")
-        body = re.sub(r'(?m)^    ' + item + r' \{.*?\n    \},\n?', "", match[2], flags=re.DOTALL)
-        # A cfg attribute belongs to the following row. Unconditional rows
-        # are removed only from EXPAND; the other current catalogs are N+1.
+        # A cfg attribute belongs to the following row: only unconditional
+        # rows are the production chain.
+        body = re.sub(r'(?m)^(    #\[cfg\([^\n]*\)\]\n)?    ' + item + r' \{.*?\n    \},\n?',
+                      lambda row: row[0] if row[1] else "", match[2], flags=re.DOTALL)
+        # Unconditional rows are removed only from EXPAND; the other current
+        # catalogs are N+1.
         if table != "EXPAND_MIGRATIONS":
             body = match[2]
             if body.strip() and '#[cfg(feature = "synthetic-next")]' not in body:
                 raise baseline.BaselineError(f"unrecognized production rows in {table}")
         text = text[:match.start(2)] + body + text[match.end(2):]
+    if text != path.read_text():
+        edits[path] = text
+
+    # schema.sql states the PostgreSQL schema version in its header and in
+    # the stamp its seed row writes; both follow the constant.
+    path = repo / baseline.POSTGRES_SCHEMA
+    constant, _ = baseline.store_versions(repo)["POSTGRES"]
+    version = declared[f"{baseline.STORE_VERSIONS}:{constant}"]
+    text = path.read_text()
+    text, headers = re.subn(r"\A(-- lash-postgres-store schema, component version )\d+\.",
+                            rf"\g<1>{version}.", text)
+    text, seeds = re.subn(r"(VALUES \('lash-postgres-store', )\d+, \d+\)",
+                          rf"\g<1>{version}, {version})", text)
+    if (headers, seeds) != (1, 1):
+        raise baseline.BaselineError(f"cannot find the component version {path.name} states")
     if text != path.read_text():
         edits[path] = text
 

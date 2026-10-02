@@ -63,12 +63,12 @@ description = "leading journaled commands of the Restate session driver: both ha
 manifest = "engine:restate.session_drive"
 
 [[surface]]
-constant = "SCHEMA_VERSION"
-constant_path = "crates/lash-postgres-store/src/lib.rs"
+constant = "POSTGRES_SCHEMA_VERSION"
+constant_path = "crates/lash-core-store/src/compat.rs"
 upgrade = "migrate"
-unguarded = "catalog DDL stamp: a schema migration moves it, and admission reads it as a [MIN_SUPPORTED, SCHEMA_VERSION] range at open (FIG-3797), never through a record decoder"
+unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"
-outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
+outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 
 [[surface]]
 constant = "TRACE_SCHEMA_VERSION"
@@ -127,28 +127,28 @@ outside_manifest = "live host cursor: it is not stored by Lash"
 # version bump. Everything else in the schema -- tables, columns, constraints, a
 # unique index -- still demands one.
 [[surface]]
-constant = "SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
+constant = "SQLITE_CORE_SCHEMA_VERSION"
+constant_path = "crates/lash-core-store/src/compat.rs"
 upgrade = "migrate"
-unguarded = "catalog DDL stamp: a schema migration moves it, and admission reads it as a [MIN_SUPPORTED, SCHEMA_VERSION] range at open (FIG-3797), never through a record decoder"
+unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
 description = "SQLite session-store DDL and stored blob envelopes"
-outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
+outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 
 [[surface]]
-constant = "PROCESS_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
+constant = "SQLITE_REGISTRY_SCHEMA_VERSION"
+constant_path = "crates/lash-core-store/src/compat.rs"
 upgrade = "migrate"
-unguarded = "catalog DDL stamp: a schema migration moves it, and admission reads it as a [MIN_SUPPORTED, SCHEMA_VERSION] range at open (FIG-3797), never through a record decoder"
+unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
 description = "SQLite process-registry tables, columns, constraints, and unique indexes"
-outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
+outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 
 [[surface]]
-constant = "TRIGGER_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
+constant = "SQLITE_TRIGGERS_SCHEMA_VERSION"
+constant_path = "crates/lash-core-store/src/compat.rs"
 upgrade = "migrate"
-unguarded = "catalog DDL stamp: a schema migration moves it, and admission reads it as a [MIN_SUPPORTED, SCHEMA_VERSION] range at open (FIG-3797), never through a record decoder"
+unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
 description = "SQLite trigger-store tables, columns, constraints, and unique indexes"
-outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
+outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 
 [[surface]]
 constant = "FLEET_FORMAT_VERSION"
@@ -634,24 +634,9 @@ constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
 
 [[unregistered]]
-constant = "BASE_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
-reason = "the shipped value of the registered SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
-
-[[unregistered]]
-constant = "BASE_PROCESS_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
-reason = "the shipped value of the registered PROCESS_SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
-
-[[unregistered]]
-constant = "BASE_TRIGGER_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/schema.rs"
-reason = "the shipped value of the registered TRIGGER_SCHEMA_VERSION, which Phase A's synthetic-next build raises by one; not a format of its own"
-
-[[unregistered]]
 constant = "MIN_SUPPORTED_SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
-reason = "lower bound of the admission window for the registered SCHEMA_VERSION, not a format of its own"
+reason = "lower bound of the planner's window under the registered POSTGRES_SCHEMA_VERSION, not a format of its own"
 
 [[unregistered]]
 constant = "PROCESS_CURSOR_UNROUTED_EPOCH"
@@ -661,9 +646,9 @@ reason = "the reserved publisher-epoch value of a cursor minted with no live rou
 
 
 [[unregistered]]
-constant = "SESSION_SCHEMA_VERSION"
-constant_path = "crates/lash-sqlite-store/src/lib.rs"
-reason = "public alias of the registered SQLite schema::SCHEMA_VERSION"
+constant = "SCHEMA_VERSION"
+constant_path = "crates/lash-postgres-store/src/lib.rs"
+reason = "the registered POSTGRES_SCHEMA_VERSION in the stamp column's type: an alias, not a number of its own"
 
 [[unregistered]]
 constant = "LASH_TRACE_SCHEMA_VERSION"

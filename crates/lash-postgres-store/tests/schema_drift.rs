@@ -461,8 +461,8 @@ async fn an_unexpected_column_on_a_lash_table_is_rejected() {
     .await;
 }
 
-/// The DDL revision and compatibility stamp are independent. A compatible
-/// expansion must still expose structural drift to verification and open.
+/// A stamp one version past this build's still gets the full structural
+/// comparison: a compatible expansion must expose drift to verification and open.
 #[tokio::test]
 async fn a_compatible_expansion_still_reports_column_drift() {
     let Some(database_url) = database_url() else {
@@ -472,7 +472,7 @@ async fn a_compatible_expansion_still_reports_column_drift() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 2, min_reader = 1
+            "UPDATE lash_schema_versions SET version = version + 1
                WHERE component = 'lash-postgres-store';
              ALTER TABLE lash_processes ALTER COLUMN status TYPE VARCHAR(64)",
         )
@@ -928,7 +928,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
                  ADD COLUMN slot_policy TEXT NOT NULL DEFAULT 'join',
                  ADD COLUMN merge_key_json TEXT NOT NULL DEFAULT '\"never\"';
              UPDATE lash_schema_versions
-                SET version = 2, min_reader = 1
+                SET version = version + 1
               WHERE component = 'lash-postgres-store'",
         )
         .await;
@@ -992,7 +992,7 @@ async fn an_expanded_stamp_cannot_hide_queued_work_drift() {
     scratch
         .apply(
             "UPDATE lash_schema_versions
-                SET version = 2, min_reader = 1
+                SET version = version + 1
               WHERE component = 'lash-postgres-store';
              ALTER TABLE lash_queued_work_batches DROP COLUMN work_kind",
         )
@@ -1018,7 +1018,8 @@ async fn an_expanded_stamp_cannot_hide_queued_work_drift() {
     .await
     .expect("read the refused catalog's component stamp");
     assert_eq!(
-        version, 2,
+        version,
+        PostgresStorage::schema_version() + 1,
         "a refused expanded catalog must retain its stamp"
     );
 
@@ -1426,7 +1427,8 @@ async fn the_schema_gate_emits_its_decision_basis() {
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
         .expect("open a conformant schema");
-    let found_version = "found_version=Some(1)";
+    let found_version = format!("found_version=Some({})", PostgresStorage::schema_version());
+    let found_version = found_version.as_str();
     assert_evidence(
         capture,
         &scratch.name,
@@ -1473,7 +1475,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
     // (d) an expanded catalog with unsafe drift is refused even under WarnOnly.
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 2, min_reader = 1
+            "UPDATE lash_schema_versions SET version = version + 1
              WHERE component = 'lash-postgres-store'",
         )
         .await;
@@ -1488,7 +1490,11 @@ async fn the_schema_gate_emits_its_decision_basis() {
         &scratch.name,
         "denied_shape",
         &[
-            "found_version=Some(2)",
+            format!(
+                "found_version=Some({})",
+                PostgresStorage::schema_version() + 1
+            )
+            .as_str(),
             "UNIQUE GUARD DRIFT=1",
             "schema_check=WarnOnly",
         ],
@@ -1731,23 +1737,22 @@ async fn verification_waiting_for_the_key_sees_the_holders_committed_work() {
     scratch.cleanup().await;
 }
 
-/// The artifact keeps its pre-1.0 DDL revision separate from the 1.0
-/// compatibility stamp; a DDL edit cannot silently move the reader floor.
+/// The artifact states one component version: its header names it and its
+/// seed row stamps it as both the version and the reader floor, so a host
+/// that applies the file provisions exactly what `lash migrate` bootstraps.
 #[test]
-fn the_ddl_artifact_keeps_revision_and_compat_stamp_separate() {
+fn the_ddl_artifact_states_one_component_version() {
     let ddl = PostgresStorage::schema_ddl();
+    let version = PostgresStorage::schema_version();
     assert_eq!(
         ddl.lines().next(),
-        Some(
-            format!(
-                "-- lash-postgres-store schema, DDL revision {}; compatibility stamp 1/1.",
-                PostgresStorage::schema_version()
-            )
-            .as_str()
-        )
+        Some(format!("-- lash-postgres-store schema, component version {version}.").as_str())
     );
     assert_eq!(
-        ddl.matches("VALUES ('lash-postgres-store', 1, 1)").count(),
+        ddl.matches(&format!(
+            "VALUES ('lash-postgres-store', {version}, {version})"
+        ))
+        .count(),
         1
     );
 }

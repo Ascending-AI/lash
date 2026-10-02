@@ -30,13 +30,17 @@ use crate::session_sql::session_sql;
 /// building, so this constant *is* the release-time injection.
 pub(crate) const BUILD_RELEASE: &str = env!("CARGO_PKG_VERSION");
 
-/// What this backend required when the stamp was written. PostgreSQL carries
-/// one component, so the tuple has one entry.
+/// What this backend required when the stamp was written: the version its
+/// compatibility descriptor writes. PostgreSQL carries one component, so the
+/// tuple has one entry.
 pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
-    vec![StoreComponentVersion {
-        component: SCHEMA_COMPONENT.to_string(),
-        version: 1,
-    }]
+    lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
+        .into_iter()
+        .map(|descriptor| StoreComponentVersion {
+            component: SCHEMA_COMPONENT.to_string(),
+            version: i64::from(descriptor.writes.max()),
+        })
+        .collect()
 }
 
 /// A reader that cannot write records no release and the store reports the

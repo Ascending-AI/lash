@@ -95,18 +95,36 @@ fn the_expand_catalog_chains_to_the_current_component() {
     }
 }
 
+#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn every_expand_step_passes_the_previous_tolerant_check() {
-    // The catalog below predates the 1.0 compatibility stamp. It is the
-    // pre-cut DDL chain, not a compatibility expand from version 1.
-    // There are no post-cut expand steps yet. When one is registered, this
-    // test must apply it to the previous catalog and call the tolerant
-    // checker before admitting the step.
+    // The production catalog is the chain that leads to the version
+    // `schema.sql` provisions; no step expands past it yet. When one is
+    // registered, this test must apply it to the previous catalog and call
+    // the tolerant checker before admitting the step. The synthetic
+    // successor's step is held to that by the store's own laws: the default
+    // build admits a catalog carrying its objects as `Expanded`.
     assert!(
         EXPAND_MIGRATIONS
             .iter()
             .all(|step| step.from_version < SCHEMA_VERSION),
-        "a post-cut expand needs a previous-catalog tolerant check"
+        "an expand past the provisioned version needs a previous-catalog tolerant check"
+    );
+}
+
+/// The synthetic successor's catalog ends in the one step from the version
+/// `schema.sql` provisions to the version its descriptor writes.
+#[cfg(feature = "synthetic-next")]
+#[test]
+fn the_synthetic_expand_is_the_catalog_step_to_the_written_version() {
+    let written = written_version().expect("the PostgreSQL descriptor");
+    let steps = chain(SCHEMA_VERSION, written).expect("the catalog reaches the written version");
+    assert_eq!(
+        steps
+            .iter()
+            .map(|step| (step.id, step.from_version, step.to_version))
+            .collect::<Vec<_>>(),
+        [("synthetic-next-expand", SCHEMA_VERSION, written)]
     );
 }
 

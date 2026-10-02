@@ -642,37 +642,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // occurrence leaves its tombstone in the same statement, and an ingest that
 // finds one writes nothing back. A catalog provisioned before the change
 // fails the open-time shape check and is recreated.
-/// version_guard(
-///     file(
-///         path = "crates/lash-postgres-store/schema.sql",
-///         cover(
-///             "CREATE TABLE IF NOT EXISTS lash_schema_versions",
-///             "CREATE TABLE IF NOT EXISTS lash_blobs", "CREATE TABLE IF NOT EXISTS lash_session_head",
-///             "CREATE TABLE IF NOT EXISTS lash_graph_nodes",
-///             "CREATE TABLE IF NOT EXISTS lash_session_meta",
-///             "CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits",
-///             "CREATE TABLE IF NOT EXISTS lash_queued_work_batches",
-///             "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
-///             "CREATE TABLE IF NOT EXISTS lash_processes",
-///             "CREATE TABLE IF NOT EXISTS lash_process_events",
-///             "CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries",
-///             "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
-///             "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
-///             "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
-///             "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
-///         ),
-///     ),
-///     shapes(
-///         path = "crates/lash-core-execution/src/runtime/effect/envelope.rs",
-///         cover(
-///             RuntimeEffectInvocation, RuntimeEffectEnvelope, RuntimeEffectCommand,
-///             RuntimeEffectOutcome,
-///         ),
-///     ),
-///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
-///     catalog(path = "crates/lash-postgres-store/src/postgres/migrate.rs", EXPAND_MIGRATIONS),
-/// )
-const SCHEMA_VERSION: i32 = 141;
+/// The version `schema.sql` provisions and the shape artifact names, in the
+/// stamp column's type. The number is the PostgreSQL descriptor's, declared
+/// once in [`lash_core_execution::compat::POSTGRES_SCHEMA_VERSION`] beside
+/// the shapes it guards.
+const SCHEMA_VERSION: i32 = lash_core_execution::compat::POSTGRES_SCHEMA_VERSION as i32;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -1170,14 +1144,16 @@ impl PostgresStorage {
         TEARDOWN_DDL
     }
 
-    /// The pre-1.0 DDL revision used by the migration ledger and shape artifact.
-    /// Compatibility admission reads the version and floor in
-    /// `lash_schema_versions` through the PostgreSQL descriptor.
+    /// The version `schema.sql` provisions: the component version its seed
+    /// row stamps into `lash_schema_versions`, the migration ledger records
+    /// and the shape artifact names. It is the PostgreSQL descriptor's number
+    /// ([`lash_core_execution::compat::POSTGRES_SCHEMA_VERSION`]).
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
 
-    /// The pre-1.0 DDL planning floor, retained for the migration ledger.
+    /// The oldest component version this build's `schema.sql` supersedes
+    /// without a migration.
     pub fn min_supported_schema_version() -> i32 {
         MIN_SUPPORTED_SCHEMA_VERSION
     }

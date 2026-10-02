@@ -123,47 +123,49 @@ async fn catalog_definitions(url: &str) -> Vec<String> {
     definitions
 }
 
-/// The 1.0 compatibility stamp `schema.sql` provisions, as
-/// `(version, min_reader)` (ADR 0115 §1.2, §7): what open admits by. The
-/// pre-1.0 DDL revision is the migration ledger's, never the stamp's.
-const COMPAT_STAMP: (i32, i32) = (1, 1);
-
-/// The expand steps this build's migrate runs past the DDL revision it
-/// provisions, by ledger id, in the active tier: the synthetic successor
-/// carries its one post-cut expand (ADR 0115 §6), and N carries none.
-#[cfg(not(feature = "synthetic-next"))]
-const COMPONENT_EXPANDS: &[&str] = &[];
-#[cfg(feature = "synthetic-next")]
-const COMPONENT_EXPANDS: &[&str] = &["synthetic-next-expand"];
-
-/// The ledger rows [`COMPONENT_EXPANDS`] record: each moves the component
-/// stamp, not the DDL revision.
-fn component_expand_rows() -> Vec<(String, String, Option<i32>, i32)> {
-    COMPONENT_EXPANDS
-        .iter()
-        .map(|id| {
-            (
-                "expand".to_string(),
-                (*id).to_string(),
-                Some(PostgresStorage::schema_version()),
-                PostgresStorage::schema_version(),
-            )
-        })
-        .collect()
+/// The stamp `schema.sql` provisions, as `(version, min_reader)` (ADR 0115
+/// §1.2, §7): the one component version, which open admits by, the ledger
+/// records and the catalog's steps are numbered in.
+fn provisioned_stamp() -> (i32, i32) {
+    (
+        PostgresStorage::schema_version(),
+        PostgresStorage::schema_version(),
+    )
 }
 
-/// The stamp a migrate leaves: the component version this build writes, over
-/// the reader floor `schema.sql` provisioned.
-fn migrated_stamp() -> (i32, i32) {
+/// The component version this build's migrate leaves a store at: the version
+/// its compatibility descriptor writes.
+fn written_version() -> i32 {
     let writes =
         lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
             .expect("the build declares the PostgreSQL store")
             .writes
             .max();
-    (
-        i32::try_from(writes).expect("the component version fits"),
-        COMPAT_STAMP.1,
-    )
+    i32::try_from(writes).expect("the component version fits")
+}
+
+/// The catalog steps this build's migrate runs past the version `schema.sql`
+/// provisions, as `(ledger id, from, to)`, in the active tier: the synthetic
+/// successor carries its one expand (ADR 0115 §6), and N carries none.
+fn component_expands() -> Vec<(&'static str, i32, i32)> {
+    if cfg!(feature = "synthetic-next") {
+        vec![(
+            "synthetic-next-expand",
+            PostgresStorage::schema_version(),
+            written_version(),
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+/// The ledger rows [`component_expands`] record: each names the component
+/// version it started from and the one it moved the stamp to.
+fn component_expand_rows() -> Vec<(String, String, Option<i32>, i32)> {
+    component_expands()
+        .into_iter()
+        .map(|(id, from, to)| ("expand".to_string(), id.to_string(), Some(from), to))
+        .collect()
 }
 
 /// The component's compatibility stamp, as `(version, min_reader)`.
@@ -183,22 +185,19 @@ async fn compat_stamp(url: &str) -> (i32, i32) {
 }
 
 /// Provisions a scratch schema from the committed artifact, then rewinds it
-/// to stand in for the previous component: the ledger records the
-/// predecessor's own bootstrap, the row a catalog that was provisioned at that
-/// DDL revision carries, and nothing records this build's. The compatibility
-/// stamp stays this build's, because pre-1.0 revisions change the DDL in
-/// place under one stamp. The objects the newest generation adds stay: every
-/// expand step is idempotent, so a catalog that already has the step's output
-/// proves the same thing — what the predecessor lacks is the ledger row, not
-/// the bytes.
+/// to stand in for the previous component: the stamp and the ledger both
+/// record the predecessor's version, as a catalog that build provisioned
+/// does. The objects the newest generation adds stay: every expand step is
+/// idempotent, so a catalog that already has the step's output proves the
+/// same thing — what the predecessor lacks is the step, not the bytes.
 async fn rewind_to_previous_component(database_url: &str, schema: &str) {
     let predecessor = PostgresStorage::schema_version() - 1;
     record_component(database_url, schema, predecessor).await;
 }
 
-/// Provisions a scratch schema from the committed artifact and records it in
-/// the ledger as provisioned at DDL revision `version`: a catalog that build
-/// provisioned, as far as the migrate planner can tell.
+/// Provisions a scratch schema from the committed artifact and records it as
+/// provisioned at component `version`: the stamp holds it and the ledger
+/// names its bootstrap.
 async fn record_component(database_url: &str, schema: &str, version: i32) {
     let mut admin = PgConnection::connect(database_url)
         .await
@@ -221,6 +220,23 @@ async fn record_component(database_url: &str, schema: &str, version: i32) {
     .execute(&mut admin)
     .await
     .expect("record the older component's bootstrap in the ledger");
+    admin.close().await.expect("close scratch provisioner");
+    stamp_component(database_url, schema, version).await;
+}
+
+/// Sets the component stamp of `schema` to `version`, floor included.
+async fn stamp_component(database_url: &str, schema: &str, version: i32) {
+    let mut admin = PgConnection::connect(database_url)
+        .await
+        .expect("connect scratch provisioner");
+    sqlx::query(&format!(
+        "UPDATE {schema}.lash_schema_versions SET version = $1, min_reader = $1
+         WHERE component = 'lash-postgres-store'"
+    ))
+    .bind(version)
+    .execute(&mut admin)
+    .await
+    .expect("stamp the older component");
     admin.close().await.expect("close scratch provisioner");
 }
 
@@ -247,7 +263,11 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
             .map(|step| step.migration.clone())
             .collect::<Vec<_>>(),
         std::iter::once(format!("bootstrap-{}", PostgresStorage::schema_version()))
-            .chain(COMPONENT_EXPANDS.iter().map(|id| (*id).to_string()))
+            .chain(
+                component_expands()
+                    .into_iter()
+                    .map(|(id, ..)| id.to_string())
+            )
             .collect::<Vec<_>>(),
         "a fresh migrate applies the bootstrap and this build's component expands: {report:?}"
     );
@@ -270,7 +290,7 @@ async fn migrate_on_a_fresh_schema_creates_the_schema_and_the_ledger() {
     );
     assert_eq!(
         compat_stamp(&url).await,
-        migrated_stamp(),
+        (written_version(), provisioned_stamp().1),
         "the migrate writes this build's compatibility stamp"
     );
 
@@ -305,15 +325,15 @@ async fn a_migrate_rerun_is_a_no_op() {
         rerun.executed.is_empty(),
         "a rerun applies nothing: {rerun:?}"
     );
-    assert_eq!(rerun.found_version, Some(PostgresStorage::schema_version()));
+    assert_eq!(rerun.found_version, Some(written_version()));
     assert_eq!(
         rerun.applied.len(),
-        1 + COMPONENT_EXPANDS.len(),
+        1 + component_expands().len(),
         "the ledger still records the first run's steps"
     );
     assert_eq!(
         ledger_rows(&url).await.len(),
-        1 + COMPONENT_EXPANDS.len(),
+        1 + component_expands().len(),
         "a rerun writes no new ledger rows"
     );
     drop_scratch_schema(&database_url, &schema).await;
@@ -420,7 +440,11 @@ async fn a_dry_run_reports_the_plan_and_changes_nothing() {
     let plan = PostgresStorage::plan_migrations(&url, MigrationPhase::Expand)
         .await
         .expect("plan a fresh migrate");
-    assert_eq!(plan.planned.len(), 1, "the plan is the bootstrap");
+    assert_eq!(
+        plan.planned.len(),
+        1 + component_expands().len(),
+        "the plan is the bootstrap and this build's component expands"
+    );
     assert!(plan.executed.is_empty());
     assert_eq!(
         scratch_lash_table_count(&database_url, &schema).await,
@@ -453,16 +477,22 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     rewind_to_previous_component(&database_url, &schema).await;
     let predecessor = PostgresStorage::schema_version() - 1;
 
-    // Open admits by the compatibility stamp and the shape, never by the
-    // ledger (ADR 0115 §1.3): the predecessor carries this build's stamp and,
-    // one vocabulary-only revision behind, this build's shape, so a worker
-    // opens it Native. What the ledger still owes it is migrate's to apply.
-    PostgresStorage::connect(&url)
+    // Open admits by the stamp (ADR 0115 §1.3): the predecessor's is older
+    // than this build reads, so a worker refuses it typed until migrate has
+    // carried it forward, whatever its shape.
+    let refused = PostgresStorage::connect(&url)
         .await
-        .expect("a predecessor under this build's stamp and shape opens")
-        .pool()
-        .close()
-        .await;
+        .err()
+        .expect("a predecessor stamp does not open");
+    assert!(
+        matches!(
+            &refused,
+            lash_core_execution::StoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::TooOld { found, .. }
+            } if i64::from(*found) == i64::from(predecessor)
+        ),
+        "the refusal names the predecessor stamp: {refused:?}"
+    );
 
     // The plan's answer is the catalog's: whatever step the build declares
     // carries the predecessor to this build's component.
@@ -483,8 +513,8 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     );
     assert_eq!(
         plan.planned.len(),
-        1,
-        "a stamped predecessor is exactly one expand step behind: {plan:?}"
+        1 + component_expands().len(),
+        "a stamped predecessor is one expand step behind `schema.sql`: {plan:?}"
     );
     let step = &plan.planned[0];
     assert_eq!(step.phase, MigrationPhase::Expand.name());
@@ -492,7 +522,7 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     assert_eq!(step.to_version, PostgresStorage::schema_version());
     // Planning changed nothing: the stamp is still the one the rewind left,
     // the ledger rows are exactly what the rewind left, and no DDL ran.
-    assert_eq!(compat_stamp(&url).await, COMPAT_STAMP);
+    assert_eq!(compat_stamp(&url).await, (predecessor, predecessor));
     assert_eq!(
         ledger_rows(&url).await,
         ledger_before,
@@ -507,7 +537,7 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("migrate the predecessor forward");
-    assert_eq!(report.executed.len(), 1 + COMPONENT_EXPANDS.len());
+    assert_eq!(report.executed.len(), 1 + component_expands().len());
     assert_eq!(
         report.executed[0].migration, step.migration,
         "migrate executes the step the plan named"
@@ -530,9 +560,8 @@ async fn migrate_advances_a_stamped_predecessor_component() {
     );
     assert_eq!(
         compat_stamp(&url).await,
-        migrated_stamp(),
-        "a DDL expand step keeps the stamp and its reader floor; a component expand moves \
-         the stamp to this build's"
+        (written_version(), predecessor),
+        "every expand step moves the stamp to its own version and none raises the reader floor"
     );
     PostgresStorage::connect(&url)
         .await
@@ -569,15 +598,7 @@ async fn a_component_without_an_expand_step_is_refused() {
         found = found
             .checked_sub(1)
             .expect("a missing predecessor path exists");
-        let mut connection = PgConnection::connect(&url)
-            .await
-            .expect("rewind DDL revision");
-        sqlx::query("UPDATE lash_migrations SET to_version = $1")
-            .bind(found)
-            .execute(&mut connection)
-            .await
-            .expect("record predecessor DDL revision");
-        connection.close().await.expect("close predecessor setup");
+        stamp_component(&database_url, &schema, found).await;
     }
     assert!(
         found < baseline,
@@ -761,10 +782,10 @@ async fn concurrent_migrates_serialize_and_converge() {
     let executed_total = first.executed.len() + second.executed.len();
     assert_eq!(
         executed_total,
-        1 + COMPONENT_EXPANDS.len(),
+        1 + component_expands().len(),
         "exactly one racer may execute each step: {first:?} {second:?}"
     );
-    assert_eq!(ledger_rows(&url).await.len(), 1 + COMPONENT_EXPANDS.len());
+    assert_eq!(ledger_rows(&url).await.len(), 1 + component_expands().len());
     drop_scratch_schema(&database_url, &schema).await;
     drop(database);
 }
@@ -819,6 +840,115 @@ async fn a_catalog_below_the_migration_floor_is_refused_not_recreated() {
         "a refused migrate runs no DDL"
     );
     drop_scratch_schema(&database_url, &schema).await;
+    drop(database);
+}
+
+/// The catalog is the only path that moves the stamp (FIG-4704): a database
+/// this build bootstraps and one provisioned from `schema.sql` are carried to
+/// the version this build writes by the same catalog steps. The plan names
+/// each step with the component versions it moves between, the run executes
+/// exactly the plan, each step's ledger row records those versions, and both
+/// stores end at one stamp.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fresh_store_and_an_expanded_store_reach_one_stamp_through_the_catalog() {
+    let Some(database) = migrator_database().await else {
+        return;
+    };
+    let database_url = database.url().to_string();
+    let steps = |report: &lash_postgres_store::MigrationReport, planned: bool| {
+        let rows = if planned {
+            &report.planned
+        } else {
+            &report.executed
+        };
+        rows.iter()
+            .map(|step| (step.migration.clone(), step.from_version, step.to_version))
+            .collect::<Vec<_>>()
+    };
+    let bootstrap = (
+        format!("bootstrap-{}", PostgresStorage::schema_version()),
+        None,
+        PostgresStorage::schema_version(),
+    );
+    let catalog: Vec<_> = component_expands()
+        .into_iter()
+        .map(|(id, from, to)| (id.to_string(), Some(from), to))
+        .collect();
+
+    // Fresh: this build's migrate bootstraps the database, then walks the
+    // catalog from the version the bootstrap stamped.
+    let fresh = create_scratch_schema(&database_url).await;
+    let fresh_url = scratch_url(&database_url, &fresh);
+    let plan = PostgresStorage::plan_migrations(&fresh_url, MigrationPhase::Expand)
+        .await
+        .expect("plan the fresh store");
+    let run = PostgresStorage::migrate(&fresh_url, MigrationPhase::Expand)
+        .await
+        .expect("migrate the fresh store");
+    let expected: Vec<_> = std::iter::once(bootstrap).chain(catalog.clone()).collect();
+    assert_eq!(steps(&plan, true), expected, "the fresh plan");
+    assert_eq!(
+        steps(&run, false),
+        expected,
+        "the fresh run executes its plan"
+    );
+
+    // Expanded: a store the previous build provisioned, which is `schema.sql`
+    // at its own stamp, owes exactly the catalog's steps.
+    let expanded = create_scratch_schema(&database_url).await;
+    let expanded_url = scratch_url(&database_url, &expanded);
+    let mut admin = PgConnection::connect(&expanded_url)
+        .await
+        .expect("connect scratch provisioner");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut admin)
+        .await
+        .expect("provision the store from schema.sql");
+    admin.close().await.expect("close scratch provisioner");
+    assert_eq!(compat_stamp(&expanded_url).await, provisioned_stamp());
+    let plan = PostgresStorage::plan_migrations(&expanded_url, MigrationPhase::Expand)
+        .await
+        .expect("plan the provisioned store");
+    assert_eq!(plan.found_version, Some(provisioned_stamp().0));
+    let run = PostgresStorage::migrate(&expanded_url, MigrationPhase::Expand)
+        .await
+        .expect("migrate the provisioned store");
+    assert_eq!(steps(&plan, true), catalog, "the provisioned store's plan");
+    assert_eq!(
+        steps(&run, false),
+        catalog,
+        "the provisioned store's run executes its plan"
+    );
+
+    // One stamp, reached by the same ledger rows past the bootstrap.
+    let stamp = (written_version(), provisioned_stamp().1);
+    assert_eq!(compat_stamp(&fresh_url).await, stamp, "the fresh stamp");
+    assert_eq!(
+        compat_stamp(&expanded_url).await,
+        stamp,
+        "the expanded stamp"
+    );
+    assert_eq!(
+        ledger_rows(&fresh_url).await[1..],
+        ledger_rows(&expanded_url).await[..],
+        "both ledgers record the same catalog steps"
+    );
+    assert_eq!(ledger_rows(&expanded_url).await, component_expand_rows());
+    for url in [&fresh_url, &expanded_url] {
+        let replan = PostgresStorage::plan_migrations(url, MigrationPhase::Expand)
+            .await
+            .expect("replan a migrated store");
+        assert_eq!(replan.found_version, Some(written_version()));
+        assert!(replan.planned.is_empty(), "nothing remains: {replan:?}");
+        PostgresStorage::connect(url)
+            .await
+            .expect("a migrated store opens")
+            .pool()
+            .close()
+            .await;
+    }
+    drop_scratch_schema(&database_url, &fresh).await;
+    drop_scratch_schema(&database_url, &expanded).await;
     drop(database);
 }
 
@@ -993,7 +1123,7 @@ async fn cancelling_a_queued_migrator_leaves_no_lock_behind() {
     let report = PostgresStorage::migrate(&url, MigrationPhase::Expand)
         .await
         .expect("the next migrator acquires the lock and provisions the catalog");
-    assert_eq!(report.executed.len(), 1 + COMPONENT_EXPANDS.len());
+    assert_eq!(report.executed.len(), 1 + component_expands().len());
     drop_scratch_schema(database_url, &schema).await;
     drop(database);
 }
