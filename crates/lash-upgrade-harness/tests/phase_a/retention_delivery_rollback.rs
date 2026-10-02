@@ -23,6 +23,16 @@
 //! module only it held; the only attachment any GC deletes is the one no
 //! session roots; and every turn's model call is made once.
 //!
+//! N+1's turn puts its attachment under its own journal, so the ledger also
+//! holds that execution's guard (ADR 0113 §3.7): a cleanup that waits for the
+//! turn's journal to settle and then ends the execution, leaving its fence.
+//! The session's root keeps the attachment. Whichever relay first finds the
+//! guard due after the turn delivers it, once: N+1's own recovery pass if a
+//! tick falls there, otherwise N's pass beside the released pin's cleanup. A
+//! pass that finds the journal unsettled leaves the guard waiting. The leg
+//! reads which from the rows: an execution is either waiting in the ledger
+//! or fenced, never both, and each pass delivers exactly the rows it removed.
+//!
 //! On PostgreSQL the ledger also holds a cleanup row whose referrer kind no
 //! build of this window knows, as a later build writes it after widening
 //! the column's check. N's relay stalls it `undecodable`, typed, and it
@@ -262,6 +272,58 @@ struct Evidence {
     forked: Forked,
 }
 
+/// The referrer kind of a turn's execution (ADR 0113 §3.7).
+const EXECUTION_KIND: &str = "execution";
+
+impl Snapshot {
+    /// The executions whose guards still wait in the ledger, sorted.
+    fn waiting_executions(&self) -> Vec<(String, String)> {
+        self.cleanups
+            .iter()
+            .filter(|row| row.0 == EXECUTION_KIND)
+            .map(|row| (row.0.clone(), row.1.clone()))
+            .collect()
+    }
+
+    /// The executions a relay ended, sorted.
+    fn ended_executions(&self) -> Vec<(String, String)> {
+        self.fences
+            .iter()
+            .filter(|fence| fence.0 == EXECUTION_KIND)
+            .cloned()
+            .collect()
+    }
+
+    /// The fences of every other kind, sorted.
+    fn other_fences(&self) -> Vec<(String, String)> {
+        self.fences
+            .iter()
+            .filter(|fence| fence.0 != EXECUTION_KIND)
+            .cloned()
+            .collect()
+    }
+
+    /// Every execution is waiting or ended, never both, and a waiting guard
+    /// is neither claimed nor stalled.
+    fn executions_stand(&self, step: &str) -> Result<()> {
+        let ended = self.ended_executions();
+        ensure!(
+            self.waiting_executions()
+                .iter()
+                .all(|execution| !ended.contains(execution))
+                && self
+                    .cleanups
+                    .iter()
+                    .filter(|row| row.0 == EXECUTION_KIND)
+                    .all(|row| row.2 == "due" && row.3.is_none()),
+            "{step} left the execution guards {:?} and fences {:?}",
+            self.cleanups,
+            self.fences
+        );
+        Ok(())
+    }
+}
+
 /// The cleanup rows a snapshot holds for the unknown kind, stalled or not.
 fn unknown_rows(snapshot: &Snapshot) -> Vec<&(String, String, String, Option<String>)> {
     snapshot
@@ -358,8 +420,22 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     );
     let fences = vec![("host_pin".to_owned(), ended.clone())];
     ensure!(
-        before.fences == fences,
+        before.other_fences() == fences,
         "N+1 wrote fences {:?}",
+        before.fences
+    );
+    // The turn's guard: its one execution waits in the ledger, or N+1's own
+    // recovery pass already ended it.
+    before.executions_stand("N+1")?;
+    let waiting = before.waiting_executions();
+    ensure!(
+        waiting.len() + before.ended_executions().len() == 1
+            && before
+                .cleanups
+                .iter()
+                .all(|row| [EXECUTION_KIND, "host_pin", UNKNOWN_KIND].contains(&row.0.as_str())),
+        "N+1's one turn did not guard its one execution: {:?}, fences {:?}",
+        before.cleanups,
         before.fences
     );
     ensure!(
@@ -392,15 +468,37 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     );
 
     // Rollback: N relays, sweeps and collects garbage, with no deployment up.
+    // The pass delivers the released pin's cleanup and each guard it ends,
+    // and claims nothing else but the row it stalls.
     let relay_n: RelayReport = n.retention(case, &["relay"])?;
-    let (claimed, stalled) = if unknown_kind { (2, 1) } else { (1, 0) };
+    let relayed = rows.snapshot(&session)?;
+    relayed.executions_stand("N's relay")?;
+    let still_waiting = relayed.waiting_executions();
+    let ended_by_n: Vec<_> = waiting
+        .iter()
+        .filter(|execution| !still_waiting.contains(execution))
+        .cloned()
+        .collect();
+    let mut ended_executions = before.ended_executions();
+    ended_executions.extend(ended_by_n.iter().cloned());
+    ended_executions.sort();
     ensure!(
-        relay_n.claimed == claimed
-            && relay_n.delivered == 1
+        still_waiting
+            .iter()
+            .all(|execution| waiting.contains(execution))
+            && relayed.ended_executions() == ended_executions,
+        "N's relay left the guards {:?} of {waiting:?}, fences {:?}",
+        relayed.cleanups,
+        relayed.fences
+    );
+    let stalled = usize::from(unknown_kind);
+    ensure!(
+        relay_n.delivered == 1 + ended_by_n.len()
+            && relay_n.claimed == relay_n.delivered + stalled
             && relay_n.stalled == stalled
             && relay_n.retried == 0
             && relay_n.claim_lost == 0,
-        "N's relay pass: {relay_n:?}"
+        "N's relay pass: {relay_n:?}, ending {ended_by_n:?}"
     );
     let maintain_n: MaintainReport = n.retention(case, &["maintain", "--session", &session])?;
     ensure!(
@@ -438,7 +536,7 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
         after_n.modules
     );
     ensure!(
-        after_n.fences == fences,
+        after_n.other_fences() == fences && after_n.ended_executions() == ended_executions,
         "N's cleanup left fences {:?}",
         after_n.fences
     );
@@ -455,7 +553,11 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
         "N's retention changed N+1's session: {before:?} -> {after_n:?}"
     );
     ensure!(
-        after_n.cleanups.iter().all(|row| row.0 == UNKNOWN_KIND),
+        after_n.cleanups == relayed.cleanups
+            && after_n
+                .cleanups
+                .iter()
+                .all(|row| row.0 == UNKNOWN_KIND || row.0 == EXECUTION_KIND),
         "the released pin's cleanup was not delivered: {:?}",
         after_n.cleanups
     );
@@ -463,7 +565,7 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
         outstanding_and_typed(&after_n, &inspect_n, "N")?;
     } else {
         ensure!(
-            after_n.cleanups.is_empty() && inspect_n.stalled.is_empty(),
+            unknown_rows(&after_n).is_empty() && inspect_n.stalled.is_empty(),
             "N stalled {:?}",
             inspect_n.stalled
         );
@@ -550,7 +652,7 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
     ensure!(
         after_return.edges == kept_edge
             && after_return.modules == after_n.modules
-            && after_return.fences == fences
+            && after_return.fences == after_n.fences
             && after_return.cleanups == after_n.cleanups,
         "the return changed the referrer rows: {after_n:?} -> {after_return:?}"
     );
@@ -562,11 +664,11 @@ fn roll(leg: &Leg, case: &Case, operator: Option<&Operator>) -> Result<Evidence>
         "N+1 does not read the session"
     );
 
-    // Every delivery once: the one released pin's cleanup, and one model
-    // call per turn.
+    // Every delivery once: the one released pin's cleanup, each guard N
+    // ended, and one model call per turn.
     ensure!(
-        relay_n.delivered + relay_next.delivered == 1,
-        "the released pin's cleanup was delivered {} times",
+        relay_n.delivered + relay_next.delivered == 1 + ended_by_n.len(),
+        "the released pin's cleanup and the guards {ended_by_n:?} were delivered {} times",
         relay_n.delivered + relay_next.delivered
     );
     for step in ["next-writes", "n-continues", "next-returns"] {
