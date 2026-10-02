@@ -20,8 +20,9 @@ use crate::{
 };
 
 mod language_execution;
-mod metrics;
+use crate::telemetry::metrics;
 use language_execution::language_execution_attributes;
+pub use metrics::registry;
 pub use metrics::{
     GenerationDrainMetrics, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
     ToolIntentMetrics,

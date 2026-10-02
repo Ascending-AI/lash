@@ -1021,3 +1021,7 @@ fn valid_tracestate_value(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+/// Injected operational instruments, with no-op handles when telemetry is absent.
+#[path = "otel/metrics.rs"]
+pub mod metrics;
