@@ -1,14 +1,14 @@
 {
   "scenario": "sleep-envelope",
-  "generation": "1654dff52a0a",
+  "generation": "de8e7224200b",
   "journal": [
     {
       "name": "lash:sleep:test",
       "body": {
         "effect": {
-          "effect_journal_version": 15,
+          "effect_journal_version": 1,
           "envelope": {
-            "hash": "a118fa4ffd6ec6228d6bdc8300fa3afa9b1fe44da829d5dc839065bf3fd775fd",
+            "hash": "5ffa27d84f84181010a21966eca48342e42d3d11018f5ea2e7cf989f8a0b5410",
             "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"sleep:test\"},\"effect_id\":\"sleep:test\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0}},\"command\":{\"type\":\"sleep\",\"spec\":{\"kind\":\"for\",\"duration_ms\":1}}}"
           },
           "outcome": {

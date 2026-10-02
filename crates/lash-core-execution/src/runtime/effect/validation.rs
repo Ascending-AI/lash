@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION, capture, verify))
-const LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION: &str = "lash-runtime-effect-envelope/v3";
+const LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION: &str = "lash-runtime-effect-envelope/v1";
 
 pub use lash_core_store::runtime_error::*;
 use std::collections::BTreeSet;

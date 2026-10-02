@@ -13,14 +13,14 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_STABLE_IDENTITY_DOMAIN_VERSION, rendered_hash))
-const LASH_STABLE_IDENTITY_DOMAIN_VERSION: &str = "lash-stable-identity/v2";
+const LASH_STABLE_IDENTITY_DOMAIN_VERSION: &str = "lash-stable-identity/v1";
 
 const MAGIC: &[u8] = b"lash-stable-identity";
 
 /// Scheme-wide salt folded into every framed family header.
 /// version_surface = "coexist"
 /// version_guard(items(new))
-pub(crate) const GLOBAL_SALT: u8 = 2;
+pub(crate) const GLOBAL_SALT: u8 = 1;
 
 /// Reserved durable identity family domains. Entries are append-only: retired
 /// families remain reserved so a later projection cannot silently reuse them.

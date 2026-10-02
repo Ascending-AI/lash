@@ -2,20 +2,20 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_AGENT_FRAME_KEY_DOMAIN_VERSION, derive))
-const LASH_AGENT_FRAME_KEY_DOMAIN_VERSION: &str = "lash.agent-frame-key/v2";
+const LASH_AGENT_FRAME_KEY_DOMAIN_VERSION: &str = "lash.agent-frame-key/v1";
 
 use crate::SessionId;
 use crate::core_support::Blake3DomainHasher;
 
 /// version_surface = "coexist"
 /// version_guard(items(FRAME_KEY_PREFIX, derive, is_derived))
-const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
+const FRAME_KEY_PREFIX: &str = "frame-key/v1/";
 /// version_guard(
 ///     items(derive),
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "hash-domain tag of the agent-frame key preimage: the *_FAMILY_VERSION class under another name (see [[excluded_class]])"
-const FRAME_KEY_VERSION: u8 = 2;
+const FRAME_KEY_VERSION: u8 = 1;
 
 /// A non-empty, deterministically derived key that Lash turns into a durable
 /// agent-frame identity.

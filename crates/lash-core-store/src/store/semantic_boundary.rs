@@ -29,7 +29,7 @@ use crate::SessionId;
 /// )
 /// version_surface = "coexist"
 /// format_manifest = "RecordConfigRequestIdentity"
-pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 /// Encoding version of the create-session semantic-boundary request identity;
 /// moves with [`RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION`] for the same
 /// reasons.
@@ -40,7 +40,7 @@ pub const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 /// )
 /// version_surface = "coexist"
 /// format_manifest = "CreateSessionRequestIdentity"
-pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+pub const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
 /// The canonical request encoding deliberately excludes these fields, so a

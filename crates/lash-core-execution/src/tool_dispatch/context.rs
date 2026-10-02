@@ -218,7 +218,7 @@ impl ToolDispatchContext<'_> {
 /// )
 /// version_surface = "drain"
 /// format_outside_manifest = "versions a reviewed in-process checklist (REBIND_FIELDS), not stored bytes: nothing durable carries it"
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 7;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 1;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).

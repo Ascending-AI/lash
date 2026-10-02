@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION, new))
-const LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION: &str = "lash-tool-intent-payload/v3";
+const LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION: &str = "lash-tool-intent-payload/v1";
 
 use crate::ProcessId;
 use crate::RuntimeOwner;
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// **Integrator class 3: protocol and process-engine implementors.**
 /// version_surface = "coexist"
 /// version_guard(roots(ToolIntents, ToolIntentSubmissionRecord))
-pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
+pub const TOOL_INTENT_PROTOCOL_V3: u16 = 1;
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
 /// Maximum canonical JSON bytes one recorded intent batch may declare.
 /// Captured environments are stored separately; their digest references count.
@@ -340,7 +340,7 @@ pub struct EmitTriggerIntent {
 
 /// version_surface = "coexist"
 /// version_guard(items(TOOL_INTENT_IDENTITY_FAMILY_VERSION, derive_tool_intent_identity_inner))
-const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
+const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 1;
 
 /// The public identity seam for host-submitted intents.
 ///

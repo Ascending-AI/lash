@@ -146,7 +146,7 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.durable_wait_request"
-pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
+pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 1;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
 /// metadata, indexed wait, marker, and membership rows alike. It is also
@@ -190,10 +190,10 @@ pub(crate) const DURABLE_WAIT_REGISTRY_FAMILY: ObjectFamily = ObjectFamily {
 };
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_METADATA_KEY, fence_cancel_decided, load_durable_wait_index_metadata, peek_turn_gate, read_durable_wait_index_metadata, register_awakeable, reinstate, resolve, revoke_index, unregister_awakeable))
-pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
+pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v1/metadata";
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_WAIT_PREFIX, durable_wait_address_from_state_key, durable_wait_index_state_key, load_indexed_waits))
-const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
+const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v1/wait/";
 /// One wait's retained authority and mirrored terminal, for every scope kind.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub(crate) struct IndexedWait {
@@ -204,20 +204,20 @@ pub(crate) struct IndexedWait {
 /// key: recorded at start, cleared at completion (FIG-2499 quiescence).
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_EFFECT_PREFIX, durable_wait_index_effect_key, scope_effects_and_groups_are_quiescent))
-const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
+const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v1/effect/";
 /// An effect group opened under the scope, keyed by group key; cleared once
 /// the group's index reports no unsettled child.
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_GROUP_PREFIX, durable_wait_index_group_key, scope_effects_and_groups_are_quiescent))
-const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
+const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v1/group/";
 /// A group child's replay-key-to-group binding, keyed by replay key: the
 /// membership a §4 boundary commit resolves its group from (FIG-3409).
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX, durable_wait_index_group_child_key))
-const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v2/group-child/";
+const DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX: &str = "wait-index/v1/group-child/";
 /// version_surface = "coexist"
 /// version_guard(items(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX, durable_wait_index_closure_participant_key, revoke_index))
-const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
+const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v1/closure-participant/";
 
 #[cfg(test)]
 mod wait_registration_witness {

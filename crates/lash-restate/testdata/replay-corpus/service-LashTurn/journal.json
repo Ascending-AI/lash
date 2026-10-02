@@ -1,7 +1,7 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "generation": "1654dff52a0a",
+  "generation": "de8e7224200b",
   "handlers": {
     "close": [
       [

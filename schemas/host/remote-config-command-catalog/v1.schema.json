@@ -24,7 +24,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/remote-config-command-catalog/v100",
+  "$id": "https://lash.dev/schemas/remote-config-command-catalog/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Every config command a session admits, describing its config at\n`revision`. Discovery only: an owner can still refuse arguments its\nschema admits.",
@@ -47,6 +47,6 @@
   ],
   "title": "RemoteConfigCommandCatalog",
   "type": "object",
-  "x-lash-schema-version": 100,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

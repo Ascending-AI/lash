@@ -1,9 +1,9 @@
 {
   "scenario": "lashlang-effect-summary",
-  "generation": "1654dff52a0a",
+  "generation": "de8e7224200b",
   "journal": [
     {
-      "name": "lash:literal-definition:lash.definition:sha256:7688b3086850b52534166981c00972d8bfa20e40869d4dc858e899a334511669.process-definition:v1",
+      "name": "lash:literal-definition:lash.definition:sha256:4f9db8e2a4bd2c63a2fffc32b3ccd91d231e7b0c47a4f76b75aff55958562bd8.process-definition:v1",
       "body": {
         "process_command_fact": {
           "Ok": {
@@ -11,7 +11,7 @@
               "outcome": {
                 "definition": {
                   "id": {
-                    "$lash_definition_id": "lash.definition:sha256:7688b3086850b52534166981c00972d8bfa20e40869d4dc858e899a334511669"
+                    "$lash_definition_id": "lash.definition:sha256:4f9db8e2a4bd2c63a2fffc32b3ccd91d231e7b0c47a4f76b75aff55958562bd8"
                   },
                   "signature": {
                     "encoding": {
@@ -35,21 +35,21 @@
       }
     },
     {
-      "name": "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1",
+      "name": "lash:lashlang:v1:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1",
       "body": {
         "effect": {
           "Ok": {
-            "effect_journal_version": 15,
+            "effect_journal_version": 1,
             "envelope": {
-              "hash": "5e5b2ee41ffc54957070345ba8c1b84c791cb6414105f091d38aa81e613ce4ed",
-              "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1\"},\"effect_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1\",\"caused_by\":{\"type\":\"effect\",\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000\"}}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"}},\"attempt\":1,\"max_attempts\":1}}"
+              "hash": "9a1b4deb9e63836608e8ba01456ec7aea6952573d73ab203289a86c5340a737f",
+              "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v1:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1\"},\"effect_id\":\"lashlang:v1:process:34:p_00000000000070008000000000000001:lk2:0000000000:tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:attempt:1\",\"caused_by\":{\"type\":\"effect\",\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v1:process:34:p_00000000000070008000000000000001:lk2:0000000000\"}}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"}},\"attempt\":1,\"max_attempts\":1}}"
             },
             "outcome": {
               "Ok": {
                 "launch": {
                   "intents": {
                     "intents": [],
-                    "protocol_version": 3
+                    "protocol_version": 1
                   },
                   "record": {
                     "args": {
@@ -84,9 +84,9 @@
       "body": {
         "effect": {
           "Ok": {
-            "effect_journal_version": 15,
+            "effect_journal_version": 1,
             "envelope": {
-              "hash": "4e14a94532afda502e4799a33a4ddc725e47fe03c4e07f8a0bed3a6bceebe217",
+              "hash": "fa8b18fda5b265aca42583f6e1bc28440f7212cfb49ad95d45a04773df19651c",
               "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present\"},\"effect_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"tc_00e52adf101d2cd0d6f318a774957356e704b53c9f8207411272513c0e470e5e\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"render\":{\"renderer_id\":\"lash.tool.v1\",\"params\":{\"defaults\":{\"authored_view\":\"prefer\",\"head_share_percent\":50,\"max_lines\":400,\"value\":{\"array_head\":3,\"array_tail\":2,\"array_threshold\":10,\"indent\":2,\"layout\":\"auto\",\"line_width\":80,\"max_chars\":16000,\"max_depth\":3,\"min_item_chars\":80,\"stack_head\":3,\"stack_tail\":1}},\"per_tool\":{}}},\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}"
             },
             "outcome": {
@@ -105,7 +105,7 @@
                     "inline_limit_bytes": 65536,
                     "witness_bytes": 4096
                   },
-                  "version": 3
+                  "version": 1
                 },
                 "type": "present_tool_result"
               }

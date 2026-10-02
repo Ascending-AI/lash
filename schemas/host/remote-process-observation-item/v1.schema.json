@@ -523,8 +523,8 @@
       "type": "object"
     },
     "ProcessCursor": {
-      "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
-      "pattern": "^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
+      "description": "Opaque process cursor: `lashpc1:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc1:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
       "type": "string"
     },
     "ProviderFailureKind": {
@@ -2675,7 +2675,7 @@
         },
         "schema_version": {
           "enum": [
-            36
+            1
           ],
           "format": "uint32",
           "minimum": 0,
@@ -4646,7 +4646,7 @@
         },
         "schema_version": {
           "enum": [
-            36
+            1
           ],
           "format": "uint32",
           "minimum": 0,
@@ -5596,7 +5596,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/remote-process-observation-item/v100",
+  "$id": "https://lash.dev/schemas/remote-process-observation-item/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
     {
@@ -5722,6 +5722,6 @@
     }
   ],
   "title": "RemoteProcessObservationItem",
-  "x-lash-schema-version": 100,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

@@ -106,7 +106,7 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 /// version_surface = "migrate"
 /// format_outside_manifest = "versions captured test fixtures, not bytes a lash build writes"
 /// version_unguarded = "a test fixture's own schema; no production writer or decoder exists to run the laws over"
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 1;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 

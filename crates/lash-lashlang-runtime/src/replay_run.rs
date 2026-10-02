@@ -31,7 +31,7 @@ const LASH_LASHLANG_CELL_GENERATION_DOMAIN_VERSION: &str = "lash-lashlang-cell-g
 
 /// version_surface = "coexist"
 /// version_guard(items(LASHLANG_PREFIX_VERSION, process))
-const LASHLANG_PREFIX_VERSION: &str = "lashlang:v2:";
+const LASHLANG_PREFIX_VERSION: &str = "lashlang:v1:";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASHLANG_DISPATCHED_ORDINALS_DOMAIN_VERSION, hash))
@@ -63,7 +63,7 @@ use lash_sansio::sync::MutexExt;
 /// )
 /// version_surface = "drain"
 /// format_outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome and the ProcessStarted record, and a run under any other grammar is refused before it issues a command"
-pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
+pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 1;
 
 /// The journal grammar a code cell writes (FIG-3587): the replay-key grammar
 /// of [`LASHLANG_REPLAY_KEY_GRAMMAR_VERSION`] plus the cell's ambient binding
@@ -94,7 +94,7 @@ pub const LASHLANG_REPLAY_KEY_GRAMMAR_VERSION: u32 = 2;
 /// )
 /// version_surface = "drain"
 /// format_outside_manifest = "a journal grammar, not a payload: the grammar a cell's journal was written under rides the execution-environment sync outcome, and a cell under any other grammar is refused before it runs"
-pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 6;
+pub const LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION: u32 = 1;
 
 /// The executable generation code cells run under (FIG-3571): what a turn's
 /// admission records, and what a redrive must match before its first effect.
@@ -134,7 +134,7 @@ pub fn lashlang_cell_generation() -> lash_core::ExecutableGeneration {
 ///
 /// version_surface = "drain"
 /// version_guard(unshaped = "a pin on lashlang::INSTRUCTION_ACCOUNTING_VERSION, which guards the accounting's own shapes")
-const CELL_GRAMMAR_INSTRUCTION_ACCOUNTING_VERSION: u32 = 3;
+const CELL_GRAMMAR_INSTRUCTION_ACCOUNTING_VERSION: u32 = 1;
 
 const _: () = assert!(
     lashlang::INSTRUCTION_ACCOUNTING_VERSION == CELL_GRAMMAR_INSTRUCTION_ACCOUNTING_VERSION,

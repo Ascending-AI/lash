@@ -108,7 +108,7 @@ use serde::{Deserialize, Serialize};
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.effect_journal"
-pub const EFFECT_JOURNAL_VERSION: u32 = 15;
+pub const EFFECT_JOURNAL_VERSION: u32 = 1;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

@@ -601,7 +601,7 @@ impl ProductEventHistory {
 /// version_surface = "migrate"
 /// format_outside_manifest = "written by the agent-workbench example host, not by a lash build"
 /// version_unguarded = "an example application's own log format, outside the runtime's crates and the fleet epoch"
-pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
+pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 1;
 
 #[derive(Serialize)]
 pub(crate) struct PersistedProductEventLog<'a> {

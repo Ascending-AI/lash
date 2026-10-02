@@ -1,10 +1,10 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_COMPOSITION_TOOL_DOMAIN_VERSION, composition_tool_fingerprint))
-const LASH_COMPOSITION_TOOL_DOMAIN_VERSION: &str = "lash-composition-tool/v2";
+const LASH_COMPOSITION_TOOL_DOMAIN_VERSION: &str = "lash-composition-tool/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION, trace_composition_key))
-const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-composition/v3";
+const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-composition/v1";
 
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,

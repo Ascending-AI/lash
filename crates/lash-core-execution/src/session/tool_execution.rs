@@ -32,7 +32,7 @@ use std::sync::Arc;
 ///     items(tool_invocation_batch_preimage),
 /// )
 /// version_surface = "coexist"
-const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
+const TOOL_BATCH_FAMILY_VERSION: u8 = 1;
 
 enum ToolCallAuthorization {
     Catalog(crate::ToolId),

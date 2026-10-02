@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION, leaf_component_key))
-const LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION: &str = "lash-rlm-execution-state-leaf/v2";
+const LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION: &str = "lash-rlm-execution-state-leaf/v1";
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

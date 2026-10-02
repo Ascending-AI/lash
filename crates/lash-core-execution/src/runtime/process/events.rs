@@ -1156,7 +1156,7 @@ impl ProcessEventAppendRequest {
 ///     items(cancellation_replay_preimage),
 /// )
 /// version_surface = "coexist"
-const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 3;
+const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 1;
 
 /// Permanent cancellation origin tags: TurnStopped=0, ParentEnded=1,
 /// OperatorRequested=2, ModelRequested=3, StartFailed=4. Clock readings are

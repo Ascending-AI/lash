@@ -2591,7 +2591,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/workflow-graph/v21",
+  "$id": "https://lash.dev/schemas/workflow-graph/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The single serializable graph document used for editing and run overlays.",
@@ -2616,7 +2616,7 @@
     },
     "schema_version": {
       "enum": [
-        21
+        1
       ],
       "format": "uint32",
       "minimum": 0,
@@ -2636,6 +2636,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 21,
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

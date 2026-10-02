@@ -67,7 +67,7 @@ pub struct RemoteProcessExecutionEnvRef(String);
 impl RemoteProcessExecutionEnvRef {
     /// version_surface = "coexist"
     /// version_guard(items(PREFIX, is_canonical_process_execution_env_ref))
-    pub const PREFIX: &'static str = "process-env:v6:blake3:";
+    pub const PREFIX: &'static str = "process-env:v1:blake3:";
 
     pub fn parse(value: impl Into<String>) -> Result<Self, RemoteProtocolError> {
         let value = value.into();

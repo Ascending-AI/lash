@@ -1,7 +1,7 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_DERIVED_TRIGGER_SUBSCRIPTION_DOMAIN_VERSION, derived_trigger_subscription_key))
 const LASH_DERIVED_TRIGGER_SUBSCRIPTION_DOMAIN_VERSION: &str =
-    "lash-derived-trigger-subscription/v2";
+    "lash-derived-trigger-subscription/v1";
 
 use super::*;
 use crate::runtime::process::identity_projection::{
@@ -18,12 +18,12 @@ use crate::runtime::process::identity_projection::{
 ///     ),
 /// )
 /// version_surface = "coexist"
-pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
+pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 1;
 /// version_guard(
 ///     items(trigger_subscription_address_preimage, project_trigger_owner),
 /// )
 /// version_surface = "coexist"
-const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
+const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 1;
 /// version_guard(
 ///     items(
 ///         path = "crates/lash-core-execution/src/triggers/router.rs",
@@ -37,7 +37,7 @@ const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 ///     items(derived_trigger_subscription_key),
 /// )
 /// version_surface = "coexist"
-const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
+const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 1;
 
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,

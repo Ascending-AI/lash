@@ -3559,7 +3559,7 @@ test_suite(
 
 filegroup(
     name = "workflow_graph_schema",
-    srcs = ["schemas/host/workflow-graph/v21.schema.json"],
+    srcs = ["schemas/host/workflow-graph/v1.schema.json"],
     copy = False,
     visibility = ["PUBLIC"],
 )

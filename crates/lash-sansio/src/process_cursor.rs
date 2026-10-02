@@ -30,7 +30,7 @@ use crate::{ProcessId, VersionRange};
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "coexist"
 /// format_outside_manifest = "live host cursor: it is not stored by Lash"
-pub const PROCESS_CURSOR_VERSION: u32 = 3;
+pub const PROCESS_CURSOR_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the cursor to 4. Its shape is
 /// 3's; while `F` is N's epoch the fleet pins minting to 3, so a cursor N+1
@@ -38,7 +38,7 @@ pub const PROCESS_CURSOR_VERSION: u32 = 3;
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "coexist"
 /// format_outside_manifest = "live host cursor: it is not stored by Lash"
-pub const PROCESS_CURSOR_VERSION: u32 = 4;
+pub const PROCESS_CURSOR_VERSION: u32 = 2;
 
 /// Cursor versions whose identity and position shape this build understands.
 /// A compatibility release widens this range while its fleet pins writers to

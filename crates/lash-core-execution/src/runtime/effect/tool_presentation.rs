@@ -47,7 +47,7 @@ use super::executor::RuntimeEffectControllerError;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "ToolPresentation"
-pub const TOOL_PRESENTATION_VERSION: u16 = 3;
+pub const TOOL_PRESENTATION_VERSION: u16 = 1;
 
 /// The journaled product of one tool result's presentation chain.
 ///

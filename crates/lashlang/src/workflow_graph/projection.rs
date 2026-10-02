@@ -7,7 +7,7 @@
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_WORKFLOW_EDGE_DOMAIN_VERSION, edge))
-const LASH_WORKFLOW_EDGE_DOMAIN_VERSION: &str = "lash-workflow-edge/v2";
+const LASH_WORKFLOW_EDGE_DOMAIN_VERSION: &str = "lash-workflow-edge/v1";
 
 use std::collections::{BTreeMap, BTreeSet};
 

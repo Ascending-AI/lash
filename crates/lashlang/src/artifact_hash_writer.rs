@@ -1,10 +1,10 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_LASHLANG_CONTENT_DOMAIN_VERSION, new))
-const LASH_LASHLANG_CONTENT_DOMAIN_VERSION: &str = "lash-lashlang-content/v2";
+const LASH_LASHLANG_CONTENT_DOMAIN_VERSION: &str = "lash-lashlang-content/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_WORKFLOW_SOURCE_DOMAIN_VERSION, for_source_identity))
-const LASH_WORKFLOW_SOURCE_DOMAIN_VERSION: &str = "lash-workflow-source/v4";
+const LASH_WORKFLOW_SOURCE_DOMAIN_VERSION: &str = "lash-workflow-source/v1";
 
 use lash_sansio::core_support::Blake3DomainHasher;
 

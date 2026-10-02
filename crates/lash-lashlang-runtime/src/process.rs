@@ -1,6 +1,6 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASH_LASHLANG_PROGRAM_DOMAIN_VERSION, lashlang_program_hash))
-const LASH_LASHLANG_PROGRAM_DOMAIN_VERSION: &str = "lash-lashlang-program/v3";
+const LASH_LASHLANG_PROGRAM_DOMAIN_VERSION: &str = "lash-lashlang-program/v1";
 
 mod execution_result;
 mod segment_state;
@@ -144,7 +144,7 @@ pub(crate) fn record_segment_boundary_decline(
 /// )
 /// version_surface = "drain"
 /// format_manifest = "LashlangSegmentHandover"
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 23;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 1;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

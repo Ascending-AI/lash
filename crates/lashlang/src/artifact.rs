@@ -1,10 +1,10 @@
 /// version_surface = "coexist"
 /// version_guard(items(LASHLANG_PREFIX_VERSION, hash_hex, new))
-const LASHLANG_PREFIX_VERSION: &str = "lashlang:v2:blake3:";
+const LASHLANG_PREFIX_VERSION: &str = "lashlang:v1:blake3:";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASHLANG_HOST_REQUIREMENTS_PREFIX_VERSION, new))
-const LASHLANG_HOST_REQUIREMENTS_PREFIX_VERSION: &str = "lashlang-host-requirements:v2:blake3:";
+const LASHLANG_HOST_REQUIREMENTS_PREFIX_VERSION: &str = "lashlang-host-requirements:v1:blake3:";
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -112,7 +112,7 @@ const fn envelope_encoding_admitted(encoding: u64) -> bool {
 /// )
 /// version_surface = "drain"
 /// format_manifest = "VmAbi"
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v14";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v1";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

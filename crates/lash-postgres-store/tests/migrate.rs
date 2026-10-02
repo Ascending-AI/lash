@@ -454,7 +454,6 @@ async fn fresh_release_ledger_has_only_baseline_bootstrap_evidence() {
 /// bootstrap provisions the release baseline 1, and only the synthetic-next
 /// build's step carries it to 2. The store then opens.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "release cut: FIG-4493"]
 async fn a_fresh_1_0_store_records_only_its_version_1_bootstrap_and_opens() {
     let database = migrator_database()
         .await

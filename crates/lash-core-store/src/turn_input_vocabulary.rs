@@ -10,7 +10,7 @@ const LASH_ACCEPTED_TURN_INPUT_DOMAIN_VERSION: &str = "lash-accepted-turn-input/
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_TURN_INPUT_DOMAIN_VERSION, derive_pending_turn_input_id))
-const LASH_TURN_INPUT_DOMAIN_VERSION: &str = "lash-turn-input/v2";
+const LASH_TURN_INPUT_DOMAIN_VERSION: &str = "lash-turn-input/v1";
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_KEYED_TURN_INPUT_DOMAIN_VERSION, keyed_input_id))

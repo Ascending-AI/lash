@@ -3552,6 +3552,32 @@
       ],
       "type": "object"
     },
+    "RemoteAssistantOutput": {
+      "properties": {
+        "raw_text": {
+          "default": "",
+          "type": "string"
+        },
+        "safe_text": {
+          "default": "",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/RemoteAssistantOutputState",
+          "default": "usable"
+        }
+      },
+      "type": "object"
+    },
+    "RemoteAssistantOutputState": {
+      "enum": [
+        "usable",
+        "empty_output",
+        "traceback_only",
+        "recovered_from_error"
+      ],
+      "type": "string"
+    },
     "RemoteAttachmentRef": {
       "properties": {
         "byte_len": {
@@ -3809,6 +3835,21 @@
         "unreported_after_failure"
       ],
       "type": "string"
+    },
+    "RemoteBoundaryReason": {
+      "description": "Why a physical turn ended at a segment boundary.",
+      "oneOf": [
+        {
+          "const": "journal_budget",
+          "description": "The turn's invocation reached its journal budget.",
+          "type": "string"
+        },
+        {
+          "const": "hand_over",
+          "description": "The build the turn's invocation ran on is draining.",
+          "type": "string"
+        }
+      ]
     },
     "RemoteCausalRef": {
       "oneOf": [
@@ -4236,6 +4277,43 @@
         }
       ]
     },
+    "RemoteLiveReplayGap": {
+      "properties": {
+        "latest_cursor": {
+          "type": "string"
+        },
+        "latest_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/RemoteLiveReplayGapReason"
+        },
+        "requested_cursor": {
+          "type": "string"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "requested_cursor",
+        "latest_cursor",
+        "latest_revision",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "RemoteLiveReplayGapReason": {
+      "enum": [
+        "trimmed",
+        "unavailable"
+      ],
+      "type": "string"
+    },
     "RemoteLlmCallRecord": {
       "description": "Wire mirror of one logical LLM call and every provider attempt it consumed.",
       "properties": {
@@ -4266,6 +4344,19 @@
         "attempts"
       ],
       "type": "object"
+    },
+    "RemoteLlmTerminalReason": {
+      "enum": [
+        "stop",
+        "tool_use",
+        "output_limit",
+        "context_overflow",
+        "content_filter",
+        "provider_error",
+        "cancelled",
+        "unknown"
+      ],
+      "type": "string"
     },
     "RemoteMessageOrigin": {
       "oneOf": [
@@ -4570,6 +4661,41 @@
           "type": "object"
         }
       ]
+    },
+    "RemoteParkedTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "park_id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/RemoteTurnParkReason"
+        },
+        "root": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "since_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "root",
+        "park_id",
+        "reason",
+        "since_ms",
+        "attempts"
+      ],
+      "type": "object"
     },
     "RemotePart": {
       "additionalProperties": false,
@@ -6633,188 +6759,6 @@
         }
       ]
     },
-    "RemoteSessionProcessEventKind": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "started",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "waiting",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "resumed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "cancel_requested",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "caller_departed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "completed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "failed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "cancelled",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "sequence": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "type": {
-              "const": "abandoned",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "sequence"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "RemoteSessionQueueEventKind": {
-      "enum": [
-        "enqueued",
-        "cancelled"
-      ],
-      "type": "string"
-    },
     "RemoteSessionScope": {
       "properties": {
         "agent_frame_id": {
@@ -6873,6 +6817,43 @@
           "type": "object"
         }
       ]
+    },
+    "RemoteStalledDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "code": {
+          "description": "The stable error code of the last delivery failure: present exactly\nwhen `last_error` is.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "stalled_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reason",
+        "attempts",
+        "stalled_at_ms"
+      ],
+      "type": "object"
     },
     "RemoteTerminalProcessStatus": {
       "description": "Mirrors [`lash_core::TerminalProcessStatus`]: the statuses a recorded\noutcome ends a process in.",
@@ -6967,6 +6948,34 @@
       },
       "required": [
         "outcome"
+      ],
+      "type": "object"
+    },
+    "RemoteToolCallRecord": {
+      "properties": {
+        "args": {
+          "default": null
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/RemoteToolCallOutput"
+        },
+        "provider_call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "output"
       ],
       "type": "object"
     },
@@ -8727,6 +8736,60 @@
       ],
       "type": "object"
     },
+    "RemoteTurnCancelMode": {
+      "description": "The boundary at which a turn honours the cancellation request.",
+      "enum": [
+        "immediate",
+        "after_step"
+      ],
+      "type": "string"
+    },
+    "RemoteTurnCancelUndeliveredInputPolicy": {
+      "enum": [
+        "defer",
+        "drop"
+      ],
+      "type": "string"
+    },
+    "RemoteTurnCancellationEvidence": {
+      "properties": {
+        "honoured_after_step": {
+          "description": "The committed protocol iteration that honoured an after-step stop.\nAbsent for immediate stops and requests honoured before any step ran.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/RemoteTurnCancelMode"
+        },
+        "origin": {
+          "description": "Opaque host-domain data; Lash records and returns it unchanged.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "undelivered": {
+          "$ref": "#/$defs/RemoteTurnCancelUndeliveredInputPolicy"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "type": "object"
+    },
     "RemoteTurnCause": {
       "properties": {
         "event_type": {
@@ -8749,6 +8812,85 @@
         "text"
       ],
       "type": "object"
+    },
+    "RemoteTurnExecutionMetrics": {
+      "properties": {
+        "duration_ms": {
+          "default": 0,
+          "description": "Whole-turn duration in milliseconds (claim \u2192 final commit). `0` when\nthe producer predates the field.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "had_code_execution": {
+          "default": false,
+          "type": "boolean"
+        },
+        "had_tool_calls": {
+          "default": false,
+          "type": "boolean"
+        },
+        "started_at_ms": {
+          "default": 0,
+          "description": "Wall-clock turn start (epoch milliseconds), measured from turn claim.\n`0` when the producer predates the field.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RemoteTurnFinish": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "assistant_message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "final_value",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_value",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "tool_name",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RemoteTurnInput": {
       "properties": {
@@ -8813,6 +8955,152 @@
       ],
       "type": "string"
     },
+    "RemoteTurnIssue": {
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The failure's namespaced code (`<namespace>:<spelling>`): `lash`\ncarries this workspace's [`TurnFailureCode`](lash_sansio::TurnFailureCode)\nvocabulary, `provider` carries codes the provider emitted on the wire,\nand host or plugin vocabularies keep their own namespaces verbatim \u2014\nnever reinterpreted into a Lash spelling."
+        },
+        "kind": {
+          "$ref": "#/$defs/TurnFailureKind",
+          "description": "Typed origin of the failure. Serializes as the same snake_case string\nthe field carried before it was typed; an unrecognized spelling decodes\ninto `RemoteTurnFailureKind::Unknown` rather than failing."
+        },
+        "message": {
+          "type": "string"
+        },
+        "provider_failure_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteProviderFailureKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Typed provider-failure classification, present only for classified\nLLM provider/transport failures."
+        },
+        "raw": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryable": {
+          "description": "Typed retryability signal; `None` when the source did not know.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/RemoteTurnIssueSeverity"
+        },
+        "terminal_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteLlmTerminalReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "severity",
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RemoteTurnIssueSeverity": {
+      "description": "Producer-selected effect of an issue on turn completion.",
+      "enum": [
+        "advisory",
+        "blocking"
+      ],
+      "type": "string"
+    },
+    "RemoteTurnOutcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "finish": {
+              "$ref": "#/$defs/RemoteTurnFinish"
+            },
+            "type": {
+              "const": "finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "finish"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "frame_key": {
+              "type": "string"
+            },
+            "task": {
+              "type": "string"
+            },
+            "type": {
+              "const": "agent_frame_switch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame_key",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The physical turn ended at a segment boundary of its run, which goes\non in a new invocation. Never a run's final outcome.",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/RemoteBoundaryReason"
+            },
+            "type": {
+              "const": "segment_boundary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "stop": {
+              "$ref": "#/$defs/RemoteTurnStop"
+            },
+            "type": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stop"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RemoteTurnOutputSource": {
       "oneOf": [
         {
@@ -8844,6 +9132,268 @@
           "type": "object"
         }
       ]
+    },
+    "RemoteTurnParkReason": {
+      "description": "Why a root parked.",
+      "properties": {
+        "code": {
+          "description": "The reason's code, as the park store keys it (`replay_divergence`,\n`binding_drift`, ...).",
+          "type": "string"
+        },
+        "message": {
+          "description": "The operator-facing refusal message.",
+          "type": "string"
+        },
+        "profile_key": {
+          "description": "The recorded model key the parked root could not bind, when that is\nwhy its engine retries ran out.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RemoteTurnReport": {
+      "properties": {
+        "activities": {
+          "items": {
+            "$ref": "#/$defs/RemoteTurnActivity"
+          },
+          "type": "array"
+        },
+        "assistant_output": {
+          "$ref": "#/$defs/RemoteAssistantOutput"
+        },
+        "execution": {
+          "$ref": "#/$defs/RemoteTurnExecutionMetrics",
+          "default": {
+            "duration_ms": 0,
+            "had_code_execution": false,
+            "had_tool_calls": false,
+            "started_at_ms": 0
+          }
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/RemoteTurnIssue"
+          },
+          "type": "array"
+        },
+        "llm_calls": {
+          "items": {
+            "$ref": "#/$defs/RemoteLlmCallRecord"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RemoteTurnOutcome"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tool_calls": {
+          "items": {
+            "$ref": "#/$defs/RemoteToolCallRecord"
+          },
+          "type": "array"
+        },
+        "turn_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/RemoteTurnUsageReport",
+          "default": {
+            "usage": {
+              "cache_read_input_tokens": 0,
+              "cache_write_input_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_output_tokens": 0
+            }
+          }
+        }
+      },
+      "required": [
+        "session_id",
+        "turn_id",
+        "outcome",
+        "assistant_output"
+      ],
+      "type": "object"
+    },
+    "RemoteTurnStop": {
+      "oneOf": [
+        {
+          "properties": {
+            "evidence": {
+              "$ref": "#/$defs/RemoteTurnCancellationEvidence"
+            },
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "evidence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "incomplete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "invalid_input",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "max_turns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "tool_failure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "provider_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "context_overflow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "plugin_abort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "runtime_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "submitted_error",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_error",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "tool_name",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteTurnUsageReport": {
+      "properties": {
+        "usage": {
+          "$ref": "#/$defs/RemoteUsage",
+          "default": {
+            "cache_read_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0
+          }
+        }
+      },
+      "type": "object"
     },
     "RemoteUsage": {
       "properties": {
@@ -12578,6 +13128,9 @@
       "minimum": 0,
       "type": "integer"
     },
+    "TurnFailureKind": {
+      "type": "string"
+    },
     "TurnInputAcceptanceReceipt": {
       "description": "Durable acceptance evidence returned to an ingress caller.\n\nThe receipt deliberately carries only stable routing and idempotency\nidentity. Queue dispatch and the pending row's mutable lifecycle state are\nobserved separately through the pending-input reconciliation surface.",
       "properties": {
@@ -12851,145 +13404,136 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/remote-session-observation-event/v100",
+  "$id": "https://lash.dev/schemas/remote-send-outcome/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The recorded answer to a sent input. Status and root are derived from\nthe variant's report or park, never stored beside them.",
   "oneOf": [
     {
+      "additionalProperties": false,
       "properties": {
-        "activity": {
-          "$ref": "#/$defs/RemoteTurnActivity"
-        },
-        "type": {
-          "const": "turn_activity",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "activity"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "type": {
-          "const": "committed",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "type": {
-          "const": "resident_changed",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "frame_id": {
-          "type": "string"
-        },
-        "type": {
-          "const": "agent_frame_switched",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "frame_id"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "batch_ids": {
+        "gaps": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/RemoteLiveReplayGap"
           },
           "type": "array"
         },
-        "kind": {
-          "$ref": "#/$defs/RemoteSessionQueueEventKind"
+        "input_id": {
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/$defs/RemoteTurnReport"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
         },
         "type": {
-          "const": "queue_changed",
+          "const": "settled",
           "type": "string"
         }
       },
       "required": [
         "type",
-        "kind",
-        "batch_ids"
+        "session_id",
+        "input_id",
+        "report"
       ],
       "type": "object"
     },
     {
+      "additionalProperties": false,
       "properties": {
-        "kind": {
-          "$ref": "#/$defs/RemoteSessionProcessEventKind"
-        },
-        "process_ids": {
+        "gaps": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/RemoteLiveReplayGap"
           },
           "type": "array"
         },
+        "input_id": {
+          "type": "string"
+        },
+        "parked": {
+          "$ref": "#/$defs/RemoteParkedTurn"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
         "type": {
-          "const": "process_changed",
+          "const": "parked",
           "type": "string"
         }
       },
       "required": [
         "type",
-        "kind",
-        "process_ids"
+        "session_id",
+        "input_id",
+        "parked"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/RemoteLiveReplayGap"
+          },
+          "type": "array"
+        },
+        "input_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "stalled": {
+          "$ref": "#/$defs/RemoteStalledDelivery"
+        },
+        "type": {
+          "const": "stalled",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "input_id",
+        "stalled"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/RemoteLiveReplayGap"
+          },
+          "type": "array"
+        },
+        "input_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "withdrawn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "input_id"
       ],
       "type": "object"
     }
   ],
-  "properties": {
-    "cursor": {
-      "type": "string"
-    },
-    "replay_incarnation_id": {
-      "type": "string"
-    },
-    "revision": {
-      "format": "uint64",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "session_id": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "turn_id": {
-      "minLength": 1,
-      "type": [
-        "string",
-        "null"
-      ]
-    }
-  },
-  "required": [
-    "session_id",
-    "replay_incarnation_id",
-    "revision",
-    "cursor"
-  ],
-  "title": "RemoteSessionObservationEvent",
-  "type": "object",
-  "unevaluatedProperties": false,
-  "x-lash-schema-version": 100,
+  "title": "RemoteSendOutcome",
+  "x-lash-schema-version": 1,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

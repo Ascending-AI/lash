@@ -1024,7 +1024,6 @@ mod tests {
     /// and the fleet's, is at 1. The synthetic-next build moves a surface one
     /// past the baseline and no further.
     #[test]
-    #[ignore = "release cut: FIG-4485"]
     fn the_build_states_every_version_at_the_release_baseline() {
         fn numbers(value: &Value, found: &mut Vec<u64>) {
             match value {

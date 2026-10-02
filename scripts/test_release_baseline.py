@@ -207,7 +207,6 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
                      "SQLITE_TRIGGERS_SCHEMA_VERSION", "compat.rs:POSTGRES_SCHEMA_VERSION"]:
             self.assertIn(name, result.stderr)
 
-    @unittest.skip("release cut: FIG-4485")
     def test_release_values_match_declared_baseline(self):
         result = self.command("check")
         self.assertEqual(result.returncode, 0, result.stderr)
