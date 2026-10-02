@@ -441,7 +441,7 @@ async fn prompt_runtime(
         .with_plugin_factories(vec![
             Arc::new(StandardProtocolPluginFactory::new()),
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                "observe-standard-prompt",
+                lash_core::plugin::PluginDeclaration::initial("observe-standard-prompt"),
                 lash_core::facade_support::PluginSpec::new()
                     .with_before_turn(observe)
                     .with_after_turn(after),

@@ -1065,9 +1065,10 @@ impl LashCoreBuilder {
                 .tool_providers
                 .into_iter()
                 .fold(PluginSpec::new(), PluginSpec::with_tool_provider);
-            plugin_factories
-                .push(Arc::new(StaticPluginFactory::new("embed_tools", spec))
-                    as Arc<dyn PluginFactory>);
+            plugin_factories.push(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("embed_tools"),
+                spec,
+            )) as Arc<dyn PluginFactory>);
         }
         plugin_factories.extend(self.plugin_stack.into_factories());
         refuse_foreign_backend_factories(

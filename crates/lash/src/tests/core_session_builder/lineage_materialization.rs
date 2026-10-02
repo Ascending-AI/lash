@@ -93,6 +93,10 @@ impl lash_core::facade_support::PluginFactory for LineageRoots {
         LINEAGE
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,

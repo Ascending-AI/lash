@@ -430,6 +430,10 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
     fn id(&self) -> &'static str {
         "runtime-feedback-witness"
     }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
     fn build(
         &self,
         ctx: &lash_core::plugin::PluginSessionContext,
@@ -457,7 +461,10 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
             })
         }));
         lash_core::plugin::PluginFactory::build(
-            &lash_core::plugin::StaticPluginFactory::new(self.id(), spec),
+            &lash_core::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial(self.id()),
+                spec,
+            ),
             ctx,
         )
     }

@@ -29,6 +29,10 @@ impl PluginFactory for MockPlugin {
     fn id(&self) -> &'static str {
         "mock-state"
     }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
+    }
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(self.clone()))
     }

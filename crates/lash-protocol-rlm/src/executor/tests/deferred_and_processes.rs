@@ -342,7 +342,7 @@ async fn restricted_empty_deferred_context<'h>(
 ) {
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "deferred_grant_provider",
+        lash_core::plugin::PluginDeclaration::initial("deferred_grant_provider"),
         lash_core::plugin::PluginSpec::new().with_tool_provider(provider),
     )));
     let session = lash_core::facade_support::PluginHost::new(factories)

@@ -99,7 +99,7 @@ async fn process_run_context_captures_catalog_and_execution_route_together() {
         }));
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
-        "process_route",
+        crate::plugin::PluginDeclaration::initial("process_route"),
         spec,
     )));
     let runtime = crate::runtime::tests::helpers::runtime_with_plugins(

@@ -63,7 +63,7 @@ fn echo_dispatch_context<'h>(
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(EchoTool { executed });
     let plugins =
         crate::support::plugin_host(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-            "echo_tools",
+            lash_core_execution::plugin::PluginDeclaration::initial("echo_tools"),
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
         ))])
         .build_session(PluginSessionRequest::creation("root", Default::default()))

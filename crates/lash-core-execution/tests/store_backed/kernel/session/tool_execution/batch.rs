@@ -551,7 +551,7 @@ mod tests {
         let provider: Arc<dyn crate::ToolProvider> = Arc::new(BatchFailureTools);
         let plugins =
             crate::support::plugin_host(vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-                "batch_failure_tools",
+                lash_core_execution::plugin::PluginDeclaration::initial("batch_failure_tools"),
                 crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
             ))])
             .build_session(PluginSessionRequest::creation(

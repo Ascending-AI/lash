@@ -1158,7 +1158,7 @@ mod attachment_notice_order_tests {
         });
         let host = crate::testing::test_plugin_host(vec![Arc::new(
             super::super::StaticPluginFactory::new(
-                "notice-order-step",
+                crate::plugin::PluginDeclaration::initial("notice-order-step"),
                 super::super::PluginSpec::new().with_presentation_step(step),
             ),
         )]);

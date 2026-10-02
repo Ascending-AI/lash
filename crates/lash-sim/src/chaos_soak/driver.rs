@@ -289,6 +289,10 @@ impl lash_core::plugin::PluginFactory for LashlangProcesses {
         "chaos-soak-lashlang-processes"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn bound_backend(&self) -> Option<&str> {
         lash_core::plugin::PluginFactory::bound_backend(&self.rlm)
     }

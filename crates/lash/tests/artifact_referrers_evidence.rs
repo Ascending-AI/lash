@@ -692,7 +692,7 @@ async fn a_pressure_seed_carries_its_module_into_the_new_frame() {
     let seed = Arc::new(Mutex::new(None));
     let hook: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "artifact-referrers-seeding-pressure",
+            lash::plugins::PluginDeclaration::initial("artifact-referrers-seeding-pressure"),
             lash_core::facade_support::PluginSpec::new().with_context_pressure_hook(
                 100,
                 Arc::new(SeedingPressureHook {

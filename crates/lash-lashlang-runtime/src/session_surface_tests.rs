@@ -91,7 +91,7 @@ fn session_policy() -> SessionPolicy {
 
 fn surface_plugin_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(PluginSpecFactory::new(
-        SURFACE_PLUGIN_ID,
+        lash_core::plugin::PluginDeclaration::initial(SURFACE_PLUGIN_ID),
         Arc::new(|ctx: &PluginSessionContext| {
             let grant_vocabulary = ctx
                 .plugin_config
@@ -407,7 +407,7 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "fig3463-recovery-echo",
+            lash_core::plugin::PluginDeclaration::initial("fig3463-recovery-echo"),
             PluginSpec::new().with_tool_provider(Arc::new(RecoveryEchoTool {
                 executions: Arc::clone(&executions),
             })),
@@ -553,7 +553,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     .with_execution_trace(Some(graphs.clone()), lash_trace::TraceContext::default());
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "fig3463-failure-tool",
+            lash_core::plugin::PluginDeclaration::initial("fig3463-failure-tool"),
             PluginSpec::new().with_tool_provider(Arc::new(RecoveryEchoTool {
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             })),

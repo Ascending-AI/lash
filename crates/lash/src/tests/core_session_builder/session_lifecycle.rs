@@ -46,6 +46,10 @@ impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
         "session-model-reconciliation-probe"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -195,6 +199,10 @@ impl CompileSurfaceToolFactory {
 impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
     fn id(&self) -> &'static str {
         self.id
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn build(

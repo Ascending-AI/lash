@@ -1444,6 +1444,10 @@ impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory 
         "calendar-triggers"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn extension_contributions(&self) -> Vec<lash_core::plugin::PluginExtensionContribution> {
         let mut resources = crate::rlm::LashlangHostCatalog::new();
         resources

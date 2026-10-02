@@ -437,6 +437,10 @@ impl PluginFactory for StandardProtocolPluginFactory {
         STANDARD_PROTOCOL_PLUGIN_ID
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     /// The session's standard-protocol namespace and its typed commands
     /// (FIG-4379).
     fn register_config(

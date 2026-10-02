@@ -29,6 +29,10 @@ impl lash_core::plugin::PluginFactory for DialectOwner {
         "dialect_owner"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::plugin::PluginSessionContext,

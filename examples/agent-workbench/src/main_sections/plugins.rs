@@ -76,6 +76,10 @@ impl PluginFactory for WorkbenchPluginFactory {
         "agent_workbench"
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "the contribution wraps statically defined abilities and resources that \

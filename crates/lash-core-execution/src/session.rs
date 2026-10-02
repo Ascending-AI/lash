@@ -998,7 +998,7 @@ mod tool_catalog_cache_tests {
     ) -> Arc<crate::PluginSession> {
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(StaticPluginFactory::new(
-            "admission_probe",
+            crate::plugin::PluginDeclaration::initial("admission_probe"),
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
         crate::PluginHost::new(factories)
@@ -1188,7 +1188,7 @@ mod tool_catalog_cache_tests {
         });
         let mut factories = crate::testing::test_standard_protocol_factories();
         factories.push(Arc::new(StaticPluginFactory::new(
-            "pinned_surface",
+            crate::plugin::PluginDeclaration::initial("pinned_surface"),
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
         let plugins = crate::PluginHost::new(factories)
@@ -1323,7 +1323,10 @@ mod tool_catalog_cache_tests {
             .fold(crate::PluginSpec::new(), |spec, provider| {
                 spec.with_tool_provider(provider)
             });
-        factories.push(Arc::new(StaticPluginFactory::new("reassignable", spec)));
+        factories.push(Arc::new(StaticPluginFactory::new(
+            crate::plugin::PluginDeclaration::initial("reassignable"),
+            spec,
+        )));
         let plugins = crate::PluginHost::new(factories)
             .build_session(PluginSessionRequest::creation(
                 "route-reassignment",

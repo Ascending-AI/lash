@@ -1433,7 +1433,7 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
     });
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(StaticPluginFactory::new(
-        "frame_rotating_tools",
+        lash_core::plugin::PluginDeclaration::initial("frame_rotating_tools"),
         lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
     )));
     let plugins = lash_core::testing::test_plugin_host(factories)

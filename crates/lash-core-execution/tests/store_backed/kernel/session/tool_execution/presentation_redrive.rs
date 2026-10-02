@@ -174,7 +174,7 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() {
     };
     let mut factories = crate::testing::test_code_protocol_factories();
     factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
-        "fallback-chain",
+        lash_core_execution::plugin::PluginDeclaration::initial("fallback-chain"),
         crate::plugin::PluginSpec::new()
             .with_presentation_step(failing)
             .with_presentation_step(replacing),

@@ -10,6 +10,7 @@ mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
 mod session_support;
+use session_support::process_incarnation_id;
 pub use session_support::{journaled_session, turn_handler_error};
 pub mod witness;
 use anyhow::{Context, Result, bail};
@@ -37,7 +38,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_SESSION_ID: &str = "restate-postgres-workers-e2e";
@@ -540,11 +541,6 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         .context("build e2e LashCore")
 }
 
-fn process_incarnation_id() -> &'static str {
-    static INCARNATION_ID: OnceLock<String> = OnceLock::new();
-    INCARNATION_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
-}
-
 #[derive(Clone)]
 struct E2ePluginFactory {
     pool: PgPool,
@@ -559,6 +555,10 @@ struct E2ePluginFactory {
 impl PluginFactory for E2ePluginFactory {
     fn id(&self) -> &'static str {
         "restate-postgres-workers-e2e"
+    }
+
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
     }
 
     #[expect(

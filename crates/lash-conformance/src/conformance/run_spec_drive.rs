@@ -1087,7 +1087,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
     let executed = Arc::new(AtomicUsize::new(0));
     let tool: Arc<dyn crate::plugin::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-run-spec-switch-probe",
+            lash_core::plugin::PluginDeclaration::initial("conformance-run-spec-switch-probe"),
             crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool {
                 executed: Arc::clone(&executed),
             })),
@@ -1252,7 +1252,7 @@ pub async fn a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resol
     parts.host.providers.models = law_models(provider.into_handle());
     let tool: Arc<dyn crate::plugin::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-run-spec-switch-probe",
+            lash_core::plugin::PluginDeclaration::initial("conformance-run-spec-switch-probe"),
             crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool {
                 executed: Arc::new(AtomicUsize::new(0)),
             })),

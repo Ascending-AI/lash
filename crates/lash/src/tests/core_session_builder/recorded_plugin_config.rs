@@ -176,6 +176,10 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
         PROBE
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         ctx: &lash_core::facade_support::PluginSessionContext,

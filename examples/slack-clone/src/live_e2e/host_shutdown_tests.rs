@@ -12,6 +12,10 @@ impl lash::plugins::PluginFactory for ShutdownOrderWitness {
         "slack_live_e2e_shutdown_order_witness"
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash::plugins::PluginSessionContext,

@@ -250,7 +250,7 @@ async fn open_runtime(
     let factories: Vec<Arc<dyn PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::with_config(config)),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "render-law-tool",
+            lash_core::plugin::PluginDeclaration::initial("render-law-tool"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tool),
         )),
     ];
@@ -529,7 +529,7 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
                         let factories: Vec<Arc<dyn PluginFactory>> = vec![
                             Arc::new(StandardProtocolPluginFactory::with_config(config)),
                             Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                                "render-law-tool",
+                                lash_core::plugin::PluginDeclaration::initial("render-law-tool"),
                                 lash_core::facade_support::PluginSpec::new().with_tool_provider(
                                     Arc::new(FixtureTool {
                                         calls: AtomicUsize::new(0),

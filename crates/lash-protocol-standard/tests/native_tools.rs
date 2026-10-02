@@ -28,7 +28,7 @@ fn standard_session_with_access(
     PluginHost::new(vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "native-tools-fixture",
+            lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
         )),
     ])
@@ -79,7 +79,7 @@ fn process_controls_and_a_model_provider_compose_with_standard_protocol() {
             ),
         ),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "native-tools-fixture",
+            lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
         )),
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
@@ -105,7 +105,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
         let session = PluginHost::new(vec![
             Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::with_config(config)),
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                "catalogue-batch",
+                lash_core::plugin::PluginDeclaration::initial("catalogue-batch"),
                 lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
             )),
         ])

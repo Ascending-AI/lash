@@ -964,6 +964,10 @@ impl lash_core::facade_support::PluginFactory for RuntimeBuildProbeFactory {
         "durable-session-runtime-probe"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,

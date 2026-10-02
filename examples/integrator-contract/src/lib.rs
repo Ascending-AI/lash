@@ -105,6 +105,10 @@ impl PluginFactory for Integrator {
     fn id(&self) -> &'static str {
         unreachable!("external signature witness")
     }
+
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(PluginFactory::id(self))
+    }
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let recorded: &AdmittedPluginConfig = &ctx.plugin_config;
         unreachable!("external signature witness")

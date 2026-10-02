@@ -144,7 +144,7 @@ pub async fn plugin_queued_turns_preserve_reserved_source_key_refusals(
     law.parts
         .host_plugins
         .push(Arc::new(crate::plugin::StaticPluginFactory::new(
-            "reserved-plugin-input",
+            lash_core::plugin::PluginDeclaration::initial("reserved-plugin-input"),
             crate::facade_support::PluginSpec::new()
                 .with_plugin_command_typed::<HostQueueCommand, _, _>(|_, keys| async move {
                     Ok(
@@ -351,7 +351,7 @@ fn host_plugin(probe: &HostPluginProbe) -> Arc<dyn PluginFactory> {
     let returns_once_probe = probe.clone();
     let event_probe = probe.clone();
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        HOST_PLUGIN_ID,
+        lash_core::plugin::PluginDeclaration::initial(HOST_PLUGIN_ID),
         crate::facade_support::PluginSpec::new()
             .with_plugin_command_value::<HostNoteCommand, _, _>(move |ctx, args| {
                 let probe = command_probe.clone();

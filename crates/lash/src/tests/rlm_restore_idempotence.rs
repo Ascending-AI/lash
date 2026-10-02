@@ -1116,6 +1116,10 @@ impl PluginFactory for FailFirstTurnPersisted {
         "fig2521-fail-first-turn-persisted"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(PluginFactory::id(self))
+    }
+
     fn build(
         &self,
         _: &lash_core::facade_support::PluginSessionContext,
@@ -1308,7 +1312,7 @@ async fn message_append_keeps_the_committed_execution(backend: Backend) {
 fn refuse_second_turn_finalize() -> Arc<dyn PluginFactory> {
     let calls = Arc::new(AtomicUsize::new(0));
     Arc::new(StaticPluginFactory::new(
-        "fig2521-refuse-second-finalize",
+        lash_core::plugin::PluginDeclaration::initial("fig2521-refuse-second-finalize"),
         PluginSpec::new().with_after_turn(Arc::new(move |_| {
             let calls = Arc::clone(&calls);
             Box::pin(async move {
@@ -1497,7 +1501,7 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
             let finalize = Arc::new(AtomicUsize::new(0));
             let fail = Arc::clone(&finalize);
             let plugins: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
-                "cold-terminal-fixture",
+                lash_core::plugin::PluginDeclaration::initial("cold-terminal-fixture"),
                 PluginSpec::new()
                     .with_tool_provider(tool)
                     .with_after_turn(Arc::new(move |_| {

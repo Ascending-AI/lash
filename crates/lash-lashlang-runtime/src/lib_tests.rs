@@ -553,7 +553,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         )
         .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
         vec![Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "fixture-tools",
+            lash_core::plugin::PluginDeclaration::initial("fixture-tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
                 BoundFixtureTools(lash_core::testing::FixtureTools::new()),
             )),

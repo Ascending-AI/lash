@@ -141,7 +141,7 @@ impl StandardFrameLawProtocol {
 /// The plugin whose tool switches a standard-protocol turn's frame.
 fn switch_tool_plugin() -> Arc<dyn PluginFactory> {
     Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-frame-open-switch",
+        lash_core::plugin::PluginDeclaration::initial("conformance-frame-open-switch"),
         crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
     ))
 }
@@ -768,7 +768,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
     let law = &parts.compaction;
     let compaction: Vec<Arc<dyn PluginFactory>> = match law.compactor {
         LawCompactor::Law => vec![Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-frame-open-compaction",
+            lash_core::plugin::PluginDeclaration::initial("conformance-frame-open-compaction"),
             crate::facade_support::PluginSpec::new()
                 .with_context_pressure_hook(
                     100,
@@ -793,7 +793,9 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
             )];
             if let Some(recorded) = &law.request_ids {
                 plugins.push(Arc::new(crate::plugin::StaticPluginFactory::new(
-                    "conformance-compaction-request-ids",
+                    lash_core::plugin::PluginDeclaration::initial(
+                        "conformance-compaction-request-ids",
+                    ),
                     crate::facade_support::PluginSpec::new().with_context_pressure_hook(
                         // Asked before the standard compactor's hook.
                         200,
@@ -809,7 +811,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
             .iter()
             .map(|(plugin_id, record)| {
                 Arc::new(crate::plugin::StaticPluginFactory::new(
-                    plugin_id,
+                    lash_core::plugin::PluginDeclaration::initial(plugin_id),
                     crate::facade_support::PluginSpec::new()
                         .with_context_pressure_hook(100, Arc::new(RecordingHook { record })),
                 )) as Arc<dyn PluginFactory>

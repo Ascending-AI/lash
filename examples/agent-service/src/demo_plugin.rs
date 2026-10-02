@@ -36,6 +36,10 @@ impl PluginFactory for DemoPluginFactory {
         DEMO_PLUGIN_ID
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
+    }
+
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(DemoSessionPlugin {
             db: Arc::clone(&self.db),

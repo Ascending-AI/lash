@@ -122,7 +122,7 @@ impl lash_core::ToolProvider for InvalidLashlangBindingTool {
 
 fn invalid_lashlang_binding_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "invalid-lashlang-binding",
+        lash_core::plugin::PluginDeclaration::initial("invalid-lashlang-binding"),
         lash_core::facade_support::PluginSpec::new()
             .with_tool_provider(Arc::new(InvalidLashlangBindingTool)),
     ))
@@ -1005,7 +1005,7 @@ pub(super) fn counting_tool_plugin(
     executions: Arc<AtomicUsize>,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "counting-process-tool",
+        lash_core::plugin::PluginDeclaration::initial("counting-process-tool"),
         lash_core::facade_support::PluginSpec::new()
             .with_tool_provider(Arc::new(CountingProcessTool { executions })),
     ))

@@ -143,7 +143,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     });
     let tool_plugin: Arc<dyn crate::facade_support::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-signal-intent",
+            lash_core::plugin::PluginDeclaration::initial("conformance-signal-intent"),
             crate::facade_support::PluginSpec::new().with_tool_provider(tools),
         ));
     let model_calls = Arc::new(AtomicUsize::new(0));

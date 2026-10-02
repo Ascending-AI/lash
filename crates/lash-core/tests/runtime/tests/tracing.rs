@@ -933,7 +933,7 @@ async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() {
 async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
     let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
     let refusal = Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "tool-refusal",
+        lash_core::plugin::PluginDeclaration::initial("tool-refusal"),
         lash_core::facade_support::PluginSpec::new().with_before_tool_call(Arc::new(|_ctx| {
             Box::pin(async {
                 Ok(vec![

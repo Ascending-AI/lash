@@ -351,7 +351,7 @@ fn deriving_plugin(calls: &Arc<AtomicUsize>) -> StaticPluginFactory {
         })
     });
     StaticPluginFactory::new(
-        "response-phase-replay-deriver",
+        lash_core::plugin::PluginDeclaration::initial("response-phase-replay-deriver"),
         lash_core::facade_support::PluginSpec::new().with_assistant_response(hook),
     )
 }

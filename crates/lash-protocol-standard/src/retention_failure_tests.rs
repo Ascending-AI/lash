@@ -25,7 +25,7 @@ async fn present_with(
         spec = spec.with_presentation_step(step);
     }
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-        "retention-law",
+        lash_core::plugin::PluginDeclaration::initial("retention-law"),
         spec,
     )));
     let context = lash_core::testing::TestExecutionContextBuilder::for_backend(backend)

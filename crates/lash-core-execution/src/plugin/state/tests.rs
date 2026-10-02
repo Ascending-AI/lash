@@ -19,6 +19,10 @@ fn materialization_preserves_recorded_config_and_creation_kind() {
         fn id(&self) -> &'static str {
             "context-probe"
         }
+
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(PluginFactory::id(self))
+        }
         fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
             self.0.lock_recover().push(ctx.clone());
             Ok(Arc::new(self.clone()))
@@ -347,6 +351,10 @@ fn readiness_runs_after_hydration_and_its_writes_survive() {
     impl crate::plugin::PluginFactory for ReadyPlugin {
         fn id(&self) -> &'static str {
             "ready-plugin"
+        }
+
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            crate::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
         }
         fn build(
             &self,

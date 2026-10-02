@@ -142,7 +142,7 @@ fn fail_the_inline_follow_on(
         }) as lash_core::plugin::PluginFuture<_>
     });
     crate::plugins::StaticPluginFactory::new(
-        "deleted-session-follow-on-failure",
+        lash_core::plugin::PluginDeclaration::initial("deleted-session-follow-on-failure"),
         lash_core::facade_support::PluginSpec::new().with_before_turn(hook),
     )
 }

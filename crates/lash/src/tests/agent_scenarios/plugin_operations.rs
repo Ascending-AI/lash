@@ -50,7 +50,10 @@ fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<()> {
         let double = restate_double(SEED).await;
         let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
             .serve_test_model(mock_provider(), mock_model_spec())
-            .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
+            .plugin(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("accept"),
+                spec,
+            )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("reserved-plugin-keys")
@@ -117,7 +120,10 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             .into();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_model(mock_provider(), mock_model_spec())
-            .plugin(Arc::new(StaticPluginFactory::new("accept", spec)))
+            .plugin(Arc::new(StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("accept"),
+                spec,
+            )))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("plugin-accept").created().await.open().await?;
         let ops = session.plugin_operations();

@@ -1494,7 +1494,7 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
     let settled = Arc::new(Mutex::new(Vec::new()));
     let tools: Arc<dyn lash::plugins::PluginFactory> =
         Arc::new(lash::plugins::StaticPluginFactory::new(
-            "keys-ask-model",
+            lash::plugins::PluginDeclaration::initial("keys-ask-model"),
             lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
                 catalog: Arc::clone(&catalog),
                 retired: AtomicBool::new(false),
@@ -1823,7 +1823,7 @@ async fn a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion(
     let acted_past_a_fault = Arc::new(AtomicUsize::new(0));
     let tools: Arc<dyn lash::plugins::PluginFactory> =
         Arc::new(lash::plugins::StaticPluginFactory::new(
-            "keys-ask-twice",
+            lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
             lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskTwice {
                 catalog: Arc::clone(&catalog),
                 retire: Retire::BeforeTheFirstCompletion,
@@ -1884,7 +1884,7 @@ async fn a_completion_dispatched_before_a_bind_fault_keeps_its_usage_settled_onc
     let acted_past_a_fault = Arc::new(AtomicUsize::new(0));
     let tools: Arc<dyn lash::plugins::PluginFactory> =
         Arc::new(lash::plugins::StaticPluginFactory::new(
-            "keys-ask-twice",
+            lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
             lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskTwice {
                 catalog: Arc::clone(&catalog),
                 retire: Retire::BetweenTheCompletions,
@@ -2004,7 +2004,7 @@ async fn a_send_answers_parked_at_the_park_commit_while_its_roots_run_is_residen
     let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", provider()));
     let tools: Arc<dyn lash::plugins::PluginFactory> =
         Arc::new(lash::plugins::StaticPluginFactory::new(
-            "keys-ask-model",
+            lash::plugins::PluginDeclaration::initial("keys-ask-model"),
             lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
                 catalog: Arc::clone(&catalog),
                 retired: AtomicBool::new(false),

@@ -618,7 +618,7 @@ pub fn plugin_session_with_tools(
     tools: Arc<dyn crate::ToolProvider>,
 ) -> Arc<crate::PluginSession> {
     let tool_factory = StaticPluginFactory::new(
-        "test_tools",
+        crate::plugin::PluginDeclaration::initial("test_tools"),
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
     );
     let mut factories = crate::testing::test_standard_protocol_factories();
@@ -934,7 +934,7 @@ impl TestRuntime {
         let mut factories = self.plugins;
         let tools = Arc::clone(&self.tools);
         factories.push(Arc::new(StaticPluginFactory::new(
-            "test_tools",
+            crate::plugin::PluginDeclaration::initial("test_tools"),
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
         )));
         let plugin_host = crate::testing::test_plugin_host(factories);
@@ -1075,6 +1075,10 @@ pub struct RuntimeTestPluginFactory {
 impl crate::PluginFactory for RuntimeTestPluginFactory {
     fn id(&self) -> &'static str {
         "runtime-test"
+    }
+
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id())
     }
 
     fn build(

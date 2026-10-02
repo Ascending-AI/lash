@@ -48,7 +48,7 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
     let settled = Arc::new(Mutex::new(Vec::new()));
     let tools: Arc<dyn lash::plugins::PluginFactory> =
         Arc::new(lash::plugins::StaticPluginFactory::new(
-            "keys-process-ask-model",
+            lash::plugins::PluginDeclaration::initial("keys-process-ask-model"),
             lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
                 catalog: Arc::clone(&catalog),
                 retired: AtomicBool::new(false),
@@ -406,7 +406,7 @@ async fn paused_group_dispatch_work_parks_its_opener(
         let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", provider));
         let tools: Arc<dyn lash::plugins::PluginFactory> =
             Arc::new(lash::plugins::StaticPluginFactory::new(
-                "keys-dispatch-model",
+                lash::plugins::PluginDeclaration::initial("keys-dispatch-model"),
                 lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskModel {
                     catalog: Arc::clone(&catalog),
                     retired: AtomicBool::new(true),

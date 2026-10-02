@@ -115,6 +115,10 @@ impl crate::plugin::PluginFactory for DriftNote {
         "conformance-model-drift-note"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(crate::plugin::PluginFactory::id(self))
+    }
+
     fn build(
         &self,
         _: &crate::plugin::PluginSessionContext,

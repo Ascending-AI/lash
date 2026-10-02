@@ -99,6 +99,10 @@ impl crate::plugin::PluginFactory for RecordingStepFactory {
         "scalar-presentation-step"
     }
 
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &crate::plugin::PluginSessionContext,

@@ -167,7 +167,7 @@ pub(super) async fn explicit_compaction_starts_a_frame_without_a_reload() {
     let store = double_unbound_recording_store(&double).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![Arc::new(StaticPluginFactory::new(
-            "frame-residency-compactor",
+            lash_core::plugin::PluginDeclaration::initial("frame-residency-compactor"),
             lash_core::facade_support::PluginSpec::new()
                 .with_context_compactor(100, Arc::new(SummaryCompactor)),
         ))],
@@ -304,7 +304,7 @@ pub(super) async fn a_pressure_frame_starts_without_a_reload() {
     let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![Arc::new(StaticPluginFactory::new(
-            "frame-residency-pressure",
+            lash_core::plugin::PluginDeclaration::initial("frame-residency-pressure"),
             lash_core::facade_support::PluginSpec::new().with_context_pressure_hook(
                 100,
                 Arc::new(ArmedPressure {
@@ -384,7 +384,7 @@ pub(super) async fn continue_as_starts_a_frame_without_a_reload() {
     let store = double_unbound_recording_store(&double).await;
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(StaticPluginFactory::new(
-        "frame-residency-continue-as",
+        lash_core::plugin::PluginDeclaration::initial("frame-residency-continue-as"),
         lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(ContinueAsTool)),
     )));
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -443,7 +443,7 @@ pub(super) async fn the_admitted_window_of_a_frame_switching_turn_is_its_admissi
     let store = double_unbound_recording_store(&double).await;
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(StaticPluginFactory::new(
-        "frame-residency-continue-as",
+        lash_core::plugin::PluginDeclaration::initial("frame-residency-continue-as"),
         lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(ContinueAsTool)),
     )));
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(

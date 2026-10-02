@@ -610,6 +610,10 @@ impl lash::plugins::PluginFactory for OverflowPluginFactory {
         "context-overflow-recovery"
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &PluginSessionContext,

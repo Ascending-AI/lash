@@ -404,7 +404,7 @@ fn build_core(
     };
     let mut plugins = lash::PluginStack::new();
     plugins.push(Arc::new(lash::plugins::StaticPluginFactory::new(
-        "latency_tools",
+        lash_core::plugin::PluginDeclaration::initial("latency_tools"),
         lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(
             crate::runtime_perf::providers::BenchmarkEchoTool::new(Arc::clone(&effect_host)),
         )),

@@ -580,7 +580,7 @@ async fn standard_batch_members_are_children_of_the_steps_one_group() {
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "standard-batch-test-tools",
+            lash_core::plugin::PluginDeclaration::initial("standard-batch-test-tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
                 BatchRuntimeTools {
                     barrier: Arc::new(Barrier::new(2)),
@@ -753,7 +753,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "standard-malformed-args-test-tools",
+            lash_core::plugin::PluginDeclaration::initial("standard-malformed-args-test-tools"),
             lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
                 CountingToolProvider {
                     executed: Arc::clone(&executed),

@@ -137,6 +137,10 @@ impl PluginFactory for McpPluginFactory {
         "mcp"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     async fn shutdown(&self) -> Result<(), PluginError> {
         self.pool.shutdown_all().await;
         Ok(())

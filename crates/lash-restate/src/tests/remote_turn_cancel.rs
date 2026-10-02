@@ -95,7 +95,7 @@ impl TurnFixture {
             ..lash_core::RuntimeSessionState::new(policy.clone())
         };
         let tools = Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "remote-cancel-echo",
+            lash_core::plugin::PluginDeclaration::initial("remote-cancel-echo"),
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::new(lash_core::testing::runtime_helpers::EchoTool)),
         ));

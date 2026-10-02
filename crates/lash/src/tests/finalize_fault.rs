@@ -78,7 +78,10 @@ fn counting_provider(calls: Arc<AtomicUsize>) -> ProviderHandle {
 }
 
 fn plugin(id: &'static str, spec: lash_core::facade_support::PluginSpec) -> Arc<dyn PluginFactory> {
-    Arc::new(StaticPluginFactory::new(id, spec))
+    Arc::new(StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial(id),
+        spec,
+    ))
 }
 
 /// An `after_turn` hook that fails with `fault()` the first `failures` times

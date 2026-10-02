@@ -515,7 +515,7 @@ fn oracle_builder(
         .serve_test_model(provider, mock_model_spec())
         .plugins(lash_core::facade_support::PluginStack::from_factories([Arc::new(
             StaticPluginFactory::new(
-                "aggregate-oracle",
+                lash_core::plugin::PluginDeclaration::initial("aggregate-oracle"),
                 lash_core::facade_support::PluginSpec::new()
                     .with_presentation_step(oracle_presentation_step(Arc::clone(&theatre))),
             ),

@@ -48,3 +48,54 @@ impl std::fmt::Display for FormatVersion {
         self.0.fmt(formatter)
     }
 }
+
+/// The declared, nonzero revision of what a plugin does. Any behaviour
+/// change moves it, and a moved revision is a new build generation.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct BehaviorRevision(std::num::NonZeroU32);
+
+impl BehaviorRevision {
+    pub const ONE: Self = Self(std::num::NonZeroU32::MIN);
+
+    pub const fn new(value: u32) -> Option<Self> {
+        match std::num::NonZeroU32::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for BehaviorRevision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// The id a plugin registers under: the name of its state and config
+/// namespaces and of its place in the plugin composition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct PluginId(&'static str);
+
+impl PluginId {
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl std::fmt::Display for PluginId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}

@@ -642,6 +642,10 @@ mod tests {
             "toolbench_timeout_shutdown_witness"
         }
 
+        fn declaration(&self) -> lash::plugins::PluginDeclaration {
+            lash::plugins::PluginDeclaration::initial(self.id())
+        }
+
         fn build(
             &self,
             _ctx: &lash::plugins::PluginSessionContext,

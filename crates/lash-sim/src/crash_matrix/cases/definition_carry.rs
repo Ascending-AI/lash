@@ -168,6 +168,10 @@ impl PluginFactory for Factory {
         KIND
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn process_engine_contributions(
         &self,
         _context: &lash_core::ProcessEngineContributionContext<'_>,
@@ -181,7 +185,11 @@ impl PluginFactory for Factory {
         &self,
         context: &PluginSessionContext,
     ) -> Result<Arc<dyn SessionPlugin>, lash_core::PluginError> {
-        PluginSpecFactory::new(KIND, Arc::new(|_| Ok(PluginSpec::new()))).build(context)
+        PluginSpecFactory::new(
+            lash_core::plugin::PluginDeclaration::initial(KIND),
+            Arc::new(|_| Ok(PluginSpec::new())),
+        )
+        .build(context)
     }
 }
 

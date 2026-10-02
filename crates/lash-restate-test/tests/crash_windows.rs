@@ -852,7 +852,7 @@ fn presentation_core(
             output: json!({ "text": tool_output() }),
         }) as Arc<dyn lash_core::ToolProvider>)
         .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            "crash-windows-presentation",
+            lash_core::plugin::PluginDeclaration::initial("crash-windows-presentation"),
             spec,
         )))
         .build(lash_core::LeaseOwnerIdentity::opaque(

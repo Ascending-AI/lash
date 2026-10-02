@@ -124,7 +124,7 @@ impl ProductionToolCell {
         });
         let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                "tool-context-first-party",
+                lash_core::plugin::PluginDeclaration::initial("tool-context-first-party"),
                 lash_core::facade_support::PluginSpec::new().with_tool_provider(counting_provider),
             ));
         let artifact_backend = memory_engine_backend().await;

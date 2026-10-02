@@ -273,6 +273,10 @@ impl crate::facade_support::PluginFactory for FactsFactory {
         FACTS
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn register_config(
         &self,
         registrar: &mut crate::ConfigRegistrar,
@@ -816,7 +820,7 @@ impl World {
         };
         let tools = tools.map(|(id, provider)| {
             Arc::new(crate::plugin::StaticPluginFactory::new(
-                id,
+                lash_core::plugin::PluginDeclaration::initial(id),
                 crate::facade_support::PluginSpec::new().with_tool_provider(provider),
             )) as Arc<dyn crate::facade_support::PluginFactory>
         });

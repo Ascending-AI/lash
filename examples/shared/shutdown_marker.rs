@@ -36,6 +36,10 @@ impl PluginFactory for ShutdownMarkerFactory {
         "host_shutdown_marker"
     }
 
+    fn declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial(self.id())
+    }
+
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(ShutdownMarkerSession))
     }

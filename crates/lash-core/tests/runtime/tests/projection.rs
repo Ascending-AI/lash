@@ -26,6 +26,10 @@ impl lash_core::facade_support::PluginFactory for AppendRollbackProtocolFactory 
         "test_protocol"
     }
 
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
@@ -586,7 +590,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
     let base_provider_factory = Arc::clone(&base_provider);
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
-            "base_tools",
+            lash_core::plugin::PluginDeclaration::initial("base_tools"),
             lash_core::facade_support::PluginSpec::new()
                 .with_tool_provider(Arc::clone(&base_provider_factory)),
         ))]);
