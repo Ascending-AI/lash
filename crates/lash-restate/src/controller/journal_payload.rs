@@ -323,7 +323,6 @@ mod tests {
                     response: Box::new(response),
                     events: Vec::new(),
                 }),
-                usage: None,
             }),
         }
     }

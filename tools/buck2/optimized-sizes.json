@@ -475,24 +475,6 @@
       "samples": 0
     }
   },
-  "lash-internal-restate-test/usage_accounting_windows": {
-    "target": {
-      "cpu_count": 1,
-      "memory_kb": 2097152,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    },
-    "test": {
-      "cpu_count": 1,
-      "memory_kb": 2097152,
-      "p95_cores": 0.0,
-      "p99_peak_bytes": 0,
-      "peak_bytes": 0,
-      "samples": 0
-    }
-  },
   "lash-internal-restate/lash_restate": {
     "target": {
       "cpu_count": 1,

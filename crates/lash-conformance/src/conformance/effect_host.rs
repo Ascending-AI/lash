@@ -118,29 +118,9 @@ pub struct RecordingEffectHost {
     selected_scopes: Arc<Mutex<Vec<ExecutionScope>>>,
     records: Arc<Mutex<Vec<RecordingEffectHostRecord>>>,
     retirements: Arc<Mutex<Vec<crate::EffectJournalRetirement>>>,
-    /// The ledger this journal-free host drains and retires in directly:
-    /// with no continuation of its own, the store is the delivery.
-    usage_accounting: Option<Arc<dyn crate::UsageAccountingStore>>,
 }
 
 impl RecordingEffectHost {
-    /// The recording host over the backend ledger it drains usage owners in.
-    pub fn over_usage_accounting(usage_accounting: Arc<dyn crate::UsageAccountingStore>) -> Self {
-        Self {
-            usage_accounting: Some(usage_accounting),
-            ..Self::default()
-        }
-    }
-
-    fn usage_ledger(&self) -> Result<&Arc<dyn crate::UsageAccountingStore>, crate::RuntimeError> {
-        self.usage_accounting.as_ref().ok_or_else(|| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::UsageAdmissionFault,
-                "this recording effect host was built without a usage ledger",
-            )
-        })
-    }
-
     pub fn selected_scopes(&self) -> Vec<ExecutionScope> {
         self.selected_scopes.lock_recover().clone()
     }
@@ -192,64 +172,8 @@ impl crate::AwaitEventResolver for RecordingEffectHost {
     }
 }
 
-/// A fixture host's owner retirement: the ledger's own, stamped now. Fixture
-/// hosts have no settle lane to drain, so retirement is the whole drain.
-pub(crate) async fn retire_usage_owner_now(
-    usage_accounting: &dyn crate::UsageAccountingStore,
-    owner: &crate::RuntimeOwner,
-) -> Result<crate::UsageOwnerRetired, crate::RuntimeError> {
-    usage_accounting
-        .retire_usage_owner(
-            owner,
-            crate::ClockWallTime::timestamp_ms(&crate::facade_support::SystemClock),
-        )
-        .await
-        .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
-}
-
-/// A fixture host's execution retirement, keyed by the scope's journal key.
-pub(crate) async fn retire_usage_execution_now(
-    usage_accounting: &dyn crate::UsageAccountingStore,
-    owner: &crate::RuntimeOwner,
-    scope: &ExecutionScope,
-) -> Result<u64, crate::RuntimeError> {
-    let scope_key = scope
-        .journal_identity()
-        .map_err(|error| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::MissingExecutionScopeId,
-                error.to_string(),
-            )
-        })?
-        .key()
-        .to_string();
-    usage_accounting
-        .retire_usage_execution(
-            owner,
-            &scope_key,
-            crate::ClockWallTime::timestamp_ms(&crate::facade_support::SystemClock),
-        )
-        .await
-        .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
-}
-
 #[async_trait::async_trait]
 impl EffectHost for RecordingEffectHost {
-    async fn drain_usage_accounting(
-        &self,
-        owner: &crate::RuntimeOwner,
-    ) -> Result<crate::UsageOwnerRetired, crate::RuntimeError> {
-        retire_usage_owner_now(self.usage_ledger()?.as_ref(), owner).await
-    }
-
-    async fn retire_usage_execution(
-        &self,
-        owner: &crate::RuntimeOwner,
-        scope: &ExecutionScope,
-    ) -> Result<u64, crate::RuntimeError> {
-        retire_usage_execution_now(self.usage_ledger()?.as_ref(), owner, scope).await
-    }
-
     async fn journal_replay(
         &self,
         _journal: &crate::EffectJournalIdentity,

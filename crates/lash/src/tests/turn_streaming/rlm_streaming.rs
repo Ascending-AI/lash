@@ -631,11 +631,6 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             attempt.usage.as_ref().map(|usage| usage.input_tokens),
             Some(17)
         );
-        let usage = settled_usage(&session).await?;
-        let report = usage.report();
-        assert_eq!(report.usage.unreported_attempts, 0);
-        assert_eq!(report.usage.usage.input_tokens, 17);
-        assert!(usage.outstanding.is_empty());
 
         let journaled = journaled_effect_outcomes(&double)
             .into_iter()
@@ -741,47 +736,13 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
             lash_core::AttemptUsageOutcome::UnreportedAfterAbort
         );
 
-        let usage = settled_usage(&session).await?;
-        let report = usage.report();
-        assert_eq!(report.usage.unreported_attempts, 1);
-        assert_eq!(report.usage.reconciled_attempts, 0);
-        assert_eq!(report.usage.total_tokens, 0);
-        let row = report
-            .by_attribution
-            .iter()
-            .find(|(attribution, _)| attribution.source == "turn")
-            .map(|(_, totals)| totals)
-            .expect("unreported turn row is written even at zero usage");
-        assert_eq!(row.unreported_attempts, 1);
-        assert_eq!(row.usage, lash_core::TokenUsage::default());
-        let unreported = usage.outstanding;
-        assert_eq!(unreported.len(), 1);
-        assert_eq!(
-            unreported[0].llm_call_id,
-            result.result.llm_calls[0].call_id
-        );
-        assert_eq!(unreported[0].provider_attempt, 1);
-        assert_eq!(unreported[0].source, "turn");
-        // The test provider never named a generation, so reconciliation has
-        // nothing to ask for: the hole stays open and is reported as such.
-        let reconciliation = session.reconcile_unreported_usage().await?;
-        assert!(reconciliation.reconciled.is_empty());
-        assert_eq!(reconciliation.unresolved, unreported);
-        assert_eq!(
-            settled_usage(&session)
-                .await?
-                .report()
-                .usage
-                .unreported_attempts,
-            1
-        );
         Ok(())
     })
 }
 
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn rlm_turn_without_interruption_or_usage_records_no_fact() -> Result<()> {
+pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() -> Result<()> {
     run_async_test_on_stack_budget("rlm-zero-usage-no-row", || async {
         let provider = crate::testing::TestProvider::builder()
             .kind("rlm-zero-usage")
@@ -817,14 +778,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_records_no_fact() -> Result
             attempt.usage_disposition,
             lash_core::AttemptUsageOutcome::UnreportedByProvider
         );
-        let usage = settled_usage(&session).await?;
-        let report = usage.report();
-        assert_eq!(
-            report.entry_count, 0,
-            "an attempt the provider completed without usage records no fact"
-        );
-        assert_eq!(report.usage.unreported_attempts, 0);
-        assert!(usage.outstanding.is_empty());
+
         Ok(())
     })
 }

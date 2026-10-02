@@ -4,11 +4,6 @@
 use super::execution_context::RuntimeExecutionContext;
 
 impl RuntimeExecutionContext<'_> {
-    /// Where this context's tool attempts account their nested completions.
-    pub(crate) fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        self.dispatch.direct_completions.usage_accounting()
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_prepared_tool_attempt_effect(
         &self,
@@ -19,7 +14,7 @@ impl RuntimeExecutionContext<'_> {
         attempt_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
         completion_key: Option<crate::AwaitEventKey>,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut attempt_dispatch = (*self.dispatch).clone();
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
@@ -29,7 +24,7 @@ impl RuntimeExecutionContext<'_> {
         attempt_dispatch.direct_completions = attempt_dispatch
             .direct_completions
             .with_tool_attempt_parent_invocation(attempt_invocation.clone())
-            .with_usage_meter(usage_meter);
+            .with_effect_attempt(effect_attempt);
         attempt_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         // Attempt-local: what this attempt commits is journaled on its

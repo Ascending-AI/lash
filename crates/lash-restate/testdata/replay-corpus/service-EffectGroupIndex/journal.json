@@ -1,7 +1,7 @@
 {
   "scenario": "service-EffectGroupIndex",
   "service": "EffectGroupIndex",
-  "generation": "e1b5f7c925ec",
+  "generation": "5bc550dad153",
   "handlers": {
     "admit_child": [
       [

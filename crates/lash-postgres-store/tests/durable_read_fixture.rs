@@ -176,7 +176,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        usage_accounting: Arc::clone(&store) as Arc<dyn lash_core_execution::UsageAccountingStore>,
+
         store: store as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,

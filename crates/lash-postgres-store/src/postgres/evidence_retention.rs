@@ -26,7 +26,6 @@ pub(crate) async fn reclaim(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        crate::usage_accounting::lock_retention(&mut tx).await?;
         let sql = &session_sql().turn_commits;
         let current: i64 = sqlx::query_scalar(sql.lock_change_clock.sql())
             .fetch_one(&mut **tx)
@@ -64,26 +63,6 @@ pub(crate) async fn reclaim(
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
-        let (facts, runs, owners) = crate::usage_accounting::retention_sql();
-        let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
-        let removed_usage_fact_count = sqlx::query(facts)
-            .bind(cutoff)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected() as usize;
-        let removed_usage_meter_count = sqlx::query(runs)
-            .bind(cutoff)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected() as usize;
-        let removed_usage_owner_retirement_count = sqlx::query(owners)
-            .bind(cutoff)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .rows_affected() as usize;
         // Trigger mutation receipts are durable evidence under the same lever
         // (FIG-4108): ownerless rows by age, session rows once the owner is
         // durably deleted and no outstanding delivery names it.
@@ -103,9 +82,6 @@ pub(crate) async fn reclaim(
             removed_receipt_count,
             removed_session_terminal_count,
             removed_trigger_mutation_receipt_count,
-            removed_usage_fact_count,
-            removed_usage_meter_count,
-            removed_usage_owner_retirement_count,
             removed_attachment_root_count: 0,
             // Effect scopes are the engine's to retire; this catalog holds
             // no effect journal.

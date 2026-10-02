@@ -300,7 +300,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ObserveDrain
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ObserveDrainMark { generation } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

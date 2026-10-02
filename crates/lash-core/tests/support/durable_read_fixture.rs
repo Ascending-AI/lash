@@ -20,7 +20,6 @@
 //! | Durable area | Populated tables | Supported read or refusal asserted |
 //! | --- | --- | --- |
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
-//! | Usage accounting | `usage_meters`, `usage_facts`, `usage_owner_retirements` | Owner totals and completeness of a settled owner, and a retired owner's retirement |
 //! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
@@ -221,7 +220,6 @@ pub struct FixtureHandles {
     pub continuations: Arc<dyn ProcessContinuationStore>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
     pub triggers: Arc<dyn TriggerStore>,
-    pub usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
 }
 
 impl FixtureHandles {
@@ -283,117 +281,6 @@ fn assert_fixture_schema_version(found: u32) {
     assert_eq!(
         found, DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         "durable fixture schema version changed without regeneration"
-    );
-}
-
-/// The fixture session's usage owner.
-fn fixture_usage_owner() -> lash_core::RuntimeOwner {
-    lash_core::RuntimeOwner::Session(SessionId::from(SESSION_ID))
-}
-
-/// An owner the fixture retires, so the retirement table carries a row.
-fn retired_usage_owner() -> lash_core::RuntimeOwner {
-    lash_core::RuntimeOwner::Session(SessionId::from("durable-read-retired-usage-owner"))
-}
-
-fn fixture_usage() -> TokenUsage {
-    TokenUsage {
-        input_tokens: 21,
-        output_tokens: 12,
-        cache_read_input_tokens: 5,
-        cache_write_input_tokens: 3,
-        reasoning_output_tokens: 2,
-    }
-}
-
-/// One admitted and settled run of the fixture session with one reported
-/// fact, and one retired owner (ADR 0125).
-async fn seed_usage_accounting(handles: &FixtureHandles) {
-    let owner = fixture_usage_owner();
-    let effect = lash_core::UsageEffectKey::for_effect(
-        &lash_sansio::EffectAddress::new(
-            ExecutionScope::turn(SESSION_ID, "durable-read-turn"),
-            "durable-read-llm-call",
-        )
-        .expect("fixture effect address"),
-    );
-    let meter = lash_core::UsageMeterId::mint();
-    handles
-        .usage_accounting
-        .admit_usage_meter(&lash_core::UsageMeterAdmission {
-            owner: owner.clone(),
-            effect: effect.clone(),
-            execution_scope_key: "durable-read-turn-scope".to_string(),
-            meter: meter.clone(),
-            source: "durable-read-turn".to_string(),
-            profile_key: lash_core::LlmProfileKey::new("durable-read-model-key"),
-            requested_model: "durable-read-model".to_string(),
-            admitted_at_ms: FIXTURE_WRITE_MS,
-        })
-        .await
-        .expect("admit the fixture usage meter");
-    handles
-        .usage_accounting
-        .settle_usage(
-            &lash_core::UsageSettlement {
-                owner,
-                effect,
-                meter,
-                facts: vec![lash_core::UsageAttemptFact {
-                    call_ordinal: 0,
-                    provider_attempt: 1,
-                    llm_call_id: lash_core::LlmCallId("durable-read-call".to_string()),
-                    source: "durable-read-turn".to_string(),
-                    profile_key: lash_core::LlmProfileKey::new("durable-read-model-key"),
-                    requested_model: "durable-read-model".to_string(),
-                    served_model: None,
-                    outcome: lash_core::AttemptFactOutcome::Reported {
-                        usage: fixture_usage(),
-                        generation_id: None,
-                    },
-                }],
-                accounting: lash_core::MeterAccounting::Complete,
-            },
-            FIXTURE_WRITE_MS,
-        )
-        .await
-        .expect("settle the fixture usage meter");
-    handles
-        .usage_accounting
-        .retire_usage_owner(&retired_usage_owner(), FIXTURE_WRITE_MS)
-        .await
-        .expect("retire the fixture's retired usage owner");
-}
-
-async fn assert_usage_accounting(handles: &FixtureHandles) {
-    let usage = handles
-        .usage_accounting
-        .load_owner_usage(&fixture_usage_owner())
-        .await
-        .expect("durable fixture drift: owner usage read failed");
-    assert_eq!(usage.rows.len(), 1);
-    assert_eq!(usage.rows[0].source, "durable-read-turn");
-    assert_eq!(usage.rows[0].profile_key.as_str(), "durable-read-model-key");
-    assert_eq!(usage.rows[0].requested_model, "durable-read-model");
-    assert_eq!(
-        usage.rows[0].usage,
-        fixture_usage(),
-        "durable fixture semantic drift: owner usage totals changed"
-    );
-    assert_eq!(usage.rows[0].reported_attempts, 1);
-    assert!(
-        usage.completeness.is_complete(),
-        "durable fixture semantic drift: the settled owner is incomplete: {:?}",
-        usage.completeness
-    );
-    let retired = handles
-        .usage_accounting
-        .load_owner_usage(&retired_usage_owner())
-        .await
-        .expect("durable fixture drift: retired owner read failed");
-    assert!(
-        retired.completeness.retired,
-        "durable fixture semantic drift: the owner retirement disappeared"
     );
 }
 
@@ -475,7 +362,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .commit_runtime_state(legacy_commit_retry.clone())
         .await
         .expect("commit supported NULL-identity legacy-shaped receipt");
-    seed_usage_accounting(handles).await;
 
     let record_config_state = load_fixture_state(&session).await;
     let mut record_config_retry = RuntimeCommit::persisted_state_with_operation_for_testing(
@@ -867,7 +753,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some(&[0x46, 0x49, 0x47, 0x38, 0x38, 0x37][..]),
         "durable fixture semantic drift: execution-state component changed"
     );
-    assert_usage_accounting(handles).await;
+
     assert_eq!(
         AttachmentReferrers::attachment_referrers(
             handles.store.as_ref(),

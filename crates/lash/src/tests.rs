@@ -66,29 +66,6 @@ pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) ->
     Ok(())
 }
 
-/// The crate's one test path to a session that may not exist yet (FIG-4112).
-///
-/// Only `create` creates, so a test that is not about creation reaches its
-/// session through this: [`created`](Self::created) creates the builder's
-/// session with the core's config unless the catalog already holds it, then hands the builder
-/// back for its terminal verb. An existing or deleted id is left as it is,
-/// so the verb that follows reports it. Tests about creation call
-/// [`SessionBuilder::create`](crate::SessionBuilder::create) themselves.
-/// The session owner's usage once every run it admitted is resolved: the
-/// engine delivers each spending effect's settlement after the effect is
-/// journaled, asynchronously to the turn (ADR 0125), so a read taken the
-/// moment a turn returns can precede its last settlement.
-pub(crate) async fn settled_usage(session: &crate::LashSession) -> Result<lash_core::OwnerUsage> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let usage = session.usage().await?;
-        if usage.completeness.is_settled() || std::time::Instant::now() >= deadline {
-            return Ok(usage);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
-
 pub(crate) trait CreatedSession: Sized {
     /// Created from the test host's default spec ([`mock_session_spec`]).
     async fn created(self) -> Self;
@@ -1225,7 +1202,6 @@ mod tool_intent_ingress;
 mod tool_restore_report;
 mod turn_streaming;
 #[cfg(feature = "rlm")]
-mod usage_durability;
 #[cfg(feature = "rlm")]
 mod withheld_follow_on;
 mod wrong_authority_redeploy;

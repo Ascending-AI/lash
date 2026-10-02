@@ -133,60 +133,6 @@ mod direct_turn_acceptance {
     );
 }
 
-mod usage_accounting {
-    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
-    use super::super::usage_accounting_on_the_double::SettleCrashes;
-    use super::*;
-
-    async fn tier() -> (impl Send, lash_conformance::UsageAccountingTier) {
-        let url = database_url();
-        let lock = DatabaseLock::acquire(&url).await;
-        let storage = lash_postgres_store::PostgresStorage::connect(&url)
-            .await
-            .expect("connect PostgreSQL accounting law store");
-        reset(storage.pool()).await;
-        let attachments = tempfile::tempdir().expect("attachment directory");
-        let stores: Arc<dyn lash_core::StoreSet> =
-            Arc::new(lash_postgres_store::PostgresStoreSet::new(
-                &storage,
-                Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-                    attachments.path(),
-                )),
-            ));
-        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-            HarnessServer::in_process(),
-            stores.usage_accounting(),
-        )
-        .await;
-        let server = harness
-            .server_double()
-            .expect("PostgreSQL storage runs on the double");
-        let tier = lash_conformance::UsageAccountingTier {
-            prefix: format!("postgres-usage-{}", harness.run_nonce()),
-            effect_host: harness.endpoint_host(),
-            stores,
-            runner: harness.turn_runner(),
-            continuation: Arc::new(SettleCrashes { server }),
-        };
-        ((lock, attachments, harness), tier)
-    }
-
-    lash_conformance::usage_accounting_engine_tests!(
-        #[ignore = "PostgreSQL usage-accounting service gate"]
-        {
-            tier().await
-        }
-    );
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "PostgreSQL usage-accounting service gate"]
-    async fn a_second_core_reads_build_drift_parked_usage() {
-        let (_guard, tier) = tier().await;
-        super::super::usage_accounting_on_the_double::read_parked_usage_from_second_core(&tier)
-            .await;
-    }
-}
-
 mod cancelled_turn_withheld_input {
     use super::*;
 
@@ -454,14 +400,12 @@ mod recorded_termination {
         let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
             unreachable!("in_process names the server double");
         };
-        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-            HarnessServer::InProcess {
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
                 seed,
                 always_replay,
-            },
-            stores.usage_accounting(),
-        )
-        .await;
+            })
+            .await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let prefix: &'static str = Box::leak(

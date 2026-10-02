@@ -103,9 +103,9 @@ its attempts it parks the work with reason `EngineRetryExhausted` carrying the
 model key typed. A direct completion inside a tool attempt ends that attempt
 the same way, and ends it at the fault: the completion hands its tool no
 error, and the tool's body is dropped where it awaited the completion, so no
-retry repeats what the tool would have done with the failure. The usage of
-completions the attempt dispatched before the fault is still settled
-(ADR 0125, FIG-4632). A deployment that serves the key again lets a resume
+retry repeats what the tool would have done with the failure. Hosts settle
+provider receipts from completions dispatched before the fault at the Provider
+seam (ADR 0127, FIG-4632). A deployment that serves the key again lets a resume
 proceed (FIG-4404).
 
 Input admission does not select a model. Child-session execution and direct

@@ -49,9 +49,6 @@ pub struct RuntimeDurabilityConfig {
     /// start. Before rebinding it is an ephemeral facade with no boundary guard.
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-    /// The ledger every spending effect's usage meter is admitted to and
-    /// settled in (ADR 0125): the backend's own.
-    pub usage_accounting: Arc<dyn crate::UsageAccountingStore>,
 }
 
 #[derive(Clone)]
@@ -184,7 +181,6 @@ impl RuntimeHostConfig {
         let effect_host = backend.effect_host();
         let attachment_store = backend.attachment_store();
         let process_env_store = backend.process_env_store();
-        let usage_accounting = backend.usage_accounting();
         let clock = backend.clock();
         let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
         let tool_children =
@@ -211,7 +207,6 @@ impl RuntimeHostConfig {
                     attachment_store,
                 )),
                 process_env_store,
-                usage_accounting,
             },
             process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
@@ -419,16 +414,7 @@ impl RuntimeHostConfig {
     }
 }
 
-impl RuntimeHostConfig {
-    /// Where this host's spending effects account their provider calls: its
-    /// backend's ledger, stamped by its clock (ADR 0125).
-    pub fn usage_accounting(&self) -> crate::UsageAccountingBinding {
-        crate::UsageAccountingBinding::new(
-            Arc::clone(&self.durability.usage_accounting),
-            Arc::clone(&self.clock),
-        )
-    }
-}
+impl RuntimeHostConfig {}
 
 impl RuntimeHostConfig {
     pub fn with_process_observation_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {

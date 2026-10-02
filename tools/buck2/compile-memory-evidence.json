@@ -564,17 +564,17 @@
       "p99_anon_peak_bytes": 105725952,
       "samples": 15
     },
-    "lash-internal-restate-test/session_shifts": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 106827776,
-      "samples": 17
-    },
     "lash-internal-restate-test/session_send": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
       "p99_anon_peak_bytes": 107028480,
       "samples": 15
+    },
+    "lash-internal-restate-test/session_shifts": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 106827776,
+      "samples": 17
     },
     "lash-internal-restate-test/start_gate_peek": {
       "legacy_peak_bytes": 0,
@@ -605,12 +605,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 83554304,
       "samples": 12
-    },
-    "lash-internal-restate-test/usage_accounting_windows": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 84422656,
-      "samples": 13
     },
     "lash-internal-restate/lash_restate": {
       "legacy_peak_bytes": 0,
@@ -1802,17 +1796,17 @@
       "p99_anon_peak_bytes": 599568384,
       "samples": 16
     },
-    "lash-internal-restate-test/session_shifts": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 626733056,
-      "samples": 22
-    },
     "lash-internal-restate-test/session_send": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
       "p99_anon_peak_bytes": 724828160,
       "samples": 16
+    },
+    "lash-internal-restate-test/session_shifts": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 626733056,
+      "samples": 22
     },
     "lash-internal-restate-test/start_gate_peek": {
       "legacy_peak_bytes": 0,
@@ -1843,12 +1837,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 673464320,
       "samples": 16
-    },
-    "lash-internal-restate-test/usage_accounting_windows": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 732237824,
-      "samples": 20
     },
     "lash-internal-restate/lash_restate": {
       "legacy_peak_bytes": 0,

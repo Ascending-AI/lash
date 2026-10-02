@@ -1134,44 +1134,18 @@ process.
 
 ### 13. Usage
 
-**Cancellation refuses semantic results and new work; it does not discard known
-usage attributable to the admitted child.** A cancelled attempt can have spent
-provider tokens without an accepted success terminal, so **the child's retained
-terminal or cancel disposition carries its captured usage facts, independently of
-whether its value is returned**.
+Cancellation can reject a child's semantic result after provider tokens were
+spent. Each recorded model-call result retains the response's reported usage
+and sealed attempt history (ADRs 0031 and 0032), independently of selection.
+Tool settlements and incorporation carry semantic facts, with no usage ledger
+or accounting delivery.
 
-**Attribution binds the exact opener and tool invocation**, with each nested LLM
-call identified by its `(LlmCallId, provider-attempt ordinal)` from
-[ADR 0032](0032-attempt-history-rides-inside-the-result.md) — that pair is a
-provider-transport attempt identity and is **not** by itself a tool driver's
-lineage, which is why the opener and invocation are named beside it.
-
-**Retained facts are incorporated idempotently before final accounting** (§7
-step 1). **A late known fact stays attributed to its original opener**; it is
-never silently dropped and never charged to a later turn. **No exception is
-granted**: if immutable final accounting were ever intended to prohibit later
-attribution, that would need its own ruling, and this ADR does not grant it.
-
-**Facts lost before a durable observation remain unknown**, per ADR 0032, which
-expressly accepts losing crash-mid-retry evidence from durable state. Unknown is a
-value; zero is a false fact. ADR 0042 already concedes that an LLM call can be
-billed again across an unrecorded completion, so this ADR does not claim to solve
-provider billing exactly.
-
-The ledger this attaches to exists:
-`crates/lash-core/src/runtime/session_manager/direct_outcome.rs` records into a
-shared `Arc` and deliberately does not commit — "Record into the shared token
-ledger only … This usage is persisted exactly once by the final turn commit" and
-"on effect-host replay this `apply` runs again with the cached outcome, and an
-incremental persist would double-merge the usage". A remote child's ledger is not
-the parent's ledger, so its usage travels as a semantic fact on its settlement.
-
-**No generic durable trace bus.** Semantic usage rides the existing usage path;
-live trace delivery stays best-effort.
-
-Usage deltas are
-charged once per `UsageDeltaIdentity`; a loser's usage is incorporated at its
-opener's end, before the opener's accounting commits.
+Hosts meter spend at the Provider seam (ADR 0127). They reserve before dispatch,
+settle every attempt's receipt, including failed partial responses, and retain
+request-id and attempt-ordinal identities for idempotent settlement. A call
+whose result is recorded is served on replay without dispatch. A crash before
+recording can repeat external spend, so Lash claims no exactly-once billing.
+Unreported usage stays absent; live trace delivery remains best effort.
 
 ---
 
@@ -1324,10 +1298,8 @@ needs its rank, discharge and projection authority (§4).
   accounting units and their release conditions, and mid-aggregate VM
   suspension is not necessary.
 
-## Model usage accounting
+## Model usage
 
-Tool-child usage rides on no settlement and is not charged at
-incorporation (§13). Each `ToolAttempt` entry's usage meter delivers the facts
-of its nested calls through the accounting continuation of [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md), and a
-nested call's unreported attempt is a fact. Settlements, captures and the
-incorporation ledger carry no usage.
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

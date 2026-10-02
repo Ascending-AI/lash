@@ -517,29 +517,6 @@ fn concurrent_first_open_never_observes_an_unstamped_schema() {
             .version()),
         )
     );
-    let payload_hash_not_null: i32 = conn
-        .query_row(
-            "SELECT \"notnull\" FROM pragma_table_info('usage_facts')
-             WHERE name = 'payload_hash'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("payload_hash column exists");
-    assert_eq!(payload_hash_not_null, 1);
-    let usage_schema: String = conn
-        .query_row(
-            "SELECT sql FROM sqlite_master
-             WHERE type = 'table' AND name = 'usage_facts'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("read usage_facts schema");
-    assert!(
-        usage_schema.contains(
-            "UNIQUE (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)"
-        ),
-        "usage fact identity is owner- and effect-keyed: {usage_schema}"
-    );
 }
 
 #[tokio::test]

@@ -391,15 +391,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolChildCompletionRouting => Terminal,
             // the child request is refused admission.
             Self::RuntimeEffectToolChildRequestAdmission => Terminal,
-            // the child request names an inconsistent call id.
             // the child request names an inconsistent opener.
             Self::RuntimeEffectToolChildRequestOpener => Terminal,
-            // a dispatch site outside every usage meter is wiring, not the attempt.
-            Self::UsageMeterMissing => Terminal,
-            // the ledger store faulted; the identical admission succeeds later.
-            Self::UsageAdmissionFault => Retryable,
-            // retirement permanently fences this owner's spending.
-            Self::UsageOwnerRetired => Terminal,
             // the child request version is unsupported.
             Self::RuntimeEffectToolChildRequestVersion => Terminal,
             // the invocation names an inconsistent subject.

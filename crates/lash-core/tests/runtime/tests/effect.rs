@@ -1217,13 +1217,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     }));
     // The recording double answers the direct effect itself: no provider was
     // dispatched, so no usage meter was admitted and nothing is accounted. Only
-    // a dispatched call is spend (ADR 0125).
-    let usage = settled_runtime_usage(&runtime).await;
-    assert!(
-        usage.rows.is_empty(),
-        "a canned answer is no paid call: {usage:?}"
-    );
-    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
+    // a dispatched call is spend (ADR 0127).
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1361,7 +1355,7 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     }));
 
     // A direct effect's usage is its own run's accounting, delivered with the
-    // effect (ADR 0125). The direct path must NOT issue its own out-of-band
+    // effect (ADR 0127). The direct path must NOT issue its own out-of-band
     // `commit_runtime_state` mid-turn: doing so races the owning turn's
     // head-revision CAS.
     assert_eq!(
@@ -1371,13 +1365,7 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     );
     // The recording double answers the direct effect itself: no provider was
     // dispatched, so no usage meter was admitted and nothing is accounted. Only
-    // a dispatched call is spend (ADR 0125).
-    let usage = settled_runtime_usage(&runtime).await;
-    assert!(
-        usage.rows.is_empty(),
-        "a canned answer is no paid call: {usage:?}"
-    );
-    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
+    // a dispatched call is spend (ADR 0127).
 }
 
 #[tokio::test(flavor = "multi_thread")]

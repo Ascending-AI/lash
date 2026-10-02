@@ -678,10 +678,11 @@ async fn complete_websocket_with_events_and_capture(
         "Codex WebSocket route identity must name the WebSocket endpoint"
     );
     let result = provider
-        .complete(
-            matrix_request("codex.responses-websocket", row, Arc::clone(events)),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(matrix_request(
+            "codex.responses-websocket",
+            row,
+            Arc::clone(events),
+        ))
         .await
         .map_err(Box::new);
     (route, result, server.captured())
@@ -812,13 +813,7 @@ async fn complete_http_buffered(
     let mut provider = http_provider(dialect, transport);
     let mut request = matrix_request(dialect, row, Arc::new(Mutex::new(Vec::new())));
     request.stream_events = None;
-    provider
-        .complete(
-            request,
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
-        .await
-        .map_err(Box::new)
+    provider.complete(request).await.map_err(Box::new)
 }
 
 async fn complete_http_with_events(
@@ -842,10 +837,7 @@ async fn complete_http_with_events(
         .max_delay_ms(0);
     provider.set_options(options);
     provider
-        .complete(
-            matrix_request(dialect, row, Arc::clone(events)),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(matrix_request(dialect, row, Arc::clone(events)))
         .await
         .map_err(Box::new)
 }

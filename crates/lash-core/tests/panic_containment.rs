@@ -694,10 +694,7 @@ async fn provider_panic_is_typed_and_non_retryable() {
     lash_core::panic_containment::set_loud(false);
     let mut provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
     let failure = provider
-        .complete(
-            request(),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(request())
         .await
         .expect_err("typed failure");
 
@@ -725,10 +722,7 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
         ClassifierKeywordPanicProvider,
     )));
     let failure = provider
-        .complete(
-            request(),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(request())
         .await
         .expect_err("typed failure");
 
@@ -1085,9 +1079,7 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
 }
 
 #[derive(Clone, Debug)]
-struct AuxiliaryPanicProvider {
-    reconcile: bool,
-}
+struct AuxiliaryPanicProvider {}
 
 #[async_trait]
 impl Provider for AuxiliaryPanicProvider {
@@ -1110,19 +1102,10 @@ impl Provider for AuxiliaryPanicProvider {
     async fn close(&self) -> Result<(), LlmTransportError> {
         panic!("auxiliary close payload")
     }
-    async fn reconcile_usage(
-        &mut self,
-        _: &str,
-    ) -> Result<Option<lash_core::provider::ReconciledUsage>, LlmTransportError> {
-        panic!("auxiliary reconciliation payload")
-    }
     async fn complete(&mut self, _: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        let mut auxiliary = ProviderHandle::new(ProviderComponents::new(Box::new(self.clone())));
-        if self.reconcile {
-            auxiliary.reconcile_usage("generation").await?;
-        } else {
-            auxiliary.close().await?;
-        }
+        let auxiliary = ProviderHandle::new(ProviderComponents::new(Box::new(self.clone())));
+        auxiliary.close().await?;
+
         panic!("the panicking callback cannot succeed")
     }
 }
@@ -1136,12 +1119,7 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
     use futures_util::FutureExt as _;
     const TEST: &str = "provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes";
     let Ok(case) = std::env::var("LASH_AUXILIARY_PANIC_CASE") else {
-        for case in [
-            "quiet-close",
-            "loud-close",
-            "quiet-reconcile",
-            "loud-reconcile",
-        ] {
+        for case in ["quiet-close", "loud-close"] {
             let output = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 tokio::process::Command::new(std::env::current_exe().unwrap())
@@ -1167,26 +1145,13 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
         return;
     };
     let loud = case.starts_with("loud");
-    let reconcile = case.ends_with("reconcile");
-    let expected_message = if reconcile {
-        "auxiliary reconciliation payload"
-    } else {
-        "auxiliary close payload"
-    };
+    let expected_message = "auxiliary close payload";
     lash_core::panic_containment::set_loud(loud);
-    let mut auxiliary =
-        ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {
-            reconcile,
-        })));
-    let direct = std::panic::AssertUnwindSafe(async {
-        if reconcile {
-            auxiliary.reconcile_usage("generation").await.map(|_| ())
-        } else {
-            auxiliary.close().await
-        }
-    })
-    .catch_unwind()
-    .await;
+    let auxiliary =
+        ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {})));
+    let direct = std::panic::AssertUnwindSafe(async { auxiliary.close().await })
+        .catch_unwind()
+        .await;
     if loud {
         let payload = direct.expect_err("loud auxiliary panic propagates");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&expected_message));
@@ -1217,9 +1182,7 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
     );
     host.providers.models = lash_core::testing::llm_profiles_serving(
         &policy(),
-        ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {
-            reconcile,
-        }))),
+        ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {}))),
     );
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
@@ -1267,7 +1230,6 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
 enum DesugaredPanicCallback {
     Complete,
     Close,
-    Reconcile,
 }
 
 impl DesugaredPanicCallback {
@@ -1275,7 +1237,6 @@ impl DesugaredPanicCallback {
         match self {
             Self::Complete => "desugared complete construction payload",
             Self::Close => "desugared close construction payload",
-            Self::Reconcile => "desugared reconciliation construction payload",
         }
     }
 
@@ -1285,7 +1246,6 @@ impl DesugaredPanicCallback {
         match self {
             Self::Complete => panic!("desugared complete construction payload"),
             Self::Close => panic!("desugared close construction payload"),
-            Self::Reconcile => panic!("desugared reconciliation construction payload"),
         }
     }
 }
@@ -1335,15 +1295,12 @@ impl Provider for DesugaredPanicProvider {
             callback.panic_at_construction();
         }
         Box::pin(async move {
-            let mut auxiliary =
+            let auxiliary =
                 ProviderHandle::new(ProviderComponents::new(Box::new(DesugaredPanicProvider {
                     callback,
                 })));
             match callback {
                 DesugaredPanicCallback::Close => auxiliary.close().await?,
-                DesugaredPanicCallback::Reconcile => {
-                    auxiliary.reconcile_usage("generation").await?;
-                }
                 DesugaredPanicCallback::Complete => {
                     unreachable!("the complete arm panics before boxing")
                 }
@@ -1365,30 +1322,6 @@ impl Provider for DesugaredPanicProvider {
         }
         Box::pin(async { Ok(()) })
     }
-    fn reconcile_usage<'life0, 'life1, 'async_trait>(
-        &'life0 mut self,
-        _: &'life1 str,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<
-                        Option<lash_core::provider::ReconciledUsage>,
-                        LlmTransportError,
-                    >,
-                > + Send
-                + 'async_trait,
-        >,
-    >
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        Self: 'async_trait,
-    {
-        if matches!(self.callback, DesugaredPanicCallback::Reconcile) {
-            self.callback.panic_at_construction();
-        }
-        Box::pin(async { Ok(None) })
-    }
 }
 
 #[allow(
@@ -1405,8 +1338,6 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
             "loud-complete",
             "quiet-close",
             "loud-close",
-            "quiet-reconcile",
-            "loud-reconcile",
         ] {
             let output = tokio::time::timeout(
                 std::time::Duration::from_secs(30),
@@ -1439,7 +1370,6 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
     {
         Some("complete") => DesugaredPanicCallback::Complete,
         Some("close") => DesugaredPanicCallback::Close,
-        Some("reconcile") => DesugaredPanicCallback::Reconcile,
         other => panic!("unknown desugared panic case {other:?}"),
     };
     let expected_message = callback.payload();
@@ -1452,10 +1382,7 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
     let direct = std::panic::AssertUnwindSafe(async {
         match callback {
             DesugaredPanicCallback::Complete => auxiliary
-                .complete(
-                    request(),
-                    <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-                )
+                .complete(request())
                 .await
                 .map(|_| ())
                 .map_err(|failure| {
@@ -1463,9 +1390,6 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
                     failure.error
                 }),
             DesugaredPanicCallback::Close => auxiliary.close().await,
-            DesugaredPanicCallback::Reconcile => {
-                auxiliary.reconcile_usage("generation").await.map(|_| ())
-            }
         }
     })
     .catch_unwind()

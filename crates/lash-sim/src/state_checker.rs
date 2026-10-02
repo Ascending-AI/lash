@@ -15,8 +15,8 @@ struct CheckedSession {
     nodes: BTreeMap<String, Value>,
     leaf_node_id: Option<String>,
     /// The last accepted read model's turn usage: what the committed state
-    /// reports for the turn (context-window tracking, not accounting; usage
-    /// accounting is owner-scoped and never rides a commit, ADR 0125).
+    /// reports for context-window tracking. Hosts meter spend at the
+    /// Provider seam (ADR 0127).
     current_turn_usage: RuntimeUsageTotals,
     checked_commits: usize,
 }

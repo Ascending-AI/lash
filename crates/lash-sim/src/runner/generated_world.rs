@@ -194,7 +194,7 @@ impl GeneratedRuntimeWorld {
                 (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
             });
         let engine = crate::backend::SimEngine::new(seed).await?;
-        let reopen = crate::content_oracle::ReopenHandles::over(&engine.backend());
+        let reopen = crate::content_oracle::ReopenHandles::over(&engine);
         let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
             .observing(self.durable_writes.clone())
             .into();
@@ -1391,16 +1391,11 @@ pub(super) async fn session_content(
         session: session.to_string(),
         emitted_attempts,
         emitted_tool_results,
-        delivered_usage: crate::content_oracle::delivered_usage(reopen.usage.as_ref(), session)
+        recorded_usage: crate::content_oracle::recorded_usage(&reopen.journal, session)
+            .map_err(FixedScriptRunnerError::Assertion)?,
+        reopened: crate::content_oracle::reopen_session(reopen.sessions.as_ref(), session)
             .await
             .map_err(FixedScriptRunnerError::Assertion)?,
-        reopened: crate::content_oracle::reopen_session(
-            reopen.sessions.as_ref(),
-            reopen.usage.as_ref(),
-            session,
-        )
-        .await
-        .map_err(FixedScriptRunnerError::Assertion)?,
     })
 }
 

@@ -91,9 +91,7 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub use executor::{
-    AdmittedProcess, DirectUsage, EffectControllerTaskRequest, ProcessRunner, ServedOnly,
-};
+pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
 pub use executor::{
     EffectControllerTaskRequests, EffectTaskController, drive_effect_controller_task,
     effect_groups_unsupported,

@@ -10,7 +10,7 @@ impl RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'a>,
         turn_id: Option<&'a crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> DirectInvocationContext<'a> {
         DirectInvocationContext {
             current: &self.current,
@@ -19,7 +19,7 @@ impl RuntimeSessionServices {
             position,
             replay_ordinals: self.direct_replay_ordinals.as_ref(),
             unkeyed_in_flight: self.direct_unkeyed_in_flight.as_ref(),
-            usage_meter,
+            effect_attempt,
         }
     }
 }
@@ -52,7 +52,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
-        usage_meter: Option<&crate::UsageMeter>,
+        effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_completion(
@@ -60,7 +60,7 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_controller,
                     turn_id,
                     position,
-                    usage_meter.cloned(),
+                    effect_attempt.cloned(),
                 ),
                 request,
                 usage_source,
@@ -76,7 +76,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
-        usage_meter: Option<&crate::UsageMeter>,
+        effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_llm_completion(
@@ -84,19 +84,13 @@ impl DirectCompletionService for RuntimeSessionServices {
                     effect_controller,
                     turn_id,
                     position,
-                    usage_meter.cloned(),
+                    effect_attempt.cloned(),
                 ),
                 request,
                 usage_source,
                 caused_by,
             )
             .await
-    }
-
-    /// The session's backend ledger: a tool attempt's usage meter is admitted
-    /// to and settled in it (ADR 0125).
-    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        Some(self.current.host.core.usage_accounting())
     }
 
     /// Rebinds this service to a tool child's recorded authority.
@@ -126,10 +120,9 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
     unkeyed_in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
-    /// The usage meter of the tool attempt this completion runs inside, when
-    /// its position is `ToolAttempt`: the call is one of that run's calls,
-    /// because it journals no effect of its own (ADR 0125).
-    usage_meter: Option<crate::UsageMeter>,
+    /// The fault latch of the tool attempt this completion runs inside.
+    /// A bind fault aborts that opaque attempt before it can record an outcome.
+    effect_attempt: Option<crate::EffectAttempt>,
 }
 
 impl DirectInvocationContext<'_> {
@@ -210,8 +203,7 @@ impl DirectCompletionCapability {
     /// resulting [`crate::LlmResponse`].
     ///
     /// The envelope carries the recorded key of `binding`'s model, so the
-    /// journaled effect and the usage ledger both name the selection the
-    /// completion ran under.
+    /// journaled result names the selection the completion ran under.
     async fn plan_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
@@ -262,7 +254,7 @@ impl DirectCompletionCapability {
 
     /// Runs a planned direct effect across the journal/controller boundary and
     /// applies trace bookkeeping, yielding the raw provider response. The
-    /// effect's usage meter accounts the call; nothing here records usage.
+    /// recorded model result carries usage and sealed attempt history.
     async fn run_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
@@ -281,10 +273,7 @@ impl DirectCompletionCapability {
             binding,
             current.policy.charge_safety.clone(),
             Arc::clone(&current.host.core.durability.attachment_store),
-            crate::runtime::effect::DirectUsage {
-                accounting: current.host.core.usage_accounting(),
-                owner: current.runtime_owner(),
-            },
+            current.runtime_owner(),
             tracing.clone(),
             replay_trace,
         );
@@ -297,7 +286,7 @@ impl DirectCompletionCapability {
             }
             DirectExecutionPosition::ToolAttempt => {
                 local_executor
-                    .execute_within_meter(envelope, context.usage_meter.clone())
+                    .execute_within_attempt(envelope, context.effect_attempt.clone())
                     .await?
             }
         };

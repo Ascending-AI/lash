@@ -480,7 +480,7 @@ fn opener_derivation_names_every_admitted_opener_scope() {
 /// the way a managed-LLM transport's would — a test-fn source would bypass
 /// it entirely. Everything the client must rebind is captured where the
 /// service receives it: the recorded session and environment at bind, and
-/// the admitted controller's scope, the recorded turn, and whether a usage meter was bound at
+/// the admitted controller's scope, the recorded turn, and whether an attempt fault latch was bound at
 /// call.
 #[derive(Default)]
 struct CompletionProbe {
@@ -505,12 +505,12 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         _position: crate::direct_completion_client::DirectExecutionPosition,
-        usage_meter: Option<&crate::UsageMeter>,
+        effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         self.probe.completes.lock_recover().push((
             effect_controller.execution_scope().clone(),
             turn_id.cloned(),
-            usage_meter.is_some(),
+            effect_attempt.is_some(),
         ));
         Ok(probed_completion())
     }
@@ -523,7 +523,7 @@ impl crate::direct_completion_client::DirectCompletionService for ProbedCompleti
         _turn_id: Option<&crate::TurnId>,
         _position: crate::direct_completion_client::DirectExecutionPosition,
         _caused_by: Option<crate::CausalRef>,
-        _usage_meter: Option<&crate::UsageMeter>,
+        _effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         Err(crate::PluginError::Session(
             "the rebind probe answers text completions only".to_string(),
@@ -655,8 +655,8 @@ async fn the_lent_completion_client_is_rebound_to_the_recorded_authority() {
                 false
             )],
             "the call arrived on the child's admitted controller under the \
-             recorded turn; the rebind binds no usage meter, which only the \
-             child's `ToolAttempt` body supplies (ADR 0125)"
+             recorded turn; the rebind binds no attempt fault latch, which only the \
+             child's `ToolAttempt` body supplies (ADR 0127)"
         );
     }
 

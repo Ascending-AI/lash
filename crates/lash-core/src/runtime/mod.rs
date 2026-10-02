@@ -203,7 +203,7 @@ pub use effect::TurnCancelWait;
 /// Tool-child, presentation and recorded-stream vocabulary the effect
 /// contracts below name.
 pub use effect::{
-    AdmittedHeadVerdict, ChildStreamTruncation, CompactionBase, DecodedChildEvent, DirectUsage,
+    AdmittedHeadVerdict, ChildStreamTruncation, CompactionBase, DecodedChildEvent,
     IncorporatedGroupRank, ProcessDefinitionLocalExecution, RecordedChildChannel,
     RecordedChildEvent, RecordedChildStream, ToolAttemptCapture, ToolChildAdmission,
     ToolChildCompletionRouting, ToolChildScope, ToolPresentation, ToolSettlement,
@@ -391,10 +391,6 @@ pub use turn_queue::{
     process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
 };
 use usage::nonzero_usage;
-pub use usage::{
-    ReconciledUsageAttempt, SessionUsageReport, UsageAttributionKey, UsageReconciliationReport,
-    UsageReportRow, UsageTotals, diff_usage_reports,
-};
 
 // Turn-execution vocabulary. These types and the phase-probe trait carry no
 // runtime machinery, so they live one layer down in `lash-core-llm` where the

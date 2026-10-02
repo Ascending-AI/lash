@@ -2155,7 +2155,6 @@ pub(super) fn restate_replay_refuses_pre_effect_19_session_list_envelope() {
         serde_json::to_vec(&JournaledEffectRecord::Recorded(RecordedRuntimeEffect {
             envelope: Arc::new(recorded_envelope),
             outcome: Ok(RuntimeEffectOutcome::Sleep),
-            usage: None,
         }))
         .expect("encode predecessor Restate journal entry");
     let JournaledEffectRecord::Recorded(recorded) = serde_json::from_slice(&journal_wire)
@@ -2183,7 +2182,6 @@ pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
     let recorded = RecordedRuntimeEffect {
         envelope: Arc::new(recorded_envelope),
         outcome: Ok(RuntimeEffectOutcome::Sleep),
-        usage: None,
     };
 
     let err = validate_recorded_effect_envelope(recorded, &reconstructed, None)
@@ -2215,7 +2213,6 @@ pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
     let recorded = RecordedRuntimeEffect {
         envelope: Arc::new(envelope.clone()),
         outcome: Ok(RuntimeEffectOutcome::Sleep),
-        usage: None,
     };
 
     let outcome = validate_recorded_effect_envelope(recorded, &envelope, None)

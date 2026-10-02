@@ -61,9 +61,8 @@ durable billing evidence. Hosts own any supplementary live telemetry archive.
 - [Failure-code decoding](../../crates/lash-sansio/src/session_model/failure.rs).
 - [Cached-prefix validation](../../crates/lash-provider-openai/src/codex/continuation.rs).
 
-## Model usage accounting
+## Model usage
 
-The facts a usage meter delivers are projected from the attempt history of each
-call's sealed record, one per attempt the dispatch gate admitted. The recorded
-usage rides beside the effect's outcome in its journal entry, outside the
-outcome, so an `Err` outcome keeps its spend ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

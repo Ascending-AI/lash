@@ -163,7 +163,7 @@ pub(super) async fn run_generated_workload(
     let mut oracles = vec![
         live_provider_failure_coverage(&live_failure_facts),
         crate::content_oracle::durable_content(&content),
-        crate::content_oracle::failed_attempt_usage_ledgered(&content),
+        crate::content_oracle::failed_attempt_usage_recorded(&content),
         invariants.verdict(),
     ];
     oracles.extend(crate::oracles::generated_trace_oracles(

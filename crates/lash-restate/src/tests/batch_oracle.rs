@@ -8,13 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Clone, Copy)]
 enum LateMutation {
     Final,
-    Accounting,
 }
 
 struct MutatingRunner {
     inner: Arc<dyn ConformanceTurnRunner>,
     server: lash_restate_test::RestateTestServer,
-    stores: lash_sqlite_store::SqliteStoreSet,
     mutation: LateMutation,
     applied: AtomicBool,
 }
@@ -45,48 +43,32 @@ impl ConformanceTurnRunner for MutatingRunner {
                 let bytes = state
                     .get_mut("effect-group/v1/state")
                     .expect("the durable group state exists");
-                let mut record: serde_json::Value =
-                    serde_json::from_slice(bytes).expect("decode the group state");
-                let finals = record["body"]["lifecycle"]["live"]["settlements"]
-                    .as_array_mut()
-                    .expect("the group retained finals");
-                let cancelled = finals
+                let mut record: crate::object_state::StampedValue<
+                    crate::effect_group::EffectGroupStateRecord,
+                > = serde_json::from_slice(bytes).expect("decode the group state");
+                let cancelled = record
+                    .body
+                    .live_mut()
+                    .expect("the group retains its live decisions")
+                    .decisions
                     .iter_mut()
-                    .find(|pair| pair[1]["terminal"]["type"] == "cancelled")
+                    .find(|decision| {
+                        matches!(
+                            decision.seat,
+                            crate::effect_group::EffectGroupSeat::CancelDecided
+                        )
+                    })
                     .expect("the group has a cancelled final");
-                cancelled[1]["terminal"] = serde_json::json!({ "type": "failed", "error":
-                    lash_core::RuntimeEffectControllerError::new(lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
-                        "injected late final overwrite") });
+                cancelled.seat = crate::effect_group::EffectGroupSeat::Seated {
+                    terminal: crate::effect_group::EffectGroupSettlementTerminal::Failed {
+                        error: lash_core::RuntimeEffectControllerError::new(
+                            lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
+                            "injected late final overwrite",
+                        ),
+                    },
+                };
                 *bytes = serde_json::to_vec(&record).expect("encode the overwritten final");
                 self.server.set_object_state("EffectGroupIndex", key, state);
-            }
-            LateMutation::Accounting => {
-                let connection = rusqlite::Connection::open(
-                    self.stores
-                        .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-                )
-                .expect("open the law's durable accounting database");
-                let changed = connection
-                    .execute(
-                        "INSERT INTO usage_facts (
-                    owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind,
-                    disposition, meter_id, llm_call_id, source, profile_key, requested_model,
-                    served_model, input_tokens, output_tokens, cache_read_input_tokens,
-                    cache_write_input_tokens, reasoning_output_tokens, generation_id,
-                    payload_hash, recorded_at_ms)
-                    SELECT owner_kind, owner_id, effect_key || ':late-duplicate', call_ordinal,
-                    provider_attempt, fact_kind, disposition, meter_id, llm_call_id, source,
-                    profile_key, requested_model, served_model, input_tokens, output_tokens,
-                    cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens,
-                    generation_id, payload_hash, recorded_at_ms
-                    FROM usage_facts WHERE input_tokens > 0 LIMIT 1",
-                        [],
-                    )
-                    .expect("inject a duplicate durable charge");
-                assert_eq!(
-                    changed, 1,
-                    "the mutation duplicated a real persisted charge"
-                );
             }
         }
         self.applied.store(true, Ordering::SeqCst);
@@ -106,15 +88,11 @@ async fn rejects_late_mutation(mutation: LateMutation, expected: &str) {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite fixture");
-    let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-        HarnessServer::in_process(),
-        lash_core::StoreSet::usage_accounting(&stores),
-    )
-    .await;
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
     let runner = Arc::new(MutatingRunner {
         inner: harness.turn_runner(),
         server: harness.server_double().expect("double"),
-        stores: stores.clone(),
         mutation,
         applied: AtomicBool::new(false),
     });
@@ -154,15 +132,6 @@ async fn rejects_late_mutation(mutation: LateMutation, expected: &str) {
 async fn cancellation_oracle_rejects_late_final_overwrite() {
     rejects_late_mutation(
         LateMutation::Final,
-        "late settlements preserve durable finals",
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn cancellation_oracle_rejects_duplicate_accounting() {
-    rejects_late_mutation(
-        LateMutation::Accounting,
         "late settlements preserve durable finals",
     )
     .await;
@@ -213,13 +182,10 @@ async fn sqlite_double_fixture(
             .await
             .expect("SQLite memory fixture")
     };
-    let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-        HarnessServer::InProcess {
-            seed,
-            always_replay,
-        },
-        lash_core::StoreSet::usage_accounting(&stores),
-    )
+    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+        seed,
+        always_replay,
+    })
     .await;
     (harness, directory, Arc::new(stores))
 }
@@ -305,12 +271,8 @@ async fn live_recorded_batch_boundaries_on_current_stores() {
         ),
     ];
     for (storage, stores) in stores {
-        // Each store set is its law's ledger, so each gets its own endpoint.
-        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-            HarnessServer::Live,
-            stores.usage_accounting(),
-        )
-        .await;
+        // Each fixture owns a store set and its endpoint.
+        let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::Live).await;
         recorded_boundaries(&harness, stores, storage).await;
     }
 }
@@ -360,13 +322,10 @@ async fn postgres_double_fixture(
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("the fixture selects the double");
     };
-    let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-        HarnessServer::InProcess {
-            seed,
-            always_replay,
-        },
-        stores.usage_accounting(),
-    )
+    let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+        seed,
+        always_replay,
+    })
     .await;
     (harness, directory, stores)
 }

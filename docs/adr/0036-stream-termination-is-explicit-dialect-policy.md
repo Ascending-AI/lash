@@ -34,9 +34,9 @@ still drain provider usage before sealing its attempt. The host selects
 interval remains provider-reported; missing usage becomes
 `UnreportedAfterAbort` (ADR 0031).
 
-A provider may implement post-hoc `reconcile_usage`. OpenRouter's configured
-lookup is bounded. The runtime invokes reconciliation only when the host calls
-`reconcile_unreported_usage`, not as an automatic background policy.
+A host may reconcile receipts after a call through its provider decorator
+(ADR 0127). Lash supplies the captured response metadata and attempt history,
+and provides no reconciliation API.
 
 ## Consequences
 
@@ -49,4 +49,4 @@ what the provider actually reports.
 
 - [OpenAI stream validation](../../crates/lash-provider-openai/src/driver.rs) and [Responses collection](../../crates/lash-provider-openai/src/codex/streaming.rs).
 - [Anthropic completion validation](../../crates/lash-provider-anthropic/src/provider.rs) and [Google defaults](../../crates/lash-provider-google/src/config.rs).
-- [Abort drain](../../crates/lash-core/src/runtime/turn_driver/streaming.rs) and [usage reconciliation](../../crates/lash-provider-openai/src/openrouter.rs).
+- [Abort drain](../../crates/lash-core/src/runtime/turn_driver/streaming.rs).

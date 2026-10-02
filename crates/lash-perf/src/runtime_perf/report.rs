@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use lash::usage::SessionUsageReport;
 use serde::Serialize;
 
 use crate::perf_support::dhat;
@@ -616,8 +615,6 @@ fn mean_turn_result(turns: &[RuntimePerfTurnResult]) -> Option<RuntimePerfTurnRe
         },
         phase_profile: mean_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
         turn_usage: mean_token_usage(turns.iter().map(|turn| &turn.turn_usage)),
-        usage_delta: SessionUsageReport::default(),
-        cumulative_usage: SessionUsageReport::default(),
     })
 }
 
@@ -711,8 +708,6 @@ mod tests {
             memory: memory_run(),
             phase_profile: BTreeMap::new(),
             turn_usage: lash_core::TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
         }
     }
 

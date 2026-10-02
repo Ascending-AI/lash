@@ -166,22 +166,18 @@ impl Storage {
     }
 }
 
-/// An endpoint on the server double whose turns settle their usage into
-/// `stores`, the law's own ledger.
+/// An endpoint on the server double for notification replay.
 async fn double(
     always_replay: bool,
-    stores: &Arc<dyn lash_core::StoreSet>,
+    _stores: &Arc<dyn lash_core::StoreSet>,
 ) -> LiveConformanceHarness {
     let HarnessServer::InProcess { seed, .. } = HarnessServer::in_process() else {
         unreachable!("in_process names the server double");
     };
-    LiveConformanceHarness::start_for_tool_children_settling_into(
-        HarnessServer::InProcess {
-            seed,
-            always_replay,
-        },
-        stores.usage_accounting(),
-    )
+    LiveConformanceHarness::start_for_tool_children_on(HarnessServer::InProcess {
+        seed,
+        always_replay,
+    })
     .await
 }
 
@@ -411,11 +407,7 @@ async fn live_notification_batches_hold_over_every_store() {
         let directory = tempfile::tempdir().expect("store fixture directory");
         let stores = storage.open(directory.path()).await;
         // Each store set is its law's ledger, so each gets its own endpoint.
-        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-            HarnessServer::Live,
-            stores.usage_accounting(),
-        )
-        .await;
+        let harness = LiveConformanceHarness::start_for_tool_children_on(HarnessServer::Live).await;
         let label = format!(
             "live-notice-batch-{}-{}",
             storage.label(),

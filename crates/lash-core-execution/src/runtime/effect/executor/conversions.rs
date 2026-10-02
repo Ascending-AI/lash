@@ -189,7 +189,7 @@ impl RuntimeEffectLocalRunner for LiveStepRunner<'_> {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let Some(live) = self.live else {
             return Err(RuntimeEffectControllerError::new(

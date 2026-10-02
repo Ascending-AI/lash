@@ -1,7 +1,7 @@
 {
   "scenario": "service-EffectGroupDrainIndex",
   "service": "EffectGroupDrainIndex",
-  "generation": "e1b5f7c925ec",
+  "generation": "5bc550dad153",
   "handlers": {
     "register": [
       [

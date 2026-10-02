@@ -141,7 +141,7 @@ async fn open_and_incorporate_first_rank<'run>(
 /// the group, consumes the usage leaf's settlement, and
 /// `incorporate_group_prefix` journals a record covering rank 1 alone. The
 /// opener then crashes where it stands. The ranks carry no usage: each leaf's
-/// spend is its own `ToolAttempt` run's (ADR 0125).
+/// host meters spend at the Provider seam (ADR 0127).
 ///
 /// Only then is the parked leaf resolved, so rank 2's settlement is durably
 /// present before the opener recovers, a fact the

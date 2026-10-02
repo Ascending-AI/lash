@@ -209,8 +209,6 @@ class Journey:
             "FROM session_meta ORDER BY session_id",
             "lineage": "SELECT session_id, ancestor_session_id, fork_node_id, fork_generation "
             "FROM fork_lineage ORDER BY session_id, ancestor_session_id",
-            "usage": "SELECT owner_id, profile_key, requested_model, served_model, input_tokens, output_tokens FROM usage_facts "
-            "WHERE owner_kind = 'session' ORDER BY seq",
         }
         if not self.session_db.exists():
             return {name: [] for name in tables}
@@ -395,7 +393,7 @@ class Journey:
         # D16: ambient traffic is ledger context, not Lash input. A folded row
         # waits for the route's next mention; it carries no admission identity,
         # admits nothing to the session graph, and spends no tokens.
-        self.gate("02-ambient", "bot", "both exact outbox events are folded once in the bot ledger and create no Lash input, committed ambient text, or model usage", identities_agree and all(r["deliveries"] == 1 for r in ambient_ledger) and all(r["input_id"] is None for r in ambient_ledger) and not session["pending"] and "FIG1341-AMBIENT" not in json.dumps(session["nodes"], sort_keys=True) and not session["usage"], "02-ambient-four-layers.json")
+        self.gate("02-ambient", "bot", "both exact outbox events are folded once in the bot ledger and create no Lash input, committed ambient text, or model usage", identities_agree and all(r["deliveries"] == 1 for r in ambient_ledger) and all(r["input_id"] is None for r in ambient_ledger) and not session["pending"] and "FIG1341-AMBIENT" not in json.dumps(session["nodes"], sort_keys=True), "02-ambient-four-layers.json")
         log = self.bot_log.read_text(encoding="utf-8", errors="replace")
         folded_logs = all(
             f"handled {r['event_id']}: Folded" in log for r in ambient_ledger

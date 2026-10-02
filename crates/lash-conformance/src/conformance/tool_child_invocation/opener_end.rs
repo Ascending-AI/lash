@@ -7,8 +7,8 @@
 //! and parks inside its drain on an [`IntentSink`]. The process its drain
 //! starts (§6) is a fact only the opener's incorporation lands, so it is what
 //! the laws observe, through the opener's possession set. Its spend is its
-//! own `ToolAttempt` run's, delivered by the engine (ADR 0125), and no longer
-//! rides the incorporation.
+//! host's to meter at the Provider seam (ADR 0127); it never rides
+//! incorporation.
 
 use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use tokio_util::sync::CancellationToken;

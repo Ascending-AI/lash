@@ -428,17 +428,10 @@ fn tool_context_with_provider<'run>(
     let direct_completions = if bind_direct_client_to_attempt {
         // The attempt's usage meter, begun as the tool-attempt runner begins it:
         // a direct completion inside an attempt is one call of that run
-        // (ADR 0125).
+        // (ADR 0127).
         direct_completions
             .with_tool_attempt_parent_invocation(attempt_parent.clone())
-            .with_usage_meter(
-                fixtures
-                    .runtime
-                    .host
-                    .core
-                    .usage_accounting()
-                    .begin(&attempt_effect_envelope()),
-            )
+            .with_effect_attempt(Some(lash_core::EffectAttempt::default()))
     } else {
         direct_completions
     };
@@ -1684,14 +1677,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             .direct_completion_client(scoped, Some(TurnId::fixture(TURN.to_string())))
             .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation())
             // The attempt's usage meter, as the tool-attempt runner begins it.
-            .with_usage_meter(
-                fixtures
-                    .runtime
-                    .host
-                    .core
-                    .usage_accounting()
-                    .begin(&attempt_effect_envelope()),
-            );
+            .with_effect_attempt(Some(lash_core::EffectAttempt::default()));
 
         lash_core::RuntimeEffectController::execute_effect(
             &sentinel,

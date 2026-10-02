@@ -626,10 +626,9 @@ async fn responses_handle_retries_allocation_only_stream_failure() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
         .await;
 
     assert_eq!(transport.calls(), 2);
@@ -651,10 +650,9 @@ async fn assert_streamed_output_stops_retry(first: &'static str) {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let failure = handle
-        .complete(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
         .await
         .expect_err("observed stream output must stop the retry ladder");
 
@@ -743,10 +741,9 @@ async fn responses_handle_retries_canonical_empty_failed_response() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let response = handle
-        .complete(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
         .await
         .expect("empty failed response is safe to discard and retry");
 
@@ -774,10 +771,9 @@ async fn responses_handle_retries_after_ping_and_response_debug() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let response = handle
-        .complete(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
         .await
         .expect("benign metadata before failure must preserve recovery");
 

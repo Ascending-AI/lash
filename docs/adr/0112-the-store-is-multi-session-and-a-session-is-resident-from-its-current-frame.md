@@ -68,10 +68,10 @@ Evidence: `crates/lash-core-store/src/store/mod.rs:1040`.
 #### 1.3 `SessionHistoryStore`
 
 Materializing reads are `load_session_window`, `load_ancestors`,
-`load_usage_ledger_page` and `load_failure_evidence_page`. The first is
+and `load_failure_evidence_page`. The first is
 frame-bound. The others take explicit budgets or limits. The segment also
-owns `contains_active_ancestor` and `load_usage_totals`, which return a
-predicate and grouped accounting rather than historical payloads.
+owns `contains_active_ancestor`, which returns a predicate rather than
+historical payloads.
 
 Evidence: `crates/lash-core-store/src/store/history.rs:362`.
 
@@ -195,9 +195,8 @@ runtime an arbitrary suffix.
 `Current` answers `None` only without a head row. A head with no leaf has
 an empty, unanchored window. `Admitted` never substitutes another head;
 an unavailable base returns `TurnBaseNotRetained`. Deleted sessions return
-`SessionDeleted`. Window reads decode frame nodes and checkpoint components,
-grouped usage and outstanding holes, without building a full usage ledger
-or decoding failure-receipt bodies.
+`SessionDeleted`. Window reads decode frame nodes and checkpoint components without decoding
+failure-receipt bodies.
 
 Evidence: `crates/lash-sqlite-store/src/history.rs:243`,
 `crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs:24`, `:273`,
@@ -254,31 +253,14 @@ Evidence: `crates/lash-sqlite-store/src/history.rs:455`,
 `crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs:712`,
 and `crates/lash-core-store/src/store_backend_support/head_path.rs:93`.
 
-### 8. Bounded usage and failure-evidence reads
-
-`SessionUsageTotals` holds grouped rows per source and model, reported and
-reconciled counters, and outstanding unreported attempts. Its checked fold
-validates accounting and refuses overflow or conflicting hole attribution.
-The runtime snapshot and window carry these totals rather than a historical
-ledger.
-
-PostgreSQL aggregates counters in SQL. SQLite folds ordered scalar rows in
-Rust with checked arithmetic because SQLite integer `SUM` would fail before
-the store could return its typed accounting-overflow error. Both use
-relational `usage_delta_holes`; reconciled call id and attempt ordinal
-identify corrections. Totals do not decode reported ledger bodies, though
-SQLite scans their accounting columns. Full usage detail is paged through
-`load_usage_ledger_page`; its continuation indicates more rows exist.
+### 8. Bounded failure-evidence reads
 
 Failure evidence is separate from the resident read view. Stored
 `failure_evidence` marks relevant receipts, with a partial index on session,
 commit time and turn id. `load_failure_evidence_page` orders by commit time
-and turn id and decodes the selected receipts. Usage and failure cursors
-check their session identity.
-
-Evidence: `crates/lash-core-store/src/usage.rs:591`,
-`crates/lash-sqlite-store/src/history.rs:764`, `:883`, `:997`, and
-`crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs:762`, `:890`, `:998`.
+and turn id and decodes selected receipts. Its cursor checks session identity.
+Model usage is data on the journaled model result, as
+[ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md) specifies.
 
 ### 9. Resident state
 
@@ -321,16 +303,15 @@ Evidence: `crates/lash-core/src/runtime/turn_loop/context_pressure.rs:116`, `:26
 
 ### 11. Stored shapes
 
-Graph rows carry `body_bytes`. Usage rows carry relational reconciliation
-identity and their holes live in `usage_delta_holes`. Turn-commit rows carry
-`failure_evidence`. Graph windows carry an anchor, and runtime state and
-snapshots carry `SessionUsageTotals`.
+Graph rows carry `body_bytes`. Turn-commit rows carry `failure_evidence`.
+Graph windows carry an anchor. Model results carry reported usage and sealed
+attempt history in the engine journal.
 
 Both SQL backends store these facts. Decoding validates body size and the
 window's anchor. The pre-1.0 version freeze applies; durable-format admission,
 writer fences and generation drain follow
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
-A journal's compaction identity includes its window and accounting inputs,
+A journal's compaction identity includes its window and token inputs,
 so replay must preserve those inputs.
 
 Evidence: `crates/lash-store-sql/src/session/graph_nodes.rs`,
@@ -440,9 +421,8 @@ Frame windows reuse the runtime's context boundary, while node and byte
 budgets make historical reads explicit. Fork ceilings accelerate selection;
 checked parent edges preserve ancestry authority.
 
-## Model usage accounting
+## Model usage
 
-Usage totals and ledger reads (§8) belong to `UsageAccountingStore`, by owner,
-over the `usage_facts`, `usage_meters` and `usage_owner_retirements` tables.
-`RuntimeSessionState`, `SessionSnapshot` and `SessionWindowRead` carry no
-usage, and `SessionHistoryStore` reads none ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

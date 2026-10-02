@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 222,
+  "cargo_target_count": 221,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -49861,7 +49861,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 288,
+  "generated_label_count": 287,
   "packages": [
     {
       "declared_features": [
@@ -52061,15 +52061,6 @@
           "clippy_label": "//crates/lash-restate-test:turn_crash_replay__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-restate-test:turn_crash_replay__test",
-          "tags": []
-        },
-        {
-          "build_label": "//crates/lash-restate-test:usage_accounting_windows__test",
-          "cargo": "usage_accounting_windows",
-          "check_label": "//crates/lash-restate-test:usage_accounting_windows__test[check]",
-          "clippy_label": "//crates/lash-restate-test:usage_accounting_windows__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//crates/lash-restate-test:usage_accounting_windows__test",
           "tags": []
         }
       ],
@@ -54841,7 +54832,6 @@
     "//crates/lash-restate-test:suspended_turn__test": 300,
     "//crates/lash-restate-test:tool_child_drift__test": 300,
     "//crates/lash-restate-test:turn_crash_replay__test": 300,
-    "//crates/lash-restate-test:usage_accounting_windows__test": 300,
     "//crates/lash-restate:lash-restate__unit_test": 300,
     "//crates/lash-restate:lash-restate__unit_test__fv_74137c42": 300,
     "//crates/lash-rlm-types:lash-rlm-types__unit_test": 300,
@@ -55427,7 +55417,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate[static]",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types[static]",
@@ -55716,7 +55705,6 @@
     "//crates/lash-restate-test:suspended_turn__test[check]",
     "//crates/lash-restate-test:tool_child_drift__test[check]",
     "//crates/lash-restate-test:turn_crash_replay__test[check]",
-    "//crates/lash-restate-test:usage_accounting_windows__test[check]",
     "//crates/lash-restate:lash-restate[check]",
     "//crates/lash-restate:lash-restate__unit_test[check]",
     "//crates/lash-rlm-types:lash-rlm-types[check]",
@@ -56005,7 +55993,6 @@
     "//crates/lash-restate-test:suspended_turn__test__clippy[clippy.txt]",
     "//crates/lash-restate-test:tool_child_drift__test__clippy[clippy.txt]",
     "//crates/lash-restate-test:turn_crash_replay__test__clippy[clippy.txt]",
-    "//crates/lash-restate-test:usage_accounting_windows__test__clippy[clippy.txt]",
     "//crates/lash-restate:lash-restate__clippy[clippy.txt]",
     "//crates/lash-restate:lash-restate__unit_test__clippy[clippy.txt]",
     "//crates/lash-rlm-types:lash-rlm-types__clippy[clippy.txt]",
@@ -56294,7 +56281,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types",
@@ -56584,7 +56570,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types",
@@ -56818,7 +56803,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
@@ -56957,7 +56941,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
@@ -57124,7 +57107,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
@@ -57483,7 +57465,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
@@ -57660,7 +57641,6 @@
     "//crates/lash-restate-test:suspended_turn__test",
     "//crates/lash-restate-test:tool_child_drift__test",
     "//crates/lash-restate-test:turn_crash_replay__test",
-    "//crates/lash-restate-test:usage_accounting_windows__test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-s3-store:lash-s3-store__unit_test",

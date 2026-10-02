@@ -85,8 +85,6 @@ pub mod trigger;
 pub mod turn_ingress;
 pub mod worker_recovery;
 
-pub mod usage;
-
 pub use render::{
     Dialect, Placeholder, RenderError, SchemaTables, TableLayout, Vocabulary, VocabularyTerm,
     render,
@@ -97,9 +95,6 @@ pub use render::{
 /// The renderer refuses a statement that names a table outside this list, so
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
-    usage::usage_facts::TABLE,
-    usage::usage_meters::TABLE,
-    usage::usage_owner_retirements::TABLE,
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,
     artifact::lashlang_artifacts::TABLE,
@@ -177,11 +172,6 @@ pub const TABLES: &[&str] = &[
 #[must_use]
 pub fn all_statements() -> Vec<Statement> {
     let mut statements = Vec::new();
-    statements.extend_from_slice(usage::usage_facts::UsageFactsStatements::NEUTRAL);
-    statements.extend_from_slice(usage::usage_meters::UsageMetersStatements::NEUTRAL);
-    statements.extend_from_slice(
-        usage::usage_owner_retirements::UsageOwnerRetirementsStatements::NEUTRAL,
-    );
     statements.extend_from_slice(artifact::blobs::BlobStatements::NEUTRAL);
     statements.extend_from_slice(artifact::referrer_edges::ReferrerEdgeStatements::NEUTRAL);
     statements.extend_from_slice(artifact::referrer_fences::ReferrerFenceStatements::NEUTRAL);

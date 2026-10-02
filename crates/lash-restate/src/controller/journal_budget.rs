@@ -104,40 +104,16 @@ fn poisoned_effect_error(effect: &str, reason: PoisonReason) -> RuntimeEffectCon
     )
 }
 
-/// The poison substitute for an unjournalable outcome. Only the outcome is
-/// substituted: the run's usage rides along, so a paid call whose response
-/// cannot be journaled still delivers what it spent (ADR 0125).
+/// A typed poison outcome prevents replay from dispatching an unjournalable
+/// completion again. The host retains any billing receipt at the Provider seam.
 fn poisoned_effect_record(
     effect: &str,
     envelope: Arc<CanonicalRuntimeEffectEnvelope>,
     reason: PoisonReason,
-    usage: Option<lash_core::EffectUsage>,
 ) -> RecordedRuntimeEffect {
     RecordedRuntimeEffect {
         envelope,
         outcome: Err(poisoned_effect_error(effect, reason)),
-        usage,
-    }
-}
-
-/// The longest owner rendering the give-up proof measures a poison
-/// substitute's usage stamp with. A stamp whose owner is longer is dropped
-/// rather than journaled over budget (see [`journalable_recorded_effect`]).
-const MEASURED_STAMP_OWNER_BYTES: usize = 256;
-
-/// The largest usage stamp a poison substitute can carry once its facts are
-/// dropped: an owner of [`MEASURED_STAMP_OWNER_BYTES`], a run id, and no fact.
-fn maximal_usage_stamp() -> lash_core::EffectUsage {
-    lash_core::EffectUsage {
-        owner: lash_core::RuntimeOwner::Session(lash_core::SessionId::prefixed(
-            "s",
-            "s".repeat(MEASURED_STAMP_OWNER_BYTES - 1),
-        )),
-        meter: lash_core::UsageMeterId::mint(),
-        facts: Vec::new(),
-        accounting: lash_core::MeterAccounting::FactsUnjournalable {
-            dropped_facts: u32::MAX,
-        },
     }
 }
 
@@ -216,7 +192,6 @@ pub(super) fn unjournalable_envelope_give_up(
         effect,
         Arc::clone(envelope),
         PoisonReason::OverBudget { budget },
-        Some(maximal_usage_stamp()),
     );
     if record_exceeds_budget(payload_budget, &stamped(&substitute)).is_ok() {
         return None;
@@ -253,8 +228,6 @@ pub(super) fn recorded_effect_from_journal(
             effect,
             Arc::clone(envelope),
             PoisonReason::OverBudget { budget },
-            // The pre-flight give-up ran no body, so no run was admitted.
-            None,
         )),
         JournaledEffectRecord::Retired(retired) => {
             Err(retired_generation_refusal(effect, envelope, &retired))
@@ -302,30 +275,5 @@ pub(super) fn journalable_recorded_effect(
         %error,
         "journaled effect outcome cannot be recorded; giving up with a terminal poison outcome"
     );
-    // The poison keeps the run's facts when they fit beside it; otherwise the
-    // stamp alone, so the run resolves `unknown(facts_unjournalable)` rather
-    // than staying open; otherwise nothing, and the run is resolved when its
-    // execution ends or its owner is drained.
-    let RecordedRuntimeEffect {
-        envelope, usage, ..
-    } = recorded;
-    let with_facts = poisoned_effect_record(effect, Arc::clone(&envelope), reason, usage.clone());
-    if usage.is_none() || record_exceeds_budget(payload_budget, &stamped(&with_facts)).is_ok() {
-        return JournaledEffectRecord::Recorded(with_facts);
-    }
-    let stamp_only = poisoned_effect_record(
-        effect,
-        Arc::clone(&envelope),
-        reason,
-        usage.map(lash_core::EffectUsage::without_facts),
-    );
-    if record_exceeds_budget(payload_budget, &stamped(&stamp_only)).is_ok() {
-        return JournaledEffectRecord::Recorded(stamp_only);
-    }
-    tracing::error!(
-        %effect,
-        "a poisoned spending effect's usage stamp cannot be journaled; its run resolves when its \
-         execution ends or its owner is drained"
-    );
-    JournaledEffectRecord::Recorded(poisoned_effect_record(effect, envelope, reason, None))
+    JournaledEffectRecord::Recorded(poisoned_effect_record(effect, recorded.envelope, reason))
 }

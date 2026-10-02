@@ -392,8 +392,8 @@ fn datetime(at_ms: u64) -> chrono::DateTime<chrono::Utc> {
 /// One real execution of a recorded step's body.
 ///
 /// The engine-side wrapper that runs a body begins one inside it and hands it
-/// to the work. Its attempt is the body's usage meter where the body spends, and
-/// an id of its own otherwise; neither is journaled as a freshness claim. A
+/// to the work. Its attempt id identifies this execution; it is never
+/// journaled as a freshness claim. A
 /// holder must not keep it past the body.
 #[derive(Debug)]
 pub struct LiveStep {
@@ -415,11 +415,11 @@ impl LiveStep {
 
     /// Begun where a recorded step's body starts running.
     pub(crate) fn begin(
-        usage_meter: Option<&crate::UsageMeter>,
+        effect_attempt: Option<&crate::EffectAttempt>,
         observation: Option<AttemptObservation>,
     ) -> Arc<Self> {
-        let attempt = match usage_meter {
-            Some(meter) => TraceAttemptId::new(meter.meter_id().as_str()),
+        let attempt = match effect_attempt {
+            Some(attempt) => attempt.trace_id(),
             None => fresh_attempt(),
         };
         Self::of(attempt, observation)
@@ -631,9 +631,9 @@ impl StepIssue {
     }
 
     /// Begins the live step of a body the engine's step wrapper is running.
-    pub(crate) fn begin(&self, usage_meter: Option<&crate::UsageMeter>) -> Arc<LiveStep> {
+    pub(crate) fn begin(&self, effect_attempt: Option<&crate::EffectAttempt>) -> Arc<LiveStep> {
         self.cross();
-        LiveStep::begin(usage_meter, self.attempt.clone())
+        LiveStep::begin(effect_attempt, self.attempt.clone())
     }
 
     /// Begins the live step of a body a substrate records itself: called

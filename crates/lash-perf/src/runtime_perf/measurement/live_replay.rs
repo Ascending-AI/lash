@@ -333,7 +333,6 @@ pub(super) async fn run_once_trace_jsonl(
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
 
-        let before_turn_usage = runtime.settled_usage_report().await?;
         run.turn_then(
             turn_index,
             async {
@@ -386,18 +385,12 @@ pub(super) async fn run_once_trace_jsonl(
             },
         )
         .await?;
-        let cumulative_usage = runtime.settled_usage_report().await?;
-        let usage_delta =
-            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
-                .map_err(anyhow::Error::msg)?;
-        run.record_last_turn_usage(usage_delta, cumulative_usage);
     }
 
-    let (state, cumulative_usage) = run
+    let state = run
         .export(async {
             let state = runtime.export_state().await;
-            let cumulative_usage = runtime.settled_usage_report().await?;
-            Ok((state, cumulative_usage))
+            Ok(state)
         })
         .await?;
     let (trace_counters, inspect_phase) =
@@ -434,7 +427,6 @@ pub(super) async fn run_once_trace_jsonl(
         extra_counters: trace_counters,
         phase_profile: Some(phase_profile),
         total_alloc: Some(total_alloc),
-        cumulative_usage,
         ..RunTail::default()
     }))
 }

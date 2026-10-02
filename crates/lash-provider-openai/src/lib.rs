@@ -3,7 +3,6 @@ pub mod codex;
 mod common;
 mod config;
 mod driver;
-mod openrouter;
 mod provider;
 #[cfg(test)]
 mod provider_trace_tests;
@@ -24,7 +23,7 @@ pub use codex::CodexProvider;
 pub use common::{OPENAI_BASE_URL, OPENROUTER_BASE_URL};
 pub use config::{
     OpenAiCompat, OpenAiCompatMaxTokensField, OpenAiCompatibleProvider, OpenAiProvider,
-    OpenAiReasoningDialect, OpenAiWireConfig, ProviderRoutingPrefs, UsageReconciliation,
+    OpenAiReasoningDialect, OpenAiWireConfig, ProviderRoutingPrefs,
 };
 pub use driver::CompletionEndpoint;
 // The vocabulary this crate's exported signatures name (the facade-completeness

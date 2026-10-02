@@ -399,7 +399,7 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::ResolveConfigTransaction { transaction, .. } =
             &envelope.command

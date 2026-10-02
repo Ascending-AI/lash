@@ -15,7 +15,7 @@ does not establish that the protected value is unusable.
 
 `Provider::complete` and `ToolProvider::execute` contain attempt panics as
 non-retryable `provider_panicked` and `tool_panicked` failures. Auxiliary
-provider callbacks `close` and `reconcile_usage` contain panics as
+provider callback `close` contains panics as
 non-retryable `ProviderPanicked` failures too.
 
 Child and effect task joins distinguish a panic from cancellation, form the

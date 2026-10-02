@@ -105,7 +105,7 @@ async fn probe_session(
     provider_handle.set_options(options);
     let collector = CheckpointWriteCollector::default();
     let engine = crate::backend::SimEngine::new(seed).await?;
-    let reopen = crate::content_oracle::ReopenHandles::over(&engine.backend());
+    let reopen = crate::content_oracle::ReopenHandles::over(&engine);
     let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
         .observing(collector.clone())
         .into();
@@ -166,7 +166,7 @@ mod tests {
 
     /// On a real generated run the durable-content law is green, the attempt
     /// probe produced the failed-after-usage shape it exists for, and corrupting
-    /// one byte of a reopened message or dropping one delivered fact turns it red.
+    /// one byte of a reopened message or dropping one recorded attempt turns it red.
     #[tokio::test]
     async fn durable_content_law_bites_on_real_run_evidence() {
         let workload = generate_workload(5, "fast-random", 96).expect("workload");
@@ -214,14 +214,14 @@ mod tests {
         let mut dropped = content;
         dropped
             .iter_mut()
-            .find(|session| !session.delivered_usage.is_empty())
+            .find(|session| !session.recorded_usage.is_empty())
             .expect("a session with committed usage")
-            .delivered_usage
+            .recorded_usage
             .pop();
         let verdict = crate::content_oracle::durable_content(&dropped);
         assert!(!verdict.is_passed());
         assert!(
-            verdict.message.contains("delivered fact"),
+            verdict.message.contains("recorded attempts diverged"),
             "{}",
             verdict.message
         );

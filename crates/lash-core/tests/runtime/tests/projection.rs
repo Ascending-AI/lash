@@ -648,21 +648,9 @@ async fn completed_turns_are_persisted_in_session_graph() {
     assert_eq!(messages[0].parts[0].content(), "where did this go?");
     assert_eq!(messages[1].parts[0].content(), "Stored answer");
     let _checkpoint = read.checkpoint.expect("checkpoint");
-    // The turn's usage is the owner's accounting, beside the window rather
-    // than in it (ADR 0125).
-    let ledger = settled_runtime_usage(&runtime).await.rows;
-    assert_eq!(ledger.len(), 1);
-    assert_eq!(ledger[0].source, "turn");
-    assert_eq!(
-        Some(&ledger[0].profile_key),
-        standard_test_policy().profile_key()
-    );
-    assert_eq!(
-        Some(ledger[0].requested_model.as_str()),
-        standard_test_policy().wire_model()
-    );
-    assert_eq!(ledger[0].usage.input_tokens, 12);
-    assert_eq!(ledger[0].usage.output_tokens, 4);
-    assert_eq!(ledger[0].usage.cache_read_input_tokens, 1);
-    assert_eq!(ledger[0].usage.reasoning_output_tokens, 2);
+    let attempt_usage = _turn.llm_calls[0].attempts[0]
+        .usage
+        .as_ref()
+        .expect("reported response usage");
+    assert_eq!(attempt_usage.input_tokens, 12);
 }

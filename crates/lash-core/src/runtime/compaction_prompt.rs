@@ -90,7 +90,7 @@ impl RuntimeEffectLocalRunner for RenderCompactionPromptRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::RenderCompactionPrompt { .. } = &envelope.command else {
             return Err(RuntimeEffectControllerError::new(

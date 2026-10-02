@@ -1685,7 +1685,7 @@ pub enum AttemptUsageOutcome {
     UnreportedByProvider,
     /// The attempt was aborted — a protocol-owned stream abort or an explicit
     /// cancellation — before the provider's usage arrived. The provider may
-    /// still bill the generation; see `Provider::reconcile_usage`.
+    /// still bill the generation; a host may reconcile its provider receipts.
     UnreportedAfterAbort,
     /// The attempt failed or was interrupted before the provider's usage
     /// arrived.

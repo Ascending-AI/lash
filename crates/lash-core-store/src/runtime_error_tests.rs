@@ -196,9 +196,6 @@ first_party_codes! {
         Self::RuntimeEffectToolChildRequestAdmission,
         Self::RuntimeEffectToolChildRequestOpener,
         Self::RuntimeEffectToolChildRequestVersion,
-        Self::UsageMeterMissing,
-        Self::UsageAdmissionFault,
-        Self::UsageOwnerRetired,
         Self::RuntimeEffectInvocationSubject,
         Self::RuntimeEffectScopeMismatch,
         Self::RuntimeEffectLocalExecutorMismatch,
@@ -425,32 +422,12 @@ fn wire_constructor_canonicalizes_built_in_codes() {
     assert!(!code.is_terminal());
 }
 
-/// A `lash:` spelling means one thing. Owner retirement is the same refusal
-/// in both vocabularies, so its typed code survives direct-call and host
-/// boundaries. Every other spelling belongs to exactly one vocabulary.
+/// A `lash:` spelling belongs to exactly one failure vocabulary.
 #[test]
-fn runtime_and_turn_failure_spellings_share_only_owner_retirement() {
+fn runtime_and_turn_failure_spellings_do_not_overlap() {
     use lash_sansio::session_model::TurnFailureCode;
 
-    let shared: Vec<_> = RuntimeErrorCode::ALL_FIRST_PARTY
-        .iter()
-        .filter(|code| {
-            TurnFailureCode::ALL_NAMED
-                .iter()
-                .any(|named| named.as_str() == code.as_str())
-        })
-        .collect();
-    assert_eq!(shared, vec![&RuntimeErrorCode::UsageOwnerRetired]);
     for code in TurnFailureCode::ALL_NAMED {
-        if *code == TurnFailureCode::UsageOwnerRetired {
-            let runtime = RuntimeErrorCode::from_wire_code(code.as_str());
-            assert_eq!(runtime, RuntimeErrorCode::UsageOwnerRetired);
-            assert_eq!(
-                lash_sansio::FailureCode::from(&runtime).turn_code(),
-                Some(code.clone())
-            );
-            continue;
-        }
         assert!(
             matches!(
                 RuntimeErrorCode::from_wire_code(code.as_str()),
@@ -970,8 +947,8 @@ fn an_unbound_llm_profile_is_the_attempts_fault_on_model_calls_alone() {
         );
         // Any other failure of the call is its recorded result, marked or not.
         let other = RuntimeEffectControllerError::new(
-            RuntimeErrorCode::UsageMeterMissing,
-            "a call reached its provider outside any usage meter",
+            RuntimeErrorCode::RuntimeEffectWrongOutcome,
+            "a model call returned the wrong effect outcome",
         )
         .retryable_uncommitted_derivation();
         assert_eq!(

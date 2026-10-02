@@ -26,10 +26,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         )
     }
 
-    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        Some(self.driver.host.core.usage_accounting())
-    }
-
     /// A recorded step's body observes as that body's live step. A body that
     /// replays by re-execution is bound none, and keeps the turn's standing.
     fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
@@ -39,7 +35,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let mut runner = *self;
         match envelope.command {
@@ -79,29 +75,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 let host = Arc::clone(&runner.driver.host.core.control.effect_host);
                 let honoured = runner.driver.turn_cancel.is_some();
                 let request = Arc::new((*request).into_request(None, None));
-                // The model call is one call of this effect's usage meter,
-                // owned by the turn's session (ADR 0125).
-                let call = usage_meter
-                    .as_ref()
-                    .ok_or_else(|| {
-                        RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::UsageMeterMissing,
-                            "a turn's model call reached its provider outside any usage meter",
-                        )
-                    })?
-                    .call(
-                        crate::RuntimeOwner::Session(runner.driver.session_id.clone()),
-                        "turn",
-                        request.model.key().clone(),
-                        request.model.wire_model(),
-                    )
-                    .map_err(|error| {
-                        RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::UsageMeterMissing,
-                            error.to_string(),
-                        )
-                    })?;
-                let body_call = call.clone();
                 let invocation = envelope.invocation.into_runtime_invocation();
                 let protocol_iteration = runner.protocol_iteration;
                 let event_tx = runner.event_tx.clone();
@@ -119,17 +92,11 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                             invocation,
                             &event_tx,
                             &stop,
-                            super::streaming::LlmCallDispatch {
-                                provider,
-                                usage_call: body_call,
-                            },
+                            super::streaming::LlmCallDispatch { provider },
                         )
                         .await
                 }))
                 .await?;
-                if let Some(call_record) = &call_record {
-                    call.record(call_record);
-                }
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,

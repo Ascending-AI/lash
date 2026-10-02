@@ -901,7 +901,7 @@ impl RuntimeEffectLocalRunner for RecoverFollowOnRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::RecoverFollowOn {
             follow_on,
@@ -1149,7 +1149,7 @@ impl RuntimeEffectLocalRunner for HeadlessRunStepRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let bound = match (&self.step, &envelope.command) {
             (
@@ -1292,7 +1292,7 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::InspectAdmittedHead { run, head } = &envelope.command
         else {
@@ -1406,7 +1406,7 @@ impl RuntimeEffectLocalRunner for AdmitRunRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitRun { head } = &envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(
@@ -1629,7 +1629,7 @@ impl RuntimeEffectLocalRunner for PluginTransitionRunner {
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::TransitionPlugins { request } = envelope.command else {
             return Err(crate::RuntimeEffectControllerError::new(

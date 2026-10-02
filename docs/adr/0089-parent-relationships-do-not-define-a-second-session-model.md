@@ -26,7 +26,7 @@ a deleted id is refused with `SessionDeleted`. Opening resolves an existing
 session, reads its recorded state and parent relation, and constructs its bound
 runtime. An open cannot state or change parentage.
 
-Each related session has its own exact session store binding and usage ledger.
+Each related session has its own exact session store binding. Usage remains data on its model results (ADR 0127).
 Parentage cannot exempt it from admission or substitute the parent's binding.
 A handle keeps its session identity and binding for its lifetime.
 

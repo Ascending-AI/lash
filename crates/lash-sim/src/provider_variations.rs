@@ -393,16 +393,13 @@ mod tests {
                 let trace_events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
                 let trace_sink = Arc::clone(&trace_events);
                 let response = provider
-                    .complete(
-                        provider_request(
-                            &model,
-                            variation,
-                            LlmProviderTraceSender::new(move |event| {
-                                trace_sink.lock_recover().push(event);
-                            }),
-                        ),
-                        <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-                    )
+                    .complete(provider_request(
+                        &model,
+                        variation,
+                        LlmProviderTraceSender::new(move |event| {
+                            trace_sink.lock_recover().push(event);
+                        }),
+                    ))
                     .await
                     .unwrap_or_else(|error| {
                         panic!(
@@ -627,6 +624,7 @@ mod tests {
                     lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
                     lash_sansio::llm_profile::LlmProfileMetadata::builder(model.wire_model.clone())
                         .context_window_tokens(128_000)
+                        .max_output_tokens(2048)
                         .capability(Default::default())
                         .extra_body(Default::default())
                         .request_defaults(model.request_defaults.clone())

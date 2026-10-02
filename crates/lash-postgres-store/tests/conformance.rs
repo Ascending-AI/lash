@@ -182,8 +182,6 @@ mod session_close;
 mod session_delete_blob_reclaim;
 #[path = "conformance/session_ingress.rs"]
 mod session_ingress;
-#[path = "conformance/usage_accounting.rs"]
-mod usage_accounting;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
 
@@ -1588,88 +1586,6 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     assert_eq!(turn_stamp as u64, NOW_MS);
 }
 
-// `from_pool` and `connect` must both reject a reader floor above this build.
-// The altered stamp lives in a scratch schema so no failed assertion can affect
-// another conformance case.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
-    let Some(url) = database_url() else {
-        eprintln!("skipping Postgres from_pool gate test: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    let scratch = IsolatedSchema::provision(&url).await;
-    let pool = scratch.pool.clone();
-    let current_version: i32 = sqlx::query_scalar(
-        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("read current schema version");
-    assert_eq!(
-        current_version,
-        lash_postgres_store::PostgresStorage::schema_version(),
-        "schema.sql stamps the component version this build declares"
-    );
-    let payload_hash_nullable: String = sqlx::query_scalar(
-        "SELECT is_nullable FROM information_schema.columns
-         WHERE table_schema = current_schema()
-           AND table_name = 'lash_usage_facts'
-           AND column_name = 'payload_hash'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("payload_hash column exists");
-    assert_eq!(payload_hash_nullable, "NO");
-    let usage_identity_constraint: String = sqlx::query_scalar(
-        "SELECT pg_get_constraintdef(oid)
-         FROM pg_constraint
-         WHERE conrelid = 'lash_usage_facts'::regclass
-           AND contype = 'u'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("read usage fact identity uniqueness constraint");
-    assert!(
-        usage_identity_constraint.contains(
-            "owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind"
-        ),
-        "a usage fact's identity is its owner, effect, call, attempt and kind (ADR 0125): \
-         {usage_identity_constraint}"
-    );
-    // A newer catalog whose floor passed every version this build reads, in
-    // its tier, must refuse adoption.
-    let newer_version = i32::try_from(
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
-            .expect("the build declares the PostgreSQL store")
-            .reads
-            .max()
-            + 1,
-    )
-    .expect("the component version fits");
-    sqlx::query(
-        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
-         WHERE component = 'lash-postgres-store'",
-    )
-    .bind(newer_version)
-    .execute(&pool)
-    .await
-    .expect("raise reader floor");
-
-    let result = PostgresStorage::from_pool(pool.clone()).await;
-    scratch.cleanup().await;
-    assert!(matches!(
-        result,
-        Err(StoreError::Incompatible {
-            refusal: CompatRefusal::ReaderFloorAbove {
-                found,
-                min_reader,
-                ..
-            }
-        }) if i32::try_from(found) == Ok(newer_version)
-            && i32::try_from(min_reader) == Ok(newer_version)
-    ));
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() {
     let Some(url) = database_url() else {
@@ -2455,38 +2371,6 @@ async fn a_stale_fence_receipt_replay_leaves_the_store_byte_identical() {
     .await;
 }
 
-lash_conformance::usage_ledger_store_tests!({
-    let Some((lock, storage)) = storage().await else {
-        return;
-    };
-    reset(storage.pool()).await;
-    let snapshot_pool = storage.pool().clone();
-    let snapshot: lash_conformance::UsageLedgerSnapshot = Arc::new(move || {
-        let pool = snapshot_pool.clone();
-        Box::pin(async move {
-            let tables: Vec<String> = sqlx::query_scalar("SELECT tablename::text FROM pg_tables WHERE schemaname = current_schema() AND tablename LIKE 'lash_%' AND tablename NOT LIKE 'lash_usage_%' ORDER BY tablename")
-                .fetch_all(&pool).await.unwrap();
-            let mut snapshot = Vec::new();
-            for table in tables {
-                let mut rows: Vec<String> =
-                    sqlx::query_scalar(&format!("SELECT to_jsonb(t)::text FROM \"{table}\" AS t"))
-                        .fetch_all(&pool)
-                        .await
-                        .unwrap();
-                rows.sort();
-                snapshot.push((table, rows.join("\n")));
-            }
-            snapshot
-        })
-    });
-    let store = Arc::new(storage.store());
-    let fixture = lash_conformance::UsageLedgerStoreFixture {
-        accounting: store.clone(),
-        factory: store,
-        snapshot,
-    };
-    ((lock, storage), fixture)
-});
 mod session_commands {
     use super::*;
     lash_conformance::session_command_replay_tests!({

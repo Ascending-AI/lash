@@ -509,13 +509,7 @@ impl HandOff {
             generation.clone(),
             crate::RestateNamespace::default(),
         ));
-        // The endpoint's accounting continuation needs a ledger to settle
-        // into, as `RestateEngine::new` binds a deployment's (ADR 0125).
-        host.bind_usage_accounting(lash_core::StoreSet::usage_accounting(
-            &lash_sqlite_store::SqliteStoreSet::memory()
-                .await
-                .expect("open the endpoint's usage ledger"),
-        ));
+
         let worker = recovery_worker(Arc::clone(registry), Arc::clone(sessions)).await;
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),

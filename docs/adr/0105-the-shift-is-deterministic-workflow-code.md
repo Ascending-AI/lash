@@ -363,7 +363,7 @@ Evidence: `crates/lash-core-execution/src/runtime/effect/executor/control.rs:369
 Core assembles the commit from recorded results and calls
 `commit_runtime_state_verified`. The store checks head, fence, operation
 identity and existing receipt, then writes the head, run terminal evidence,
-usage and ingress settlement together. Lost replies are checked against the
+and ingress settlement together. Lost replies are checked against the
 stored commit. The shift can safely repeat the idempotent write. An exact
 replay of a stored commit answers from its receipt even when its fence is
 stale, and writes nothing: a shift that runs several runs in one journal,
@@ -540,8 +540,8 @@ owns commit and terminal evidence. The contract applies to drivers and engines;
 opaque tool bodies are recorded execution. Changes under the pre-1.0 freeze
 carry no cross-build compatibility guarantee.
 
-## Model usage accounting
+## Model usage
 
-The fenced commit (§9) carries no usage and stages none. Usage is
-engine-owned accounting that never reads the head or the shift fence
-([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

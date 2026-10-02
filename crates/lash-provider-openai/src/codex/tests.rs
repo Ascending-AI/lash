@@ -1868,10 +1868,7 @@ async fn codex_websocket_output_started_error_stops_provider_handle_retry() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(
-            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
         .await;
 
     assert_eq!(
@@ -1923,10 +1920,7 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(
-            request(vec![LlmMessage::text(LlmRole::User, "hello")]),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
         .await;
 
     assert_eq!(

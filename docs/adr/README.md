@@ -159,4 +159,5 @@ The generated region below is checked against the live filenames and headings.
 | 0124 | [Attachments are kept alive only by their referrers](0124-attachments-are-kept-alive-only-by-their-referrers.md) |
 | 0125 | [Model usage is engine-owned accounting delivered per call](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md) |
 | 0126 | [Session config changes are typed owner commands](0126-session-config-changes-are-typed-owner-commands.md) |
+| 0127 | [Usage is result data; hosts meter spend](0127-usage-is-result-data-hosts-meter-spend.md) |
 <!-- adr-index:end -->

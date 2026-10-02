@@ -59,7 +59,7 @@ enum GateEvent {
 struct Witness {
     executions: Mutex<Vec<Execution>>,
     recorded: Arc<super::recorded_batch::RecordedBatch>,
-    accounting: Mutex<Vec<(crate::ToolCallId, crate::TokenUsage)>>,
+    observed_usage: Mutex<Vec<(crate::ToolCallId, crate::TokenUsage)>>,
     spend: AtomicBool,
     /// Every tool name a before-tool hook saw.
     hooked: Mutex<Vec<String>>,
@@ -190,7 +190,7 @@ impl crate::ToolProvider for SugarTools {
 
     #[expect(
         clippy::expect_used,
-        reason = "conformance fixture requires successful managed accounting"
+        reason = "conformance fixture requires successful managed usage"
     )]
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let value = call
@@ -216,7 +216,7 @@ impl crate::ToolProvider for SugarTools {
                 .await
                 .expect("the law's managed completion answers");
             self.witness
-                .accounting
+                .observed_usage
                 .lock_recover()
                 .push((call.context.call_id().clone(), completion.usage));
         }
@@ -1417,16 +1417,10 @@ pub async fn batch_cancel_preserves_committed_drains(
         .unwrap_or_else(|| panic!("{context}: the cancelled turn assembles"))
         .unwrap_or_else(|error| panic!("{context}: the cancelled turn assembles: {error}"));
     let before = durable_cancel_snapshot(&law).await;
+    let observed_usage = law.witness.observed_usage.lock_recover().clone();
     assert!(
-        before["ledger"]
-            .as_array()
-            .is_some_and(|rows| !rows.is_empty()),
-        "{context}: the fixture persisted real accounting"
-    );
-    let accounting = law.witness.accounting.lock_recover().clone();
-    assert!(
-        !accounting.is_empty(),
-        "{context}: the fixture captured member accounting"
+        !observed_usage.is_empty(),
+        "{context}: the fixture captured member usage"
     );
     law.witness.release_held();
     tokio::time::timeout(
@@ -1438,12 +1432,12 @@ pub async fn batch_cancel_preserves_committed_drains(
     assert_eq!(
         durable_cancel_snapshot(&law).await,
         before,
-        "{context}: late settlements preserve durable finals, transcript and usage ledger"
+        "{context}: late settlements preserve durable finals and transcript"
     );
     assert_eq!(
-        *law.witness.accounting.lock_recover(),
-        accounting,
-        "{context}: late settlements double no captured accounting"
+        *law.witness.observed_usage.lock_recover(),
+        observed_usage,
+        "{context}: late settlements double no captured usage"
     );
 
     assert!(
@@ -1696,32 +1690,8 @@ async fn durable_cancel_snapshot(law: &SugarTurn) -> serde_json::Value {
         .await
         .expect("reread the durable transcript")
         .expect("the cancelled session has a head");
-    // The session's durable accounting (ADR 0125): every fact its owner
-    // holds, in ledger order.
-    let accounting = law.stores.usage_accounting();
-    let owner = crate::RuntimeOwner::Session(law.session_id.clone());
-    let mut ledger = Vec::new();
-    let mut cursor = None;
-    loop {
-        let page = accounting
-            .load_usage_fact_page(
-                &owner,
-                cursor.as_ref(),
-                std::num::NonZeroU32::new(128).expect("nonzero page size"),
-            )
-            .await
-            .expect("reread durable accounting");
-        for fact in page.facts {
-            ledger.push(serde_json::to_value(&fact).expect("encode the durable fact"));
-        }
-        cursor = page.next;
-        if cursor.is_none() {
-            break;
-        }
-    }
     serde_json::json!({
         "finals": law.witness.recorded.finals(law.host.as_ref(), law.admitted()).await,
         "transcript": read.window.nodes,
-        "ledger": ledger,
     })
 }

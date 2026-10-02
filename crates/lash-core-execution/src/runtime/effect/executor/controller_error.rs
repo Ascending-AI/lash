@@ -15,6 +15,20 @@ impl From<PluginError> for RuntimeEffectControllerError {
     /// so a new variant does not compile until it names its code.
     fn from(err: PluginError) -> Self {
         match err {
+            PluginError::ProviderFailure {
+                kind,
+                code,
+                retryable,
+                terminal_reason,
+                message,
+            } => RuntimeError::new(RuntimeErrorCode::LlmProvider, message)
+                .with_cause(crate::RuntimeErrorCause::ProviderFailure {
+                    failure_kind: kind,
+                    code,
+                    retryable,
+                    terminal_reason,
+                })
+                .into(),
             PluginError::Format(refusal) => refusal.into(),
             PluginError::State(crate::PluginStateError::EffectOwnerMismatch) => {
                 let mut error = Self::new(

@@ -201,10 +201,7 @@ pub use turn_queue::{
     SessionCommandReceipt, TurnLaneAdmissionPolicy, process_wake_batch_draft,
     process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
 };
-pub use usage::{
-    ReconciledUsageAttempt, SessionUsageReport, UsageAttributionKey, UsageReconciliationReport,
-    UsageReportRow, UsageTotals, diff_usage_reports,
-};
+
 pub use work::{
     NoProcessWork, NoSessionWork, ProcessRegistryAwaiter, ProcessTerminalWait,
     ProcessWorkSubstrate, ProcessWorkWiring, SessionShifts, SessionWorkEngine,

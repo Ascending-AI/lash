@@ -116,7 +116,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     let session_stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open the session store set");
-    host.bind_usage_accounting(lash_core::StoreSet::usage_accounting(&session_stores));
+
     let sessions = session_stores.session_store_factory();
     let endpoint = crate::services::bind_lash_services(
         Endpoint::builder(),

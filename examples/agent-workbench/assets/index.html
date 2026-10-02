@@ -2686,11 +2686,6 @@
       <div class="operator-actions"><button id="operatorStalls" type="button">list stalled deliveries</button><button id="operatorStallsNext" type="button" disabled>next page</button></div>
       <div id="operatorStallList"></div><pre id="operatorDrainResult"></pre>
     </details>
-    <details><summary>Usage ledger</summary>
-      <p>Exports retain every fact or meter and its cursor. Unreported amounts remain unknown until provider reconciliation can recover them.</p>
-      <div class="operator-actions"><button id="operatorUsageFacts" type="button">export usage facts</button><button id="operatorUsageMeters" type="button">export usage meters</button><button id="operatorUsageReconcile" type="button">reconcile unreported usage</button></div>
-      <pre id="operatorUsageResult"></pre>
-    </details>
     <details><summary>Recorded session settings</summary>
       <button id="operatorConfigRead" type="button">read recorded settings</button>
       <pre id="operatorRecordedConfig"></pre>
@@ -4618,7 +4613,6 @@
     function finishTransientRows(turnId) {
       if (!turnId) return;
       markTurnTerminal(turnId);
-      markStreamingUsageSettled(turnId);
       clearRetryStatus(turnId);
       const finishedTools = pendingTools.filter(tool => tool.observationTurnId === turnId);
       for (const tool of finishedTools) {
@@ -4905,7 +4899,7 @@
       }
       if (event.type === "done") {
         finishTransientRows(event.turn_id);
-        refreshUsage(event.turn_id);
+        refreshTerminalState(event.turn_id);
         /* A turn that failed committed nothing its optimistic rows can stand
            for, and the server has already retired them from the lane
            (FIG-1000). This tab may still be rendering them, and rows are only
@@ -6113,7 +6107,6 @@
       knownSessionLabel = state.settings.session_id;
       markShellHydrated(shellAvailability);
       renderShellStatus();
-      renderUsage(state.usage);
       renderQueuedWork(state.queued_work || []);
       renderApprovals(state.pending_approvals || []);
       if (!preserveTransientTranscript) renderStateTranscript(state);
@@ -6152,10 +6145,7 @@
     // END WORKBENCH_STATE_FETCH
 
     // BEGIN WORKBENCH_USAGE_PROJECTION
-    let settledUsage = {};
-    let settledUsageEntryCount = 0;
     const streamingUsageByTurn = new Map();
-    const settlingUsageTurnIds = new Set();
 
     function normalizedUsage(usage = {}) {
       return {
@@ -6175,7 +6165,7 @@
     }
 
     function projectedUsage() {
-      let usage = normalizedUsage(settledUsage);
+      let usage = normalizedUsage();
       for (const live of streamingUsageByTurn.values()) usage = addUsage(usage, live);
       return usage;
     }
@@ -6200,9 +6190,7 @@
     }
 
     function renderUsageTitle() {
-      usageTotal.title = streamingUsageByTurn.size
-        ? settledUsageEntryCount + " settled source/model ledger entries · live turn usage included"
-        : settledUsageEntryCount + " source/model ledger entries";
+      usageTotal.title = "Reported usage from observed turns";
     }
 
     function renderStreamingUsage(usage = {}, turnId = null) {
@@ -6212,30 +6200,18 @@
       renderUsageTitle();
     }
 
-    function markStreamingUsageSettled(turnId) {
-      if (streamingUsageByTurn.has(turnId)) settlingUsageTurnIds.add(turnId);
-    }
 
     function clearStreamingUsage() {
       streamingUsageByTurn.clear();
-      settlingUsageTurnIds.clear();
     }
 
-    function renderUsage(report) {
-      settledUsage = normalizedUsage(report?.usage);
-      settledUsageEntryCount = Number(report?.entry_count) || 0;
-      for (const turnId of settlingUsageTurnIds) streamingUsageByTurn.delete(turnId);
-      settlingUsageTurnIds.clear();
-      renderUsageCounters(projectedUsage());
-      renderUsageTitle();
-    }
     // END WORKBENCH_USAGE_PROJECTION
 
     // BEGIN WORKBENCH_STATE_RECOVERY
     const SETTLEMENT_STATE_REFRESH_DELAY_MS = 100;
     const SETTLEMENT_STATE_REFRESH_ATTEMPTS = 50;
 
-    async function refreshUsage(
+    async function refreshTerminalState(
       settlingTurnId = null,
       attemptsRemaining = SETTLEMENT_STATE_REFRESH_ATTEMPTS
     ) {
@@ -6249,8 +6225,7 @@
         );
         if (!applied) return;
         markShellChannel(shellAvailability, "state", true);
-        renderUsage(state.usage);
-        renderShellStatus();
+          renderShellStatus();
       } catch (error) {
         if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
@@ -6268,7 +6243,7 @@
       } finally {
         if (retrySettlement && attemptsRemaining > 0) {
           setTimeout(
-            () => refreshUsage(settlingTurnId, attemptsRemaining - 1),
+            () => refreshTerminalState(settlingTurnId, attemptsRemaining - 1),
             SETTLEMENT_STATE_REFRESH_DELAY_MS
           );
         }
@@ -7997,20 +7972,6 @@
     operatorAction("Stalls", () => operatorReadStalls());
     operatorAction("StallsNext", () => operatorReadStalls(operatorStallCursor));
     op("ObligationKind").addEventListener("change", () => { operatorStallCursor = null; op("StallsNext").disabled = true; op("StallList").replaceChildren(); });
-    async function operatorExportUsage(kind) {
-      const pages = []; let after = null;
-      do {
-        const query = after ? "?after=" + encodeURIComponent(JSON.stringify(after)) : "";
-        const page = await operatorRequest(operatorSessionPath("/usage/" + kind) + query);
-        pages.push(page); after = page.next;
-      } while (after);
-      const blob = new Blob([JSON.stringify({session_id: operatorSession, pages}, null, 2)], {type: "application/json"});
-      const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = operatorSession + "-usage-" + kind + ".json"; link.click(); URL.revokeObjectURL(url);
-      operatorShow("UsageResult", {exported_pages: pages.length, records: pages.reduce((sum, page) => sum + (Object.values(page).find(Array.isArray) || []).length, 0)});
-    }
-    operatorAction("UsageFacts", () => operatorExportUsage("facts"));
-    operatorAction("UsageMeters", () => operatorExportUsage("meters"));
-    operatorAction("UsageReconcile", async () => operatorShow("UsageResult", await operatorRequest(operatorSessionPath("/usage/reconcile"), "POST")));
     operatorAction("ConfigRead", async () => {
       const result = await operatorRequest(operatorSessionPath("/config")); op("ConfigRevision").value = result.catalog.revision; op("ConfigId").value = crypto.randomUUID(); operatorShow("RecordedConfig", result);
     });

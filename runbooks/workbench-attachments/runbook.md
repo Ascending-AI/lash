@@ -67,7 +67,7 @@ cross-surface identity, not the quality of the model's image description.
    `attachment_blobs` table of the session catalog
    (`<data-dir>/lash-sessions/durable-core.db`), while Postgres wires
    `FileAttachmentStore` under `<data-dir>/attachments`. The deterministic companion gate
-   reopens the backend's attachment store and separately runs the usage restart assertion
+   reopens the backend's attachment store and checks model usage in trace records
    against the SQLite session-store backend.
 6. **The transcript image is the attachment contract.** The matching user row must contain
    exactly one `a.message-attachment[data-attachment-id]` wrapping exactly one `<img>` whose
@@ -81,8 +81,7 @@ cross-surface identity, not the quality of the model's image description.
 
 - First run `just agent-workbench-attachment-usage-gate <gate-port>` on **its own port**,
   not the browser stack's. It is model-free and asserts upload → reference → persist →
-  retrieve, non-zero internally consistent usage, JSONL `llm_call_completed` agreement, and
-  exact usage after reconstruction on the SQLite session-store backend.
+  retrieve and non-zero reported usage in JSONL `llm_call_completed` records.
 - Boot the browser scenario with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
   (the `just agent-workbench <port>` recipe is the same command, but it does not export

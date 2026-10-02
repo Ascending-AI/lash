@@ -115,8 +115,6 @@ macro_rules! turn_config_tests {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_config_command_after_a_pinned_run_resolves_over_the_sticky_config, "run-spec-sticky-command"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (usage_under_two_model_keys_that_share_a_wire_model_is_attributed_separately, "usage-two-keys"));
-        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_run_resolves_its_spec_once_across_a_crash, "run-spec-once"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_missing_definition_retries_unrecorded_until_it_is_deployed, "run-spec-missing"));

@@ -168,7 +168,7 @@ pub fn backend_over(
 /// [`backend_over`] with the recording double as its effect host: for a
 /// storage law that reaches a backend's storage ports and runs no effect.
 pub fn recording_backend_over(stores: Arc<dyn crate::StoreSet>) -> crate::Backend {
-    let effect_host = crate::RecordingEffectHost::over_usage_accounting(stores.usage_accounting());
+    let effect_host = crate::RecordingEffectHost::default();
     backend_over(stores, Arc::new(effect_host))
 }
 
@@ -262,107 +262,9 @@ impl StoreLawStores {
     }
 }
 
-/// The usage ledger of a store law's runtime: the law runs no effect, so
-/// nothing spends, and every write or read is refused like the other ports
-/// that would name a second substrate. The runtime still holds a ledger,
-/// because every host binds one (ADR 0125).
-struct StoreLawUsageAccounting;
-
-impl StoreLawUsageAccounting {
-    fn refused() -> crate::StoreError {
-        crate::StoreError::Backend(
-            "a store law's runtime spends nothing: its substrate is the store it was handed"
-                .to_string(),
-        )
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::UsageAccountingStore for StoreLawUsageAccounting {
-    async fn admit_usage_meter(
-        &self,
-        _admission: &lash_core::UsageMeterAdmission,
-    ) -> Result<lash_core::UsageMeterAdmitted, lash_core::UsageAdmissionError> {
-        Err(lash_core::UsageAdmissionError::Store(Self::refused()))
-    }
-
-    async fn settle_usage(
-        &self,
-        _settlement: &lash_core::UsageSettlement,
-        _now_ms: u64,
-    ) -> Result<lash_core::UsageSettleReceipt, lash_core::UsageAppendError> {
-        Err(lash_core::UsageAppendError::Store(Self::refused()))
-    }
-
-    async fn mark_usage_settlement_conflicted(
-        &self,
-        _settlement: &lash_core::UsageSettlement,
-        _conflict: &lash_core::UsageFactConflict,
-        _now_ms: u64,
-    ) -> Result<(), crate::StoreError> {
-        Err(Self::refused())
-    }
-
-    async fn append_usage_corrections(
-        &self,
-        _owner: &lash_core::RuntimeOwner,
-        _corrections: &[lash_core::UsageCorrection],
-        _now_ms: u64,
-    ) -> Result<lash_core::UsageAppendReceipt, lash_core::UsageAppendError> {
-        Err(lash_core::UsageAppendError::Store(Self::refused()))
-    }
-
-    async fn retire_usage_execution(
-        &self,
-        _owner: &lash_core::RuntimeOwner,
-        _execution_scope_key: &str,
-        _now_ms: u64,
-    ) -> Result<u64, crate::StoreError> {
-        Err(Self::refused())
-    }
-
-    async fn retire_usage_owner(
-        &self,
-        _owner: &lash_core::RuntimeOwner,
-        _now_ms: u64,
-    ) -> Result<lash_core::UsageOwnerRetired, crate::StoreError> {
-        Err(Self::refused())
-    }
-
-    async fn load_owner_usage(
-        &self,
-        _owner: &lash_core::RuntimeOwner,
-    ) -> Result<lash_core::OwnerUsage, crate::StoreError> {
-        Err(Self::refused())
-    }
-
-    async fn load_usage_fact_page(
-        &self,
-        _owner: &lash_core::RuntimeOwner,
-        _after: Option<&lash_core::UsageFactCursor>,
-        _limit: std::num::NonZeroU32,
-    ) -> Result<lash_core::UsageFactPage, crate::StoreError> {
-        Err(Self::refused())
-    }
-
-    async fn load_usage_meter_page(
-        &self,
-        _owner: &lash_core::RuntimeOwner,
-        _filter: lash_core::UsageMeterFilter,
-        _after: Option<&lash_core::UsageMeterCursor>,
-        _limit: std::num::NonZeroU32,
-    ) -> Result<lash_core::UsageMeterPage, crate::StoreError> {
-        Err(Self::refused())
-    }
-}
-
 impl crate::StoreSet for StoreLawStores {
     fn worker_recovery(&self) -> Arc<dyn lash_core::store::worker_recovery::WorkerRecoveryStore> {
         Self::no_second_substrate("worker recovery accounting")
-    }
-
-    fn usage_accounting(&self) -> Arc<dyn lash_core::UsageAccountingStore> {
-        Arc::new(StoreLawUsageAccounting)
     }
 
     fn binding_identity(&self) -> &crate::StoreBindingId {

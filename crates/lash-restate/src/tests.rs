@@ -306,8 +306,6 @@ mod trigger_authority;
 mod turn_cancel_modes;
 mod turn_crash_on_the_double;
 mod turn_laws_on_the_double;
-mod usage_accounting_on_the_double;
-mod usage_poison;
 mod wait_handoff_generations;
 use endpoint_protocol::{
     RecordedCommand, admission_journal, admitted_invocation_body, durable_wait_index_call_response,
@@ -1660,7 +1658,6 @@ fn fig1142_recorded_llm_call() -> crate::controller::RecordedRuntimeEffect {
                 .expect("canonical model-call envelope"),
         ),
         outcome: Ok(fig793_llm_outcome()),
-        usage: None,
     }
 }
 

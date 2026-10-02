@@ -727,7 +727,7 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // Boxed: the driver future carries the whole dispatch, and a group
         // child is spawned per member — 21 kB of stack per pending child is a
@@ -929,8 +929,8 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // rebound is everything that decides whose call it is — the recorded
     // session, environment, lineage and admitted controller — so a
     // managed-LLM call the child makes is journaled under the child's facts,
-    // never the opener's (ADR 0099 §3). Its spend is accounted by the usage
-    // run of the attempt it runs inside (ADR 0125).
+    // never the opener's (ADR 0099 §3). Hosts meter its provider attempts
+    // at the Provider seam (ADR 0127).
     child.direct_completions = lent.direct_completions.bind_tool_child(
         &request.scope.owner.runtime_owner(),
         &execution_env_spec,

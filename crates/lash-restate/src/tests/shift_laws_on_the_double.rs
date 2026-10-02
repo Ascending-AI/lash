@@ -190,11 +190,8 @@ mod recorded_termination {
                 .await
                 .expect("open the SQLite file store set"),
         );
-        let harness = LiveConformanceHarness::start_for_tool_children_settling_into(
-            server(always_replay),
-            stores.usage_accounting(),
-        )
-        .await;
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(server(always_replay)).await;
         let effect_host = harness.endpoint_host();
         let turn_runner = harness.turn_runner();
         let prefix: &'static str = Box::leak(

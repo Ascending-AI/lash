@@ -232,8 +232,6 @@ pub(super) async fn run_once_high_traffic(
                 },
                 phase_profile: operation.phase_profile.clone(),
                 turn_usage: operation.turn_usage.clone(),
-                usage_delta: SessionUsageReport::default(),
-                cumulative_usage: SessionUsageReport::default(),
             });
         }
         total_elapsed_ms += step.elapsed_ms;
@@ -345,7 +343,6 @@ pub(super) async fn run_once_high_traffic(
         memory: memory_span(before_memory, after_memory),
         phase_profile,
         turns,
-        cumulative_usage: SessionUsageReport::default(),
     })
 }
 

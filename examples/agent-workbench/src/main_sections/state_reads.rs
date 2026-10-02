@@ -11,7 +11,6 @@ pub(crate) struct StateProjectionReads {
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
-    pub(crate) usage: lash::usage::SessionUsageReport,
     pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
 }
 
@@ -187,14 +186,6 @@ pub(crate) async fn read_state_projection(
     } else {
         Vec::new()
     };
-    // Usage is engine-owned accounting, read by owner from the usage ledger
-    // (ADR 0125): the same lease-free durable read, independent of the head.
-    let usage = state
-        .core
-        .owner_usage(&lash::RuntimeOwner::Session(session_id.clone()))
-        .await
-        .map_err(AppError::internal)?
-        .report();
     let mut turn_failure_settlements = Vec::new();
     if session_present {
         let mut after = None;
@@ -221,7 +212,6 @@ pub(crate) async fn read_state_projection(
         pending_turn_inputs,
         queued_work,
         turn_input_applications,
-        usage,
         turn_failure_settlements,
     })
 }

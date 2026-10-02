@@ -227,11 +227,8 @@ Store laws use SQLite file, SQLite memory, and PostgreSQL. Host laws use the
 in-process Restate server double, live Restate, and lash-sim's in-process effect
 host. Upgrade proofs use synthetic-next.
 
-## Model usage accounting
+## Model usage
 
-The pre-journal limit is an explicit liability, not silent loss. A provider
-attempt is dispatched only under an admitted usage meter, so a charge the
-journal cannot describe (a body re-run after an unrecorded fault, an execution
-killed between its entry and its send, facts too large to journal beside a
-poison entry) is an `unknown` run with a reason, readable through
-`LashCore::owner_usage` ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

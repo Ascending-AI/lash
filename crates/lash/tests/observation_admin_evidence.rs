@@ -666,32 +666,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::tracing::TraceTokenUsage| {
         let _ = &value.reasoning_output_tokens;
     });
-    // W0169: lash::usage::SessionUsageReport [struct]
-    type_witness::<lash::usage::SessionUsageReport>();
-    // W0170: lash::usage::SessionUsageReport::by_requested_model [field]
-    field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.by_requested_model;
-    });
-    // W0171: lash::usage::SessionUsageReport::by_source [field]
-    field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.by_source;
-    });
-    // W0172: lash::usage::SessionUsageReport::by_attribution [field]
-    field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.by_attribution;
-    });
-    // W0173: lash::usage::SessionUsageReport::entry_count [field]
-    field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.entry_count;
-    });
-    // W0175: lash::usage::SessionUsageReport::saturated [field]
-    field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.saturated;
-    });
-    // W0176: lash::usage::SessionUsageReport::usage [field]
-    field_witness(|value: &lash::usage::SessionUsageReport| {
-        let _ = &value.usage;
-    });
     // W0179: lash::usage::TokenUsage::checked_add [function]
     let _ = lash::usage::TokenUsage::checked_add;
     // W0180: lash::usage::TokenUsage::checked_input_total [function]
@@ -704,30 +678,6 @@ fn drain_area_witnesses() {
     type_witness::<lash::usage::TokenUsageOverflow>();
     // W0184: lash::usage::TokenUsageOverflow::counter [function]
     let _ = lash::usage::TokenUsageOverflow::counter;
-    // W0185: lash::usage::UsageReportRow [struct]
-    type_witness::<lash::usage::UsageReportRow>();
-    // W0186: lash::usage::UsageReportRow::requested_model [field]
-    field_witness(|value: &lash::usage::UsageReportRow| {
-        let _ = &value.requested_model;
-    });
-    // W0187: lash::usage::UsageReportRow::source [field]
-    field_witness(|value: &lash::usage::UsageReportRow| {
-        let _ = &value.source;
-    });
-    // W0188: lash::usage::UsageReportRow::usage [field]
-    field_witness(|value: &lash::usage::UsageReportRow| {
-        let _ = &value.usage;
-    });
-    // W0189: lash::usage::UsageTotals [struct]
-    type_witness::<lash::usage::UsageTotals>();
-    // W0190: lash::usage::UsageTotals::total_tokens [field]
-    field_witness(|value: &lash::usage::UsageTotals| {
-        let _ = &value.total_tokens;
-    });
-    // W0191: lash::usage::UsageTotals::usage [field]
-    field_witness(|value: &lash::usage::UsageTotals| {
-        let _ = &value.usage;
-    });
     // W0198: lash::persistence::SessionCursorError [enum]
     type_witness::<lash::persistence::SessionCursorError>();
     // W0199: lash::persistence::SessionCursorError::Malformed [variant]

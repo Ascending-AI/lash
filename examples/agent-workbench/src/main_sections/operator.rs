@@ -19,18 +19,6 @@ pub(crate) fn operator_routes() -> Router<AppState> {
         .route("/api/admin/obligations/{kind}", get(operator_stalls))
         .route("/api/admin/obligations/rearm", post(operator_rearm))
         .route(
-            "/api/admin/sessions/{session_id}/usage/facts",
-            get(operator_usage_facts),
-        )
-        .route(
-            "/api/admin/sessions/{session_id}/usage/meters",
-            get(operator_usage_meters),
-        )
-        .route(
-            "/api/admin/sessions/{session_id}/usage/reconcile",
-            post(operator_usage_reconcile),
-        )
-        .route(
             "/api/admin/sessions/{session_id}/commands",
             post(operator_command_submit),
         )
@@ -374,52 +362,6 @@ pub(crate) async fn operator_rearm(
     Ok(Json(
         json!({"rearmed": state.core.rearm_obligation(request.kind, &request.id).await?}),
     ))
-}
-
-pub(crate) async fn operator_usage_facts(
-    State(state): State<AppState>,
-    AxumPath(session_id): AxumPath<SessionId>,
-    Query(page): Query<OperatorPageQuery>,
-) -> Result<Json<Value>, OperatorError> {
-    authorize_operator(&state)?;
-    Ok(Json(json!(
-        state
-            .core
-            .usage_fact_page(
-                &lash::RuntimeOwner::Session(session_id),
-                page.cursor::<lash::usage::UsageFactCursor>()?.as_ref(),
-                page.limit()?
-            )
-            .await?
-    )))
-}
-pub(crate) async fn operator_usage_meters(
-    State(state): State<AppState>,
-    AxumPath(session_id): AxumPath<SessionId>,
-    Query(page): Query<OperatorPageQuery>,
-) -> Result<Json<Value>, OperatorError> {
-    authorize_operator(&state)?;
-    Ok(Json(json!(
-        state
-            .core
-            .usage_meter_page(
-                &lash::RuntimeOwner::Session(session_id),
-                lash::usage::UsageMeterFilter::All,
-                page.cursor::<lash::usage::UsageMeterCursor>()?.as_ref(),
-                page.limit()?
-            )
-            .await?
-    )))
-}
-pub(crate) async fn operator_usage_reconcile(
-    State(state): State<AppState>,
-    AxumPath(session_id): AxumPath<SessionId>,
-) -> Result<Json<Value>, OperatorError> {
-    authorize_operator(&state)?;
-    let session = state
-        .open_session(&session_id, "operator_usage_reconcile")
-        .await?;
-    Ok(Json(json!(session.reconcile_unreported_usage().await?)))
 }
 
 #[derive(Deserialize)]

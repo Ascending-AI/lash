@@ -137,8 +137,6 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
     let session = core.session("session-ops").created().await.open().await?;
 
     session.send(TurnInput::text("usage")).output().await?;
-    let usage = settled_usage(&session).await?.report();
-    assert_eq!(usage.usage.usage.output_tokens, 2);
     Box::pin(
         session
             .admin()
@@ -991,7 +989,6 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         let _ = session.session_id();
         let _ = session.policy_snapshot();
         let _ = session.read_view();
-        let _ = session.usage().await?;
         let _ = session.admin().tools().state().await?;
         let _ = session.admin().tools().active_manifests().await?;
         let (_plugin_id, query_output) = session
@@ -1256,15 +1253,7 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 
     let observed = session.observe();
     assert_eq!(observed.read_view().messages().len(), 2);
-    assert_eq!(
-        settled_usage(&session)
-            .await?
-            .report()
-            .usage
-            .usage
-            .output_tokens,
-        2
-    );
+
     assert_eq!(observed.policy_snapshot().wire_model(), Some("mock-model"));
     Ok(())
 }

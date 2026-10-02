@@ -40,12 +40,6 @@ DROP TABLE IF EXISTS lash_graph_nodes CASCADE;
 
 DROP TABLE IF EXISTS lash_fork_lineage CASCADE;
 
-DROP TABLE IF EXISTS lash_usage_facts CASCADE;
-
-DROP TABLE IF EXISTS lash_usage_meters CASCADE;
-
-DROP TABLE IF EXISTS lash_usage_owner_retirements CASCADE;
-
 DROP TABLE IF EXISTS lash_session_meta CASCADE;
 
 DROP TABLE IF EXISTS lash_session_meta_pending_observer_intents CASCADE;

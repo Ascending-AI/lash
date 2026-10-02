@@ -24,7 +24,7 @@ fn workbench_ui_exposes_attachment_and_usage_affordances() {
         "Image unavailable · open original",
         "id=\"usageTotal\"",
         "id=\"usageBreakdown\"",
-        "renderUsage(state.usage)",
+        "renderUsageCounters(projectedUsage())",
     ] {
         assert!(
             ui::INDEX_HTML.contains(contract),
@@ -268,7 +268,6 @@ async fn run_attachment_usage_gate(
     .await
     .expect("read pre-restart workbench state API");
     assert_snapshot_attachment(&before_restart, &uploaded.attachment.id);
-    assert_usage_report_consistent(&before_restart.usage);
     let call_usage = completed_llm_call_usage(&trace_path);
     assert_eq!(call_usage.len(), 1);
     let call_total = call_usage.iter().map(trace_usage_total).sum::<i64>();
@@ -276,8 +275,6 @@ async fn run_attachment_usage_gate(
         call_total > 0,
         "the deterministic LLM call must report usage"
     );
-    assert!(before_restart.usage.usage.total_tokens >= call_total);
-    let persisted_usage = before_restart.usage.clone();
     let attachment_id = uploaded.attachment.id.clone();
     drop(state);
     drop(attachment_store);
@@ -306,12 +303,10 @@ async fn run_attachment_usage_gate(
     .await
     .expect("read post-restart workbench state API");
     assert_snapshot_attachment(&after_restart, &attachment_id);
-    assert_eq!(after_restart.usage, persisted_usage);
-    assert_usage_report_consistent(&after_restart.usage);
 
     println!(
         "workbench attachment/usage gate passed: session={session_id} attachment={attachment_id} total_tokens={}",
-        after_restart.usage.usage.total_tokens
+        call_total
     );
 }
 
@@ -446,23 +441,6 @@ async fn assert_retrieved_attachment(
         .await
         .expect("read retrieved attachment body");
     assert_eq!(bytes.as_ref(), expected);
-}
-
-fn assert_usage_report_consistent(report: &lash::usage::SessionUsageReport) {
-    assert!(report.entry_count > 0);
-    assert!(report.usage.total_tokens > 0);
-    assert!(report.usage.usage.input_tokens > 0);
-    assert!(report.usage.usage.output_tokens > 0);
-    let rows_total = report
-        .by_attribution
-        .values()
-        .map(|row| row.total_tokens)
-        .sum::<i64>();
-    assert_eq!(report.usage.total_tokens, rows_total);
-    assert!(report.by_attribution.len() <= report.entry_count);
-    for row in report.by_attribution.values() {
-        assert!(report.usage.total_tokens >= row.total_tokens);
-    }
 }
 
 fn completed_llm_call_usage(trace_path: &std::path::Path) -> Vec<lash::tracing::TraceTokenUsage> {

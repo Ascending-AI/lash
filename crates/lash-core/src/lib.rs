@@ -254,7 +254,6 @@ pub mod facade_support {
     pub use crate::provider::ProviderComponents;
     pub use crate::provider::ProviderHandle;
     pub use crate::provider::ProviderOptions;
-    pub use crate::provider::ReconciledUsage;
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::AssistantOutput;
@@ -299,7 +298,7 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkKind;
-    pub use crate::runtime::ReconciledUsageAttempt;
+
     pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeEnvironment;
@@ -314,7 +313,7 @@ pub mod facade_support {
     pub use crate::runtime::SessionObservationSubscription;
     pub use crate::runtime::SessionResume;
     pub use crate::runtime::SessionScopeId;
-    pub use crate::runtime::SessionUsageReport;
+
     pub use crate::runtime::SystemClock;
     pub use crate::runtime::TerminationPolicy;
     pub use crate::runtime::TurnActivitySink;
@@ -344,17 +343,13 @@ pub mod facade_support {
     pub use crate::runtime::TurnLaneAdmissionPolicy;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
-    pub use crate::runtime::UsageAttributionKey;
-    pub use crate::runtime::UsageReconciliationReport;
-    pub use crate::runtime::UsageReportRow;
-    pub use crate::runtime::UsageTotals;
+
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
     pub use crate::runtime::WeakRuntimeHandle;
     pub use crate::runtime::await_event_identity;
     pub use crate::runtime::current_epoch_ms;
-    pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::process_signal_event_type;
@@ -876,6 +871,14 @@ pub mod core_internal {
     };
 }
 
+pub use lash_core_execution::{
+    AttachmentRetentionFailure, AttachmentRetentionStoreFailure, CompletedToolCall, Response,
+    ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentRealized,
+    ToolIntentRefusalReason, ToolIntentRuntimeFailure,
+};
+
+pub use lash_core_execution::{EffectAttempt, RecordedEffectExecution};
+
 #[cfg(test)]
 mod attachments_tests;
 
@@ -898,18 +901,3 @@ mod tests {
         assert!(err.to_string().contains("kind"), "unexpected error: {err}");
     }
 }
-
-/// Engine-owned usage accounting (ADR 0125): the store's ledger vocabulary
-/// and the kernel's usage meter, under one path.
-pub mod usage_accounting {
-    pub use lash_core_execution::usage_accounting::*;
-    pub use lash_core_store::usage_accounting::*;
-}
-pub use lash_core_execution::UsageAccountingStore;
-pub use usage_accounting::*;
-
-pub use lash_core_execution::{
-    AttachmentRetentionFailure, AttachmentRetentionStoreFailure, CompletedToolCall, Response,
-    ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentRealized,
-    ToolIntentRefusalReason, ToolIntentRuntimeFailure,
-};

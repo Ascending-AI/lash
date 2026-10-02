@@ -1,18 +1,16 @@
 {
   "scenario": "service-LashSession",
   "service": "LashSession",
-  "recorded_at_git_sha": "6b665cd0a405d3abe245d6473eb5085ab2d79add",
-  "format": "lash-restate service handler journals v1; per handler, each distinct ordered command sequence its invocations wrote on the server double, minted ids elided as #",
-  "journal_logic_epoch": 1,
+  "generation": "5bc550dad153",
   "handlers": {
-    "drive": [
+    "shift": [
       [
         "InputCommand",
-        "RunCommand lash.drive.leg",
-        "RunCommand lash:drive-admission:ingress:ti:#:1#0",
+        "RunCommand lash.shift.leg",
+        "RunCommand lash:shift-admission:ingress:ti:#:1#0",
         "CallCommand LashTurn/run",
-        "RunCommand lash.drive.boundary",
-        "RunCommand lash:drive-admission:ingress:ti:#:1#1",
+        "RunCommand lash.shift.boundary",
+        "RunCommand lash:shift-admission:ingress:ti:#:1#1",
         "OutputCommand"
       ]
     ]

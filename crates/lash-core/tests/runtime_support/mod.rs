@@ -46,27 +46,6 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteStoreSet
     backend
 }
 
-/// A fresh Restate server double under `seed` with `config`: lash-restate's
-/// engine over a SQLite memory store set, the twin of [`sqlite_recording_backend`] for a
-/// kernel test whose effects run on an engine. Hold the double to the end of
-/// the test and never build a core over the handle itself (FIG-3723); a turn
-/// runs on `double.open_handler(scope)`'s scoped controller.
-/// The runtime owner's usage once every run it admitted is resolved: the
-/// engine delivers each spending effect's settlement after the effect is
-/// journaled, asynchronously to the turn (ADR 0125).
-pub(crate) async fn settled_runtime_usage(
-    runtime: &lash_core::runtime::LashRuntime,
-) -> lash_core::OwnerUsage {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let usage = runtime.usage().await.expect("read the owner's usage");
-        if usage.completeness.is_settled() || std::time::Instant::now() >= deadline {
-            return usage;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
-
 pub(crate) async fn kernel_double(
     seed: u64,
     config: lash_restate_test::ServerConfig,

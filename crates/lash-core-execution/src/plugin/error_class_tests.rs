@@ -38,6 +38,13 @@ fn cancel(actor: &str) -> Box<crate::CancelRequest> {
 }
 
 plugin_error_samples! {
+    ProviderFailure { .. } => PluginError::ProviderFailure {
+        kind: crate::ProviderFailureKind::Quota,
+        code: Some(crate::FailureCode::provider("host_spend_cap")),
+        retryable: false,
+        terminal_reason: crate::LlmTerminalReason::ProviderError,
+        message: "host spend cap reached".into(),
+    },
     UnusableSchema { .. } => PluginError::UnusableSchema {
         source: Box::new(crate::JsonSchema::admit(serde_json::Value::Null)
             .expect_err("null cannot be admitted as a schema")),
@@ -252,6 +259,13 @@ plugin_error_samples! {
 /// every store error as the plugin boundary carries it.
 fn samples() -> Vec<PluginError> {
     let mut samples = one_of_every_variant();
+    samples.push(PluginError::ProviderFailure {
+        kind: crate::ProviderFailureKind::Transport,
+        code: Some(crate::FailureCode::provider("transport")),
+        retryable: true,
+        terminal_reason: crate::LlmTerminalReason::ProviderError,
+        message: "recorded transport failure".into(),
+    });
     for code in [
         RuntimeErrorCode::RuntimeStore,
         RuntimeErrorCode::StoreCommitSuperseded,

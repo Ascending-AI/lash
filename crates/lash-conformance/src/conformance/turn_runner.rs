@@ -68,23 +68,6 @@ pub enum ConformanceTurnEnd {
 }
 
 impl ConformanceTurnEnd {
-    /// How a turn ended when its run has durable terminal evidence.
-    /// A matching recorded refusal ends the run even when its error code
-    /// alone describes a redrivable operation, such as a superseded commit.
-    pub(crate) fn of_run<T>(
-        turn: &Result<T, crate::RuntimeError>,
-        terminal: Option<&crate::store::RunTerminal>,
-    ) -> Self {
-        if let Err(error) = turn
-            && let Some(terminal) = terminal
-            && let crate::store::RunTerminalCause::Refused { code, .. } = &terminal.cause
-            && code == &error.code
-        {
-            return Self::Settled;
-        }
-        Self::of(turn)
-    }
-
     /// How a turn that returned `turn` ended.
     pub fn of<T>(turn: &Result<T, crate::RuntimeError>) -> Self {
         match turn {

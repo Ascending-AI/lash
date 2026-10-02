@@ -8,7 +8,7 @@
 //!   restored once;
 //! * a cancel-decided child's settlement applies nothing: no possession is
 //!   granted and no messages are enqueued. Its spend is its own `ToolAttempt`
-//!   run's, delivered by the engine (ADR 0125), never the settlement's;
+//!   run's, delivered by the engine (ADR 0127), never the settlement's;
 //! * the incorporation ledger survives the boundary it travels with: a
 //!   successor context restored from the handover snapshot refuses to
 //!   re-apply a settlement the predecessor already incorporated.

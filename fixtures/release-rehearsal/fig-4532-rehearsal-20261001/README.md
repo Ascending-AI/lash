@@ -17,3 +17,8 @@ FIG-4805 adds the eleven `service-<Service>` handler journals beside them,
 recorded at `6b665cd0a405d3abe245d6473eb5085ab2d79add` from the real handlers
 on the server double. They are not part of the FIG-4532 capture; the cut
 regenerates the whole corpus.
+
+FIG-4852 regenerates the ten service journals from the current handlers and
+removes the accounting service. The three original FIG-4532 controller
+journals remain the captured historical evidence; the service journals are
+the current preparation corpus, generated with the replay-corpus writer.

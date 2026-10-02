@@ -488,7 +488,6 @@ pub(crate) async fn run_once_writer_contention(
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
-    let cumulative_usage = runtime.settled_usage_report().await?;
 
     for session in peer_sessions {
         session.close().await?;
@@ -515,8 +514,6 @@ pub(crate) async fn run_once_writer_contention(
         memory: memory_span(after_build_memory, after_turn_memory),
         phase_profile: phase_profile.clone(),
         turn_usage: TokenUsage::default(),
-        usage_delta: SessionUsageReport::default(),
-        cumulative_usage: cumulative_usage.clone(),
     };
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),
@@ -564,7 +561,6 @@ pub(crate) async fn run_once_writer_contention(
         memory: memory_span(before_memory, after_export_memory),
         phase_profile,
         turns: vec![turn],
-        cumulative_usage,
     })
 }
 
@@ -675,7 +671,6 @@ pub(crate) async fn run_once_async_process_settlement(
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
     let state = runtime.export_state().await;
-    let cumulative_usage = runtime.settled_usage_report().await?;
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
@@ -704,8 +699,6 @@ pub(crate) async fn run_once_async_process_settlement(
         memory: memory_span(after_build_memory, after_turn_memory),
         phase_profile: phase_profile.clone(),
         turn_usage: turn.usage,
-        usage_delta: cumulative_usage.clone(),
-        cumulative_usage: cumulative_usage.clone(),
     };
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),
@@ -759,7 +752,6 @@ pub(crate) async fn run_once_async_process_settlement(
         memory: memory_span(before_memory, after_export_memory),
         phase_profile,
         turns: vec![turn_result],
-        cumulative_usage,
     })
 }
 
@@ -1277,8 +1269,6 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         memory: memory_span(after_seed_memory, after_turn_memory),
         phase_profile: phase_profile.clone(),
         turn_usage: TokenUsage::default(),
-        usage_delta: SessionUsageReport::default(),
-        cumulative_usage: SessionUsageReport::default(),
     };
 
     drop(store);
@@ -1335,6 +1325,5 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         memory: memory_span(before_memory, after_export_memory),
         phase_profile,
         turns: vec![turn],
-        cumulative_usage: SessionUsageReport::default(),
     })
 }

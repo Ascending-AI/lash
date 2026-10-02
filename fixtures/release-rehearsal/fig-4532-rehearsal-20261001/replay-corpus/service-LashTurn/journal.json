@@ -1,30 +1,28 @@
 {
   "scenario": "service-LashTurn",
   "service": "LashTurn",
-  "recorded_at_git_sha": "6b665cd0a405d3abe245d6473eb5085ab2d79add",
-  "format": "lash-restate service handler journals v1; per handler, each distinct ordered command sequence its invocations wrote on the server double, minted ids elided as #",
-  "journal_logic_epoch": 1,
+  "generation": "5bc550dad153",
   "handlers": {
     "close": [
       [
         "InputCommand",
-        "RunCommand lash:drive-close:replay-corpus-turn",
+        "RunCommand lash:shift-close:replay-corpus-turn",
         "OutputCommand"
       ]
     ],
     "run": [
       [
         "InputCommand",
-        "RunCommand lash:drive-root-start:ingress:ti:#:1#0",
-        "RunCommand lash:drive-seal:ingress:ti:#:1#0",
-        "RunCommand lash:drive-admit:replay-corpus-turn",
-        "RunCommand lash:drive-head:replay-corpus-turn",
+        "RunCommand lash:shift-run-start:ingress:ti:#:1#0",
+        "RunCommand lash:shift-seal:ingress:ti:#:1#0",
+        "RunCommand lash:shift-admit:replay-corpus-turn",
+        "RunCommand lash:shift-head:replay-corpus-turn",
+        "RunCommand lash:plugin-transition:replay-corpus-turn",
         "RunCommand lash:turn-config:replay-corpus-turn",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:sync_execution_environment:1",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:before_llm_call:2",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:0:llm_call:2",
-        "OneWayCallCommand LashUsageAccounting/settle",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:requests",
         "CallCommand EffectGroupIndex/probe",
@@ -42,9 +40,9 @@
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:checkpoint:4",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:sync_execution_environment:5",
+        "RunCommand lash:drain-mark:replay-corpus-turn:1",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:before_llm_call:6",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:llm_call:6",
-        "OneWayCallCommand LashUsageAccounting/settle",
         "CallCommand LashDurableWaitIndex/peek_turn_gate",
         "RunCommand lash:replay-corpus-session:replay-corpus-turn:1:1:checkpoint:7",
         "CallCommand LashDurableWaitIndex/resolve",

@@ -183,11 +183,8 @@ needs its own implementation of the neutral contracts and their laws. The
 server double can differ from the live invoker, so live-server coverage remains
 necessary even when a controller law passes on the double.
 
-## Model usage accounting
+## Model usage
 
-§3 has an obligation row, **Accounting continuation**. Contract: a spending
-effect's recorded usage facts reach storage once, independently of how its
-execution ends. Restate: a detached one-way `settle` send to the
-`LashUsageAccounting` virtual object, keyed by owner, journaled right after
-the effect's entry; per-owner FIFO order makes the execution retirement and
-the owner drain exact ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

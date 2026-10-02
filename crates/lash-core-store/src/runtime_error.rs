@@ -521,15 +521,6 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolChildRequestOpener,
     RuntimeEffectToolChildRequestVersion,
     RuntimeEffectToolSettlementVersion,
-    /// A provider call was dispatched outside any spending effect's usage meter
-    /// (ADR 0125): nothing would account for it, so it is refused before
-    /// dispatch.
-    UsageMeterMissing,
-    /// Admitting a spending effect's usage meter to storage failed. The attempt
-    /// ends retryably and journals nothing; the engine runs it again.
-    UsageAdmissionFault,
-    /// The accounting owner is retired; no further provider dispatch may spend under it.
-    UsageOwnerRetired,
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
@@ -818,9 +809,6 @@ impl RuntimeErrorCode {
                 "runtime_effect_tool_child_request_admission"
             }
             Self::RuntimeEffectToolChildRequestOpener => "runtime_effect_tool_child_request_opener",
-            Self::UsageMeterMissing => "usage_meter_missing",
-            Self::UsageAdmissionFault => "usage_admission_fault",
-            Self::UsageOwnerRetired => "usage_owner_retired",
             Self::RuntimeEffectToolChildRequestVersion => {
                 "runtime_effect_tool_child_request_version"
             }
@@ -1114,9 +1102,6 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectToolChildRequestAdmission
             }
             "runtime_effect_tool_child_request_opener" => Self::RuntimeEffectToolChildRequestOpener,
-            "usage_meter_missing" => Self::UsageMeterMissing,
-            "usage_admission_fault" => Self::UsageAdmissionFault,
-            "usage_owner_retired" => Self::UsageOwnerRetired,
             "runtime_effect_tool_child_request_version" => {
                 Self::RuntimeEffectToolChildRequestVersion
             }
@@ -1422,7 +1407,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::VmWorker { .. }
+            RuntimeErrorCause::ProviderFailure { .. }
+            | RuntimeErrorCause::VmWorker { .. }
             | RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::Compat { .. }
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }

@@ -96,7 +96,6 @@ pub(crate) struct StateSnapshot {
     /// the fact by anything reading `/api/state`, not only by whoever was
     /// watching the page in the second the note first appeared.
     pub(crate) unknown_turn_terminals: Vec<UnknownTurnTerminal>,
-    pub(crate) usage: lash::usage::SessionUsageReport,
     pub(crate) pending_approvals: Vec<approvals::PendingApproval>,
 }
 

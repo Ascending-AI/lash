@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use lash::usage::SessionUsageReport;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
 use lash_core::runtime::{

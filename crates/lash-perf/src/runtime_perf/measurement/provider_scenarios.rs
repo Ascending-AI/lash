@@ -52,7 +52,6 @@ pub(super) async fn run_once_openai_responses_sse_parse(
                     tail: TurnTail {
                         phase_profile,
                         turn_usage: token_usage_from_llm_usage(state.usage()),
-                        ..TurnTail::default()
                     },
                 })
             },

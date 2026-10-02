@@ -172,5 +172,5 @@ captured_ports! {
     generation_drain: crate::store::generation_drain::GenerationDrainStore,
     artifact_cleanup: crate::store::ArtifactCleanupLedger,
     session_delete_ledger: crate::store::session_delete::SessionDeleteLedger,
-    usage_accounting: crate::UsageAccountingStore,
+
 }

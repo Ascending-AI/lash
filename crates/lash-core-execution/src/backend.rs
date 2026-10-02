@@ -227,11 +227,6 @@ impl Backend {
         self.stores().generation_drain()
     }
 
-    /// Owner-scoped accounting, independent of conversation commits.
-    pub fn usage_accounting(&self) -> Arc<dyn crate::UsageAccountingStore> {
-        self.stores().usage_accounting()
-    }
-
     /// The store set's obligation ledger of `kind`.
     pub fn obligation_ledger(
         &self,
@@ -291,8 +286,6 @@ impl std::fmt::Debug for Backend {
 /// one. Every accessor hands out a handle on the store set's one instance of
 /// that port.
 pub trait StoreSet: Send + Sync {
-    /// Owner-scoped usage facts and dispatch liabilities.
-    fn usage_accounting(&self) -> Arc<dyn crate::UsageAccountingStore>;
     /// The identity of this store set's storage.
     fn binding_identity(&self) -> &StoreBindingId;
 

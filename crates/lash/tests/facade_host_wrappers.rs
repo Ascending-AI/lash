@@ -171,10 +171,6 @@ impl lash::StoreSet for HostStores {
     fn worker_recovery(&self) -> Arc<dyn lash::persistence::WorkerRecoveryStore> {
         self.inner.worker_recovery()
     }
-
-    fn usage_accounting(&self) -> Arc<dyn lash::persistence::UsageAccountingStore> {
-        self.inner.usage_accounting()
-    }
 }
 
 // ---- the host ---------------------------------------------------------------

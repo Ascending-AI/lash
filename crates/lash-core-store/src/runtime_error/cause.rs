@@ -20,6 +20,13 @@ pub enum RuntimeErrorCause {
     PluginStateEffectReplayMismatch {
         plugin: String,
     },
+    /// A completed provider call's refusal, retained through plugin and host errors.
+    ProviderFailure {
+        failure_kind: lash_sansio::llm::types::ProviderFailureKind,
+        code: Option<lash_sansio::FailureCode>,
+        retryable: bool,
+        terminal_reason: lash_sansio::llm::types::LlmTerminalReason,
+    },
     /// A typed worker failure retained through protocol and host errors.
     VmWorker {
         outcome: Box<lash_vm_protocol::InfrastructureOutcome>,

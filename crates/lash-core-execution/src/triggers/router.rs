@@ -1257,7 +1257,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for OccurrenceIn
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::IngestTriggerOccurrence { request } = envelope.command
         else {
@@ -1292,7 +1292,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for DeliveryBind
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
             return Err(wrong_command("trigger delivery bind", &envelope));
@@ -1325,7 +1325,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for BoundDeliver
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let crate::RuntimeEffectCommand::AdmitTriggerDelivery { .. } = &envelope.command else {
             return Err(wrong_command("trigger delivery admission", &envelope));

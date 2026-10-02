@@ -486,10 +486,7 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
     let mut provider =
         fixed_texts_provider("lash-sim-fixed-text-guard", vec!["facade response text"]);
     let response = provider
-        .complete(
-            openai_compatible_request(false),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(openai_compatible_request(false))
         .await
         .expect("fixed text provider response");
 
@@ -507,10 +504,7 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
 async fn rlm_final_value_provider_response_shape_mutation_guard() {
     let mut provider = rlm_final_value_provider();
     let response = provider
-        .complete(
-            openai_compatible_request(true),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(openai_compatible_request(true))
         .await
         .expect("rlm final-value provider response");
 
@@ -525,10 +519,7 @@ async fn rlm_final_value_provider_response_shape_mutation_guard() {
 async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     let mut provider = pending_tool_roundtrip_provider();
     let tool_response = provider
-        .complete(
-            openai_compatible_request(false),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(openai_compatible_request(false))
         .await
         .expect("pending tool provider tool-call response");
     assert!(
@@ -541,10 +532,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
     );
 
     let final_response = provider
-        .complete(
-            openai_compatible_request(false),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(openai_compatible_request(false))
         .await
         .expect("pending tool provider final response");
     assert_eq!(final_response.full_text(), "done");

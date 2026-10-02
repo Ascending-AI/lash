@@ -313,13 +313,6 @@ pub fn stage_execution_state_components(
 type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
 type CompletionFn = dyn Fn(LlmRequest) -> CompletionFuture + Send + Sync;
-type ReconciliationFuture = Pin<
-    Box<
-        dyn Future<Output = Result<Option<crate::provider::ReconciledUsage>, LlmTransportError>>
-            + Send,
-    >,
->;
-type ReconcileFn = dyn Fn(String) -> ReconciliationFuture + Send + Sync;
 type SerializeConfigFn = dyn Fn() -> serde_json::Value + Send + Sync;
 
 fn empty_provider_config() -> serde_json::Value {
@@ -336,9 +329,6 @@ pub struct TestProvider {
     options: ProviderOptions,
     serialize_config: Arc<SerializeConfigFn>,
     complete: Arc<CompletionFn>,
-    /// Host-invoked usage reconciliation (FIG-2765). Defaults to "this provider
-    /// keeps no generation records", the trait default.
-    reconcile: Arc<ReconcileFn>,
 }
 
 impl std::fmt::Debug for TestProvider {
@@ -387,7 +377,6 @@ impl TestProviderBuilder {
                         ))
                     })
                 }),
-                reconcile: Arc::new(|_generation_id| Box::pin(async { Ok(None) })),
             },
         }
     }
@@ -430,18 +419,6 @@ impl TestProviderBuilder {
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
         self.provider.complete = Arc::new(move |request| Box::pin(complete(request)));
-        self
-    }
-
-    /// Answer host-invoked usage reconciliation for a generation id.
-    pub fn reconcile_usage<F, Fut>(mut self, reconcile: F) -> Self
-    where
-        F: Fn(String) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Option<crate::provider::ReconciledUsage>, LlmTransportError>>
-            + Send
-            + 'static,
-    {
-        self.provider.reconcile = Arc::new(move |generation_id| Box::pin(reconcile(generation_id)));
         self
     }
 
@@ -492,20 +469,13 @@ impl Provider for TestProvider {
         // A scripted answer that carries counters is one its provider
         // reported, and a real provider reports them beside its own raw usage
         // record: without one the attempt is unreported by the provider
-        // (ADR 0031), and its usage is no accounting fact (ADR 0125).
+        // (ADR 0031).
         if response.provider_usage.is_none()
             && response.usage != crate::llm::types::LlmUsage::default()
         {
             response.provider_usage = serde_json::to_value(&response.usage).ok();
         }
         Ok(response)
-    }
-
-    async fn reconcile_usage(
-        &mut self,
-        generation_id: &str,
-    ) -> Result<Option<crate::provider::ReconciledUsage>, LlmTransportError> {
-        (self.reconcile)(generation_id.to_string()).await
     }
 
     fn generation_retry_guarantee(

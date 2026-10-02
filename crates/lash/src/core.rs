@@ -1109,7 +1109,7 @@ impl LashCoreBuilder {
     /// provider task is aborted. The drain lets a cooperative provider's
     /// trailing usage event land on the aborted attempt; past the grace the
     /// attempt is sealed with a typed unreported usage disposition and the
-    /// turn's usage ledger records the hole. Defaults to 2 seconds.
+    /// recorded attempt preserves that disposition. Defaults to 2 seconds.
     pub fn abort_drain_grace(mut self, grace: std::time::Duration) -> Self {
         self.abort_drain_grace = Some(grace);
         self
@@ -1427,54 +1427,6 @@ impl LashCore {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.live_replay_store.current_cursor(session_id, revision)
-    }
-
-    /// The model usage of one owner (a session or a process), read from the
-    /// deployment's usage ledger (ADR 0125).
-    ///
-    /// Like [`Self::sessions`], it opens no session and executes nothing, so it
-    /// answers for a live, parked, refused, deleted-but-retained or
-    /// pruned-but-retained owner alike.
-    pub async fn owner_usage(
-        &self,
-        owner: &lash_core::RuntimeOwner,
-    ) -> Result<lash_core::OwnerUsage> {
-        self.backend
-            .usage_accounting()
-            .load_owner_usage(owner)
-            .await
-            .map_err(Into::into)
-    }
-
-    /// One page of an owner's usage facts in ledger order. `next` is `Some`
-    /// only when more facts exist.
-    pub async fn usage_fact_page(
-        &self,
-        owner: &lash_core::RuntimeOwner,
-        after: Option<&lash_core::UsageFactCursor>,
-        limit: std::num::NonZeroU32,
-    ) -> Result<lash_core::UsageFactPage> {
-        self.backend
-            .usage_accounting()
-            .load_usage_fact_page(owner, after, limit)
-            .await
-            .map_err(Into::into)
-    }
-
-    /// One page of an owner's usage meters: the admitted dispatch liabilities,
-    /// filtered by `filter`. `next` is `Some` only when more runs exist.
-    pub async fn usage_meter_page(
-        &self,
-        owner: &lash_core::RuntimeOwner,
-        filter: lash_core::UsageMeterFilter,
-        after: Option<&lash_core::UsageMeterCursor>,
-        limit: std::num::NonZeroU32,
-    ) -> Result<lash_core::UsageMeterPage> {
-        self.backend
-            .usage_accounting()
-            .load_usage_meter_page(owner, filter, after, limit)
-            .await
-            .map_err(Into::into)
     }
 
     /// Enumerate every durable session catalog entry.

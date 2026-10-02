@@ -38,7 +38,6 @@ mod session_affinity_tests;
 mod sessions;
 mod strict_tool_omission_tests;
 mod tool_result_shape_tests;
-mod usage_reconciliation_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 
@@ -1867,13 +1866,7 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     let mut req = request(Vec::new());
     req.model.metadata_mut().wire_model = "openrouter/auto".to_string();
 
-    let completion = handle
-        .complete(
-            req,
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
-        .await
-        .expect("retry succeeds");
+    let completion = handle.complete(req).await.expect("retry succeeds");
     assert_eq!(completion.call_record.attempts.len(), 2);
     let failed = &completion.call_record.attempts[0];
     assert_eq!(failed.outcome, lash_core::AttemptOutcome::Failed);
@@ -2081,10 +2074,9 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
         .await;
 
     assert_eq!(
@@ -2119,10 +2111,9 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let result = handle
-        .complete(
-            streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
         .await;
 
     assert_eq!(
@@ -2190,13 +2181,14 @@ async fn response_metadata_buffered_sse_body_capture_is_last_wins() {
 #[tokio::test]
 async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
     let body = concat!(
-        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+        "data: {\"cost\":0.000008,\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
         "data: [DONE]\n\n"
     );
     let transport = Arc::new(RecordingHttpTransport::responding_with(
         vec![
             ("content-type".to_string(), "text/event-stream".to_string()),
             ("x-opper-cost".to_string(), "0.000008".to_string()),
+            ("x-private-receipt".to_string(), "secret".to_string()),
         ],
         body,
     ));
@@ -2211,7 +2203,7 @@ async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
         .complete(capturing(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
             &["X-Opper-Cost"],
-            &[],
+            &["/cost"],
         ))
         .await
         .expect_err("missing terminal evidence returns a partial response");
@@ -2220,6 +2212,13 @@ async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
     assert_eq!(
         partial.response_metadata["header:x-opper-cost"],
         json!("0.000008")
+    );
+
+    assert_eq!(partial.response_metadata["body:/cost"], json!(0.000008));
+    assert!(
+        !partial
+            .response_metadata
+            .contains_key("header:x-private-receipt")
     );
 }
 

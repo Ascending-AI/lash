@@ -14,7 +14,6 @@ use crate::support::{
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::runtime::UsageReconciliationReport;
 use lash_core::{LiveReplayStoreError, SessionObservationEvent, facade_support::LiveReplayGap};
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
@@ -200,7 +199,6 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
-            self.core.backend.usage_accounting(),
             Arc::clone(self.core.env.core.tracing.scopes()),
         )
     }
@@ -340,7 +338,6 @@ impl SessionBuilder {
             Arc::clone(&self.core.live_replay_store),
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
-            self.core.backend.usage_accounting(),
             Arc::clone(self.core.env.core.tracing.scopes()),
         ))
     }
@@ -1092,7 +1089,6 @@ impl LashSession {
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
             self.binding.llm_profiles(),
-            self.binding.usage_accounting(),
             self.binding.trace_scopes(),
         )
     }
@@ -1117,33 +1113,6 @@ impl LashSession {
 
     pub fn read_view(&self) -> SessionReadView {
         self.runtime.observe().read_view.clone()
-    }
-
-    /// The session's model usage, read from the deployment's usage ledger
-    /// (ADR 0125): every call made for this session, by this runtime or any
-    /// other. `completeness.is_settled()` says whether every run has been
-    /// delivered; a host that reads after a turn and wants the turn's calls
-    /// counted waits for it.
-    pub async fn usage(&self) -> Result<lash_core::OwnerUsage> {
-        self.binding
-            .usage_accounting()
-            .load_owner_usage(&lash_core::RuntimeOwner::Session(SessionId::from(
-                self.runtime.observe().session_id(),
-            )))
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Ask the session's provider for the usage of every unreported attempt
-    /// the ledger holds for this session, and append one correction per
-    /// recovered generation. Host-invoked (a billing sweep, an idle hook),
-    /// never on the turn's hot path; each lookup is bounded by the provider.
-    /// Attempts the provider cannot resolve stay outstanding and return as
-    /// `unresolved`.
-    pub async fn reconcile_unreported_usage(&self) -> Result<UsageReconciliationReport> {
-        let writer = self.runtime.writer();
-        let mut runtime = writer.lock().await;
-        Ok(runtime.reconcile_unreported_usage().await?)
     }
 
     /// Install explicitly unstable internal instrumentation for this runtime.

@@ -9,9 +9,8 @@
 //! *child-local buffers* rather than wiring: the checkpoint-message queue and
 //! the trigger-outcome queue are fresh per child. A child that dropped them
 //! would take its semantic facts with it. What a child spends is not among
-//! them: each of its `ToolAttempt` effects is a spending effect whose usage meter
-//! delivers its own facts (ADR 0125), so no settlement carries usage and no
-//! incorporation charges it.
+//! them: hosts meter each provider attempt at the Provider seam (ADR 0127),
+//! so no settlement carries billing data and no incorporation charges it.
 //!
 //! On the in-process tiers the loss is already visible.
 //! `crates/lash-core-execution/src/session/process_handles.rs` explains what
@@ -88,7 +87,7 @@
 //! Facts are journaled per attempt and accumulated as the child runs, so a
 //! child cancelled before settlement leaves its attempts' captures in the
 //! journal for close to incorporate. Its spend never depended on settlement:
-//! each attempt's usage meter delivered it when the attempt was recorded.
+//! hosts meter each provider attempt before it returns (ADR 0127).
 
 use serde::{Deserialize, Serialize};
 
@@ -122,8 +121,7 @@ use crate::{PluginMessage, ProcessId};
 /// process id alone; a v7 settlement's incarnation-qualified process
 /// references are refused.
 /// Version 8 changed in place under the pre-1.0 version freeze (FIG-4236):
-/// a settlement carries no usage, because each attempt's usage meter delivers
-/// its own facts (ADR 0125).
+/// a settlement carries no usage; model results retain it (ADR 0127).
 ///
 /// version_guard(
 ///     roots(ToolSettlement),
@@ -171,7 +169,7 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 /// Version 6 carries the same minted-process-id cutover as settlement
 /// version 7.
 /// Version 6 changed in place under the pre-1.0 version freeze (FIG-4236):
-/// a capture carries no usage (ADR 0125).
+/// a capture carries no usage (ADR 0127).
 ///
 /// version_guard(
 ///     roots(ToolAttemptCapture),
@@ -222,7 +220,7 @@ impl ToolAttemptCapture {
     /// Read by the outcome's `skip_serializing_if`, so an attempt that produced
     /// no message adds no bytes to the journal and leaves the ungrouped
     /// outcome corpus byte-identical. What the attempt spent is not a
-    /// capture: the attempt's usage meter carries it (ADR 0125).
+    /// capture: hosts meter provider attempts at the Provider seam (ADR 0127).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()

@@ -1057,8 +1057,8 @@ pub async fn terminal_callback_append_does_not_deadlock(
 /// head's owner, with nothing written: the refusal hands its runtime back.
 /// Once the bound turn's boundary passed, the same runtime parks, and
 /// everything the bound turn committed stands. A host runtime holds no
-/// pending model usage to lose: the engine delivers each call's usage on
-/// its own (ADR 0125).
+/// pending billing data to lose: hosts meter provider attempts at the
+/// Provider seam (ADR 0127).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

@@ -71,8 +71,6 @@ impl SpanMeter {
 pub(crate) struct TurnTail {
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     pub(crate) turn_usage: TokenUsage,
-    pub(crate) usage_delta: SessionUsageReport,
-    pub(crate) cumulative_usage: SessionUsageReport,
 }
 
 pub(crate) struct TurnRun<T> {
@@ -106,7 +104,6 @@ pub(crate) struct RunTail {
     /// measuring work after the last recorded stage boundary.
     pub(crate) total_alloc: Option<RuntimePerfAllocationDelta>,
     pub(crate) total_stage: Option<RuntimePerfStageRunResult>,
-    pub(crate) cumulative_usage: SessionUsageReport,
 }
 
 /// The shared measurement scaffold behind every `run_once*` site: opens the
@@ -286,24 +283,8 @@ impl RunRecorder {
             ),
             phase_profile: tail.phase_profile,
             turn_usage: tail.turn_usage,
-            usage_delta: tail.usage_delta,
-            cumulative_usage: tail.cumulative_usage,
         });
         Ok(value)
-    }
-
-    /// Record the usage the last recorded turn delivered. It is read after
-    /// the turn's spans, because accounting delivery is eventual (ADR 0125)
-    /// and the durable read is async.
-    pub(crate) fn record_last_turn_usage(
-        &mut self,
-        usage_delta: SessionUsageReport,
-        cumulative_usage: SessionUsageReport,
-    ) {
-        if let Some(turn) = self.turns.last_mut() {
-            turn.usage_delta = usage_delta;
-            turn.cumulative_usage = cumulative_usage;
-        }
     }
 
     /// The turns recorded so far — for tails that aggregate over them
@@ -366,7 +347,6 @@ impl RunRecorder {
                 sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile))
             }),
             turns,
-            cumulative_usage: tail.cumulative_usage,
         }
     }
 }

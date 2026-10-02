@@ -99,7 +99,6 @@ use crate::process_attach::{LashProcessAttach as _, LashProcessAttachImpl};
 use crate::session_shifts::{
     LashSession as _, LashSessionImpl, LashTurn as _, LashTurnImpl, RestateSessionShiftsSlot,
 };
-use crate::usage_accounting::LashUsageAccounting as _;
 
 /// The longest namespace a deployment may take, in bytes.
 const NAMESPACE_MAX_LEN: usize = 63;
@@ -390,9 +389,6 @@ lash_services! {
     SessionShifts => "LashSession", Pinned;
     /// One admitted run: its seal, turns and commits (FIG-3600).
     TurnDriver => "LashTurn", Pinned;
-    /// One usage owner's accounting continuation: projects each spending
-    /// effect's settlement, and drains the owner (ADR 0125).
-    UsageAccounting => "LashUsageAccounting", Shared;
 }
 
 /// Which of a pinned service's names a call addresses (FIG-3795).
@@ -584,11 +580,6 @@ lash_clients! {
             -> lash_core::ResolveOutcome;
     }
 
-    /// Calls to one `LashUsageAccounting` object.
-    UsageAccountingCalls, usage_accounting: UsageAccounting object,
-    pinned to crate::usage_accounting::LashUsageAccountingClient {
-        settle(crate::usage_accounting::UsageAccountingSettle) -> ();
-    }
 
     /// Calls to one `LashProcessAttach` workflow.
     ProcessAttachCalls, process_attach: ProcessAttach workflow,
@@ -988,28 +979,6 @@ pub(crate) fn bind_lash_services_reading<R: RestateProcessRunner>(
                     turn.on_route(route.clone()).serve(),
                     &name,
                     claimed().handler("run", crate::turn_handler_options()),
-                    &wire,
-                ),
-                LashService::UsageAccounting => bind_as(
-                    builder,
-                    crate::usage_accounting::LashUsageAccountingImpl::new(
-                        effect_host.usage_accounting_cell(),
-                    )
-                    .serve(),
-                    &name,
-                    claimed()
-                        .handler(
-                            "settle",
-                            crate::usage_accounting::usage_accounting_handler_options(),
-                        )
-                        .handler(
-                            "retire_execution",
-                            crate::usage_accounting::usage_accounting_handler_options(),
-                        )
-                        .handler(
-                            "drain",
-                            crate::usage_accounting::usage_accounting_handler_options(),
-                        ),
                     &wire,
                 ),
             }

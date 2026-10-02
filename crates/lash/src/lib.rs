@@ -530,12 +530,7 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::usage_accounting::{
-        AttemptFactOutcome, MeterAccounting, UsageAdmissionError, UsageAppendError,
-        UsageAppendReceipt, UsageAttemptFact, UsageCorrection, UsageFactConflict,
-        UsageMeterAdmission, UsageMeterAdmitted, UsageMeterResolution, UsageSettleReceipt,
-        UsageSettlement,
-    };
+
     pub use lash_core_store::PersistedNodeIds;
     pub use lash_core_store::artifact_referrer::{
         ArtifactCarry, ArtifactCleanup, ArtifactReferrerError, ArtifactReferrerKind,
@@ -569,7 +564,6 @@ pub mod persistence {
     /// objects, nameable so a host can decorate a store set (FIG-4373).
     pub use lash_core::ProcessDefinitionStore;
     pub use lash_core::RunSpecHash;
-    pub use lash_core::UsageAccountingStore;
     pub use lash_core::attachments::{
         AttachmentRootPage, AttachmentRootSource, CompleteAttachmentRoots,
     };
@@ -1316,10 +1310,10 @@ pub mod process {
 
 /// Durability configuration and backend contracts.
 pub mod durability {
+    pub use lash_core::{EffectAttempt, RecordedEffectExecution};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::RecordedKeys;
     pub use lash_core::runtime::process_start::ProcessStartRelay;
-    pub use lash_core::usage_accounting::UsageAccountingBinding;
     pub use lash_core_store::attachments::{
         AttachmentProducer, AttachmentSourcePolicy, AttachmentSourcePolicyError,
     };
@@ -1366,7 +1360,6 @@ pub mod runtime {
         ToolChildDriver, ToolChildOpenerContext, ToolChildRebuildRefusal, ToolChildRequest,
         ToolChildSessionFacts, UnrecordedSessionSources,
     };
-    pub use lash_core::runtime::DirectUsage;
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
     pub use lash_core::runtime::{
@@ -1376,9 +1369,7 @@ pub mod runtime {
     pub use lash_core::shift::relay::RelayPolicy;
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
     pub use lash_core::triggers::TriggerDeliveryAdmission;
-    pub use lash_core::usage_accounting::{
-        EffectUsage, RecordedEffectExecution, UsageCall, UsageMeter, UsageMeterError,
-    };
+
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
     pub use lash_core::{
         GroupReopen, ProtocolSessionExtension, ScopeBoundController, ServedOnly,
@@ -1715,15 +1706,12 @@ pub mod provider {
     };
     pub use lash_core::provider::LlmProfileEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.
-    /// A direct [`ProviderHandle::complete`](facade_support::ProviderHandle::complete)
-    /// names its [`DispatchAdmission`]: a host calling a provider outside any
-    /// turn passes `<dyn DispatchAdmission>::host_owned()` and owns that
-    /// call's accounting itself (ADR 0125).
+    /// Hosts meter spend by decorating the Provider seam (ADR 0127).
     pub use lash_core::provider::{
-        CacheRetention, DefaultProviderFailureClassifier, DispatchAdmission, DispatchRefused,
-        LlmProfileRequestDefaults, ProviderCompletion, ProviderCompletionError, ProviderDispatch,
-        ProviderFailureClassifier, ProviderRateLimitPermit, ProviderRateLimitPolicy,
-        ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy, RequestTimeout,
+        CacheRetention, DefaultProviderFailureClassifier, LlmProfileRequestDefaults,
+        ProviderCompletion, ProviderCompletionError, ProviderFailureClassifier,
+        ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability,
+        ProviderRetryPolicy, RequestTimeout,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
@@ -1735,7 +1723,6 @@ pub mod provider {
         StreamTermination, facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
         facade_support::Provider, facade_support::ProviderComponents,
         facade_support::ProviderHandle, facade_support::ProviderOptions,
-        facade_support::ReconciledUsage,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission

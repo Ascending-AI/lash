@@ -155,41 +155,6 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
 }
 
 #[tokio::test]
-async fn sqlite_catalog_indexes_usage_by_owner() {
-    let root = unique_temp_dir("usage-index");
-    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
-    admit_store(
-        &factory,
-        &SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("usage-index"),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: SessionPolicy::new(
-                lash_core_execution::TurnBudget::Unbounded,
-                lash_core_execution::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: SessionCreationHead::Config,
-        },
-    )
-    .await
-    .expect("create store");
-    let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
-    let indexed: bool = conn
-        .query_row(
-            "SELECT EXISTS(
-                 SELECT 1 FROM pragma_index_list('usage_facts')
-                 WHERE name = 'idx_usage_facts_owner_seq'
-             )",
-            [],
-            |row| row.get(0),
-        )
-        .expect("query usage indexes");
-    assert!(indexed, "shared-catalog usage reads require an owner index");
-}
-
-#[tokio::test]
 async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     let root = unique_temp_dir("metadata");
     let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));

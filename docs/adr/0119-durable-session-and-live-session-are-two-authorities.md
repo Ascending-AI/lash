@@ -77,8 +77,7 @@ run handles and cancellation; pending-input and queued-work reads and
 cancels; settled input applications; and `read`, `exists` and `was_deleted`.
 User input and non-user queued work remain separate row classes.
 
-The live session owns runtime configuration and views that include the shared
-in-memory token ledger. Session deletion uses its scoped delete context and
+The live session owns runtime configuration and live runtime views. Session deletion uses its scoped delete context and
 closure-pin checks. Forking names a destination session and reconciles its
 observers. Runtime administration and effect-host wait revocation require
 their own authority. Restate serializes session shifts; the sealed shift fence
@@ -203,8 +202,8 @@ execution need. Inferring execution completion from a queue row disappearing
 would confuse claimed, cancelled and completed work; handles and observation
 carry the outcome instead.
 
-## Model usage accounting
+## Model usage
 
-A live session's usage is a durable read (`LashSession::usage()`, async), not
-an in-memory ledger, and it answers the same as `DurableSession::usage()` for
-the same owner ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)).
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

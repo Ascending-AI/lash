@@ -256,87 +256,8 @@ CREATE TABLE IF NOT EXISTS fork_lineage (
     PRIMARY KEY (session_id, ancestor_session_id)
 );
 
-CREATE TABLE IF NOT EXISTS usage_facts (
-    seq                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_kind               TEXT NOT NULL CONSTRAINT ck_usage_facts_owner_kind CHECK (owner_kind IN ('session', 'process')),
-    owner_id                 TEXT NOT NULL,
-    effect_key               TEXT NOT NULL,
-    call_ordinal             INTEGER NOT NULL CONSTRAINT ck_usage_facts_call_ordinal CHECK (call_ordinal >= 0),
-    provider_attempt         INTEGER NOT NULL CONSTRAINT ck_usage_facts_provider_attempt CHECK (provider_attempt >= 0),
-    fact_kind                TEXT NOT NULL,
-    disposition              TEXT NOT NULL,
-    meter_id                   TEXT,
-    llm_call_id              TEXT NOT NULL,
-    source                   TEXT NOT NULL,
-    profile_key                TEXT NOT NULL,
-    requested_model          TEXT NOT NULL,
-    served_model             TEXT,
-    input_tokens             INTEGER NOT NULL,
-    output_tokens            INTEGER NOT NULL,
-    cache_read_input_tokens  INTEGER NOT NULL,
-    cache_write_input_tokens INTEGER NOT NULL,
-    reasoning_output_tokens  INTEGER NOT NULL,
-    generation_id            TEXT,
-    payload_hash             TEXT NOT NULL,
-    recorded_at_ms           INTEGER NOT NULL,
-    CONSTRAINT ck_usage_facts_kind CHECK (
-        (fact_kind = 'attempt' AND disposition IN ('reported', 'unreported') AND meter_id IS NOT NULL)
-     OR (fact_kind = 'correction' AND disposition = 'reconciled' AND meter_id IS NULL AND generation_id IS NOT NULL)),
-    CONSTRAINT ck_usage_facts_unreported_zero CHECK (disposition <> 'unreported' OR (
-        input_tokens = 0 AND output_tokens = 0 AND cache_read_input_tokens = 0
-        AND cache_write_input_tokens = 0 AND reasoning_output_tokens = 0)),
-    CONSTRAINT uq_usage_facts_identity UNIQUE (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
-);
-CREATE INDEX IF NOT EXISTS idx_usage_facts_owner_seq
-    ON usage_facts(owner_kind, owner_id, seq);
-CREATE INDEX IF NOT EXISTS idx_usage_facts_unreported
-    ON usage_facts(owner_kind, owner_id, effect_key, call_ordinal, provider_attempt)
-    WHERE disposition = 'unreported';
 
-CREATE TABLE IF NOT EXISTS usage_meters (
-    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_meters_owner_kind CHECK (owner_kind IN ('session', 'process')),
-    owner_id TEXT NOT NULL,
-    effect_key TEXT NOT NULL,
-    meter_id TEXT NOT NULL,
-    execution_scope_key TEXT,
-    source TEXT,
-    profile_key TEXT,
-    requested_model TEXT,
-    admitted_at_ms INTEGER,
-    state TEXT NOT NULL,
-    unknown_reason TEXT,
-    conflict_call_ordinal INTEGER,
-    conflict_provider_attempt INTEGER,
-    conflict_fact_kind TEXT,
-    conflict_stored_payload_hash TEXT,
-    conflict_offered_payload_hash TEXT,
-    resolved_at_ms INTEGER,
-    PRIMARY KEY (owner_kind, owner_id, effect_key, meter_id),
-    CONSTRAINT ck_usage_meters_admission CHECK (
-        (execution_scope_key IS NOT NULL AND source IS NOT NULL AND profile_key IS NOT NULL AND requested_model IS NOT NULL AND admitted_at_ms IS NOT NULL AND admitted_at_ms >= 0)
-     OR (execution_scope_key IS NULL AND source IS NULL AND profile_key IS NULL AND requested_model IS NULL AND admitted_at_ms IS NULL AND state <> 'open')),
-    CONSTRAINT ck_usage_meters_state CHECK (
-        (state = 'open' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NULL)
-     OR (state = 'settled' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0)
-     OR (state = 'unknown' AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0
-         AND unknown_reason IS NOT NULL AND unknown_reason IN ('superseded_meter', 'call_without_record', 'facts_unjournalable', 'execution_ended', 'owner_retired'))
-     OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_call_ordinal IS NOT NULL AND conflict_provider_attempt IS NOT NULL AND conflict_fact_kind IS NOT NULL AND conflict_stored_payload_hash IS NOT NULL AND conflict_offered_payload_hash IS NOT NULL
-         AND conflict_call_ordinal BETWEEN 0 AND 4294967295 AND conflict_provider_attempt BETWEEN 0 AND 4294967295
-         AND conflict_fact_kind IN ('attempt', 'correction') AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0))
-);
-CREATE INDEX IF NOT EXISTS idx_usage_meters_open_owner
-    ON usage_meters(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';
-CREATE INDEX IF NOT EXISTS idx_usage_meters_open_scope
-    ON usage_meters(owner_kind, owner_id, execution_scope_key) WHERE state = 'open';
-CREATE INDEX IF NOT EXISTS idx_usage_meters_unresolved
-    ON usage_meters(owner_kind, owner_id, effect_key, meter_id) WHERE state IN ('unknown', 'conflicted');
 
-CREATE TABLE IF NOT EXISTS usage_owner_retirements (
-    owner_kind    TEXT NOT NULL CONSTRAINT ck_usage_owner_retirements_owner_kind CHECK (owner_kind IN ('session', 'process')),
-    owner_id      TEXT NOT NULL,
-    retired_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (owner_kind, owner_id)
-);
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id                       TEXT PRIMARY KEY,

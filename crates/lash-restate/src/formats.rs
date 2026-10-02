@@ -20,7 +20,6 @@ use crate::effect_group::{
 };
 use crate::process::RESTATE_PROCESS_JOURNAL_VERSION;
 use crate::session_shifts::{LASH_SESSION_SHIFT_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION};
-use crate::usage_accounting::USAGE_ACCOUNTING_WIRE_VERSION;
 
 // The rows are comparable counters whose bytes live in the engine's
 // deployment, so no bounded walk of lash's own store enumerates them.
@@ -139,14 +138,6 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         version: LASH_TURN_OUTCOME_FORMAT_VERSION,
         constant: "LASH_TURN_OUTCOME_FORMAT_VERSION",
         upgrade_policy: UpgradePolicy::Migrate,
-        unwalkable_reason: UNWALKABLE_REASON,
-    },
-    EngineDurableFormat {
-        id: "restate.usage_accounting",
-        name: "Restate usage accounting continuation request",
-        version: USAGE_ACCOUNTING_WIRE_VERSION,
-        constant: "USAGE_ACCOUNTING_WIRE_VERSION",
-        upgrade_policy: UpgradePolicy::Drain,
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {

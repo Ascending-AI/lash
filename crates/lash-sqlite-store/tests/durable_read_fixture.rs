@@ -241,8 +241,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        usage_accounting: Arc::clone(&runtime)
-            as Arc<dyn lash_core_execution::UsageAccountingStore>,
         store: Arc::clone(&runtime) as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,

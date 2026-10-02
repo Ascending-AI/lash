@@ -183,21 +183,6 @@ impl lash::runtime::AwaitEventResolver for RestateParticipantCrashHost {
 
 #[async_trait::async_trait]
 impl lash::durability::EffectHost for RestateParticipantCrashHost {
-    async fn drain_usage_accounting(
-        &self,
-        owner: &lash::RuntimeOwner,
-    ) -> Result<lash::usage::UsageOwnerRetired, lash::runtime::RuntimeError> {
-        self.inner.drain_usage_accounting(owner).await
-    }
-
-    async fn retire_usage_execution(
-        &self,
-        owner: &lash::RuntimeOwner,
-        scope: &lash::runtime::ExecutionScope,
-    ) -> Result<u64, lash::runtime::RuntimeError> {
-        self.inner.retire_usage_execution(owner, scope).await
-    }
-
     async fn journal_replay(
         &self,
         journal: &lash::durability::EffectJournalIdentity,

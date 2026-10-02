@@ -245,7 +245,6 @@ pub(crate) struct RuntimePerfRunResult {
     pub(crate) memory: RuntimePerfMemoryRunResult,
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     pub(crate) turns: Vec<RuntimePerfTurnResult>,
-    pub(crate) cumulative_usage: SessionUsageReport,
 }
 
 impl RuntimePerfRunResult {
@@ -263,8 +262,6 @@ pub(crate) struct RuntimePerfTurnResult {
     pub(crate) memory: RuntimePerfMemoryRunResult,
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     pub(crate) turn_usage: TokenUsage,
-    pub(crate) usage_delta: SessionUsageReport,
-    pub(crate) cumulative_usage: SessionUsageReport,
 }
 
 impl RuntimePerfTurnResult {

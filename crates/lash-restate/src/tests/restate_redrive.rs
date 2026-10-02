@@ -1995,7 +1995,6 @@ pub(super) async fn fig793_pre_fix_suspended_llm_run(
                 .expect("canonical FIG-793 LLM envelope"),
         ),
         outcome: Ok(fig793_llm_outcome()),
-        usage: None,
     };
     (endpoint, suspended, journal_entry_value(recorded))
 }

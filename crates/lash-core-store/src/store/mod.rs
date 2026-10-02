@@ -1049,8 +1049,7 @@ pub trait SessionCommitStore: Send + Sync {
     /// of the attempted commit envelope. Conflicts and corrupt count
     /// cross-checks mutate nothing.
     ///
-    /// A commit carries no usage: model usage is engine-owned accounting in
-    /// [`UsageAccountingStore`](crate::UsageAccountingStore) (ADR 0125).
+    /// Model usage and attempt history are recorded with the model result (ADR 0127).
     ///
     /// A fresh identity-bearing append enforces
     /// the optional ancestor in [`AppendRequestIdentity::Append`] against the
@@ -1776,6 +1775,3 @@ pub use runtime_store_decorator::StoreOp;
 
 #[cfg(test)]
 mod tests;
-
-pub mod usage_accounting;
-pub use usage_accounting::UsageAccountingStore;

@@ -495,8 +495,7 @@ impl Entry {
     /// harnesses see a `CheckpointKind` request, not a store commit) build the
     /// line with [`Entry::new`] instead and describe what they actually saw.
     ///
-    /// A commit carries no usage: model usage is owner-scoped accounting
-    /// delivered per call, never a commit component (ADR 0125).
+    /// Model usage and attempt history are recorded with the model result (ADR 0127).
     pub fn commit(actor: Actor, revision_before: u64, revision_after: u64) -> Self {
         Self::new(Kind::Commit, actor, CHECKPOINT_COMMIT_EVENT)
             .attr(Attr::revision(revision_before, revision_after))

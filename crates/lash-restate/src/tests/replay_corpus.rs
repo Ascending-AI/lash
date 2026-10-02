@@ -661,7 +661,6 @@ fn drive_sleep_envelope(
             RecordedRuntimeEffect {
                 envelope: Arc::new(canonical.clone()),
                 outcome: Ok(RuntimeEffectOutcome::Sleep),
-                usage: None,
             },
         )]));
     }

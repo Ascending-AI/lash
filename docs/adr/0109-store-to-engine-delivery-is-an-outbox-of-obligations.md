@@ -487,10 +487,8 @@ Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
 `crates/lash/src/send/resolve.rs` and
 `crates/lash/src/tests/store_faults.rs`.
 
-## Model usage accounting
+## Model usage
 
-`SessionDelete`'s delivery (§4) first drains the session's accounting
-(`EffectHost::drain_usage_accounting`), before any session state is deleted;
-a drain failure is retryable like every other step. The engine-to-store
-direction of that drain is the accounting continuation of [ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md), not an
-`ObligationKind`: there is no usage obligation kind and no SQL relay.
+Usage is data on the model call's recorded result. Hosts meter spend at the
+`Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
+Lash has no accounting ledger or delivery dependency.

@@ -707,7 +707,7 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn child_usage_stays_on_the_child_sessions_own_ledger() {
+async fn child_usage_stays_on_the_child_turn_result() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let transport = mock_openai_compatible_provider(vec![
@@ -856,14 +856,26 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .expect("second parent turn");
     handler.close().await.expect("close the scope's handler");
 
-    // Child usage is not folded into the parent's report: it holds only the
-    // parent's own calls, and no source carries the child's tokens.
-    let usage = settled_runtime_usage(&runtime).await.report();
-    assert_eq!(usage.by_source["turn"].usage.input_tokens, 11);
-    assert_eq!(usage.by_source["turn"].usage.output_tokens, 3);
-    assert!(
-        !usage.by_source.contains_key("subagent"),
-        "child usage must not fold into the parent report: {usage:?}"
+    let parent_usage: Vec<_> = first_parent
+        .llm_calls
+        .iter()
+        .chain(&second_parent.llm_calls)
+        .flat_map(|call| &call.attempts)
+        .filter_map(|attempt| attempt.usage.as_ref())
+        .collect();
+    assert_eq!(
+        parent_usage
+            .iter()
+            .map(|usage| usage.input_tokens)
+            .sum::<i64>(),
+        11
+    );
+    assert_eq!(
+        parent_usage
+            .iter()
+            .map(|usage| usage.output_tokens)
+            .sum::<i64>(),
+        3
     );
 
     let parent_evidence = first_parent
@@ -893,47 +905,18 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
             .all(|evidence| evidence.served_model.as_deref() != Some("child-only"))
     );
 
-    // The child's usage is its own owner's accounting and survives after the
-    // child session has closed — read straight from storage with no parent
-    // involvement.
-    let child_usage = durable_owner_usage(&runtime, "subagent-child").await;
-    let child_totals = child_usage
-        .by_source
-        .values()
-        .map(|row| &row.usage)
-        .fold(lash_core::TokenUsage::default(), |acc, usage| {
-            acc.saturating_add(usage).0
-        });
+    let child_totals = child_turn.llm_calls[0].attempts[0]
+        .usage
+        .as_ref()
+        .expect("child reported usage");
     assert_eq!(child_totals.input_tokens, 7);
     assert_eq!(child_totals.output_tokens, 2);
     assert_eq!(child_totals.cache_read_input_tokens, 4);
     assert_eq!(child_totals.reasoning_output_tokens, 1);
 }
 
-/// A closed session's settled usage, read straight from the owner's
-/// accounting — no resident runtime of that session is involved.
-async fn durable_owner_usage(
-    runtime: &LashRuntime,
-    session_id: &str,
-) -> lash_core::facade_support::SessionUsageReport {
-    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(session_id));
-    let accounting = runtime.host.core.usage_accounting();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let usage = accounting
-            .store
-            .load_owner_usage(&owner)
-            .await
-            .expect("load the child's usage");
-        if usage.completeness.is_settled() || std::time::Instant::now() >= deadline {
-            return usage.report();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
-async fn cached_only_child_usage_stays_on_the_child_ledger() {
+async fn cached_only_child_usage_stays_on_the_child_turn_result() {
     let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let transport = mock_provider(vec![
@@ -981,7 +964,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         ))
         .await
         .expect("open the scope's handler");
-    runtime
+    let parent_turn = runtime
         .execute_turn(
             TurnInput::text("run parent"),
             TurnOptions::new(CancellationToken::new(), handler.scoped()),
@@ -1021,7 +1004,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         ))
         .await
         .expect("open the scope's handler");
-    child_runtime
+    let child_turn = child_runtime
         .execute_turn(
             TurnInput::text("run the child turn"),
             lash_core::facade_support::TurnOptions::new(CancellationToken::new(), handler.scoped()),
@@ -1031,22 +1014,16 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
     handler.close().await.expect("close the scope's handler");
     drop(child_runtime);
 
-    let usage = settled_runtime_usage(&runtime).await.report();
-    assert_eq!(usage.by_source["turn"].usage.input_tokens, 5);
-    assert_eq!(usage.by_source["turn"].usage.output_tokens, 1);
-    assert!(
-        !usage.by_source.contains_key("subagent"),
-        "child usage must not fold into the parent report: {usage:?}"
-    );
-
-    let child_usage = durable_owner_usage(&runtime, "subagent-child").await;
-    let child_totals = child_usage
-        .by_source
-        .values()
-        .map(|row| &row.usage)
-        .fold(lash_core::TokenUsage::default(), |acc, usage| {
-            acc.saturating_add(usage).0
-        });
+    let parent_usage = parent_turn.llm_calls[0].attempts[0]
+        .usage
+        .as_ref()
+        .expect("parent reported usage");
+    assert_eq!(parent_usage.input_tokens, 5);
+    assert_eq!(parent_usage.output_tokens, 1);
+    let child_totals = child_turn.llm_calls[0].attempts[0]
+        .usage
+        .as_ref()
+        .expect("child reported usage");
     assert_eq!(child_totals.input_tokens, 0);
     assert_eq!(child_totals.output_tokens, 0);
     assert_eq!(child_totals.cache_read_input_tokens, 9);

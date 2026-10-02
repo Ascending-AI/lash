@@ -745,37 +745,6 @@ where
     ) -> Result<lash_core::JournalReplay, RuntimeError> {
         Ok(lash_core::JournalReplay::MayReplay)
     }
-
-    /// The deployment host drains an owner through ingress; a handler-scoped
-    /// controller would put the drain in its own journal, where a replay
-    /// could order it before settles its caller has not sent yet.
-    async fn drain_usage_accounting(
-        &self,
-        owner: &lash_core::RuntimeOwner,
-    ) -> Result<lash_core::UsageOwnerRetired, RuntimeError> {
-        Err(RuntimeError::new(
-            RuntimeErrorCode::EngineEffectController,
-            format!(
-                "a handler-scoped Restate controller does not drain usage owner {owner}; the \
-                 deployment effect host does"
-            ),
-        ))
-    }
-
-    /// See [`drain_usage_accounting`](Self::drain_usage_accounting).
-    async fn retire_usage_execution(
-        &self,
-        owner: &lash_core::RuntimeOwner,
-        _scope: &ExecutionScope,
-    ) -> Result<u64, RuntimeError> {
-        Err(RuntimeError::new(
-            RuntimeErrorCode::EngineEffectController,
-            format!(
-                "a handler-scoped Restate controller does not retire usage executions of {owner}; \
-                 the deployment effect host does"
-            ),
-        ))
-    }
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
@@ -1694,8 +1663,7 @@ fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWa
     }
 }
 
-/// Run a journaled effect's body, beginning a spending body's usage meter: the
-/// answer carries what the controller journals beside the outcome.
+/// Run a journaled effect body, retaining its outcome and any live attempt fault.
 async fn execute_restate_journaled_effect(
     envelope: RuntimeEffectEnvelope,
     local_executor: RuntimeEffectLocalExecutor<'_>,
@@ -1714,14 +1682,12 @@ async fn execute_restate_journaled_effect(
                 };
             lash_core::RecordedEffectExecution {
                 outcome,
-                usage: None,
-                admission_fault: None,
                 attempt_fault: None,
             }
         }
         command => {
             local_executor
-                .execute_recording_usage(RuntimeEffectEnvelope {
+                .execute_recorded(RuntimeEffectEnvelope {
                     invocation,
                     command,
                     group,

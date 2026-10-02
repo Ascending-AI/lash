@@ -57,6 +57,8 @@ pub use lash_sansio::module_artifact_refusal::{
 pub use module_artifacts::{ArtifactStoreError, DurabilityTier, ModuleArtifactStore};
 pub mod direct;
 pub mod direct_completion_client;
+pub mod effect_attempt;
+pub use effect_attempt::{EffectAttempt, RecordedEffectExecution};
 pub mod engine;
 pub(crate) use lash_core_ids::identity_json;
 pub(crate) use lash_core_ids::operational_metrics;
@@ -121,11 +123,6 @@ pub mod tool_registry;
 pub mod tool_result;
 pub mod trace;
 pub mod triggers;
-pub mod usage_accounting;
-pub use usage_accounting::{
-    EffectUsage, Projected, RecordedEffectExecution, UsageAccountingBinding, UsageCall, UsageMeter,
-    UsageMeterError, is_spending_effect, project_unrecorded_usage, project_usage_settlement,
-};
 
 pub mod facade_support {
     pub use crate::Response;
@@ -255,7 +252,6 @@ pub mod facade_support {
     pub use crate::provider::ProviderComponents;
     pub use crate::provider::ProviderHandle;
     pub use crate::provider::ProviderOptions;
-    pub use crate::provider::ReconciledUsage;
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::AssistantOutput;
@@ -296,7 +292,7 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkKind;
-    pub use crate::runtime::ReconciledUsageAttempt;
+
     pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeHostConfig;
@@ -304,7 +300,7 @@ pub mod facade_support {
     pub use crate::runtime::SessionCommand;
     pub use crate::runtime::SessionCommandReceipt;
     pub use crate::runtime::SessionScopeId;
-    pub use crate::runtime::SessionUsageReport;
+
     pub use crate::runtime::SystemClock;
     pub use crate::runtime::TerminationPolicy;
     pub use crate::runtime::TurnActivitySink;
@@ -334,16 +330,12 @@ pub mod facade_support {
     pub use crate::runtime::TurnLaneAdmissionPolicy;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
-    pub use crate::runtime::UsageAttributionKey;
-    pub use crate::runtime::UsageReconciliationReport;
-    pub use crate::runtime::UsageReportRow;
-    pub use crate::runtime::UsageTotals;
+
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
     pub use crate::runtime::await_event_identity;
     pub use crate::runtime::current_epoch_ms;
-    pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::process_child_session_id;
     pub use crate::runtime::process_signal_event_type;
@@ -968,11 +960,6 @@ pub mod core_internal {
         crate::session::attach_process_lineage(turn_context, lineage);
     }
 }
-
-// The store's usage DTOs; `usage_accounting` itself names the engine's run
-// module (ADR 0125).
-pub use lash_core_store::UsageAccountingStore;
-pub use lash_core_store::usage_accounting::*;
 
 mod tool_intent_outcome;
 pub use plugin::{ToolIntentCommandFailure, ToolIntentRuntimeFailure};

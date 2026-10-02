@@ -195,10 +195,7 @@ impl RuntimeTurnDriver<'_> {
         cancel: &CancellationToken,
         dispatch: LlmCallDispatch,
     ) -> RuntimeLlmCallOutcome {
-        let LlmCallDispatch {
-            provider,
-            usage_call,
-        } = dispatch;
+        let LlmCallDispatch { provider } = dispatch;
         let request = (*request).clone();
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
@@ -286,7 +283,6 @@ impl RuntimeTurnDriver<'_> {
                 llm_request,
                 task_sideband,
                 charge_safety,
-                &usage_call,
                 trace.runtime().metrics(),
                 trace.body_permit(),
             )
@@ -1454,10 +1450,9 @@ impl RuntimeTurnDriver<'_> {
 }
 
 /// What the body of an unjournaled model call dispatches with: the transport
-/// it bound for the recorded model, and the call of its effect's usage meter.
+/// it bound for the recorded model.
 pub(in crate::runtime) struct LlmCallDispatch {
     pub(in crate::runtime) provider: crate::ProviderHandle,
-    pub(in crate::runtime) usage_call: crate::UsageCall,
 }
 
 #[cfg(test)]

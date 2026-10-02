@@ -598,7 +598,6 @@ async fn run_once_inner(
             phase_probe.defer_named_close("trigger.occurrence_to_delivery");
         }
 
-        let before_turn_usage = runtime.settled_usage_report().await?;
         if let Some(variant) = catalog_variant {
             let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics().await?;
             extra_counters.lock_recover().insert(
@@ -784,7 +783,6 @@ async fn run_once_inner(
                         tail: TurnTail {
                             phase_profile: std::mem::take(&mut extra_phase_profile),
                             turn_usage: turn.usage,
-                            ..TurnTail::default()
                         },
                     })
                 },
@@ -832,22 +830,16 @@ async fn run_once_inner(
                 },
             )
             .await?;
-        let cumulative_usage = runtime.settled_usage_report().await?;
-        let usage_delta =
-            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
-                .map_err(anyhow::Error::msg)?;
-        executed.record_last_turn_usage(usage_delta, cumulative_usage);
     }
 
-    let (state, cumulative_usage) = executed
+    let state = executed
         .export(async {
             let state = if let Some(session) = &deep_session {
                 session.admin().state().export().await
             } else {
                 runtime.export_state().await
             };
-            let cumulative_usage = runtime.settled_usage_report().await?;
-            Ok((state, cumulative_usage))
+            Ok(state)
         })
         .await?;
     let store_metrics = runtime.store_metrics();
@@ -922,7 +914,6 @@ async fn run_once_inner(
         extra_counters: std::mem::take(&mut extra_counters.lock_recover()),
         metric_samples,
         metric_samples_ms,
-        cumulative_usage,
         ..RunTail::default()
     }))
 }
@@ -959,8 +950,6 @@ pub(crate) fn skipped_runtime_perf_result(
         memory: empty_memory.clone(),
         phase_profile: BTreeMap::new(),
         turn_usage: TokenUsage::default(),
-        usage_delta: SessionUsageReport::default(),
-        cumulative_usage: SessionUsageReport::default(),
     };
     let mut extra_counters = BTreeMap::new();
     extra_counters.insert("skipped.no_database_url".to_string(), 1);
@@ -978,7 +967,6 @@ pub(crate) fn skipped_runtime_perf_result(
         memory: empty_memory,
         phase_profile: BTreeMap::new(),
         turns: vec![turn],
-        cumulative_usage: SessionUsageReport::default(),
     }
 }
 

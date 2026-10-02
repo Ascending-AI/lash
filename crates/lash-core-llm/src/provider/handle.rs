@@ -254,14 +254,12 @@ impl ProviderHandle {
     pub async fn complete(
         &mut self,
         mut request: LlmRequest,
-        admission: &dyn DispatchAdmission,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
         self.complete_prepared(
             request,
             sideband,
             crate::ChargeSafetyPolicy::default(),
-            admission,
             &TelemetryMetrics::default(),
             None,
         )
@@ -280,14 +278,12 @@ impl ProviderHandle {
         &mut self,
         mut request: LlmRequest,
         charge_safety: crate::ChargeSafetyPolicy,
-        admission: &dyn DispatchAdmission,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
         self.complete_prepared(
             request,
             sideband,
             charge_safety,
-            admission,
             &TelemetryMetrics::default(),
             None,
         )
@@ -342,7 +338,6 @@ impl ProviderHandle {
         request: LlmRequest,
         sideband: ProviderCompletionSideband,
         charge_safety: crate::ChargeSafetyPolicy,
-        admission: &dyn DispatchAdmission,
         metrics: &TelemetryMetrics,
         permit: Option<&EmissionPermit>,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
@@ -371,34 +366,6 @@ impl ProviderHandle {
         let mut records = Vec::new();
         loop {
             let attempt_ordinal = records.len() as u32 + 1;
-            // The accounting obligation exists before the attempt can be
-            // billed (ADR 0125): a refused attempt is never dispatched.
-            if let Err(refused) = admission
-                .admit_dispatch(&ProviderDispatch {
-                    call_id: &call_id,
-                    attempt_ordinal,
-                    model: request.model.wire_model(),
-                })
-                .await
-            {
-                let error = refused.into_transport_error();
-                records.push(failure_attempt_record(
-                    attempt_ordinal,
-                    &error,
-                    false,
-                    ProtocolPosition::NoResponse,
-                    None,
-                ));
-                return Err(ProviderCompletionError {
-                    error,
-                    call_record: Box::new(LlmCallRecord {
-                        call_id,
-                        label: None,
-                        replay_drops: sideband.replay_drops(),
-                        attempts: records,
-                    }),
-                });
-            }
             let _permit = self
                 .components
                 .rate_limiter
@@ -668,22 +635,6 @@ impl ProviderHandle {
             .catch_unwind()
             .await
             .unwrap_or_else(provider_close_panicked)
-    }
-
-    /// Recover the usage of one generation whose stream ended before the provider reported it.
-    pub async fn reconcile_usage(
-        &mut self,
-        generation_id: &str,
-    ) -> Result<Option<ReconciledUsage>, LlmTransportError> {
-        std::panic::AssertUnwindSafe(async {
-            self.components
-                .provider
-                .reconcile_usage(generation_id)
-                .await
-        })
-        .catch_unwind()
-        .await
-        .unwrap_or_else(|payload| provider_close_panicked(payload).map(|()| None))
     }
 }
 
@@ -1432,11 +1383,10 @@ pub async fn complete_prepared(
     request: LlmRequest,
     sideband: ProviderCompletionSideband,
     charge_safety: crate::ChargeSafetyPolicy,
-    admission: &dyn DispatchAdmission,
     metrics: &TelemetryMetrics,
     permit: Option<&EmissionPermit>,
 ) -> Result<ProviderCompletion, ProviderCompletionError> {
     handle
-        .complete_prepared(request, sideband, charge_safety, admission, metrics, permit)
+        .complete_prepared(request, sideband, charge_safety, metrics, permit)
         .await
 }

@@ -483,19 +483,6 @@ impl LiveConformanceHarness {
         Self::start_with(target, Arc::new(ConformanceExecutors::default()), |_| {}).await
     }
 
-    /// The tool-child laws' endpoint for a law that brings its own store set:
-    /// the accounting continuation settles into the ledger the law's runtime
-    /// admits its runs into (ADR 0125), not the endpoint's own store set.
-    pub(super) async fn start_for_tool_children_settling_into(
-        target: HarnessServer,
-        accounting: Arc<dyn lash_core::UsageAccountingStore>,
-    ) -> Self {
-        Self::start_with(target, Arc::new(ConformanceExecutors::default()), |host| {
-            host.bind_usage_accounting(accounting);
-        })
-        .await
-    }
-
     /// The endpoint binds every lash service through the one binder a
     /// deployment uses, beside the suite's probes.
     async fn start_with(
@@ -581,10 +568,7 @@ impl LiveConformanceHarness {
         let invocation_admin = crate::RestateAdminClient::new(admin.connection());
         register(&host);
         let (stores, sqlite, tier) = tier.open().await;
-        // The endpoint's accounting continuation settles into the store set
-        // a law's runtime admits its runs into, as `RestateEngine::new`
-        // binds a deployment's (ADR 0125).
-        host.bind_usage_accounting(stores.usage_accounting());
+
         let process_runner = Arc::new(LawProcessRunner::default());
         let session_shifts = crate::RestateSessionShiftsSlot::new();
         let endpoint = crate::services::bind_lash_services(

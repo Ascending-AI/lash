@@ -655,7 +655,6 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
                     .expect("the two-attempt proof has one unsafe retry"),
                 max_duplicate_cost_tokens: None,
             },
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
         )
         .await
         .expect_err("retry exhaustion should fail");

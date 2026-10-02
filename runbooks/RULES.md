@@ -139,10 +139,8 @@ Four rules keep the tiers honest:
 
 Where a runbook is half mechanics and half behaviour, the mechanical half runs deterministic
 and only the residue is funded: `judged-matrix.toml` records that split per scenario in
-`deterministic_phases`. A companion shared by two scenarios
-(`agent-workbench-attachment-usage-gate` serves both `workbench-attachments` and
-`workbench-usage-ledger`) is run **once per battery** and cited by both rows; re-running it
-per row buys an identical log.
+`deterministic_phases`. The `agent-workbench-attachment-usage-gate` companion runs once per battery
+and supplies attachment persistence and model trace evidence.
 
 The judge is separate and unchanged: `judge_model_floor` stays `gpt-5.6-sol`. A cheap driver
 producing the evidence does not license a cheap reader of it.

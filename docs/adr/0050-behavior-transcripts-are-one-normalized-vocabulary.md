@@ -77,8 +77,8 @@ behavior-transcript format.
   [facade export](../../crates/lash/src/testing.rs#L83).
 - [Accepted checkpoint observation](../../crates/lash-core/src/testing/checkpoint_observer.rs#L369).
 
-## Model usage accounting
+## Model usage data
 
-A `commit` line carries no usage, and `Entry::commit` takes none: model usage
-is owner-scoped accounting delivered per call ([ADR 0125](0125-model-usage-is-engine-owned-accounting-delivered-per-call.md)), so the accounting laws,
-not a transcript line, catch a usage-accounting change.
+Usage and attempt evidence ride the model call's recorded result
+([ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md)). Behavioral transcripts
+retain their normalized vocabulary; billing belongs to the host's provider decorator.

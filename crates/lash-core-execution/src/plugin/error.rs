@@ -151,6 +151,27 @@ impl ToolIntentRuntimeFailure {
 define_plugin_errors! {
     derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize);
     derive(Debug, thiserror::Error, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema);
+    /// A provider refusal retains the host's classification and namespaced code.
+    #[error("{message}")]
+    ProviderFailure {
+        kind: crate::ProviderFailureKind,
+        code: Option<crate::FailureCode>,
+        retryable: bool,
+        terminal_reason: crate::LlmTerminalReason,
+        message: String,
+    }
+        => PluginError::ProviderFailure { kind, code, retryable, terminal_reason, message }
+        => {
+        kind: crate::ProviderFailureKind,
+        code: Option<crate::FailureCode>,
+        retryable: bool,
+        terminal_reason: crate::LlmTerminalReason,
+        message: String,
+    }
+        => Self::ProviderFailure { kind: *kind, code: code.clone(), retryable: *retryable, terminal_reason: *terminal_reason, message: message.clone() }
+        => Self::ProviderFailure { kind, code, retryable, .. }
+        => code.as_ref().map(std::string::ToString::to_string).unwrap_or_else(|| kind.code().to_string())
+        => if *retryable { crate::ToolFailureClass::Unavailable } else { crate::ToolFailureClass::InvalidRequest };
     #[error(transparent)]
     TriggerOperation(Box<crate::TriggerOperationError>)
         => PluginError::TriggerOperation(source)
@@ -1090,7 +1111,8 @@ impl PluginError {
             // answer is `StoreUnavailable`, and infrastructure that did not
             // is an attempt fault ([`Self::attempt_fault`]): neither is a
             // session, registration or invoke error.
-            Self::UnusableSchema { .. }
+            Self::ProviderFailure { .. }
+            | Self::UnusableSchema { .. }
             | Self::UnusableToolSchema { .. }
             | Self::ValueMismatch { .. }
             | Self::Session(_)
@@ -1244,7 +1266,8 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
         || matches!(
             error.cause.as_ref(),
             Some(
-                crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
+                crate::RuntimeErrorCause::ProviderFailure { .. }
+                    | crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
                     | crate::RuntimeErrorCause::PluginFormat { .. }
                     | crate::RuntimeErrorCause::SchemaRefused { .. }
                     | crate::RuntimeErrorCause::ToolSchemaRefused { .. }
@@ -1257,7 +1280,6 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
             error.code,
             crate::RuntimeErrorCode::RuntimeStoreCorrupt
                 | crate::RuntimeErrorCode::StoreRefused
-                | crate::RuntimeErrorCode::UsageOwnerRetired
                 | crate::RuntimeErrorCode::RecordedTerminationUnavailable
                 | crate::RuntimeErrorCode::MissingRecordedProcessConfig
         )
@@ -1411,33 +1433,6 @@ mod classification_tests {
             assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionHeadOwned);
             assert!(runtime.is_retryable());
             assert!(!runtime.is_terminal());
-        }
-    }
-
-    #[test]
-    fn owner_retirement_survives_plugin_journaling_and_host_conversions() {
-        let runtime = crate::RuntimeError::new(
-            crate::RuntimeErrorCode::UsageOwnerRetired,
-            "the accounting owner was retired",
-        );
-        let controller = crate::RuntimeEffectControllerError::from(runtime.clone());
-        for plugin in [
-            PluginError::Runtime(runtime),
-            PluginError::RuntimeEffectController(controller),
-        ] {
-            let encoded = serde_json::to_vec(&plugin).expect("encode plugin journal");
-            let plugin: PluginError =
-                serde_json::from_slice(&encoded).expect("replay plugin journal");
-            assert!(plugin.is_terminal());
-            assert!(!plugin.is_retryable());
-            let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
-            assert_eq!(controller.code, crate::RuntimeErrorCode::UsageOwnerRetired);
-            let runtime = plugin.into_turn_failure(crate::RuntimeErrorCode::Plugin);
-            assert_eq!(runtime.code, crate::RuntimeErrorCode::UsageOwnerRetired);
-            assert_eq!(
-                lash_sansio::FailureCode::from(&runtime.code).namespaced(),
-                "lash:usage_owner_retired"
-            );
         }
     }
 

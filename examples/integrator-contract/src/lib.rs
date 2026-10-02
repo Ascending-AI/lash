@@ -364,19 +364,6 @@ impl EffectHost for Integrator {
     fn turn_control_binding_id(&self) -> String {
         unreachable!("external signature witness")
     }
-    async fn drain_usage_accounting(
-        &self,
-        _owner: &RuntimeOwner,
-    ) -> Result<lash::usage::UsageOwnerRetired, RuntimeError> {
-        unreachable!("external signature witness")
-    }
-    async fn retire_usage_execution(
-        &self,
-        _owner: &RuntimeOwner,
-        _scope: &lash::runtime::ExecutionScope,
-    ) -> Result<u64, RuntimeError> {
-        unreachable!("external signature witness")
-    }
     async fn retire_closed_run_waits(
         &self,
         _session_id: &SessionId,

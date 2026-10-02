@@ -509,21 +509,6 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     where
         'ctx: 'run;
 
-    /// Journal a spending effect's one-way settle send to its owner's
-    /// accounting continuation (ADR 0125).
-    ///
-    /// One-way by construction: the settlement must outlive this invocation,
-    /// so it is carried by a send, which no cancel or kill of the sender
-    /// recalls, and projected in the continuation's own journal.
-    fn send_usage_settlement<'run>(
-        &'run self,
-        namespace: &'run crate::RestateNamespace,
-        owner_key: String,
-        request: crate::usage_accounting::UsageAccountingSettle,
-    ) -> crate::JournaledFuture<'run, ()>
-    where
-        'ctx: 'run;
-
     fn update_session_waits<'run>(
         &'run self,
         namespace: &'run crate::RestateNamespace,
@@ -1324,25 +1309,6 @@ macro_rules! impl_restate_controller_context {
                 process_signal_wait_method!($promises, $context, 'ctx);
 
                 durable_wait_index_methods!('ctx);
-
-                fn send_usage_settlement<'run>(
-                    &'run self,
-                    namespace: &'run crate::RestateNamespace,
-                    owner_key: String,
-                    request: crate::usage_accounting::UsageAccountingSettle,
-                ) -> crate::JournaledFuture<'run, ()>
-                where
-                    'ctx: 'run,
-                {
-                    let send = namespace
-                        .usage_accounting(self, owner_key)
-                        .settle(request)
-                        .send();
-                    Box::pin(async move {
-                        send.await?;
-                        Ok(())
-                    })
-                }
 
                 fn attach_process_terminal<'run>(
                     &'run self,

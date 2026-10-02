@@ -1656,6 +1656,3 @@ mod acquire_timeout_tests {
         );
     }
 }
-
-#[path = "postgres/usage_accounting.rs"]
-mod usage_accounting;

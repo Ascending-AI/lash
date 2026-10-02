@@ -125,19 +125,13 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
         stream_events: None,
         provider_trace: None,
     };
-    let mut first_call = Box::pin(first.complete(
-        request.clone(),
-        <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-    ));
+    let mut first_call = Box::pin(first.complete(request.clone()));
     tokio::select! {
         _ = entered.notified() => {},
         _ = &mut first_call => panic!("fixture transport must remain pending"),
     }
     assert_eq!(permits.available_permits(), 0);
-    let mut second_call = Box::pin(second.complete(
-        request.clone(),
-        <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-    ));
+    let mut second_call = Box::pin(second.complete(request.clone()));
     assert!(futures_util::poll!(&mut second_call).is_pending());
     assert_eq!(closed.load(Ordering::SeqCst), 0);
     drop(second_call);
@@ -154,10 +148,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     );
     let mut next_request = request;
     next_request.scope.request_id = "next-request".into();
-    let mut next_call = Box::pin(second.complete(
-        next_request,
-        <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-    ));
+    let mut next_call = Box::pin(second.complete(next_request));
     tokio::select! {
         _ = entered.notified() => {},
         _ = &mut next_call => panic!("fixture transport must remain pending"),

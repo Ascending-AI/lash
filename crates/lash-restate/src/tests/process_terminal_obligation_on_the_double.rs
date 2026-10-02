@@ -107,7 +107,7 @@ impl World {
             runs: AtomicUsize::new(0),
         });
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
-        host.bind_usage_accounting(lash_core::StoreSet::usage_accounting(&stores));
+
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {

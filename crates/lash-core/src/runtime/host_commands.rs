@@ -18,8 +18,8 @@
 //! - A plugin command or task runs its plugin's code only here, after
 //!   admission. Its services join the command as in-turn services join a
 //!   turn: its graph appends ride the command's commit, with its runtime
-//!   events and plugin state, and its model usage is delivered by the engine
-//!   per call (ADR 0125). A task's effects are journaled under
+//!   events and plugin state. Model usage stays with each journaled call
+//!   result (ADR 0127). A task's effects are journaled under
 //!   the command's own session-operation scope, so a redrive of the unsettled
 //!   command replays them. A host's cancel reaches an admitted task through
 //!   its cancel signal ([`task_cancel`]), and a cancel the shift finds

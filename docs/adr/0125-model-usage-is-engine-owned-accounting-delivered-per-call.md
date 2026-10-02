@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (FIG-4236). ADR 0099 §13, ADR 0100, ADR 0104 §3, ADR 0105 §9,
+Superseded by [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md)
+(FIG-4852), Sam's ruling of 2026-10-02. The following records the retired
+decision. Previously accepted (FIG-4236). ADR 0099 §13, ADR 0100, ADR 0104 §3, ADR 0105 §9,
 ADR 0109 §4, ADR 0112 §8, ADR 0119, ADR 0031 and ADR 0032 each state their
 part of this decision in a model usage accounting section pointing here.
 

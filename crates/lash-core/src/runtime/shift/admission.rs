@@ -131,7 +131,7 @@ impl RuntimeEffectLocalRunner for AdmitShiftRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::AdmitShift { request } = &envelope.command else {
             return Err(executor_mismatch("shift admission", &envelope));
@@ -489,7 +489,7 @@ impl RuntimeEffectLocalRunner for SealShiftRunner {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::SealShiftAdmission { admitted } = &envelope.command else {
             return Err(executor_mismatch("shift seal", &envelope));

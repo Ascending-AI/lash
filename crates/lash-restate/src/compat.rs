@@ -64,10 +64,6 @@ pub use lash_sansio::VersionRange;
 ///             RestateDurableWaitIndexRequest, RestateDurableWaitRegistration, RestateTurnGatePeek,
 ///         ),
 ///     ),
-///     shapes(
-///         path = "crates/lash-restate/src/usage_accounting.rs",
-///         cover(UsageAccountingSettle, UsageExecutionRetirement, UsageOwnerDrain),
-///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "coexist"

@@ -37,7 +37,6 @@ pub(crate) async fn app_state(
         pending_turn_inputs,
         queued_work,
         turn_input_applications,
-        usage,
         turn_failure_settlements,
     } = read_state_projection(&state, &session_id).await?;
     let active_turn_ids = active_turn
@@ -131,7 +130,6 @@ pub(crate) async fn app_state(
             turn_input_applications,
             turn_failure_settlements,
             unknown_turn_terminals,
-            usage,
             pending_approvals,
         },
     }))
@@ -877,7 +875,6 @@ pub(crate) async fn reset_chat(
         turn_input_applications: Vec::new(),
         turn_failure_settlements: Vec::new(),
         unknown_turn_terminals: Vec::new(),
-        usage: session.usage().await.map_err(AppError::internal)?.report(),
         pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
     }))
 }

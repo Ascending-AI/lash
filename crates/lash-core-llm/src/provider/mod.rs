@@ -12,7 +12,6 @@
 
 #[cfg(test)]
 mod charge_safety_tests;
-mod dispatch_admission;
 pub(crate) mod handle;
 mod models;
 mod options;
@@ -22,7 +21,6 @@ mod support;
 mod tests;
 mod traits;
 
-pub use dispatch_admission::{DispatchAdmission, DispatchRefused, ProviderDispatch};
 pub use handle::{
     ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
     UnconfiguredProvider,
@@ -49,5 +47,5 @@ pub use options::{
 pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};
 pub use traits::{
     DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,
-    ProviderFailureClassifier, ReconciledUsage, is_context_overflow_text,
+    ProviderFailureClassifier, is_context_overflow_text,
 };

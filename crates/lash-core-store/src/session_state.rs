@@ -1660,7 +1660,6 @@ pub fn append_session_nodes_to_state_with_clock(
 /// | record-config | Persist materialized protocol configuration | Semantic-boundary receipt replays same-request rebuilds; a differing canonical encoding is refused (FIG-2480) | Adopted: `SemanticBoundary` identity with a typed operation tag |
 /// | record-seeded-config (reopen seed) | Persist the reconciled host seed at facade reopen | Exact seed retry replays; a changed seed or advanced head gets a different operation | Keep content-addressed identity (initial-park pattern); no rebuilt-request promise |
 /// | create-session | Create a new child; registered IDs are rejected | Semantic-boundary receipt replays same-request rebuilds; a differing canonical encoding is refused (FIG-2480) | Adopted: `SemanticBoundary` identity with a typed operation tag |
-/// | usage-ledger | Flush staged child usage after its turn | Semantic-boundary receipt replays same-request rebuilds; a differing canonical encoding is refused (FIG-2480) | Adopted: `SemanticBoundary` identity with a typed operation tag |
 ///
 /// Plain-commit writes still require the original canonical commit for replay,
 /// excluding the optimistic head revision. Operations adopting the FIG-2480

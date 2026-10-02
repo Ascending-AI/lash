@@ -131,6 +131,10 @@ name = "lash-runtime-usage-payload/v4"
 reason = "FIG-4236: usage is engine-owned accounting; the runtime-commit usage payload is deleted"
 
 [[retired_hash_domain]]
+name = "lash-usage-fact-payload/v4"
+reason = "FIG-4852: model usage remains result data and hosts meter spend; the accounting payload is deleted"
+
+[[retired_hash_domain]]
 name = "lash-usage-ledger-request/v1"
 reason = "FIG-4236: usage is engine-owned accounting; the usage-ledger boundary request is deleted"
 

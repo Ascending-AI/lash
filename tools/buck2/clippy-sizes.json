@@ -735,14 +735,6 @@
     "peak_bytes": 173199360,
     "samples": 169
   },
-  "lash-internal-restate-test/session_shifts": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 160759808,
-    "peak_bytes": 166195200,
-    "samples": 178
-  },
   "lash-internal-restate-test/session_send": {
     "cpu_count": 1,
     "memory_kb": 524288,
@@ -750,6 +742,14 @@
     "p99_peak_bytes": 193310720,
     "peak_bytes": 223936512,
     "samples": 145
+  },
+  "lash-internal-restate-test/session_shifts": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 160759808,
+    "peak_bytes": 166195200,
+    "samples": 178
   },
   "lash-internal-restate-test/start_gate_peek": {
     "cpu_count": 1,
@@ -790,14 +790,6 @@
     "p99_peak_bytes": 162611200,
     "peak_bytes": 180264960,
     "samples": 105
-  },
-  "lash-internal-restate-test/usage_accounting_windows": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 124542976,
-    "peak_bytes": 127283200,
-    "samples": 127
   },
   "lash-internal-restate/lash_restate": {
     "cpu_count": 1,

@@ -1228,18 +1228,46 @@ async fn a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_ca
     };
     let catalog = Arc::new(LiveCatalog::default());
     let calls = Arc::new(AtomicUsize::new(0));
+    let dispatched = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider = {
         // The key is retired while its one model call is in flight: the
         // call's result is journaled, and everything after it is a replay
         // or runs on the deployment without the key.
         let retiring = Arc::clone(&catalog);
         let calls = Arc::clone(&calls);
+        let dispatched = Arc::clone(&dispatched);
         lash::testing::TestProvider::builder()
             .kind(KIND)
-            .complete(move |_request| {
-                calls.fetch_add(1, Ordering::SeqCst);
-                retiring.serve(LlmProfileRegistry::new());
-                async move { Ok(text("kimi answers")) }
+            .generation_retry_guarantee(lash::provider::GenerationRetryGuarantee::Idempotent)
+            .options(lash::provider::ProviderOptions {
+                reliability: lash::provider::ProviderReliability::default()
+                    .max_attempts(2)
+                    .base_delay_ms(0)
+                    .max_delay_ms(0),
+                ..Default::default()
+            })
+            .complete(move |request| {
+                let ordinal = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                dispatched
+                    .lock()
+                    .expect("decorator attempts")
+                    .push((request.request_id().to_owned(), ordinal));
+                if ordinal == 2 {
+                    retiring.serve(LlmProfileRegistry::new());
+                }
+                async move {
+                    if ordinal == 1 {
+                        Err(
+                            lash::provider::LlmTransportError::new("retry the first attempt")
+                                .with_kind(lash::provider::ProviderFailureKind::Transport)
+                                .with_retry_verdict(
+                                    lash::provider::TransportRetryVerdict::RetryableTransient,
+                                ),
+                        )
+                    } else {
+                        Ok(text("kimi answers"))
+                    }
+                }
             })
             .build()
             .into_handle()
@@ -1267,9 +1295,22 @@ async fn a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_ca
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        1,
+        2,
         "the journaled model call is served from the journal, never made again"
     );
+    let attempts = dispatched.lock().expect("decorator attempts");
+    assert_eq!(attempts.len(), 2, "replay dispatches no additional attempt");
+    assert_eq!(
+        attempts[0].0, attempts[1].0,
+        "retries preserve the request id"
+    );
+    assert!(!attempts[0].0.is_empty());
+    assert_eq!(
+        (attempts[0].1, attempts[1].1),
+        (1, 2),
+        "the decorator distinguishes attempts"
+    );
+    drop(attempts);
     let turns = double
         .double
         .service_name(lash_restate_test::TURN_DRIVER_SERVICE);
@@ -1763,71 +1804,6 @@ fn ask_twice_provider(calls: &Arc<AtomicUsize>, completions: usize) -> ProviderH
         .into_handle()
 }
 
-/// The session's usage ledger: its facts and its runs.
-async fn ledger(
-    core: &LashCore,
-    session_id: &str,
-) -> (
-    Vec<lash_core::UsageFactRecord>,
-    Vec<lash_core::UsageMeterRecord>,
-) {
-    let owner = lash_core::RuntimeOwner::Session(lash_core::SessionId::fixture(session_id));
-    let limit = std::num::NonZeroU32::new(64).expect("non-zero");
-    let facts = core
-        .usage_fact_page(&owner, None, limit)
-        .await
-        .expect("the ledger lists the session's facts");
-    let runs = core
-        .usage_meter_page(&owner, lash_core::UsageMeterFilter::All, None, limit)
-        .await
-        .expect("the ledger lists the session's runs");
-    assert!(
-        facts.next.is_none() && runs.next.is_none(),
-        "one page holds the session's ledger"
-    );
-    (facts.facts, runs.meters)
-}
-
-/// Wait until the session's ledger holds exactly `first` facts of
-/// `ask-first` and `second` of `ask-second`, each from its own run, and every
-/// run of the session is settled. A settlement is delivered after its effect,
-/// so the ledger is read until it agrees.
-async fn await_settled_asks(core: &LashCore, session_id: &str, first: usize, second: usize) {
-    let agreed = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        loop {
-            let (facts, runs) = ledger(core, session_id).await;
-            let of = |source: &str| {
-                facts
-                    .iter()
-                    .filter(|fact| fact.source == source)
-                    .map(|fact| fact.meter().cloned())
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .len()
-            };
-            let asks = facts
-                .iter()
-                .filter(|fact| fact.source.starts_with("ask-"))
-                .count();
-            if of("ask-first") == first
-                && of("ask-second") == second
-                && asks == first + second
-                && runs.iter().all(|run| run.state.is_settled())
-            {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await;
-    if agreed.is_err() {
-        let (facts, runs) = ledger(core, session_id).await;
-        panic!(
-            "the ledger holds {first} ask-first and {second} ask-second facts, each settled \
-             once, and no run is open, unknown or conflicted; facts {facts:#?}, runs {runs:#?}"
-        );
-    }
-}
-
 /// A bind fault inside a tool attempt ends the attempt where it is met
 /// (FIG-4632). The direct completion that cannot bind the session's recorded
 /// model hands its tool no error to catch: the tool's body is dropped there,
@@ -1889,9 +1865,9 @@ async fn a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion(
 /// journals it, so the usage of the completion already dispatched and billed
 /// is settled when the attempt ends, under the run that spent it: its run is
 /// not left an unknown liability. The retry that completes once the key is
-/// served dispatches both completions under its own run, and settles each
-/// once without conflicting with the earlier run's fact.
-async fn a_completion_dispatched_before_a_bind_fault_keeps_its_usage_settled_once(
+/// served dispatches both completions again: the opaque attempt had recorded
+/// no result. Hosts own receipts for this unrecorded retry window.
+async fn a_completion_before_a_bind_fault_is_retried_only_while_unrecorded(
     tier: Tier,
     replay: bool,
     seed: u64,
@@ -1934,9 +1910,7 @@ async fn a_completion_dispatched_before_a_bind_fault_keeps_its_usage_settled_onc
         "the run's model call and the first attempt's first completion reached the transport; \
          every retry met the bind fault at its first completion"
     );
-    // The faulted attempt's dispatched completion is settled, and its run is
-    // resolved, although the attempt journaled nothing.
-    await_settled_asks(&core, session_id, 1, 0).await;
+    // The opaque attempt recorded nothing; its completed call may retry.
 
     let run = lash::TurnId::from("keys-usage-before-fault-run");
     let work = lash::ParkedWorkRef::Turn {
@@ -1969,10 +1943,6 @@ async fn a_completion_dispatched_before_a_bind_fault_keeps_its_usage_settled_onc
         5,
         "the resumed attempt dispatched both completions, and the run its second model call"
     );
-    // Each dispatched completion is settled exactly once: the first
-    // completion of the faulted attempt and of the completed one, under their
-    // own runs, and the second completion of the completed one.
-    await_settled_asks(&core, session_id, 2, 1).await;
     assert_eq!(
         acted_past_a_fault.load(Ordering::SeqCst),
         0,
@@ -2430,7 +2400,7 @@ tiered!(
     0x4632_1100
 );
 tiered!(
-    a_completion_dispatched_before_a_bind_fault_keeps_its_usage_settled_once,
+    a_completion_before_a_bind_fault_is_retried_only_while_unrecorded,
     0x4632_1200
 );
 tiered!(

@@ -408,8 +408,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             memory: memory_span(turn_before_memory, after_await_memory),
             phase_profile,
             turn_usage: TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
         });
     }
 
@@ -480,7 +478,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         memory: memory_span(before_memory, after_export_memory),
         phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
         turns,
-        cumulative_usage: SessionUsageReport::default(),
     })
 }
 

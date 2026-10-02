@@ -1072,21 +1072,15 @@ AUDITED_GUARDS = {
         "ControlIntentId", "ArtifactReferrer", "canonical_id",
     ),
     "crates/lash-sansio/src/process_cursor.rs:PROCESS_CURSOR_VERSION": ("ProcessId",),
-    "crates/lash-core-store/src/usage_accounting.rs:USAGE_PAYLOAD_FAMILY_VERSION": (
-        "PayloadAttribution", "UsageAttemptFact", "AttemptFactOutcome",
-    ),
     "crates/lash-restate/src/compat.rs:RESTATE_WIRE_VERSION": (
         "VersionRange", "RestateCompatError", "EffectGroupOpenRequest",
         "EffectGroupCommitChildResponse", "EffectGroupChildRequest", "EffectGroupNotice",
         "RestateDurableWaitAwaitRequest", "RestateProcessWorkflowInput",
-        "RestateSessionShiftRequest", "UsageAccountingSettle", "ObjectUpgradeResponse",
+        "RestateSessionShiftRequest", "ObjectUpgradeResponse",
         "BuildGeneration", "AwaitEventKey",
     ),
     "crates/lash-restate/src/session_shifts.rs:LASH_TURN_OUTCOME_FORMAT_VERSION": (
         "SealVerdict", "ShiftFence", "AdmissionId", "TurnOutcome", "TurnStop", "FailureCode",
-    ),
-    "crates/lash-restate/src/usage_accounting.rs:USAGE_ACCOUNTING_WIRE_VERSION": (
-        "UsageSettlement", "UsageAttemptFact", "MeterAccounting", "LlmProfileKey", "TokenUsage",
     ),
     "crates/lash-vm-protocol/src/version.rs:WORKER_PROTOCOL_VERSION": (
         "StateDigest", "Serialize for StateDigest", "FRAME_MAGIC", "encode_parent", "WorkerLimit",

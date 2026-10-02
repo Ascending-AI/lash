@@ -38,7 +38,6 @@ filters = [
   "live_effect_group_sdk_preconditions",
   "tests::conformance_and_poison::",
   # FIG-4236: the usage accounting engine laws on a live server.
-  "tests::usage_accounting_on_the_double::live::",
   # FIG-4651: the live-fault park laws on a live server and on the double
   # over PostgreSQL.
   "tests::live_fault_park_on_the_double::",
@@ -321,15 +320,6 @@ filters = ["live_sqlite_memory::"]
 endpoints = ["RAA_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 180
-
-# The detached usage continuation's live transport and projection windows.
-[suites.usage-accounting]
-label = "//crates/lash-restate-test:usage_accounting_windows__test"
-cwd = "crates/lash-restate-test"
-filters = ["live_restate_usage_crash_"]
-endpoints = ["CW"]
-shards = 1
-timeout_seconds = 120
 
 # Recorded creation behaviour survives remote materialization and handler replay.
 [suites.recorded-process-behaviour]

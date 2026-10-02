@@ -212,10 +212,7 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let completion = handle
-        .complete(
-            sampled_request(),
-            <dyn lash_core::provider::DispatchAdmission>::host_owned(),
-        )
+        .complete(sampled_request())
         .await
         .expect("retry succeeds");
 

@@ -13,9 +13,8 @@
 //! resets the stored execution state and the prompt usage and settles the
 //! command with its outcome
 //! ([`CompactContextOutcome`](super::CompactContextOutcome)), which the
-//! submitter reads back from the batch's completion. The compaction's billed
-//! usage is not part of that commit: its summarizer call is a spending
-//! effect whose usage meter the engine delivers (ADR 0125).
+//! submitter reads back from the batch's completion. The summarizer's usage
+//! remains in its journaled model result; the host meters spend (ADR 0127).
 //!
 //! A storeless runtime keeps a direct path,
 //! [`LashRuntime::compact_storeless_context`]: it has no shift and no durable

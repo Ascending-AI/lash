@@ -252,8 +252,6 @@ pub(super) struct RecordingContext {
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
     pub(super) process_attachments: Mutex<Vec<crate::process_attach::RestateProcessAttachRequest>>,
-    /// Every settle send a recorded spending effect journaled (ADR 0125).
-    pub(super) usage_settlements: Mutex<Vec<crate::usage_accounting::UsageAccountingSettle>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
     pub(super) awaited_replay_keys: Mutex<Vec<String>>,
@@ -528,19 +526,6 @@ impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx> for Arc<Record
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn invocation_id(&self) -> &str {
         "RecordingContext"
-    }
-
-    fn send_usage_settlement<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _owner_key: String,
-        request: crate::usage_accounting::UsageAccountingSettle,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        self.usage_settlements.lock_recover().push(request);
-        Box::pin(async move { Ok(()) })
     }
 
     fn attach_process_terminal<'run>(
@@ -1758,9 +1743,8 @@ impl ReplayableRecordingContext {
                 let envelope: serde_json::Value = serde_json::from_str(recorded.envelope.json())
                     .expect("decode recorded effect envelope");
                 let entry = JournaledEffectRecord::Recorded(recorded);
-                // Retried runs journal the closure's Result: a presentation,
-                // and every spending effect, whose admission fault retries
-                // (ADR 0125). Recorded runs journal the stamped entry directly.
+                // Retried runs journal the closure's Result. Recorded runs
+                // journal the stamped entry directly.
                 let retried = envelope
                     .pointer("/command/type")
                     .and_then(serde_json::Value::as_str)
@@ -1891,18 +1875,6 @@ impl<'ctx> crate::controller::context::GroupChildCancelRace<'ctx>
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     fn invocation_id(&self) -> &str {
         "ReplayableRecordingContext"
-    }
-
-    fn send_usage_settlement<'run>(
-        &'run self,
-        _namespace: &'run crate::RestateNamespace,
-        _owner_key: String,
-        _request: crate::usage_accounting::UsageAccountingSettle,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
-    where
-        'ctx: 'run,
-    {
-        Box::pin(async move { Ok(()) })
     }
 
     /// Journaled wake verdict (FIG-3149). A live wake records the verdict it

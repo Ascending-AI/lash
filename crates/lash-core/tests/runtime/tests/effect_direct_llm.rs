@@ -134,13 +134,7 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
     );
     // The recording double answers the direct effect itself: no provider was
     // dispatched, so no usage meter was admitted and nothing is accounted. Only
-    // a dispatched call is spend (ADR 0125).
-    let usage = settled_runtime_usage(&runtime).await;
-    assert!(
-        usage.rows.is_empty(),
-        "a canned answer is no paid call: {usage:?}"
-    );
-    assert_eq!(usage.completeness, lash_core::UsageCompleteness::default());
+    // a dispatched call is spend (ADR 0127).
     drop(direct);
     handler
         .close()

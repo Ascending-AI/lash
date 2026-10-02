@@ -1,63 +1,15 @@
 //! Content-level durable-state oracles.
 //!
-//! The independent checkpoint checker (`state_checker`) compares lash
-//! against itself: counts and totals. A fact lash never records is invisible
-//! to it. These oracles compare three independently obtained views instead:
-//!
-//! * **emitted** — what the scripted provider put on the wire and what the
-//!   scripted tools returned, decoded by this module from the wire script
-//!   itself, never through a lash provider adapter;
-//! * **delivered** — the per-attempt usage facts the engine delivered for the
-//!   session's owner (ADR 0125), paged fact by fact;
-//! * **reopened** — the session graph and the owner's aggregated usage read
-//!   back through a fresh store handle after the run (a fresh SQLite factory
-//!   on the SQLite lane, so that read is genuinely cold).
-//!
-//! # Documented projections
-//!
-//! The comparison is byte-for-byte after these projections and no others:
-//!
-//! * An assistant message is the concatenation of its `Text`/`Prose` parts plus
-//!   the `(tool_call_id, tool_name)` of its `ToolCall` parts, in order. An
-//!   emitted attempt's text is the concatenation of its streamed text deltas
-//!   (OpenAI chat `choices[0].delta.content`, OpenAI Responses
-//!   `response.output_text.delta`, Anthropic `text_delta`, Google candidate
-//!   part `text`), and its tool calls are the streamed native calls.
-//! * A tool result is the committed `ToolResult` part's `content`: the value
-//!   rendered with the standard renderer's default parameters. A cut includes
-//!   a head and tail within the shared character and line limits, plus a
-//!   notice naming the retained full output.
-//! * Usage is decoded per provider convention into the accounting buckets:
-//!   OpenAI reports prompt tokens inclusive of cached ones (input = prompt −
-//!   cached) and reasoning inside the completion count; Anthropic reports input
-//!   and cache buckets on `message_start` and output on `message_delta` (later
-//!   non-zero fields overlay earlier ones); Google reports candidates and
-//!   thoughts separately (output = candidates + thoughts). The last usage the
-//!   wire reports wins, as it does for the providers.
-//!
-//! Only provider-*reported* usage is in scope. An attempt whose wire carries no
-//! usage is an unreported attempt (FIG-2765), classified elsewhere; its fact
-//! carries a non-reported disposition and is excluded from both sides.
-//!
-//! # The two laws
-//!
-//! Both laws are registered as run-only oracles of the generated lane.
-//!
-//! [`durable_content`] checks that every committed assistant message and tool
-//! result equals what was emitted, and that the reported usage of every
-//! *completed* attempt reaches the accounting as its own fact. On sessions
-//! where no attempt failed after reporting usage, the delivered facts and the
-//! reopened owner total equal the emitted usage exactly.
-//!
-//! [`failed_attempt_usage_ledgered`] is the same usage law extended to failed
-//! attempts: every attempt that reported usage, including one that then
-//! failed, reaches the accounting as its own fact. FIG-3514's fix made it
-//! hold.
+//! Compare the scripted provider's wire output against recorded model attempt
+//! results in the engine journal and messages read through fresh graph pages.
+//! The wire decoder is independent of Lash's provider adapters. Failed attempts
+//! retain their reported usage in the same journaled result as successful ones.
+//! The oracle compares every nonzero reported attempt as a separate delta.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-use lash_core::{DeploymentStore, UsageAccountingStore};
+use lash_core::DeploymentStore;
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
 use lash_sansio::SessionId;
 use serde::Serialize;
@@ -69,9 +21,9 @@ use crate::trace::OracleVerdict;
 pub const DURABLE_CONTENT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.durable-content.v1");
 pub const FAILED_ATTEMPT_USAGE_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::real("sim.oracle.failed-attempt-usage-ledgered.v1");
+    crate::trace::OracleId::real("sim.oracle.failed-attempt-usage-recorded.v1");
 
-/// The accounting's usage buckets, in this module's own representation so
+/// Provider usage buckets, in this module's own representation so
 /// the oracle does not borrow lash's usage type.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct UsageBuckets {
@@ -95,16 +47,14 @@ impl UsageBuckets {
         "reasoning_output_tokens",
     ];
 
-    /// Decode the accounting's usage from its JSON rendering, so the oracle
+    /// Decode the recorded attempt's usage from its JSON rendering, so the oracle
     /// reads the counters by name rather than through lash's type.
-    fn from_accounting_usage(usage: &lash_core::TokenUsage) -> Result<Self, String> {
-        let usage = serde_json::to_value(usage)
-            .map_err(|err| format!("accounting usage does not encode: {err}"))?;
+    fn from_recorded_usage(usage: &Value) -> Result<Self, String> {
         let field = |name: &str| {
             usage
                 .get(name)
                 .and_then(Value::as_i64)
-                .ok_or_else(|| format!("accounting usage has no integer `{name}`: {usage}"))
+                .ok_or_else(|| format!("recorded usage has no integer `{name}`: {usage}"))
         };
         Ok(Self {
             input_tokens: field(Self::FIELDS[0])?,
@@ -113,22 +63,6 @@ impl UsageBuckets {
             cache_write_input_tokens: field(Self::FIELDS[3])?,
             reasoning_output_tokens: field(Self::FIELDS[4])?,
         })
-    }
-
-    fn saturating_add(self, other: Self) -> Self {
-        Self {
-            input_tokens: self.input_tokens.saturating_add(other.input_tokens),
-            output_tokens: self.output_tokens.saturating_add(other.output_tokens),
-            cache_read_input_tokens: self
-                .cache_read_input_tokens
-                .saturating_add(other.cache_read_input_tokens),
-            cache_write_input_tokens: self
-                .cache_write_input_tokens
-                .saturating_add(other.cache_write_input_tokens),
-            reasoning_output_tokens: self
-                .reasoning_output_tokens
-                .saturating_add(other.reasoning_output_tokens),
-        }
     }
 }
 
@@ -203,9 +137,6 @@ pub struct ReopenedSession {
     /// The `ToolCallId` each committed tool result answers, in the order of
     /// `tool_results`.
     pub result_call_ids: Vec<String>,
-    /// The owner's aggregated usage over its provider-reported and reconciled
-    /// facts, read through the accounting's totals rather than its fact pages.
-    pub reported_usage_total: UsageBuckets,
 }
 
 /// Everything the content oracles need about one session.
@@ -216,7 +147,7 @@ pub struct SessionContent {
     pub emitted_tool_results: Vec<ToolResultContent>,
     /// The session owner's provider-reported usage facts, one per attempt,
     /// as the engine delivered them.
-    pub delivered_usage: Vec<UsageBuckets>,
+    pub recorded_usage: Vec<UsageBuckets>,
     /// `None` when the store holds no session under this id.
     pub reopened: Option<ReopenedSession>,
 }
@@ -438,97 +369,84 @@ fn google_usage(usage: &Value) -> UsageBuckets {
 #[derive(Clone)]
 pub struct ReopenHandles {
     pub sessions: std::sync::Arc<dyn DeploymentStore>,
-    pub usage: std::sync::Arc<dyn UsageAccountingStore>,
+    pub journal: lash_restate_test::RestateTestServer,
 }
 
 impl ReopenHandles {
-    pub fn over(backend: &lash_core::Backend) -> Self {
+    pub fn over(engine: &crate::backend::SimEngine) -> Self {
         Self {
-            sessions: backend.session_store_factory(),
-            usage: backend.usage_accounting(),
+            sessions: engine.backend().session_store_factory(),
+            journal: engine.restate().server().clone(),
         }
     }
 }
 
-/// How long a read waits for the engine to deliver a session's open runs.
-const DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// Wait until every usage meter `session`'s owner admitted is resolved:
-/// delivery is asynchronous to the turn (ADR 0125), so a read taken the
-/// moment a turn ends can precede its last settlement.
-async fn await_settled_usage(
-    usage: &dyn UsageAccountingStore,
-    session: &str,
-) -> Result<lash_core::OwnerUsage, String> {
-    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(session.to_string()));
-    let deadline = std::time::Instant::now() + DELIVERY_WAIT;
-    loop {
-        let read = usage
-            .load_owner_usage(&owner)
-            .await
-            .map_err(|err| format!("read `{session}` usage: {err}"))?;
-        if read.completeness.is_settled() {
-            return Ok(read);
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!(
-                "`{session}` usage did not settle within {DELIVERY_WAIT:?}: {:?}",
-                read.completeness
-            ));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-}
-
-/// The provider-reported usage facts the engine delivered for `session`'s
-/// owner, one per attempt. A zero report carries no charge and is outside
-/// both sides of every comparison, as it is on the emitted side.
-#[expect(
-    clippy::expect_used,
-    reason = "the fixed fact page limit is a nonzero constant"
-)]
-pub async fn delivered_usage(
-    usage: &dyn UsageAccountingStore,
+/// Read the provider attempts in the model call's recorded effect result.
+/// No turn result or emitted wire script is used to manufacture this evidence.
+pub fn recorded_usage(
+    journal: &lash_restate_test::RestateTestServer,
     session: &str,
 ) -> Result<Vec<UsageBuckets>, String> {
-    await_settled_usage(usage, session).await?;
-    let owner = lash_core::RuntimeOwner::Session(SessionId::fixture(session.to_string()));
-    let mut facts = Vec::new();
-    let mut after = None;
-    loop {
-        let page = usage
-            .load_usage_fact_page(
-                &owner,
-                after.as_ref(),
-                std::num::NonZeroU32::new(256).expect("nonzero page size"),
-            )
-            .await
-            .map_err(|err| format!("page `{session}` usage facts: {err}"))?;
-        for fact in page.facts {
-            if fact.disposition() == lash_core::UsageReporting::Reported {
-                let buckets = UsageBuckets::from_accounting_usage(&fact.usage())?;
-                if !buckets.is_zero() {
-                    facts.push(buckets);
+    let mut usages = Vec::new();
+    for invocation in journal.invocations() {
+        for entry in journal.journal(&invocation.id).unwrap_or_default() {
+            let Some(Ok(bytes)) = entry.run_completion() else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+                continue;
+            };
+            let Some(envelope_json) = value.pointer("/envelope/json").and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let envelope: Value = serde_json::from_str(envelope_json)
+                .map_err(|error| format!("invalid recorded envelope: {error}"))?;
+            if envelope
+                .pointer("/invocation/attribution/session_id")
+                .and_then(Value::as_str)
+                != Some(session)
+            {
+                continue;
+            }
+            let Some(outcome) = value.pointer("/outcome/Ok") else {
+                continue;
+            };
+            if !matches!(
+                outcome.get("type").and_then(Value::as_str),
+                Some("llm_call" | "direct")
+            ) {
+                continue;
+            }
+            let Some(attempts) = outcome
+                .pointer("/call_record/attempts")
+                .and_then(Value::as_array)
+            else {
+                return Err(format!(
+                    "`{session}` recorded a model result without attempt evidence"
+                ));
+            };
+            for attempt in attempts {
+                if let Some(usage) = attempt.get("usage").filter(|usage| !usage.is_null()) {
+                    let buckets = UsageBuckets::from_recorded_usage(usage)?;
+                    if !buckets.is_zero() {
+                        usages.push(buckets);
+                    }
                 }
             }
         }
-        match page.next {
-            Some(next) => after = Some(next),
-            None => break,
-        }
     }
-    Ok(facts)
+    Ok(usages)
 }
 
 /// Read the committed history through explicit graph pages, and the owner's
-/// settled usage through the accounting's totals.
+/// through a fresh store handle.
 #[expect(
     clippy::expect_used,
     reason = "the fixed history page limits are nonzero constants"
 )]
 pub async fn reopen_session(
     store: &dyn DeploymentStore,
-    usage: &dyn UsageAccountingStore,
     session_id: &str,
 ) -> Result<Option<ReopenedSession>, String> {
     use lash_core::store::{HistoryAnchor, HistoryBudget};
@@ -644,11 +562,6 @@ pub async fn reopen_session(
         reopened.assistant_messages.push(committed);
         reopened.call_ids.push(call_ids);
     }
-    for row in await_settled_usage(usage, session_id.as_str()).await?.rows {
-        reopened.reported_usage_total = reopened
-            .reported_usage_total
-            .saturating_add(UsageBuckets::from_accounting_usage(&row.usage)?);
-    }
     Ok(Some(reopened))
 }
 
@@ -692,10 +605,10 @@ pub fn durable_content(sessions: &[SessionContent]) -> OracleVerdict {
 /// The per-attempt usage law extended to attempts that failed after reporting
 /// usage; see the module docs.
 ///
-/// An attempt that reported all-zero usage carries no charge, so zero reports
-/// are outside both sides of the comparison ([`delivered_usage`] drops them
+/// An attempt that reported all-zero usage contributes no tokens, so zero reports
+/// are outside both sides of the comparison ([`recorded_usage`] drops them
 /// too).
-pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdict {
+pub fn failed_attempt_usage_recorded(sessions: &[SessionContent]) -> OracleVerdict {
     let mut checked = 0usize;
     for session in sessions.iter().filter(|s| s.has_failed_reported_attempt()) {
         let reported = session
@@ -706,19 +619,12 @@ pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdi
             .collect::<Vec<_>>();
         if let Err(message) = require_same_multiset(
             &reported,
-            &session.delivered_usage,
+            &session.recorded_usage,
             &format!(
-                "`{}` every reported attempt's usage, failed attempts included, vs delivered facts",
+                "`{}` every reported attempt's usage, failed attempts included, vs recorded attempts",
                 session.session
             ),
-        )
-        .and_then(|()| {
-            require_reopened_total(
-                session,
-                &reported,
-                "every reported attempt, failed included",
-            )
-        }) {
+        ) {
             return OracleVerdict::failed(FAILED_ATTEMPT_USAGE_ORACLE, message);
         }
         checked += 1;
@@ -731,7 +637,7 @@ pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdi
     }
     OracleVerdict::passed(
         FAILED_ATTEMPT_USAGE_ORACLE,
-        format!("{checked} session(s) delivered every failed attempt's reported usage"),
+        format!("{checked} session(s) recorded every failed attempt's reported usage"),
     )
 }
 
@@ -748,7 +654,7 @@ impl fmt::Display for ContentCounts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} assistant messages, {} tool results and {} reported attempt usages matched byte for byte after reopen across {} sessions ({} with exact per-attempt accounting)",
+            "{} assistant messages, {} tool results and {} reported attempt usages matched byte for byte after reopen across {} sessions ({} with exact recorded attempt usage)",
             self.messages,
             self.tool_results,
             self.usage_attempts,
@@ -816,8 +722,8 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
             ));
         }
 
-        // An all-zero report carries no charge and is outside both sides
-        // (see `failed_attempt_usage_ledgered`).
+        // An all-zero report contributes no tokens and is outside both sides
+        // (see `failed_attempt_usage_recorded`).
         let completed_usage = completed
             .iter()
             .filter_map(|attempt| attempt.usage)
@@ -828,22 +734,21 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
             // completed attempt's usage must still be its own delivered fact.
             require_subset(
                 &completed_usage,
-                &session.delivered_usage,
+                &session.recorded_usage,
                 &format!(
-                    "`{}` completed attempts' usage vs delivered facts",
+                    "`{}` completed attempts' usage vs recorded attempts",
                     session.session
                 ),
             )?;
         } else {
             require_same_multiset(
                 &completed_usage,
-                &session.delivered_usage,
+                &session.recorded_usage,
                 &format!(
-                    "`{}` reported attempt usage vs delivered facts",
+                    "`{}` reported attempt usage vs recorded attempts",
                     session.session
                 ),
             )?;
-            require_reopened_total(session, &completed_usage, "every reported attempt")?;
             counts.exact_usage_sessions += 1;
         }
 
@@ -858,30 +763,6 @@ fn check_durable_content(sessions: &[SessionContent]) -> Result<ContentCounts, S
         ));
     }
     Ok(counts)
-}
-
-fn require_reopened_total(
-    session: &SessionContent,
-    attempts: &[UsageBuckets],
-    what: &str,
-) -> Result<(), String> {
-    let expected = attempts
-        .iter()
-        .fold(UsageBuckets::default(), |total, usage| {
-            total.saturating_add(*usage)
-        });
-    let reopened = session
-        .reopened
-        .as_ref()
-        .map(|reopened| reopened.reported_usage_total)
-        .unwrap_or_default();
-    if reopened != expected {
-        return Err(format!(
-            "`{}` reopened usage total diverged from {what}: emitted={expected:?} reopened={reopened:?}",
-            session.session
-        ));
-    }
-    Ok(())
 }
 
 fn require_same_multiset(
@@ -910,7 +791,7 @@ fn require_subset(
     for usage in emitted {
         let Some(index) = remaining.iter().position(|candidate| candidate == usage) else {
             return Err(format!(
-                "{what}: emitted {usage:?} has no delivered fact among {committed:?}"
+                "{what}: emitted {usage:?} has no recorded attempt among {committed:?}"
             ));
         };
         remaining.swap_remove(index);
@@ -1069,11 +950,10 @@ mod tests {
                 attempt("e\u{301}", Some(usage(u32::MAX.into(), 0)), true),
             ],
             emitted_tool_results: vec![tool_result("{\"payload\":\"\\u0000\"}")],
-            delivered_usage: vec![usage(u32::MAX.into(), 0), usage(1 << 40, 3)],
+            recorded_usage: vec![usage(u32::MAX.into(), 0), usage(1 << 40, 3)],
             reopened: Some(ReopenedSession {
                 assistant_messages: vec![message("caf\u{e9} \u{0} \u{1f980}"), message("e\u{301}")],
                 tool_results: vec![tool_result("{\"payload\":\"\\u0000\"}")],
-                reported_usage_total: usage((1 << 40) + i64::from(u32::MAX), 3),
                 call_ids: Vec::new(),
                 result_call_ids: Vec::new(),
             }),
@@ -1090,11 +970,10 @@ mod tests {
                 attempt("done", Some(usage(9, 4)), true),
             ],
             emitted_tool_results: Vec::new(),
-            delivered_usage: vec![usage(9, 4)],
+            recorded_usage: vec![usage(9, 4)],
             reopened: Some(ReopenedSession {
                 assistant_messages: vec![message("done")],
                 tool_results: Vec::new(),
-                reported_usage_total: usage(9, 4),
                 call_ids: Vec::new(),
                 result_call_ids: Vec::new(),
             }),
@@ -1134,23 +1013,10 @@ mod tests {
         );
 
         let mut summed_delta = healthy();
-        summed_delta.delivered_usage = vec![usage((1 << 40) + i64::from(u32::MAX), 3)];
+        summed_delta.recorded_usage = vec![usage((1 << 40) + i64::from(u32::MAX), 3)];
         let verdict = durable_content(&[summed_delta]);
         assert!(
-            verdict.message.contains("vs delivered facts"),
-            "{}",
-            verdict.message
-        );
-
-        let mut ledger_drift = healthy();
-        ledger_drift
-            .reopened
-            .as_mut()
-            .expect("reopened")
-            .reported_usage_total = usage(1, 1);
-        let verdict = durable_content(&[ledger_drift]);
-        assert!(
-            verdict.message.contains("reopened usage total"),
+            verdict.message.contains("vs recorded attempts"),
             "{}",
             verdict.message
         );
@@ -1173,15 +1039,15 @@ mod tests {
     }
 
     #[test]
-    fn registered_law_tolerates_today_failed_attempt_ledgering_but_not_a_lost_completion() {
+    fn completed_attempt_law_rejects_a_lost_completion() {
         let today = durable_content(&[healthy(), retried_like_today()]);
         assert!(today.is_passed(), "{}", today.message);
 
         let mut lost_completion = retried_like_today();
-        lost_completion.delivered_usage.clear();
+        lost_completion.recorded_usage.clear();
         let verdict = durable_content(&[healthy(), lost_completion]);
         assert!(
-            verdict.message.contains("has no delivered fact"),
+            verdict.message.contains("has no recorded attempt"),
             "{}",
             verdict.message
         );
@@ -1189,7 +1055,7 @@ mod tests {
 
     #[test]
     fn failed_attempt_law_requires_every_reported_attempt_as_its_own_delta() {
-        let today = failed_attempt_usage_ledgered(&[healthy(), retried_like_today()]);
+        let today = failed_attempt_usage_recorded(&[healthy(), retried_like_today()]);
         assert!(!today.is_passed(), "the FIG-3514 shape must be red");
         assert!(
             today.message.contains("failed attempts included"),
@@ -1198,30 +1064,25 @@ mod tests {
         );
 
         let mut fixed = retried_like_today();
-        fixed.delivered_usage = vec![usage(7, 0), usage(9, 4)];
-        fixed
-            .reopened
-            .as_mut()
-            .expect("reopened")
-            .reported_usage_total = usage(16, 4);
-        let verdict = failed_attempt_usage_ledgered(&[healthy(), fixed.clone()]);
+        fixed.recorded_usage = vec![usage(7, 0), usage(9, 4)];
+        let verdict = failed_attempt_usage_recorded(&[healthy(), fixed.clone()]);
         assert!(verdict.is_passed(), "{}", verdict.message);
         // The fixed shape still satisfies the registered law, so registering
         // the failed-attempt law does not have to touch it.
         assert!(durable_content(&[healthy(), fixed]).is_passed());
 
-        let vacuous = failed_attempt_usage_ledgered(&[healthy()]);
+        let vacuous = failed_attempt_usage_recorded(&[healthy()]);
         assert!(vacuous.message.contains("vacuous"), "{}", vacuous.message);
     }
 
     #[test]
     fn failed_attempt_law_ignores_a_zero_usage_report() {
-        // A failed attempt that reported all-zero usage owes no charge, and
+        // A failed attempt that reported all-zero usage contributes no tokens, and
         // both sides drop zero reports, so a session whose only failed report
         // is zero leaves nothing for the law to check.
         let mut zero = retried_like_today();
         zero.emitted_attempts[0].usage = Some(usage(0, 0));
-        let only_zero = failed_attempt_usage_ledgered(&[healthy(), zero.clone()]);
+        let only_zero = failed_attempt_usage_recorded(&[healthy(), zero.clone()]);
         assert!(
             only_zero.message.contains("vacuous"),
             "{}",
@@ -1229,13 +1090,8 @@ mod tests {
         );
 
         let mut fixed = retried_like_today();
-        fixed.delivered_usage = vec![usage(7, 0), usage(9, 4)];
-        fixed
-            .reopened
-            .as_mut()
-            .expect("reopened")
-            .reported_usage_total = usage(16, 4);
-        let verdict = failed_attempt_usage_ledgered(&[healthy(), fixed, zero]);
+        fixed.recorded_usage = vec![usage(7, 0), usage(9, 4)];
+        let verdict = failed_attempt_usage_recorded(&[healthy(), fixed, zero]);
         assert!(verdict.is_passed(), "{}", verdict.message);
     }
 

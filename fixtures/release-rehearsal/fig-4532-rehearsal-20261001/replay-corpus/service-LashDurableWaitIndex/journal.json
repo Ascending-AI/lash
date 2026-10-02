@@ -1,9 +1,7 @@
 {
   "scenario": "service-LashDurableWaitIndex",
   "service": "LashDurableWaitIndex",
-  "recorded_at_git_sha": "6b665cd0a405d3abe245d6473eb5085ab2d79add",
-  "format": "lash-restate service handler journals v1; per handler, each distinct ordered command sequence its invocations wrote on the server double, minted ids elided as #",
-  "journal_logic_epoch": 1,
+  "generation": "5bc550dad153",
   "handlers": {
     "group_child_membership": [
       [
@@ -20,14 +18,6 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "OutputCommand"
-      ],
-      [
-        "InputCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateKeysCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateKeysCommand",
-        "OutputCommand"
       ]
     ],
     "peek_turn_gate": [
@@ -38,23 +28,13 @@
         "GetLazyStateCommand",
         "GetLazyStateCommand",
         "OutputCommand"
-      ],
-      [
-        "InputCommand",
-        "GetLazyStateKeysCommand",
-        "GetLazyStateCommand",
-        "GetLazyStateCommand",
-        "OutputCommand"
       ]
     ],
     "record_group_child": [
       [
         "InputCommand",
         "GetLazyStateCommand",
-        "GetLazyStateKeysCommand",
-        "SetStateCommand _compat",
         "GetLazyStateCommand",
-        "SetStateCommand wait-index/v2/metadata",
         "SetStateCommand wait-index/v2/group-child/replay-corpus-turn:group:replay-corpus-session:replay-corpus-turn:1:0:tool_batch:3:child:0",
         "OutputCommand"
       ]
@@ -77,6 +57,37 @@
         "GetLazyStateCommand",
         "CallCommand LashDurableWaitWorkflow/peek",
         "SetStateCommand wait-index/v2/metadata",
+        "OutputCommand"
+      ]
+    ],
+    "register_process_journal": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateKeysCommand",
+        "SetStateCommand _compat",
+        "GetLazyStateCommand",
+        "SetStateCommand wait-index/v2/metadata",
+        "SetStateCommand wait-index/v2/process-journal/inv_#",
+        "OutputCommand"
+      ]
+    ],
+    "reinstate": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateKeysCommand",
+        "SetStateCommand _compat",
+        "GetLazyStateCommand",
+        "SetStateCommand wait-index/v2/metadata",
+        "OutputCommand"
+      ]
+    ],
+    "release_process_journal": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "ClearStateCommand wait-index/v2/process-journal/inv_#",
         "OutputCommand"
       ]
     ],

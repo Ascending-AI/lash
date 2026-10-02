@@ -269,15 +269,8 @@ impl DirectLlmClient {
             (standing, id)
         });
         // No lash execution owns this call: the host that made it owns its
-        // billing, and lash keeps no ledger row for it (ADR 0125).
-        match self
-            .provider
-            .complete(
-                llm_request,
-                <dyn crate::provider::DispatchAdmission>::host_owned(),
-            )
-            .await
-        {
+        // billing, and lash keeps no ledger row for it (ADR 0127).
+        match self.provider.complete(llm_request).await {
             Ok(response) => {
                 let result = DirectLlmOutcome {
                     response: response.response,

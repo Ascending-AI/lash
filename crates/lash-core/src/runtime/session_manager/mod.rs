@@ -516,7 +516,7 @@ impl RuntimeSessionServices {
     /// The services a process runtime runs its body through, keyed by the
     /// process's minted id: built from the host, the process's own plugin
     /// session and its captured environment, with no session state. Its
-    /// direct calls account under the process's own owner (ADR 0125).
+    /// direct calls account under the process's own owner (ADR 0127).
     pub(in crate::runtime) fn for_process(ports: ProcessServicesPorts) -> Self {
         let ProcessServicesPorts {
             process_id,

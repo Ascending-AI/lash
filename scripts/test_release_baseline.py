@@ -51,7 +51,7 @@ const RAW: &str = r#"/* a literal */"#;
             if '"LASH_REGENERATE"' in source and str(path.relative_to(ROOT)) not in discovered:
                 undiscovered.append(f"{path.relative_to(ROOT)}: LASH_REGENERATE")
         self.assertEqual(undiscovered, [], "fixture writers missing from discovery")
-        self.assertIn("crates/lash-core-store/src/testdata/usage_fact_payload_v4.hex",
+        self.assertIn("crates/lash-postgres-store/schema-shape.txt",
                       {row["output"] for row in generators})
 
     def test_regenerator_discovery_follows_rust_modules_and_cargo_targets(self):

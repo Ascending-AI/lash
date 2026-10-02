@@ -670,55 +670,6 @@ table lash_turn_parks
   column since_ms bigint not-null
   column turn_id text not-null
   primary-key (session_id)
-table lash_usage_facts
-  column cache_read_input_tokens bigint not-null
-  column cache_write_input_tokens bigint not-null
-  column call_ordinal bigint not-null
-  column disposition text not-null
-  column effect_key text not-null
-  column fact_kind text not-null
-  column generation_id text nullable
-  column input_tokens bigint not-null
-  column llm_call_id text not-null
-  column meter_id text nullable
-  column output_tokens bigint not-null
-  column owner_id text not-null
-  column owner_kind text not-null
-  column payload_hash text not-null
-  column profile_key text not-null
-  column provider_attempt bigint not-null
-  column reasoning_output_tokens bigint not-null
-  column recorded_at_ms bigint not-null
-  column requested_model text not-null
-  column seq bigint not-null default
-  column served_model text nullable
-  column source text not-null
-  unique (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind)
-  primary-key (seq)
-table lash_usage_meters
-  column admitted_at_ms bigint nullable
-  column conflict_call_ordinal bigint nullable
-  column conflict_fact_kind text nullable
-  column conflict_offered_payload_hash text nullable
-  column conflict_provider_attempt bigint nullable
-  column conflict_stored_payload_hash text nullable
-  column effect_key text not-null
-  column execution_scope_key text nullable
-  column meter_id text not-null
-  column owner_id text not-null
-  column owner_kind text not-null
-  column profile_key text nullable
-  column requested_model text nullable
-  column resolved_at_ms bigint nullable
-  column source text nullable
-  column state text not-null
-  column unknown_reason text nullable
-  primary-key (owner_kind, owner_id, effect_key, meter_id)
-table lash_usage_owner_retirements
-  column owner_id text not-null
-  column owner_kind text not-null
-  column retired_at_ms bigint not-null
-  primary-key (owner_kind, owner_id)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null
   column process_id text not-null

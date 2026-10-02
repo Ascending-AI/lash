@@ -1,6 +1,6 @@
 //! The commit phase: finalize the assembled turn and execute the head-advancing
-//! commit that makes the turn durable. The commit carries no usage: every
-//! model call the turn made was delivered by its own usage meter (ADR 0125).
+//! commit that makes the turn durable. Model calls retain reported usage
+//! in their journaled results, independently of this commit (ADR 0127).
 //!
 //! The phase types are consumed in sequence and each transition takes the
 //! previous one by value, so a committed turn cannot be adopted twice and

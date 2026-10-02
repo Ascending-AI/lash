@@ -106,25 +106,21 @@ pub(super) async fn failed_attempt_partial_usage_is_a_fact() {
 
     // The failed attempt's billed usage and the successful retry's usage are
     // two facts of the owner's accounting, and the report sums both.
-    let report = settled_runtime_usage(&runtime).await.report();
-    let deltas = run_usage_facts(&runtime).await;
+    let deltas: Vec<_> = assembled
+        .llm_calls
+        .iter()
+        .flat_map(|call| &call.attempts)
+        .filter_map(|attempt| attempt.usage.as_ref())
+        .collect();
     assert_eq!(deltas.len(), 2, "one fact per reported attempt: {deltas:?}");
     assert_eq!(
-        deltas
-            .iter()
-            .map(|entry| entry.usage().input_tokens)
-            .sum::<i64>(),
+        deltas.iter().map(|entry| entry.input_tokens).sum::<i64>(),
         31
     );
     assert_eq!(
-        deltas
-            .iter()
-            .map(|entry| entry.usage().output_tokens)
-            .sum::<i64>(),
+        deltas.iter().map(|entry| entry.output_tokens).sum::<i64>(),
         7
     );
-    assert_eq!(report.usage.usage.input_tokens, 31);
-    assert_eq!(report.usage.usage.output_tokens, 7);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -215,34 +211,15 @@ pub(super) async fn all_attempts_failed_partial_usage_are_facts() {
 
     // No response was ever counted into the turn's cumulative usage, and
     // each failed attempt's reported partial usage is its own fact.
-    let report = settled_runtime_usage(&runtime).await.report();
-    let deltas = run_usage_facts(&runtime).await;
+    let deltas: Vec<_> = assembled
+        .llm_calls
+        .iter()
+        .flat_map(|call| &call.attempts)
+        .filter_map(|attempt| attempt.usage.as_ref())
+        .collect();
     assert_eq!(deltas.len(), 2, "one fact per reported attempt: {deltas:?}");
     assert_eq!(
-        deltas
-            .iter()
-            .map(|entry| entry.usage().input_tokens)
-            .sum::<i64>(),
+        deltas.iter().map(|entry| entry.input_tokens).sum::<i64>(),
         21
     );
-    assert_eq!(report.usage.usage.input_tokens, 21);
-    assert_eq!(report.usage.usage.output_tokens, 4);
-}
-
-/// The root session's reported usage facts, once delivery has settled.
-async fn run_usage_facts(runtime: &LashRuntime) -> Vec<lash_core::UsageFactRecord> {
-    settled_runtime_usage(runtime).await;
-    runtime
-        .host
-        .core
-        .usage_accounting()
-        .store
-        .load_usage_fact_page(
-            &lash_core::RuntimeOwner::Session(SessionId::from("root")),
-            None,
-            std::num::NonZeroU32::new(100).expect("a nonzero page"),
-        )
-        .await
-        .expect("load the owner's usage facts")
-        .facts
 }

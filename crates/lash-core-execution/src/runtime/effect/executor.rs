@@ -22,14 +22,13 @@ use plugin_state::record_plugin_state;
 mod scoped;
 mod served_only;
 pub use served_only::ServedOnly;
+mod direct;
 mod task_panic;
 mod tool_attempt;
 mod trigger;
 mod turn_cancel_wait;
 mod turn_control_authority;
-mod usage;
 pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
-pub use usage::DirectUsage;
 
 pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
@@ -210,8 +209,8 @@ pub(super) struct LocalDirectEffectRunner {
     binding: crate::LlmProfileBinding,
     charge_safety: crate::ChargeSafetyPolicy,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    /// Who the call spends for (ADR 0125).
-    usage: DirectUsage,
+    /// Who the call spends for (ADR 0127).
+    owner: crate::RuntimeOwner,
     /// The request is the body's own work, so its records are made inside
     /// the body and a replay that serves the recorded completion makes none.
     tracing: crate::trace::TraceRuntime,
@@ -235,9 +234,6 @@ struct LocalPreparedToolAttemptEffectRunner<'run> {
 
 struct RemoteEffectRunner {
     requests: mpsc::UnboundedSender<RemoteLocalExecutionRequest>,
-    /// The forwarded runner's binding, so the proxying controller begins the
-    /// body's run where it records it.
-    usage: Option<crate::UsageAccountingBinding>,
     plugins: Option<Arc<crate::PluginSession>>,
 }
 
@@ -268,30 +264,18 @@ pub trait RuntimeEffectLocalRunner: Send {
         None
     }
 
-    /// Where this runner's spending bodies account their provider calls
-    /// (ADR 0125). A runner whose body may dispatch a provider call answers
-    /// the ledger it admits and settles through; the executor begins the
-    /// body's [`UsageMeter`](crate::UsageMeter) with it and hands the run to
-    /// [`execute`](Self::execute). `None` is the honest answer for a runner
-    /// that never dispatches.
-    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        None
-    }
-
     /// Hands the runner the live step of the body it is about to run: called
     /// once, right before [`execute`](Self::execute), and only for a body the
     /// engine records, never for one that replays by re-execution. A runner
     /// that observes nothing ignores it.
     fn bind_live_step(&mut self, _live: Arc<crate::trace::LiveStep>) {}
 
-    /// Run the body. `usage_meter` is the body's run when the envelope is a
-    /// spending effect and this runner offered
-    /// [`usage_accounting`](Self::usage_accounting); every provider call the
-    /// body dispatches takes a call from it.
+    /// Run the body with the enclosing attempt's typed fault latch. A nested
+    /// bind fault ends that attempt even if a tool catches its local error.
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
 }
 
@@ -903,7 +887,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        usage: DirectUsage,
+        owner: crate::RuntimeOwner,
         tracing: crate::trace::TraceRuntime,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
@@ -913,7 +897,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     binding,
                     charge_safety,
                     attachment_store,
-                    usage,
+                    owner,
                     tracing,
                     live: None,
                 },
@@ -1054,7 +1038,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     async fn run_body(
         self,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // This is the engine's journaled-step boundary: a substrate that
         // serves the step from its journal never reaches it. A command that
@@ -1072,7 +1056,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             issued.unrecorded();
             None
         } else {
-            Some(issued.begin(usage_meter.as_ref()))
+            Some(issued.begin(effect_attempt.as_ref()))
         };
         match self.state {
             RuntimeEffectLocalExecutorState::Runner(mut runner) => {
@@ -1083,7 +1067,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     plugins,
                     kind,
                     address,
-                    runner.execute(envelope, usage_meter),
+                    runner.execute(envelope, effect_attempt),
                 )
                 .await
             }
@@ -1096,7 +1080,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         plugins,
                         kind,
                         address,
-                        runner.execute(envelope, usage_meter),
+                        runner.execute(envelope, effect_attempt),
                     )
                     .await;
                 }
@@ -1108,7 +1092,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     plugins,
                     kind,
                     address,
-                    runner.execute(envelope, usage_meter),
+                    runner.execute(envelope, effect_attempt),
                 ));
                 let mut abort = AbortEffectTaskOnDrop::new(task.abort_handle());
                 let result = match task.await {
@@ -1222,7 +1206,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             mpsc::UnboundedReceiver<RemoteLocalExecutionRequest>,
         )>,
     ) {
-        let usage = self.usage_accounting();
         let plugins = self.plugin_state_session();
         let RuntimeEffectLocalExecutor {
             state,
@@ -1236,11 +1219,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 (
                     RuntimeEffectLocalExecutor {
                         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner {
-                                requests,
-                                usage,
-                                plugins,
-                            }),
+                            Box::new(RemoteEffectRunner { requests, plugins }),
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
@@ -1262,11 +1241,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 (
                     RuntimeEffectLocalExecutor {
                         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner {
-                                requests,
-                                usage,
-                                plugins,
-                            }),
+                            Box::new(RemoteEffectRunner { requests, plugins }),
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
@@ -1300,7 +1275,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     async fn execute_forwarded(
         self,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // The proxy that forwarded this body already asked the served-only
         // question and began the body's run.
@@ -1327,7 +1302,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         command,
                         group,
                     },
-                    usage_meter,
+                    effect_attempt,
                 )
                 .await
             }
@@ -1376,7 +1351,7 @@ impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        _usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         (self.run)(envelope).await
     }
@@ -1392,10 +1367,6 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
         matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }
 
-    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        self.context.usage_accounting()
-    }
-
     fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
         self.context.bind_live_step(live);
     }
@@ -1403,7 +1374,7 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::ToolAttempt {
@@ -1421,7 +1392,7 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
                     envelope.invocation.into_runtime_invocation(),
                     child_execution_trace_hook,
                     self.completion_key,
-                    usage_meter,
+                    effect_attempt,
                 ))
                 .await?;
                 Ok(tool_attempt_outcome(outcome))
@@ -1452,10 +1423,6 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
         matches!(command, RuntimeEffectCommand::Direct { .. })
     }
 
-    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        Some(self.usage.accounting.clone())
-    }
-
     fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
         self.live = Some(live);
     }
@@ -1463,12 +1430,12 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
     async fn execute(
         mut self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        _effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::Direct {
                 request,
-                usage_source,
+                usage_source: _,
             } => {
                 // An unjournaled completion binds its recorded model here; a
                 // refusal leaves the step unsealed, never a recorded result.
@@ -1477,14 +1444,8 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                     crate::session_model::transport_stream_events(&provider, None),
                     None,
                 );
-                self.run_direct_in_usage_meter(
-                    &envelope.invocation,
-                    provider,
-                    request,
-                    usage_source,
-                    usage_meter.as_ref(),
-                )
-                .await
+                self.run_direct(&envelope.invocation, provider, request)
+                    .await
             }
             RuntimeEffectCommand::Sleep { spec } => {
                 let duration_ms = sleep_duration(spec, crate::SystemClock.timestamp_ms());
@@ -1513,20 +1474,16 @@ impl RuntimeEffectLocalRunner for RemoteEffectRunner {
         self.plugins.clone()
     }
 
-    fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
-        self.usage.clone()
-    }
-
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
-        usage_meter: Option<crate::UsageMeter>,
+        effect_attempt: Option<crate::EffectAttempt>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let (response, response_rx) = oneshot::channel();
         self.requests
             .send(RemoteLocalExecutionRequest {
                 envelope,
-                usage_meter,
+                effect_attempt,
                 response,
             })
             .map_err(|_| {
@@ -1549,7 +1506,6 @@ impl LocalDirectEffectRunner {
         &mut self,
         mut provider: ProviderHandle,
         request: CoreLlmRequest,
-        call: &crate::UsageCall,
     ) -> RuntimeDirectLlmOutcome {
         let request = match crate::attachments::resolve_llm_request_attachments(
             request,
@@ -1577,7 +1533,7 @@ impl LocalDirectEffectRunner {
             }
         };
         match provider
-            .complete_with_charge_safety(request, self.charge_safety.clone(), call)
+            .complete_with_charge_safety(request, self.charge_safety.clone())
             .await
         {
             Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
@@ -1674,7 +1630,7 @@ mod task_boundary_tests {
         async fn execute(
             self: Box<Self>,
             _envelope: RuntimeEffectEnvelope,
-            _usage_meter: Option<crate::UsageMeter>,
+            _effect_attempt: Option<crate::EffectAttempt>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
             let _ = self.observed.send(tokio::task::id());
             Ok(RuntimeEffectOutcome::Sleep)
