@@ -6,11 +6,11 @@
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
-use lash_core_execution::ProcessId;
 use lash_core_execution::engine::BuildGeneration;
 use lash_core_execution::store::generation_drain::{
     DrainingGeneration, GenerationDrainStore, GenerationWork,
 };
+use lash_core_execution::{ProcessId, SessionId};
 use lash_store_sql::Dialect;
 use lash_store_sql::draining_generations::DrainingGenerationStatements;
 use sqlx::{PgPool, Row};
@@ -206,6 +206,29 @@ impl GenerationDrainStore for PostgresGenerationDrain {
         .map_err(store_sqlx_error)?;
         ids.iter()
             .map(|id| ProcessId::parse(id).map_err(|error| corrupt("ProcessId", error)))
+            .collect()
+    }
+
+    async fn sessions_in_flight(
+        &self,
+        generation: &BuildGeneration,
+        after: Option<&SessionId>,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            crate::session_roots::session_roots_sql()
+                .roots
+                .list_unfinished_sessions_by_admitted_generation
+                .sql(),
+        )
+        .bind(generation.as_str())
+        .bind(after.map(SessionId::as_str).unwrap_or_default())
+        .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        ids.into_iter()
+            .map(|id| SessionId::parse(id).map_err(|error| corrupt("SessionId", error)))
             .collect()
     }
 }

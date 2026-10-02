@@ -481,6 +481,7 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         language: String,
         code: String,
+        run_offset: usize,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
@@ -627,6 +628,26 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        // A cell that stopped at a segment boundary inside itself has no
+        // answer yet (FIG-4739): the wait it was parked on now belongs to the
+        // run's successor segment. The plugin keeps the cell's captured state
+        // for this turn's commit, the turn ends at the boundary still waiting
+        // on the cell, and the successor issues the cell again. Nothing of
+        // it reaches history or the model here.
+        if result.as_ref().is_ok_and(|output| output.suspended) {
+            if let Some(code_executor) = self.session.plugins().code_executor() {
+                code_executor
+                    .settle_code_execution(crate::plugin::CodeExecutionOutcome::Accepted)
+                    .await
+                    .map_err(|error| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::ExecutionStateCaptureFailed,
+                            error.to_string(),
+                        )
+                    })?;
+            }
+            return self.end_inside_cell(machine, run_offset);
+        }
         let cell_duration_ms = self
             .host
             .core

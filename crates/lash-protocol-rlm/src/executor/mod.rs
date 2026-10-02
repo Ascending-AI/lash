@@ -2,7 +2,9 @@ mod globals;
 use globals::{apply_global_defaults, process_handle_names};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 mod definition_holds;
-use definition_holds::{hold_continuation_definitions, hold_global_definitions};
+use definition_holds::{
+    hold_continuation_definitions, hold_global_definitions, publish_cell_module,
+};
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
 #[cfg(test)]
@@ -723,7 +725,12 @@ async fn execute_code_in_worker_scope(
     if let Ok(cell) = cell.as_ref() {
         cell.ran_module(linked_module.artifact.module_ref().to_string());
     }
-    if !linked_module.artifact.exports().processes.is_empty() {
+    // A resumed cell's module was published, and held in the frame, by the
+    // segment that first ran the cell; the continuation holds what it names
+    // through its definitions. Publishing again would journal a step its
+    // first execution may have skipped on a frame hold only that worker
+    // knew of, and a replay rebuilt from the committed state would not.
+    if resumed.is_none() && !linked_module.artifact.exports().processes.is_empty() {
         let stored = {
             let _phase = ctx.named_phase("rlm_lashlang.store_module_artifact");
             publish_cell_module(state, &ctx, &artifact_store, &linked_module.artifact).await
@@ -833,7 +840,10 @@ async fn execute_code_in_worker_scope(
                     ))
                 })
                 .unwrap_or(lash_vm_protocol::StartState::Fresh),
-            None,
+            cell.as_ref()
+                .as_ref()
+                .ok()
+                .map(|cell| cell_segment::projection_namespace(&cell.identities().namespace())),
         ),
     };
     let identities = match cell.as_ref() {
@@ -1205,75 +1215,6 @@ async fn acquire_frame_edge(
         Ok(()) => Ok(()),
         Err(lash_core::ArtifactStoreError::ReferrerEnded { .. }) => Err(FrameHoldError::Ended),
         Err(error) => Err(FrameHoldError::Store(error)),
-    }
-}
-
-/// Publish a cell's module under the cell's execution, then hold it in the
-/// frame (ADR 0113 §3.1). The execution edge protects the bytes while the
-/// cell's journal may replay; the frame edge keeps them for the globals that
-/// name them. A module the frame already holds is not published again.
-async fn publish_cell_module(
-    state: &mut RlmExecutionState,
-    ctx: &RuntimeExecutionContext<'_>,
-    artifact_store: &lashlang::LashlangArtifacts,
-    artifact: &lash_vm_client::InspectedArtifact,
-) -> Result<(), String> {
-    let frame = frame_environment(ctx);
-    let module_ref = artifact.module_ref();
-    if frame
-        .as_ref()
-        .is_some_and(|frame| state.frame_holds(frame, module_ref))
-    {
-        return Ok(());
-    }
-    let claim = ctx.execution_claim().map_err(|error| error.to_string())?;
-    artifact_store
-        .publish_module_artifact(&claim, artifact)
-        .await
-        .map_err(|error| error.to_string())?;
-    let publication = lash_core::DeclaredModuleArtifact {
-        module_ref: artifact.module_ref().to_string(),
-        bytes: String::from_utf8(artifact.bytes().to_vec()).map_err(|error| error.to_string())?,
-    };
-    for name in artifact.exports().processes.keys() {
-        let identity = artifact
-            .definition_identity(name)
-            .ok_or_else(|| format!("module has no process `{name}`"))?;
-        let draft = identity.draft().map_err(|error| error.to_string())?;
-        let definition = ctx
-            .publish_compiled_definition(
-                format!("literal-definition:{}", draft.id()),
-                draft,
-                Some(publication.clone()),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        if frame.is_some() {
-            let engines = ctx.definition_engines();
-            let ports = engines
-                .artifact_ports()
-                .ok_or_else(|| "definition artifact ports are unavailable".to_string())?;
-            let claim = ctx.frame_claim().map_err(|error| error.to_string())?;
-            match ports
-                .acquire_definition(engines, &claim, &definition.id)
-                .await
-                .map_err(|error| error.to_string())?
-            {
-                lash_core::DefinitionAcquisition::Held(_) => {}
-                lash_core::DefinitionAcquisition::Ended => return Ok(()),
-            }
-        }
-    }
-    let Some(frame) = frame else {
-        return Ok(());
-    };
-    match acquire_frame_edge(&frame, artifact_store, module_ref).await {
-        Ok(()) => {
-            state.record_frame_hold(&frame, module_ref.clone());
-            Ok(())
-        }
-        Err(FrameHoldError::Ended) => Ok(()),
-        Err(FrameHoldError::Store(error)) => Err(error.to_string()),
     }
 }
 

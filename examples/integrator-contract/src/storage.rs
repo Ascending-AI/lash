@@ -730,6 +730,14 @@ impl GenerationDrainStore for Integrator {
     ) -> Result<Vec<ProcessId>, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn sessions_in_flight(
+        &self,
+        generation: &BuildGeneration,
+        after: Option<&SessionId>,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        unreachable!("external signature witness")
+    }
 }
 
 #[lash::async_trait]

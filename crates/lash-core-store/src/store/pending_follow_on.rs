@@ -74,6 +74,32 @@ pub struct RunContinuation {
     /// from them, so a run's budget is one budget however many segments it
     /// takes.
     pub protocol_iterations: u64,
+    /// The code cell the boundary stopped inside, when it stopped inside one:
+    /// the continuation issues the cell again and the cell resumes from the
+    /// state the boundary's commit captured. `None` for a boundary between
+    /// protocol steps, whose continuation asks the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<SuspendedCell>,
+}
+
+/// A code cell a segment boundary stopped inside (FIG-4739): what the turn's
+/// machine was waiting on, so the continuation's machine waits on it again.
+///
+/// The cell's own state — the VM continuation and every ledger its host
+/// holds — is the protocol plugin's, committed with the session's execution
+/// state by the boundary's commit. This record carries only what the turn
+/// machine held: the cell and the protocol driver's state for it.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SuspendedCell {
+    pub language: String,
+    pub code: String,
+    /// The protocol plugin whose driver issued the cell.
+    pub driver_plugin_id: String,
+    /// That driver's state for the cell, opaque to the store.
+    pub driver_state: serde_json::Value,
 }
 
 impl PendingFollowOn {

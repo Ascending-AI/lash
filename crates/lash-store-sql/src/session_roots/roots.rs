@@ -66,6 +66,17 @@ crate::statements! {
              WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
                AND admitted_generation = ?1";
 
+        /// The sessions holding an unfinished root generation `?1` admitted,
+        /// strictly after session `?2` (`''` from the start), at most `?3`,
+        /// in session order: the page the drain's turn hand-over wakes
+        /// (FIG-4739). The same partial index serves the read.
+        list_unfinished_sessions_by_admitted_generation = "SELECT DISTINCT session_id FROM session_roots
+             WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
+               AND admitted_generation = ?1
+               AND session_id > ?2
+             ORDER BY session_id
+             LIMIT ?3";
+
         /// The terminal evidence of root `?2` of session `?1`: all three
         /// columns NULL while the root has none.
         select_terminal = "SELECT terminal_cause_json, terminal_head_revision, terminal_at_ms

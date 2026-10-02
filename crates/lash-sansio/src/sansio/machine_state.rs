@@ -247,4 +247,9 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// machine name the request that stopped it instead of minting internal
     /// evidence.
     pub(crate) observed_cancellation: Option<crate::TurnCancellationEvidence>,
+    /// The work this machine starts at once it has synced, in place of the
+    /// driver's first step ([`TurnMachine::resume_with`]). Runtime-only, as
+    /// the observed cancellation is: the host that builds the machine hands
+    /// it over again.
+    pub(crate) resume_work: Option<PendingWork<M>>,
 }

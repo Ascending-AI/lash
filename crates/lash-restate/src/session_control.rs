@@ -948,6 +948,42 @@ impl RestateSessionControl {
 
 #[async_trait::async_trait]
 impl SessionControlEngine for RestateSessionControl {
+    /// The session's wait index wakes every turn wait that registered a
+    /// hand-over for `generation` (FIG-4739): each woken wait's invocation
+    /// journals the wake and ends its turn at a segment boundary.
+    async fn hand_over_turns(
+        &self,
+        session: &lash_core::SessionId,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<(), EngineRefusal> {
+        let woken: u64 = self
+            .ingress
+            .call_lash_object(
+                &self
+                    .namespace
+                    .stable(crate::LashService::DurableWaitRegistry)
+                    .name(),
+                session.as_str(),
+                "hand_over_turns",
+                &crate::durable_wait::RestateDurableWaitHandOverRequest {
+                    generation: generation.clone(),
+                },
+            )
+            .await
+            .map_err(refusal)?;
+        if woken > 0 {
+            tracing::info!(
+                target: "lash::restate",
+                event = "restate.turn_hand_over_woken",
+                session_id = session.as_str(),
+                generation = generation.as_str(),
+                woken,
+                "the drain woke a session's parked turn waits to hand over"
+            );
+        }
+        Ok(())
+    }
+
     async fn resume_root(
         &self,
         target: &RootRef,

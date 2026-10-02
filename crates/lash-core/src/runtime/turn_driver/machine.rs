@@ -115,6 +115,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: TurnObserver,
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+        self.resume_suspended_cell(&mut machine);
         loop {
             let Some(effect) = machine.poll_effect() else {
                 break;
@@ -190,8 +191,15 @@ impl RuntimeTurnDriver<'_> {
                 Effect::Log { event } => self.handle_log_event(event),
                 Effect::ExecCode { id, language, code } => {
                     self.recorded_assembly.note_code_execution();
-                    self.handle_exec_code_effect(&mut machine, id, language, code, &event_tx)
-                        .await?;
+                    self.handle_exec_code_effect(
+                        &mut machine,
+                        id,
+                        language,
+                        code,
+                        run_offset,
+                        &event_tx,
+                    )
+                    .await?;
                 }
             }
         }

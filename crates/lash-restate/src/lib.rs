@@ -131,7 +131,7 @@ pub use controller::{
     EFFECT_JOURNAL_VERSION, GroupChildCancelArm, GroupChildCancelRace,
     PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, ProcessCancelRace, ProcessWorkflowStartFailure,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
-    SignalWaitOutcome,
+    SignalWaitOutcome, TurnWaitOutcome,
 };
 pub use deployment_registry::RestateDeploymentRegistry;
 pub use durable_wait::{

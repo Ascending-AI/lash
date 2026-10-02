@@ -48,6 +48,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-queued-work-batch/v2",
     "lash-queued-work-claim-lease/v2",
     "lash-record-config-request/v1",
+    "lash-rlm-cell-projection-namespace/v1",
     "lash-rlm-cell-segment-code/v1",
     "lash-rlm-execution-state-leaf/v2",
     "lash-rlm-stall-reply/v2",

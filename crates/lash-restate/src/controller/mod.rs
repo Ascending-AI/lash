@@ -67,7 +67,7 @@ pub(crate) use live_frontier::LiveFrontier;
 
 pub use context::{
     GroupChildCancelArm, GroupChildCancelRace, ProcessCancelRace, RestateControllerContext,
-    SignalWaitOutcome,
+    SignalWaitOutcome, TurnWaitOutcome,
 };
 
 /// How a controller observes its own handling of the effects it executes.

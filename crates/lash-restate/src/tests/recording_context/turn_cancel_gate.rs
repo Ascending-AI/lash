@@ -152,9 +152,10 @@ pub(crate) fn test_turn_cancel_wake_outcome<T>(
     session_id: SessionId,
 ) -> RestateTurnCancelRaceOutcome<T> {
     match wake {
-        RestateTurnCancelWake::TurnCancelled | RestateTurnCancelWake::TurnCancelDeferred => {
-            RestateTurnCancelRaceOutcome::TurnCancelled
-        }
+        // The test gate registers no hand-over, so no wake carries one.
+        RestateTurnCancelWake::TurnCancelled
+        | RestateTurnCancelWake::TurnCancelDeferred
+        | RestateTurnCancelWake::HandedOver => RestateTurnCancelRaceOutcome::TurnCancelled,
         RestateTurnCancelWake::SessionRevoked => {
             RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
         }

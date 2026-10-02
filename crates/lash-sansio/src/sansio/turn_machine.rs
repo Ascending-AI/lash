@@ -47,6 +47,33 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: TokenUsage::default(),
             environment: None,
             observed_cancellation: None,
+            resume_work: None,
+        }
+    }
+
+    /// Start this machine at `work` instead of at the driver's first step
+    /// (FIG-4739): the turn continues a run whose earlier turn ended at a
+    /// segment boundary while it waited on `work`, and issues it again. The
+    /// machine syncs its environment first, as every turn does, and then
+    /// waits on `work` where the driver would have prepared an iteration.
+    pub fn resume_with(&mut self, work: PendingWork<M>) {
+        self.resume_work = Some(work);
+    }
+
+    /// The code execution the machine waits on, if that is what it waits on:
+    /// its language, its code and the driver state that answers it.
+    pub fn waiting_exec(&self) -> Option<(&str, &str, &M::DriverState)> {
+        match &self.state {
+            MachineState::Waiting {
+                work:
+                    PendingWork::Exec {
+                        language,
+                        code,
+                        driver_state,
+                    },
+                ..
+            } => Some((language, code, driver_state)),
+            _ => None,
         }
     }
 
@@ -175,6 +202,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: checkpoint.cumulative_usage,
             environment: checkpoint.environment,
             observed_cancellation: None,
+            resume_work: None,
         })
     }
 
@@ -331,6 +359,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .is_none_or(|environment| environment.protocol_iteration != self.protocol_iteration)
         {
             self.start(PendingWork::SyncExecutionEnvironment);
+            return;
+        }
+        if let Some(work) = self.resume_work.take() {
+            self.start(work);
             return;
         }
         self.drive(|driver, ctx| driver.prepare_protocol_iteration(ctx));

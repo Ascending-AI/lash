@@ -187,8 +187,9 @@ pub(super) struct LogicalTurnCommitEffects {
 /// (FIG-4739) owes the run's continuation the same way, in the frame the
 /// turn ran in — `frame`, the current frame of the state the turn assembled —
 /// and at the turn's own chain depth, since a boundary switches no frame;
-/// `segment_boundary` is the protocol iterations the run has spent through
-/// the turn. Every other outcome leaves nothing: a turn commits only
+/// `segment_boundary` is what the turn took at it: the protocol iterations
+/// the run has spent through the turn, and the code cell the boundary
+/// stopped inside, if it stopped inside one. Every other outcome leaves nothing: a turn commits only
 /// while the head owes nothing or owes this very turn, and this commit is
 /// that follow-on's terminal record.
 pub(super) fn follow_on_after_turn(
@@ -197,7 +198,7 @@ pub(super) fn follow_on_after_turn(
     turn_id: &TurnId,
     root: &TurnId,
     frame: Option<&crate::FrameNodeId>,
-    segment_boundary: Option<u64>,
+    segment_boundary: Option<&crate::runtime::turn_driver::BoundaryTaken>,
 ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
     let owed = state
         .pending_follow_on
@@ -224,7 +225,8 @@ pub(super) fn follow_on_after_turn(
                 String::new(),
                 Some(crate::store::RunContinuation {
                     reason: *reason,
-                    protocol_iterations: segment_boundary.unwrap_or_default(),
+                    protocol_iterations: segment_boundary.map_or(0, |taken| taken.iterations),
+                    cell: segment_boundary.and_then(|taken| taken.cell.clone()),
                 }),
                 owed.map_or(0, |owed| owed.chain_depth),
             )

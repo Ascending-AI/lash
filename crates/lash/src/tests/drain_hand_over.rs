@@ -113,6 +113,17 @@ impl GenerationDrainStore for ClearingDrain {
     ) -> std::result::Result<Vec<lash_core::ProcessId>, lash_core::StoreError> {
         self.inner.live_processes(generation, after, limit).await
     }
+
+    async fn sessions_in_flight(
+        &self,
+        generation: &BuildGeneration,
+        after: Option<&lash_core::SessionId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::SessionId>, lash_core::StoreError> {
+        self.inner
+            .sessions_in_flight(generation, after, limit)
+            .await
+    }
 }
 
 /// What a law's stores need to outlive them.
@@ -1151,4 +1162,6 @@ drain_hand_over_laws! {
     postgres_live_restate_replay_hands_over: on_live_restate, Storage::Postgres, true;
 }
 
+#[cfg(feature = "rlm")]
+mod cell_segment;
 mod run_segment;

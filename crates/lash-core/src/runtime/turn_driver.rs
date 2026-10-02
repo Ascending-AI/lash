@@ -11,7 +11,7 @@ mod local_effects;
 mod machine;
 mod opener_groups;
 mod segment;
-pub(in crate::runtime) use segment::TurnSegment;
+pub(in crate::runtime) use segment::{BoundaryTaken, TurnSegment};
 mod streaming;
 mod tool_catalog;
 mod tools;

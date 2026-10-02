@@ -29,6 +29,10 @@ pub struct ReconcileCursor {
     /// (FIG-4739), by its park's instant and its id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resend: Option<(u64, crate::ProcessId)>,
+    /// The last session of a draining generation whose parked turn the
+    /// previous tick asked to hand over (FIG-4739), with that generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turns: Option<(super::BuildGeneration, crate::SessionId)>,
 }
 
 /// The arm of a tick a failure came from.
@@ -88,6 +92,9 @@ pub struct ReconcileTick {
     pub parks: Option<ParkReconcileReport>,
     /// The FIG-3799 slot.
     pub drain_hand_over: SlotPass,
+    /// The sessions of draining generations whose parked turns this tick
+    /// asked to hand over (FIG-4739).
+    pub turn_hand_over: SlotPass,
     /// Every arm failure, in arm order.
     pub failures: Vec<ReconcileFailure>,
     /// Whether this tick ran the leader-only arms (ADR 0109 §1.7).

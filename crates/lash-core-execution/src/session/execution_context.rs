@@ -82,6 +82,9 @@ pub struct RuntimeExecutionContext<'run> {
     /// successor segment (FIG-4739): set by a code cell for an operation its
     /// run is parked on, whose state is captured, and never otherwise.
     transferable_waits: bool,
+    /// Whether the turn this context executes for may end at a segment
+    /// boundary inside the execution (FIG-4739).
+    turn_hands_over: bool,
     /// Set when a transferable wait this context issued was handed over,
     /// shared with every context derived from this one.
     wait_handed_over: Arc<std::sync::atomic::AtomicBool>,
@@ -583,6 +586,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_cancel: self.turn_cancel.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
             transferable_waits: self.transferable_waits,
+            turn_hands_over: self.turn_hands_over,
             wait_handed_over: Arc::clone(&self.wait_handed_over),
             turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
@@ -1116,6 +1120,21 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn with_transferable_waits(mut self, transferable: bool) -> Self {
         self.transferable_waits = transferable;
         self
+    }
+
+    /// Says whether the turn this context executes for may end at a segment
+    /// boundary inside the execution (FIG-4739): its engine moves turns off a
+    /// draining build, and the turn has a drive to recover its continuation.
+    /// Only such an execution marks a wait transferable.
+    pub fn with_turn_hand_over(mut self, hands_over: bool) -> Self {
+        self.turn_hands_over = hands_over;
+        self
+    }
+
+    /// Whether the turn this context executes for may end at a segment
+    /// boundary inside the execution.
+    pub fn turn_hands_over(&self) -> bool {
+        self.turn_hands_over
     }
 
     /// Records that a transferable wait this context issued was handed to

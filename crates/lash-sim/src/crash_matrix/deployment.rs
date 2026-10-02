@@ -634,6 +634,14 @@ fn refusal(effect: ArmEffect, site: HostSite) -> lash_core::engine::EngineRefusa
 
 #[async_trait::async_trait]
 impl lash_core::engine::SessionControlEngine for CrashControl {
+    async fn hand_over_turns(
+        &self,
+        session: &lash_core::SessionId,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<(), lash_core::engine::EngineRefusal> {
+        self.inner.hand_over_turns(session, generation).await
+    }
+
     async fn reconcile_parks(
         &self,
         parks: &dyn lash_core::engine::ParkRecoveryWriter,

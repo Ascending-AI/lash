@@ -38,6 +38,42 @@ pub enum SignalWaitOutcome {
     HandedOver,
 }
 
+/// How a turn's transferable wait ended when neither its turn's cancel nor
+/// its session's revocation won (FIG-4739).
+#[derive(Clone, Debug, PartialEq)]
+pub enum TurnWaitOutcome {
+    /// The wait's event resolved first.
+    Resolved(Resolution),
+    /// The drain's wake won for the generation the turn runs on: the wait is
+    /// left open for the Run's successor segment to wait on again.
+    HandedOver,
+}
+
+/// `await_event_or_turn_end` on a context whose turn waits take no drain
+/// wake (a recording test context): the turn's gate alone races the event.
+pub(super) async fn turn_cancel_only<'ctx, 'run, C>(
+    context: &'run C,
+    namespace: &'run crate::RestateNamespace,
+    request: RestateDurableWaitAwaitRequest,
+    replay_key: String,
+    turn_cancel: RestateDurableWaitAwaitRequest,
+) -> Result<RestateTurnCancelRaceOutcome<TurnWaitOutcome>, TerminalError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+    'ctx: 'run,
+{
+    Ok(context
+        .await_event_or_turn_cancel(
+            namespace,
+            request,
+            replay_key,
+            Some(turn_cancel),
+            ProcessCancelRace::NotRaced,
+        )
+        .await?
+        .map(TurnWaitOutcome::Resolved))
+}
+
 /// The index of whichever of `waits` the journal completed first:
 /// [`first_of_gate_race`](super::first_of_gate_race) over any number of durable futures, with the same
 /// non-consuming semantics — every other future stays awaitable.

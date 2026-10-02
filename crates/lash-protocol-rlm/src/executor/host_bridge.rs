@@ -934,7 +934,7 @@ impl HostBridge<'_> {
         let command_ctx = in_flight
             .ctx
             .under_command(&in_flight.command.key)
-            .with_transferable_waits(self.hand_over.parked());
+            .with_transferable_waits(self.hand_over.parked() && self.ctx.turn_hands_over());
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             command_ctx.await_tool_handle(call_id.clone(), handle).await

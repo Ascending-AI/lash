@@ -72,7 +72,7 @@ pub(super) struct TurnFinishInput {
     /// The protocol iterations the run has spent through this turn, when the
     /// turn ended at a segment boundary (FIG-4739): what the continuation its
     /// commit owes records.
-    pub(super) segment_boundary: Option<u64>,
+    pub(super) segment_boundary: Option<crate::runtime::turn_driver::BoundaryTaken>,
 }
 
 struct PreparedTurn {
@@ -551,7 +551,7 @@ impl LashRuntime {
                     .as_ref()
                     .map_or(&trace_turn_id, |run| run.root()),
                 assembled.state.current_frame_node_id.as_ref(),
-                segment_boundary,
+                segment_boundary.as_ref(),
             )?;
             self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
@@ -633,7 +633,7 @@ impl LashRuntime {
                 .as_ref()
                 .map_or(&trace_turn_id, |run| run.root()),
             prepared.turn.state.current_frame_node_id.as_ref(),
-            segment_boundary,
+            segment_boundary.as_ref(),
         ) {
             Ok(pending_follow_on) => pending_follow_on,
             Err(err) => {

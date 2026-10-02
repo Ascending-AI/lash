@@ -109,6 +109,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             turn_cancel: RecordedTurnCancel::default(),
             observe_turn_cancel: true,
             transferable_waits: false,
+            turn_hands_over: false,
             wait_handed_over: Arc::default(),
             turn_cancel_scope: None,
             tracing: None,

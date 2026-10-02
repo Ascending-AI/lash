@@ -8,11 +8,11 @@
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
-use lash_core_execution::ProcessId;
 use lash_core_execution::engine::BuildGeneration;
 use lash_core_execution::store::generation_drain::{
     DrainingGeneration, GenerationDrainStore, GenerationWork,
 };
+use lash_core_execution::{ProcessId, SessionId};
 use lash_store_sql::draining_generations::DrainingGenerationStatements;
 
 use crate::conn::SqliteConnection;
@@ -188,6 +188,37 @@ impl GenerationDrainStore for SqliteGenerationDrain {
             .map(|id| {
                 ProcessId::parse(&id).map_err(|error| stored_data_corrupt("ProcessId", error))
             })
+            .collect()
+    }
+
+    async fn sessions_in_flight(
+        &self,
+        generation: &BuildGeneration,
+        after: Option<&SessionId>,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        let stamp = generation.as_str().to_owned();
+        let after = after.map(SessionId::to_string).unwrap_or_default();
+        let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
+        let ids = self
+            .core
+            .call(move |conn| {
+                let mut statement = conn.prepare_cached(
+                    crate::session_roots::session_roots_sql()
+                        .roots
+                        .list_unfinished_sessions_by_admitted_generation
+                        .sql(),
+                )?;
+                statement
+                    .query_map(rusqlite::params![stamp, after, limit], |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        ids.into_iter()
+            .map(|id| SessionId::parse(id).map_err(|error| stored_data_corrupt("SessionId", error)))
             .collect()
     }
 }

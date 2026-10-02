@@ -40,6 +40,27 @@ pub(super) const CELL_SEGMENT_STATE_VERSION: u32 = 1;
 /// version_guard(items(LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION, code_digest))
 const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-code/v1";
 
+/// version_surface = "coexist"
+/// version_guard(items(LASH_RLM_CELL_PROJECTION_NAMESPACE_DOMAIN_VERSION, projection_namespace))
+const LASH_RLM_CELL_PROJECTION_NAMESPACE_DOMAIN_VERSION: &str =
+    "lash-rlm-cell-projection-namespace/v1";
+
+/// The namespace a fresh execution of a cell mints its projection tokens
+/// under: derived from the cell's own replay namespace, so every execution
+/// of the same cell — its first, a replay, a retry — mints the same tokens
+/// and captures the same state at a boundary inside it. A random one would
+/// make the boundary's commit content differ between an execution and its
+/// replay, and the replay's commit would be refused as other content under
+/// the same operation.
+pub(super) fn projection_namespace(
+    cell: &lash_lashlang_runtime::LashlangReplayNamespace,
+) -> String {
+    lash_sansio::core_support::blake3_domain_hash_hex(
+        LASH_RLM_CELL_PROJECTION_NAMESPACE_DOMAIN_VERSION,
+        cell.seal().as_bytes(),
+    )
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub(super) struct RecordedPrint(#[serde(with = "lashlang::effect_value")] pub lashlang::Value);

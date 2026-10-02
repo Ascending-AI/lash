@@ -517,7 +517,7 @@ impl<T> RestateTurnCancelRaceOutcome<T> {
 pub(crate) enum RestateTurnCancelGate {
     /// The entry is live; retire it with [`retire_turn_cancel_gate`] if the
     /// guarded wait wins.
-    Registered(RestateDurableWaitAwakeableRequest),
+    Registered(Box<RestateDurableWaitAwakeableRequest>),
     /// The session was already revoked, so no entry was created and the caller
     /// must unwind instead of parking.
     Revoked,
@@ -534,11 +534,16 @@ pub(crate) async fn register_turn_cancel_gate<'ctx, C>(
     session_id: &SessionId,
     key: AwaitEventKey,
     awakeable_id: String,
+    hand_over: Option<lash_core::engine::BuildGeneration>,
 ) -> Result<RestateTurnCancelGate, TerminalError>
 where
     C: ContextClient<'ctx>,
 {
-    let entry = RestateDurableWaitAwakeableRequest { key, awakeable_id };
+    let entry = RestateDurableWaitAwakeableRequest {
+        key,
+        awakeable_id,
+        hand_over,
+    };
     let replay_key = entry.key.key_id.clone();
     let register = namespace
         .durable_wait_registry(context, session_id)
@@ -548,7 +553,9 @@ where
     Ok(match registration {
         RestateDurableWaitRegistration::Revoked => RestateTurnCancelGate::Revoked,
         RestateDurableWaitRegistration::Registered
-        | RestateDurableWaitRegistration::Resolved(_) => RestateTurnCancelGate::Registered(entry),
+        | RestateDurableWaitRegistration::Resolved(_) => {
+            RestateTurnCancelGate::Registered(Box::new(entry))
+        }
     })
 }
 
@@ -766,6 +773,14 @@ pub trait LashDurableWaitRegistry {
     async fn unregister_awakeable(
         call: Call<RestateDurableWaitAwakeableRequest>,
     ) -> HandlerResult<Reply<()>>;
+    /// Wake every parked turn wait of this scope that registered a hand-over
+    /// for the request's generation (FIG-4739), answering how many it woke.
+    /// Each woken wait is left open and its turn ends at a segment boundary;
+    /// its entry is dropped, as a fired gate's is. Idempotent: a second call
+    /// finds no entry left to wake.
+    async fn hand_over_turns(
+        call: Call<RestateDurableWaitHandOverRequest>,
+    ) -> HandlerResult<Reply<u64>>;
     async fn resolve(
         call: Call<RestateDurableWaitResolveRequest>,
     ) -> HandlerResult<Reply<RestateDurableWaitResolveResponse>>;
@@ -1433,6 +1448,34 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             metadata,
         );
         Ok(Reply::at(wire, ()))
+    }
+
+    async fn hand_over_turns(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<RestateDurableWaitHandOverRequest>,
+    ) -> HandlerResult<Reply<u64>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
+        let mut woken = 0_u64;
+        metadata.awakeables.retain(|entry| {
+            let hands_over = entry.hand_over.as_ref() == Some(&request.generation);
+            if hands_over {
+                ctx.resolve_awakeable(&entry.awakeable_id, Json(RestateTurnCancelWake::HandedOver));
+                woken += 1;
+            }
+            !hands_over
+        });
+        if woken > 0 {
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                object.writer,
+                metadata,
+            );
+        }
+        Ok(Reply::at(wire, woken))
     }
 
     async fn resolve(

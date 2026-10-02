@@ -156,7 +156,7 @@ pub async fn reconcile_once(
     );
     let drain = async {
         match parts.processes {
-            Some(processes) => Some(
+            Some(processes) => Some((
                 bounded_arm(
                     parts.clock,
                     deadline,
@@ -170,7 +170,20 @@ pub async fn reconcile_once(
                     ),
                 )
                 .await,
-            ),
+                // A turn holds its build only across a wait on a process, so
+                // a host that runs no processes has no parked turn to move.
+                bounded_arm(
+                    parts.clock,
+                    deadline,
+                    turn_hand_over_slot(
+                        control.as_ref(),
+                        processes.drain,
+                        cursor.turns.as_ref(),
+                        page,
+                    ),
+                )
+                .await,
+            )),
             None => None,
         }
     };
@@ -200,7 +213,20 @@ pub async fn reconcile_once(
         }
     }
 
-    if let Some(drain) = drain {
+    if let Some((drain, turns)) = drain {
+        match turns {
+            Ok(hand_over) => {
+                report.turn_hand_over = hand_over.pass;
+                report.next.turns = hand_over.next;
+            }
+            Err(error) => {
+                report.next.turns = cursor.turns.clone();
+                report.failures.push(ReconcileFailure {
+                    arm: ReconcileArm::DrainHandOver,
+                    error: format!("turn hand-over: {error}"),
+                });
+            }
+        }
         match drain {
             Ok(hand_over) => {
                 report.drain_hand_over = hand_over.pass;
@@ -292,6 +318,80 @@ async fn bounded_arm<T, E: std::fmt::Display>(
         result = arm => result.map_err(|error| error.to_string()),
         () = clock.sleep_until(deadline) => Err("recovery arm time budget exhausted".into()),
     }
+}
+
+/// What one pass of the turn hand-over slot did, and where the next resumes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TurnHandOverPass {
+    /// Sessions asked (`handled`) and ones whose ask failed and waits for
+    /// the next pass (`deferred`).
+    pub pass: SlotPass,
+    /// The last session this pass asked when it stopped at its page bound,
+    /// with its generation; `None` when it read every draining generation to
+    /// the end, so the next pass starts over.
+    pub next: Option<(crate::engine::BuildGeneration, crate::SessionId)>,
+}
+
+/// **FIG-4739 slot.** Ask the parked turn of every session a draining
+/// generation holds in flight to hand over, at most `page` sessions, in
+/// (generation, session id) order from `after`.
+///
+/// A turn on a draining build hands over at its next quiet point by itself;
+/// one parked on a durable wait reaches no quiet point until the wait ends,
+/// so the recovery leader wakes it
+/// ([`SessionControlEngine::hand_over_turns`](crate::engine::SessionControlEngine::hand_over_turns)):
+/// the turn ends at a segment boundary with the wait left open, and its Run
+/// goes on in a new execution on the newest build, which restamps the root.
+/// The session leaves the listing with that restamp, or when its root ends.
+///
+/// Unlike the process slot, the leader's own generation is not skipped: a
+/// turn's successor is sent to the stable name, never back to a named
+/// generation, and a draining build that holds the recovery lease must still
+/// move its own turns. Idempotent: a wake finds only waits still parked. One
+/// failed ask is logged and counted deferred, never failing the page.
+pub async fn turn_hand_over_slot(
+    control: &dyn crate::engine::SessionControlEngine,
+    drain: &dyn crate::store::generation_drain::GenerationDrainStore,
+    after: Option<&(crate::engine::BuildGeneration, crate::SessionId)>,
+    page: NonZeroUsize,
+) -> Result<TurnHandOverPass, StoreError> {
+    let mut report = TurnHandOverPass::default();
+    let mut remaining = page.get();
+    for marked in drain.draining_generations().await? {
+        let generation = marked.generation;
+        let resume = match after {
+            Some((cursor, _)) if generation < *cursor => continue,
+            Some((cursor, session)) if generation == *cursor => Some(session),
+            _ => None,
+        };
+        let Some(limit) = NonZeroUsize::new(remaining) else {
+            return Ok(report);
+        };
+        let sessions = drain.sessions_in_flight(&generation, resume, limit).await?;
+        for session in sessions {
+            match control.hand_over_turns(&session, &generation).await {
+                Ok(()) => report.pass.handled += 1,
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = session.as_str(),
+                        generation = generation.as_str(),
+                        error = %error.message,
+                        "the drain's turn hand-over wake failed; a later pass wakes the session again"
+                    );
+                    report.pass.deferred += 1;
+                }
+            }
+            remaining -= 1;
+            report.next = Some((generation.clone(), session));
+        }
+        if remaining == 0 {
+            return Ok(report);
+        }
+    }
+    // Every draining generation was read to its end: the next pass starts
+    // over.
+    report.next = None;
+    Ok(report)
 }
 
 /// What one pass of the drain hand-over slot did, and where the next resumes.

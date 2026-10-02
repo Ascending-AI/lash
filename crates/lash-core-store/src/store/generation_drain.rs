@@ -15,8 +15,8 @@ use std::sync::Arc;
 use super::fleet_finalize::DeploymentRegistry;
 use super::session_delete::SessionDeleteLedger;
 use super::{ObligationKind, ObligationLedger, StoreError};
-use crate::ProcessId;
 use crate::build_generation::BuildGeneration;
+use crate::{ProcessId, SessionId};
 
 /// A generation an operator marked draining, and when.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,6 +82,17 @@ pub trait GenerationDrainStore: Send + Sync {
         after: Option<&ProcessId>,
         limit: NonZeroUsize,
     ) -> Result<Vec<ProcessId>, StoreError>;
+
+    /// The sessions holding a turn in flight that `generation` counts — an
+    /// unfinished root stamped with it — strictly after `after` in
+    /// session-id order, at most `limit` (FIG-4739). The drain wakes each
+    /// one's parked turn waits so the turn hands over.
+    async fn sessions_in_flight(
+        &self,
+        generation: &BuildGeneration,
+        after: Option<&SessionId>,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<SessionId>, StoreError>;
 }
 
 /// What one build generation still holds while it drains (FIG-3799): the

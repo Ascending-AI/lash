@@ -196,6 +196,20 @@ pub struct RestateTurnCancelClosureParticipantRequest {
 pub struct RestateDurableWaitAwakeableRequest {
     pub key: AwaitEventKey,
     pub awakeable_id: String,
+    /// Set on a turn-cancel gate entry whose guarded wait its Run's successor
+    /// segment may take over (FIG-4739): the build generation the waiting
+    /// turn runs on. The drain of that generation wakes the entry
+    /// ([`RestateTurnCancelWake::HandedOver`]); no other entry is ever woken
+    /// for a drain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hand_over: Option<lash_core::engine::BuildGeneration>,
+}
+
+/// The drain of `generation` asking a session's parked turn waits to hand
+/// over (FIG-4739).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitHandOverRequest {
+    pub generation: lash_core::engine::BuildGeneration,
 }
 
 /// Why a registered turn-cancel gate awakeable fired.
@@ -218,6 +232,11 @@ pub(crate) enum RestateTurnCancelWake {
     /// `Immediate` request still unwinds it.
     TurnCancelDeferred,
     SessionRevoked,
+    /// The build the waiting turn runs on is draining (FIG-4739): the parked
+    /// wait is left open for the Run's successor segment, and the turn ends
+    /// at a segment boundary. Only an entry that registered a hand-over
+    /// generation is woken with it.
+    HandedOver,
 }
 
 impl RestateTurnCancelWake {

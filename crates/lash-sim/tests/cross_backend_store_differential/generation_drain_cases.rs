@@ -232,6 +232,38 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
         .map(|id| aliases.get(id).copied().unwrap_or("?"))
         .collect::<Vec<_>>();
     out.push(format!("live of b -> {whole:?}"));
+    // The sessions holding a turn in flight under each generation
+    // (FIG-4739): ia and qa under a, paged one at a time in session order,
+    // and qc under b. qb's root ended, so its session holds none.
+    let session_alias = |session: &SessionId| {
+        session
+            .as_str()
+            .rsplit_once("-drain-")
+            .map_or_else(|| "?".to_owned(), |(_, name)| name.to_owned())
+    };
+    let mut after = None;
+    let mut holding = Vec::new();
+    loop {
+        let page = drain
+            .sessions_in_flight(&a, after.as_ref(), one)
+            .await
+            .expect("page the sessions in flight");
+        out.push(format!("sessions page of a -> {}", page.len()));
+        let Some(last) = page.last().cloned() else {
+            break;
+        };
+        holding.extend(page.iter().map(session_alias));
+        after = Some(last);
+    }
+    out.push(format!("sessions in flight of a -> {holding:?}"));
+    let whole = drain
+        .sessions_in_flight(&b, None, NonZeroUsize::new(10).unwrap_or(one))
+        .await
+        .expect("page the sessions in flight")
+        .iter()
+        .map(session_alias)
+        .collect::<Vec<_>>();
+    out.push(format!("sessions in flight of b -> {whole:?}"));
 
     out.push(format!(
         "clear a -> {}",

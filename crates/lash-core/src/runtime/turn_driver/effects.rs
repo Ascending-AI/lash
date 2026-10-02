@@ -617,7 +617,8 @@ impl RuntimeTurnDriver<'_> {
             .execution_context(event_tx, chronological_projection)
             .map_err(crate::RuntimeEffectControllerError::from)?
             .with_tracing(self.execution_tracing(protocol_iteration))
-            .with_code_block_graph_key(code_block_graph_key);
+            .with_code_block_graph_key(code_block_graph_key)
+            .with_turn_hand_over(self.cells_hand_over());
         let context = context.with_parent_invocation(invocation);
         let result = match code_executor {
             Some(code_executor) => code_executor

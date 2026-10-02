@@ -23,7 +23,7 @@ pub(super) struct TurnDriverRemainder {
     pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
     /// The protocol iterations the run has spent through this turn, when the
     /// turn ended at a segment boundary (FIG-4739).
-    pub(super) segment_boundary: Option<u64>,
+    pub(super) segment_boundary: Option<crate::runtime::turn_driver::BoundaryTaken>,
 }
 
 /// Everything the execute phase needs to drive an already-prepared turn.
@@ -477,8 +477,7 @@ impl LashRuntime {
                 .pending_follow_on
                 .as_deref()
                 .filter(|owed| owed.is_turn(&trace_turn_id))
-                .and_then(|owed| owed.continuation.as_ref())
-                .map_or(0, |continuation| continuation.protocol_iterations),
+                .and_then(|owed| owed.continuation.as_ref()),
         );
         let session = self
             .session

@@ -135,7 +135,8 @@ impl Fixture {
             "cell",
         ))
         .build()
-        .into_runtime();
+        .into_runtime()
+        .with_turn_hand_over(true);
         let (response, ()) = Box::pin(tokio::time::timeout(
             std::time::Duration::from_secs(60),
             async {

@@ -125,6 +125,7 @@ impl LashProcessAttach for LashProcessAttachImpl {
         let watch = RestateDurableWaitAwakeableRequest {
             key: key.clone(),
             awakeable_id,
+            hand_over: None,
         };
         let registration = self
             .namespace

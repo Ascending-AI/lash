@@ -474,6 +474,7 @@ where
                 context,
                 namespace,
                 authority_id,
+                sender_generation,
                 process_cancel,
                 invocation,
                 local_executor.into_process()?,
@@ -927,6 +928,7 @@ async fn execute_restate_process_await<'ctx, C>(
     context: &C,
     namespace: &crate::RestateNamespace,
     authority_id: &RestateAuthorityId,
+    generation: &lash_core::engine::BuildGeneration,
     process_cancel: context::ProcessCancelRace,
     invocation: &RuntimeEffectInvocation,
     execution: lash_core::runtime::ProcessLocalExecution,
@@ -992,15 +994,35 @@ where
                 deadline: None,
             };
             trace_park("process");
-            let first_wait = context
-                .await_event_or_turn_cancel(
-                    namespace,
-                    await_request,
-                    await_key.key_id.clone(),
-                    turn_cancel,
-                    process_cancel,
-                )
-                .await;
+            // A wait the Run's successor segment may take over also takes
+            // the drain's wake for this build's generation (FIG-4739): the
+            // turn that issued it holds captured state that issues it again.
+            let transferable = turn_cancellation
+                .as_ref()
+                .is_some_and(|turn_cancellation| turn_cancellation.transferable);
+            let first_wait = match turn_cancel {
+                Some(turn_cancel) if transferable => {
+                    context
+                        .await_event_or_turn_end(
+                            namespace,
+                            await_request,
+                            await_key.key_id.clone(),
+                            turn_cancel,
+                            generation.clone(),
+                        )
+                        .await
+                }
+                turn_cancel => context
+                    .await_event_or_turn_cancel(
+                        namespace,
+                        await_request,
+                        await_key.key_id.clone(),
+                        turn_cancel,
+                        process_cancel,
+                    )
+                    .await
+                    .map(|outcome| outcome.map(context::TurnWaitOutcome::Resolved)),
+            };
             let first_wait = match first_wait {
                 Ok(outcome) => outcome,
                 Err(err) => {
@@ -1012,9 +1034,31 @@ where
                 }
             };
             match first_wait {
-                RestateTurnCancelRaceOutcome::Completed(resolution) => {
+                RestateTurnCancelRaceOutcome::Completed(context::TurnWaitOutcome::Resolved(
+                    resolution,
+                )) => {
                     trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
                     process_await_output_from_resolution(resolution)?
+                }
+                RestateTurnCancelRaceOutcome::Completed(context::TurnWaitOutcome::HandedOver) => {
+                    // The wait has no outcome here. It stays armed on its
+                    // key for whoever resolves the process's terminal, and
+                    // the successor segment's turn waits on the process
+                    // under a key of its own.
+                    tracing::info!(
+                        target: "lash::restate",
+                        event = "restate.turn_wait_handed_over",
+                        process_id = process_id.as_str(),
+                        generation = generation.as_str(),
+                        "a turn's process await was handed over to its run's successor segment"
+                    );
+                    return Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::TurnWaitHandedOver,
+                        format!(
+                            "the drain of generation {} handed the await of process                              `{process_id}` to the run's successor segment",
+                            generation.as_str()
+                        ),
+                    ));
                 }
                 RestateTurnCancelRaceOutcome::ProcessCancelled => {
                     // The awaiting process was cancelled while it waited: its

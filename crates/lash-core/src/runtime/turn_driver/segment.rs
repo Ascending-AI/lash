@@ -12,6 +12,17 @@
 
 use super::*;
 
+/// What a turn took at the segment boundary it ended at.
+#[derive(Clone, Debug)]
+pub(in crate::runtime) struct BoundaryTaken {
+    /// The protocol iterations the run has spent through this turn, which
+    /// the owed continuation records.
+    pub(in crate::runtime) iterations: u64,
+    /// The code cell the boundary stopped inside, which the continuation
+    /// issues again.
+    pub(in crate::runtime) cell: Option<crate::store::SuspendedCell>,
+}
+
 /// What a turn carries for its run's segment boundaries.
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct TurnSegment {
@@ -25,19 +36,31 @@ pub(in crate::runtime) struct TurnSegment {
     pub(in crate::runtime) iterations_spent: u64,
     /// How many model calls this physical turn has asked for.
     model_calls: usize,
-    /// Set when the turn ended at a boundary: the iterations the run has
-    /// spent through this turn, which the owed continuation records.
-    pub(in crate::runtime) taken: Option<u64>,
+    /// The code cell the run's earlier turn stopped inside at its boundary:
+    /// this turn's machine issues it again in place of its first model call.
+    pub(in crate::runtime) resume: Option<crate::store::SuspendedCell>,
+    /// Set when the turn ended at a boundary.
+    pub(in crate::runtime) taken: Option<BoundaryTaken>,
 }
 
 impl TurnSegment {
-    pub(in crate::runtime) fn new(allowed: bool, iterations_spent: u64) -> Self {
+    pub(in crate::runtime) fn new(
+        allowed: bool,
+        continuation: Option<&crate::store::RunContinuation>,
+    ) -> Self {
         Self {
             allowed,
-            iterations_spent,
+            iterations_spent: continuation.map_or(0, |owed| owed.protocol_iterations),
             model_calls: 0,
+            resume: continuation.and_then(|owed| owed.cell.clone()),
             taken: None,
         }
+    }
+
+    /// The iterations the run has spent once this turn ends at `iteration`.
+    fn spent_through(&self, iteration: usize, run_offset: usize) -> u64 {
+        self.iterations_spent
+            .saturating_add(iteration.saturating_sub(run_offset) as u64)
     }
 
     /// The turn budget the run has left for this physical turn.
@@ -86,13 +109,81 @@ impl RuntimeTurnDriver<'_> {
         let Some(reason) = reason else {
             return Ok(false);
         };
-        self.segment.taken = Some(
-            self.segment
-                .iterations_spent
-                .saturating_add(iteration.saturating_sub(run_offset) as u64),
-        );
+        self.segment.taken = Some(BoundaryTaken {
+            iterations: self.segment.spent_through(iteration, run_offset),
+            cell: None,
+        });
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });
         Ok(true)
+    }
+
+    /// Whether the cells this turn runs may hand their durable waits to the
+    /// run's successor segment: the turn may end at a boundary, and its
+    /// engine moves turns off a draining build.
+    pub(super) fn cells_hand_over(&self) -> bool {
+        self.segment.allowed
+            && self
+                .scoped_effect_controller
+                .controller()
+                .hands_over_turns()
+    }
+
+    /// Ends the turn at the segment boundary a code cell stopped at inside
+    /// itself: the wait it was parked on was handed to the run's successor
+    /// segment, and the cell captured itself there. The machine is still
+    /// waiting on the cell; the owed continuation records that work, and the
+    /// successor's machine waits on it again.
+    pub(super) fn end_inside_cell(
+        &mut self,
+        machine: &mut TurnMachine,
+        run_offset: usize,
+    ) -> Result<(), RuntimeError> {
+        let Some((language, code, driver_state)) = machine.waiting_exec() else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                "a code cell stopped at a segment boundary the turn was not waiting on",
+            ));
+        };
+        if !self.segment.allowed {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                "a code cell stopped at a segment boundary in a turn that takes none",
+            ));
+        }
+        let cell = crate::store::SuspendedCell {
+            language: language.to_owned(),
+            code: code.to_owned(),
+            driver_plugin_id: driver_state.plugin_id.clone(),
+            driver_state: driver_state.payload.clone(),
+        };
+        self.segment.taken = Some(BoundaryTaken {
+            iterations: self
+                .segment
+                .spent_through(machine.protocol_iteration(), run_offset),
+            cell: Some(cell),
+        });
+        machine.finish_with_outcome(TurnOutcome::SegmentBoundary {
+            reason: crate::BoundaryReason::HandOver,
+        });
+        Ok(())
+    }
+
+    /// Starts the machine at the code cell the run's earlier turn stopped
+    /// inside, when this turn continues one.
+    pub(super) fn resume_suspended_cell(&mut self, machine: &mut TurnMachine) {
+        if let Some(cell) = self.segment.resume.take() {
+            // The resumed cell is this turn's work: the model call after it
+            // is a quiet point like any other.
+            self.segment.model_calls = 1;
+            machine.resume_with(crate::sansio::PendingWork::Exec {
+                language: cell.language,
+                code: cell.code,
+                driver_state: crate::ProtocolDriverState::new(
+                    cell.driver_plugin_id,
+                    cell.driver_state,
+                ),
+            });
+        }
     }
 
     /// The turn's recorded read of its build's drain mark at the quiet point

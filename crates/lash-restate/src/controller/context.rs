@@ -62,6 +62,7 @@ use crate::process_attach::RestateProcessAttachRequest;
 mod child_cancel;
 #[macro_use]
 mod index_calls;
+mod gate_race;
 #[macro_use]
 mod segment_wait;
 mod wake;
@@ -69,8 +70,9 @@ pub(crate) use crate::durable_wait::LASH_REPLAY_KEY_HEADER;
 pub use child_cancel::GroupChildCancelArm;
 pub use child_cancel::GroupChildCancelRace;
 use child_cancel::race_group_child_cancel;
+use gate_race::{TurnGateRace, race_turn_cancel_gate, race_turn_gate};
 use segment_wait::race_signal_wait;
-pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome};
+pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome, TurnWaitOutcome};
 #[cfg(test)]
 pub(crate) use wake::guard_restate_context_future;
 pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
@@ -153,147 +155,6 @@ where
             index => Err(TerminalError::new(format!(
                 "gate race completed out-of-range branch {index}"
             ))),
-        }
-    }
-}
-
-/// Race one parked wait against this turn's durable cancel gate.
-///
-/// The gate awakeable's journaled value carries the mode of the request that
-/// settled the gate. An `Immediate` settlement unwinds the wait at this wake,
-/// exactly as every gate resolution did before the mode existed. An
-/// `AfterStep` settlement composes to the step boundary instead: the wait
-/// stays parked and finishes on its own terms, the iteration completes, and
-/// the turn stops at its `turn_cancel.after_step.{n}` peek. So that a later
-/// `Immediate` request still unwinds the wait, a deferred wake re-parks the
-/// gate on the turn's escalation promise before continuing.
-///
-/// Journal order is the deployed contract: the awakeable, then its
-/// registration, then whatever `guarded` emits. Sites whose guarded command
-/// must precede the awakeable construct it first and hand it over through the
-/// closure; the timer site constructs it in the closure so it lands after the
-/// registration verdict. Every command a deferred wake adds sits on a branch
-/// no journal written before the mode existed can take, so replay of an
-/// in-flight invocation is unchanged.
-async fn race_turn_cancel_gate<'run, 'ctx, C, T>(
-    context: &C,
-    namespace: &crate::RestateNamespace,
-    session_id: &SessionId,
-    turn_cancel: RestateDurableWaitAwaitRequest,
-    awakeable: impl Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>),
-    guarded: impl FnOnce() -> GateWait<'run, T>,
-) -> Result<RestateTurnCancelRaceOutcome<T>, TerminalError>
-where
-    C: ContextClient<'ctx>,
-{
-    let scope = turn_cancel.key.scope.clone();
-    let authority_id = crate::durable_wait::restate_authority_id_for_key(&turn_cancel.key)
-        .ok_or_else(|| {
-            TerminalError::from_error(crate::durable_wait::restate_unknown_or_revoked())
-        })?;
-    let (awakeable_id, awakeable_wait) = awakeable();
-    let gate = match register_turn_cancel_gate(
-        context,
-        namespace,
-        session_id,
-        turn_cancel.key,
-        awakeable_id,
-    )
-    .await?
-    {
-        RestateTurnCancelGate::Registered(gate) => gate,
-        RestateTurnCancelGate::Revoked => {
-            return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: session_id.clone(),
-            });
-        }
-    };
-    let guarded = guarded();
-    match first_of_gate_race(&*guarded, &*awakeable_wait).await? {
-        GateRaceWinner::Guarded => {
-            let value = guarded.await?;
-            retire_turn_cancel_gate(context, namespace, session_id, gate).await?;
-            return Ok(RestateTurnCancelRaceOutcome::Completed(value));
-        }
-        GateRaceWinner::Gate => {}
-    }
-    let Json(wake) = awakeable_wait.await?;
-    match wake {
-        RestateTurnCancelWake::TurnCancelled => {
-            return Ok(RestateTurnCancelRaceOutcome::TurnCancelled);
-        }
-        RestateTurnCancelWake::SessionRevoked => {
-            return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: session_id.clone(),
-            });
-        }
-        RestateTurnCancelWake::TurnCancelDeferred => {}
-    }
-    // The stop is deferred to the step boundary. The index dropped the gate
-    // entry when it fired, so nothing is retired here; the wait now parks
-    // against the escalation promise, which only an `Immediate` request that
-    // found the gate holding this after-step request ever writes.
-    tracing::debug!(
-        target: "lash::restate",
-        event = "restate.turn_cancel_deferred",
-        session_id = session_id.as_str(),
-        "after-step stop observed by a parked durable wait; composing to the step boundary"
-    );
-    let escalation_key = restate_await_event_key_for_authority(
-        &authority_id,
-        &scope,
-        AwaitEventWaitIdentity::TurnCancelEscalation,
-    )
-    .map_err(TerminalError::from_error)?;
-    let (escalation_id, escalation) = awakeable();
-    let escalation_gate = match register_turn_cancel_gate(
-        context,
-        namespace,
-        session_id,
-        escalation_key,
-        escalation_id,
-    )
-    .await?
-    {
-        RestateTurnCancelGate::Registered(gate) => gate,
-        RestateTurnCancelGate::Revoked => {
-            return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: session_id.clone(),
-            });
-        }
-    };
-    match first_of_gate_race(&*guarded, &*escalation).await? {
-        GateRaceWinner::Guarded => {
-            // The escalation entry is retired whichever way the guarded wait
-            // settles: it only ever exists on the deferred branch, so no
-            // journal written before the mode existed can reach this
-            // retirement, and a failing guarded wait would otherwise leave the
-            // index holding an entry for a wait that is gone. The success path
-            // keeps the deployed order — guarded value first, then the
-            // retirement — byte for byte.
-            let value = guarded.await;
-            let retirement =
-                retire_turn_cancel_gate(context, namespace, session_id, escalation_gate).await;
-            let value = value?;
-            retirement?;
-            Ok(RestateTurnCancelRaceOutcome::Completed(value))
-        }
-        GateRaceWinner::Gate => {
-            let Json(wake) = escalation.await?;
-            Ok(match wake {
-                // The escalation promise only ever holds an immediate request;
-                // a deferred wake on it would be a weaker request that cannot
-                // exist there, and is honoured as the stop it escalates.
-                RestateTurnCancelWake::TurnCancelled
-                | RestateTurnCancelWake::TurnCancelDeferred => {
-                    RestateTurnCancelRaceOutcome::TurnCancelled
-                }
-                RestateTurnCancelWake::SessionRevoked => {
-                    RestateTurnCancelRaceOutcome::SessionRevoked {
-                        session_id: session_id.clone(),
-                    }
-                }
-            })
         }
     }
 }
@@ -434,6 +295,35 @@ pub trait RestateControllerContext<'ctx>: GroupChildCancelRace<'ctx> + Send + Sy
     ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run;
+
+    /// A turn's durable await its Run's successor segment may take over
+    /// (FIG-4739): the event raced against the turn's cancellation gate,
+    /// with the gate entry registered for the drain of `generation`, the
+    /// build generation the turn runs on. A drain wake answers
+    /// [`TurnWaitOutcome::HandedOver`] and leaves the event wait open; a
+    /// cancel releases it, as [`Self::await_event_or_turn_cancel`] does.
+    ///
+    /// A context whose waits take no drain wake races the gate alone.
+    fn await_event_or_turn_end<'run>(
+        &'run self,
+        namespace: &'run crate::RestateNamespace,
+        request: RestateDurableWaitAwaitRequest,
+        replay_key: String,
+        turn_cancel: RestateDurableWaitAwaitRequest,
+        generation: lash_core::engine::BuildGeneration,
+    ) -> TurnCancelRaceFuture<'run, TurnWaitOutcome>
+    where
+        'ctx: 'run,
+    {
+        let _ = generation;
+        Box::pin(segment_wait::turn_cancel_only(
+            self,
+            namespace,
+            request,
+            replay_key,
+            turn_cancel,
+        ))
+    }
 
     /// A process segment's signal wait, raced against its cancel and
     /// hand-over promises (FIG-3799): see the `segment_wait` module.
@@ -1223,6 +1113,74 @@ macro_rules! impl_restate_controller_context {
                                 Ok(outcome.map(Reply::into_body))
                             }
                         }
+                    })
+                }
+
+                fn await_event_or_turn_end<'run>(
+                    &'run self,
+                    namespace: &'run crate::RestateNamespace,
+                    request: RestateDurableWaitAwaitRequest,
+                    replay_key: String,
+                    turn_cancel: RestateDurableWaitAwaitRequest,
+                    generation: lash_core::engine::BuildGeneration,
+                ) -> TurnCancelRaceFuture<'run, TurnWaitOutcome>
+                where
+                    'ctx: 'run,
+                {
+                    Box::pin(async move {
+                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
+                        else {
+                            return Err(TerminalError::new(
+                                "turn cancellation gate is missing its session id",
+                            ));
+                        };
+                        let event_address = RestateDurableWaitAddress::for_key(&request.key);
+                        let event_key = request.key.clone();
+                        // The journal geometry of every gated await: the
+                        // guarded wait's CallCommand, then the gate's
+                        // awakeable, then the registration.
+                        let event = namespace.durable_wait_workflow(self,
+                                event_address.workflow_key.clone(),
+                            )
+                            .await_resolution(request.into())
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
+                        let event = erase_gate_wait(event.call());
+                        let outcome = match race_turn_gate(
+                            self,
+                            namespace,
+                            &SessionId::from(session_id),
+                            turn_cancel,
+                            Some(generation),
+                            || gate_awakeable(self),
+                            move || event,
+                        )
+                        .await?
+                        {
+                            // The event wait stays open: the successor
+                            // segment's turn waits on the same process, and
+                            // this orphaned call completes harmlessly when
+                            // the process ends.
+                            TurnGateRace::HandedOver => {
+                                return Ok(RestateTurnCancelRaceOutcome::Completed(
+                                    TurnWaitOutcome::HandedOver,
+                                ));
+                            }
+                            TurnGateRace::Ended(outcome) => outcome,
+                        };
+                        if matches!(outcome, RestateTurnCancelRaceOutcome::TurnCancelled) {
+                            // Release the losing event wait: on the gate it
+                            // is the waiter's job.
+                            let resolve = namespace.durable_wait_registry(self,
+                                    durable_wait_index_object_key(&event_address),
+                                )
+                                .resolve(RestateDurableWaitResolveRequest {
+                                    key: event_key,
+                                    resolution: Resolution::Cancelled,
+                                })
+                                .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
+                            resolve.call().await?;
+                        }
+                        Ok(outcome.map(|reply| TurnWaitOutcome::Resolved(reply.into_body())))
                     })
                 }
 

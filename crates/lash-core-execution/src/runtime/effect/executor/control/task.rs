@@ -213,6 +213,7 @@ pub struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     scope: ExecutionScope,
     owns_commit_backpressure: bool,
+    hands_over_turns: bool,
     await_event_authority_binding_id: Option<String>,
     attempt_observation: Option<lash_trace::AttemptObservation>,
 }
@@ -237,6 +238,7 @@ impl EffectTaskController {
             requests,
             scope: admitted.scope().clone(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
+            hands_over_turns: controller.hands_over_turns(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
             attempt_observation: controller.attempt_observation(),
         };
@@ -368,6 +370,10 @@ impl RuntimeEffectController for EffectTaskController {
 
     fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
         self.attempt_observation.clone()
+    }
+
+    fn hands_over_turns(&self) -> bool {
+        self.hands_over_turns
     }
 
     async fn execute_effect(

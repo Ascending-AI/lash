@@ -243,7 +243,7 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
     let ia = AdmittedRoot::admit(&fixture, "ia", Head::Input, &a).await;
     let qa = AdmittedRoot::admit(&fixture, "qa", Head::Batch, &a).await;
     let qb = AdmittedRoot::admit(&fixture, "qb", Head::Batch, &a).await;
-    let _qc = AdmittedRoot::admit(&fixture, "qc", Head::Batch, &b).await;
+    let qc = AdmittedRoot::admit(&fixture, "qc", Head::Batch, &b).await;
     qb.end().await;
 
     for (stamp, expected) in [(&a, 2), (&b, 1), (&never, 0)] {
@@ -255,6 +255,41 @@ pub async fn in_flight_turns_follow_their_admitting_generation(fixture: Generati
             stamp.as_str(),
         );
     }
+
+    // The sessions holding those turns, which the drain asks to hand over
+    // (FIG-4739): each generation's, in session order, paged; an ended
+    // root's session holds none.
+    let one = std::num::NonZeroUsize::MIN;
+    let mut paged = Vec::new();
+    loop {
+        let page = drain
+            .sessions_in_flight(&a, paged.last(), one)
+            .await
+            .expect("page a's sessions in flight");
+        let Some(last) = page.last().cloned() else {
+            break;
+        };
+        assert_eq!(page.len(), 1, "a page holds at most its bound");
+        paged.push(last);
+    }
+    let mut expected = vec![ia.session_id.clone(), qa.session_id.clone()];
+    expected.sort();
+    assert_eq!(paged, expected, "a's sessions in flight, in order");
+    let whole = std::num::NonZeroUsize::new(16).expect("non-zero");
+    assert_eq!(
+        drain
+            .sessions_in_flight(&b, None, whole)
+            .await
+            .expect("list b's sessions in flight"),
+        vec![qc.session_id.clone()],
+    );
+    assert!(
+        drain
+            .sessions_in_flight(&never, None, whole)
+            .await
+            .expect("list a generation that admitted nothing")
+            .is_empty()
+    );
 
     // The composed status carries the count and holds the drain open for it:
     // marked and otherwise empty, `a` is not drained while `ia` or `qa`
