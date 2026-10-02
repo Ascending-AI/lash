@@ -172,7 +172,13 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
     let request = lash_core::engine::DriveRequest {
         session: session.clone(),
         request: lash_core::engine::DriveRequestId::new("bounded-first"),
-        build_generation: runtime.host.core.backend().build_generation().clone(),
+        build_generation: runtime
+            .host
+            .core
+            .backend()
+            .build_generation()
+            .expect("the engine's generation is bound")
+            .clone(),
     };
     let handler = open_turn(&double, session.clone(), tid("bounded-first")).await;
     let first = Box::pin(lash_core::drive::drive_session(

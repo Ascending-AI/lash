@@ -258,12 +258,8 @@ fn driver(
     let generation = BuildGeneration::for_test("recovery-new");
     let engine = RestateEngine::new(
         stores.clone(),
-        RestateConfig::new(
-            connection.clone(),
-            admin,
-            test_restate_authority_id(),
-            generation.clone(),
-        ),
+        RestateConfig::new(connection.clone(), admin, test_restate_authority_id())
+            .stamped(generation.clone()),
     );
     Arc::new(RecoveryDriver {
         lanes: lash_conformance::deployment_tick_lanes(

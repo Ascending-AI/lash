@@ -350,7 +350,11 @@ impl lash_core::SessionDriver for CoreSessionDriver {
         let process_port = self.config.env.process_work();
         let backend = self.config.env.core.backend();
         let drain = backend.generation_drain();
-        let generation = backend.build_generation().clone();
+        // The driver is installed by the core that bound the generation; a
+        // tick that finds none has nothing to reconcile against.
+        let Ok(generation) = backend.build_generation().cloned() else {
+            return Ok(cursor.clone());
+        };
         let processes = self
             .config
             .env

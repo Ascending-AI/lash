@@ -155,7 +155,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         .serve_at(
             &engine,
             config.restate_endpoint_addr,
-            engine.endpoint_builder(worker).build(),
+            engine.endpoint_builder(worker)?.build(),
         )
         .await?;
     log_out!(

@@ -53,7 +53,7 @@ constant = "JOURNAL_LOGIC_EPOCH"
 constant_path = "crates/lash-restate/src/process/admission.rs"
 upgrade = "drain"
 description = "manual epoch of the Restate journal-bearing handlers' logic: step order, names, and verdict meaning, hashed into the build's drain generation (FIG-3795)"
-outside_manifest = "not a durable format version: it is an input to formats::build_generation, not a row in the durable-format manifest"
+outside_manifest = "not a durable format version: it is an input to the build generation (formats::composed_generation), not a row in the durable-format manifest"
 
 [[surface]]
 constant = "LASH_SESSION_DRIVE_VERSION"

@@ -750,7 +750,11 @@ async fn an_unapplied_plan_is_delivered_once_by_its_obligation_relay() {
     let work = lash_core::NoSessionWork::new();
     let scopes = lash_core::engine::NoScopeClose;
     let drain = world.backend.generation_drain();
-    let generation = world.backend.build_generation().clone();
+    let generation = world
+        .backend
+        .build_generation()
+        .expect("the engine's generation is bound")
+        .clone();
     let relay = Arc::new(lash_core::drive::ParentEndRelay::new(
         world
             .backend

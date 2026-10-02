@@ -49,8 +49,8 @@ run. The node binaries are:
   expansion, SQLite component bumps, `F`'s writable range, remote and Restate
   wire ranges, and durable surface writer pins and lifts (ADR 0115 §6).
 
-`lashctl version --json` reports the operator build's
-`cli_build_generation`, the store's `fleet_generations`, and declared ranges.
+`lashctl version --json` reports the store's `fleet_generations` and the
+operator build's declared ranges.
 The nodes write their build labels and generations to ready files.
 The operator and scripted node builds enable different Lash features, so the
 ready-file generations drive routing and drain calls. The N and synthetic N+1 `lashctl` variants are Buck2 targets. `lashctl version`

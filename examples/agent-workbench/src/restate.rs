@@ -153,7 +153,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
-            lash::formats::build_generation(),
+            self.state.core.build_generation().clone(),
         );
         // The trigger's work reaches the session durably, and the session's
         // engine drives it.
@@ -188,7 +188,7 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
-            lash::formats::build_generation(),
+            self.state.core.build_generation().clone(),
         );
         run_mail_received(self.state.clone(), request, &controller)
             .await
@@ -233,7 +233,7 @@ impl WorkbenchSessionDeleteWorkflow for WorkbenchSessionDeleteWorkflowImpl {
                         self.state.restate_http.clone(),
                     ),
                     configured_restate_authority_id().map_err(AppError::internal)?,
-                    lash::formats::build_generation(),
+                    self.state.core.build_generation().clone(),
                 ))
             })
             .await
@@ -270,7 +270,7 @@ impl WorkbenchProcessCancelWorkflow for WorkbenchProcessCancelWorkflowImpl {
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
-            lash::formats::build_generation(),
+            self.state.core.build_generation().clone(),
         );
         run_process_cancel(self.state.clone(), request, &controller)
             .await
@@ -382,7 +382,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             self.authority_id()?,
-            lash::formats::build_generation(),
+            self.state.core.build_generation().clone(),
         );
         let decision = cron_tick_decision(basis, &state, controller.context().key());
         let cancel_surface = RestateCronTickCancelSurface::new(self.state.clone(), &controller);

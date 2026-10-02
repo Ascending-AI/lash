@@ -275,7 +275,9 @@ async fn drive_ended(engine: &RestateSessionWork, session: &SessionId, request: 
                 }
                 None => return,
             },
-            Err(error) if error.classification() == crate::RestateHttpErrorClass::Transient => {
+            Err(super::SendDriveError::Http(error))
+                if error.classification() == crate::RestateHttpErrorClass::Transient =>
+            {
                 tokio::time::sleep(pause).await;
                 pause = (pause * 2).min(ATTACH_PAUSE_CEILING);
             }

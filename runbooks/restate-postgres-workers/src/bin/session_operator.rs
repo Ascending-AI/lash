@@ -150,7 +150,7 @@ impl Harness {
                 .serve_at(
                     &self.engine,
                     std::env::var("LASH_OPERATOR_ENDPOINT")?.parse()?,
-                    self.engine.endpoint_builder(worker).build(),
+                    self.engine.endpoint_builder(worker)?.build(),
                 )
                 .await?,
         );

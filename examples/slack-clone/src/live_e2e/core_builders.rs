@@ -202,7 +202,7 @@ async fn serve_live_core(
     .context("build the live-E2E process worker")?;
     let deployment = live
         .restate
-        .serve(&live.engine, live.engine.endpoint_builder(worker).build())
+        .serve(&live.engine, live.engine.endpoint_builder(worker)?.build())
         .await?;
     Ok(LiveCore {
         core,

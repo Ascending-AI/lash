@@ -234,7 +234,7 @@ impl LashRuntime {
         let request = crate::engine::DriveRequest {
             session: self.state.session_id.clone(),
             request: crate::engine::DriveRequestId::new(format!("turn:{trace_turn_id}")),
-            build_generation: self.host.core.backend().build_generation().clone(),
+            build_generation: self.host.core.backend().build_generation()?.clone(),
         };
         let sinks = crate::runtime::drive::DriveSinks {
             events: opts.events_or_noop(),

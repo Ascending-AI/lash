@@ -188,7 +188,10 @@ async fn law(storage: Storage, live: bool, kind: JournalKind) {
                     .session_work()
                     .install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>),
             );
-            let generation = backend.build_generation().clone();
+            let generation = backend
+                .build_generation()
+                .expect("the engine's generation is bound")
+                .clone();
             let scope = match kind {
                 JournalKind::DrivelessRoot => {
                     ingress(&harness)

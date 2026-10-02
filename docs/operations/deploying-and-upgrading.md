@@ -53,7 +53,8 @@ lashctl version --json
 ```
 
 The JSON envelope has `schema_version`, `command`, `result` and `error`.
-`result.cli_build_generation` is the CLI binary's own drain generation `G`.
+The CLI reports no generation of its own: a deployment's drain generation `G`
+folds in its registered plugins, so only the serving node knows it.
 `result.fleet_generations` lists generations with pinned work or a drain mark
 in the PostgreSQL store. Each entry has `generation`, `draining`, and
 `source: "postgres"`. `version` does not read the Restate admin API, so this

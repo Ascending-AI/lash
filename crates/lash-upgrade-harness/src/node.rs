@@ -469,7 +469,7 @@ fn engine(
         .map_err(|error| anyhow!("namespace: {error}"))?;
     Ok(Arc::new(lash::restate::RestateEngine::new(
         stores,
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             restate.ingress_url.clone(),
             restate.admin_url.clone(),
             authority,
@@ -558,8 +558,9 @@ fn recovery_lease() -> lash::RecoveryLeaseConfig {
 /// holds each call as `observed` asks.
 fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCore> {
     let build = BuildLabel::current();
-    let generation = lash::formats::build_generation().to_string();
-    let reply = served_by(build, &generation);
+    // The generation exists once this core is built: it folds in the core's
+    // plugins. The provider reads it when a turn calls it.
+    let serving = backend.clone();
     let observed = Arc::new(observed.clone());
     let provider = lash_core::testing::TestProvider::builder()
         .kind("upgrade-harness")
@@ -571,11 +572,14 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
         // opened reads as the same provider on the other.
         .serialize_config(|| serde_json::json!({ "fixture": "upgrade-harness" }))
         .complete(move |request| {
-            let reply = reply.clone();
             let observed = Arc::clone(&observed);
-            let generation = generation.clone();
+            let generation = serving.build_generation().map(ToString::to_string);
             let message = provider::newest_message(&request);
             async move {
+                let generation = generation.map_err(|error| {
+                    lash_core::llm::transport::LlmTransportError::new(error.to_string())
+                })?;
+                let reply = served_by(build, &generation);
                 observed
                     .observe(build, &generation, &message)
                     .await
@@ -669,12 +673,12 @@ impl Serving {
         )
         .map_err(|error| anyhow!("build the process worker: {error}"))?;
         let endpoint = process::bind(
-            engine.endpoint_builder(worker),
+            engine.endpoint_builder(worker)?,
             &restate.namespace,
             process::HarnessProcesses {
                 core: core.clone(),
                 artifacts,
-                build_generation: engine.build_generation().clone(),
+                build_generation: engine.build_generation()?.clone(),
                 authority: lash::restate::RestateAuthorityId::new(&restate.authority)
                     .map_err(|error| anyhow!("authority id: {error}"))?,
                 namespace: lash::restate::RestateNamespace::new(&restate.namespace)
@@ -707,7 +711,7 @@ impl Serving {
         }
         let ready = ServeReady {
             build: BuildLabel::current(),
-            generation: engine.build_generation().to_string(),
+            generation: engine.build_generation()?.to_string(),
             uri,
         };
         Ok(Self {

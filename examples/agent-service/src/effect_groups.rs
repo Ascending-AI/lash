@@ -82,8 +82,12 @@ pub(crate) trait AgentServiceEffectGroupWorkflow {
     ) -> restate_sdk::errors::HandlerResult<restate_sdk::serde::Json<EffectGroupWorkflowResult>>;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct AgentServiceEffectGroupWorkflowImpl;
+#[derive(Clone, Debug)]
+pub(crate) struct AgentServiceEffectGroupWorkflowImpl {
+    /// The deployment's build generation: the lane the groups this workflow
+    /// opens dispatch on.
+    pub(crate) build_generation: lash::BuildGeneration,
+}
 
 impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
     async fn run(
@@ -103,11 +107,8 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
         // This build's lane: the deployment's endpoint binds it, so the
         // group's children run on the build that opened it (FIG-4454).
-        let controller = RestateRuntimeEffectController::new(
-            ctx,
-            authority_id,
-            lash::formats::build_generation(),
-        );
+        let controller =
+            RestateRuntimeEffectController::new(ctx, authority_id, self.build_generation.clone());
         let mut handle = controller
             .open_effect_group(group)
             .await

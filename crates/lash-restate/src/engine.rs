@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use lash_core::engine::BuildGeneration;
+use lash_core::engine::{BuildGeneration, EngineGeneration, GenerationUnbound};
 use lash_core::facade_support::{ProcessEventSink, TurnWorkDriver};
 use lash_core::{EffectHost as _, SessionWorkEngine, StoreSet};
 
@@ -26,7 +26,7 @@ use crate::turn::RestateTurnAttach;
 pub struct RestateConfig {
     connection: RestateConnection,
     authority: RestateAuthorityId,
-    build_generation: BuildGeneration,
+    generation: EngineGeneration,
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
     admin_connection: RestateConnection,
     namespace: RestateNamespace,
@@ -34,35 +34,44 @@ pub struct RestateConfig {
 
 impl RestateConfig {
     /// Reach Restate's ingress at `connection` and its admin API at
-    /// `admin_connection`, under `authority`, as a deployment of the build
-    /// whose drain generation is `build_generation`. The engine's sessions'
-    /// drives run on the `LashSession` and `LashTurn` services its endpoint
-    /// builder binds, and both record and stamp that generation.
+    /// `admin_connection`, under `authority`. The engine's sessions' drives
+    /// run on the `LashSession` and `LashTurn` services its endpoint builder
+    /// binds, and both record and stamp the build's drain generation.
     ///
     /// The admin API is required: releasing a cancelled or forked root's
     /// execution, resuming a redriven one, and reconciling executions Restate
     /// stopped retrying all go through it, and a deployment without it would
     /// refuse every such verb and hold its sessions behind them.
     ///
-    /// `build_generation` is the facade's `formats::build_generation()`
-    /// answer: lash-restate cannot compute it (the format manifest lives in
-    /// the facade), so the caller hands it in and the engine reports it as
-    /// its own. A test double stamps a [`BuildGeneration::for_test`] value
-    /// instead.
+    /// No generation is handed in (FIG-4744): it folds in the core's plugins
+    /// in hook order, so the core built over this engine's backend computes
+    /// it after registration and binds it. Until then the engine has no
+    /// generation: it builds no endpoint and stamps no work, so nothing can
+    /// open on a lane no deployment serves.
     pub fn new(
         connection: impl Into<RestateConnection>,
         admin_connection: impl Into<RestateConnection>,
         authority: RestateAuthorityId,
-        build_generation: BuildGeneration,
     ) -> Self {
         Self {
             connection: connection.into(),
             authority,
-            build_generation,
+            generation: EngineGeneration::unbound(),
             process_event_sink: None,
             admin_connection: admin_connection.into(),
             namespace: RestateNamespace::default(),
         }
+    }
+
+    /// Stamp `build_generation` on the engine instead of the generation its
+    /// core computes: a test double's stand-in for a build, which lets its
+    /// endpoint exist before any core does and lets one process stand up
+    /// several builds. A core built over the engine leaves the stamp as it
+    /// is.
+    #[doc(hidden)]
+    pub fn stamped(mut self, build_generation: BuildGeneration) -> Self {
+        self.generation = EngineGeneration::fixed(build_generation);
+        self
     }
 
     /// Name every Restate service the engine serves and calls under
@@ -102,10 +111,13 @@ pub struct RestateEngine {
     connection: RestateConnection,
     admin: crate::RestateAdminClient,
     namespace: RestateNamespace,
-    build_generation: BuildGeneration,
+    generation: EngineGeneration,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
     session_work: Arc<RestateSessionWork>,
+    /// What the engine was built from, kept so the double can stand up
+    /// another build over the same stores ([`Self::separate_build`]).
+    config: RestateConfig,
 }
 
 impl RestateEngine {
@@ -114,15 +126,15 @@ impl RestateEngine {
         let RestateConfig {
             connection,
             authority,
-            build_generation,
+            generation,
             process_event_sink,
             admin_connection,
             namespace,
-        } = config;
-        let effect_host = Arc::new(RestateEffectHost::in_namespace(
+        } = config.clone();
+        let effect_host = Arc::new(RestateEffectHost::on_generation(
             connection.clone(),
             authority.clone(),
-            build_generation.clone(),
+            generation.clone(),
             namespace.clone(),
         ));
         let process = Arc::new(RestateProcessDeployment::in_namespace(
@@ -142,7 +154,7 @@ impl RestateEngine {
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),
-            build_generation.clone(),
+            generation.clone(),
             namespace.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
                 lost_processes: Default::default(),
@@ -160,10 +172,11 @@ impl RestateEngine {
             connection,
             admin,
             namespace,
-            build_generation,
+            generation,
             effect_host,
             process,
             session_work,
+            config,
         }
     }
 
@@ -202,18 +215,25 @@ impl RestateEngine {
     /// this engine installs it — and a session-scope child checks its
     /// session's state generation in this engine's session catalog.
     ///
+    /// # Errors
+    /// [`GenerationUnbound`] before a core was built over this engine's
+    /// backend: the generation lanes are named by the generation the core
+    /// computes from its registered plugins (FIG-4744), so the endpoint is
+    /// built after the core.
+    ///
     /// [`DurableProcessWorker`]: lash_core_worker::DurableProcessWorker
     pub fn endpoint_builder(
         &self,
         processes: impl Into<RestateProcessServing>,
-    ) -> restate_sdk::endpoint::Builder {
+    ) -> Result<restate_sdk::endpoint::Builder, GenerationUnbound> {
+        let build_generation = self.generation.get()?.clone();
         // The host's own handlers bound on this builder run lash code under
         // no lash handler: their journaled calls state the wire this
         // deployment's recorded `F` selects (FIG-3805).
         crate::compat::DeploymentWire::serve_host_fleet(crate::object_state::FleetView::of(
             self.stores.process_registry(),
         ));
-        bind_lash_services(
+        Ok(bind_lash_services(
             restate_sdk::endpoint::Endpoint::builder(),
             LashServiceParts {
                 effect_host: &self.effect_host,
@@ -223,15 +243,15 @@ impl RestateEngine {
                 attachments: self.stores.attachment_referrers(),
                 process_workflow: self.process.workflow(
                     processes.into(),
-                    self.build_generation.clone(),
+                    build_generation.clone(),
                     self.stores.attachment_referrers(),
                 ),
                 session_driver: self.session_work.driver_slot().clone(),
-                build_generation: self.build_generation.clone(),
+                build_generation,
                 namespace: self.namespace.clone(),
                 fleet: crate::object_state::FleetView::of(self.stores.process_registry()),
             },
-        )
+        ))
     }
 
     /// Register the endpoint at `uri` with the server as a deployment of
@@ -269,16 +289,19 @@ impl RestateEngine {
     /// [`RestateRegistrationError::NameTaken`] for a name another deployment
     /// holds; [`RestateRegistrationError::EndpointServesAnotherGeneration`]
     /// for a URI another build holds; [`RestateRegistrationError::Admin`]
-    /// when the admin API fails or refuses the registration.
+    /// when the admin API fails or refuses the registration;
+    /// [`RestateRegistrationError::GenerationUnbound`] before a core was
+    /// built over this engine's backend.
     #[allow(
         clippy::result_large_err,
         reason = "RestateHttpError travels unboxed across the crate's admin and ingress API"
     )]
     pub async fn register_deployment(&self, uri: &str) -> Result<(), RestateRegistrationError> {
-        let force = self.redeploys_endpoint(uri).await?;
+        let build_generation = self.generation.get()?;
+        let force = self.redeploys_endpoint(uri, build_generation).await?;
         let authority = self.effect_host.authority_id().binding_id();
         let routes = crate::services::LASH_SERVICES.iter().flat_map(|&service| {
-            crate::services::lanes(&self.namespace, service, &self.build_generation)
+            crate::services::lanes(&self.namespace, service, build_generation)
         });
         for route in routes {
             let name = route.name();
@@ -322,7 +345,11 @@ impl RestateEngine {
         clippy::result_large_err,
         reason = "RestateHttpError travels unboxed across the crate's admin and ingress API"
     )]
-    async fn redeploys_endpoint(&self, uri: &str) -> Result<bool, RestateRegistrationError> {
+    async fn redeploys_endpoint(
+        &self,
+        uri: &str,
+        build_generation: &BuildGeneration,
+    ) -> Result<bool, RestateRegistrationError> {
         let Some(held) = self
             .admin
             .deployments()
@@ -346,13 +373,13 @@ impl RestateEngine {
                 crate::services::Lane::Stable => None,
             })
             .collect::<std::collections::BTreeSet<_>>();
-        if generations.contains(&self.build_generation) {
+        if generations.contains(build_generation) {
             return Ok(true);
         }
         Err(RestateRegistrationError::EndpointServesAnotherGeneration {
             uri: uri.to_owned(),
             held: generations.into_iter().next(),
-            local: self.build_generation.clone(),
+            local: build_generation.clone(),
         })
     }
 
@@ -369,11 +396,27 @@ impl RestateEngine {
             connection: self.connection.clone(),
             admin: self.admin.clone(),
             namespace: self.namespace.clone(),
-            build_generation,
+            generation: EngineGeneration::fixed(build_generation.clone()),
             effect_host: Arc::clone(&self.effect_host),
             process: Arc::clone(&self.process),
             session_work: Arc::clone(&self.session_work),
+            config: self.config.clone().stamped(build_generation),
         }
+    }
+
+    /// Another build over the same stores that shares nothing else with
+    /// this one: its own effect host, process deployment and session
+    /// driver, as a real deployment of another build has in its own
+    /// process. A core built over it installs its own plugins, so a test
+    /// double can run two builds whose plugin compositions differ
+    /// (FIG-4744): work in flight on this build keeps running under this
+    /// build's plugins while the other serves new work under its own.
+    #[doc(hidden)]
+    pub fn separate_build(&self, build_generation: BuildGeneration) -> Self {
+        Self::new(
+            Arc::clone(&self.stores),
+            self.config.clone().stamped(build_generation),
+        )
     }
 
     /// The namespace every Restate service of this engine is named in
@@ -404,11 +447,15 @@ impl RestateEngine {
         &self.stores
     }
 
-    /// The drain generation of the build this engine runs on: the caller's
-    /// `formats::build_generation()` answer, reported through
-    /// [`EffectEngine::build_generation`](lash_core::EffectEngine::build_generation).
-    pub fn build_generation(&self) -> &BuildGeneration {
-        &self.build_generation
+    /// The drain generation of the build this engine runs on: the one the
+    /// core built over its backend computed from its formats and its
+    /// registered plugins and bound
+    /// ([`EffectEngine::generation`](lash_core::EffectEngine::generation)).
+    ///
+    /// # Errors
+    /// [`GenerationUnbound`] before that core is built.
+    pub fn build_generation(&self) -> Result<&BuildGeneration, GenerationUnbound> {
+        self.generation.get()
     }
 
     /// Exact-turn control over this engine's sessions, usable from a
@@ -441,8 +488,8 @@ impl lash_core::EffectEngine for RestateEngine {
         self.restate_effect_host()
     }
 
-    fn build_generation(&self) -> &BuildGeneration {
-        self.build_generation()
+    fn generation(&self) -> &EngineGeneration {
+        &self.generation
     }
 
     fn process_work(&self) -> lash_core::ProcessWorkWiring {
@@ -513,6 +560,10 @@ pub enum RestateRegistrationError {
         /// This build's generation.
         local: BuildGeneration,
     },
+    /// No core has been built over the engine's backend yet, so the engine
+    /// has no generation to name its lanes by (FIG-4744).
+    #[error(transparent)]
+    GenerationUnbound(#[from] GenerationUnbound),
     /// The admin API failed, or refused the registration itself.
     #[error(transparent)]
     Admin(#[from] crate::RestateHttpError),

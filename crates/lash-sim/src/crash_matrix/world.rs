@@ -373,9 +373,12 @@ impl CrashWorld {
     }
 
     /// The build generation the next deployment runs.
-    #[must_use]
-    pub fn generation(&self) -> lash_core::engine::BuildGeneration {
-        self.deploy.lock_recover().build_generation().clone()
+    pub fn generation(&self) -> Result<lash_core::engine::BuildGeneration, String> {
+        self.deploy
+            .lock_recover()
+            .build_generation()
+            .cloned()
+            .map_err(|error| error.to_string())
     }
 
     /// Register a build of drain generation `generation` on the server under

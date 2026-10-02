@@ -242,7 +242,7 @@ async fn attach_whole_drive(
     work: &crate::RestateSessionWork,
     session: &SessionId,
     request: DriveRequestId,
-) -> Result<DriveOutcome, crate::RestateHttpError> {
+) -> Result<DriveOutcome, crate::SendDriveError> {
     let mut leg = DriveRequest {
         session: session.clone(),
         request,
@@ -522,7 +522,7 @@ impl Fixture {
     async fn attach_whole_drive(
         &self,
         request: DriveRequestId,
-    ) -> Result<DriveOutcome, crate::RestateHttpError> {
+    ) -> Result<DriveOutcome, crate::SendDriveError> {
         attach_whole_drive(&self.work, &self.driver.session, request).await
     }
     /// Attach to `request`'s drive, firing the double's timers while it
@@ -1489,7 +1489,7 @@ fn detached_session_work() -> crate::RestateSessionWork {
     crate::RestateSessionWork::new(
         crate::RestateIngressClient::new(crate::RestateConnection::new("http://127.0.0.1:9")),
         crate::RestateSessionDriverSlot::new(),
-        BuildGeneration::for_test("recovery-interval"),
+        lash_core::engine::EngineGeneration::fixed(BuildGeneration::for_test("recovery-interval")),
         crate::RestateNamespace::default(),
         Arc::new(NoEngineControl),
     )

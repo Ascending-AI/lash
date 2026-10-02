@@ -89,7 +89,8 @@ impl LiveRestateEndpoint {
                         backend,
                         process_worker,
                         shutdown_rx,
-                    );
+                    )
+                    .expect("the core bound the engine's generation");
                     ready_tx
                         .send(())
                         .expect("announce owned Restate endpoint readiness");

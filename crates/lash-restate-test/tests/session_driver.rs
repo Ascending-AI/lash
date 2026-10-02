@@ -641,7 +641,10 @@ async fn held_generation_continuation() -> (
         release: tokio::sync::Notify::new(),
     });
     *driver.continuation_gate.lock().unwrap() = Some(Arc::clone(&gate));
-    let generation = backend.restate().build_generation();
+    let generation = backend
+        .restate()
+        .build_generation()
+        .expect("the engine's generation is bound");
     let initial = backend
         .restate()
         .session_work_engine()
@@ -784,7 +787,11 @@ async fn a_drive_resumed_on_a_draining_generation_lane_hands_the_rest_to_the_new
         .unwrap();
         let (driver, _installation) = install(&backend);
         let old_deployment = backend.server().deployments()[0].clone();
-        let generation = backend.restate().build_generation().clone();
+        let generation = backend
+            .restate()
+            .build_generation()
+            .expect("the engine's generation is bound")
+            .clone();
         let next_generation = lash_core::engine::BuildGeneration::for_test("drain-next");
         let next_deployment = backend
             .add_build(next_generation.clone(), "next", DeploymentHooks::default())
@@ -1519,7 +1526,11 @@ async fn a_released_root_admitted_again_after_a_handoff_stops_the_drive() {
     let next = lash_core::engine::drive_continuation_request(&DriveRequest {
         session: session.clone(),
         request: request("r1"),
-        build_generation: backend.lash_backend().build_generation().clone(),
+        build_generation: backend
+            .lash_backend()
+            .build_generation()
+            .expect("the engine's generation is bound")
+            .clone(),
     });
     let second = attach(&backend, &session, next.as_str()).await;
     assert_eq!(second.ran, [], "the root is not called again");
@@ -1808,7 +1819,10 @@ fn schedule_continuation_case(
     let initial = DriveRequest {
         session: session.clone(),
         request: request("bounded-crash"),
-        build_generation: backend.build_generation().clone(),
+        build_generation: backend
+            .build_generation()
+            .expect("the engine's generation is bound")
+            .clone(),
     };
     let successor = lash_core::engine::drive_continuation_request(&initial);
     backend

@@ -94,6 +94,9 @@ pub struct LiveConfig {
 pub enum LiveError {
     #[error("the SQLite memory store set could not open: {0}")]
     Stores(String),
+    /// The engine's generation was read before anything bound it.
+    #[error(transparent)]
+    GenerationUnbound(#[from] lash_core::engine::GenerationUnbound),
     #[error("the Restate authority id is invalid: {0}")]
     Authority(String),
     #[error("the endpoint could not listen on {bind}: {detail}")]
@@ -379,7 +382,7 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
     /// The caller must install a new process worker and session driver. Test
     /// handler jobs are host oracles and deliberately do not survive.
     pub async fn rebuild(&self) -> Result<Self, LiveError> {
-        self.rebuild_on_generation(self.lash_backend().build_generation().clone())
+        self.rebuild_on_generation(self.lash_backend().build_generation()?.clone())
             .await
     }
 
@@ -400,7 +403,7 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
             Arc::clone(&self.inner.stores),
             Arc::clone(&self.inner.clock),
             build_generation.clone(),
-            build_generation == *self.lash_backend().build_generation(),
+            self.lash_backend().build_generation() == Ok(&build_generation),
             Box::new(|builder| builder),
         )
         .await
@@ -461,8 +464,8 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
                 connection.clone(),
                 admin_connection.clone(),
                 authority.clone(),
-                build_generation,
             )
+            .stamped(build_generation.clone())
             .with_namespace(config.namespace.clone()),
         ));
         let processes = RestateProcessWorkerSlot::new();
@@ -480,11 +483,11 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
             None => serving,
         };
         let endpoint = bind_handler_host(
-            services(restate.endpoint_builder(serving)),
+            services(restate.endpoint_builder(serving)?),
             HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority,
-                build_generation: restate.build_generation().clone(),
+                build_generation,
                 namespace: config.namespace.clone(),
             },
         )
@@ -612,7 +615,7 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
         &self,
         session: &lash_core::SessionId,
         request: lash_core::engine::DriveRequestId,
-    ) -> Result<lash_core::engine::DriveOutcome, lash_restate::RestateHttpError> {
+    ) -> Result<lash_core::engine::DriveOutcome, lash_restate::SendDriveError> {
         self.inner
             .restate
             .session_work_engine()

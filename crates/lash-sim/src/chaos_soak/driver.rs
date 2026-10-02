@@ -1211,7 +1211,7 @@ impl Driver {
     /// is left pinned to N's build, and remove that build.
     async fn roll(&mut self) -> Result<String, String> {
         self.counts.rolls += 1;
-        let old = self.world.generation();
+        let old = self.world.generation()?;
         let old_deployment = self.deployment.clone();
         let index = self.counts.rolls;
         let next = {

@@ -94,8 +94,14 @@ mod restate_tests {
         let endpoint = harness
             .backend
             .endpoint_builder(harness.process_worker.clone())
+            .expect("the core bound the engine's generation")
             .bind(harness.chat_discard.serve())
-            .bind(AgentServiceEffectGroupWorkflowImpl.serve())
+            .bind(
+                AgentServiceEffectGroupWorkflowImpl {
+                    build_generation: harness.state.core().build_generation().clone(),
+                }
+                .serve(),
+            )
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
@@ -302,10 +308,9 @@ mod restate_tests {
         // members. This separate wait proves the underlying await-event
         // terminal itself is durable: a fresh observer sees `Cancelled`, a
         // second await returns immediately, and a late completion cannot win.
-        let wait_host = RestateEffectHost::new(
+        let wait_host = RestateEffectHost::outside_deployment(
             ingress_url,
             lash_restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
-            lash::formats::build_generation(),
         );
         let wait_scope = ExecutionScope::turn(
             format!("agent-service-await-session-{}", uuid::Uuid::new_v4()),
@@ -445,7 +450,7 @@ finish("done via Restate E2E");
             .expect("open the SQLite store set");
         let backend = Arc::new(lash_restate::RestateEngine::new(
             Arc::new(stores),
-            lash::restate::config(
+            lash::restate::RestateConfig::new(
                 ingress_url.clone(),
                 admin_url,
                 lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),

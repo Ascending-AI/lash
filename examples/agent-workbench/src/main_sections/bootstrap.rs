@@ -88,7 +88,7 @@ pub(crate) async fn register_deployment_command(endpoint_url: &str) -> AnyhowRes
         .context("open the registration engine's scratch store set")?;
     let engine = lash_restate::RestateEngine::new(
         Arc::new(stores),
-        lash::restate::config(ingress_url, admin_url, authority),
+        lash::restate::RestateConfig::new(ingress_url, admin_url, authority),
     );
     match engine.register_deployment(endpoint_url).await {
         Ok(()) => Ok(()),
@@ -245,7 +245,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // session's accepted input through its `LashSession` service.
     let backend = Arc::new(lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             lash_restate::RestateConnection::with_client_and_config(
                 restate_ingress_url.clone(),
                 restate_http.clone(),
@@ -592,7 +592,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             Arc::clone(&backend),
             process_worker,
             host_shutdown.subscribe(),
-        );
+        )
+        .context("build the Restate endpoint")?;
         let signal_shutdown = host_shutdown.clone();
         let serve_result = axum::serve(listener, app)
             .with_graceful_shutdown(async move {

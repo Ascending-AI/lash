@@ -338,12 +338,7 @@ async fn restate_deployment(
         .map_err(|error| anyhow::anyhow!("open the probe's store set: {error}"))?;
     let backend = Arc::new(lash_restate::RestateEngine::new(
         Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
-        lash_restate::RestateConfig::new(
-            ingress_url,
-            admin_url,
-            authority.clone(),
-            lash::formats::build_generation(),
-        ),
+        lash_restate::RestateConfig::new(ingress_url, admin_url, authority.clone()),
     ));
     let core = lash::LashCore::standard_builder(lash_core::Backend::new(backend.clone()))
         .serve_test_model(
@@ -461,13 +456,13 @@ async fn run_restate(
     let (backend, process_worker) =
         restate_deployment(&ingress_url, &admin_url, &authority).await?;
     let endpoint = backend
-        .endpoint_builder(process_worker)
+        .endpoint_builder(process_worker)?
         .bind(
             ToolBatchProbeImpl {
                 host: backend.restate_effect_host(),
                 stores: Arc::clone(backend.store_set()),
                 authority: authority.clone(),
-                build_generation: backend.build_generation().clone(),
+                build_generation: backend.build_generation()?.clone(),
                 producers: producers.to_vec(),
             }
             .serve(),

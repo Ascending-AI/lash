@@ -42,7 +42,7 @@
 //!         let effect_controller = RestateRuntimeEffectController::new(
 //!             ctx,
 //!             authority_id,
-//!             lash::formats::build_generation(),
+//!             core.build_generation().clone(),
 //!         );
 //!         let turn_id = req.turn_id.clone();
 //!         let scoped_effect_controller = effect_controller
@@ -193,7 +193,7 @@ pub use session_administration::{RestateSessionAdministration, RestateSessionDel
 pub use session_driver::{
     LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRootCloseRequest,
     RestateSessionDriveRequest, RestateSessionDriverSlot, RestateSessionWork,
-    RestateTurnDriveRequest, turn_workflow_key,
+    RestateTurnDriveRequest, SendDriveError, turn_workflow_key,
 };
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{

@@ -113,7 +113,10 @@ fn dispatch_lane(engine: &Engine) -> String {
     format!(
         "{}_g{}",
         live(engine).service_name("EffectGroupDispatch"),
-        engine.lash_backend().build_generation()
+        engine
+            .lash_backend()
+            .build_generation()
+            .expect("the engine's generation is bound")
     )
 }
 

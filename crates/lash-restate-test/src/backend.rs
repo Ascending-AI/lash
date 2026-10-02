@@ -19,9 +19,9 @@ use lash_core::{
 };
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
-    RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateHttpError,
-    RestateIngressClient, RestateNamespace, RestateProcessServing, RestateProcessWorkerSlot,
-    RestateRegistrationError, RestateSessionWork, turn_workflow_key,
+    RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateIngressClient,
+    RestateNamespace, RestateProcessServing, RestateProcessWorkerSlot, RestateRegistrationError,
+    RestateSessionWork, turn_workflow_key,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -61,6 +61,9 @@ pub enum BackendError {
     Server(#[from] StartError),
     #[error("the store set could not open: {0}")]
     Stores(String),
+    /// The engine's generation was read before anything bound it.
+    #[error(transparent)]
+    GenerationUnbound(#[from] lash_core::engine::GenerationUnbound),
     #[error("the Restate authority id is invalid: {0}")]
     Authority(String),
     /// The engine refused to register its deployment: another deployment on
@@ -468,7 +471,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
         let builder = bind_handler_host(
             self.restate
                 .sibling_build(generation.clone())
-                .endpoint_builder(self.processes.clone()),
+                .endpoint_builder(self.processes.clone())?,
             HandlerHost {
                 jobs: Arc::clone(&self.jobs),
                 authority: self.authority.clone(),
@@ -488,6 +491,32 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
             .server
             .register_with(builder.build(), label, hooks)
             .await?)
+    }
+
+    /// Register a build of drain generation `generation` that shares only
+    /// this backend's stores: its engine has its own effect host, process
+    /// deployment and session driver, as a deployment of another build has
+    /// in its own process (FIG-4744). A core built over
+    /// [`SeparateBuild::lash_backend`] installs its own plugins on it, so
+    /// two builds whose plugin compositions differ serve one server: an
+    /// invocation in flight on this backend's build stays on it, under its
+    /// plugins, and new invocations of a stable name reach the newest.
+    /// The build serves no test handler host and lends no handler.
+    pub async fn add_separate_build(
+        &self,
+        generation: lash_core::engine::BuildGeneration,
+        label: impl Into<String>,
+        hooks: DeploymentHooks,
+    ) -> Result<SeparateBuild, BackendError> {
+        let restate = Arc::new(self.restate.separate_build(generation));
+        let processes = RestateProcessWorkerSlot::new();
+        let endpoint = restate.endpoint_builder(processes.clone())?.build();
+        let deployment = self.server.register_with(endpoint, label, hooks).await?;
+        Ok(SeparateBuild {
+            deployment,
+            restate,
+            processes,
+        })
     }
 
     /// The namespace this backend's services are named in (FIG-3898).
@@ -542,7 +571,8 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 
     /// The drain generation of the build this backend's engine runs.
     pub(crate) fn build_generation(&self) -> &lash_core::engine::BuildGeneration {
-        self.restate.build_generation()
+        // The double stamps its engine with the server's configured build.
+        &self.server.config().build_generation
     }
 
     /// The storage-only store set [`backend_with`]'s `decorate_stores` was
@@ -683,7 +713,7 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
         &self,
         session: &lash_core::SessionId,
         request: lash_core::engine::DriveRequestId,
-    ) -> Result<lash_core::engine::DriveOutcome, RestateHttpError> {
+    ) -> Result<lash_core::engine::DriveOutcome, lash_restate::SendDriveError> {
         self.restate
             .session_work_engine()
             .attach_drive(session, request)
@@ -834,6 +864,44 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
 /// scenario reconciles through [`SessionDriver::reconcile`] itself, so a
 /// seeded run never meets a drive ask whose request id and landing point
 /// wall time picked.
+/// A build [`RestateTestBackend::add_separate_build`] registered: its own
+/// engine over the first build's stores.
+pub struct SeparateBuild {
+    deployment: DeploymentId,
+    restate: Arc<RestateEngine>,
+    processes: RestateProcessWorkerSlot,
+}
+
+impl SeparateBuild {
+    /// The deployment the server registered the build as.
+    pub fn deployment(&self) -> &DeploymentId {
+        &self.deployment
+    }
+
+    /// The backend a core of this build runs on.
+    pub fn lash_backend(&self) -> lash_core::Backend {
+        lash_core::Backend::new(self.restate.clone())
+    }
+
+    /// The build's own engine.
+    pub fn restate(&self) -> &Arc<RestateEngine> {
+        &self.restate
+    }
+
+    /// The slot the build's endpoint serves processes from.
+    pub fn processes(&self) -> &RestateProcessWorkerSlot {
+        &self.processes
+    }
+
+    /// The build's session work with its own reconcile schedule off
+    /// ([`RestateTestBackend::explicit_reconcile_session_work`]).
+    pub fn explicit_reconcile_session_work(&self) -> Arc<dyn SessionWorkEngine> {
+        Arc::new(ExplicitlyReconciledSessionWork {
+            inner: Arc::clone(self.restate.session_work_engine()),
+        })
+    }
+}
+
 pub(crate) struct ExplicitlyReconciledSessionWork {
     pub(crate) inner: Arc<RestateSessionWork>,
 }
@@ -1108,13 +1176,9 @@ impl Process {
             RestateConnection::with_transport(server.ingress_url(), server.transport());
         let restate = Arc::new(RestateEngine::new(
             Arc::clone(engine_stores),
-            RestateConfig::new(
-                connection.clone(),
-                connection.clone(),
-                authority.clone(),
-                server.config().build_generation.clone(),
-            )
-            .with_namespace(namespace.clone()),
+            RestateConfig::new(connection.clone(), connection.clone(), authority.clone())
+                .stamped(server.config().build_generation.clone())
+                .with_namespace(namespace.clone()),
         ));
         // The endpoint exists before any core over this backend does, so it
         // serves processes on whatever worker the fixture installs later.
@@ -1127,11 +1191,11 @@ impl Process {
         };
         let loans = Arc::new(crate::open_handler::Loans::default());
         let builder = bind_handler_host(
-            restate.endpoint_builder(serving),
+            restate.endpoint_builder(serving)?,
             HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority: authority.clone(),
-                build_generation: restate.build_generation().clone(),
+                build_generation: restate.build_generation()?.clone(),
                 namespace: namespace.clone(),
             },
         )

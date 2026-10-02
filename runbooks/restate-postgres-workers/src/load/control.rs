@@ -69,7 +69,7 @@ pub fn router(control: FaultControl) -> Router {
 async fn active(State(control): State<FaultControl>) -> Json<WorkerActivity> {
     Json(WorkerActivity {
         worker_id: control.worker_id.clone(),
-        generation: lash::formats::build_generation().as_str().to_owned(),
+        generation: control.core.build_generation().as_str().to_owned(),
         active: control.active.keys(),
     })
 }
@@ -88,7 +88,7 @@ async fn register(
         .map_err(failed)?;
     Ok(Json(json!({
         "uri": registration.uri,
-        "generation": lash::formats::build_generation().as_str(),
+        "generation": control.core.build_generation().as_str(),
         "worker_id": control.worker_id,
     })))
 }
@@ -105,7 +105,7 @@ async fn drain(State(control): State<FaultControl>, Path(text): Path<String>) ->
     Ok(Json(json!({
         "generation": generation.as_str(),
         "marked": marked,
-        "by": lash::formats::build_generation().as_str(),
+        "by": control.core.build_generation().as_str(),
     })))
 }
 

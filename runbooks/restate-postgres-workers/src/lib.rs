@@ -451,7 +451,11 @@ pub fn e2e_backend(
             storage,
             attachment_store,
         )),
-        lash::restate::config(restate_ingress_url, restate_admin_url, restate_authority_id),
+        lash::restate::RestateConfig::new(
+            restate_ingress_url,
+            restate_admin_url,
+            restate_authority_id,
+        ),
     ))
 }
 
@@ -1025,11 +1029,8 @@ impl E2eTools {
         let restate_authority_id = self.restate_authority_id.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let host = RestateEffectHost::new(
-                restate_ingress_url,
-                restate_authority_id,
-                lash::formats::build_generation(),
-            );
+            let host =
+                RestateEffectHost::outside_deployment(restate_ingress_url, restate_authority_id);
             let resolution = lash_core::Resolution::Ok(result.clone());
             let outcome = host
                 .resolve_await_event(&completion_key, resolution)

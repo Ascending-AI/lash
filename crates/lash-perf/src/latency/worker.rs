@@ -65,7 +65,7 @@ pub(crate) async fn run(args: LatencyWorkerArgs) -> Result<()> {
             .context("worker process worker config")?,
     )
     .map_err(|error| anyhow::anyhow!("build the worker process worker: {error}"))?;
-    let endpoint = engine.endpoint_builder(worker).build();
+    let endpoint = engine.endpoint_builder(worker)?.build();
     let listener = tokio::net::TcpListener::bind(args.endpoint_bind)
         .await
         .with_context(|| format!("bind the latency worker endpoint at {}", args.endpoint_bind))?;

@@ -78,7 +78,10 @@ async fn discovered_service_names(endpoint: &Endpoint) -> BTreeSet<String> {
 #[tokio::test]
 async fn group_dispatch_is_bound_only_on_its_generation_lane() {
     let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend.endpoint_builder(worker).build();
+    let endpoint = backend
+        .endpoint_builder(worker)
+        .expect("the core bound the engine's generation")
+        .build();
     let discovered = discovered_service_names(&endpoint).await;
     assert!(discovered.contains(&format!(
         "EffectGroupDispatch{}",
@@ -134,8 +137,8 @@ pub(super) async fn backend_and_process_worker()
             "http://127.0.0.1:9",
             "http://127.0.0.1:9",
             RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
-            bindings_generation(),
-        ),
+        )
+        .stamped(bindings_generation()),
     ));
     let core = lash::LashCore::standard_builder(lash_core::Backend::from(Arc::clone(&backend)))
         .serve_test_model(
@@ -200,7 +203,10 @@ fn a_generation_suffixed_service_name_is_valid_to_the_sdk() {
 #[tokio::test]
 async fn the_endpoint_builder_binds_every_lash_service() {
     let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend.endpoint_builder(worker).build();
+    let endpoint = backend
+        .endpoint_builder(worker)
+        .expect("the core bound the engine's generation")
+        .build();
     let discovered = discovered_service_names(&endpoint).await;
     assert_eq!(discovered, lash_lane_names());
     let generation = bindings_generation();
@@ -217,7 +223,10 @@ async fn the_endpoint_builder_binds_every_lash_service() {
 #[tokio::test]
 async fn every_bound_upgrade_is_declared_in_the_service_table() {
     let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend.endpoint_builder(worker).build();
+    let endpoint = backend
+        .endpoint_builder(worker)
+        .expect("the test engine is stamped")
+        .build();
     let document = discovery_document(&endpoint).await;
     let bound: BTreeSet<_> = document["services"]
         .as_array()
@@ -264,7 +273,10 @@ async fn every_bound_upgrade_is_declared_in_the_service_table() {
 #[tokio::test]
 async fn durable_wait_and_effect_group_indexes_load_state_lazily() {
     let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend.endpoint_builder(worker).build();
+    let endpoint = backend
+        .endpoint_builder(worker)
+        .expect("the core bound the engine's generation")
+        .build();
     let document = discovery_document(&endpoint).await;
     for name in ["LashDurableWaitIndex", "EffectGroupIndex"] {
         let index = document["services"]
@@ -283,7 +295,10 @@ async fn durable_wait_and_effect_group_indexes_load_state_lazily() {
 #[tokio::test]
 async fn a_generation_lane_serves_the_same_handlers_as_its_stable_name() {
     let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend.endpoint_builder(worker).build();
+    let endpoint = backend
+        .endpoint_builder(worker)
+        .expect("the core bound the engine's generation")
+        .build();
     let document = discovery_document(&endpoint).await;
     let handlers = |name: &str| -> BTreeSet<String> {
         document["services"]
@@ -322,6 +337,7 @@ async fn a_host_binds_its_own_services_beside_lash_services() {
         .endpoint_builder(
             crate::RestateProcessServing::new(worker).with_segment_effect_budget_selector(|_| 3),
         )
+        .expect("the core bound the engine's generation")
         .bind(crate::turn_service(HostTurnWorkflowImpl.serve(), "run"))
         .build();
     let mut expected = lash_lane_names();

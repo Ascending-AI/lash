@@ -26,6 +26,22 @@ pub enum EmbedError {
         backend: String,
     },
     #[error(transparent)]
+    /// Returned when a registered plugin factory's declaration is refused:
+    /// it names another plugin than its factory, or cannot write the format
+    /// it reads natively (FIG-4744). Nothing is built.
+    PluginDeclaration(#[from] lash_core::plugin::PluginDeclarationError),
+    #[error(transparent)]
+    /// Returned when the core's plugin composition gives another build
+    /// generation than the one its engine already runs: a core with other
+    /// plugins, or the same plugins in another order, was built over the
+    /// same engine (FIG-4744). One engine serves one generation's lanes, so
+    /// a second composition takes an engine of its own.
+    BuildGenerationRebound(#[from] lash_core::engine::GenerationRebound),
+    #[error(transparent)]
+    /// Returned when the engine's build generation is read before a core
+    /// was built over its backend (FIG-4744).
+    BuildGenerationUnbound(#[from] lash_core::engine::GenerationUnbound),
+    #[error(transparent)]
     /// Returned when the core would build without some obligation kind's
     /// relay: its store set arms every kind, and a kind nothing delivers
     /// stays owed forever (ADR 0109 §1.4).
@@ -314,6 +330,9 @@ impl EmbedError {
             Self::MissingProtocolPlugin
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
+            | Self::PluginDeclaration(_)
+            | Self::BuildGenerationRebound(_)
+            | Self::BuildGenerationUnbound(_)
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
@@ -370,6 +389,9 @@ impl EmbedError {
         match self {
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
+            | Self::PluginDeclaration(_)
+            | Self::BuildGenerationRebound(_)
+            | Self::BuildGenerationUnbound(_)
             | Self::ObligationRelayUnavailable(_)
             | Self::MissingModel
             | Self::ModelUnknown(_)

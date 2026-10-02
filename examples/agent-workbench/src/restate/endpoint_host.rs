@@ -10,7 +10,8 @@ pub(crate) fn spawn_restate_endpoint(
     process_worker: lash::durability::DurableProcessWorker,
 ) {
     tokio::spawn(async move {
-        let endpoint = endpoint(state, backend, process_worker);
+        let endpoint = endpoint(state, backend, process_worker)
+            .expect("the core bound the engine's generation");
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .expect("bind the workbench Restate endpoint");
@@ -36,9 +37,9 @@ pub(crate) fn spawn_owned_restate_endpoint(
     backend: Arc<crate::WorkbenchRestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let endpoint = endpoint(state, backend, process_worker);
+) -> Result<tokio::task::JoinHandle<()>, lash::GenerationUnbound> {
+    let endpoint = endpoint(state, backend, process_worker)?;
+    Ok(tokio::spawn(async move {
         lash::restate::serve_endpoint(
             listener,
             endpoint,
@@ -46,7 +47,7 @@ pub(crate) fn spawn_owned_restate_endpoint(
             async move { while !*shutdown.borrow() && shutdown.changed().await.is_ok() {} },
         )
         .await;
-    })
+    }))
 }
 
 /// The workbench's Restate endpoint: lash's own services come from the
@@ -56,13 +57,13 @@ fn endpoint(
     state: AppState,
     backend: Arc<crate::WorkbenchRestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
-) -> Endpoint {
-    backend
-        .endpoint_builder(process_worker)
+) -> Result<Endpoint, lash::GenerationUnbound> {
+    Ok(backend
+        .endpoint_builder(process_worker)?
         .bind(WorkbenchButtonTriggerWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchMailReceivedWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchSessionDeleteWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchProcessCancelWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchCronJobImpl::new(state).serve())
-        .build()
+        .build())
 }

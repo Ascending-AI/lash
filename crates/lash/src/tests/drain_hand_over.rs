@@ -49,7 +49,7 @@ const ROOTS: usize = 4;
 const SESSION_DRIVER_SERVICE: &str = "LashSession";
 
 #[derive(Clone, Copy, Debug)]
-enum Storage {
+pub(super) enum Storage {
     SqliteMemory,
     SqliteFile,
     Postgres,
@@ -64,7 +64,7 @@ struct ClearingDrain {
 }
 
 #[derive(Clone, Default)]
-struct DrainLever {
+pub(super) struct DrainLever {
     armed: Arc<std::sync::atomic::AtomicBool>,
     generation: Arc<std::sync::OnceLock<BuildGeneration>>,
 }
@@ -116,13 +116,13 @@ impl GenerationDrainStore for ClearingDrain {
 
 /// What a law's stores need to outlive them.
 #[derive(Default)]
-struct Keep {
+pub(super) struct Keep {
     _files: Option<tempfile::TempDir>,
     _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
 
 /// A store set a law is about to open on its engine's clock.
-enum Opening {
+pub(super) enum Opening {
     SqliteMemory,
     SqliteFile(std::path::PathBuf),
     Postgres(lash_postgres_store::PostgresStorage, std::path::PathBuf),
@@ -137,7 +137,7 @@ fn postgres_url() -> String {
     lash_postgres_store::testing::required_database_url()
 }
 
-async fn prepare(storage: Storage) -> (Opening, Keep) {
+pub(super) async fn prepare(storage: Storage) -> (Opening, Keep) {
     match storage {
         Storage::SqliteMemory => (Opening::SqliteMemory, Keep::default()),
         Storage::SqliteFile => {
@@ -171,7 +171,7 @@ async fn prepare(storage: Storage) -> (Opening, Keep) {
 }
 
 /// Open `opening` on `clock`, with its drain marks behind `lever`.
-async fn open(
+pub(super) async fn open(
     opening: Opening,
     clock: Arc<dyn lash_core::Clock>,
     lever: DrainLever,
@@ -208,15 +208,15 @@ async fn open(
 /// The provider both builds' cores answer with: it echoes the last user
 /// text, records every question it was asked, and holds each of its first
 /// `held` calls until the law releases it.
-struct Model {
+pub(super) struct Model {
     held: usize,
-    asked: std::sync::Mutex<Vec<String>>,
-    reached: tokio::sync::Notify,
-    release: tokio::sync::Notify,
+    pub(super) asked: std::sync::Mutex<Vec<String>>,
+    pub(super) reached: tokio::sync::Notify,
+    pub(super) release: tokio::sync::Notify,
 }
 
 impl Model {
-    fn holding(held: usize) -> Self {
+    pub(super) fn holding(held: usize) -> Self {
         Self {
             held,
             asked: std::sync::Mutex::default(),
@@ -226,7 +226,7 @@ impl Model {
     }
 }
 
-fn provider(model: &Arc<Model>) -> ProviderHandle {
+pub(super) fn provider(model: &Arc<Model>) -> ProviderHandle {
     let model = Arc::clone(model);
     crate::testing::TestProvider::builder()
         .kind("drain-hand-over")
@@ -539,7 +539,11 @@ async fn a_drive_on_a_draining_build_hands_over_after_its_current_root(
         _keep,
     } = world;
     let model = Arc::new(Model::holding(1));
-    let old_generation = engine.old_backend().build_generation().clone();
+    let old_generation = engine
+        .old_backend()
+        .build_generation()
+        .expect("the engine's generation is bound")
+        .clone();
     lever
         .generation
         .set(old_generation.clone())
@@ -820,7 +824,11 @@ impl MidRoll {
     ) -> Result<Self> {
         let World { engine, _keep, .. } = double_world(storage).await;
         let model = Arc::new(Model::holding(held));
-        let old = engine.old_backend().build_generation().clone();
+        let old = engine
+            .old_backend()
+            .build_generation()
+            .expect("the engine's generation is bound")
+            .clone();
         let core = core_with_protocol(engine.old_backend(), engine.old_work(), &model, protocol);
         core.session(session).created().await.open().await?;
         let session = lash_core::SessionId::from(session);

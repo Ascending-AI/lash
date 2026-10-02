@@ -787,7 +787,11 @@ async fn retired_journal_case() {
     let request = waiting_request(&engine, 32).await;
     let id = start(&engine, &core, request).await;
     let at_wait = record_where(&engine, &id, signal_wait).await;
-    let generation = engine.lash_backend().build_generation().clone();
+    let generation = engine
+        .lash_backend()
+        .build_generation()
+        .expect("the engine's generation is bound")
+        .clone();
     let Engine::Live {
         backend, restarts, ..
     } = engine

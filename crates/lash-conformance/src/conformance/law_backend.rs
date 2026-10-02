@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use lash_core::engine::BuildGeneration;
+use lash_core::engine::{BuildGeneration, EngineGeneration};
 
 /// See the module documentation.
 pub(crate) struct LawBackend {
@@ -89,11 +89,12 @@ impl crate::EffectEngine for HostOverStores {
         Arc::clone(&self.effect_host)
     }
 
-    fn build_generation(&self) -> &BuildGeneration {
+    fn generation(&self) -> &EngineGeneration {
         // A law engine serves no Restate journals, so nothing routes it by
         // generation; a fixed value keeps the trait honest.
-        static GENERATION: std::sync::OnceLock<BuildGeneration> = std::sync::OnceLock::new();
-        GENERATION.get_or_init(|| BuildGeneration::for_test("host-over-stores"))
+        static GENERATION: std::sync::OnceLock<EngineGeneration> = std::sync::OnceLock::new();
+        GENERATION
+            .get_or_init(|| EngineGeneration::fixed(BuildGeneration::for_test("host-over-stores")))
     }
 
     fn process_work(&self) -> crate::ProcessWorkWiring {
@@ -222,11 +223,12 @@ impl crate::EffectEngine for StoreLawBackend {
         Arc::clone(&self.effect_host)
     }
 
-    fn build_generation(&self) -> &BuildGeneration {
+    fn generation(&self) -> &EngineGeneration {
         // A store law runs no engine-served journals; a fixed value keeps the
         // trait honest.
-        static GENERATION: std::sync::OnceLock<BuildGeneration> = std::sync::OnceLock::new();
-        GENERATION.get_or_init(|| BuildGeneration::for_test("store-law-backend"))
+        static GENERATION: std::sync::OnceLock<EngineGeneration> = std::sync::OnceLock::new();
+        GENERATION
+            .get_or_init(|| EngineGeneration::fixed(BuildGeneration::for_test("store-law-backend")))
     }
 
     /// A store law's runtime runs no processes, and its registry is refused

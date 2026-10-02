@@ -91,7 +91,7 @@ impl TestTurnDrive for LashRuntime {
         let request = DriveRequest {
             session: self.state().session_id.clone(),
             request: DriveRequestId::new(opts.execution_scope_id()),
-            build_generation: self.host.core.backend().build_generation().clone(),
+            build_generation: self.host.core.backend().build_generation()?.clone(),
         };
         let mut ordinal = 0_u32;
         let mut rules = DriveLoop::new();
@@ -161,7 +161,7 @@ impl TestTurnDrive for LashRuntime {
         let request = DriveRequest {
             session: self.state().session_id.clone(),
             request: DriveRequestId::new(format!("turn:{turn_id}")),
-            build_generation: self.host.core.backend().build_generation().clone(),
+            build_generation: self.host.core.backend().build_generation()?.clone(),
         };
         let sinks = crate::drive::DriveSinks {
             events: opts.events_or_noop(),
@@ -267,7 +267,7 @@ impl TestTurnDrive for LashRuntime {
         let request = DriveRequest {
             session: self.state().session_id.clone(),
             request: DriveRequestId::new(request),
-            build_generation: self.host.core.backend().build_generation().clone(),
+            build_generation: self.host.core.backend().build_generation()?.clone(),
         };
         let AdmitVerdict::Admit(admitted) =
             crate::drive::admit_drive(self, &controller, &request, 0, None)

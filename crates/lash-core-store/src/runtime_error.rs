@@ -2064,3 +2064,14 @@ impl From<&crate::StoreError> for RuntimeEffectControllerError {
         }
     }
 }
+
+/// A generation read before a core bound it is a deployment fact no retry
+/// changes: no generation lane is served yet.
+impl From<crate::build_generation::GenerationUnbound> for RuntimeError {
+    fn from(error: crate::build_generation::GenerationUnbound) -> Self {
+        Self::new(
+            RuntimeErrorCode::EngineServiceUnregistered,
+            error.to_string(),
+        )
+    }
+}

@@ -82,7 +82,9 @@ impl RestateEffectHost {
     /// generation is `build_generation` (FIG-3795, FIG-4454): a group this
     /// host opens dispatches on that build's lane, whose endpoint the
     /// deployment binds — the engine's
-    /// [`build_generation`](crate::RestateEngine::build_generation).
+    /// [`build_generation`](crate::RestateEngine::build_generation), which
+    /// is the core's (`LashCore::build_generation`): it exists once the
+    /// core's plugins are registered (FIG-4744).
     pub fn new(
         connection: impl Into<RestateConnection>,
         authority_id: RestateAuthorityId,
@@ -96,12 +98,45 @@ impl RestateEffectHost {
         )
     }
 
+    /// A host outside any deployment, in the default namespace: a tool or an
+    /// operator process that mints, resolves, awaits and peeks await events
+    /// under `authority_id`. It runs no build of a core, so it has no
+    /// generation and serves no lane: a group opened through it is refused,
+    /// typed, before anything is dispatched.
+    pub fn outside_deployment(
+        connection: impl Into<RestateConnection>,
+        authority_id: RestateAuthorityId,
+    ) -> Self {
+        Self::on_generation(
+            connection,
+            authority_id,
+            lash_core::engine::EngineGeneration::unbound(),
+            crate::RestateNamespace::default(),
+        )
+    }
+
     /// [`new`](Self::new) for a deployment in `namespace` (FIG-3898): every
     /// lash service this host calls is that namespace's.
     pub fn in_namespace(
         connection: impl Into<RestateConnection>,
         authority_id: RestateAuthorityId,
         build_generation: lash_core::engine::BuildGeneration,
+        namespace: crate::RestateNamespace,
+    ) -> Self {
+        Self::on_generation(
+            connection,
+            authority_id,
+            lash_core::engine::EngineGeneration::fixed(build_generation),
+            namespace,
+        )
+    }
+
+    /// The engine's own host: it opens groups on the lane of the generation
+    /// the engine's core binds into `generation`.
+    pub(crate) fn on_generation(
+        connection: impl Into<RestateConnection>,
+        authority_id: RestateAuthorityId,
+        generation: lash_core::engine::EngineGeneration,
         namespace: crate::RestateNamespace,
     ) -> Self {
         let connection = connection.into();
@@ -114,7 +149,7 @@ impl RestateEffectHost {
                     namespace: namespace.clone(),
                 },
                 authority_id,
-                build_generation,
+                generation,
                 registrations: std::sync::Mutex::new(None),
                 group_executors: OnceLock::new(),
             }),
@@ -581,7 +616,7 @@ struct RestateEffectHostController {
     /// The drain generation of the build this host runs: the
     /// `EffectGroupDispatch` lane the groups it opens dispatch on (FIG-3795,
     /// FIG-4454).
-    build_generation: lash_core::engine::BuildGeneration,
+    generation: lash_core::engine::EngineGeneration,
     /// The bound process registry's registration truth (ADR 0049): a process
     /// scope's index says `revoked` only as a cache of the registry's fence,
     /// so a revoked index on a registered process is stale and is reinstated
@@ -957,7 +992,10 @@ impl RestateEffectHostController {
         // children run on the build that opened it.
         let dispatch_lane = self.await_event_ingress.namespace.generation(
             LashService::EffectGroupDispatch,
-            self.build_generation.clone(),
+            self.generation
+                .get()
+                .map_err(lash_core::RuntimeError::from)?
+                .clone(),
         );
         let probe = ingress
             .call_lash_object::<_, EffectGroupProbeResponse>(

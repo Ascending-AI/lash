@@ -59,6 +59,7 @@ const LASH_BUILD_GENERATION_DOMAIN_VERSION: &str = "lash-build-generation/v1";
 
 use lash_core::engine::BuildGeneration;
 pub use lash_core::engine::UpgradePolicy;
+use lash_core::plugin::PluginComposition;
 use lash_core::store::SessionAdmissionWindow;
 use lash_sansio::core_support::Blake3DomainHasher;
 
@@ -562,36 +563,44 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
     std::iter::empty()
 }
 
-/// The build's drain generation `G` (FIG-3795): the digest of the
-/// drain-policy durable formats this build writes, the journal-logic epoch
-/// and the build's session admission, stamped on every journal-bearing
-/// Restate deployment so a journal written by another build is never
-/// replayed here.
+/// The build's drain generation `G` (FIG-3795, FIG-4744): the digest of the
+/// drain-policy durable formats this build writes, the journal-logic epoch,
+/// the build's session admission and the ordered plugin `composition`,
+/// stamped on every journal-bearing Restate deployment so a journal written
+/// by another build is never replayed here.
 ///
 /// The preimage is the sorted `(name, version)` rows of the
 /// [`UpgradePolicy::Drain`] entries of [`durable_formats`], then the
 /// `JOURNAL_LOGIC_EPOCH` — the manual counter beside the process handler's
 /// step names, bumped when handler logic moves without a format version —
 /// then the build's [`SessionAdmissionWindow`] (FIG-4454): its supported
-/// range and every writer pin of the session-state surface, hashed under the
+/// range and every writer pin of the session-state surface, then each
+/// plugin's id and behaviour revision in hook order, hashed under the
 /// `lash-build-generation/v1` BLAKE3 domain, first six bytes. The stored
 /// marker still migrates, so the session-state row stays outside the
 /// drain-policy rows; its admission is hashed because work routed on a lane
 /// — an effect group's children, a successor — must run on a build that
 /// admits every session the lane's opener admitted. Two builds whose session
-/// admission differs therefore never share a lane. Feature gating is honest: a build without `rlm` serves no Lashlang
-/// journals and so has a different `G`. There is no environment or host
-/// input; the same code gives the same `G`, which is what makes a generation
-/// routable.
-pub fn build_generation() -> BuildGeneration {
+/// admission differs therefore never share a lane, and neither do two whose
+/// plugins differ in any behaviour revision or only in order: a replay on
+/// the lane runs the hooks the journal was written under. Feature gating is
+/// honest: a build without `rlm` serves no Lashlang journals and so has a
+/// different `G`. There is no environment input; the same code and the same
+/// registration give the same `G`, which is what makes a generation routable.
+///
+/// Only a core computes it, after its plugins are registered, and binds it
+/// into its engine: there is no generation of a build without its
+/// composition, so no caller can open work on a lane no deployment serves.
+pub(crate) fn composed_generation(composition: &PluginComposition) -> BuildGeneration {
     build_generation_of(
         durable_formats(),
         journal_logic_epoch(),
         &SessionAdmissionWindow::of_this_build(),
+        composition,
     )
 }
 
-/// The epoch input to [`build_generation`]: the Restate journal handlers'
+/// The epoch input to [`composed_generation`]: the Restate journal handlers'
 /// logic epoch when this build carries them, absent when it does not — a
 /// no-Restate build serves no journals and its `G` says so.
 #[cfg(feature = "restate")]
@@ -605,13 +614,14 @@ fn journal_logic_epoch() -> Option<u32> {
     None
 }
 
-/// The hash behind [`build_generation`], over an explicit manifest, epoch
-/// and session admission so the tests below can move one input at a time
-/// instead of depending on which durable format next bumps.
+/// The hash behind [`composed_generation`], over an explicit manifest, epoch,
+/// session admission and composition so the tests below can move one input
+/// at a time instead of depending on which durable format next bumps.
 fn build_generation_of(
     entries: impl Iterator<Item = DurableFormatEntry>,
     epoch: Option<u32>,
     session_admission: &SessionAdmissionWindow,
+    composition: &PluginComposition,
 ) -> BuildGeneration {
     let mut rows: Vec<(String, String)> = entries
         .filter(|entry| entry.format.upgrade_policy() == UpgradePolicy::Drain)
@@ -643,6 +653,16 @@ fn build_generation_of(
         hasher.update(generation.to_be_bytes());
         hasher.update(version.to_be_bytes());
     }
+    // Hook order is part of the behaviour, so the declarations are hashed in
+    // registration order, unsorted.
+    hasher.update(b"plugin-composition");
+    hasher.update((composition.declarations().len() as u64).to_be_bytes());
+    for declaration in composition.declarations() {
+        let id = declaration.id.as_str();
+        hasher.update((id.len() as u64).to_be_bytes());
+        hasher.update(id.as_bytes());
+        hasher.update(declaration.behavior_revision.get().to_be_bytes());
+    }
     let digest = hasher.finalize();
     let mut bytes = [0_u8; 6];
     bytes.copy_from_slice(&digest[..6]);
@@ -662,6 +682,78 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::plugin::{
+        BehaviorRevision, PluginDeclaration, PluginFactory, PluginSpec, StaticPluginFactory,
+    };
+
+    /// The composition of no plugins.
+    fn bare() -> PluginComposition {
+        composition(&[])
+    }
+
+    /// The generation of this build with no plugins.
+    fn bare_generation() -> BuildGeneration {
+        composed_generation(&bare())
+    }
+
+    /// The composition of `plugins`, each an id and a behaviour revision, in
+    /// the order given.
+    fn composition(plugins: &[(&'static str, u32)]) -> PluginComposition {
+        let factories = plugins
+            .iter()
+            .map(|&(id, revision)| {
+                let mut declaration = PluginDeclaration::initial(id);
+                declaration.behavior_revision =
+                    BehaviorRevision::new(revision).expect("a revision counts from one");
+                std::sync::Arc::new(StaticPluginFactory::new(declaration, PluginSpec::new()))
+                    as std::sync::Arc<dyn PluginFactory>
+            })
+            .collect::<Vec<_>>();
+        PluginComposition::of(&factories).expect("a valid composition")
+    }
+
+    /// FIG-4744 lane routing: a plugin-only behaviour revision bump is a new
+    /// generation, and so is the same plugins in another hook order; the
+    /// same registration is the same generation.
+    #[test]
+    fn a_plugin_revision_bump_or_a_hook_reorder_is_a_new_generation() {
+        let generation =
+            |plugins: &[(&'static str, u32)]| composed_generation(&composition(plugins));
+        let registered = generation(&[("first", 1), ("second", 1)]);
+        assert_eq!(registered, generation(&[("first", 1), ("second", 1)]));
+        let generations = [
+            bare_generation(),
+            generation(&[("first", 1)]),
+            registered,
+            generation(&[("first", 1), ("second", 2)]),
+            generation(&[("first", 2), ("second", 1)]),
+            generation(&[("second", 1), ("first", 1)]),
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            generations.len(),
+            6,
+            "each composition is its own lane: {generations:?}"
+        );
+    }
+
+    /// A format a plugin stores migrates; it does not drain. Moving only
+    /// the declared formats leaves the generation where it was.
+    #[test]
+    fn a_plugin_format_move_alone_keeps_the_generation() {
+        let declared = |format: u32| {
+            let version =
+                lash_core::plugin::FormatVersion::new(format).expect("a format counts from one");
+            let mut declaration = PluginDeclaration::initial("stateful");
+            declaration.format_version = version;
+            declaration.writable_formats = vec![lash_core::plugin::FormatVersion::ONE, version];
+            let factory: std::sync::Arc<dyn PluginFactory> =
+                std::sync::Arc::new(StaticPluginFactory::new(declaration, PluginSpec::new()));
+            composed_generation(&PluginComposition::of(&[factory]).expect("a valid composition"))
+        };
+        assert_eq!(declared(1), declared(2));
+    }
 
     #[test]
     fn the_manifest_reports_the_constants_the_runtime_writes() {
@@ -755,13 +847,14 @@ mod tests {
     fn the_build_generation_is_stable_for_the_same_code() {
         // L0: the same manifest and epoch must give the same G, or generation
         // routing would pin work to a value that moves within one build.
-        assert_eq!(build_generation(), build_generation());
+        assert_eq!(bare_generation(), bare_generation());
         assert_eq!(
-            build_generation(),
+            bare_generation(),
             build_generation_of(
                 durable_formats(),
                 journal_logic_epoch(),
-                &SessionAdmissionWindow::of_this_build()
+                &SessionAdmissionWindow::of_this_build(),
+                &bare()
             )
         );
     }
@@ -781,18 +874,19 @@ mod tests {
                 moved.iter().copied(),
                 journal_logic_epoch(),
                 &SessionAdmissionWindow::of_this_build(),
+                &bare(),
             );
             if moved[index].format.upgrade_policy() == UpgradePolicy::Drain {
                 assert_ne!(
                     generation,
-                    build_generation(),
+                    bare_generation(),
                     "{:?} drains: its version is in the generation",
                     moved[index].format
                 );
             } else {
                 assert_eq!(
                     generation,
-                    build_generation(),
+                    bare_generation(),
                     "{:?} does not drain: its version is outside the generation",
                     moved[index].format
                 );
@@ -807,9 +901,9 @@ mod tests {
     fn two_builds_with_different_session_windows_never_share_a_lane() {
         let this = SessionAdmissionWindow::of_this_build();
         let generation_of = |window: &SessionAdmissionWindow| {
-            build_generation_of(durable_formats(), journal_logic_epoch(), window)
+            build_generation_of(durable_formats(), journal_logic_epoch(), window, &bare())
         };
-        assert_eq!(generation_of(&this.clone()), build_generation());
+        assert_eq!(generation_of(&this.clone()), bare_generation());
         let narrower = SessionAdmissionWindow {
             oldest: this.oldest + 1,
             ..this.clone()
@@ -850,31 +944,36 @@ mod tests {
                 durable_formats(),
                 Some(journal_logic_epoch().unwrap_or(0) + 1),
                 &SessionAdmissionWindow::of_this_build(),
+                &bare(),
             ),
-            build_generation()
+            bare_generation()
         );
         assert_ne!(
             build_generation_of(
                 durable_formats(),
                 Some(0),
-                &SessionAdmissionWindow::of_this_build()
+                &SessionAdmissionWindow::of_this_build(),
+                &bare()
             ),
             build_generation_of(
                 durable_formats(),
                 None,
-                &SessionAdmissionWindow::of_this_build()
+                &SessionAdmissionWindow::of_this_build(),
+                &bare()
             )
         );
         assert_ne!(
             build_generation_of(
                 durable_formats(),
                 Some(1),
-                &SessionAdmissionWindow::of_this_build()
+                &SessionAdmissionWindow::of_this_build(),
+                &bare()
             ),
             build_generation_of(
                 durable_formats(),
                 Some(2),
-                &SessionAdmissionWindow::of_this_build()
+                &SessionAdmissionWindow::of_this_build(),
+                &bare()
             )
         );
     }

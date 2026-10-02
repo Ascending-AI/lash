@@ -587,7 +587,7 @@ opener recorded (§8), and a lane's builds admit the same session-state
 generations: the drain generation `G` hashes the build's session admission —
 its supported range and every writer pin of the session-state surface
 (`SessionAdmissionWindow`, `crates/lash-core-store/src/store/state_version.rs`;
-`build_generation`, `crates/lash/src/formats.rs`). The session's marker moves
+`composed_generation`, `crates/lash/src/formats.rs`). The session's marker moves
 under no production writer (ADR 0077). So a successor that drains a committed
 final runs on a build that admits every session its opener's build admitted,
 and drains it. `CommittedFinalLost` for a generation refusal remains only as

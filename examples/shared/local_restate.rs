@@ -99,7 +99,7 @@ impl LocalRestate {
     ) -> Arc<lash::restate::RestateEngine> {
         Arc::new(lash::restate::RestateEngine::new(
             stores,
-            lash::restate::config(
+            lash::restate::RestateConfig::new(
                 self.ingress_url.clone(),
                 self.admin_url.clone(),
                 self.authority.clone(),

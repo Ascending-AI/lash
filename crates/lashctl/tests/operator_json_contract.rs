@@ -305,10 +305,6 @@ async fn operator_json_contract_postgres() {
     assert_envelope(&empty_version, "version", true, false);
     assert_eq!(empty_version["result"]["fleet_generations"], json!([]));
     assert_eq!(
-        empty_version["result"]["cli_build_generation"],
-        lash::formats::build_generation().as_str()
-    );
-    assert_eq!(
         empty_version["result"]["fleet_writable"],
         json!({"min":1,"max":1})
     );
@@ -326,7 +322,6 @@ async fn operator_json_contract_postgres() {
     assert_keys(
         &empty_version["result"],
         &[
-            "cli_build_generation",
             "components",
             "fleet_generations",
             "fleet_writable",
@@ -337,10 +332,6 @@ async fn operator_json_contract_postgres() {
     #[cfg(feature = "synthetic-next")]
     {
         assert_eq!(lash_restate::JOURNAL_LOGIC_EPOCH, 2);
-        assert_ne!(
-            empty_version["result"]["cli_build_generation"],
-            "21c7af909642"
-        );
     }
 
     let generation = "0123456789ab";
@@ -410,7 +401,6 @@ async fn operator_json_contract_postgres() {
         .expect("human version");
     assert!(human.status.success());
     let text = String::from_utf8(human.stdout).expect("human output");
-    assert!(text.contains("CLI build generation:"));
     assert!(text.contains("0123456789ab (draining: true, source: postgres)"));
     assert!(text.contains("fedcba987654 (draining: false, source: postgres)"));
 

@@ -300,8 +300,8 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
                 std::env::var("RESTATE_ADMIN_URL").expect("native admin URL"),
             ),
             lash_restate::RestateAuthorityId::new(&namespace).expect("authority"),
-            lash_core::engine::BuildGeneration::for_test("mcp-catalog"),
         )
+        .stamped(lash_core::engine::BuildGeneration::for_test("mcp-catalog"))
         .with_namespace(lash_restate::RestateNamespace::new(namespace).expect("namespace"));
         let stores = make_stores(
             store,
@@ -433,7 +433,10 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
             "http://{}",
             listener.local_addr().expect("endpoint address")
         );
-        let services = engine.endpoint_builder(processes).build();
+        let services = engine
+            .endpoint_builder(processes)
+            .expect("the core bound the engine's generation")
+            .build();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         stop = Some(sender);
         endpoint = Some(tokio::spawn(async move {

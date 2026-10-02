@@ -1201,6 +1201,7 @@ mod failure_settlement;
 mod finalize_fault;
 mod obligation_relays;
 mod output_retention;
+mod plugin_generation;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;

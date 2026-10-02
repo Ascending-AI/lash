@@ -111,10 +111,7 @@ pub(super) async fn memory_engine() -> RestateEngine {
                 .await
                 .expect("open a SQLite memory store set"),
         ),
-        RestateConfig::new(
-            connection.clone(),
-            connection,
-            test_restate_authority_id(),
+        RestateConfig::new(connection.clone(), connection, test_restate_authority_id()).stamped(
             lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
         ),
     )

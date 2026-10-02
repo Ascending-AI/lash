@@ -69,18 +69,30 @@ impl LashRuntime {
         // parked journal belongs to — the caller's where it holds one (a
         // resumed run's recorded admission), the running root's admitted
         // generation, else this build's, which wrote the journal itself.
+        let recorded = journal_generation
+            .or_else(|| self.drive_root.as_ref().map(|run| run.journal_generation()));
+        let generation = match recorded {
+            Some(generation) => generation.clone(),
+            None => match self.host.core.backend().build_generation() {
+                Ok(generation) => generation.clone(),
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %self.state.session_id,
+                        turn_id = %root,
+                        error = %error,
+                        "turn park not recorded"
+                    );
+                    return;
+                }
+            },
+        };
         let mut write = crate::store::TurnParkWrite::refusal(
             self.state.session_id.clone(),
             root.clone(),
             reason,
             self.host.core.clock.timestamp_ms(),
         );
-        write.build_generation = Some(
-            journal_generation
-                .or_else(|| self.drive_root.as_ref().map(|run| run.journal_generation()))
-                .cloned()
-                .unwrap_or_else(|| self.host.core.backend().build_generation().clone()),
-        );
+        write.build_generation = Some(generation);
         let reason_code = write.reason.code().as_str();
         let effect_kind = write.reason.effect_kind();
         match lash_core_execution::runtime::record_root_park(store.store().as_ref(), &write).await {

@@ -15,7 +15,10 @@ pub(super) async fn a_retired_sessions_drive_admission_step_records_the_retireme
     let request = lash_core::engine::DriveRequest {
         session: session.clone(),
         request: lash_core::engine::DriveRequestId::new("retired-drive"),
-        build_generation: backend.build_generation().clone(),
+        build_generation: backend
+            .build_generation()
+            .expect("the engine's generation is bound")
+            .clone(),
     };
     let recorder = RecordingEffectController::default().with_strict_replay_by_address();
     let scope = layered_scope(

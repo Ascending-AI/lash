@@ -113,6 +113,92 @@ impl<'de> Deserialize<'de> for BuildGeneration {
     }
 }
 
+/// The generation an engine runs on, and how it comes to hold one.
+///
+/// A build's generation folds in its ordered plugin composition, which exists
+/// only once the core's plugins are registered, and the engine is built
+/// before that. So an engine holds this slot: the core binds the generation
+/// it computed after registration, once, and every reader takes it from here.
+/// Until then there is no generation to read, so no work can be stamped with
+/// one that no deployment serves.
+///
+/// A test double fixes its generation at construction instead
+/// ([`Self::fixed`]): the stamp stands in for a composition, and the core's
+/// bind leaves it as it is.
+#[derive(Clone, Debug)]
+pub struct EngineGeneration {
+    slot: std::sync::Arc<std::sync::OnceLock<BuildGeneration>>,
+    fixed: bool,
+}
+
+/// An engine's generation was read before a core bound it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the engine has no build generation yet: a core binds it when it is built over the engine's backend"
+)]
+pub struct GenerationUnbound;
+
+/// A core computed a generation other than the one its engine is already
+/// bound to: another core, with another plugin composition, was built over
+/// the same engine.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the engine already runs build generation `{bound}`; this core's plugin composition is generation `{composed}`"
+)]
+pub struct GenerationRebound {
+    pub bound: BuildGeneration,
+    pub composed: BuildGeneration,
+}
+
+impl EngineGeneration {
+    /// A slot the core binds after its plugins are registered.
+    pub fn unbound() -> Self {
+        Self {
+            slot: std::sync::Arc::default(),
+            fixed: false,
+        }
+    }
+
+    /// A slot holding `generation` from the start: a test double's stamp, or
+    /// a handle on a generation a core already bound.
+    pub fn fixed(generation: BuildGeneration) -> Self {
+        Self {
+            slot: std::sync::Arc::new(std::sync::OnceLock::from(generation)),
+            fixed: true,
+        }
+    }
+
+    /// The engine's generation.
+    ///
+    /// # Errors
+    /// [`GenerationUnbound`] until a core has bound it.
+    pub fn get(&self) -> Result<&BuildGeneration, GenerationUnbound> {
+        self.slot.get().ok_or(GenerationUnbound)
+    }
+
+    /// Bind the generation a core computed after registration. Binding the
+    /// same generation again is a no-op, so several cores of one composition
+    /// share an engine.
+    ///
+    /// # Errors
+    /// [`GenerationRebound`] when the slot is already bound to another
+    /// generation.
+    pub fn bind(&self, composed: &BuildGeneration) -> Result<(), GenerationRebound> {
+        if self.fixed {
+            return Ok(());
+        }
+        let bound = self.slot.get_or_init(|| composed.clone());
+        if bound == composed {
+            Ok(())
+        } else {
+            Err(GenerationRebound {
+                bound: bound.clone(),
+                composed: composed.clone(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +263,26 @@ mod tests {
             serde_json::from_str(&encoded).expect("a serialized generation parses");
         assert_eq!(decoded, generation);
         assert!(serde_json::from_str::<BuildGeneration>("\"t0\"").is_err());
+    }
+
+    #[test]
+    fn an_unbound_slot_is_bound_once_and_refuses_another_generation() {
+        let slot = EngineGeneration::unbound();
+        assert_eq!(slot.get(), Err(GenerationUnbound));
+        let first = BuildGeneration::for_test("t0");
+        let second = BuildGeneration::for_test("t1");
+        slot.bind(&first).expect("the first bind");
+        slot.bind(&first).expect("the same generation again");
+        assert_eq!(slot.clone().get(), Ok(&first));
+        assert_eq!(
+            slot.bind(&second),
+            Err(GenerationRebound {
+                bound: first.clone(),
+                composed: second.clone(),
+            })
+        );
+        let fixed = EngineGeneration::fixed(first.clone());
+        fixed.bind(&second).expect("a fixed stamp stands in");
+        assert_eq!(fixed.get(), Ok(&first));
     }
 }

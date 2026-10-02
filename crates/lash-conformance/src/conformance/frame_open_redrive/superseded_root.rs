@@ -86,8 +86,12 @@ fn path_attempt(
                     })
                 }),
                 SupersededRootPath::Engine => {
-                    let generation = parts.host.backend().build_generation().clone();
-                    Box::pin(engine_root(&mut runtime, &scope, generation)).await
+                    match parts.host.backend().build_generation().cloned() {
+                        Ok(generation) => {
+                            Box::pin(engine_root(&mut runtime, &scope, generation)).await
+                        }
+                        Err(unbound) => Err(unbound.into()),
+                    }
                 }
             };
             let _ = result_tx.send(end);

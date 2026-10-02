@@ -41,7 +41,7 @@ impl LocalRestate {
     pub fn engine(&self, stores: Arc<dyn lash::StoreSet>) -> Arc<lash_restate::RestateEngine> {
         Arc::new(lash_restate::RestateEngine::new(
             stores,
-            lash::restate::config(
+            lash::restate::RestateConfig::new(
                 self.ingress_url.clone(),
                 self.admin_url.clone(),
                 self.authority.clone(),

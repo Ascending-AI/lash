@@ -32,14 +32,19 @@ Evidence: `crates/lash-core-execution/src/engine/contracts.rs:23`,
 
 ### 1. Long-running work and build generations
 
-`G` is the build's drain generation. `lash::formats::build_generation` hashes
-the sorted drain-policy format names and versions with `JOURNAL_LOGIC_EPOCH`
-and the build's `SessionAdmissionWindow`: its supported session-state range
-and every writer pin the recorded `F` could select (FIG-4454). Two builds
-whose session admission differs therefore never share a lane, so work sent on
-its opener's lane runs on a build that admits every session its opener
-admitted.
-The host gives `G` to the engine, whose journal-bearing services bind a stable
+`G` is the build's drain generation. The core hashes the sorted drain-policy
+format names and versions with `JOURNAL_LOGIC_EPOCH`, the build's
+`SessionAdmissionWindow` (its supported session-state range and every writer
+pin the recorded `F` could select, FIG-4454) and the ordered plugin
+composition: each registered plugin's id and declared behaviour revision, in
+hook order (FIG-4744). Two builds whose session admission differs therefore
+never share a lane, so work sent on its opener's lane runs on a build that
+admits every session its opener admitted; and two builds whose plugins differ
+in any behaviour revision, or only in order, never share one either.
+`G` exists once the core's plugins are registered: the core computes it when
+it is built and binds it into the engine, and there is no other way to obtain
+one, so no caller can open work on a lane no deployment serves.
+The engine's journal-bearing services bind a stable
 name and a generation name, `<Service>_g<G>`. Shared state services keep one
 stable name. `EffectGroupDispatch` binds only its generation name, since
 every group opener records its build's lane. The fleet epoch `F`, described

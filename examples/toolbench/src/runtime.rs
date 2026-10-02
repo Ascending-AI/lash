@@ -414,7 +414,7 @@ impl RunSubstrate {
                 server,
             } => {
                 let deployment = restate
-                    .serve(&engine, engine.endpoint_builder(worker).build())
+                    .serve(&engine, engine.endpoint_builder(worker)?.build())
                     .await?;
                 Ok(ServedSubstrate::Local {
                     _deployment: deployment,

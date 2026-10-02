@@ -54,7 +54,7 @@ impl AgentServiceChatDiscardImpl {
                 core.session_administration().await,
                 connection,
                 authority,
-                lash::formats::build_generation(),
+                core.build_generation().clone(),
             ),
         }
     }

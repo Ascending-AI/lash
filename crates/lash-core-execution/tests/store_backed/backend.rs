@@ -5,7 +5,7 @@ use crate::{Backend, EffectEngine, EffectHost, ProcessWorkWiring, SessionWorkEng
 struct WrappedEngine {
     inner: Arc<dyn EffectEngine>,
     stores: Arc<dyn StoreSet>,
-    generation: crate::engine::BuildGeneration,
+    generation: crate::engine::EngineGeneration,
     processes: ProcessWorkWiring,
     sessions: Arc<dyn SessionWorkEngine>,
 }
@@ -19,7 +19,7 @@ impl EffectEngine for WrappedEngine {
         self.inner.effect_host()
     }
 
-    fn build_generation(&self) -> &crate::engine::BuildGeneration {
+    fn generation(&self) -> &crate::engine::EngineGeneration {
         &self.generation
     }
 
@@ -55,7 +55,7 @@ async fn backend_ports_remain_coherent_through_wrappers() {
         engine = Arc::new(WrappedEngine {
             inner: engine,
             stores: Arc::clone(&stores),
-            generation: generation.clone(),
+            generation: crate::engine::EngineGeneration::fixed(generation.clone()),
             processes: processes.clone(),
             sessions: Arc::clone(&sessions),
         });
@@ -64,7 +64,7 @@ async fn backend_ports_remain_coherent_through_wrappers() {
             assert!(Arc::ptr_eq(clone.engine(), &engine));
             assert!(Arc::ptr_eq(&clone.stores(), &stores));
             assert_eq!(clone.binding_identity(), *stores.binding_identity());
-            assert_eq!(clone.build_generation(), &generation);
+            assert_eq!(clone.build_generation(), Ok(&generation));
             assert!(Arc::ptr_eq(&clone.effect_host(), &host));
             assert!(Arc::ptr_eq(&clone.session_work(), &sessions));
             assert!(Arc::ptr_eq(&clone.process_registry(), processes.registry()));

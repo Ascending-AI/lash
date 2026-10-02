@@ -1918,7 +1918,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
                 .await
                 .expect("open the recovery registration scratch store set"),
         ),
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             ingress_url.clone(),
             admin_url.clone(),
             lash_restate::RestateAuthorityId::new(
@@ -1980,7 +1980,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
         .expect("reopen recovery session catalog");
     let driver = lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             ingress_url,
             std::env::var("RESTATE_ADMIN_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string()),

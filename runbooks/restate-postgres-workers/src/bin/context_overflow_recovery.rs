@@ -430,7 +430,7 @@ impl Harness {
         )
         .context("build the process worker")?;
         let deployment = restate
-            .serve(&engine, engine.endpoint_builder(worker).build())
+            .serve(&engine, engine.endpoint_builder(worker)?.build())
             .await?;
 
         Ok(Self {

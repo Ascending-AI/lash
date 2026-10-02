@@ -1057,8 +1057,10 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
             "http://127.0.0.1:9",
             "http://127.0.0.1:9",
             crate::RestateAuthorityId::new("lash-restate-fig430").expect("valid authority"),
-            lash_core::engine::BuildGeneration::for_test("cancellation-and-effects"),
-        ),
+        )
+        .stamped(lash_core::engine::BuildGeneration::for_test(
+            "cancellation-and-effects",
+        )),
     ));
     let core = lash::LashCore::standard_builder(backend.into())
         .serve_test_model(

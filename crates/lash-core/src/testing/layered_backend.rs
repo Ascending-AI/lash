@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use crate::engine::BuildGeneration;
+use crate::engine::EngineGeneration;
 use crate::{
     AttachmentStore, Backend, Clock, DeploymentStore, EffectEngine, EffectHost,
     ModuleArtifactStore, ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry,
@@ -245,7 +245,7 @@ impl LayeredBackend {
         Backend::new(Arc::new(LayeredEngine {
             stores,
             effect_host: self.effect_host,
-            build_generation: self.inner.build_generation().clone(),
+            generation: self.inner.engine().generation().clone(),
             deployment_registry: self.inner.deployment_registry(),
             process_work: self.process_work,
             session_work: self.session_work,
@@ -387,7 +387,7 @@ impl LayeredStores {
 struct LayeredEngine {
     stores: Arc<LayeredStoreSet>,
     effect_host: Arc<dyn EffectHost>,
-    build_generation: BuildGeneration,
+    generation: EngineGeneration,
     /// The inner engine's retirement evidence: the layered backend decorates
     /// store ports, never the engine's deployments.
     deployment_registry: Arc<dyn crate::store::fleet_finalize::DeploymentRegistry>,
@@ -404,10 +404,10 @@ impl EffectEngine for LayeredEngine {
         Arc::clone(&self.effect_host)
     }
 
-    fn build_generation(&self) -> &BuildGeneration {
+    fn generation(&self) -> &EngineGeneration {
         // The layered backend is the inner backend's substrate with decorated
-        // ports: it reports the inner build's generation, not one of its own.
-        &self.build_generation
+        // ports: it shares the inner build's generation, not one of its own.
+        &self.generation
     }
 
     fn process_work(&self) -> ProcessWorkWiring {

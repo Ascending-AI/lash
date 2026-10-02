@@ -224,6 +224,9 @@ pub use lash_core::drive::relay::RelayVerdict;
 /// [`LashCore::builder`] requires one: a `lash::restate::RestateEngine` over a
 /// SQLite or PostgreSQL store set.
 pub use lash_core::engine::BuildGeneration;
+/// The slot an engine holds its build generation in, and the typed refusals
+/// of reading it before a core bound it and of binding it twice (FIG-4744).
+pub use lash_core::engine::{EngineGeneration, GenerationRebound, GenerationUnbound};
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
@@ -1524,27 +1527,6 @@ pub mod restate {
     pub use crate::send::restate::{RestateWait, RestateWaitContext};
 
     pub use lash_restate::*;
-
-    /// A [`RestateConfig`] reaching Restate's ingress at `connection` and its
-    /// admin API at `admin_connection`, stamped with this build's drain
-    /// generation (FIG-3795): [`crate::formats::build_generation`]'s answer,
-    /// filled in here because lash-restate cannot see the format manifest
-    /// that derives it. Deployments that serve journals are configured
-    /// through this so the generation the engine reports is the build's, not
-    /// a caller's guess. The admin API is required: parked-root verbs and
-    /// park recovery run through it.
-    pub fn config(
-        connection: impl Into<RestateConnection>,
-        admin_connection: impl Into<RestateConnection>,
-        authority: RestateAuthorityId,
-    ) -> RestateConfig {
-        RestateConfig::new(
-            connection,
-            admin_connection,
-            authority,
-            crate::formats::build_generation(),
-        )
-    }
 
     /// The durable-format rows this engine registers with the facade's
     /// format table, projected onto the table's own row shape

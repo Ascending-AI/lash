@@ -433,7 +433,10 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 async fn generation_drain_status_counts_the_generations_live_processes() {
     let backend = sqlite_memory_store_backend().await;
     let registry = backend.process_registry();
-    let own = backend.build_generation().clone();
+    let own = backend
+        .build_generation()
+        .expect("the engine's generation is bound")
+        .clone();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .build(crate::testing::runtime_lease_owner())
         .expect("build core with a process registry");

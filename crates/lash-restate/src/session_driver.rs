@@ -123,6 +123,7 @@ use crate::{
 mod asks;
 mod continuation;
 
+pub use continuation::SendDriveError;
 use continuation::{admits, continuation_generation, drain_answered, session_drive_continuation};
 
 /// The generation of the session driver's journaled command prefix
@@ -479,7 +480,7 @@ pub struct RestateSessionWork {
     slot: RestateSessionDriverSlot,
     /// The drain generation of the build scheduling drives: every drive
     /// request it sends is stamped with it.
-    build_generation: BuildGeneration,
+    generation: lash_core::engine::EngineGeneration,
     /// The namespace the deployment's session services are named in
     /// (FIG-3898).
     namespace: crate::RestateNamespace,
@@ -497,14 +498,14 @@ impl RestateSessionWork {
     pub(crate) fn new(
         ingress: RestateIngressClient,
         slot: RestateSessionDriverSlot,
-        build_generation: BuildGeneration,
+        generation: lash_core::engine::EngineGeneration,
         namespace: crate::RestateNamespace,
         control: Arc<dyn lash_core::engine::SessionControlEngine>,
     ) -> Self {
         Self {
             ingress,
             slot,
-            build_generation,
+            generation,
             namespace,
             control,
             asks: Arc::default(),
@@ -514,36 +515,6 @@ impl RestateSessionWork {
     /// The slot the deployment's session handlers read the driver from.
     pub fn driver_slot(&self) -> &RestateSessionDriverSlot {
         &self.slot
-    }
-
-    /// Send `request`'s drive to `LashSession/{session}`, keyed by the
-    /// request id: a repeated send of one request attaches to its first
-    /// invocation instead of driving twice. A transient send failure retries
-    /// under the same idempotency key before the ask is given up to the
-    /// ingress relay. Resolves once Restate accepted the send, not once the
-    /// drive ran.
-    pub async fn send_drive(
-        &self,
-        session: &SessionId,
-        request: DriveRequestId,
-    ) -> Result<crate::RestateInvocationId, crate::RestateHttpError> {
-        let body = RestateSessionDriveRequest {
-            request: DriveRequest {
-                session: session.clone(),
-                request: request.clone(),
-                build_generation: self.build_generation.clone(),
-            },
-            handed_off: None,
-        };
-        self.ingress
-            .send_object_json_idempotent_bounded(
-                &self.namespace.stable(LashService::SessionDriver).name(),
-                session.as_str(),
-                DRIVE_HANDLER,
-                &Call::new(body),
-                request.as_str(),
-            )
-            .await
     }
 
     /// Send `request`'s drive to `LashSession_g<G>/{session}`: the resume of
@@ -620,7 +591,7 @@ impl RestateSessionWork {
             }
             Err(error) => error,
         };
-        if let crate::RestateHttpError::Status { body, .. } = &error
+        if let SendDriveError::Http(crate::RestateHttpError::Status { body, .. }) = &error
             && let Some(refusal) = decode_drive_refusal(body)
         {
             return Err(classify_refusal(refusal));
@@ -640,7 +611,7 @@ impl std::fmt::Debug for RestateSessionWork {
         formatter
             .debug_struct("RestateSessionWork")
             .field("slot", &self.slot)
-            .field("build_generation", &self.build_generation)
+            .field("generation", &self.generation)
             .finish_non_exhaustive()
     }
 }
@@ -1746,7 +1717,7 @@ mod tests {
                 transport.clone(),
             )),
             RestateSessionDriverSlot::new(),
-            BuildGeneration::for_test("t0"),
+            lash_core::engine::EngineGeneration::fixed(BuildGeneration::for_test("t0")),
             crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
@@ -1798,7 +1769,7 @@ mod tests {
                 transport.clone(),
             )),
             RestateSessionDriverSlot::new(),
-            BuildGeneration::for_test("t0"),
+            lash_core::engine::EngineGeneration::fixed(BuildGeneration::for_test("t0")),
             crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
@@ -1871,7 +1842,7 @@ mod tests {
                 transport.clone(),
             )),
             RestateSessionDriverSlot::new(),
-            BuildGeneration::for_test("t0"),
+            lash_core::engine::EngineGeneration::fixed(BuildGeneration::for_test("t0")),
             crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );
@@ -1933,7 +1904,7 @@ mod tests {
                 transport.clone(),
             )),
             RestateSessionDriverSlot::new(),
-            BuildGeneration::for_test("t0"),
+            lash_core::engine::EngineGeneration::fixed(BuildGeneration::for_test("t0")),
             crate::RestateNamespace::default(),
             Arc::new(lash_core::engine::NoEngineControl),
         );

@@ -7,7 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use lash_core_store::build_generation::{BuildGeneration, BuildGenerationParseError};
+pub use lash_core_store::build_generation::{
+    BuildGeneration, BuildGenerationParseError, EngineGeneration, GenerationRebound,
+    GenerationUnbound,
+};
 
 use super::admission::DriveRequestId;
 use crate::SessionId;

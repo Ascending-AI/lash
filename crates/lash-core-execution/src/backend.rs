@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::engine::BuildGeneration;
+use crate::engine::{BuildGeneration, EngineGeneration, GenerationRebound, GenerationUnbound};
 use crate::{
     AttachmentStore, Clock, DeploymentStore, EffectHost, ModuleArtifactStore,
     ProcessContinuationStore, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
@@ -50,14 +50,15 @@ pub trait EffectEngine: Send + Sync {
     fn effect_host(&self) -> Arc<dyn EffectHost>;
 
     /// The drain generation of the build this engine runs on (FIG-3795): the
-    /// digest of the drain-policy durable formats and the journal-logic epoch
-    /// the facade computes as `formats::build_generation`. Journal-bearing
+    /// digest of the drain-policy durable formats, the journal-logic epoch
+    /// and the ordered plugin composition, which the core computes once its
+    /// plugins are registered and binds here (FIG-4744). Journal-bearing
     /// services are routed by it, and drain status (FIG-3799) reads it.
     ///
     /// Required, with no default, for the same reason as
     /// [`Self::process_work`]: a wrapper that silently answered for its inner
     /// engine would name the wrong build on a generation-routed lane.
-    fn build_generation(&self) -> &BuildGeneration;
+    fn generation(&self) -> &EngineGeneration;
 
     /// The engine that executes the store set's background processes:
     /// Restate's process workflow, or a wiring over
@@ -147,9 +148,26 @@ impl Backend {
         self.engine.effect_host()
     }
 
-    /// See [`EffectEngine::build_generation`].
-    pub fn build_generation(&self) -> &BuildGeneration {
-        self.engine.build_generation()
+    /// The generation the engine runs on ([`EffectEngine::generation`]).
+    ///
+    /// # Errors
+    /// [`GenerationUnbound`] until a core built over this backend has bound
+    /// the generation of its plugin composition.
+    pub fn build_generation(&self) -> Result<&BuildGeneration, GenerationUnbound> {
+        self.engine.generation().get()
+    }
+
+    /// Bind the generation a core computed from its registered plugins
+    /// ([`EngineGeneration::bind`]).
+    ///
+    /// # Errors
+    /// [`GenerationRebound`] when the engine already runs another
+    /// generation.
+    pub fn bind_build_generation(
+        &self,
+        composed: &BuildGeneration,
+    ) -> Result<(), GenerationRebound> {
+        self.engine.generation().bind(composed)
     }
 
     /// The durable registry of this backend's background processes: the one

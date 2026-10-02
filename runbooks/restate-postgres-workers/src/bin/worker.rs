@@ -181,7 +181,7 @@ impl AppState {
         let controller = RestateRuntimeEffectController::new(
             ctx,
             self.restate_authority_id.clone(),
-            lash::formats::build_generation(),
+            core.build_generation().clone(),
         );
         if request.scenario == TurnScenario::SignalProcess {
             return Box::pin(self.signal_process(&controller, core, &request))
@@ -961,10 +961,9 @@ async fn direct_resolve_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitResolveRequest>,
 ) -> Result<AxumJson<DirectDurableWaitResolveResponse>, (StatusCode, String)> {
-    let outcome = RestateEffectHost::new(
+    let outcome = RestateEffectHost::outside_deployment(
         state.restate_ingress_url,
         state.restate_authority_id,
-        lash::formats::build_generation(),
     )
     .resolve_await_event(&request.key, request.resolution)
     .await
@@ -979,10 +978,9 @@ async fn direct_await_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitAwaitRequest>,
 ) -> Result<AxumJson<DirectDurableWaitAwaitResponse>, (StatusCode, String)> {
-    let resolution = RestateEffectHost::new(
+    let resolution = RestateEffectHost::outside_deployment(
         state.restate_ingress_url,
         state.restate_authority_id,
-        lash::formats::build_generation(),
     )
     .await_await_event(
         &request.key,
@@ -1388,7 +1386,7 @@ async fn async_main() -> Result<()> {
     // tool batch opens — come from the backend, over the effect host every
     // core of this worker installs its tool-child resolver on. The worker
     // binds only its turn workflow beside them.
-    let mut builder = backend.endpoint_builder(processes);
+    let mut builder = backend.endpoint_builder(processes)?;
     if let Some(load) = state.load.clone() {
         builder = builder.bind(
             LoadWorker::new(LoadWorkerConfig {

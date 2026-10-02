@@ -78,7 +78,7 @@ impl E2eLoadWorkflow for DeleteProbe {
                     services.core.session_administration().await,
                     self.connection.clone(),
                     services.authority.clone(),
-                    lash::formats::build_generation(),
+                    services.core.build_generation().clone(),
                 ))
                 .is_ok()
         );
@@ -99,7 +99,7 @@ impl LoadBehaviorReplayProbe for Probe {
         let controller = Controller::new(
             context,
             services.authority.clone(),
-            lash::formats::build_generation(),
+            services.core.build_generation().clone(),
         );
         let run = controller.context().key().to_string();
         let session_id = session_of(&run);

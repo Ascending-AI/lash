@@ -285,7 +285,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let attachment_store = stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
     let restate_backend = Arc::new(RestateEngine::new(
         Arc::new(stores),
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             restate_ingress_url.clone(),
             restate_admin_url.clone(),
             restate_authority_id.clone(),
@@ -378,8 +378,14 @@ async fn async_main() -> anyhow_like::Result<()> {
         // and effect-group demo workflows beside them.
         let endpoint = restate_backend
             .endpoint_builder(process_worker)
+            .map_err(|err| format!("build the Restate endpoint: {err}"))?
             .bind(chat_discard.serve())
-            .bind(AgentServiceEffectGroupWorkflowImpl.serve())
+            .bind(
+                AgentServiceEffectGroupWorkflowImpl {
+                    build_generation: state.core().build_generation().clone(),
+                }
+                .serve(),
+            )
             .build();
         let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
             .await

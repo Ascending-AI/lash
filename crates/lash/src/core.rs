@@ -33,6 +33,9 @@ pub struct LashCore {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     /// The one substrate every port and the effect host come from.
     pub(crate) backend: Backend,
+    /// The generation this core's engine runs on: the one the core computed
+    /// from its formats and its registered plugins and bound at build.
+    pub(crate) build_generation: lash_core::engine::BuildGeneration,
     /// The backend's session catalog.
     pub(crate) store_factory: Arc<dyn DeploymentStore>,
     /// The backend's process registry, as the core sees it (watched, and
@@ -180,6 +183,15 @@ impl LashCore {
         ))
     }
 
+    /// The drain generation `G` of this deployment (FIG-3795, FIG-4744): the
+    /// digest of the build's drain formats and of this core's plugins in
+    /// hook order, computed when the core was built and bound into its
+    /// engine. Work the host opens beside the core, such as an effect host
+    /// or a controller of its own, is stamped with this value.
+    pub fn build_generation(&self) -> &lash_core::engine::BuildGeneration {
+        &self.build_generation
+    }
+
     /// The backend this core takes every port and its effect host from.
     pub fn backend(&self) -> &Backend {
         &self.backend
@@ -244,7 +256,7 @@ impl LashCore {
         &self,
         generation: &lash_core::engine::BuildGeneration,
     ) -> Result<bool> {
-        if generation == self.backend.build_generation() {
+        if *generation == self.build_generation {
             return Err(crate::EmbedError::DrainOwnGeneration {
                 generation: generation.clone(),
             });
@@ -1079,6 +1091,13 @@ impl LashCoreBuilder {
             protocol_factory.as_ref(),
             &plugin_factories,
         )?);
+        // The generation exists only now that the plugins are registered:
+        // it folds in their declarations in hook order, and the engine runs
+        // on no other. Bound before anything below can stamp work with it.
+        backend.bind_build_generation(&crate::formats::composed_generation(
+            &default_plugin_host.composition()?,
+        ))?;
+        let build_generation = backend.build_generation()?.clone();
         // Every backend supplies a process registry, so process lifecycle
         // is available on every core. Threaded to every plugin host so core
         // installs the same plugin-contributed process engines wherever it
@@ -1171,6 +1190,7 @@ impl LashCoreBuilder {
             drive_owner,
             env,
             backend,
+            build_generation,
             store_factory,
             process_registry,
             plugin_factories,

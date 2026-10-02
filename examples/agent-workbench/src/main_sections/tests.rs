@@ -1906,7 +1906,7 @@ async fn live_workbench_restate_state_over_stores(
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
     let backend = Arc::new(lash_restate::RestateEngine::new(
         store_set,
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             lash_restate::RestateConnection::with_client(
                 restate_ingress_url.clone(),
                 restate_http.clone(),

@@ -530,7 +530,7 @@ async fn main() -> Result<()> {
         .serve_at(
             &engine,
             std::net::SocketAddr::from(([127, 0, 0, 1], args.port)),
-            engine.endpoint_builder(worker).build(),
+            engine.endpoint_builder(worker)?.build(),
         )
         .await?;
     // A smoke run may name a session an earlier run created: create-or-use,

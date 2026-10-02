@@ -161,7 +161,13 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
                     registration,
                     execution_context: lash_core::ProcessExecutionContext::default(),
                     segment_ordinal: 1,
-                    sender_generation: Some(restate.restate().build_generation().clone()),
+                    sender_generation: Some(
+                        restate
+                            .restate()
+                            .build_generation()
+                            .expect("the engine's generation is bound")
+                            .clone(),
+                    ),
                 }),
             ),
     )

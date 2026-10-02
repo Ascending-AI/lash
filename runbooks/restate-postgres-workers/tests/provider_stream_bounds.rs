@@ -51,7 +51,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let identity = format!("bounds{}", uuid::Uuid::new_v4().simple());
     let engine = Arc::new(lash_restate::RestateEngine::new(
         stores,
-        lash::restate::config(
+        lash::restate::RestateConfig::new(
             restate.ingress_url.clone(),
             restate.admin_url.clone(),
             restate.authority.clone(),
@@ -86,7 +86,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let worker =
         lash::durability::DurableProcessWorker::new(core.durable_process_worker_config()?)?;
     let deployment = restate
-        .serve(&engine, engine.endpoint_builder(worker).build())
+        .serve(&engine, engine.endpoint_builder(worker)?.build())
         .await?;
     core.session(&identity)
         .create(lash::SessionCreation::root(lash::SessionSpec::new(

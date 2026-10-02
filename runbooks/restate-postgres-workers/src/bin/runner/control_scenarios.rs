@@ -4,11 +4,8 @@ pub(super) async fn run_engine_promise_conformance(
     admin_url: &str,
     ingress_url: &str,
 ) -> Result<()> {
-    let key_host = RestateEffectHost::new(
-        ingress_url.to_string(),
-        restate_authority_id()?,
-        lash::formats::build_generation(),
-    );
+    let key_host =
+        RestateEffectHost::outside_deployment(ingress_url.to_string(), restate_authority_id()?);
     let attached_key = engine_conformance_key(&key_host, "waiter-before-resolution").await?;
     let attached_expected = Resolution::Ok(json!({ "ordering": "waiter-before-resolution" }));
     let attached_wait_key = attached_key.clone();
@@ -735,10 +732,9 @@ pub(super) async fn drive_break_glass_scenario(
     wait_for_invocation_terminal(&admin, &workflow_invocation).await?;
 
     let driver = TurnWorkDriver::for_catalog(
-        Arc::new(RestateEffectHost::new(
+        Arc::new(RestateEffectHost::outside_deployment(
             ingress_url.to_string(),
             restate_authority_id()?,
-            lash::formats::build_generation(),
         )),
         Arc::new(storage.session_store_factory()),
     );

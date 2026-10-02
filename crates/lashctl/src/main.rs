@@ -645,7 +645,6 @@ fn drain_status_result(status: &GenerationDrainStatus, stalled: &[StalledObligat
 fn version_result(fleet_generations: &[(BuildGeneration, bool)]) -> Value {
     json!({
         "release": env!("CARGO_PKG_VERSION"),
-        "cli_build_generation": lash::formats::build_generation().as_str(),
         "fleet_generations": fleet_generations.iter().map(|(generation, draining)| json!({
             "generation": generation.as_str(),
             "draining": draining,
@@ -918,10 +917,6 @@ fn output(command: &str, result: Option<Value>, error: Option<&CliError>, json_m
             println!(
                 "release: {}",
                 result["release"].as_str().unwrap_or("unknown")
-            );
-            println!(
-                "CLI build generation: {}",
-                result["cli_build_generation"].as_str().unwrap_or("unknown")
             );
             println!("fleet generations:");
             if let Some(generations) = result["fleet_generations"].as_array() {

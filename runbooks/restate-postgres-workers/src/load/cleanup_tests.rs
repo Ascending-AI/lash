@@ -39,7 +39,7 @@ impl WorkloadDeleteProbe for Probe {
         let controller = Controller::new(
             context,
             services.authority.clone(),
-            lash::formats::build_generation(),
+            services.core.build_generation().clone(),
         );
         let ctx = controller.context();
         let cleaned = cleanup_model_children(

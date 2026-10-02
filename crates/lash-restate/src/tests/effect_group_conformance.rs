@@ -697,7 +697,9 @@ impl LiveConformanceHarness {
         crate::RestateSessionWork::new(
             crate::RestateIngressClient::new(self.connection.clone()),
             self.session_driver.clone(),
-            lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+            lash_core::engine::EngineGeneration::fixed(
+                lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
+            ),
             crate::RestateNamespace::default(),
             Arc::new(crate::session_control::RestateSessionControl {
                 lost_processes: Default::default(),
@@ -845,8 +847,10 @@ impl LiveConformanceHarness {
                 // turn-control under it, so it must match what the probe's
                 // controller was admitted with.
                 crate::RestateAuthorityId::new("lash-restate-tests").expect("valid authority"),
-                lash_core::engine::BuildGeneration::for_test("parent-end-laws"),
-            ),
+            )
+            .stamped(lash_core::engine::BuildGeneration::for_test(
+                "parent-end-laws",
+            )),
         )))
     }
 
@@ -930,8 +934,10 @@ impl LiveConformanceHarness {
                         admin,
                         crate::RestateAuthorityId::new("lash-conformance-backend-laws")
                             .expect("valid authority"),
-                        lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
-                    ),
+                    )
+                    .stamped(lash_core::engine::BuildGeneration::for_test(
+                        "effect-group-conformance",
+                    )),
                 )))
             })
         }

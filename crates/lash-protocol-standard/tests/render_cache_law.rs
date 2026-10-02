@@ -366,7 +366,13 @@ async fn drive_with_run_spec(
         ))
         .await
         .expect("open drive handler");
-    let build_generation = runtime.host.core.backend().build_generation().clone();
+    let build_generation = runtime
+        .host
+        .core
+        .backend()
+        .build_generation()
+        .expect("the engine's generation is bound")
+        .clone();
     let outcome = lash_core::drive::drive_session(
         runtime,
         &handler.scoped(),

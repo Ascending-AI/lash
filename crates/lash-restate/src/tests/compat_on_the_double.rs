@@ -41,7 +41,10 @@ use lash_core_store::compat::CompatRefusal;
 #[tokio::test]
 async fn every_handler_the_binder_binds_takes_a_call_and_answers_a_reply() {
     let (backend, worker) = backend_and_process_worker().await;
-    let endpoint = backend.endpoint_builder(worker).build();
+    let endpoint = backend
+        .endpoint_builder(worker)
+        .expect("the core bound the engine's generation")
+        .build();
     let document = discovery_document(&endpoint).await;
     let namespace = crate::RestateNamespace::default();
     let mut lanes = BTreeSet::new();
@@ -565,12 +568,8 @@ async fn registration_refuses_an_endpoint_serving_another_generation() {
             crate::RestateConnection::with_transport(server.ingress_url(), server.transport());
         crate::RestateEngine::new(
             Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
-            crate::RestateConfig::new(
-                connection.clone(),
-                connection,
-                test_restate_authority_id(),
-                generation(build),
-            ),
+            crate::RestateConfig::new(connection.clone(), connection, test_restate_authority_id())
+                .stamped(generation(build)),
         )
     };
     let next = engine("N+1").await;
@@ -627,13 +626,9 @@ async fn registration_refuses_an_endpoint_serving_another_namespace() {
         crate::RestateConnection::with_transport(server.ingress_url(), server.transport());
     let beta = crate::RestateEngine::new(
         Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
-        crate::RestateConfig::new(
-            connection.clone(),
-            connection,
-            test_restate_authority_id(),
-            generation("N"),
-        )
-        .with_namespace(crate::RestateNamespace::new("beta").expect("a valid namespace")),
+        crate::RestateConfig::new(connection.clone(), connection, test_restate_authority_id())
+            .stamped(generation("N"))
+            .with_namespace(crate::RestateNamespace::new("beta").expect("a valid namespace")),
     );
 
     let refused = beta

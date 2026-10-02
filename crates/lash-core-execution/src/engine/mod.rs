@@ -26,7 +26,10 @@ pub use admission::{
 };
 pub use commands::{GatedObservationSink, NullObservationSink, ObservationCursor, ObservationSink};
 pub use context::{DriveObservation, ObservedEvent, ReplayKey, activity_projection};
-pub use contracts::{BuildGeneration, BuildGenerationParseError, DriveRequest, UpgradePolicy};
+pub use contracts::{
+    BuildGeneration, BuildGenerationParseError, DriveRequest, EngineGeneration, GenerationRebound,
+    GenerationUnbound, UpgradePolicy,
+};
 pub use control::{
     EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
     NoScopeClose, OpenRoot, ParkReconcileReport, ParkRecoveryWriter, ParkTarget,

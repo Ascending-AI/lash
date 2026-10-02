@@ -229,7 +229,7 @@ impl E2eLoadWorkflow for LoadWorker {
                 let controller = RestateRuntimeEffectController::new(
                     ctx,
                     self.restate_authority_id.clone(),
-                    lash::formats::build_generation(),
+                    self.core.build_generation().clone(),
                 );
                 LoadResponse::Behaviors(Box::new(
                     Box::pin(self.behaviors(&controller, &run)).await?,
@@ -250,7 +250,7 @@ impl E2eLoadWorkflow for LoadWorker {
                 let controller = RestateRuntimeEffectController::new(
                     ctx,
                     self.restate_authority_id.clone(),
-                    lash::formats::build_generation(),
+                    self.core.build_generation().clone(),
                 );
                 LoadResponse::Turn(
                     Box::pin(self.turn(&controller, &generator, &plan, session_id)).await?,
@@ -267,7 +267,7 @@ impl E2eLoadWorkflow for LoadWorker {
                 let controller = RestateRuntimeEffectController::new(
                     ctx,
                     self.restate_authority_id.clone(),
-                    lash::formats::build_generation(),
+                    self.core.build_generation().clone(),
                 );
                 LoadResponse::CronSetup(
                     Box::pin(self.cron_setup(&controller, &run, session_id)).await?,
@@ -286,7 +286,7 @@ impl E2eLoadWorkflow for LoadWorker {
                 let controller = RestateRuntimeEffectController::new(
                     ctx,
                     self.restate_authority_id.clone(),
-                    lash::formats::build_generation(),
+                    self.core.build_generation().clone(),
                 );
                 LoadResponse::CronTick(
                     Box::pin(self.cron_tick(&controller, &generator, subscription, tick)).await?,
@@ -651,7 +651,7 @@ impl LoadWorker {
                     self.core.session_administration().await,
                     self.restate_ingress_url.clone(),
                     self.restate_authority_id.clone(),
-                    lash::formats::build_generation(),
+                    self.core.build_generation().clone(),
                 )
             })
             .await;
