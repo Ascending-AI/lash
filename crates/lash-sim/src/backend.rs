@@ -130,7 +130,12 @@ impl SimEngine {
         drop(hold);
         let report = match accepted {
             Ok(handle) => {
-                self.await_input_drive(session, handle.input_id()).await;
+                if let Some(paused) = self.await_input_drive(session, handle.input_id()).await {
+                    return Err(FixedScriptRunnerError::Runtime(format!(
+                        "engine invocation {} paused after {} attempt(s) and settles no turn until it is resumed; last failure: {:?}",
+                        paused.target, paused.attempts, paused.last_failure
+                    )));
+                }
                 handle.output_into(&collected).await
             }
             Err(err) => Err(err),
@@ -151,7 +156,32 @@ impl SimEngine {
     /// [`Draining`](lash_core::engine::DriveStop::Draining), to the one
     /// after it. A drive the engine refused ends the wait too; the
     /// handle then reports why.
-    async fn await_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
+    ///
+    /// A drive whose handler, or whose root's, exhausted its attempts is
+    /// paused: the server runs it no further and its attach never answers.
+    /// The wait ends there and returns the paused invocation (FIG-4753).
+    /// The watch reads the server's introspection; it sends no request.
+    async fn await_input_drive(
+        &self,
+        session: &lash::LashSession,
+        input: &lash::InputId,
+    ) -> Option<lash_restate_test::InvocationView> {
+        let session_id = session.session_id();
+        let paused = async {
+            loop {
+                if let Some(view) = self.restate.paused_session_work(&session_id) {
+                    return view;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        };
+        tokio::select! {
+            () = self.attach_input_drive(session, input) => None,
+            view = paused => Some(view),
+        }
+    }
+
+    async fn attach_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
         let mut leg = lash_core::engine::DriveRequest {
             session: session.session_id(),
             request: lash_core::drive::ingress_drive_request(

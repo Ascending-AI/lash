@@ -151,6 +151,7 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             usage()
         ));
     }
+    lash_sim::require_vm_worker()?;
     let seeds = match seeds {
         Some(seeds) => seeds,
         // The profile default answers to `LASH_QUICK`, floored at

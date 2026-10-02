@@ -884,6 +884,43 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
     }
 }
 
+/// A host whose VM worker executable is missing cannot capture a turn's
+/// execution state: the turn's handler fails every attempt and the engine
+/// pauses it. The harness reports the pause and its cause; it does not wait
+/// for a turn nothing will settle (FIG-4753).
+#[tokio::test]
+async fn rlm_turn_on_a_host_without_a_vm_worker_reports_the_paused_turn() {
+    let missing = tempfile::tempdir().expect("tempdir");
+    let workers =
+        lash_vm_client::service::Service::subprocess(missing.path().join("lash-vm-worker"));
+    let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED)
+        .await
+        .expect("engine");
+    let turn = Box::pin(run_final_value_turn(&engine, events, Some(workers)));
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(60), turn)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the turn did not end within 60s on a host without a VM worker; invocations: {:#?}",
+                engine.restate().server().invocations()
+            )
+        });
+
+    let Err(FixedScriptRunnerError::Runtime(message)) = ended else {
+        panic!("a host without a VM worker ran the turn: {ended:?}");
+    };
+    assert!(
+        message.contains("LashTurn/") && message.contains("paused after 8 attempt(s)"),
+        "{message}"
+    );
+    assert!(
+        message.contains("execution_state_capture_failed")
+            && message.contains("No such file or directory"),
+        "{message}"
+    );
+}
+
 #[tokio::test]
 async fn runtime_facade_turn_uses_scripted_transport_and_checks_invariants() {
     let proof = Box::pin(prove_runtime_facade_turn())

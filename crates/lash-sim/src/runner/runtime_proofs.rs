@@ -556,10 +556,13 @@ impl lash::TurnActivitySink for RuntimeProofRecordingEvents {
     }
 }
 
-pub(super) async fn prove_final_value_semantic_channel()
--> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
-    let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
+/// The final-value proof's RLM turn. `workers` replaces the dialect's worker
+/// service, so a law can run the turn on a host whose worker is unavailable.
+pub(super) async fn run_final_value_turn(
+    engine: &crate::backend::SimEngine,
+    events: Arc<RuntimeProofRecordingEvents>,
+    workers: Option<lash_vm_client::service::Service>,
+) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -570,6 +573,10 @@ pub(super) async fn prove_final_value_semantic_channel()
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     );
+    let factory = match workers {
+        Some(workers) => factory.with_worker_service(workers),
+        None => factory,
+    };
     let core = lash::LashCore::rlm_builder(
         backend,
         lash::TurnBudget::Unbounded,
@@ -590,17 +597,25 @@ pub(super) async fn prove_final_value_semantic_channel()
     let session = crate::open_created_session(&core, "sim-final-value-session")
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let result = engine
+    engine
         .run_turn(
             &session,
             "sim-final-value-turn",
-            events.clone(),
+            events,
             Arc::new(|session: &lash::LashSession| {
                 session
                     .send(lash::TurnInput::text("produce a semantic final value"))
                     .require_finish()
             }),
         )
+        .await
+}
+
+pub(super) async fn prove_final_value_semantic_channel()
+-> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
+    let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
+    let result = run_final_value_turn(&engine, events.clone(), None)
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .result;

@@ -628,6 +628,32 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
     /// next input from another core, settles the drive first: while a drive
     /// runs it admits what the session is sent, on the driver it started on.
     pub async fn settle_session_drive(&self, session: &lash_core::SessionId) {
+        while self
+            .session_work(session)
+            .iter()
+            .any(|view| view.status != "completed")
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
+    /// The engine invocation of `session` that is paused, if one is: a
+    /// drive, or a root it awaits, whose handler exhausted its attempts.
+    /// The server runs no further attempt of it until an operator resumes
+    /// it, so a wait on the session's turn would not end; a harness reads
+    /// this to report the pause and its last failure instead of waiting.
+    pub fn paused_session_work(
+        &self,
+        session: &lash_core::SessionId,
+    ) -> Option<crate::InvocationView> {
+        self.session_work(session)
+            .into_iter()
+            .find(|view| view.status == "paused")
+    }
+
+    /// The engine's invocations for `session`: its `LashSession` drives and
+    /// the `LashTurn` roots and scope closes they awaited.
+    fn session_work(&self, session: &lash_core::SessionId) -> Vec<crate::InvocationView> {
         let drives = format!(
             "{}/{}/",
             self.service_name(SESSION_DRIVER_SERVICE),
@@ -641,12 +667,9 @@ impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
             session.as_str().len(),
             session.as_str()
         );
-        while self.server.invocations().iter().any(|view| {
-            (view.target.starts_with(&drives) || view.target.starts_with(&roots))
-                && view.status != "completed"
-        }) {
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        }
+        let mut work = self.server.invocations();
+        work.retain(|view| view.target.starts_with(&drives) || view.target.starts_with(&roots));
+        work
     }
 
     #[expect(

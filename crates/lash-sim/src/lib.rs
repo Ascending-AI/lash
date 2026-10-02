@@ -124,6 +124,20 @@ pub fn quick_enabled() -> bool {
     std::env::var("LASH_QUICK").is_ok_and(|value| !value.is_empty() && value != "0")
 }
 
+/// Start the VM worker a generated run's RLM turns execute their cells in.
+/// A host with no worker cannot run a cell: its turn's handler fails every
+/// attempt and pauses. A command that runs such turns calls this first, so
+/// the missing worker is refused before any world runs (FIG-4753).
+pub fn require_vm_worker() -> Result<(), String> {
+    let workers = lash_vm_client::service::Service::default();
+    workers.pool().map(drop).map_err(|err| {
+        format!(
+            "the VM worker `{}` did not start: {err}; build //crates/lash-vm-worker:lash-vm-worker__bin and export its path as LASH_VM_WORKER",
+            workers.config().entry.executable.display()
+        )
+    })
+}
+
 /// The seed count a generated sweep runs under `quick_enabled`: a quarter of
 /// the full count, at least one.
 pub fn quick_seed_sweep(full: usize) -> usize {
