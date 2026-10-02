@@ -160,8 +160,7 @@ pub(crate) fn restate_effect_execution(
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
-        command @ (RuntimeEffectCommand::ToolAttempt { .. }
-        | RuntimeEffectCommand::Trigger { .. }
+        command @ (RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::DrawRootStart { .. }
@@ -212,8 +211,10 @@ pub(crate) fn restate_effect_execution(
         // A model call and a direct completion whose recorded model this
         // deployment cannot bind end the attempt the same way: the bind
         // fault precedes the call, so it is never the call's recorded result
-        // (FIG-4404).
-        command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
+        // (FIG-4404). A tool attempt's marked VM host fault likewise retries
+        // its pure derivation without recording a refusal (FIG-4707).
+        command @ (RuntimeEffectCommand::ToolAttempt { .. }
+        | RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::AdmitRoot { .. }

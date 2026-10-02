@@ -160,7 +160,8 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 &artifacts_backend,
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
-            )?;
+            )
+            .await?;
             let runtime_state = RuntimeSessionState {
                 session_id: SessionId::from("runtime-perf-checkpoint-state"),
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -181,9 +182,9 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     let (initial_component_count, initial_capture_phase) = run
         .seed(async {
             let (initial_snapshot, initial_capture_phase) =
-                measure_runtime_perf_phase("checkpoint_state.initial_capture", || {
-                    fixture.capture().map_err(anyhow::Error::from)
-                })?;
+                measure_runtime_perf_async_phase("checkpoint_state.initial_capture", async {
+                    fixture.capture().await.map_err(anyhow::Error::from)
+                }).await?;
             if initial_snapshot.root.is_none() {
                 anyhow::bail!("checkpoint-state fixture omitted its root");
             }
@@ -233,9 +234,9 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         }
 
         let (snapshot, phase) =
-            measure_runtime_perf_phase("checkpoint_state.incremental_capture", || {
-                fixture.capture().map_err(anyhow::Error::from)
-            })?;
+            measure_runtime_perf_async_phase("checkpoint_state.incremental_capture", async {
+                fixture.capture().await.map_err(anyhow::Error::from)
+            }).await?;
         phase_profile.insert(phase.0, phase.1);
         fixture.acknowledge_capture();
         if snapshot.root.is_none() {
@@ -306,10 +307,10 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 .map(|v| v.len())
                 .sum::<usize>()) as u64;
 
-        let (_, phase) = measure_runtime_perf_phase("checkpoint_state.execution_restore", || {
-            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&lash_protocol_rlm::TypescriptDialect, &loaded_execution_state)
+        let (_, phase) = measure_runtime_perf_async_phase("checkpoint_state.execution_restore", async {
+            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&lash_protocol_rlm::TypescriptDialect, &loaded_execution_state).await
                 .map_err(anyhow::Error::from)
-        })?;
+        }).await?;
         phase_profile.insert(phase.0, phase.1);
 
                 Ok(TurnRun {

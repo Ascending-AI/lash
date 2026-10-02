@@ -241,6 +241,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
         crate::ToolAttemptOutcome::Done { result, intents } => {
             (ToolOutcome::from_output(result.into_output()), intents)
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => return Err(*error),
         crate::ToolAttemptOutcome::Pending(pending) => {
             let key =
                 match completion_context.take_completion_key() {

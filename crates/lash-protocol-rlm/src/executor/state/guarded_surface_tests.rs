@@ -14,39 +14,54 @@ use crate::native::state::{
 };
 use crate::native::transport::{NATIVE_TRANSPORT_VERSION, decode_payload, execution_event};
 
+fn run<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("guarded-surface runtime")
+        .block_on(future)
+}
+
 const OWNER: &str = "lash-protocol-rlm";
 
 // --- RLM_SNAPSHOT_VERSION: the canonical execution-state root. ---
 
 fn write_root(fleet: FleetFormat) -> Vec<u8> {
-    let snapshot = RlmExecutionState::new()
-        .snapshot_execution_state(fleet)
-        .expect("snapshot a fresh state");
-    assert!(
-        snapshot.components.is_empty(),
-        "a fresh state's root carries every value inline"
-    );
-    snapshot
-        .root
-        .expect("a fresh state snapshots a root")
-        .to_vec()
+    run(async {
+        let snapshot = RlmExecutionState::new()
+            .snapshot_execution_state(fleet)
+            .await
+            .expect("snapshot a fresh state");
+        assert!(
+            snapshot.components.is_empty(),
+            "a fresh state's root carries every value inline"
+        );
+        snapshot
+            .root
+            .expect("a fresh state snapshots a root")
+            .to_vec()
+    })
 }
 
 fn read_root(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
-    let hydration = lash_core::plugin::HydratedExecutionState {
-        root: bytes.to_vec().into(),
-        components: BTreeMap::new(),
-    };
-    let mut state = RlmExecutionState::new();
-    state
-        .restore_execution_state(&hydration, fleet)
-        .map_err(|error| error.to_string())?;
-    // The restored state is the fact: taken again at the newest root, every
-    // admitted version restores to the same one.
-    let again = state
-        .snapshot_execution_state(FleetFormat::current())
-        .map_err(|error| error.to_string())?;
-    Ok(format!("{:?}", again.root))
+    run(async {
+        let hydration = lash_core::plugin::HydratedExecutionState {
+            root: bytes.to_vec().into(),
+            components: BTreeMap::new(),
+        };
+        let mut state = RlmExecutionState::new();
+        state
+            .restore_execution_state(&hydration, fleet)
+            .await
+            .map_err(|error| error.to_string())?;
+        // The restored state is the fact: taken again at the newest root, every
+        // admitted version restores to the same one.
+        let again = state
+            .snapshot_execution_state(FleetFormat::current())
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(format!("{:?}", again.root))
+    })
 }
 
 fn restamp_root(bytes: &[u8], version: u32) -> Vec<u8> {

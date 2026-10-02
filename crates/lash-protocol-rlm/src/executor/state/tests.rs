@@ -225,8 +225,8 @@ fn hydrate(
     }
 }
 
-#[test]
-fn large_scalar_edit_commits_changed_state_not_retained_session() {
+#[tokio::test]
+async fn large_scalar_edit_commits_changed_state_not_retained_session() {
     let mut state = RlmExecutionState::new();
     for index in 0..50 {
         state
@@ -236,11 +236,13 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
                 format!("page_{index}"),
                 FlowValue::String(format!("page-{index}-{}", "x".repeat(100 * 1024)).into()),
             )
+            .await
             .expect("seed a global");
     }
     state.mark_execution_started();
     let initial = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("initial snapshot");
     state.acknowledge_execution_state_capture();
 
@@ -251,10 +253,12 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
             "page_0".to_string(),
             FlowValue::String(format!("changed-{}", "y".repeat(100 * 1024)).into()),
         )
+        .await
         .expect("seed a global");
     state.mark_execution_started();
     let changed = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("changed snapshot");
     let retained_bytes = state
         .vm
@@ -345,8 +349,8 @@ fn size_line_selects_literal_global_boundaries() {
     assert_eq!(changed_leaves.len(), 1);
 }
 
-#[test]
-fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
+#[tokio::test]
+async fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
     let old_snapshot = serde_json::to_vec(&json!({
         "version": 5,
         "engine": "lashlang",
@@ -365,6 +369,7 @@ fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
             },
             lash_core::FleetFormat::current(),
         )
+        .await
         .expect_err("old JSON must not have a compatibility decoder");
 
     assert!(matches!(&error, RlmSnapshotError::FormatMismatch { .. }));
@@ -454,18 +459,20 @@ fn canonical_resolution_field_order_is_independent_of_key_shape() {
     }
 }
 
-#[test]
-fn rlm_snapshot_accepts_inline_global_named_schema() {
+#[tokio::test]
+async fn rlm_snapshot_accepts_inline_global_named_schema() {
     let mut state = RlmExecutionState::new();
     state
         .vm
         .state_mut()
         .insert_global("schema".to_string(), FlowValue::String("note".into()))
+        .await
         .expect("seed schema global");
     state.mark_execution_started();
 
     let snapshot = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("schema global snapshots as canonical RLM state");
     let hydration = hydrate(snapshot);
     let root: RlmSnapshotRoot =
@@ -476,8 +483,8 @@ fn rlm_snapshot_accepts_inline_global_named_schema() {
     ));
 }
 
-#[test]
-fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
+#[tokio::test]
+async fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     #[derive(Serialize)]
     struct PreviousEnvelope {
         version: u32,
@@ -505,6 +512,7 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 
     let error = target
         .restore_execution_state(&hydration, lash_core::FleetFormat::current())
+        .await
         .expect_err("older version must be rejected before Lashlang decode");
 
     assert!(matches!(
@@ -519,8 +527,8 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
-#[test]
-fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
+#[tokio::test]
+async fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
     const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
     const { assert!(RLM_SNAPSHOT_VERSION > EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION) };
 
@@ -577,6 +585,7 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
         let mut target = RlmExecutionState::for_engine("lashlang");
         let error = target
             .restore_execution_state(&hydration, lash_core::FleetFormat::current())
+            .await
             .expect_err("the previous snapshot version must fail closed");
 
         assert!(matches!(
@@ -592,8 +601,8 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
     }
 }
 
-#[test]
-fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
+#[tokio::test]
+async fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
     #[derive(Serialize)]
     struct UnexpectedFilesEnvelope {
         version: u32,
@@ -619,6 +628,7 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
 
     let error = target
         .restore_execution_state(&hydration, lash_core::FleetFormat::current())
+        .await
         .expect_err("a v14 root must not accept the removed files field");
 
     assert!(matches!(
@@ -628,18 +638,20 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
     ));
 }
 
-#[test]
-fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
+#[tokio::test]
+async fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     let mut source = RlmExecutionState::for_engine("lashlang");
     let hydration = hydrate(
         source
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("source snapshot"),
     );
     let mut target = RlmExecutionState::for_engine("typescript");
 
     let error = target
         .restore_execution_state(&hydration, lash_core::FleetFormat::current())
+        .await
         .expect_err("a snapshot from another dialect must be rejected");
 
     assert!(matches!(
@@ -767,14 +779,14 @@ fn decode_hex(hex: &str) -> Vec<u8> {
 /// The clean cutover refuses a predecessor's capture with the typed version
 /// boundary before anything is restored, and leaves its stamp readable, so a
 /// host can tell which sessions predate this build.
-#[test]
-fn a_predecessor_v22_capture_is_refused_by_its_version_before_anything_is_restored() {
+#[tokio::test]
+async fn a_predecessor_v22_capture_is_refused_by_its_version_before_anything_is_restored() {
     let root = decode_hex(V22_PREDECESSOR_ROOT_HEX);
     assert_eq!(
         probe_snapshot_version(&root).expect("the predecessor's stamp is readable"),
         22
     );
-    let (_, mut live) = leaf_bearing_hydration_and_live_target();
+    let (_, mut live) = leaf_bearing_hydration_and_live_target().await;
     let error = live
         .restore_execution_state(
             &lash_core::plugin::HydratedExecutionState {
@@ -783,6 +795,7 @@ fn a_predecessor_v22_capture_is_refused_by_its_version_before_anything_is_restor
             },
             lash_core::FleetFormat::current(),
         )
+        .await
         .expect_err("a version-22 capture must not restore");
     assert!(
         matches!(
@@ -802,7 +815,7 @@ fn a_predecessor_v22_capture_is_refused_by_its_version_before_anything_is_restor
 
 /// A leaf-bearing hydration plus a distinct live target, so a rejected
 /// restore can be checked for having changed nothing.
-fn leaf_bearing_hydration_and_live_target()
+async fn leaf_bearing_hydration_and_live_target()
 -> (lash_core::plugin::HydratedExecutionState, RlmExecutionState) {
     let mut source = RlmExecutionState::new();
     source
@@ -812,11 +825,13 @@ fn leaf_bearing_hydration_and_live_target()
             "kept".to_string(),
             FlowValue::List(vec![FlowValue::String("source".repeat(2048).into())].into()),
         )
+        .await
         .expect("seed a global");
     source.mark_execution_started();
     let hydration = hydrate(
         source
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("source snapshot"),
     );
     assert!(
@@ -828,6 +843,7 @@ fn leaf_bearing_hydration_and_live_target()
     live.vm
         .state_mut()
         .insert_global("live".to_string(), FlowValue::String("untouched".into()))
+        .await
         .expect("seed a global");
     live.mark_execution_started();
     (hydration, live)
@@ -845,9 +861,9 @@ fn assert_live_state_untouched(live: &RlmExecutionState) {
     );
 }
 
-#[test]
-fn restore_rejects_a_hydration_that_omits_a_referenced_leaf() {
-    let (hydration, mut live) = leaf_bearing_hydration_and_live_target();
+#[tokio::test]
+async fn restore_rejects_a_hydration_that_omits_a_referenced_leaf() {
+    let (hydration, mut live) = leaf_bearing_hydration_and_live_target().await;
     let dropped = hydration
         .components
         .keys()
@@ -859,6 +875,7 @@ fn restore_rejects_a_hydration_that_omits_a_referenced_leaf() {
 
     let error = live
         .restore_execution_state(&tampered, lash_core::FleetFormat::current())
+        .await
         .expect_err("a root referencing an unsupplied leaf must be rejected");
 
     match &error {
@@ -873,12 +890,13 @@ fn restore_rejects_a_hydration_that_omits_a_referenced_leaf() {
     }
     assert_live_state_untouched(&live);
     live.restore_execution_state(&hydration, lash_core::FleetFormat::current())
+        .await
         .expect("the untampered hydration still restores");
 }
 
-#[test]
-fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
-    let (hydration, mut live) = leaf_bearing_hydration_and_live_target();
+#[tokio::test]
+async fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
+    let (hydration, mut live) = leaf_bearing_hydration_and_live_target().await;
     let key = hydration
         .components
         .keys()
@@ -892,6 +910,7 @@ fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
 
     let error = live
         .restore_execution_state(&tampered, lash_core::FleetFormat::current())
+        .await
         .expect_err("a leaf body that is not its own content address must be rejected");
 
     match &error {
@@ -907,12 +926,13 @@ fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
     }
     assert_live_state_untouched(&live);
     live.restore_execution_state(&hydration, lash_core::FleetFormat::current())
+        .await
         .expect("the untampered hydration still restores");
 }
 
-#[test]
-fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
-    let (hydration, mut live) = leaf_bearing_hydration_and_live_target();
+#[tokio::test]
+async fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
+    let (hydration, mut live) = leaf_bearing_hydration_and_live_target().await;
     let surplus = leaf_component_key(b"orphan");
     let mut tampered = hydration.clone();
     tampered
@@ -921,6 +941,7 @@ fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
 
     let error = live
         .restore_execution_state(&tampered, lash_core::FleetFormat::current())
+        .await
         .expect_err("an orphan leaf must be rejected rather than silently ignored");
 
     match &error {
@@ -935,6 +956,7 @@ fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
     }
     assert_live_state_untouched(&live);
     live.restore_execution_state(&hydration, lash_core::FleetFormat::current())
+        .await
         .expect("the untampered hydration still restores");
 }
 
@@ -958,8 +980,8 @@ fn resolving_an_absent_leaf_is_a_typed_missing_leaf_rejection() {
     ));
 }
 
-#[test]
-fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
+#[tokio::test]
+async fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
     let mut state = RlmExecutionState::new();
     state
         .vm
@@ -968,10 +990,12 @@ fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
             "large".to_string(),
             FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
         )
+        .await
         .expect("seed a global");
     state.mark_execution_started();
     let first = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("first capture");
     assert!(first.components.values().any(|component| matches!(
         component,
@@ -981,6 +1005,7 @@ fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
     state.abort_execution_state_capture();
     let retry = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("retry capture");
     assert!(retry.components.values().any(|component| matches!(
         component,
@@ -991,8 +1016,8 @@ fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[test]
-fn includes_globals_excludes_history_and_named() {
+#[tokio::test]
+async fn includes_globals_excludes_history_and_named() {
     let mut state = RlmExecutionState::new();
     let mut set_default = serde_json::Map::new();
     set_default.insert("inventory".to_string(), json!(["lantern"]));
@@ -1002,6 +1027,7 @@ fn includes_globals_excludes_history_and_named() {
             &lash_rlm_types::RlmGlobalsPatchPluginBody { set_default },
             &BTreeSet::new(),
         )
+        .await
         .unwrap();
 
     let exclude: BTreeSet<String> = ["secret".to_string()].into_iter().collect();
@@ -1017,8 +1043,8 @@ fn includes_globals_excludes_history_and_named() {
     );
 }
 
-#[test]
-fn excludes_direct_projected_globals() {
+#[tokio::test]
+async fn excludes_direct_projected_globals() {
     let mut state = RlmExecutionState::new();
     state
         .vm
@@ -1030,11 +1056,13 @@ fn excludes_direct_projected_globals() {
                 FlowValue::String("host".into()),
             )),
         )
+        .await
         .expect("seed a global");
     state
         .vm
         .state_mut()
         .insert_global("plain".to_string(), FlowValue::String("local".into()))
+        .await
         .expect("seed a global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
@@ -1049,8 +1077,8 @@ fn excludes_direct_projected_globals() {
     );
 }
 
-#[test]
-fn excludes_top_level_globals_containing_nested_projected_values() {
+#[tokio::test]
+async fn excludes_top_level_globals_containing_nested_projected_values() {
     let mut state = RlmExecutionState::new();
     let mut record = FlowRecord::new();
     record.insert(
@@ -1065,6 +1093,7 @@ fn excludes_top_level_globals_containing_nested_projected_values() {
         .vm
         .state_mut()
         .insert_global("doc".to_string(), FlowValue::Record(Arc::new(record)))
+        .await
         .expect("seed a global");
     state
         .vm
@@ -1073,6 +1102,7 @@ fn excludes_top_level_globals_containing_nested_projected_values() {
             "plain".to_string(),
             FlowValue::List(vec![FlowValue::Number(1.0)].into()),
         )
+        .await
         .expect("seed a global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
@@ -1109,8 +1139,8 @@ impl ProjectedHostDescriptor for CountingProjectedValue {
     }
 }
 
-#[test]
-fn excludes_custom_projected_globals_without_rendering_or_materializing() {
+#[tokio::test]
+async fn excludes_custom_projected_globals_without_rendering_or_materializing() {
     let projected = Arc::new(CountingProjectedValue::default());
     let mut state = RlmExecutionState::new();
     state
@@ -1120,6 +1150,7 @@ fn excludes_custom_projected_globals_without_rendering_or_materializing() {
             "projected".to_string(),
             FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
         )
+        .await
         .expect("seed a global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
@@ -1129,8 +1160,8 @@ fn excludes_custom_projected_globals_without_rendering_or_materializing() {
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn the_dialect_pins_snapshot_engine_id() {
+#[tokio::test]
+async fn the_dialect_pins_snapshot_engine_id() {
     let dialect = SessionDialect::new(
         std::sync::Arc::new(crate::dialect::TypescriptDialect),
         lash_lashlang_runtime::LashlangSurface::default(),
@@ -1149,6 +1180,7 @@ fn the_dialect_pins_snapshot_engine_id() {
     let mut session = dialect.create_session();
     let snapshot = session
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("snapshot the session");
     let root: RlmSnapshotRoot =
         rmp_serde::from_slice(snapshot.root.as_deref().expect("fresh snapshot has a root"))

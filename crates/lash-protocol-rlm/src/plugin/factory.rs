@@ -301,12 +301,12 @@ impl RlmProtocolPluginFactory {
         })
     }
 
-    /// Compile a Lashlang module against the compile-time surface without I/O.
+    /// Compile a Lashlang module against the compile-time surface in a worker.
     #[allow(
         clippy::result_large_err,
         reason = "boxing LashlangModuleCompileError would change this public compile API"
     )]
-    pub fn compile_lashlang_module(
+    pub async fn compile_lashlang_module(
         &self,
         plugin_host: &PluginHost,
         process_lifecycle_available: bool,
@@ -321,28 +321,23 @@ impl RlmProtocolPluginFactory {
                     execution_env_spec: request.execution_env_spec,
                 },
             )
-            .map_err(|err| {
-                lashlang::ModuleCompileError::Link(lashlang::ModuleCompileDiagnostic {
-                    message: err.to_string(),
-                    span: None,
-                    diagnostic: Some(err.to_string()),
-                })
-            })?;
+            .map_err(LashlangModuleCompileError::Surface)?;
         match self
             .workers
-            .request(lash_vm_client::service::Request::CompileModule {
+            .request_accounted(lash_vm_client::service::Request::CompileModule {
                 source: request.source,
                 environment: surface.host_environment,
                 cell: false,
-            }) {
-            Ok(lash_vm_client::service::Response::Module(module)) => Ok(*module),
-            Ok(lash_vm_client::service::Response::CompileRefused { error, .. }) => Err(error),
-            result => Err(lashlang::ModuleCompileError::Link(
-                lashlang::ModuleCompileDiagnostic {
-                    message: format!("worker compilation failed: {result:?}"),
-                    span: None,
-                    diagnostic: None,
-                },
+            })
+            .await
+            .map_err(LashlangModuleCompileError::Worker)?
+        {
+            lash_vm_client::service::Response::Module(module) => Ok(*module),
+            lash_vm_client::service::Response::CompileRefused { error, .. } => Err(error.into()),
+            _ => Err(LashlangModuleCompileError::Worker(
+                lash_vm_client::PoolError::breach(
+                    lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+                ),
             )),
         }
     }
@@ -583,7 +578,16 @@ pub struct LashlangCompileSurface {
     pub surface: LashlangSurface,
 }
 
-pub type LashlangModuleCompileError = lashlang::ModuleCompileError;
+/// A compile diagnostic, worker fault, or failure to assemble the host surface.
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum LashlangModuleCompileError {
+    #[error(transparent)]
+    Compile(#[from] lashlang::ModuleCompileError),
+    #[error(transparent)]
+    Worker(lash_vm_client::PoolError),
+    #[error(transparent)]
+    Surface(PluginError),
+}
 pub type ModuleCompileOutput = lash_vm_client::service::CompiledModule;
 
 struct RlmProtocolPlugin {
@@ -702,9 +706,13 @@ mod label_annotation_tests {
                     ),
                 ),
             )
+            .await
             .expect_err("invalid typescript must fail to parse");
 
-        let lashlang::ModuleCompileError::Parse(diagnostic) = err else {
+        let super::LashlangModuleCompileError::Compile(lashlang::ModuleCompileError::Parse(
+            diagnostic,
+        )) = err
+        else {
             panic!("expected parse error");
         };
         let span = diagnostic.span.expect("parse failure carries a span");

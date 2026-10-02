@@ -203,11 +203,12 @@ async fn start_request(
         lashlang::LashlangAbilities::all(),
     );
     let linked = match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::CompileModule {
+        .request_accounted(lash_vm_client::service::Request::CompileModule {
             source: SIGNAL_WAITING_PROCESS.into(),
             environment,
             cell: false,
         })
+        .await
         .map_err(|error| anyhow!("compile the signal-waiting process: {error}"))?
     {
         lash_vm_client::service::Response::Module(module) => module,

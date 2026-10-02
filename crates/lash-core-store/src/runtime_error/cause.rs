@@ -6,12 +6,16 @@ use crate::SessionId;
 /// Typed cause retained when a controller-owned runtime effect must abort
 /// through the generic runtime error boundary.
 ///
-/// An attachment retention cause keeps the attachment store's retry class.
+/// Attachment retention and worker causes keep their source's retry class.
 /// Other causes are terminal except for an unavailable recorded model.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// A typed worker failure retained through protocol and host errors.
+    VmWorker {
+        outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
+    },
     /// The attachment-store family and structured source of a required retention failure.
     AttachmentRetention {
         failure: Box<super::AttachmentRetentionFailure>,

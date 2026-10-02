@@ -895,6 +895,7 @@ finish(value);
                 ),
             ),
         )
+        .await
         .expect("compile module through the RLM factory");
     artifact_store
         .publish_module_artifact(

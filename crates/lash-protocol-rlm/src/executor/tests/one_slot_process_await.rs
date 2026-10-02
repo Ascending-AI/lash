@@ -178,10 +178,11 @@ async fn published_definition_fixture(
     let workers = lash_vm_client::service::Service::new(config)
         .with_recovery_store(table.backend().worker_recovery());
     let Response::Definition(created) = workers
-        .request(Request::CreateDefinition {
+        .request_accounted(Request::CreateDefinition {
             source: "const answer = async (): Promise<number> => { return 42; };".into(),
             environment: lashlang::LashlangHostEnvironment::default(),
         })
+        .await
         .expect("compile the definition")
     else {
         panic!("a compiled definition");
@@ -322,5 +323,149 @@ async fn artifact_checkout_timeout_crosses_the_plugin_boundary_as_a_retryable_fa
     assert_eq!(
         runtime.turn_failure_cause(),
         lash_core::TurnFailureCause::LiveFault
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn saturated_process_create_retries_without_recording_a_tool_refusal() {
+    struct CreateAttemptProbe {
+        inner: Arc<dyn lash_core::ToolProvider>,
+        held: Arc<Mutex<Option<lash_vm_client::Checkout>>>,
+        outcomes: Arc<Mutex<Vec<(bool, bool)>>>,
+    }
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for CreateAttemptProbe {
+        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+            self.inner.tool_manifests()
+        }
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+            self.inner.resolve_contract(name)
+        }
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            let outcome = self.inner.execute(call).await;
+            self.outcomes.lock().expect("attempt observations").push((
+                matches!(&outcome, lash_core::ToolAttemptOutcome::Done { .. }),
+                matches!(&outcome, lash_core::ToolAttemptOutcome::Pending(_)),
+            ));
+            if let Some(held) = self.held.lock().expect("held slot").take() {
+                held.release().expect("release before the engine retry");
+            }
+            outcome
+        }
+    }
+
+    let table = crate::testing::DoubleProcesses::new(0x4707_0002).await;
+    let backend = table.backend().clone();
+    let mut config = one_slot_workers(&backend).config().clone();
+    config.deadlines.checkout = std::time::Duration::from_millis(100);
+    let workers = lash_vm_client::service::Service::new(config)
+        .with_recovery_store(backend.worker_recovery());
+    let held = Arc::new(Mutex::new(Some(held_worker(&workers))));
+    let outcomes = Arc::new(Mutex::new(Vec::new()));
+    let outputs = Arc::new(Mutex::new(Vec::new()));
+    let definition = lash_lashlang_runtime::process_create_tool_definition();
+    let provider: Arc<dyn lash_core::ToolProvider> = Arc::new(CreateAttemptProbe {
+        inner: Arc::new(lash_lashlang_runtime::process_create_tool_provider(
+            "typescript",
+            LashlangSurface::default(),
+            workers.clone(),
+        )),
+        held,
+        outcomes: Arc::clone(&outcomes),
+    });
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![definition.clone()]);
+    let engines = definition_engines(
+        &table,
+        &workers,
+        lashlang::LashlangArtifacts::new(backend.module_artifacts()),
+    )
+    .with_artifact_ports(lash_core::ArtifactReferrerPorts::of_backend(&backend));
+    let invocation = lash_core::testing::exec_code_invocation(
+        "test-session",
+        "create-retry",
+        0,
+        0,
+        "cell",
+        "create-retry",
+    );
+    let attempt: lash_restate_test::HandlerAttempt = {
+        let outputs = Arc::clone(&outputs);
+        Arc::new(move |scoped| {
+            let ctx = lash_core::testing::TestExecutionContextBuilder::new(
+                crate::testing::attempt_ports(&backend, scoped),
+            )
+            .provider(Arc::clone(&provider))
+            .tool_catalog(catalog.clone())
+            .process_engines(engines.clone())
+            .runtime_parent_invocation(invocation.clone())
+            .build()
+            .into_runtime();
+            let outputs = Arc::clone(&outputs);
+            let tool_id = definition.manifest.id.clone();
+            Box::pin(async move {
+                let reply = ctx.call_command_tool(
+                    &lash_core::CommandReplayKey::new("create-process"),
+                    lash_core::facade_support::ToolInvocation::new(
+                        lash_core::ToolCallId::fixture("create-process"), tool_id,
+                        serde_json::json!({
+                            "source": "const answer = async (): Promise<number> => { return 42; };",
+                            "dialect": "typescript",
+                        }),
+                    ),
+                ).await;
+                assert!(ctx.take_nested_effect_error().is_none());
+                outputs
+                    .lock()
+                    .expect("tool observations")
+                    .push(reply.output);
+            })
+        })
+    };
+    table
+        .double()
+        .run_in_handler(
+            lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from("test-session"),
+                lash_core::TurnId::from("create-retry"),
+            ),
+            attempt,
+        )
+        .await
+        .expect("the engine retries the saturated attempt");
+    assert_eq!(
+        *outcomes.lock().expect("attempt observations"),
+        vec![(false, false), (true, false)],
+        "the saturated host attempt is retried before any completed result",
+    );
+    let outputs = outputs.lock().expect("tool observations");
+    assert!(!outputs.is_empty());
+    assert!(
+        outputs.iter().all(lash_core::ToolCallOutput::is_success),
+        "{outputs:?}"
+    );
+    let view = table
+        .double()
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|view| view.target.starts_with("LashTestHandlerHost/"))
+        .expect("the create handler ran");
+    assert_eq!(view.status, "completed");
+    assert_eq!(
+        view.retry_count, 1,
+        "pool saturation retries the engine attempt"
+    );
+    let journal = table
+        .double()
+        .server()
+        .journal(&view.id)
+        .expect("handler journal");
+    let fault = lash_vm_client::PoolError::CheckoutTimedOut.to_string();
+    assert!(
+        journal.iter().all(|entry| !entry
+            .payload
+            .windows(fault.len())
+            .any(|window| window == fault.as_bytes())),
+        "the journal holds no tool refusal: {journal:?}"
     );
 }

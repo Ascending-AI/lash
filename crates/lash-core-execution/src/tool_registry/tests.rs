@@ -115,6 +115,7 @@ fn leaf_outcome(outcome: crate::ToolAttemptOutcome) -> ToolOutcome {
             );
             ToolOutcome::from_output(result.into_output())
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => panic!("unexpected host fault: {error}"),
         crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     }
 }

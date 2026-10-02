@@ -12,6 +12,7 @@ impl RuntimeErrorCause {
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         match self {
+            Self::VmWorker { outcome } => !outcome.is_retryable(),
             Self::ModelUnavailable { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::IngressReservedSourceKey { .. }

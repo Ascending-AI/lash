@@ -189,11 +189,12 @@ pub(crate) async fn publish_process(
         lashlang::LashlangAbilities::default().with_sleep(),
     );
     let linked = match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::LinkAst {
+        .request_accounted(lash_vm_client::service::Request::LinkAst {
             source: String::new(),
             program,
             environment,
         })
+        .await
         .map_err(|error| format!("link the process: {error}"))?
     {
         lash_vm_client::service::Response::Module(module) => module,

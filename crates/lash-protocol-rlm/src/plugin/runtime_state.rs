@@ -172,8 +172,10 @@ impl RlmRuntimeState {
         *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) = snapshot {
-            execution.restore_execution_state(&snapshot, fleet_format)?;
-            execution.prune_protected_globals(&protected_names)?;
+            execution
+                .restore_execution_state(&snapshot, fleet_format)
+                .await?;
+            execution.prune_protected_globals(&protected_names).await?;
         }
         for event in &state.active_events {
             if let SessionHistoryRecord::Protocol(event) = event
@@ -193,7 +195,7 @@ impl RlmRuntimeState {
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
         let protected_names = self.protected_projected_binding_names().await;
-        execution.prune_protected_globals(&protected_names)?;
+        execution.prune_protected_globals(&protected_names).await?;
         for node in nodes {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
                 && let Some(event) = decode_rlm_protocol_event(event)
@@ -237,6 +239,7 @@ impl RlmRuntimeState {
             .lock()
             .await
             .snapshot_execution_state(fleet_format)
+            .await
     }
 
     pub(crate) async fn probe_execution_state_capture(
@@ -247,6 +250,7 @@ impl RlmRuntimeState {
             .lock()
             .await
             .probe_execution_state_capture(fleet_format)
+            .await
     }
 
     pub(crate) async fn hydrated_execution_state(
@@ -257,6 +261,7 @@ impl RlmRuntimeState {
             .lock()
             .await
             .hydrated_execution_state(fleet_format)
+            .await
             .map(Some)
     }
 
@@ -288,6 +293,7 @@ impl RlmRuntimeState {
             .lock()
             .await
             .restore_execution_state(state, fleet_format)
+            .await
     }
 
     async fn apply_seed_or_globals_event(
@@ -298,7 +304,7 @@ impl RlmRuntimeState {
     ) -> Result<(), SessionError> {
         match event {
             RlmProtocolEvent::RlmGlobalsPatch(patch) => {
-                execution.patch_globals(&patch, protected_names)?;
+                execution.patch_globals(&patch, protected_names).await?;
             }
             RlmProtocolEvent::RlmSeed(seed) => {
                 let mut protected_names = protected_names.clone();
@@ -307,12 +313,14 @@ impl RlmRuntimeState {
                     protected_names = self.protected_projected_binding_names().await;
                 }
                 if !seed.globals.is_empty() {
-                    execution.patch_globals(
-                        &RlmGlobalsPatchPluginBody {
-                            set_default: seed.globals,
-                        },
-                        &protected_names,
-                    )?;
+                    execution
+                        .patch_globals(
+                            &RlmGlobalsPatchPluginBody {
+                                set_default: seed.globals,
+                            },
+                            &protected_names,
+                        )
+                        .await?;
                 }
             }
             RlmProtocolEvent::RlmAssistantContent(_)

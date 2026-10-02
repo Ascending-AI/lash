@@ -158,6 +158,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
     );
     let snapshot = state
         .snapshot_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("capture container state");
     let components = snapshot
         .components
@@ -177,6 +178,7 @@ async fn control_round_trip(storage: &str, access: &str, suspension: &str) {
     let mut restored = RlmExecutionState::for_engine("typescript");
     restored
         .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .await
         .expect("restore container state");
     let joined = execute_code_with_test_render(
         &mut restored,

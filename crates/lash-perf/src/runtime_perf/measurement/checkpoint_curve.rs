@@ -199,8 +199,9 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             &artifacts_backend,
             point.component_count,
             point.transcript_bytes,
-        )?;
-        let initial_snapshot = fixture.capture()?;
+        )
+        .await?;
+        let initial_snapshot = fixture.capture().await?;
         let initial_shape = CheckpointArtifactShape::from_snapshot(&initial_snapshot);
         if initial_shape.manifest_count != point.component_count as u64 + 1 {
             anyhow::bail!(
@@ -263,7 +264,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                         sample,
                     )
                     .await?;
-                    fixture.fixture.capture().map_err(anyhow::Error::from)
+                    fixture.fixture.capture().await.map_err(anyhow::Error::from)
                 },
             ))
             .await?;
@@ -329,6 +330,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                         &lash_protocol_rlm::TypescriptDialect,
                         &execution_state,
                     )
+                    .await
                     .map_err(anyhow::Error::from)?;
                     Ok(loaded_state)
                 })

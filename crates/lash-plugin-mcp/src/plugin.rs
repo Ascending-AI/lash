@@ -313,6 +313,9 @@ mod tests {
                 assert!(intents.is_empty(), "deferred MCP declares no intents");
                 ToolOutcome::from_output(result.into_output())
             }
+            lash_core::ToolAttemptOutcome::HostFailed(error) => {
+                panic!("unexpected host fault: {error}")
+            }
             lash_core::ToolAttemptOutcome::Pending(pending) => {
                 ToolOutcome::Pending(Box::new(pending))
             }

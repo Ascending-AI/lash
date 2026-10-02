@@ -71,7 +71,7 @@ async fn publish_definition(world: &CrashWorld) -> Result<Published, String> {
         Vec::new(),
     );
     let response = lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::LinkAst {
+        .request_accounted(lash_vm_client::service::Request::LinkAst {
             source: String::new(),
             program,
             environment: lashlang::LashlangHostEnvironment::new(
@@ -79,6 +79,7 @@ async fn publish_definition(world: &CrashWorld) -> Result<Published, String> {
                 lashlang::LashlangAbilities::default(),
             ),
         })
+        .await
         .map_err(|error| format!("link the process: {error:?}"))?;
     let lash_vm_client::service::Response::Module(linked) = response else {
         return Err(format!("worker refused the process: {response:?}"));

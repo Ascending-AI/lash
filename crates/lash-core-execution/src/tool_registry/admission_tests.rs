@@ -335,6 +335,7 @@ async fn execute_leaf_by_id(
             );
             ToolOutcome::from_output(result.into_output())
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => panic!("unexpected host fault: {error}"),
         crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     }
 }

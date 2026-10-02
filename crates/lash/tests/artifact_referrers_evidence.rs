@@ -79,9 +79,10 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics() {
             generation
         );
         let verification = lash_vm_client::service::Service::default()
-            .request(lash_vm_client::service::Request::VerifyArtifact {
+            .request_accounted(lash_vm_client::service::Request::VerifyArtifact {
                 bytes: bytes.clone(),
             })
+            .await
             .unwrap();
         let wire = rmp_serde::to_vec_named(&verification).unwrap();
         let replay: lash_vm_client::service::Response = rmp_serde::from_slice(&wire).unwrap();

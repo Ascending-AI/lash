@@ -131,11 +131,11 @@ fn strip_carve_outs(text: &str) -> String {
     text
 }
 
-fn assembled_prompt_fragments(dialect: &SessionDialect) -> Vec<(&'static str, String)> {
-    assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs"))
+async fn assembled_prompt_fragments(dialect: &SessionDialect) -> Vec<(&'static str, String)> {
+    assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs")).await
 }
 
-fn assembled_prompt_fragments_with_projection(
+async fn assembled_prompt_fragments_with_projection(
     dialect: &SessionDialect,
     projected_value: serde_json::Value,
 ) -> Vec<(&'static str, String)> {
@@ -330,6 +330,7 @@ fn assembled_prompt_fragments_with_projection(
             },
             &std::collections::BTreeSet::new(),
         )
+        .await
         .expect("seed one bound variable");
     fragments.push((
         "bound variables",
@@ -452,11 +453,11 @@ fn assembled_prompt_fragments_with_projection(
     fragments
 }
 
-#[test]
-fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
+#[tokio::test]
+async fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
     let dialect = crate::dialect::typescript_test_dialect();
     let mut violations = Vec::new();
-    for (name, fragment) in assembled_prompt_fragments(&dialect) {
+    for (name, fragment) in assembled_prompt_fragments(&dialect).await {
         let haystack = strip_carve_outs(&fragment).to_lowercase();
         for marker in RETIRED_SURFACE_MARKERS {
             if haystack.contains(&marker.to_lowercase()) {
@@ -616,9 +617,10 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
 /// FIG-2750 supersedes exhaustive syntax teaching with a compact library list.
 // FIG-2750: ordinary TypeScript syntax is learned from diagnostics; only the
 // supported library families and host execution rules belong in the prompt.
-#[test]
-fn typescript_teaches_library_families_without_exhaustive_inventory() {
+#[tokio::test]
+async fn typescript_teaches_library_families_without_exhaustive_inventory() {
     let prompt = assembled_prompt_fragments(&crate::dialect::typescript_test_dialect())
+        .await
         .into_iter()
         .map(|(_, text)| text)
         .collect::<Vec<_>>()
@@ -633,8 +635,8 @@ fn typescript_teaches_library_families_without_exhaustive_inventory() {
     assert!(!prompt.contains("### Deterministic standard library"));
 }
 
-#[test]
-fn composed_typescript_prompt_has_no_markdown_fences() {
+#[tokio::test]
+async fn composed_typescript_prompt_has_no_markdown_fences() {
     let mut resources = ::lashlang::LashlangHostCatalog::new();
     resources
         .add_trigger_source_constructor(
@@ -669,7 +671,9 @@ fn composed_typescript_prompt_has_no_markdown_fences() {
     for (name, fragment) in assembled_prompt_fragments_with_projection(
         &dialect,
         serde_json::json!({"path": "src/lib.rs", "lines": [1, 2]}),
-    ) {
+    )
+    .await
+    {
         if name == "execution section" {
             assert!(fragment.contains("type cron_Tick ="));
             assert!(fragment.contains("cron.Schedule(input:"));

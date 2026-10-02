@@ -135,6 +135,7 @@ async fn execute_leaf_by_id(
             );
             ToolOutcome::from_output(result.into_output())
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => panic!("unexpected host fault: {error}"),
         crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     }
 }
@@ -436,6 +437,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
             );
             ToolOutcome::from_output(result.into_output())
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => panic!("unexpected host fault: {error}"),
         crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     };
     assert_eq!(
@@ -467,6 +469,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
             );
             ToolOutcome::from_output(result.into_output())
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => panic!("unexpected host fault: {error}"),
         crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     };
     assert_eq!(

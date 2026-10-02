@@ -152,6 +152,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
                 env_spec,
             ),
         )
+        .await
         .expect("module compiles against the session-contributed surface");
     factory
         .artifact_store()

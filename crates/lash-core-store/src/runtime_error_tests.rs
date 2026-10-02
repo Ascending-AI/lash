@@ -37,6 +37,7 @@ first_party_codes! {
         Self::DefinitionMissing,
         Self::DefinitionRefused,
         Self::WorkerCheckoutTimedOut,
+        Self::VmWorkerFailed,
         Self::EffectPanicked,
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,

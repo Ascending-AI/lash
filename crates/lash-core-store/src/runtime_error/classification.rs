@@ -82,6 +82,7 @@ impl RuntimeErrorCode {
             Self::DefinitionRefused => Terminal,
             // a worker becomes available without changing the operation.
             Self::WorkerCheckoutTimedOut => Retryable,
+            Self::VmWorkerFailed => Retryable,
             // a contained panic of the effect body; the same body panics the same way.
             Self::EffectPanicked => Terminal,
             // the effect names no execution scope; wiring, not the attempt.

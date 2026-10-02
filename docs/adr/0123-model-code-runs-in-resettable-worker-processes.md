@@ -332,6 +332,13 @@ process count, deadlines, cumulative CPU and replacement attempts. Clean
 release resets the worker; a crash, protocol failure or exhausted limit
 discards it. Pool accounting stays parent-owned across redrive.
 
+Async compiler and guest-state callers use `ServiceRuntimeOps::request_accounted`.
+It checkpoints worker accounting around a blocking-pool task; the synchronous
+checkout and framed exchange are private to that seam. Cold pool creation also
+runs on the blocking pool. Pool saturation remains a typed host failure across
+plugin and tool-attempt boundaries, so the engine retries or parks the attempt
+without recording a tool refusal. Guest compile refusals remain tool results.
+
 This provides crash containment, rather than an OS sandbox. Lash installs no
 namespaces, seccomp, Landlock or cgroups. A native VM escape has the worker
 user's OS access. Both adapters run model code through this process boundary.

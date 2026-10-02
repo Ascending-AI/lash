@@ -45,6 +45,8 @@ pub enum RuntimeErrorCode {
     /// This host could not obtain a worker before the checkout deadline.
     /// No guest or definition verdict was produced; the attempt can retry.
     WorkerCheckoutTimedOut,
+    /// A worker fault whose typed cause distinguishes a retry from a run refusal.
+    VmWorkerFailed,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -695,6 +697,7 @@ impl RuntimeErrorCode {
             Self::DefinitionMissing => "definition_missing",
             Self::DefinitionRefused => "definition_refused",
             Self::WorkerCheckoutTimedOut => "worker_checkout_timed_out",
+            Self::VmWorkerFailed => "vm_worker_failed",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -978,6 +981,7 @@ impl RuntimeErrorCode {
             "definition_missing" => Self::DefinitionMissing,
             "definition_refused" => Self::DefinitionRefused,
             "worker_checkout_timed_out" => Self::WorkerCheckoutTimedOut,
+            "vm_worker_failed" => Self::VmWorkerFailed,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
@@ -1500,7 +1504,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&str> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::ArtifactReferrerEnded { .. }
+            RuntimeErrorCause::VmWorker { .. }
+            | RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::ModelUnavailable { .. }
@@ -1742,7 +1747,9 @@ impl RuntimeEffectControllerError {
     /// ([`Self::turn_cancel_watch_lost`]): that fault is about the attempt,
     /// never the step. A model call and a direct completion consume it for
     /// one more fault alone: the recorded model this worker could not bind
-    /// before the call ([`Self::model_unavailable`], FIG-4404).
+    /// before the call ([`Self::model_unavailable`], FIG-4404). A tool attempt
+    /// also consumes local retry authority for a typed VM worker fault
+    /// encountered before its pure derivation returned (FIG-4707).
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalPolicy {
         // The public cause can be attached after retry authority was granted.
         // No effect kind may consume that authority for a terminal refusal.
@@ -1771,6 +1778,13 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
             || self.is_unbound_model_call(kind)
+            || matches!(
+                (kind, self.cause.as_ref()),
+                (
+                    RuntimeEffectKind::ToolAttempt,
+                    Some(RuntimeErrorCause::VmWorker { .. })
+                )
+            )
         {
             self.journal_disposition
         } else {

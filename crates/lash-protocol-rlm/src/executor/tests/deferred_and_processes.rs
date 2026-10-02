@@ -530,11 +530,13 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
         let snapshot = hydrate_snapshot(
             state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
                 .expect("snapshot components"),
         );
         let mut restored = RlmExecutionState::new();
         restored
             .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+            .await
             .expect("restore");
 
         assert!(

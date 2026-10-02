@@ -2268,6 +2268,7 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "lash-internal-vm-protocol",
  "proptest",
  "rmp-serde",
  "schemars 1.2.2",

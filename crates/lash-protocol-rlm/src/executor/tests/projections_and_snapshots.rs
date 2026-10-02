@@ -62,6 +62,7 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
                 &lash_rlm_types::RlmGlobalsPatchPluginBody { set_default },
                 &BTreeSet::new(),
             )
+            .await
             .expect("patch diary");
 
         let projected = projected_history(vec![FlowValue::String("hello".into())]);
@@ -69,6 +70,7 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
             ("history_len", b::builtin("len", vec![b::var("history")])),
             ("diary_len", b::builtin("len", vec![b::var("diary")])),
         ]))
+        .await
         .expect("compile");
         let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
@@ -92,6 +94,7 @@ pub(super) fn projected_history_defaults_to_empty_list_when_missing() {
             "history_len",
             b::builtin("len", vec![b::var("history")]),
         )]))
+        .await
         .expect("compile");
         let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
@@ -103,8 +106,8 @@ pub(super) fn projected_history_defaults_to_empty_list_when_missing() {
     });
 }
 
-#[test]
-pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals() {
+#[tokio::test]
+pub(super) async fn set_default_initializes_once_and_does_not_mutate_projected_globals() {
     let mut state = RlmExecutionState::new();
     let projected = BTreeSet::from_iter(["current_query".to_string()]);
 
@@ -118,6 +121,7 @@ pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals
             },
             &projected,
         )
+        .await
         .expect("apply defaults");
     assert_eq!(
         state.vm.state().globals().get("diary"),
@@ -137,6 +141,7 @@ pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals
             },
             &projected,
         )
+        .await
         .expect("reapply defaults");
     assert_eq!(
         state.vm.state().globals().get("diary"),
@@ -151,7 +156,9 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = worker_compile_program(&seed_nested_one()).expect("compile setup");
+        let setup = worker_compile_program(&seed_nested_one())
+            .await
+            .expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
@@ -165,9 +172,11 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
                 },
                 &BTreeSet::new(),
             )
+            .await
             .expect("patch heap-backed state");
 
         let finish = worker_compile_program(&b::program(vec![b::finish(b::var("diary"))]))
+            .await
             .expect("compile finish");
         assert_eq!(
             execute_with_projected(&finish, state.vm.state_mut(), &projected)
@@ -204,7 +213,9 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = worker_compile_program(&seed_nested_one()).expect("compile setup");
+        let setup = worker_compile_program(&seed_nested_one())
+            .await
+            .expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
@@ -230,6 +241,7 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
                 },
                 &BTreeSet::new(),
             )
+            .await
             .expect_err("a reserved name must reject the whole patch");
         assert!(error.to_string().contains("history"));
 
@@ -259,6 +271,7 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
             "seed",
             b::list(vec![b::num(1.0)]),
         )]))
+        .await
         .expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
@@ -281,6 +294,7 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
                 },
                 &protected,
             )
+            .await
             .expect_err("a protected name must reject the whole patch");
 
         assert_eq!(
@@ -308,6 +322,7 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
                 )])]),
             ),
         ]))
+        .await
         .expect("compile setup");
         let mut state = lashlang::State::new();
         execute_with_projected(&setup, &mut state, &ProjectedBindings::new())
@@ -345,6 +360,7 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
             ("doc", b::var("doc")),
             ("kept", b::var("kept")),
         ]))
+        .await
         .expect("compile post-patch read");
         let expected =
             ExecutionOutcome::Finished(FlowValue::Record(Arc::new(FlowRecord::from_iter([
@@ -392,7 +408,7 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
 /// A restored session whose `healthy` and `dead` globals decode as the
 /// unavailable placeholders a snapshot leaves for projected values
 /// (FIG-2865), plus one ordinary binding.
-pub(super) fn restored_projection_placeholder_fixture() -> RlmExecutionState {
+pub(super) async fn restored_projection_placeholder_fixture() -> RlmExecutionState {
     let descriptor = Arc::new(SnapshotProjectedToolText::default());
     let mut source = RlmExecutionState::new();
     for name in ["healthy", "dead"] {
@@ -403,21 +419,25 @@ pub(super) fn restored_projection_placeholder_fixture() -> RlmExecutionState {
                 name.to_string(),
                 FlowValue::Projected(ProjectedValue::custom(name, descriptor.clone())),
             )
+            .await
             .expect("insert projected global");
     }
     source
         .vm
         .state_mut()
         .insert_global("ordinary".to_string(), FlowValue::String("kept".into()))
+        .await
         .expect("insert ordinary global");
     let snapshot = hydrate_snapshot(
         source
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("snapshot projected globals"),
     );
     let mut restored = RlmExecutionState::new();
     restored
         .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+        .await
         .expect("restore projected globals as placeholders");
     restored
 }
@@ -425,7 +445,7 @@ pub(super) fn restored_projection_placeholder_fixture() -> RlmExecutionState {
 #[test]
 pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_serves() {
     block_on(async {
-        let mut state = restored_projection_placeholder_fixture();
+        let mut state = restored_projection_placeholder_fixture().await;
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let handler = double
@@ -478,8 +498,8 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
     });
 }
 
-#[test]
-pub(super) fn set_default_rejects_projected_host_bindings() {
+#[tokio::test]
+pub(super) async fn set_default_rejects_projected_host_bindings() {
     let mut state = RlmExecutionState::new();
     let projected = BTreeSet::from_iter(["current_query".to_string()]);
 
@@ -493,6 +513,7 @@ pub(super) fn set_default_rejects_projected_host_bindings() {
             },
             &projected,
         )
+        .await
         .expect_err("projected default should fail");
     assert!(err.to_string().contains("read-only projected host binding"));
 
@@ -506,6 +527,7 @@ pub(super) fn set_default_rejects_projected_host_bindings() {
             },
             &BTreeSet::new(),
         )
+        .await
         .expect_err("history default should fail");
     assert!(err.to_string().contains("read-only projected host binding"));
 }
@@ -524,6 +546,7 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             ("chars", b::builtin("len", vec![b::var("current_query")])),
             ("value", b::var("current_query")),
         ]))
+        .await
         .expect("compile read");
         let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
@@ -539,6 +562,7 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             "current_query",
             b::string("local"),
         )]))
+        .await
         .expect("compile write");
         let env = ExecutionEnvironment::new(&NoopHost)
             .traced()
@@ -558,8 +582,8 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
     });
 }
 
-#[test]
-pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globals() {
+#[tokio::test]
+pub(super) async fn executor_snapshot_does_not_materialize_projected_tool_result_globals() {
     let projected = Arc::new(SnapshotProjectedToolText::default());
     let mut state = RlmExecutionState::new();
     state
@@ -572,11 +596,13 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
                 projected.clone(),
             )),
         )
+        .await
         .expect("insert projected global");
 
     let snapshot = hydrate_snapshot(
         state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("executor snapshot"),
     );
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
@@ -592,6 +618,7 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
     let mut restored_execution = RlmExecutionState::new();
     restored_execution
         .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+        .await
         .expect("restore runtime");
     let restored = restored_execution.vm.state().clone();
     assert!(matches!(
@@ -614,6 +641,7 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let initial = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("initial snapshot");
         assert_eq!(
             initial
@@ -641,6 +669,7 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         .await;
         let changed = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("changed snapshot");
         let changed_bodies = changed
             .components
@@ -691,6 +720,7 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         .await;
         let progress_snapshot = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("progress-boundary capture");
 
         state = execute_test_code(
@@ -700,6 +730,7 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         .await;
         let final_snapshot = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("final capture after later assignment");
         assert_ne!(
             final_snapshot.root, progress_snapshot.root,
@@ -722,6 +753,7 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         let mut reopened = RlmExecutionState::new();
         reopened
             .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+            .await
             .expect("cold reopen final capture");
         assert_eq!(
             reopened.vm.state().globals().get("large"),
@@ -732,11 +764,13 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         state.abort_execution_state_capture();
         let retry_snapshot = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("retry superseded capture after commit failure");
         let retry_hydrated = hydrate_snapshot(retry_snapshot);
         let mut retry_reopened = RlmExecutionState::new();
         retry_reopened
             .restore_execution_state(&retry_hydrated, lash_core::FleetFormat::current())
+            .await
             .expect("cold reopen retry capture");
         assert_eq!(
             retry_reopened.vm.state().globals().get("large"),
@@ -758,6 +792,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         .await;
         let durable_a = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("durable A capture");
         state.acknowledge_execution_state_capture();
         let mut staged_runtime = lash_core::RuntimeSessionState {
@@ -785,6 +820,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         state = execute_test_code(state, format!("let large = [\"{payload_b}\"];")).await;
         let progress_b = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("progress-boundary B capture");
         lash_core::testing::stage_execution_state_components(
             &mut staged_runtime,
@@ -794,6 +830,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         state = execute_test_code(state, format!("let large = [\"{payload_a}\"];")).await;
         let final_a = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("final A capture");
         assert_ne!(final_a.root, progress_b.root);
         assert_eq!(
@@ -818,6 +855,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         let mut reopened = RlmExecutionState::new();
         reopened
             .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
+            .await
             .expect("cold reopen final A capture");
         assert_eq!(
             reopened.vm.state().globals().get("large"),
@@ -827,6 +865,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         state.abort_execution_state_capture();
         let retry_a = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("retry A after final commit failure");
         lash_core::testing::stage_execution_state_components(&mut retry_runtime, retry_a)
             .expect("stage retry A over durable A");
@@ -837,6 +876,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         let mut retry_reopened = RlmExecutionState::new();
         retry_reopened
             .restore_execution_state(&retry_hydration, lash_core::FleetFormat::current())
+            .await
             .expect("cold reopen retry A capture");
         assert_eq!(
             retry_reopened.vm.state().globals().get("large"),
@@ -865,6 +905,7 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             .len();
         let _initial = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("initial snapshot");
         state.acknowledge_execution_state_capture();
 
@@ -881,6 +922,7 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             .await;
             let snapshot = state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
                 .expect("turn snapshot");
             assert_eq!(
                 state.encoded_globals_in_last_snapshot(),
@@ -1002,6 +1044,7 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
         assert_eq!(full_state_bytes, 1_106_995);
         let _initial = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("initial snapshot");
         state.acknowledge_execution_state_capture();
 
@@ -1023,6 +1066,7 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             .await;
             let snapshot = state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
                 .expect("turn snapshot");
             assert_eq!(
                 state.encoded_globals_in_last_snapshot(),
@@ -1071,6 +1115,7 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
         let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let initial = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("initial snapshot");
         assert_eq!(initial.components.len(), 0);
         state.acknowledge_execution_state_capture();
@@ -1085,6 +1130,7 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
         .await;
         let changed = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("changed snapshot");
         let commit_bytes = state::measure_snapshot(&changed).checkpoint_bytes;
         println!(

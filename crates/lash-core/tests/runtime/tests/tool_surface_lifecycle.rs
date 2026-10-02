@@ -1325,6 +1325,9 @@ async fn execute_by_id(runtime: &LashRuntime, id: &str) -> lash_core::ToolOutcom
             );
             lash_core::ToolOutcome::from_output(result.into_output())
         }
+        lash_core::ToolAttemptOutcome::HostFailed(error) => {
+            panic!("unexpected host fault: {error}")
+        }
         lash_core::ToolAttemptOutcome::Pending(pending) => {
             lash_core::ToolOutcome::Pending(Box::new(pending))
         }

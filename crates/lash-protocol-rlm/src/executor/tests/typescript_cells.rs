@@ -579,11 +579,13 @@ fn a_restored_typescript_closure_does_not_poison_a_different_cell() {
             let snapshot = hydrate_snapshot(
                 state
                     .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
                     .expect("snapshot components"),
             );
             let mut restored = RlmExecutionState::for_engine("typescript");
             restored
                 .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+                .await
                 .expect("restore TypeScript execution state");
 
             let (_, response) = execute_typescript_test_cell(restored, TRIVIAL_NEXT_CELL).await;
@@ -958,6 +960,7 @@ fn ambient_effects_remain_unavailable_after_restore() {
         let snapshot = hydrate_snapshot(
             state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
                 .expect("snapshot components"),
         );
         for restore in [false, true] {
@@ -973,6 +976,7 @@ fn ambient_effects_remain_unavailable_after_restore() {
                     let mut candidate = RlmExecutionState::for_engine("typescript");
                     candidate
                         .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+                        .await
                         .expect("restore");
                     candidate
                 } else {

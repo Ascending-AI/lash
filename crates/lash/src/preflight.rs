@@ -324,7 +324,7 @@ impl Walk {
                 return Ok(());
             }
             for item in &page.items {
-                self.item(item);
+                self.item(item).await;
             }
             match page.next {
                 // A backend that returned the cursor it was handed would page
@@ -355,12 +355,14 @@ impl Walk {
         }
     }
 
-    fn item(&mut self, item: &DurableItem) {
+    async fn item(&mut self, item: &DurableItem) {
         for extraction in extract(
             item,
             #[cfg(feature = "rlm")]
             &self.workers,
-        ) {
+        )
+        .await
+        {
             match extraction {
                 Extraction::Found { format, version } => {
                     let expected =

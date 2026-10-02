@@ -26,6 +26,7 @@ allow-unwrap-in-tests = true
 # `#[expect(clippy::disallowed_methods, reason = "...")]` at the smallest
 # enclosing item; each one is a shrink candidate, not a permanent waiver.
 disallowed-methods = [
+    { path = "lash_vm_client::service::Service::request_blocking", reason = "blocking worker checkout and IPC must use request_accounted from async paths (FIG-4707)" },
     # Ambient filesystem (std and tokio faces).
     { path = "std::fs::canonicalize", reason = "hosts supply the world: take the resolved path by parameter (FIG-2971)" },
     { path = "std::fs::copy", reason = "hosts supply the world: take the paths by parameter (FIG-2971)" },

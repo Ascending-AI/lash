@@ -29,12 +29,13 @@ fn contains(haystack: &[u8], needle: &str) -> bool {
 
 /// A session with one guest binding and a recorded grant whose execution
 /// binding carries the sentinel.
-fn session_with_sentinel_grant() -> RlmExecutionState {
+async fn session_with_sentinel_grant() -> RlmExecutionState {
     let mut state = RlmExecutionState::new();
     state
         .vm
         .state_mut()
         .insert_global("greeting", FlowValue::String("hello".into()))
+        .await
         .expect("seed a guest binding");
     let mut link = crate::testing::deferred_link();
     link.record("vault.read", sentinel_grant());
@@ -46,11 +47,12 @@ fn parse_root(bytes: &[u8]) -> RlmSnapshotRoot {
     rmp_serde::from_slice(bytes).expect("decode the RLM root")
 }
 
-#[test]
-fn deferred_tool_outcomes_are_absent_from_durable_root() {
-    let session = session_with_sentinel_grant();
+#[tokio::test]
+async fn deferred_tool_outcomes_are_absent_from_durable_root() {
+    let session = session_with_sentinel_grant().await;
     let hydrated = session
         .hydrated_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("capture the session");
     assert!(
         !contains(&hydrated.root, SENTINEL_SECRET),
@@ -62,16 +64,18 @@ fn deferred_tool_outcomes_are_absent_from_durable_root() {
     let mut restored = RlmExecutionState::new();
     restored
         .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .await
         .expect("restore the guest state");
     assert!(restored.deferred_link.is_none());
 }
 
-#[test]
-fn rlm_worker_envelope_carries_no_grant_or_binding() {
+#[tokio::test]
+async fn rlm_worker_envelope_carries_no_grant_or_binding() {
     let fleet_format = lash_core::FleetFormat::current();
-    let session = session_with_sentinel_grant();
+    let session = session_with_sentinel_grant().await;
     let hydrated = session
         .hydrated_execution_state(fleet_format)
+        .await
         .expect("capture the session");
 
     assert!(
@@ -107,8 +111,9 @@ fn rlm_worker_envelope_carries_no_grant_or_binding() {
     );
 
     // What the worker returns carries no authority either.
-    let (capture, _) =
-        worker_capture(&session, fleet_format).expect("the worker captures its guest state");
+    let (capture, _) = worker_capture(&session, fleet_format)
+        .await
+        .expect("the worker captures its guest state");
     assert!(
         !contains(&capture, SENTINEL_SECRET),
         "a grant's execution binding appeared in the worker's capture"
@@ -119,6 +124,7 @@ fn rlm_worker_envelope_carries_no_grant_or_binding() {
     let mut restored = RlmExecutionState::new();
     restored
         .restore_execution_state(&hydrated, fleet_format)
+        .await
         .expect("restore the session");
     assert!(
         restored
@@ -144,10 +150,10 @@ struct ForgedCapture {
     deferred_resolutions: BTreeMap<String, lash_lashlang_runtime::Resolution>,
 }
 
-#[test]
-fn worker_returned_state_cannot_replace_parent_authority() {
+#[tokio::test]
+async fn worker_returned_state_cannot_replace_parent_authority() {
     let fleet_format = lash_core::FleetFormat::current();
-    let session = session_with_sentinel_grant();
+    let session = session_with_sentinel_grant().await;
     let parent_grants = serde_json::to_value(
         &session
             .deferred_link
@@ -157,8 +163,9 @@ fn worker_returned_state_cannot_replace_parent_authority() {
     )
     .expect("encode the parent's grants");
 
-    let (honest, _) =
-        worker_capture(&session, fleet_format).expect("the worker captures its guest state");
+    let (honest, _) = worker_capture(&session, fleet_format)
+        .await
+        .expect("the worker captures its guest state");
     let honest = RlmWorkerCapture::accept(&honest).expect("an honest capture is accepted");
 
     // A returned capture naming a grant is refused outright.
@@ -200,9 +207,11 @@ fn worker_returned_state_cannot_replace_parent_authority() {
             "deferred_resolutions",
             FlowValue::String("forged-by-the-guest".into()),
         )
+        .await
         .expect("bind a guest global named after the authority slot");
     let hydrated = session
         .hydrated_execution_state(fleet_format)
+        .await
         .expect("capture the session");
     let root = parse_root(&hydrated.root);
     assert!(root.globals.contains_key("deferred_resolutions"));
@@ -221,11 +230,16 @@ fn worker_returned_state_cannot_replace_parent_authority() {
     assert!(!contains(&hydrated.root, "forged-by-the-worker"));
 }
 
-fn worker_capture(
+async fn worker_capture(
     session: &RlmExecutionState,
     fleet: lash_core::FleetFormat,
 ) -> Result<(Vec<u8>, ()), String> {
-    let parts = session.vm.state().capture(&Default::default(), fleet)?;
+    let parts = session
+        .vm
+        .state()
+        .capture(&Default::default(), fleet)
+        .await
+        .map_err(|error| error.to_string())?;
     let mut capture = RlmWorkerCapture {
         state_header: parts.header.into(),
         changed: Default::default(),

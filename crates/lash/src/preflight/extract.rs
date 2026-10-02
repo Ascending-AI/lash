@@ -80,7 +80,7 @@ pub(super) fn primary_format(surface: DurableSurface) -> DurableFormat {
 }
 
 /// Every format observation one item yields.
-pub(super) fn extract(
+pub(super) async fn extract(
     item: &DurableItem,
     #[cfg(feature = "rlm")] workers: &lash_vm_client::service::Service,
 ) -> Vec<Extraction> {
@@ -109,11 +109,14 @@ pub(super) fn extract(
         DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
-        DurableSurface::ModuleArtifact => module_artifact(
-            payload,
-            #[cfg(feature = "rlm")]
-            workers,
-        ),
+        DurableSurface::ModuleArtifact => {
+            module_artifact(
+                payload,
+                #[cfg(feature = "rlm")]
+                workers,
+            )
+            .await
+        }
         _ => Vec::new(),
     }
 }
@@ -125,7 +128,7 @@ pub(super) fn extract(
 /// future shape is a decided refusal. Without the verifier, the manifest row
 /// remains visible but stored artifacts are honestly undecidable. Malformed
 /// JSON is likewise undecidable because it is not evidence of another build.
-fn module_artifact(
+async fn module_artifact(
     payload: Payload<'_>,
     #[cfg(feature = "rlm")] workers: &lash_vm_client::service::Service,
 ) -> Vec<Extraction> {
@@ -150,9 +153,12 @@ fn module_artifact(
             }
         };
         use lash_vm_client::service::{ArtifactVerification, Request, Response};
-        match workers.request(Request::VerifyArtifact {
-            bytes: bytes.to_vec(),
-        }) {
+        match workers
+            .request_accounted(Request::VerifyArtifact {
+                bytes: bytes.to_vec(),
+            })
+            .await
+        {
             Ok(Response::ArtifactVerification(ArtifactVerification::Match)) => {
                 vec![Extraction::IdentityMatch { format }]
             }
@@ -505,12 +511,13 @@ mod tests {
     use lash_sansio::ProcessId;
     use lash_sansio::SessionId;
 
-    fn extract(item: &DurableItem) -> Vec<Extraction> {
+    async fn extract(item: &DurableItem) -> Vec<Extraction> {
         super::extract(
             item,
             #[cfg(feature = "rlm")]
             &lash_vm_client::service::Service::default(),
         )
+        .await
     }
 
     fn item(surface: DurableSurface, payload: DurablePayload) -> DurableItem {
@@ -564,14 +571,15 @@ mod tests {
         .to_string()
     }
 
-    #[test]
-    fn a_parked_segment_yields_both_of_its_nested_format_versions() {
+    #[tokio::test]
+    async fn a_parked_segment_yields_both_of_its_nested_format_versions() {
         // One payload, two boundaries: the envelope this build wrote and the VM
         // continuation nested a level inside it.
         let extractions = extract(&item(
             DurableSurface::ParkedSegment,
             DurablePayload::Json(segment_handover(3, 8)),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&extractions, DurableFormat::LashlangSegmentHandover),
             vec![3]
@@ -584,8 +592,8 @@ mod tests {
 
     /// FIG-4645: the sealed state stores each version once, in its contract.
     /// A `format_version` beside it is no writer's shape and answers nothing.
-    #[test]
-    fn a_parked_segment_is_read_from_its_contract_and_never_from_a_duplicate() {
+    #[tokio::test]
+    async fn a_parked_segment_is_read_from_its_contract_and_never_from_a_duplicate() {
         let engine_state = serde_json::to_vec(&serde_json::json!({
             "version": 3,
             "vm": {"format_version": 8},
@@ -598,7 +606,8 @@ mod tests {
         let extractions = extract(&item(
             DurableSurface::ParkedSegment,
             DurablePayload::Json(payload),
-        ));
+        ))
+        .await;
         assert!(versions(&extractions, DurableFormat::VmContinuation).is_empty());
         assert_eq!(
             undecodable(&extractions, DurableFormat::VmContinuation),
@@ -606,8 +615,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_unstamped_segment_reads_as_generation_zero_not_as_readable() {
+    #[tokio::test]
+    async fn an_unstamped_segment_reads_as_generation_zero_not_as_readable() {
         // The engine's decoder reads an absent version as zero and refuses it;
         // a probe that reported "no version, cannot say" would be gentler than
         // the boundary the host will actually hit.
@@ -624,15 +633,16 @@ mod tests {
         let extractions = extract(&item(
             DurableSurface::ParkedSegment,
             DurablePayload::Json(payload),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&extractions, DurableFormat::LashlangSegmentHandover),
             vec![0]
         );
     }
 
-    #[test]
-    fn a_segment_whose_engine_state_is_junk_is_undecodable_rather_than_fatal() {
+    #[tokio::test]
+    async fn a_segment_whose_engine_state_is_junk_is_undecodable_rather_than_fatal() {
         let payload = serde_json::json!({
             "handover": {"engine_state": vec![0xffu8, 0xfe, 0xfd]},
         })
@@ -640,7 +650,8 @@ mod tests {
         let extractions = extract(&item(
             DurableSurface::ParkedSegment,
             DurablePayload::Json(payload),
-        ));
+        ))
+        .await;
         assert_eq!(
             undecodable(&extractions, DurableFormat::LashlangSegmentHandover).len(),
             1
@@ -648,13 +659,13 @@ mod tests {
         assert!(versions(&extractions, DurableFormat::VmContinuation).is_empty());
     }
 
-    #[test]
-    fn a_payload_that_is_not_json_at_all_is_undecodable_rather_than_fatal() {
+    #[tokio::test]
+    async fn a_payload_that_is_not_json_at_all_is_undecodable_rather_than_fatal() {
         for payload in [
             DurablePayload::Json("}{ not json".to_string()),
             DurablePayload::MessagePack(vec![0xc1, 0xc1]),
         ] {
-            let extractions = extract(&item(DurableSurface::ParkedSegment, payload));
+            let extractions = extract(&item(DurableSurface::ParkedSegment, payload)).await;
             assert_eq!(
                 undecodable(&extractions, DurableFormat::LashlangSegmentHandover).len(),
                 1
@@ -662,22 +673,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_payload_that_could_not_be_fetched_is_attributed_to_its_surface() {
+    #[tokio::test]
+    async fn a_payload_that_could_not_be_fetched_is_attributed_to_its_surface() {
         let extractions = extract(&item(
             DurableSurface::SessionCheckpoint,
             DurablePayload::Missing {
                 reason: "blob sha256:abc is absent".to_string(),
             },
-        ));
+        ))
+        .await;
         let reasons = undecodable(&extractions, DurableFormat::SessionCheckpointManifest);
         assert_eq!(reasons.len(), 1);
         assert!(reasons[0].contains("sha256:abc"), "{reasons:?}");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "rlm")]
-    fn a_frozen_predecessor_module_artifact_retains_its_generation_refusal() {
+    async fn a_frozen_predecessor_module_artifact_retains_its_generation_refusal() {
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
@@ -691,7 +703,8 @@ mod tests {
             DurablePayload::Json(
                 serde_json::to_string(&raw).expect("legacy artifact should encode"),
             ),
-        ));
+        ))
+        .await;
         let [
             Extraction::IdentityMismatch {
                 format: DurableFormat::ModuleArtifact,
@@ -708,9 +721,9 @@ mod tests {
         assert!(detail.contains("recompile and republish"), "{detail}");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "rlm")]
-    fn a_frozen_trigger_manifest_artifact_is_a_shape_refusal() {
+    async fn a_frozen_trigger_manifest_artifact_is_a_shape_refusal() {
         let raw: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
@@ -725,7 +738,8 @@ mod tests {
                 })
                 .to_string(),
             ),
-        ));
+        ))
+        .await;
         let detail = extractions
             .iter()
             .find_map(|extraction| match extraction {
@@ -740,9 +754,9 @@ mod tests {
         assert!(detail.contains("recompile and republish"), "{detail}");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "rlm")]
-    fn a_future_module_artifact_is_a_legible_identity_refusal() {
+    async fn a_future_module_artifact_is_a_legible_identity_refusal() {
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
@@ -759,7 +773,8 @@ mod tests {
                 })
                 .to_string(),
             ),
-        ));
+        ))
+        .await;
         let detail = extractions
             .iter()
             .find_map(|extraction| match extraction {
@@ -774,13 +789,14 @@ mod tests {
         assert!(!detail.contains("unknown variant"), "{detail}");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(not(feature = "rlm"))]
-    fn a_module_artifact_is_undecidable_without_the_identity_verifier() {
+    async fn a_module_artifact_is_undecidable_without_the_identity_verifier() {
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json("{}".to_string()),
-        ));
+        ))
+        .await;
         let reasons = undecodable(&extractions, DurableFormat::ModuleArtifact);
         assert_eq!(reasons.len(), 1);
         assert!(
@@ -789,15 +805,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_unstamped_wake_reads_as_this_builds_version() {
+    #[tokio::test]
+    async fn an_unstamped_wake_reads_as_this_builds_version() {
         // The opposite call from the segment case, and for a stated reason: the
         // wake payload's own decoder defaults an absent version to this
         // build's, so the row genuinely opens.
         let extractions = extract(&item(
             DurableSurface::PendingWake,
             DurablePayload::Json(serde_json::json!({"wake_id": "w-1"}).to_string()),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&extractions, DurableFormat::ProcessWakeDelivery),
             vec![crate::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION]
@@ -806,7 +823,8 @@ mod tests {
         let stamped = extract(&item(
             DurableSurface::PendingWake,
             DurablePayload::Json(serde_json::json!({"version": 9}).to_string()),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&stamped, DurableFormat::ProcessWakeDelivery),
             vec![9]
@@ -832,14 +850,15 @@ mod tests {
         .expect("the fixture encodes")
     }
 
-    #[test]
-    fn a_checkpoint_answers_for_its_manifest_and_every_component_encoding() {
+    #[tokio::test]
+    async fn a_checkpoint_answers_for_its_manifest_and_every_component_encoding() {
         // One blob read decides two formats, because the component encodings
         // live in the manifest rather than in the component bodies.
         let extractions = extract(&item(
             DurableSurface::SessionCheckpoint,
             DurablePayload::MessagePack(checkpoint_root(2, &[2, 2, 3])),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&extractions, DurableFormat::SessionCheckpointManifest),
             vec![2]
@@ -850,14 +869,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_checkpoint_with_no_components_reports_nothing_rather_than_undecodable() {
+    #[tokio::test]
+    async fn a_checkpoint_with_no_components_reports_nothing_rather_than_undecodable() {
         let bytes = rmp_serde::to_vec_named(&serde_json::json!({"schema_version": 2}))
             .expect("the fixture encodes");
         let extractions = extract(&item(
             DurableSurface::SessionCheckpoint,
             DurablePayload::MessagePack(bytes),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&extractions, DurableFormat::SessionCheckpointManifest),
             vec![2]
@@ -868,8 +888,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_execution_state_root_yields_the_envelope_version() {
+    #[tokio::test]
+    async fn an_execution_state_root_yields_the_envelope_version() {
         let bytes = rmp_serde::to_vec_named(&serde_json::json!({
             "version": 13,
             "engine": "rlm",
@@ -878,7 +898,8 @@ mod tests {
         let extractions = extract(&item(
             DurableSurface::SessionExecutionState,
             DurablePayload::MessagePack(bytes),
-        ));
+        ))
+        .await;
         assert_eq!(
             versions(&extractions, DurableFormat::RlmSnapshotEnvelope),
             vec![13]
@@ -886,8 +907,8 @@ mod tests {
     }
 
     #[cfg(feature = "rlm")]
-    #[test]
-    fn a_new_writer_handover_exposes_its_nested_program_identity() {
+    #[tokio::test]
+    async fn a_new_writer_handover_exposes_its_nested_program_identity() {
         let hash = lashlang::ContentHash::new("00ff");
         let input = lash_lashlang_runtime::LashlangProcessInput {
             module_ref: lashlang::ModuleRef::new(&hash),
@@ -927,14 +948,14 @@ mod tests {
         parked.owner_record = Some(record);
 
         assert_eq!(
-            versions(&extract(&parked), DurableFormat::Bytecode),
+            versions(&extract(&parked).await, DurableFormat::Bytecode),
             vec![crate::formats::BYTECODE_FORMAT_VERSION]
         );
     }
 
     #[cfg(feature = "rlm")]
-    #[test]
-    fn a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name() {
+    #[tokio::test]
+    async fn a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name() {
         let hash = lashlang::ContentHash::new("00ff");
         let input = lash_lashlang_runtime::LashlangProcessInput {
             module_ref: lashlang::ModuleRef::new(&hash),
@@ -967,7 +988,7 @@ mod tests {
         );
         matching.owner_record = Some(record.clone());
         assert_eq!(
-            versions(&extract(&matching), DurableFormat::Bytecode),
+            versions(&extract(&matching).await, DurableFormat::Bytecode),
             vec![crate::formats::BYTECODE_FORMAT_VERSION],
             "an identity this build mints is the only evidence of readability there is"
         );
@@ -982,7 +1003,7 @@ mod tests {
             })
             .to_string(),
         );
-        let extractions = extract(&stale);
+        let extractions = extract(&stale).await;
         assert!(
             extractions.iter().any(|extraction| matches!(
                 extraction,
@@ -1001,8 +1022,8 @@ mod tests {
     /// readable, a foreign or missing stamp is a decided refusal, and a
     /// process that has not started yields nothing.
     #[cfg(feature = "rlm")]
-    #[test]
-    fn a_started_process_is_judged_by_its_start_stamp() {
+    #[tokio::test]
+    async fn a_started_process_is_judged_by_its_start_stamp() {
         let hash = lashlang::ContentHash::new("00ff");
         let input = lash_lashlang_runtime::LashlangProcessInput {
             module_ref: lashlang::ModuleRef::new(&hash),
@@ -1042,7 +1063,8 @@ mod tests {
 
         let stamped = extract(&record(
             serde_json::json!({ "generation": current.as_str() }),
-        ));
+        ))
+        .await;
         assert!(
             matches!(
                 stamped.as_slice(),
@@ -1053,17 +1075,20 @@ mod tests {
             "a start stamped with the generation this build runs is readable"
         );
         assert!(
-            refused(&extract(&record(
-                serde_json::json!({ "generation": "blake3:another-build" })
-            ))),
+            refused(
+                &extract(&record(
+                    serde_json::json!({ "generation": "blake3:another-build" })
+                ))
+                .await
+            ),
             "a start another build stamped is a decided refusal"
         );
         assert!(
-            refused(&extract(&record(serde_json::json!({ "attempt": 1 })))),
+            refused(&extract(&record(serde_json::json!({ "attempt": 1 }))).await),
             "a start written before the stamp existed is a decided refusal"
         );
         assert!(
-            extract(&record(serde_json::Value::Null)).is_empty(),
+            extract(&record(serde_json::Value::Null)).await.is_empty(),
             "a process that has not started carries no stamp"
         );
     }

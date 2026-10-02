@@ -407,7 +407,7 @@ pub mod runtime_ops {
             >,
         > + Send;
 
-        fn request(&self, request: Request) -> Result<Response, PoolError>;
+        fn pool_accounted(&self) -> impl Future<Output = Result<WorkerPool, PoolError>> + Send;
     }
 
     #[doc(hidden)]
@@ -499,10 +499,14 @@ pub mod runtime_ops {
             Ok(())
         }
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the accounted async seam isolates blocking checkout and IPC on Tokio's blocking pool"
+        )]
         async fn request_accounted(&self, request: Request) -> Result<Response, PoolError> {
             self.mark_running().await?;
             let service = self.clone();
-            let response = tokio::task::spawn_blocking(move || service.request(request))
+            let response = tokio::task::spawn_blocking(move || service.request_blocking(request))
                 .await
                 .map_err(|error| {
                     PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
@@ -546,7 +550,20 @@ pub mod runtime_ops {
             }
         }
 
-        fn request(&self, request: Request) -> Result<Response, PoolError> {
+        async fn pool_accounted(&self) -> Result<WorkerPool, PoolError> {
+            let service = self.clone();
+            tokio::task::spawn_blocking(move || service.pool())
+                .await
+                .map_err(|error| {
+                    PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
+                        detail: lash_vm_protocol::Detail::new(error),
+                    })
+                })?
+        }
+    }
+
+    impl Service {
+        fn request_blocking(&self, request: Request) -> Result<Response, PoolError> {
             let source = match &request {
                 Request::References { source }
                 | Request::CreateDefinition { source, .. }

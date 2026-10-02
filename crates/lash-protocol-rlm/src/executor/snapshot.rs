@@ -132,3 +132,14 @@ pub(crate) enum RlmSnapshotError {
     #[error("RLM canonical Lashlang snapshot is invalid: {0}")]
     Lashlang(#[from] lashlang::SnapshotDecodeError),
 }
+
+impl From<RlmSnapshotError> for lash_core::SessionError {
+    fn from(error: RlmSnapshotError) -> Self {
+        match error {
+            RlmSnapshotError::WorkerUnavailable(error) => {
+                Self::Plugin(lash_core::PluginError::Runtime(error.into_runtime_error()))
+            }
+            error => Self::Protocol(error.to_string()),
+        }
+    }
+}

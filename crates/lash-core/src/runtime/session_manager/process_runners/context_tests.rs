@@ -78,6 +78,7 @@ async fn execute_process_dispatch(
         crate::ToolAttemptOutcome::Done { result, .. } => {
             result.into_output().value_for_projection()
         }
+        crate::ToolAttemptOutcome::HostFailed(error) => panic!("unexpected host fault: {error}"),
         crate::ToolAttemptOutcome::Pending(_) => serde_json::Value::Null,
     }
 }

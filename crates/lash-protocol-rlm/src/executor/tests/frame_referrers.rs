@@ -232,6 +232,7 @@ fn a_bare_module_reference_does_not_acquire_a_definition() {
             .vm
             .state_mut()
             .insert_global("bare", value)
+            .await
             .expect("bind bare module refs");
         let response = run_cell(&mut state, &store, "finish(1);").await;
         assert!(response.error.is_none(), "{:?}", response.error);
@@ -264,6 +265,7 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
         // (which the host view omits) still names the module.
         let snapshot = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
             .expect("capture");
         let mut restored = RlmExecutionState::for_engine("typescript");
         restored
@@ -271,12 +273,14 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
                 &super::lifecycle_and_diagnostics::hydrate_snapshot(snapshot),
                 lash_core::FleetFormat::current(),
             )
+            .await
             .expect("restore");
         assert!(
             restored
                 .vm
                 .state_mut()
                 .remove_global("q")
+                .await
                 .expect("remove binding")
         );
         assert!(

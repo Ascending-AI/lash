@@ -596,11 +596,13 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
             let snapshot = hydrate_snapshot(
                 state
                     .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
                     .expect("snapshot after cancelled cell"),
             );
             let mut restored = RlmExecutionState::for_engine(language);
             restored
                 .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+                .await
                 .expect("cold restore after cancelled cell");
             assert!(
                 restored.vm.state().globals().get("survives").is_some(),
@@ -716,11 +718,13 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
         let snapshot = hydrate_snapshot(
             state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
+                .await
                 .expect("snapshot after mid-spin cancellation"),
         );
         let mut restored = RlmExecutionState::for_engine("typescript");
         restored
             .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+            .await
             .expect("cold restore after mid-spin cancellation");
         assert!(restored.vm.state().globals().get("cancelledTail").is_none());
         assert!(restored.vm.state().globals().get("survives").is_some());
@@ -865,11 +869,13 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
             let snapshot = hydrate_snapshot(
                 state
                     .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
                     .expect("snapshot after late cancellation"),
             );
             let mut restored = RlmExecutionState::for_engine(language);
             restored
                 .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
+                .await
                 .expect("cold restore after late cancellation");
             assert!(restored.vm.state().globals().get(tail_binding).is_none());
             assert!(restored.vm.state().globals().get("survives").is_some());
@@ -917,6 +923,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 assert_eq!(first.error, None, "{language}: large first cell");
                 let first_snapshot = state
                     .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
                     .expect("large first-cell snapshot");
                 let first_hydration = hydrate_snapshot(first_snapshot);
                 if acknowledge_first_capture {
@@ -953,6 +960,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
 
                 let final_snapshot = state
                     .snapshot_execution_state(lash_core::FleetFormat::current())
+                    .await
                     .expect("snapshot after late cancellation");
                 let final_hydration = if acknowledge_first_capture {
                     hydrate_snapshot_against(final_snapshot, &first_hydration)
@@ -962,6 +970,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 let mut restored = RlmExecutionState::for_engine(language);
                 restored
                     .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
+                    .await
                     .expect("cold restore after late cancellation");
                 assert!(restored.vm.state().globals().get("survives").is_some());
                 assert!(restored.vm.state().globals().get(tail_binding).is_none());
@@ -1019,14 +1028,15 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
 /// again. Rewrite it in the form named above" — with no form named above,
 /// because a misspelled identifier has no accepted alternative form. The
 /// gate is the diagnostic code, not the fact that compilation failed.
-#[test]
-pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
-    let kind = |source: &str| match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::CompileModule {
+#[tokio::test]
+pub(super) async fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
+    let kind = async |source: &str| match lash_vm_client::service::Service::default()
+        .request_accounted(lash_vm_client::service::Request::CompileModule {
             source: source.into(),
             environment: Default::default(),
             cell: true,
         })
+        .await
         .expect("worker diagnostic")
     {
         lash_vm_client::service::Response::CompileRefused { policy, .. } => {
@@ -1039,12 +1049,12 @@ pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
         other => panic!("expected a refusal: {other:?}"),
     };
     assert_eq!(
-        kind("finish(taks);"),
+        kind("finish(taks);").await,
         lash_core::CellFailureKind::Program,
         "a misspelled name is the program being wrong"
     );
     assert_eq!(
-        kind("class A {}"),
+        kind("class A {}").await,
         lash_core::CellFailureKind::Policy,
         "a construct outside the dialect is a refusal"
     );
@@ -1076,12 +1086,12 @@ pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
         "the premise of this check is that one code carries both"
     );
     assert_eq!(
-        kind(nondeterministic),
+        kind(nondeterministic).await,
         lash_core::CellFailureKind::Policy,
         "the runtime will never run this"
     );
     assert_eq!(
-        kind(miscounted),
+        kind(miscounted).await,
         lash_core::CellFailureKind::Program,
         "the method exists and the call is wrong"
     );
@@ -1110,8 +1120,8 @@ pub(super) fn a_typescript_rejection_reaches_the_model_with_its_own_line_number(
     assert!(diagnostic.contains("\nhint: "), "{diagnostic}");
 }
 
-#[test]
-pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog() {
+#[tokio::test]
+pub(super) async fn typescript_method_diagnostics_consult_the_link_time_module_catalog() {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
         .add_module_operation(
@@ -1127,12 +1137,13 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
             .with_globals(["text"]);
 
-    let diagnostic = |source: &str| match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::CompileModule {
+    let diagnostic = async |source: &str| match lash_vm_client::service::Service::default()
+        .request_accounted(lash_vm_client::service::Request::CompileModule {
             source: source.into(),
             environment: environment.clone(),
             cell: true,
         })
+        .await
         .expect("worker diagnostic")
     {
         lash_vm_client::service::Response::CompileRefused {
@@ -1141,12 +1152,12 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         } => diagnostic.message,
         other => panic!("expected a parse refusal: {other:?}"),
     };
-    let shadowed = diagnostic("text.sha256({});");
+    let shadowed = diagnostic("text.sha256({});").await;
     assert_eq!(
         shadowed,
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
-    let ordinary = diagnostic("const s = 'a,b'; s.anchor(',');");
+    let ordinary = diagnostic("const s = 'a,b'; s.anchor(',');").await;
     assert_eq!(
         ordinary,
         "method `anchor` is not in the TypeScript runtime surface"
@@ -1170,15 +1181,16 @@ impl ExecutionHost for NoopHost {
     }
 }
 
-pub(super) fn worker_compile_program(
+pub(super) async fn worker_compile_program(
     program: &lashlang::Program,
 ) -> Result<lash_vm_client::service::CompiledModule, String> {
     match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::CompileAst {
+        .request_accounted(lash_vm_client::service::Request::CompileAst {
             source: String::new(),
             program: program.clone(),
             environment: Default::default(),
         })
+        .await
         .map_err(|e| e.to_string())?
     {
         lash_vm_client::service::Response::Module(module) => Ok(*module),
@@ -1187,14 +1199,16 @@ pub(super) fn worker_compile_program(
 }
 pub(super) trait WorkerFixtureState {
     fn worker_bytes(&self) -> Option<Vec<u8>>;
-    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String>;
+    async fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String>;
 }
 impl WorkerFixtureState for lash_vm_client::RemoteState {
     fn worker_bytes(&self) -> Option<Vec<u8>> {
         self.bytes().map(Vec::from)
     }
-    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+    async fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
         self.install_bytes(bytes)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 impl WorkerFixtureState for lashlang::State {
@@ -1205,7 +1219,7 @@ impl WorkerFixtureState for lashlang::State {
                 .expect("fixture state encodes"),
         )
     }
-    fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+    async fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
         *self = lashlang::State::from_snapshot(
             lashlang::VmInstance::pristine()
                 .open_snapshot(&bytes)
@@ -1261,6 +1275,7 @@ pub(super) async fn execute_with_projected(
         lash_vm_broker::BrokeredEnd::Complete { value, checkpoint } => {
             state
                 .install_worker_bytes(checkpoint.vm.bytes().to_vec())
+                .await
                 .expect("install worker state");
             Ok(rmp_serde::from_slice(&value.0).expect("worker outcome"))
         }
@@ -1268,6 +1283,7 @@ pub(super) async fn execute_with_projected(
             if let Some(checkpoint) = checkpoint {
                 state
                     .install_worker_bytes(checkpoint.vm.bytes().to_vec())
+                    .await
                     .expect("install worker state");
             }
             Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
@@ -1340,8 +1356,8 @@ impl lash_core::facade_support::TraceSink for NoopTraceSink {
     }
 }
 
-#[test]
-pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation() {
+#[tokio::test]
+pub(super) async fn foreground_trace_carries_the_enclosing_restate_process_invocation() {
     let process_id = lash_core::ProcessId::fixture("rlm-session-turn");
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
         process_id.clone(),
@@ -1372,6 +1388,7 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
             .into_runtime();
     let program = lash_typescript::parse("finish(1);").expect("valid fixture source");
     let artifact = worker_compile_program(&program)
+        .await
         .expect("valid fixture module")
         .artifact;
     let trace = foreground_lashlang_execution_trace(

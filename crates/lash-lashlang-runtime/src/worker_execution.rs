@@ -209,9 +209,7 @@ impl<H: ExecutionHost + Sync> WorkerRun<'_, H> {
             limits,
             from: state,
         };
-        let pool = self.service.pool().map_err(|e| BrokerFailure::Parent {
-            fault: ParentFault(e.to_string()),
-        })?;
+        let pool = self.service.pool_accounted().await.map_err(pool_failure)?;
         let slots = PoolSlots {
             pool,
             owner_epoch: context.owner_epoch,
@@ -427,10 +425,11 @@ mod tests {
             recovery: None,
         };
         let snapshot = match workers
-            .request(lash_vm_client::service::Request::State {
+            .request_accounted(lash_vm_client::service::Request::State {
                 snapshot: None,
                 action: lash_vm_client::service::StateAction::Inspect,
             })
+            .await
             .expect("fresh worker snapshot")
         {
             lash_vm_client::service::Response::State(view) => view.snapshot,

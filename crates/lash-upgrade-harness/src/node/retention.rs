@@ -71,17 +71,18 @@ finish(null);
         }
     }
 
-    fn link(self) -> Result<lash_vm_client::InspectedArtifact> {
+    async fn link(self) -> Result<lash_vm_client::InspectedArtifact> {
         let environment = lashlang::LashlangHostEnvironment::new(
             lashlang::LashlangHostCatalog::new(),
             lashlang::LashlangAbilities::all(),
         );
         match lash_vm_client::service::Service::default()
-            .request(lash_vm_client::service::Request::CompileModule {
+            .request_accounted(lash_vm_client::service::Request::CompileModule {
                 source: self.source().into(),
                 environment,
                 cell: false,
             })
+            .await
             .map_err(|error| anyhow!("link the {self:?} module: {error}"))?
         {
             lash_vm_client::service::Response::Module(module) => Ok(module.artifact),
@@ -228,7 +229,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
     let stores = open_stores(&args.store).await?;
     match args.step {
         RetentionStep::Publish { pin: text, module } => {
-            let artifact = module.link()?;
+            let artifact = module.link().await?;
             let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
                 pin(&text)?,
             ))
@@ -353,7 +354,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
             let artifacts = lashlang::LashlangArtifacts::new(stores.module_artifacts());
             let mut modules = Vec::with_capacity(module.len());
             for module in module {
-                let artifact = module.link()?;
+                let artifact = module.link().await?;
                 let module_ref = artifact.module_ref().clone();
                 let (verified, error) = match lash_vm_client::service::Service::default()
                     .inspect_artifact(&artifacts, &module_ref)

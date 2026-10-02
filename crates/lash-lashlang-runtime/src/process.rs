@@ -781,7 +781,12 @@ async fn execute_lashlang(
                         .collect(),
                     Default::default(),
                 )
-                .map_err(infra)?;
+                .await
+                .map_err(|error| {
+                    lash_core::ProcessInfraError::new(lash_core::PluginError::Runtime(
+                        error.into_runtime_error(),
+                    ))
+                })?;
             lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
                 lash_vm_protocol::VmStateKind::Snapshot,
                 owner.clone(),

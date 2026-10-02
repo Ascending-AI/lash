@@ -634,6 +634,7 @@ async fn every_model_code_path_runs_in_a_worker() {
             "definition",
             lashlang::from_json(serde_json::json!({"$lash_definition_id": id.to_string()})),
         )
+        .await
         .expect("worker installs the candidate root");
     assert_eq!(
         remote.referenced_definition_ids(),
@@ -641,16 +642,18 @@ async fn every_model_code_path_runs_in_a_worker() {
     );
     let capture = remote
         .capture(&Default::default(), lash_core::FleetFormat::current())
+        .await
         .expect("worker captures candidate roots");
     assert_eq!(capture.definition_ids, BTreeSet::from([id]));
     let definition = workers
-        .request(Request::CreateDefinition {
+        .request_accounted(Request::CreateDefinition {
             source: "const answer = async (): Promise<number> => { return 42; };".into(),
             environment: lashlang::LashlangHostEnvironment::new(
                 lashlang::LashlangHostCatalog::new(),
                 lashlang::LashlangAbilities::all(),
             ),
         })
+        .await
         .expect("definition compiler runs in a worker");
     assert!(matches!(definition, Response::Definition(_)));
     process_map_fixture(workers.clone()).await;

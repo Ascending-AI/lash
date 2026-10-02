@@ -266,6 +266,7 @@ PACKAGE_DEPS = {
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
+            "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "rmp_serde": "//third-party/rust:p0304",
             "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",

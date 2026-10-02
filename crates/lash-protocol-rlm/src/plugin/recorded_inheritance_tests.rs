@@ -219,6 +219,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(
             false,
             crate::LashlangModuleCompileRequest::new(name, looping_process(), env_spec.clone()),
         )
+        .await
         .expect("the process module compiles");
     creating
         .factory

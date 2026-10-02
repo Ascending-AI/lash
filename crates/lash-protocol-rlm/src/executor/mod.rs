@@ -344,7 +344,7 @@ pub struct RlmCheckpointPerfFixture {
 #[cfg(feature = "testing")]
 impl RlmCheckpointPerfFixture {
     /// A fixture whose cells keep their Lashlang artifacts in `backend`.
-    pub fn new(
+    pub async fn new(
         dialect: Arc<dyn crate::dialect::Dialect>,
         backend: &lash_core::Backend,
         binding_count: usize,
@@ -369,7 +369,12 @@ impl RlmCheckpointPerfFixture {
                         "x".repeat(payload_bytes)
                     )])),
                 )
-                .map_err(|error| SessionError::Protocol(error.to_string()))?;
+                .await
+                .map_err(|error| {
+                    SessionError::Plugin(lash_core::PluginError::Runtime(
+                        error.into_runtime_error(),
+                    ))
+                })?;
         }
         Ok(Self {
             dialect,
@@ -380,9 +385,12 @@ impl RlmCheckpointPerfFixture {
         })
     }
 
-    pub fn capture(&mut self) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+    pub async fn capture(
+        &mut self,
+    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
         self.state
             .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
     }
 
     pub fn acknowledge_capture(&mut self) {
@@ -432,7 +440,7 @@ impl RlmCheckpointPerfFixture {
         Ok(())
     }
 
-    pub fn restore(
+    pub async fn restore(
         dialect: &dyn crate::dialect::Dialect,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
@@ -442,7 +450,8 @@ impl RlmCheckpointPerfFixture {
         );
         restored
             .restore_execution_state(state, lash_core::FleetFormat::current())
-            .map_err(|error| SessionError::Protocol(error.to_string()))
+            .await
+            .map_err(SessionError::from)
     }
 }
 
@@ -749,14 +758,14 @@ async fn execute_code_in_worker_scope(
     // The kind is decided here, while the failure is still a typed diagnostic.
     // "Compilation failed" is not enough to classify it: a misspelled name and a
     // forbidden construct both fail here and need opposite advice.
-    if let Err(error) = workers.mark_running().await {
-        return worker_setup_failure(state, &ctx, error);
-    }
-    let compile_result = match workers.request(lash_vm_client::service::Request::CompileModule {
-        source: code.to_string(),
-        environment: host_environment.clone(),
-        cell: true,
-    }) {
+    let compile_result = match workers
+        .request_accounted(lash_vm_client::service::Request::CompileModule {
+            source: code.to_string(),
+            environment: host_environment.clone(),
+            cell: true,
+        })
+        .await
+    {
         Ok(lash_vm_client::service::Response::Module(module)) => Ok(*module),
         Ok(lash_vm_client::service::Response::CompileRefused { error, policy }) => {
             let message = match error {
@@ -776,10 +785,15 @@ async fn execute_code_in_worker_scope(
                 message,
             ))
         }
-        Ok(other) => Err((
-            lash_core::CellFailureKind::Host,
-            format!("unexpected compilation response: {other:?}"),
-        )),
+        Ok(_) => {
+            return worker_setup_failure(
+                state,
+                &ctx,
+                lash_vm_client::PoolError::breach(
+                    lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+                ),
+            );
+        }
         Err(error) => {
             emit_step_trace(
                 &ctx,
@@ -797,9 +811,6 @@ async fn execute_code_in_worker_scope(
             .map(|_| ())
             .map_err(|(_, diagnostic)| diagnostic.as_str()),
     );
-    if let Err(error) = workers.checkpoint().await {
-        return worker_setup_failure(state, &ctx, error);
-    }
     let linked_module = match compile_result {
         Ok(program) => program,
         Err((kind, error)) => {
@@ -839,17 +850,12 @@ async fn execute_code_in_worker_scope(
         }
     };
     let projected_names = projected.names().collect::<Vec<_>>();
-    if let Err(error) = workers.mark_running().await {
-        return worker_setup_failure(state, &ctx, error);
-    }
     if let Err(error) = state
         .vm
         .state_mut()
         .remove_names(projected_names.iter().cloned().collect())
+        .await
     {
-        return exec_setup_failure_or_stop(state, &ctx, lash_core::CellFailureKind::Host, error);
-    }
-    if let Err(error) = workers.checkpoint().await {
         return worker_setup_failure(state, &ctx, error);
     }
     let deferred_execution_grants = state
@@ -981,13 +987,9 @@ async fn execute_code_in_worker_scope(
                     .vm
                     .state_mut()
                     .install_bytes(checkpoint.vm.bytes().to_vec())
+                    .await
             {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error,
-                );
+                return worker_setup_failure(state, &ctx, error);
             }
             let failure: lashlang::RuntimeFailure = match rmp_serde::from_slice(&error.0) {
                 Ok(failure) => failure,
@@ -1366,9 +1368,8 @@ fn fail_attempt_on_host_verdict(
 ) {
     if error.is_host_verdict() {
         ctx.record_nested_effect_error(
-            lash_core::RuntimeEffectControllerError::retryable_response_derivation(
-                error.to_string(),
-            ),
+            lash_core::RuntimeEffectControllerError::from(error.clone().into_runtime_error())
+                .retryable_uncommitted_derivation(),
         );
     }
 }

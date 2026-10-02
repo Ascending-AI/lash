@@ -641,7 +641,7 @@ impl RlmExecutionState {
     /// `fleet_format` is the `F` the bound session's store recorded: the root
     /// and every durable part stamp `F`'s writer versions (FIG-3796), never
     /// the bare build constants.
-    pub fn snapshot_execution_state(
+    pub async fn snapshot_execution_state(
         &mut self,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
@@ -650,7 +650,9 @@ impl RlmExecutionState {
         {
             return Ok(snapshot.clone());
         }
-        let prepared = self.build_capture(CaptureMode::Incremental, fleet_format)?;
+        let prepared = self
+            .build_capture(CaptureMode::Incremental, fleet_format)
+            .await?;
         Ok(self.install_capture(prepared))
     }
 
@@ -660,7 +662,7 @@ impl RlmExecutionState {
     /// The whole fallible part of a capture is building it — canonical encoding
     /// of every changed fragment — so this proves capturability by building the
     /// same capture and dropping it. It advances no capture bookkeeping.
-    pub fn probe_execution_state_capture(
+    pub async fn probe_execution_state_capture(
         &mut self,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<(), SessionError> {
@@ -668,6 +670,7 @@ impl RlmExecutionState {
             return Ok(());
         }
         self.build_capture(CaptureMode::Incremental, fleet_format)
+            .await
             .map(|_| ())
     }
 
@@ -675,11 +678,13 @@ impl RlmExecutionState {
     /// capture bookkeeping touched. Explicit administrative snapshot uses this;
     /// it is relative to nothing, so it never depends on which leaf bodies are
     /// still resident in the runtime's checkpoint state.
-    pub fn hydrated_execution_state(
+    pub async fn hydrated_execution_state(
         &self,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        let prepared = self.build_capture(CaptureMode::Complete, fleet_format)?;
+        let prepared = self
+            .build_capture(CaptureMode::Complete, fleet_format)
+            .await?;
         let mut components = BTreeMap::new();
         for (key, component) in prepared.snapshot.components {
             match component {
@@ -702,7 +707,7 @@ impl RlmExecutionState {
         })
     }
 
-    fn build_capture(
+    async fn build_capture(
         &self,
         mode: CaptureMode,
         fleet_format: lash_core::FleetFormat,
@@ -723,7 +728,8 @@ impl RlmExecutionState {
                 },
                 fleet_format,
             )
-            .map_err(SessionError::Protocol)?;
+            .await
+            .map_err(worker_session_error)?;
         let baseline = parts.baseline;
         let mut capture = RlmWorkerCapture {
             state_header: ByteBuf::from(parts.header),
@@ -886,7 +892,7 @@ impl RlmExecutionState {
     /// FIG-3802) — the newest, and each older version a `Lift::Decoder` row
     /// registers, which this canonical binary root reads natively. The root's
     /// bytes and its leaves' identities are read as stored.
-    pub fn restore_execution_state(
+    pub async fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
         fleet_format: lash_core::FleetFormat,
@@ -935,9 +941,8 @@ impl RlmExecutionState {
         }
 
         let envelope = worker_bound_envelope(state, &parsed)?;
-        let baseline = self
-            .vm
-            .state_mut()
+        let mut restored = lash_vm_client::RemoteState::pristine(self.vm.state().service().clone());
+        let baseline = restored
             .restore(
                 envelope.state_header.into_vec(),
                 envelope
@@ -947,6 +952,7 @@ impl RlmExecutionState {
                     .collect(),
                 fleet_format,
             )
+            .await
             .map_err(|error| match error {
                 lash_vm_client::RemoteRestoreError::Snapshot(error) => {
                     RlmSnapshotError::Lashlang(error)
@@ -955,17 +961,16 @@ impl RlmExecutionState {
                     RlmSnapshotError::WorkerUnavailable(error)
                 }
             })?;
-        self.vm
-            .state_mut()
+        restored
             .remove_names(BTreeSet::from(["history".to_string()]))
-            .map_err(|details| RlmSnapshotError::FormatMismatch { details })?;
+            .await
+            .map_err(RlmSnapshotError::WorkerUnavailable)?;
 
-        let next_live_names = self
-            .vm
-            .state()
+        let next_live_names = restored
             .binding_names()
             .map(str::to_string)
             .collect::<BTreeSet<_>>();
+        self.vm.replace_state(restored);
         let pruned_reserved = parsed.globals.len() != next_live_names.len();
         self.deferred_link = None;
         self.deferred_trigger_resolutions = parsed.deferred_trigger_resolutions;
@@ -980,7 +985,7 @@ impl RlmExecutionState {
         Ok(())
     }
 
-    pub fn prune_protected_globals(
+    pub async fn prune_protected_globals(
         &mut self,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
@@ -993,14 +998,15 @@ impl RlmExecutionState {
         self.vm
             .state_mut()
             .remove_names(names)
-            .map_err(SessionError::Protocol)?;
+            .await
+            .map_err(worker_session_error)?;
         if self.vm.state().binding_names().count() != before {
             self.capture_dirty = true;
         }
         Ok(())
     }
 
-    pub fn patch_globals(
+    pub async fn patch_globals(
         &mut self,
         patch: &lash_rlm_types::RlmGlobalsPatchPluginBody,
         protected_names: &BTreeSet<String>,
@@ -1011,8 +1017,7 @@ impl RlmExecutionState {
         // The state commits the whole batch or none of it, so the dirty
         // bookkeeping is recorded from what the commit reports rather than
         // reconstructed afterwards. A rejected patch leaves both untouched.
-        let inserted = apply_global_defaults(self.vm.state_mut(), patch, protected_names)
-            .map_err(SessionError::Protocol)?;
+        let inserted = apply_global_defaults(self.vm.state_mut(), patch, protected_names).await?;
         if !inserted.is_empty() {
             self.capture_dirty = true;
         }
@@ -1081,3 +1086,7 @@ mod guarded_surface_tests;
 
 #[cfg(test)]
 mod authority_split_tests;
+
+fn worker_session_error(error: lash_vm_client::PoolError) -> SessionError {
+    SessionError::Plugin(lash_core::PluginError::Runtime(error.into_runtime_error()))
+}

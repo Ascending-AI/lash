@@ -79,96 +79,113 @@ impl RemoteState {
         };
         Ok(completion.outcome)
     }
-    pub fn install_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+    pub async fn install_bytes(&mut self, bytes: Vec<u8>) -> Result<(), crate::PoolError> {
         match self
             .service
-            .request(Request::State {
+            .request_accounted(Request::State {
                 snapshot: Some(bytes.into()),
                 action: StateAction::Inspect,
             })
-            .map_err(|e| e.to_string())?
+            .await?
         {
             Response::State(view) => {
                 self.view = view;
                 Ok(())
             }
-            other => Err(format!("worker returned {other:?}")),
+            _ => Err(crate::PoolError::breach(
+                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+            )),
         }
     }
-    pub fn insert_global(&mut self, name: impl Into<String>, value: Value) -> Result<(), String> {
+    pub async fn insert_global(
+        &mut self,
+        name: impl Into<String>,
+        value: Value,
+    ) -> Result<(), crate::PoolError> {
         self.mutate(StateAction::Insert {
             name: name.into(),
             value,
         })
+        .await
     }
-    pub fn remove_global(&mut self, name: &str) -> Result<bool, String> {
+    pub async fn remove_global(&mut self, name: &str) -> Result<bool, crate::PoolError> {
         if !self.view.metadata.names.contains(name) {
             return Ok(false);
         }
         self.mutate(StateAction::Remove {
             names: BTreeSet::from([name.to_string()]),
-        })?;
+        })
+        .await?;
         Ok(true)
     }
-    pub fn remove_names(&mut self, names: BTreeSet<String>) -> Result<(), String> {
-        self.mutate(StateAction::Remove { names })
+    pub async fn remove_names(&mut self, names: BTreeSet<String>) -> Result<(), crate::PoolError> {
+        self.mutate(StateAction::Remove { names }).await
     }
-    pub fn defaults(
+    pub async fn defaults(
         &mut self,
         values: std::collections::BTreeMap<String, Value>,
         protected: BTreeSet<String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::PoolError> {
         self.mutate(StateAction::Defaults { values, protected })
+            .await
     }
-    fn mutate(&mut self, action: StateAction) -> Result<(), String> {
+    async fn mutate(&mut self, action: StateAction) -> Result<(), crate::PoolError> {
         match self
             .service
-            .request(Request::State {
+            .request_accounted(Request::State {
                 snapshot: self.bytes().map(serde_bytes::ByteBuf::from),
                 action,
             })
-            .map_err(|e| e.to_string())?
+            .await?
         {
             Response::State(view) => {
                 self.view = view;
                 Ok(())
             }
-            other => Err(format!("worker returned {other:?}")),
+            _ => Err(crate::PoolError::breach(
+                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+            )),
         }
     }
-    pub fn capture(
+    pub async fn capture(
         &self,
         baseline: &std::collections::BTreeMap<String, String>,
         fleet: FleetFormat,
-    ) -> Result<Capture, String> {
+    ) -> Result<Capture, crate::PoolError> {
         let snapshot = match self.bytes() {
             Some(bytes) => bytes.to_vec(),
             None => match self
                 .service
-                .request(Request::State {
+                .request_accounted(Request::State {
                     snapshot: None,
                     action: StateAction::Inspect,
                 })
-                .map_err(|e| e.to_string())?
+                .await?
             {
                 Response::State(view) => view.snapshot,
-                other => return Err(format!("worker returned {other:?}")),
+                _ => {
+                    return Err(crate::PoolError::breach(
+                        lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+                    ));
+                }
             },
         };
         match self
             .service
-            .request(Request::Capture {
+            .request_accounted(Request::Capture {
                 snapshot: snapshot.into(),
                 baseline: baseline.clone(),
                 fleet: fleet.version(),
             })
-            .map_err(|e| e.to_string())?
+            .await?
         {
             Response::Captured(parts) => Ok(parts),
-            other => Err(format!("worker returned {other:?}")),
+            _ => Err(crate::PoolError::breach(
+                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+            )),
         }
     }
-    pub fn restore(
+    pub async fn restore(
         &mut self,
         header: Vec<u8>,
         globals: std::collections::BTreeMap<String, Vec<u8>>,
@@ -176,11 +193,12 @@ impl RemoteState {
     ) -> Result<std::collections::BTreeMap<String, String>, RemoteRestoreError> {
         match self
             .service
-            .request(Request::Restore {
+            .request_accounted(Request::Restore {
                 header: header.into(),
                 globals: globals.into_iter().map(|(k, v)| (k, v.into())).collect(),
                 fleet: fleet.version(),
             })
+            .await
             .map_err(RemoteRestoreError::Worker)?
         {
             Response::Restored { view, baseline } => {
@@ -230,6 +248,64 @@ mod tests {
     use lash_vm_protocol::{
         EncodedPayload, InfrastructureOutcome, OpaqueVmState, VmOwner, VmStateKind,
     };
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn saturated_state_request_does_not_delay_an_unrelated_timer() {
+        use crate::WorkerPoolRuntimeOps as _;
+        use std::time::{Duration, Instant};
+
+        let mut config = crate::PoolConfig::standard(crate::WorkerEntry::helper(
+            crate::testing::worker_executable("lash-vm-worker".into()),
+        ));
+        config.max_workers = 1;
+        config.deadlines.checkout = Duration::from_secs(1);
+        let service = Service::new(config);
+        let pool = service
+            .pool()
+            .expect("prewarm outside the measured interval");
+        let held = pool
+            .checkout(
+                4096,
+                crate::OwnerEpoch(0),
+                crate::FrameEpoch(0),
+                Default::default(),
+            )
+            .expect("hold the only worker");
+        let mut state = RemoteState::pristine(service);
+        let (elapsed, result) = tokio::join!(
+            biased;
+            async {
+                let started = Instant::now();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                started.elapsed()
+            },
+            async { state.insert_global("value", Value::Number(42.0)).await },
+        );
+        drop(held);
+        assert!(
+            matches!(result, Err(crate::PoolError::CheckoutTimedOut)),
+            "{result:?}"
+        );
+        let runtime = result.expect_err("saturated checkout").into_runtime_error();
+        let plugin = lash_core_execution::PluginError::Runtime(runtime);
+        let encoded = rmp_serde::to_vec_named(&plugin).expect("plugin failure encodes");
+        let plugin: lash_core_execution::PluginError =
+            rmp_serde::from_slice(&encoded).expect("plugin failure decodes");
+        let runtime = plugin.into_turn_failure(lash_core_execution::RuntimeErrorCode::Plugin);
+        assert_eq!(
+            runtime.code,
+            lash_core_execution::RuntimeErrorCode::WorkerCheckoutTimedOut
+        );
+        assert!(
+            matches!(runtime.cause, Some(lash_core_execution::RuntimeErrorCause::VmWorker { ref outcome }) if **outcome == crate::PoolError::CheckoutTimedOut.into_outcome())
+        );
+        assert!(!runtime.is_terminal());
+        eprintln!("saturated checkout left the 20 ms timer responsive after {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "an unrelated 20 ms timer waited {elapsed:?} behind worker checkout"
+        );
+    }
 
     #[test]
     fn rejected_completion_preserves_the_previous_state() -> Result<(), Box<dyn std::error::Error>>

@@ -685,8 +685,8 @@ fn the_v11_envelope_is_refused_by_the_current_envelope_version() {
 /// envelope carries, is refused twice: the parent's structural check refuses
 /// its contract's continuation version without decoding it, and the worker's semantic decode
 /// refuses the bytes on their own.
-#[test]
-fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
+#[tokio::test]
+async fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
     assert!(
         VM_V10_SEGMENT_STATE
             .windows(b"projected_slots".len())
@@ -720,7 +720,7 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
             }
         )
     );
-    let Err(refusal) = worker_continuation_info(&sealed) else {
+    let Err(refusal) = worker_continuation_info(&sealed).await else {
         panic!("the v10 VM continuation must be refused by the current decoder");
     };
     let details = refusal.to_string();
@@ -761,8 +761,8 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
     assert_retired_generation(&output, "sha256:old");
 }
 
-#[test]
-fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
+#[tokio::test]
+async fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     let mut fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
         .expect("the version-17 parked-loop fixture is JSON");
     assert_eq!(fixture["bytecode_format_version"], 17);
@@ -864,6 +864,7 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current envelope");
     let continuation = worker_continuation_info(&segment.vm)
+        .await
         .expect("the worker decodes the re-enveloped continuation");
     assert_eq!(
         continuation, 1,
@@ -1144,11 +1145,14 @@ pub(super) fn worker_parked_continuation(vm: Vec<u8>) -> Vec<u8> {
     .expect("encode the worker's parked continuation")
 }
 
-fn worker_continuation_info(state: &lash_vm_protocol::OpaqueVmState) -> Result<usize, String> {
+async fn worker_continuation_info(
+    state: &lash_vm_protocol::OpaqueVmState,
+) -> Result<usize, String> {
     match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::ContinuationInfo {
+        .request_accounted(lash_vm_client::service::Request::ContinuationInfo {
             bytes: state.bytes().to_vec(),
         })
+        .await
         .map_err(|e| e.to_string())?
     {
         lash_vm_client::service::Response::ContinuationInfo { iterator_count } => {

@@ -149,13 +149,15 @@ async fn process_context<'h>(
     )
 }
 
-fn cold_reload(state: &RlmExecutionState) -> RlmExecutionState {
+async fn cold_reload(state: &RlmExecutionState) -> RlmExecutionState {
     let hydrated = state
         .hydrated_execution_state(lash_core::FleetFormat::current())
+        .await
         .expect("the live execution state captures");
     let mut restored = RlmExecutionState::for_engine("typescript");
     restored
         .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        .await
         .expect("the captured execution state restores");
     restored
 }
@@ -212,7 +214,7 @@ const total = [1, 2, 3].map((value) => value * 2).length;"#,
         .await;
         assert_eq!(first.error, None, "cell 1");
         assert_exact_globals(&state, CELL_1_GLOBALS, "cell 1");
-        let mut state = cold_reload(&state);
+        let mut state = cold_reload(&state).await;
         assert_exact_globals(&state, CELL_1_GLOBALS, "reload after cell 1");
 
         let process_handler = process_double
@@ -239,7 +241,7 @@ const from_host = host_config.label;"#,
             .expect("close the process cell's handler");
         assert_eq!(second.error, None, "cell 2");
         assert_exact_globals(&state, CELL_2_GLOBALS, "cell 2");
-        let mut state = cold_reload(&state);
+        let mut state = cold_reload(&state).await;
         assert_exact_globals(&state, CELL_2_GLOBALS, "reload after cell 2");
 
         // Cell 3's block shadow lowers to the same generated slot cell 2's
@@ -273,7 +275,7 @@ finish({ answer: answer, counter: counter, n: box.n, later: later, fetched: fetc
                 "cell 3 reads every global by name after two reloads: missing {expected} in {rendered}"
             );
         }
-        let state = cold_reload(&state);
+        let state = cold_reload(&state).await;
         assert_exact_globals(&state, CELL_2_GLOBALS, "reload after cell 3");
     });
 }

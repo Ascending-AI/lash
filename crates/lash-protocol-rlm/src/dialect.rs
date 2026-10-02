@@ -736,25 +736,25 @@ impl DialectSession {
         self.state.execution_state_dirty()
     }
 
-    pub(crate) fn snapshot_execution_state(
+    pub(crate) async fn snapshot_execution_state(
         &mut self,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state.snapshot_execution_state(fleet_format)
+        self.state.snapshot_execution_state(fleet_format).await
     }
 
-    pub(crate) fn probe_execution_state_capture(
+    pub(crate) async fn probe_execution_state_capture(
         &mut self,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture(fleet_format)
+        self.state.probe_execution_state_capture(fleet_format).await
     }
 
-    pub(crate) fn hydrated_execution_state(
+    pub(crate) async fn hydrated_execution_state(
         &self,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state.hydrated_execution_state(fleet_format)
+        self.state.hydrated_execution_state(fleet_format).await
     }
 
     pub(crate) fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
@@ -783,30 +783,31 @@ impl DialectSession {
         Ok(())
     }
 
-    pub(crate) fn restore_execution_state(
+    pub(crate) async fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
         fleet_format: lash_core::FleetFormat,
     ) -> Result<(), SessionError> {
         self.state
             .restore_execution_state(state, fleet_format)
-            .map_err(|error| SessionError::Protocol(error.to_string()))
+            .await
+            .map_err(SessionError::from)
     }
 
-    pub(crate) fn prune_protected_globals(
+    pub(crate) async fn prune_protected_globals(
         &mut self,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state.prune_protected_globals(protected_names)?;
+        self.state.prune_protected_globals(protected_names).await?;
         Ok(())
     }
 
-    pub(crate) fn patch_globals(
+    pub(crate) async fn patch_globals(
         &mut self,
         patch: &RlmGlobalsPatchPluginBody,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state.patch_globals(patch, protected_names)
+        self.state.patch_globals(patch, protected_names).await
     }
 
     /// The bound-variable prompt: the session's globals, including the ones
@@ -906,8 +907,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn extension_session_bound_variables_use_its_vocabulary() {
+    #[tokio::test]
+    async fn extension_session_bound_variables_use_its_vocabulary() {
         let mut session = DialectSession::new(
             Arc::new(ExtensionFixture),
             lash_lashlang_runtime::LashlangSurface::default(),
@@ -922,6 +923,7 @@ mod tests {
                 },
                 &BTreeSet::new(),
             )
+            .await
             .expect("bind a value to render through the session");
         let prompt = session
             .prepare_bound_variables_prompt(&BTreeSet::new(), lash_render::RenderParams::default())

@@ -506,6 +506,9 @@ pub enum ToolAttemptOutcome {
         /// Follow-on declarations admitted only after the attempt is recorded.
         intents: ToolIntents,
     },
+    /// A host fault that aborts the attempt before it has a recorded result.
+    /// Its journal disposition determines whether the engine may retry it.
+    HostFailed(Box<crate::RuntimeEffectControllerError>),
     /// Deferred provider output with no representable declarations.
     Pending(crate::PendingCompletion),
 }
@@ -518,6 +521,10 @@ impl ToolAttemptOutcome {
 
     pub fn done_without_intents(result: ToolOutcomeDone) -> Self {
         Self::done(result, ToolIntents::default())
+    }
+
+    pub fn host_failed(error: crate::RuntimeEffectControllerError) -> Self {
+        Self::HostFailed(Box::new(error))
     }
 
     pub fn pending(pending: crate::PendingCompletion) -> Self {

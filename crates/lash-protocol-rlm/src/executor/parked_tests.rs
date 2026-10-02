@@ -171,10 +171,11 @@ pub(crate) async fn execute_parked_cell_for_tests(
         return Err("parked cell did not stop at its tool effect".into());
     };
     let (wire, closure_root) = match service
-        .request(lash_vm_client::service::Request::ContinuationProbe {
+        .request_accounted(lash_vm_client::service::Request::ContinuationProbe {
             bytes: checkpoint.vm.bytes().to_vec(),
             remove_first_reference: break_retention,
         })
+        .await
         .map_err(|e| e.to_string())?
     {
         lash_vm_client::service::Response::ContinuationProbe {

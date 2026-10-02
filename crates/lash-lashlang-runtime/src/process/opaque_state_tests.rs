@@ -102,7 +102,9 @@ async fn parent_state_decode_never_compiles_regexp() {
         worker_parked_continuation(bytes),
     );
     assert_eq!(
-        worker_continuation_info(&valid).expect("the worker accepts the unpoisoned RegExp"),
+        worker_continuation_info(&valid)
+            .await
+            .expect("the worker accepts the unpoisoned RegExp"),
         0
     );
     let envelope = serde_json::to_vec(&LashlangSegmentState {
@@ -140,6 +142,7 @@ async fn parent_state_decode_never_compiles_regexp() {
     );
 
     let refusal = worker_continuation_info(&decoded.vm)
+        .await
         .expect_err("the worker's semantic decode validates the RegExp");
     assert!(
         refusal.to_string().contains("RegExp"),
@@ -297,11 +300,14 @@ fn only_a_refusal_or_a_run_limit_ends_the_process() {
     );
 }
 
-fn worker_continuation_info(state: &lash_vm_protocol::OpaqueVmState) -> Result<usize, String> {
+async fn worker_continuation_info(
+    state: &lash_vm_protocol::OpaqueVmState,
+) -> Result<usize, String> {
     match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::ContinuationInfo {
+        .request_accounted(lash_vm_client::service::Request::ContinuationInfo {
             bytes: state.bytes().to_vec(),
         })
+        .await
         .map_err(|e| e.to_string())?
     {
         lash_vm_client::service::Response::ContinuationInfo { iterator_count } => {

@@ -22,7 +22,8 @@ pub async fn process_shutdown_preserves_typed_failures(backend: &lash_core::Back
         "process guarded() -> null { finish null }",
         process_module("guarded", Vec::new(), lashlang::TypeExpr::Null, b::null()),
         &environment,
-    );
+    )
+    .await;
     let store = LashlangArtifacts::new(backend.module_artifacts());
     store
         .publish_module_artifact(&host_claim(), &compiled.artifact)
@@ -165,17 +166,18 @@ fn host_claim() -> lash_core::ReferrerClaim {
     ))
     .expect("unguarded host pin")
 }
-fn compile_fixture(
+async fn compile_fixture(
     source: &str,
     program: lashlang::Program,
     environment: &LashlangHostEnvironment,
 ) -> lash_vm_client::service::CompiledModule {
     match lash_vm_client::service::Service::default()
-        .request(lash_vm_client::service::Request::CompileAst {
+        .request_accounted(lash_vm_client::service::Request::CompileAst {
             source: source.to_owned(),
             program,
             environment: environment.clone(),
         })
+        .await
         .expect("compile fixture in worker")
     {
         lash_vm_client::service::Response::Module(module) => *module,
@@ -199,7 +201,8 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
             b::bool_lit(true),
         ),
         &environment,
-    );
+    )
+    .await;
     let process_type = b::process_type(
         vec![
             b::param("event", lashlang::TypeExpr::Str),
@@ -226,7 +229,8 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
             b::bool_lit(true),
         ),
         &environment,
-    );
+    )
+    .await;
     for artifact in [&handler.artifact, &receiver.artifact] {
         store
             .publish_module_artifact(&host_claim(), artifact)

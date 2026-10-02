@@ -29,6 +29,21 @@ pub enum PoolError {
 }
 
 impl PoolError {
+    /// Preserve the worker's cause and retry class at the plugin/host boundary.
+    pub fn into_runtime_error(self) -> lash_core_execution::RuntimeError {
+        let message = self.to_string();
+        let code = if matches!(self, Self::CheckoutTimedOut) {
+            lash_core_execution::RuntimeErrorCode::WorkerCheckoutTimedOut
+        } else {
+            lash_core_execution::RuntimeErrorCode::VmWorkerFailed
+        };
+        let mut error = lash_core_execution::RuntimeError::new(code, message);
+        error.cause = Some(lash_core_execution::RuntimeErrorCause::VmWorker {
+            outcome: Box::new(self.into_outcome()),
+        });
+        error
+    }
+
     /// Whether this is a verdict of the host and the attempt that met it:
     /// its worker failure, worker budget (a deadline, cumulative CPU or
     /// replacement attempts), pool capacity, or recovery store. It is read

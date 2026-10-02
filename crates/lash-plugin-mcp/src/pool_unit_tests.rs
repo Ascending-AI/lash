@@ -193,6 +193,9 @@ async fn execute_with_manifest<P: ToolProvider>(
             );
             ToolOutcome::from_output(result.into_output())
         }
+        lash_core::ToolAttemptOutcome::HostFailed(error) => {
+            panic!("unexpected host fault: {error}")
+        }
         lash_core::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     }
 }

@@ -251,8 +251,11 @@ impl Session {
     /// the stale leaf here exactly as it would in production.
     pub(crate) fn restart(&mut self) {
         let snapshot = self
-            .state
-            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .runtime
+            .block_on(
+                self.state
+                    .snapshot_execution_state(lash_core::FleetFormat::current()),
+            )
             .expect("capture the RLM execution state");
         self.state.acknowledge_execution_state_capture();
         let mut components = BTreeMap::new();
@@ -276,8 +279,10 @@ impl Session {
         };
         let mut restored =
             RlmExecutionState::for_engine_with_workers(LANGUAGE_ID, self.workers.clone());
-        restored
-            .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
+        self.runtime
+            .block_on(
+                restored.restore_execution_state(&hydrated, lash_core::FleetFormat::current()),
+            )
             .expect("restore the RLM execution state");
         self.state = restored;
     }
@@ -333,8 +338,11 @@ impl Session {
     /// The session's persisted execution state: the root record and every leaf
     /// body, exactly as a host would store them.
     pub(crate) fn persisted_state(&self) -> lash_core::plugin::HydratedExecutionState {
-        self.state
-            .hydrated_execution_state(lash_core::FleetFormat::current())
+        self.runtime
+            .block_on(
+                self.state
+                    .hydrated_execution_state(lash_core::FleetFormat::current()),
+            )
             .expect("capture the RLM execution state")
     }
 

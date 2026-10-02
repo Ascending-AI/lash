@@ -35,6 +35,7 @@ async fn deferred_outcomes_recover_only_from_journal(
                         .expect("captured root");
                     state
                         .restore_execution_state(&saved, lash_core::FleetFormat::current())
+                        .await
                         .expect("cold restore");
                 }
                 let ctx = lash_core::testing::code_execution_context_with_invocation(
@@ -64,11 +65,13 @@ async fn deferred_outcomes_recover_only_from_journal(
                     .expect("error log lock")
                     .push(result.error.is_some());
                 if crash {
-                    *snapshot.lock().expect("snapshot lock") = Some(hydrate_snapshot(
+                    let captured = hydrate_snapshot(
                         state
                             .snapshot_execution_state(lash_core::FleetFormat::current())
+                            .await
                             .expect("capture root"),
-                    ));
+                    );
+                    *snapshot.lock().expect("snapshot lock") = Some(captured);
                 }
                 assert!(
                     !crash,
