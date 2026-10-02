@@ -267,7 +267,8 @@ router wiring as an emit.
 
 Control-intent acknowledgements and refusals compare their claim token. An
 intent's state records only what was decided about its engine half: pending,
-acknowledged, superseded, or refused with the engine's typed cause. Failed
+acknowledged, overtaken by a later intent, or refused with the engine's
+typed cause. Failed
 attempts and their exhaustion live on the obligation alone. The engine half
 is owed exactly while the intent is pending and its obligation is due or
 claimed; each store states that once, as the generated column

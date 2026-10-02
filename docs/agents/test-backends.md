@@ -107,6 +107,7 @@ Each row names the deletion commit, not merely the ADR that proposed it.
 | Orchestrating tools and their registry lane | Retired in `501f323f61`. Tools are opaque providers; a Pending result can declare a child start. |
 | Durable stopped partial and turn capture store | Retired in `dddace81f0`, closing the deletion arc through `65102e4944`, `1ca6b375f2`, `a9aa9071ee` and `54fa765274`. A stopped turn's uncommitted tail exists only on the live stream. |
 | Universal exclusively-owned copies at durable stores | Retired in `c51e616528`. ECMA stores preserve shared references; durable capture uses forest encoding where possible and otherwise validated shared-graph encoding. Runtime roots remain authoritative and host views remain projections. |
+| Retryable failed intent state on control intents | Retired in `02ffbca4fd`. `ControlIntentState` is `Pending`, `Acknowledged`, `Superseded` or `Refused { cause }`; a retryable failure lives on the obligation alone and writes nothing on the intent. |
 
 ## Keeping this document current
 

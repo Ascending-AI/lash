@@ -108,8 +108,9 @@ Evidence: `crates/lash-sqlite-store/src/session_roots.rs:169`,
 
 ### 5a. The `CloseSession` intent is the deletion tombstone
 
-Deletion records `CloseSession` before removing storage. A pending or
-retryable failed intent remains recoverable. Its acknowledgement arms the
+Deletion records `CloseSession` before removing storage. The intent stays
+pending while its obligation is owed and remains recoverable; a refusal
+records `Refused { cause }`. Its acknowledgement arms the
 physical-delete obligation. The acknowledged intent stays as permanent
 deletion evidence, and `root_terminal` can answer roots of the deleted
 session as `Cancelled` with cause `SessionDeleted`.

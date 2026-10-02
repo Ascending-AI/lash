@@ -40,6 +40,7 @@ TERMS = (
     RetiredTerm("orchestrating tool", r"\borchestrating\s+tools?\b", "501f323f61"),
     RetiredTerm("stopped partial", r"\bstopped[ -]partials?\b", "dddace81f0"),
     RetiredTerm("exclusively-owned copies", r"\bexclusively[ -]owned[ -](?:recursive[ -])?cop(?:y|ies)\b", "c51e616528"),
+    RetiredTerm("retryable failed intent", r"\bretryable[ -]failed\s+intents?\b", "02ffbca4fd"),
 )
 
 
