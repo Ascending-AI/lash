@@ -510,12 +510,12 @@ struct PreflightJson<'a> {
 fn preflight_result(
     status: &StoreSchemaStatus,
     connection_budget: Option<&PostgresConnectionBudgetReport>,
-) -> Value {
+) -> Result<Value, CliError> {
     serde_json::to_value(PreflightJson {
         schema: lash::preflight::schema_report(status),
         connection_budget,
     })
-    .expect("the typed preflight report serializes")
+    .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))
 }
 
 #[derive(Serialize)]
@@ -818,7 +818,7 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                 StoreSchemaOutcome::Undecided => Exit::Refused,
                 _ => Exit::Refused,
             };
-            (preflight_result(&status, capacity.as_ref()), exit)
+            (preflight_result(&status, capacity.as_ref())?, exit)
         }
         Command::Drain { generation }
         | Command::EndDrain { generation }
