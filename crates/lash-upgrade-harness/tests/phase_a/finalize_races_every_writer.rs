@@ -188,11 +188,18 @@ async fn every_writer_is_fenced(stores: &dyn StoreSet, label: &str) -> Result<Ve
         .await;
     expect("leader lease", store_outcome(lease))?;
 
-    let pruned = stores
+    let mutation = stores
         .trigger_store()
-        .prune_mutation_receipts(u64::MAX)
+        .execute_command(
+            "finalize-races-trigger-mutation",
+            lash_core::TriggerCommand::Prune {
+                owner_scope: lash_core::TriggerOwnerScope::host("finalize-races")?,
+                actor: lash_core::ProcessOriginator::host(),
+                subscription_keys: Vec::new(),
+            },
+        )
         .await;
-    expect("trigger write", plugin_outcome(pruned))?;
+    expect("trigger write", plugin_outcome(mutation))?;
 
     let process = lash_core::process_id_for_test("finalize-races");
     let released = stores

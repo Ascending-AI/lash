@@ -136,15 +136,12 @@ pub(crate) enum WorkbenchAuthorizationAction {
     /// separate from chat/session participation.
     ManageApprovals,
     OperateDeployment,
-    /// Destructive, deployment-wide maintenance. It is deliberately not
-    /// session-scoped: no chat participant should ever be able to reach it.
-    PruneTriggerMutationReceipts,
     /// Destructive, deployment-wide store-growth maintenance: trigger
     /// occurrence reclamation, explicit tombstone forget, session-store vacuum,
-    /// and attachment reclamation. Operator-only for the same reason
-    /// [`WorkbenchAuthorizationAction::PruneTriggerMutationReceipts`] is — it
-    /// deletes durable rows and bytes across sessions, and the caller owns the
-    /// safety argument.
+    /// and attachment reclamation. It is deliberately not session-scoped: no
+    /// chat participant should ever be able to reach it, it deletes durable
+    /// rows and bytes across sessions, and the caller owns the safety
+    /// argument.
     RunStoreMaintenance,
 }
 
@@ -185,7 +182,6 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             }
             WorkbenchAuthorizationAction::ManageApprovals => {}
             WorkbenchAuthorizationAction::OperateDeployment => {}
-            WorkbenchAuthorizationAction::PruneTriggerMutationReceipts => {}
             WorkbenchAuthorizationAction::RunStoreMaintenance => {}
         }
         Ok(())

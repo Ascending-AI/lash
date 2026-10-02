@@ -1,6 +1,7 @@
 //! Terminal-session receipt sweep and dependent-root reconciliation.
 use crate::session_sql::session_sql;
 use crate::*;
+use lash_core_execution::SessionCatalogStore as _;
 
 pub(crate) type ReclaimResult = Result<
     lash_core_execution::store::RetentionReport,
@@ -15,7 +16,7 @@ pub(crate) async fn reclaim(
         Box::new(lash_core_execution::MaintenanceFailure::failed_before_any_work(error))
     };
     let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
-    store
+    let mut report = store
         .conn
         .write_flow(move |tx| {
             Ok(
@@ -70,6 +71,7 @@ pub(crate) async fn reclaim(
                     Ok(lash_core_execution::store::RetentionReport {
                         removed_receipt_count,
                         removed_session_terminal_count,
+                        removed_trigger_mutation_receipt_count: 0,
                         removed_usage_fact_count,
                         removed_usage_meter_count,
                         removed_usage_owner_retirement_count,
@@ -84,5 +86,110 @@ pub(crate) async fn reclaim(
         })
         .await
         .map_err(|error| failed_before_any_work(sqlite_error(error)))?
-        .map_err(failed_before_any_work)
+        .map_err(failed_before_any_work)?;
+    if let Some(trigger_store) = store.trigger_store.as_ref() {
+        report.removed_trigger_mutation_receipt_count =
+            reclaim_trigger_mutation_receipts(store, trigger_store, cutoff)
+                .await
+                .map_err(|error| {
+                    Box::new(lash_core_execution::MaintenanceFailure::failed(
+                        error,
+                        report.clone(),
+                    ))
+                })?;
+    }
+    Ok(report)
+}
+
+/// The trigger database's half of the sweep (FIG-4108): mutation receipts are
+/// durable evidence, reclaimed by the same bound as every other kind, so the
+/// low-level per-kind primitive is gone. The trigger database is its own
+/// file in the store set, so — like the process-registry arm of
+/// `delete_session` — its writes go through a connection of their own that
+/// installs and fences `SqliteDatabase::Triggers` rather than an `ATTACH`ed
+/// name.
+async fn reclaim_trigger_mutation_receipts(
+    store: &SqliteStore,
+    trigger_store: &DatabaseTarget,
+    cutoff: i64,
+) -> Result<usize, StoreError> {
+    if !trigger_store.exists() {
+        return Ok(0);
+    }
+    let conn = SqliteConnection::open_with_policy(trigger_store, store.options.connection_policy)
+        .await
+        .map_err(sqlite_async_error)?;
+    conn.install(
+        SqliteDatabase::Triggers,
+        lash_core_execution::FleetFormat::writable(),
+        |tx| {
+            crate::compat::fence(
+                tx,
+                SqliteDatabase::Triggers,
+                lash_core_execution::FleetFormat::writable(),
+            )
+        },
+    )
+    .await
+    .map_err(sqlite_error)?;
+    // Enumerate the session owners with a receipt older than the bound, then
+    // keep only the durably deleted ones: `deleted_sessions` lives in the
+    // durable core, so the proof crosses databases at the Rust boundary the
+    // reconcile driver already uses (`lookup_session` on each candidate).
+    let session_owners = conn
+        .call(move |conn| {
+            let mut stmt = conn.prepare_cached(
+                crate::triggers::trigger_sql()
+                    .retention_sqlite
+                    .select_receipt_session_owners
+                    .sql(),
+            )?;
+            let rows = stmt.query_map(params![cutoff], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+        .await
+        .map_err(sqlite_error)?;
+    let mut deleted_owner_ids = Vec::new();
+    for owner_id in session_owners {
+        let session_id =
+            SessionId::parse(&owner_id).map_err(|error| StoreError::StorageFailure {
+                backend: SQLITE_BACKEND,
+                message: format!(
+                    "trigger mutation receipt names a malformed session owner `{owner_id}`: {error}"
+                ),
+            })?;
+        if store.lookup_session(&session_id).await? == lash_core_execution::SessionLookup::Deleted {
+            deleted_owner_ids.push(owner_id);
+        }
+    }
+    // Ownerless (host/platform) receipts are swept even when no session
+    // owner was durably deleted, so the write transaction always runs.
+    let deleted_owner_ids_json =
+        serde_json::to_string(&deleted_owner_ids).map_err(|error| StoreError::StorageFailure {
+            backend: SQLITE_BACKEND,
+            message: format!("encode deleted trigger owner ids: {error}"),
+        })?;
+    sweep_trigger_mutation_receipts(&conn, cutoff, deleted_owner_ids_json).await
+}
+
+/// Delete every sweep-eligible receipt in one fenced write transaction: the
+/// bound's ownerless rows and the deleted owners' rows, with the outstanding-
+/// delivery guard re-proved inside the transaction.
+async fn sweep_trigger_mutation_receipts(
+    conn: &SqliteConnection,
+    cutoff: i64,
+    deleted_owner_ids_json: String,
+) -> Result<usize, StoreError> {
+    conn.write(move |tx| {
+        crate::conn::cached_execute(
+            tx,
+            crate::triggers::trigger_sql()
+                .retention_sqlite
+                .reclaim_mutation_receipts
+                .sql(),
+            params![cutoff, deleted_owner_ids_json],
+        )
+    })
+    .await
+    .map_err(sqlite_error)
 }

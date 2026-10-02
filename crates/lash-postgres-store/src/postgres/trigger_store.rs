@@ -226,14 +226,6 @@ lash_store_sql::statements! {
                AND delivery.subscription_id = candidate.subscription_id
                AND delivery.process_id = candidate.process_id";
 
-        /// Every session whose deliveries are still outstanding: the scopes a retention pass
-        /// must not reclaim receipts for.
-        select_session_owner_scopes = "SELECT DISTINCT
-                    'session:' ||
-                    (subscription_snapshot_json::jsonb #>> '{owner_scope,session_id}')
-             FROM trigger_deliveries
-             WHERE subscription_snapshot_json::jsonb #>> '{owner_scope,type}' = 'session'";
-
         /// At most `?2` delivery obligations due at `?1`, oldest due first,
         /// each row locked for the caller's claim and skipped by every
         /// concurrent claimant: two deployments' relays take disjoint pages.
@@ -242,16 +234,6 @@ lash_store_sql::statements! {
              ORDER BY obligation_due_at_ms, obligation_id
              LIMIT ?2
              FOR UPDATE SKIP LOCKED";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `trigger_mutation_receipts` statements only PostgreSQL issues.
-    pub(crate) struct MutationReceiptPostgresStatements @ "trigger_mutation_receipt" {
-        /// Forks on the bound `TEXT[]` against SQLite's `json_each`.
-        delete_for_session_owners = "DELETE FROM trigger_mutation_receipts
-             WHERE owner_kind = 'session'
-               AND owner_id = ANY(?1::TEXT[])";
     }
 }
 
@@ -280,6 +262,30 @@ lash_store_sql::statements! {
              ) AS trigger_owner_scopes
              WHERE owner_scope LIKE 'session:%'
              ORDER BY owner_scope";
+
+        /// The host retention lever's receipt sweep (FIG-4108): receipts
+        /// older than bound `?1` go when they are ownerless or their session
+        /// owner is durably deleted — `deleted_sessions` is in this database,
+        /// so the proof is a join — unless a delivery still names the owner.
+        reclaim_mutation_receipts = "DELETE FROM trigger_mutation_receipts
+             WHERE created_at_ms < ?1
+               AND (
+                   owner_kind IN ('host', 'platform')
+                   OR (
+                       owner_kind = 'session'
+                       AND EXISTS (
+                           SELECT 1 FROM deleted_sessions AS deleted
+                           WHERE deleted.session_id = trigger_mutation_receipts.owner_id
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM trigger_deliveries
+                           WHERE subscription_snapshot_json::jsonb #>> '{owner_scope,type}'
+                                 = 'session'
+                             AND subscription_snapshot_json::jsonb #>> '{owner_scope,session_id}'
+                                 = trigger_mutation_receipts.owner_id
+                       )
+                   )
+               )";
     }
 }
 
@@ -306,10 +312,9 @@ pub(crate) struct TriggerSql {
     pub(crate) delivery_postgres: DeliveryPostgresStatements,
     /// `trigger_mutation_receipts` statements both backends issue verbatim.
     receipt: MutationReceiptStatements,
-    /// `trigger_mutation_receipts` statements only PostgreSQL issues.
-    receipt_postgres: MutationReceiptPostgresStatements,
-    /// The family's cross-table retention read.
-    retention_postgres: RetentionPostgresStatements,
+    /// The family's cross-table retention statements, also issued by
+    /// `evidence_retention.rs` inside the sweep's guarded transaction.
+    pub(crate) retention_postgres: RetentionPostgresStatements,
 }
 
 static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
@@ -328,7 +333,6 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
         delivery: DeliveryStatements::render(dialect),
         delivery_postgres: DeliveryPostgresStatements::render(dialect),
         receipt: MutationReceiptStatements::render(dialect),
-        receipt_postgres: MutationReceiptPostgresStatements::render(dialect),
         retention_postgres: RetentionPostgresStatements::render(dialect),
     }
 });
@@ -1079,20 +1083,6 @@ impl TriggerStore for PostgresTriggerStore {
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize;
 
-        let blocked_owner_scopes: Vec<String> =
-            sqlx::query_scalar(sql.delivery_postgres.select_session_owner_scopes.sql())
-                .fetch_all(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-        let blocked_owner_scopes = blocked_owner_scopes
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        let receipt_owner_ids = deleted_owner_scopes
-            .iter()
-            .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
-            .map(|owner_scope| owner_scope["session:".len()..].to_string())
-            .collect::<Vec<_>>();
-
         let now = self.clock.timestamp_ms();
         let rows = sqlx::query(
             sql.subscription_postgres
@@ -1126,23 +1116,11 @@ impl TriggerStore for PostgresTriggerStore {
                 .map_err(plugin_sqlx_error)?
                 .rows_affected() as usize
         };
-        let reclaimed_mutation_receipt_count = if receipt_owner_ids.is_empty() {
-            0
-        } else {
-            sqlx::query(sql.receipt_postgres.delete_for_session_owners.sql())
-                .bind(&receipt_owner_ids)
-                .execute(&mut **tx)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize
-        };
-
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core_execution::TriggerRetentionReconciliationReport {
             reclaimed_delivery_count,
             reclaimed_occurrence_count,
             reclaimed_subscription_count,
-            reclaimed_mutation_receipt_count,
         })
     }
 
@@ -1276,22 +1254,6 @@ impl TriggerStore for PostgresTriggerStore {
         })
         .await?;
         Ok(forgotten.rows_affected() as usize)
-    }
-
-    async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let pruned = crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
-            Box::pin(async move {
-                sqlx::query(trigger_sql().receipt.prune_host_and_platform.sql())
-                    .bind(cutoff_epoch_ms)
-                    .execute(tx.as_mut())
-                    .await
-                    .map_err(crate::store_sqlx_error)
-            })
-        })
-        .await
-        .map_err(crate::plugin_store_error)?;
-        Ok(pruned.rows_affected() as usize)
     }
 
     async fn prune_non_fired_occurrences(

@@ -841,7 +841,6 @@ async fn apply_pruned_trigger_delivery_reconciliation(
             deleted_deliveries = report.reclaimed_delivery_count,
             deleted_occurrences = report.reclaimed_occurrence_count,
             deleted_subscriptions = report.reclaimed_subscription_count,
-            deleted_mutation_receipts = report.reclaimed_mutation_receipt_count,
             deleted_candidates = ?candidates,
             deletion_result = "deleted_observed_rows",
             "completed trigger-delivery retention reconciliation"

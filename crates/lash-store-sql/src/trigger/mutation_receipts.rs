@@ -22,12 +22,5 @@ crate::statements! {
                 request_fingerprint, result_json, created_at_ms
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
-
-        /// Session-owned receipts are deliberately absent: they are reclaimed
-        /// by the session's own retention pass, which has to see that no
-        /// delivery still blocks the session first.
-        prune_host_and_platform = "DELETE FROM trigger_mutation_receipts
-             WHERE created_at_ms < ?1
-               AND owner_kind IN ('host', 'platform')";
     }
 }

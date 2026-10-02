@@ -49,6 +49,7 @@ where
     drop((first, second));
     Box::pin(captured_delivery_refusals(make().await)).await;
     deleted_session_frontier_authorizes_trigger_owner_reclamation(make().await).await;
+    mutation_receipts_follow_the_host_retention_bound(make().await).await;
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
     zero_match_occurrence_is_reclaimed_at_delivery_reconciliation(make().await).await;
     delivery_delete_is_bound_to_observed_row_identity(make().await).await;
@@ -350,28 +351,30 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
     .await
     .expect("reconcile deleted trigger owner");
     assert_eq!(report.reclaimed_subscription_count, 1);
-    assert_eq!(report.reclaimed_mutation_receipt_count, 3);
 
-    let mut replacement = original_draft;
-    replacement.source_key = "frontier-trigger-retention-replacement".to_string();
-    let recreated = handles
+    // Mutation receipts no longer ride the session-delete reconcile
+    // (FIG-4108): the host retention lever reclaims them by bound, so until it
+    // runs the operation ids still replay their journaled answers and a
+    // reused id carrying different content is a conflict, not a
+    // re-evaluation.
+    let resent = handles
         .triggers
         .execute_command(
             REGISTER_OPERATION,
             TriggerCommand::Register {
                 owner_scope: owner(&SessionId::from(SESSION)),
                 actor: actor(&SessionId::from(SESSION)),
-                draft: replacement,
+                draft: original_draft,
             },
         )
         .await
-        .expect("reuse operation id after dead-owner receipt reclamation")
-        .expect("recreate trigger after dead-owner fence reclamation");
-    let TriggerCommandOutcome::Mutation { receipt: recreated } = recreated else {
-        panic!("recreate must return a mutation receipt")
+        .expect("resend operation id while its receipt is retained")
+        .expect("resend replays the retained receipt");
+    let TriggerCommandOutcome::Mutation { receipt: resent } = resent else {
+        panic!("resend must return a mutation receipt")
     };
-    assert_eq!(recreated.revision, 1);
-    handles
+    assert_eq!(resent, created);
+    let reused = handles
         .triggers
         .execute_command(
             "frontier-trigger-receipt-only-operation",
@@ -382,8 +385,262 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
             },
         )
         .await
-        .expect("reuse receipt-only operation id after owner cascade")
-        .expect("receipt-only operation is re-evaluated after owner cascade");
+        .expect("reuse receipt-only operation id while its receipt is retained");
+    assert!(
+        matches!(reused, Err(crate::TriggerOperationError::Conflict { .. })),
+        "a retained receipt still fences a reused operation id: {reused:?}"
+    );
+}
+
+/// FIG-4108 / ADR 0023: `reclaim_retained_evidence` is the one host retention
+/// lever, and trigger mutation receipts are evidence it owns. Host- and
+/// platform-owned receipts older than the bound are reclaimed; a
+/// session-owned receipt is reclaimed once its owner is durably deleted and
+/// it is older than the bound — unless a delivery still names the owner. A
+/// receipt exactly at the bound — and every live owner's receipt — survives,
+/// and a resend whose receipt was reclaimed is evaluated again rather than
+/// replayed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn mutation_receipts_follow_the_host_retention_bound(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const DELETED_SESSION: &str = "receipt-lever-deleted-session";
+    const BLOCKED_SESSION: &str = "receipt-lever-blocked-session";
+    const LIVE_SESSION: &str = "receipt-lever-live-session";
+    const REGISTER_OPERATION: &str = "receipt-lever-register";
+    const BLOCKED_OPERATION: &str = "receipt-lever-register-blocked";
+    const LIVE_OPERATION: &str = "receipt-lever-register-live";
+
+    for session in [DELETED_SESSION, BLOCKED_SESSION, LIVE_SESSION] {
+        let request = super::session_store_factory::session_store_request(
+            &SessionId::from(session),
+            "receipt-lever-model",
+            crate::SessionRelation::Root,
+        );
+        handles
+            .sessions
+            .admit_view(&request)
+            .await
+            .expect("materialize trigger owner session");
+    }
+
+    let command = TriggerCommand::Register {
+        owner_scope: owner(&SessionId::from(DELETED_SESSION)),
+        actor: actor(&SessionId::from(DELETED_SESSION)),
+        draft: draft(
+            &SessionId::from(DELETED_SESSION),
+            "receipt-lever-key",
+            "receipt-lever-source",
+        ),
+    };
+    let created = handles
+        .triggers
+        .execute_command(REGISTER_OPERATION, command.clone())
+        .await
+        .expect("register the deleted session's trigger")
+        .expect("the registration commits");
+    let TriggerCommandOutcome::Mutation { receipt: created } = created else {
+        panic!("register must return a mutation receipt")
+    };
+    let written_at_ms = created.record_snapshot.created_at_ms;
+
+    let live_command = TriggerCommand::Register {
+        owner_scope: owner(&SessionId::from(LIVE_SESSION)),
+        actor: actor(&SessionId::from(LIVE_SESSION)),
+        draft: draft(
+            &SessionId::from(LIVE_SESSION),
+            "receipt-lever-live-key",
+            "receipt-lever-live-source",
+        ),
+    };
+    let created_live = handles
+        .triggers
+        .execute_command(LIVE_OPERATION, live_command.clone())
+        .await
+        .expect("register the live session's trigger")
+        .expect("the live registration commits");
+    let TriggerCommandOutcome::Mutation {
+        receipt: created_live,
+    } = created_live
+    else {
+        panic!("register must return a mutation receipt")
+    };
+
+    // The blocked session's subscription captures an occurrence into an
+    // outstanding delivery: while that row stands, the owner's receipts are
+    // not the sweep's to take.
+    let blocked_command = TriggerCommand::Register {
+        owner_scope: owner(&SessionId::from(BLOCKED_SESSION)),
+        actor: actor(&SessionId::from(BLOCKED_SESSION)),
+        draft: draft(
+            &SessionId::from(BLOCKED_SESSION),
+            "receipt-lever-blocked-key",
+            "receipt-lever-blocked-source",
+        ),
+    };
+    let created_blocked = handles
+        .triggers
+        .execute_command(BLOCKED_OPERATION, blocked_command.clone())
+        .await
+        .expect("register the blocked session's trigger")
+        .expect("the blocked registration commits");
+    let TriggerCommandOutcome::Mutation {
+        receipt: created_blocked,
+    } = created_blocked
+    else {
+        panic!("register must return a mutation receipt")
+    };
+    let reserved = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "receipt-lever-blocked-source",
+            serde_json::json!({ "button": "Blue" }),
+            "receipt-lever-blocked-occurrence",
+        ))
+        .await
+        .expect("capture a delivery for the blocked owner");
+    assert_eq!(reserved.reservations.len(), 1);
+
+    // Host- and platform-scoped commands journal the ownerless receipts the
+    // same lever covers.
+    for (operation_id, owner_scope, command_actor) in [
+        (
+            "receipt-lever-host",
+            crate::TriggerOwnerScope::host("receipt-lever-binding").expect("host scope"),
+            crate::ProcessOriginator::host_scoped("receipt-lever-binding"),
+        ),
+        (
+            "receipt-lever-platform",
+            crate::TriggerOwnerScope::Platform,
+            crate::ProcessOriginator::host(),
+        ),
+    ] {
+        handles
+            .triggers
+            .execute_command(
+                operation_id,
+                TriggerCommand::Prune {
+                    owner_scope,
+                    actor: command_actor,
+                    subscription_keys: Vec::new(),
+                },
+            )
+            .await
+            .expect("journal an ownerless trigger command")
+            .expect("the ownerless command commits");
+    }
+
+    for session in [DELETED_SESSION, BLOCKED_SESSION] {
+        handles
+            .sessions
+            .delete_session(&SessionId::from(session))
+            .await
+            .expect("delete the receipt's owner session");
+    }
+
+    // The bound is exclusive: a sweep at the receipt's own write time takes
+    // nothing, and the operation still replays its recorded answer.
+    let at_bound = handles
+        .sessions
+        .reclaim_retained_evidence(crate::RetentionBound {
+            committed_before_epoch_ms: written_at_ms,
+            turn_watermark: crate::TurnProjectionWatermark::NoProjector,
+        })
+        .await
+        .expect("sweep at the receipt's write time");
+    assert_eq!(
+        at_bound.removed_trigger_mutation_receipt_count, 0,
+        "the bound is exclusive"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .execute_command(REGISTER_OPERATION, command.clone())
+            .await
+            .expect("replay after the at-bound sweep")
+            .expect("the replay returns its journaled result"),
+        TriggerCommandOutcome::Mutation {
+            receipt: created.clone()
+        },
+        "a receipt exactly at the bound still replays"
+    );
+
+    // Past the bound the lever reclaims every receipt of a dead or ownerless
+    // scope, so the resend is evaluated again rather than replayed.
+    let report = handles
+        .sessions
+        .reclaim_retained_evidence(crate::RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+            turn_watermark: crate::TurnProjectionWatermark::NoProjector,
+        })
+        .await
+        .expect("sweep past the bound");
+    assert_eq!(report.removed_receipt_count, 0, "no turn receipts existed");
+    assert_eq!(
+        report.removed_trigger_mutation_receipt_count, 3,
+        "the deleted owner's receipt and both ownerless receipts go; \
+         the blocked and live owners' receipts stay"
+    );
+    let resent = handles
+        .triggers
+        .execute_command(REGISTER_OPERATION, command.clone())
+        .await
+        .expect("resend after reclamation")
+        .expect("the resend commits");
+    let TriggerCommandOutcome::Mutation { receipt: resent } = resent else {
+        panic!("a resend must return a mutation receipt")
+    };
+    assert_eq!(
+        resent.disposition,
+        crate::TriggerMutationOutcome::Unchanged,
+        "the reclaimed receipt's resend re-evaluates against the live subscription"
+    );
+    assert_ne!(resent, created, "the resend journaled a fresh receipt");
+
+    // A third send replays the receipt the resend journaled.
+    assert_eq!(
+        handles
+            .triggers
+            .execute_command(REGISTER_OPERATION, command)
+            .await
+            .expect("replay the resend")
+            .expect("the resend's receipt replays"),
+        TriggerCommandOutcome::Mutation { receipt: resent },
+        "a resend after reclamation is idempotent on its new receipt"
+    );
+
+    // The delivery-blocked owner's receipt survives the sweep and still
+    // replays its journaled answer.
+    assert_eq!(
+        handles
+            .triggers
+            .execute_command(BLOCKED_OPERATION, blocked_command)
+            .await
+            .expect("replay the blocked owner's command")
+            .expect("the blocked replay returns its journaled result"),
+        TriggerCommandOutcome::Mutation {
+            receipt: created_blocked
+        },
+        "an outstanding delivery keeps its owner's receipt"
+    );
+
+    // The live owner's receipt is untouched by the sweep and still replays.
+    assert_eq!(
+        handles
+            .triggers
+            .execute_command(LIVE_OPERATION, live_command)
+            .await
+            .expect("replay the live owner's command")
+            .expect("the live replay returns its journaled result"),
+        TriggerCommandOutcome::Mutation {
+            receipt: created_live
+        },
+        "a live owner's receipt survives the host sweep"
+    );
 }
 
 #[expect(
@@ -1928,13 +2185,6 @@ impl TriggerStore for BindCrashesOnce {
         self.inner
             .forget_trigger_tombstones(written_before_epoch_ms)
             .await
-    }
-
-    async fn prune_mutation_receipts(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> Result<usize, crate::PluginError> {
-        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
     }
 
     async fn prune_non_fired_occurrences(

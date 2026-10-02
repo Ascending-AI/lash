@@ -159,12 +159,6 @@ impl TriggerStore for TriggerFault {
             .await
     }
 
-    async fn prune_mutation_receipts(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> std::result::Result<usize, PluginError> {
-        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
-    }
     async fn prune_non_fired_occurrences(
         &self,
         cutoff_epoch_ms: u64,

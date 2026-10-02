@@ -840,9 +840,6 @@ impl TriggerStore for Integrator {
     async fn forget_trigger_tombstones(&self, cutoff_epoch_ms: u64) -> Result<usize, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn prune_non_fired_occurrences(
         &self,
         cutoff_epoch_ms: u64,

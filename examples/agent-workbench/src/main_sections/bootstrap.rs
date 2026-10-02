@@ -560,11 +560,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             put(set_trigger_enabled),
         )
         .route("/api/triggers/{subscription_key}", delete(delete_trigger))
-        // Deliberately absent from the UI: see the handler's contract.
-        .route(
-            "/api/admin/trigger-mutation-receipts/prune",
-            post(prune_trigger_mutation_receipts),
-        )
         .merge(trigger_occurrence_admin_routes())
         .merge(operator_routes())
         // Deliberately absent from the UI, and deliberately unscheduled: see

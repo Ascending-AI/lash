@@ -522,6 +522,12 @@ pub trait DeploymentStore:
     /// and after receipt pruning. The permanent identity tombstone is exempt.
     /// No daemon, clock read or live policy lookup runs this operation.
     ///
+    /// Trigger mutation receipts are evidence under this same lever (FIG-4108):
+    /// ownerless (host/platform) receipts go by age alone, session-owned
+    /// receipts once their owner is durably deleted and no outstanding
+    /// delivery still names it. A resent mutation whose receipt was reclaimed
+    /// re-evaluates against current state rather than replaying.
+    ///
     /// SQL stores reclaim their retained storage evidence here. Effect scopes,
     /// journal entries, groups and promises belong to Restate, so this sweep
     /// does not retire engine scopes or decide whether an invocation is live.

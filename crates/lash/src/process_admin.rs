@@ -258,13 +258,6 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
             .await
     }
 
-    async fn prune_mutation_receipts(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> std::result::Result<usize, lash_core::PluginError> {
-        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
-    }
-
     async fn prune_non_fired_occurrences(
         &self,
         cutoff_epoch_ms: u64,
@@ -1162,7 +1155,6 @@ impl Processes {
             reclaimed_trigger_deliveries = retention.reclaimed_delivery_count,
             reclaimed_trigger_occurrences = retention.reclaimed_occurrence_count,
             reclaimed_trigger_subscriptions = retention.reclaimed_subscription_count,
-            reclaimed_trigger_mutation_receipts = retention.reclaimed_mutation_receipt_count,
             "completed trigger retention after process prune"
         );
         Ok(report)

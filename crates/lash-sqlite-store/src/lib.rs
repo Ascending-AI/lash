@@ -197,6 +197,10 @@ pub struct SqliteStore {
     location: DatabaseLocation,
     turn_cancel_closure_owner: Mutex<Option<std::sync::Weak<dyn lash_core_execution::EffectHost>>>,
     process_registry: Option<DatabaseTarget>,
+    /// The store set's trigger database: where the evidence-retention sweep
+    /// reclaims mutation receipts, on a connection of its own like the
+    /// process-registry arm of `delete_session` (FIG-4108).
+    trigger_store: Option<DatabaseTarget>,
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
     decoded_graph_node_bodies: Arc<AtomicU64>,

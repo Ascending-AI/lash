@@ -66,11 +66,11 @@ the Restate configuration contract.
 
 ## Durable-core evidence retention
 
-`SessionStoreFactory::reclaim_retained_evidence(RetentionBound)` is an explicit factory-wide lever with an exclusive commit-timestamp horizon. Only receipts belonging to durably deleted sessions are eligible. Permanent deleted-session identity evidence remains. Live receipts and usage deltas survive; terminal usage is reclaimed only when its matching receipt is absent.
+`DeploymentStore::reclaim_retained_evidence(RetentionBound)` is an explicit factory-wide lever with an exclusive commit-timestamp horizon. Only receipts belonging to durably deleted sessions are eligible. Permanent deleted-session identity evidence remains. Live receipts and usage deltas survive; terminal usage is reclaimed only when its matching receipt is absent.
 
 SQLite and PostgreSQL delete eligible receipts and dependent usage in one fenced transaction. Reports describe committed counts; errors roll back the operation. Repetition after exhausting the eligible set removes nothing. Attachment liveness follows referrer and graph-retirement contracts under ADRs 0028, 0113 and 0124 rather than receipt age. SQL stores own no effect journals; Restate invocation journals use engine retention under ADR 0025.
 
-`vacuum` cleans eligible tombstoned graph and terminal ingress rows without a receipt horizon. Blob GC uses its separate explicit policy. Trigger mutation receipts have a low-level pruning primitive but no public pruning facade or production schedule; age alone cannot prove a retry identity dead, so those receipts remain retained.
+`vacuum` cleans eligible tombstoned graph and terminal ingress rows without a receipt horizon. Blob GC uses its separate explicit policy. Trigger mutation receipts are durable evidence under the same lever (FIG-4108): receipts older than the bound are reclaimed when ownerless (host/platform) or when their session owner is durably deleted and no outstanding delivery still names it, and a resent mutation then re-evaluates rather than replaying. The lever's bound is what proves a retry identity dead; the deleted-owner requirement is what makes that proof safe for session receipts. On SQLite the trigger database is its own file in the store set, so the sweep's receipt arm runs as a fenced write on a connection of its own, the discipline `delete_session` already uses for the process registry.
 
 ## Why and alternatives
 

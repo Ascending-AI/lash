@@ -262,6 +262,11 @@ impl SqliteStoreSet {
         )
         .await?;
         process_env_store.process_registry = Some(registry.target().clone());
+        // The evidence sweep reaches the trigger database on a connection of
+        // its own: a cross-database write goes through that database's own
+        // writer and fence, the same discipline `delete_session` uses for the
+        // process registry.
+        process_env_store.trigger_store = Some(triggers.target().clone());
         let process_env_store = Arc::new(process_env_store);
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);

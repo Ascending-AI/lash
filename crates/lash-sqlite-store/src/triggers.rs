@@ -259,29 +259,6 @@ lash_store_sql::statements! {
                    AND trigger_deliveries.process_id =
                            json_extract(candidate.value, '$.process_id')
              )";
-
-        /// Every session whose deliveries are still outstanding: the scopes a retention pass
-        /// must not reclaim receipts for.
-        select_session_owner_scopes = "SELECT DISTINCT
-                                'session:' || json_extract(
-                                    subscription_snapshot_json,
-                                    '$.owner_scope.session_id'
-                                )
-             FROM trigger_deliveries
-             WHERE json_extract(
-                       subscription_snapshot_json,
-                       '$.owner_scope.type'
-                   ) = 'session'";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `trigger_mutation_receipts` statements only SQLite issues.
-    pub(crate) struct MutationReceiptSqliteStatements @ "trigger_mutation_receipt" {
-        /// Forks on `json_each` against PostgreSQL's bound `TEXT[]`.
-        delete_for_session_owners = "DELETE FROM trigger_mutation_receipts
-             WHERE owner_kind = 'session'
-               AND owner_id IN (SELECT value FROM json_each(?1))";
     }
 }
 
@@ -315,6 +292,39 @@ lash_store_sql::statements! {
              )
              WHERE owner_scope LIKE 'session:%'
              ORDER BY owner_scope";
+
+        /// The session owners with a mutation receipt older than bound `?1`:
+        /// the sweep's candidate set, filtered against the durable-core
+        /// session catalog before it deletes (FIG-4108).
+        select_receipt_session_owners = "SELECT DISTINCT owner_id
+             FROM trigger_mutation_receipts
+             WHERE owner_kind = 'session'
+               AND created_at_ms < ?1";
+
+        /// The host retention lever's receipt sweep (FIG-4108): receipts
+        /// older than bound `?1` go when they are ownerless or their session
+        /// owner is durably deleted — the caller enumerates and filters those
+        /// owner ids into `?2` — unless a delivery still names the owner.
+        reclaim_mutation_receipts = "DELETE FROM trigger_mutation_receipts
+             WHERE created_at_ms < ?1
+               AND (
+                   owner_kind IN ('host', 'platform')
+                   OR (
+                       owner_kind = 'session'
+                       AND owner_id IN (SELECT value FROM json_each(?2))
+                       AND NOT EXISTS (
+                           SELECT 1 FROM trigger_deliveries
+                           WHERE json_extract(
+                                     subscription_snapshot_json,
+                                     '$.owner_scope.type'
+                                 ) = 'session'
+                             AND json_extract(
+                                     subscription_snapshot_json,
+                                     '$.owner_scope.session_id'
+                                 ) = trigger_mutation_receipts.owner_id
+                       )
+                   )
+               )";
     }
 }
 
@@ -341,10 +351,9 @@ pub(crate) struct TriggerSql {
     delivery_sqlite: DeliverySqliteStatements,
     /// `trigger_mutation_receipts` statements both backends issue verbatim.
     receipt: MutationReceiptStatements,
-    /// `trigger_mutation_receipts` statements only SQLite issues.
-    receipt_sqlite: MutationReceiptSqliteStatements,
-    /// The family's cross-table retention read.
-    retention_sqlite: RetentionSqliteStatements,
+    /// The family's cross-table retention statements, also issued by
+    /// `retention.rs` on its own connection to this database.
+    pub(crate) retention_sqlite: RetentionSqliteStatements,
 }
 
 static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
@@ -363,7 +372,6 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
         delivery: DeliveryStatements::render(dialect),
         delivery_sqlite: DeliverySqliteStatements::render(dialect),
         receipt: MutationReceiptStatements::render(dialect),
-        receipt_sqlite: MutationReceiptSqliteStatements::render(dialect),
         retention_sqlite: RetentionSqliteStatements::render(dialect),
     }
 });
@@ -372,8 +380,9 @@ static TRIGGER_SQL: LazyLock<TriggerSql> = LazyLock::new(|| {
 ///
 /// One set, not one per schema: the trigger database is never attached to
 /// another connection, so these tables are never addressed through a
-/// qualifier.
-fn trigger_sql() -> &'static TriggerSql {
+/// qualifier. `retention.rs` issues `retention_sqlite` on the connection it
+/// opens to the trigger database, where the same unqualified names hold.
+pub(crate) fn trigger_sql() -> &'static TriggerSql {
     &TRIGGER_SQL
 }
 
@@ -1220,25 +1229,6 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                     )
                     .map_err(process_sqlite_error)?;
 
-                    let blocked_owner_scopes = {
-                        let mut stmt = tx
-                            .prepare_cached(sql.delivery_sqlite.select_session_owner_scopes.sql())
-                            .map_err(process_sqlite_error)?;
-                        let rows = stmt
-                            .query_map([], |row| row.get::<_, String>(0))
-                            .map_err(process_sqlite_error)?;
-                        rows.collect::<Result<std::collections::HashSet<_>, _>>()
-                            .map_err(process_sqlite_error)?
-                    };
-                    let receipt_owner_ids = deleted_owner_scopes
-                        .iter()
-                        .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
-                        .map(|owner_scope| owner_scope["session:".len()..].to_string())
-                        .collect::<Vec<_>>();
-                    let receipt_owner_ids_json = serde_json::to_string(&receipt_owner_ids)
-                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
-                        .map_err(process_sqlite_error)?;
-
                     let records = {
                         let mut stmt = tx
                             .prepare(sql.subscription_sqlite.select_unreferenced_for_owners.sql())
@@ -1272,18 +1262,11 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         params![&deleted_owner_scopes_json],
                     )
                     .map_err(process_sqlite_error)?;
-                    let reclaimed_mutation_receipt_count = crate::conn::cached_execute(
-                        tx,
-                        sql.receipt_sqlite.delete_for_session_owners.sql(),
-                        params![&receipt_owner_ids_json],
-                    )
-                    .map_err(process_sqlite_error)?;
 
                     Ok(lash_core_execution::TriggerRetentionReconciliationReport {
                         reclaimed_delivery_count,
                         reclaimed_occurrence_count,
                         reclaimed_subscription_count,
-                        reclaimed_mutation_receipt_count,
                     })
                 })()))
             })
@@ -1432,23 +1415,6 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
             })
             .await
             .map_err(crate::sqlite_error)
-    }
-
-    async fn prune_mutation_receipts(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> Result<usize, lash_core_execution::PluginError> {
-        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        self.conn
-            .write(move |tx| {
-                crate::conn::cached_execute(
-                    tx,
-                    trigger_sql().receipt.prune_host_and_platform.sql(),
-                    params![cutoff_epoch_ms],
-                )
-            })
-            .await
-            .map_err(process_sqlite_error)
     }
 
     async fn prune_non_fired_occurrences(

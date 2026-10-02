@@ -1730,8 +1730,6 @@ pub struct TriggerRetentionReconciliationReport {
     pub reclaimed_occurrence_count: usize,
     /// Deleted-session subscriptions removed after their deliveries were gone.
     pub reclaimed_subscription_count: usize,
-    /// Deleted-session receipts removed after their deliveries were gone.
-    pub reclaimed_mutation_receipt_count: usize,
 }
 
 /// Outcome counters from one host-invoked trigger-occurrence reclaim pass.
@@ -2013,13 +2011,6 @@ pub trait TriggerStore: Send + Sync {
         &self,
         written_before_epoch_ms: u64,
     ) -> Result<usize, crate::StoreError>;
-
-    /// Low-level primitive for dropping host- and platform-scoped mutation
-    /// idempotency receipts older than an explicit cutoff. Session-scoped
-    /// receipts follow the ADR 0049 deletion frontier during reconciliation.
-    /// Lists do not create receipts. No public facade or production schedule is
-    /// exposed until FIG-653 proves terminal-gated eligibility.
-    async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
 
     /// Low-level primitive for dropping non-fired occurrence rows recorded
     /// before an explicit cutoff, returning the number deleted.

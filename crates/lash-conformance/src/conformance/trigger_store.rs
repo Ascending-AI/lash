@@ -24,7 +24,6 @@ where
     conflicting_mutation_receipt_survives_later_revision(make()).await;
     list_operations_are_not_receipted(make()).await;
     for_session_filter_is_canonical_and_scoped(make()).await;
-    mutation_receipts_follow_owner_retention(make()).await;
     reservations_execute_the_reserved_revision(make()).await;
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
     register_disable_reenable_roundtrip_is_fenced_and_receipted(make()).await;
@@ -348,17 +347,32 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         report.reclaimed_subscription_count, 2,
         "the deleted-session cascade covers enabled and tombstoned subscriptions"
     );
-    assert_eq!(report.reclaimed_mutation_receipt_count, 4);
 
+    // The session cascade reclaims subscriptions but not receipts (FIG-4108):
+    // `reclaim_retained_evidence` owns mutation receipts, so until the host
+    // lever runs the operation id still replays its journaled answer.
+    assert_eq!(
+        mutate(
+            &store,
+            REGISTER_OPERATION,
+            register_command(&SessionId::from(SESSION), draft.clone()),
+        )
+        .await,
+        created,
+        "the registration receipt still replays after the owner cascade"
+    );
     let mut replacement = draft;
     replacement.source_key = "dead-owner-retention-replacement".to_string();
     let recreated = mutate(
         &store,
-        REGISTER_OPERATION,
+        "dead-owner-retention-replacement-operation",
         register_command(&SessionId::from(SESSION), replacement),
     )
     .await;
-    assert_eq!(recreated.revision, 1, "the old receipt was reclaimed");
+    assert_eq!(
+        recreated.revision, 1,
+        "a new operation re-evaluates against the reclaimed subscription"
+    );
 }
 
 #[expect(
@@ -411,7 +425,6 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
         .expect("reconcile around host tombstone");
     assert_eq!(report.reclaimed_occurrence_count, 1);
     assert_eq!(report.reclaimed_subscription_count, 0);
-    assert_eq!(report.reclaimed_mutation_receipt_count, 0);
 
     let revived = mutate(
         &store,
@@ -948,57 +961,6 @@ async fn for_session_filter_is_canonical_and_scoped(store: Arc<dyn crate::Trigge
     assert_eq!(
         rows[0].owner_scope,
         crate::TriggerOwnerScope::session("canonical-session")
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn mutation_receipts_follow_owner_retention(store: Arc<dyn crate::TriggerStore>) {
-    let key = "receipt-retention-key";
-    let command = register_command(
-        &SessionId::from("session-a"),
-        sample_draft(&SessionId::from("session-a"), key, "v1", "worker"),
-    );
-    let created = mutate(&store, "receipt-retention-register", command.clone()).await;
-    assert_eq!(created.disposition, crate::TriggerMutationOutcome::Created);
-
-    for (operation_id, owner_scope, actor) in [
-        (
-            "receipt-retention-host",
-            crate::TriggerOwnerScope::host("receipt-retention-binding").unwrap(),
-            crate::ProcessOriginator::host_scoped("receipt-retention-binding"),
-        ),
-        (
-            "receipt-retention-platform",
-            crate::TriggerOwnerScope::Platform,
-            crate::ProcessOriginator::host(),
-        ),
-    ] {
-        execute(
-            &store,
-            operation_id,
-            crate::TriggerCommand::Prune {
-                owner_scope,
-                actor,
-                subscription_keys: Vec::new(),
-            },
-        )
-        .await
-        .expect("host or platform prune is journaled");
-    }
-
-    assert_eq!(
-        store.prune_mutation_receipts(u64::MAX).await.unwrap(),
-        2,
-        "the retention cutoff removes only aged host and platform receipts"
-    );
-    let replayed = mutate(&store, "receipt-retention-register", command).await;
-    assert_eq!(
-        replayed, created,
-        "a live session's mutation receipt survives the host cutoff"
     );
 }
 

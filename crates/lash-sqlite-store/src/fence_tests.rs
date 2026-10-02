@@ -16,8 +16,9 @@ use lash_core_execution::store::fleet_finalize::{
     RetainedDeployment,
 };
 use lash_core_execution::{
-    FleetFormat, FleetFormatStore, SessionCatalogStore as _, SessionId, SessionMeta,
-    SessionRelation, StoreError, StoreSet, TriggerStore as _,
+    FleetFormat, FleetFormatStore, ProcessOriginator, SessionCatalogStore as _, SessionId,
+    SessionMeta, SessionRelation, StoreError, StoreSet, TriggerCommand, TriggerOwnerScope,
+    TriggerStore as _,
 };
 use rusqlite::Connection;
 
@@ -133,7 +134,7 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
              VALUES ('seeded', 'host', 'h', 'f', '{}', 0)",
             [],
         )
-        .expect("seed a receipt the trigger writer would prune");
+        .expect("seed a receipt so the fenced trigger mutation's insert is detectable");
     let core = set.process_env_store();
     core.admit_session(
         &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(
@@ -190,7 +191,14 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
 
     let trigger_error = set
         .trigger_store()
-        .prune_mutation_receipts(u64::MAX)
+        .execute_command(
+            "fence-trigger-mutation",
+            TriggerCommand::Prune {
+                owner_scope: TriggerOwnerScope::host("fence").expect("host owner scope"),
+                actor: ProcessOriginator::host(),
+                subscription_keys: Vec::new(),
+            },
+        )
         .await
         .expect_err("the trigger writer is fenced");
     assert!(
@@ -204,7 +212,7 @@ async fn sqlite_fence_refuses_a_writer_after_finalize_in_each_database() {
             "trigger_mutation_receipts"
         ),
         1,
-        "a fenced trigger writer deleted nothing"
+        "a fenced trigger writer journaled no receipt"
     );
 
     // The fence reads each database's own row: every connection-level

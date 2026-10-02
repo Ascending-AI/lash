@@ -107,8 +107,8 @@ silently become a whole-catalog blob sweep.
 | Session subscription | Registering session | The deleted-session frontier and zero remaining deliveries. A tombstone remains a `Revive` fence while that session can still speak. |
 | Host or platform subscription tombstone | Host or platform namespace | Permanent name fence; the namespace has no deleted-session frontier or purge lever. |
 | Session ingress tombstone | Its session | Host vacuum after its terminal transition, or session deletion. A command retains its first receipt and applying operation key until vacuum. |
-| Session mutation receipt | Registering session's replay eligibility | Host-selected retention, including after session deletion. |
-| Host or platform mutation receipt | Namespace replay eligibility | Explicit host retention through the trigger-store primitive. |
+| Session mutation receipt | Registering session's replay eligibility | The host retention lever under ADR 0023 once its owner is durably deleted and no outstanding delivery names it. |
+| Host or platform mutation receipt | Namespace replay eligibility | The host retention lever under ADR 0023, by age alone. |
 | Fired occurrence | Committed delivery fan-out | Transactional reconciliation after zero delivery rows remain. |
 | Non-fired occurrence | Factory audit history | Explicit non-fired audit cutoff, never delivery reconciliation. |
 | Occurrence tombstone | Factory redelivery fence for one reclaimed occurrence identity | Explicit host deletion through `forget_trigger_tombstones(written_before_epoch_ms)`, after the host vouches that its source stops redelivering the selected identities. Reclaim never deletes these tombstones (ADR 0021, FIG-4610). |
