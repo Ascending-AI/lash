@@ -19,13 +19,15 @@ pub(crate) async fn open_session_with_bounded_retry(
 
 #[expect(
     clippy::expect_used,
-    reason = "every break out of the retry loop follows a contended attempt that just \
-              recorded last_contended; reaching attempt > 1 requires one"
+    reason = "every break out of the retry loop follows a retryable attempt that just \
+              recorded last_retryable; reaching attempt > 1 requires one"
 )]
 /// `surface` is the route that wanted the session. Every contention record
 /// carries it: a storm is only actionable once it names which caller is
 /// contending, and 156 unattributed `contended` records name nothing
-/// (FIG-3151).
+/// (FIG-3151). The retried set is the facade's typed one —
+/// [`lash::EmbedError::is_retryable`] is the same classification the engine's
+/// own open retry applies.
 pub(crate) async fn retry_session_open<T, Open, OpenFuture, Trace>(
     surface: &str,
     mut open: Open,
@@ -37,7 +39,7 @@ where
     Trace: FnMut(&str, Value),
 {
     let started = tokio::time::Instant::now();
-    let mut last_contended = None;
+    let mut last_retryable = None;
     for attempt in 1..=SESSION_OPEN_MAX_ATTEMPTS {
         if attempt > 1 && started.elapsed() >= SESSION_OPEN_RETRY_BUDGET {
             break;
@@ -57,7 +59,7 @@ where
                 }
                 return Ok(session);
             }
-            Err(error) if session_open_is_contended(&error) => {
+            Err(error) if error.is_retryable() => {
                 trace(
                     "session.open.contended",
                     json!({
@@ -69,7 +71,7 @@ where
                         "outcome": "retrying",
                     }),
                 );
-                last_contended = Some(error);
+                last_retryable = Some(error);
                 if attempt == SESSION_OPEN_MAX_ATTEMPTS {
                     break;
                 }
@@ -92,7 +94,7 @@ where
             "outcome": "temporarily_unavailable",
         }),
     );
-    Err(last_contended.expect("a retry budget exhausts only after typed contention"))
+    Err(last_retryable.expect("a retry budget exhausts only after a retryable error"))
 }
 
 /// The jittered backoff between a bounded contention retry's attempts: the
@@ -104,17 +106,6 @@ pub(crate) fn contention_retry_delay(attempt: usize) -> Duration {
     let base_ms = 1_u64 << (attempt - 1).min(4);
     let sequence = RETRY_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Duration::from_millis(base_ms + sequence % (base_ms + 1))
-}
-
-pub(crate) fn session_open_is_contended(error: &lash::EmbedError) -> bool {
-    matches!(
-        error,
-        lash::EmbedError::Store(lash::persistence::StoreError::Contended)
-            | lash::EmbedError::Session(lash::SessionError::Store {
-                source: lash::persistence::StoreError::Contended,
-                ..
-            })
-    )
 }
 
 pub(crate) fn temporarily_unavailable_session_open() -> AppError {

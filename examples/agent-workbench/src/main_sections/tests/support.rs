@@ -104,7 +104,7 @@ pub(crate) async fn open_session_once_released(
                 .await
             {
                 Ok(session) => return session,
-                Err(error) if crate::session_open_is_contended(&error) => {
+                Err(error) if error.is_retryable() => {
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
                 Err(error) => panic!("open session `{session_id}`: {error:?}"),

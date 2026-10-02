@@ -3,7 +3,9 @@ use lash::SessionId;
 
 pub(crate) struct StateProjectionReads {
     pub(crate) read_view: lash::persistence::SessionReadView,
-    pub(crate) history_store: lash::persistence::SessionStore,
+    /// The durable handle the projection read through, kept for the caller's
+    /// history paging.
+    pub(crate) durable: lash::DurableSession,
     pub(crate) has_durable_head: bool,
     pub(crate) cursor: SessionCursor,
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
@@ -30,30 +32,20 @@ impl AppState {
     /// without a lease, so it is read the same way and handed to
     /// [`lash::SessionBuilder::observe_with_state`], which admits nothing,
     /// claims nothing, and is never a runtime the session's shifts run on.
-    /// Observing never creates (FIG-4112): a session the catalog does not
-    /// hold is `UnknownSession`, and no row is written (FIG-3144, FIG-3151).
+    /// `observe_with_state` is kept because these callers need a live
+    /// observation stream, which only a `LashSession` serves; it resolves the
+    /// catalog itself, so an unknown id is `UnknownSession` and a tombstone is
+    /// `SessionDeleted` without a lookup here. Observing never creates
+    /// (FIG-4112): no row is written (FIG-3144, FIG-3151).
     pub(crate) async fn open_session_for_observation(
         &self,
         session_id: &SessionId,
     ) -> Result<lash::LashSession, lash::EmbedError> {
         let request = state_store_request(self, session_id);
         let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
-            self.session_store_factory.clone();
+            self.core.backend().session_store_factory();
         let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
             .map_err(lash::EmbedError::Store)?;
-        if matches!(
-            lash::persistence::SessionCatalogStore::lookup_session(
-                self.session_store_factory.as_ref(),
-                session_id,
-            )
-            .await
-            .map_err(lash::EmbedError::Store)?,
-            lash::persistence::SessionLookup::Absent
-        ) {
-            return Err(lash::EmbedError::UnknownSession {
-                session_id: session_id.clone(),
-            });
-        }
         let state = match lash::persistence::load_session_window_state(
             &store,
             lash::persistence::WindowSelector::Current,
@@ -109,51 +101,60 @@ pub(crate) fn state_store_request(
 /// raced the running turn for the one thing a turn must hold — 242 contended
 /// claims and 37 `retry_exhausted` refusals over nine turns in the judged
 /// `workbench-continue-as` run, each exhaustion surfacing to the operator as a
-/// 503 red banner. The durable store read below answers the same question from
-/// the same records and contends with nothing (FIG-3144).
+/// 503 red banner. The Durable Session answers the same question from the
+/// same records and contends with nothing (FIG-3144, ADR 0119).
 pub(crate) async fn read_state_projection(
     state: &AppState,
     session_id: &SessionId,
 ) -> Result<StateProjectionReads, AppError> {
-    let request = state_store_request(state, session_id);
-    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
-        state.session_store_factory.clone();
-    let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
+    let durable = state
+        .session_builder(session_id.clone())
+        .durable()
+        .await
         .map_err(AppError::internal)?;
-    let catalog_absent = matches!(
-        lash::persistence::SessionCatalogStore::lookup_session(
-            state.session_store_factory.as_ref(),
-            session_id,
-        )
-        .await
-        .map_err(AppError::internal)?,
-        lash::persistence::SessionLookup::Absent
-    );
-    let loaded = if catalog_absent {
-        None
-    } else {
-        match lash::persistence::load_session_window_state(
-            &store,
-            lash::persistence::WindowSelector::Current,
-        )
-        .await
-        {
-            Ok(loaded) => loaded.map(|loaded| loaded.state),
-            Err(lash::persistence::StoreError::SessionNotFound { .. }) => None,
-            Err(error) => return Err(AppError::internal(error)),
-        }
-    };
-    let has_durable_head = loaded.is_some();
-    let persisted = loaded.unwrap_or_else(|| {
-        let mut persisted =
-            lash::persistence::RuntimeSessionState::new(request.config.session_policy());
-        persisted.session_id = session_id.clone();
-        persisted
-    });
-    let revision = persisted
-        .checkpoint_ref
-        .as_ref()
-        .map_or(persisted.turn_index as u64, |_| persisted.head_revision);
+    // `exists` answers whether the catalog holds live metadata: an absent or
+    // deleted id reads as an empty session, the shape this projection has
+    // always handed the page for a session with nothing committed.
+    let session_present = durable.exists().await.map_err(AppError::internal)?;
+    let (read_view, has_durable_head, revision) =
+        match durable.read().await.map_err(AppError::internal)? {
+            Some(view) => {
+                // The revision the snapshot's cursor names is the head's: the
+                // head revision once a checkpoint exists, the turn index before
+                // the first one — the same projection `observation_revision`
+                // makes of a loaded runtime state, read here off the retained
+                // revision record.
+                let head = durable
+                    .revisions()
+                    .await
+                    .map_err(AppError::internal)?
+                    .into_iter()
+                    .find(|revision| revision.head);
+                let revision = head.map_or(view.turn_index() as u64, |head| {
+                    if head.checkpoint_ref.is_some() {
+                        head.head_revision
+                    } else {
+                        view.turn_index() as u64
+                    }
+                });
+                (view, true, revision)
+            }
+            None => {
+                // A session with no durable head yet, or one the catalog does not
+                // hold: the same empty state `open_session_for_observation`
+                // falls back to, so a page that polls before the first commit
+                // sees what an observer would.
+                let request = state_store_request(state, session_id);
+                let mut persisted =
+                    lash::persistence::RuntimeSessionState::new(request.config.session_policy());
+                persisted.session_id = session_id.clone();
+                (
+                    lash::persistence::SessionReadView::from_persisted_state(&persisted),
+                    false,
+                    0,
+                )
+            }
+        };
     // The cursor handed back with this snapshot has to name the replay
     // incarnation that will actually serve the attach. A synthesized
     // `workbench-durable` token names none, so every attach was fenced into
@@ -165,32 +166,26 @@ pub(crate) async fn read_state_projection(
     let cursor = state
         .core
         .observation_cursor(session_id, lash::observe::SessionRevision(revision));
-    let pending_turn_inputs = if catalog_absent {
-        Vec::new()
-    } else {
-        store
-            .list_pending_turn_inputs()
+    let pending_turn_inputs = if session_present {
+        durable
+            .pending_turn_inputs()
             .await
             .map_err(AppError::internal)?
+    } else {
+        Vec::new()
     };
-    let queued_work = if catalog_absent {
-        Vec::new()
+    let queued_work = if session_present {
+        durable.queued_work().await.map_err(AppError::internal)?
     } else {
-        store
-            .list_open_queued_work()
-            .await
-            .map_err(AppError::internal)?
+        Vec::new()
     };
-    let turn_input_applications = if catalog_absent {
-        Vec::new()
-    } else {
-        store
-            .list_turn_input_applications()
+    let turn_input_applications = if session_present {
+        durable
+            .remote_turn_input_applications()
             .await
             .map_err(AppError::internal)?
-            .iter()
-            .map(Into::into)
-            .collect()
+    } else {
+        Vec::new()
     };
     // Usage is engine-owned accounting, read by owner from the usage ledger
     // (ADR 0125): the same lease-free durable read, independent of the head.
@@ -201,11 +196,11 @@ pub(crate) async fn read_state_projection(
         .map_err(AppError::internal)?
         .report();
     let mut turn_failure_settlements = Vec::new();
-    let mut after = None;
-    if !catalog_absent {
+    if session_present {
+        let mut after = None;
         loop {
-            let page = store
-                .load_failure_evidence_page(
+            let page = durable
+                .failure_evidence(
                     after.as_ref(),
                     std::num::NonZeroU32::MIN.saturating_add(128 - 1),
                 )
@@ -219,8 +214,8 @@ pub(crate) async fn read_state_projection(
         }
     }
     Ok(StateProjectionReads {
-        read_view: lash::persistence::SessionReadView::from_persisted_state(&persisted),
-        history_store: store,
+        read_view,
+        durable,
         has_durable_head,
         cursor,
         pending_turn_inputs,

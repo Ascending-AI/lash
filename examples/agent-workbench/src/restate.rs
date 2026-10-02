@@ -549,24 +549,12 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     session_id: &SessionId,
     reason: &str,
 ) -> Result<(), AppError> {
-    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
-        state.session_store_factory.clone();
-    let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone()).map_err(
-        |error| {
-            state.session_admission_error(
-                session_id,
-                "cron.restate.cancel",
-                lash::EmbedError::Store(error),
-            )
-        },
-    )?;
-    store.read_session_state_version().await.map_err(|error| {
-        state.session_admission_error(
-            session_id,
-            "cron.restate.cancel",
-            lash::EmbedError::Store(error),
-        )
-    })?;
+    // The admission read names a session that exists; it never creates one
+    // and it re-checks after the subscription list, so a session tombstoned
+    // mid-read does not get fresh jobs cancelled under it.
+    state
+        .admit_live_session(session_id, "cron.restate.cancel")
+        .await?;
     let mut filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
     filter.source_type = Some(CRON_SCHEDULE_SOURCE_TYPE.to_string());
     let registrations = state
@@ -574,30 +562,9 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         .list_subscriptions(filter)
         .await
         .map_err(AppError::internal)?;
-    if matches!(
-        lash::persistence::SessionCatalogStore::lookup_session(
-            state.session_store_factory.as_ref(),
-            session_id,
-        )
-        .await
-        .map_err(AppError::internal)?,
-        lash::persistence::SessionLookup::Deleted
-    ) {
-        return Err(state.session_admission_error(
-            session_id,
-            "cron.restate.cancel",
-            lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
-                session_id: SessionId::parse(session_id.to_string())?,
-            }),
-        ));
-    }
-    store.read_session_state_version().await.map_err(|error| {
-        state.session_admission_error(
-            session_id,
-            "cron.restate.cancel",
-            lash::EmbedError::Store(error),
-        )
-    })?;
+    state
+        .admit_live_session(session_id, "cron.restate.cancel")
+        .await?;
     let mut job_keys: BTreeSet<String> = registrations
         .iter()
         .map(|registration| cron_job_key(session_id, &registration.source_key))

@@ -591,23 +591,25 @@ pub(crate) fn trace_store_maintenance(
     );
 }
 
-/// Vacuum one named session's store after a non-creating catalog lookup.
+/// Vacuum one named session's store after a non-creating existence read: a
+/// Durable Session answers whether the catalog still holds live metadata for
+/// the id, while the sweep itself still runs against the raw store, whose
+/// maintenance authority it owns.
 pub(crate) async fn vacuum_session_store(
     state: &AppState,
     session_id: &SessionId,
 ) -> Result<SessionVacuumReport, AppError> {
-    let store = state.session_store_factory.as_ref();
-    if !matches!(
-        lash::persistence::SessionCatalogStore::lookup_session(store, session_id)
-            .await
-            .map_err(AppError::internal)?,
-        lash::persistence::SessionLookup::Live(_)
-    ) {
+    let durable = state
+        .session_builder(session_id.clone())
+        .durable()
+        .await
+        .map_err(AppError::internal)?;
+    if !durable.exists().await.map_err(AppError::internal)? {
         return Err(AppError::not_found(format!(
             "session `{session_id}` has no durable store to vacuum"
         )));
     }
-    let report = vacuum_bound_store(store, session_id).await?;
+    let report = vacuum_bound_store(state.session_store_factory.as_ref(), session_id).await?;
     Ok(session_vacuum_report(session_id, report))
 }
 

@@ -77,31 +77,77 @@ impl AppState {
             }
             (Some(SessionRetirement::Retiring), SessionAdmission::Delete) | (None, _) => {}
         }
-        match lash::persistence::SessionCatalogStore::lookup_session(
-            self.session_store_factory.as_ref(),
-            session_id,
-        )
-        .await
-        {
-            Ok(
-                lash::persistence::SessionLookup::Live(_)
-                | lash::persistence::SessionLookup::Absent,
-            ) => Ok(()),
+        let durable = match self.session_builder(session_id.clone()).durable().await {
+            Ok(durable) => durable,
+            // Audited: durable() builds no runtime and reads nothing today; a
+            // failure here is a wiring error, not a session fact.
+            Err(error) => {
+                return Err(AppError::internal(format!(
+                    "session admission read for `{session_id}` failed: {error}"
+                )));
+            }
+        };
+        match durable.was_deleted().await {
+            Ok(false) => Ok(()),
             // Not memoized into the in-process mark: the evidence a refusal
             // records names the authority that was consulted, and for a
             // tombstoned session that authority is the store.
-            Ok(lash::persistence::SessionLookup::Deleted) => Err(self.session_admission_error(
+            Ok(true) => Err(self.session_admission_error(
                 session_id,
                 surface,
                 lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
                     session_id: session_id.clone(),
                 }),
             )),
-            // Audited: a failed tombstone read is an untyped factory/backend error; admission cannot proceed without the fact.
+            // Audited: a failed tombstone read is an untyped store error; admission cannot proceed without the fact.
             Err(error) => Err(AppError::internal(format!(
                 "session admission read for `{session_id}` failed: {error}"
             ))),
         }
+    }
+
+    /// The typed refusal for a session `durable` cannot stand in for on
+    /// `surface`: the tombstone for a deleted id, `UnknownSession` for one
+    /// the catalog does not hold, and `Ok(())` for a live one. Reads go
+    /// through the Durable Session's settled reads, so this works beside a
+    /// live writer (ADR 0119).
+    pub(crate) async fn admit_live_session(
+        &self,
+        session_id: &SessionId,
+        surface: &str,
+    ) -> Result<(), AppError> {
+        let durable = self
+            .session_builder(session_id.clone())
+            .durable()
+            .await
+            .map_err(|error| self.session_admission_error(session_id, surface, error))?;
+        if durable
+            .was_deleted()
+            .await
+            .map_err(|error| self.session_admission_error(session_id, surface, error))?
+        {
+            return Err(self.session_admission_error(
+                session_id,
+                surface,
+                lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
+                    session_id: session_id.clone(),
+                }),
+            ));
+        }
+        if !durable
+            .exists()
+            .await
+            .map_err(|error| self.session_admission_error(session_id, surface, error))?
+        {
+            return Err(self.session_admission_error(
+                session_id,
+                surface,
+                lash::EmbedError::UnknownSession {
+                    session_id: session_id.clone(),
+                },
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn retirement_fence_refusal(
@@ -152,20 +198,13 @@ impl AppState {
         match outcome {
             Ok(()) => self.confirm_retirement_and_rotate(session_id),
             Err(error) if error.verdict == AppErrorVerdict::Ambiguous => {}
-            Err(_) => match lash::persistence::SessionCatalogStore::lookup_session(
-                self.session_store_factory.as_ref(),
-                session_id,
-            )
-            .await
-            {
-                Ok(lash::persistence::SessionLookup::Deleted) => {
-                    self.confirm_retirement_and_rotate(session_id)
-                }
-                Ok(
-                    lash::persistence::SessionLookup::Live(_)
-                    | lash::persistence::SessionLookup::Absent,
-                ) => self.active_turns.abandon_retirement(session_id),
+            Err(_) => match self.session_builder(session_id.clone()).durable().await {
                 Err(_) => {}
+                Ok(durable) => match durable.was_deleted().await {
+                    Ok(true) => self.confirm_retirement_and_rotate(session_id),
+                    Ok(false) => self.active_turns.abandon_retirement(session_id),
+                    Err(_) => {}
+                },
             },
         }
     }

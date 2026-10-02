@@ -400,7 +400,7 @@ The chat composer can upload one PNG (up to 1 MiB) through
 `attachment_id` in `POST /api/turn`. The Restate workflow resolves the durable file-store
 blob and supplies it as a stored MIME-tagged `AttachmentSource` through Lash's generic turn
 contract. The Workbench's PNG-only check is a host-surface policy: Lash's provider transports
-enforce their own image/file allowlists from `crates/lash-core/src/llm/transport.rs`, and an
+enforce their own image/file allowlists from the recorded `lash::provider::AttachmentCapabilitySnapshot`, and an
 unsupported MIME/source combination returns the typed `unsupported_attachment_capability`
 refusal before wire serialization. The same bytes remain available at
 `GET /api/attachments/{attachment_id}` across a workbench restart.

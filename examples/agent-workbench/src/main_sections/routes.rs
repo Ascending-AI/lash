@@ -31,7 +31,7 @@ pub(crate) async fn app_state(
     let active_turn = state.active_turns.for_session(&session_id);
     let StateProjectionReads {
         read_view,
-        history_store,
+        durable,
         has_durable_head,
         cursor,
         pending_turn_inputs,
@@ -61,8 +61,8 @@ pub(crate) async fn app_state(
     let mut anchor = lash::persistence::HistoryAnchor::Head;
     if has_durable_head {
         loop {
-            let page = history_store
-                .load_ancestors(
+            let page = durable
+                .history(
                     anchor,
                     lash::persistence::HistoryBudget {
                         max_nodes: std::num::NonZeroU32::MIN.saturating_add(128 - 1),
@@ -998,17 +998,17 @@ pub(crate) async fn list_queued_work(
         })?;
     // A read-only probe reads the durable records directly. Opening the session
     // to list them claimed the execution lease and raced the running turn for
-    // it (FIG-3144).
-    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
-        state.session_store_factory.clone();
-    let store = lash::persistence::SessionStore::new(runtime_store, session_id)
-        .map_err(AppError::internal)?;
-    Ok(Json(
-        store
-            .list_open_queued_work()
-            .await
-            .map_err(AppError::internal)?,
-    ))
+    // it (FIG-3144); a Durable Session resolves the queue without one.
+    let durable = state
+        .session_builder(session_id.clone())
+        .durable()
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.list", error)
+        })?;
+    Ok(Json(durable.queued_work().await.map_err(|error| {
+        state.session_admission_error(&session_id, "api.queued_work.list", error)
+    })?))
 }
 
 pub(crate) async fn cancel_queued_work_batch(
@@ -1024,17 +1024,22 @@ pub(crate) async fn cancel_queued_work_batch(
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
             session_id: session_id.clone(),
         })?;
-    let session = state
-        .open_session(&session_id, "api.queued_work.cancel")
+    // Cancelling a queued batch is a durable queue mutation: a Durable
+    // Session issues it beside a running turn, where `open` would claim the
+    // execution lease the turn holds (ADR 0119).
+    let durable = state
+        .session_builder(session_id.clone())
+        .durable()
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.cancel", error)
         })?;
-    if session
-        .durable()
+    if durable
         .cancel_queued_work_batch(&lash::BatchId::parse(batch_id.as_str())?)
         .await
-        .map_err(AppError::internal)?
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.cancel", error)
+        })?
         .is_none()
     {
         return Err(AppError::conflict(format!(

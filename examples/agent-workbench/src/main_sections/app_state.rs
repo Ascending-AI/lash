@@ -379,39 +379,10 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         // A cancel names a session that exists; it never creates one
-        // (FIG-4112).
-        let refusal = match lash::persistence::SessionCatalogStore::lookup_session(
-            self.session_store_factory.as_ref(),
-            session_id,
-        )
-        .await
-        {
-            Ok(lash::persistence::SessionLookup::Live(_)) => None,
-            Ok(lash::persistence::SessionLookup::Absent) => {
-                Some(lash::EmbedError::UnknownSession {
-                    session_id: session_id.clone(),
-                })
-            }
-            Ok(lash::persistence::SessionLookup::Deleted) => Some(lash::EmbedError::Store(
-                lash::persistence::StoreError::SessionDeleted {
-                    session_id: session_id.clone(),
-                },
-            )),
-            Err(error) => Some(lash::EmbedError::Store(error)),
-        };
-        if let Some(error) = refusal {
-            return Err(self.session_admission_error(session_id, "api.turn.cancel", error));
-        }
-        self.session_store_factory
-            .read_session_state_version(session_id)
-            .await
-            .map_err(|error| {
-                self.session_admission_error(
-                    session_id,
-                    "api.turn.cancel",
-                    lash::EmbedError::Store(error),
-                )
-            })?;
+        // (FIG-4112). The durable handle's settled reads carry the same typed
+        // refusal the catalog lookup used to hand-map.
+        self.admit_live_session(session_id, "api.turn.cancel")
+            .await?;
         // At most one, structurally: the registry is keyed by session. The
         // receipts stay a list because that is what this returns to its
         // callers and what the traces are shaped around.
@@ -1402,7 +1373,7 @@ impl AppError {
             log_deleted_session_refusal(session_id, context);
             return Self::conflict(deleted_session_message(session_id));
         }
-        if session_open_is_contended(&error) {
+        if error.is_retryable() {
             return temporarily_unavailable_session_open();
         }
         if let lash::EmbedError::UnknownSession { session_id } = &error {
@@ -1462,12 +1433,18 @@ impl AppError {
             };
         }
         // `SessionError::Store` is minted only by `load_persisted_state_admitted`,
-        // so this match is open-only; mid-turn contention arrives as
+        // so scoping the retryable check to the two store shapes keeps this
+        // gate open-only; mid-turn contention arrives as
         // `EmbedError::Runtime(StoreCommitContended)` and does not match. If a
-        // future non-open path mints `EmbedError::Store(Contended)`, durable turn
-        // failures would flip from Ambiguous to Retryable and Restate would rerun
-        // the provider call.
-        if session_open_is_contended(&error) {
+        // future non-open path mints a retryable `EmbedError::Store`, durable
+        // turn failures would present as "session temporarily busy", which a
+        // Restate caller reads as license to rerun the provider call.
+        if matches!(
+            error,
+            lash::EmbedError::Store(_)
+                | lash::EmbedError::Session(lash::SessionError::Store { .. })
+        ) && error.is_retryable()
+        {
             return temporarily_unavailable_session_open();
         }
         eprintln!("agent-workbench runtime request failure: {error}");
@@ -1627,20 +1604,18 @@ mod app_error_tests {
     }
 
     #[tokio::test]
-    async fn non_contended_session_open_is_not_retried() {
+    async fn non_retryable_session_open_is_not_retried() {
         let mut attempts = 0;
         let error = retry_session_open(
             "test",
             || {
                 attempts += 1;
-                std::future::ready(Err::<(), _>(lash::EmbedError::Store(
-                    lash::persistence::StoreError::Backend("store unavailable".to_string()),
-                )))
+                std::future::ready(Err::<(), _>(lash::EmbedError::MissingLlmProfile))
             },
             |_, _| {},
         )
         .await
-        .expect_err("a non-contended open error passes through");
+        .expect_err("a non-retryable open error passes through");
         let error = AppError::session_open(error);
 
         assert_eq!(attempts, 1);
