@@ -60,6 +60,10 @@ while True:
     try:
         length = struct.unpack('!I', receive(connection, 4))[0]
         database = receive(connection, length - 4)[4:].split(b'\\0')[3].decode()
+        if os.environ.get('FAKE_POSTGRES_STARTUP_FAILS'):
+            error = b'SERROR\\0C28000\\0Mstartup refused\\0\\0'
+            connection.sendall(b'E' + struct.pack('!I', len(error) + 4) + error)
+            continue
         connection.sendall(b'R' + struct.pack('!II', 8, 0) + b'Z' + struct.pack('!I', 5) + b'I')
         while True:
             kind, length = struct.unpack('!cI', receive(connection, 5))
@@ -191,6 +195,19 @@ class FakeServerTests(unittest.TestCase):
         self.assertNotIn('ran', result.stdout)
         self.assertIn('could not look up effective user ID', result.stderr)
         self.assertEqual(list(self.clusters.iterdir()), [])
+
+    def test_a_server_that_refuses_startup_stops_before_its_cluster_is_deleted(self):
+        result = self.run_runner(sys.executable, '-c', 'print("ran")', FAKE_POSTGRES_STARTUP_FAILS='1')
+        self.assertEqual(result.returncode, 70)
+        self.assertNotIn('ran', result.stdout)
+        self.assertIn('startup refused', result.stderr)
+        pid = next(record['pid'] for record in self.records() if 'pid' in record)
+        try:
+            self.assert_server_gone()
+            self.assertEqual(self.records()[-1], {'stopped': signal.SIGINT})
+        finally:
+            if alive(pid):
+                os.kill(pid, signal.SIGKILL)
 
 
 @unittest.skipUnless(PINNED_TREE.is_dir() and PINNED_NSS_WRAPPER.is_file(), 'the pinned PostgreSQL is not bootstrapped in this checkout')

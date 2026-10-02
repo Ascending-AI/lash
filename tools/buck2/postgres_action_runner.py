@@ -139,20 +139,24 @@ def start(tree: Path, data: Path, log: Path) -> tuple[subprocess.Popen, int]:
             command, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
             env=dict(os.environ, LC_ALL="C", TZ="UTC"),
         )
-    deadline = time.monotonic() + READY_SECONDS
-    while True:
-        if server.poll() is not None:
-            raise RuntimeError(f"postgres exited with {server.returncode} while starting")
-        try:
-            execute(port, "postgres", "SELECT 1")
-            return server, port
-        except (OSError, ServerError) as error:
-            # 57P03: the server accepts connections but is still starting up.
-            if isinstance(error, ServerError) and error.code != "57P03":
-                raise
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f"postgres was not ready after {READY_SECONDS} s: {error}") from error
-            time.sleep(0.02)
+    try:
+        deadline = time.monotonic() + READY_SECONDS
+        while True:
+            if server.poll() is not None:
+                raise RuntimeError(f"postgres exited with {server.returncode} while starting")
+            try:
+                execute(port, "postgres", "SELECT 1")
+                return server, port
+            except (OSError, ServerError) as error:
+                # 57P03: the server accepts connections but is still starting up.
+                if isinstance(error, ServerError) and error.code != "57P03":
+                    raise
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"postgres was not ready after {READY_SECONDS} s: {error}") from error
+                time.sleep(0.02)
+    except BaseException:
+        stop(server)
+        raise
 
 
 def stop(server: subprocess.Popen) -> None:

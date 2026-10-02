@@ -696,9 +696,10 @@ kiln test //crates/lash-postgres-store:conformance__test
   PID namespace, which is all the server needs. `initdb` looks its user up in
   the password database and the action's user is not in the image's;
   `libnss_wrapper.so` answers that lookup.
-- **Size.** The server shares the test's request. `[test_runs] service_floor`
-  keeps these runs at two CPUs and 1 GiB until measured rows say more; the
-  cluster lives on the action's tmpfs and counts as its memory.
+- **Size.** The server shares the test's request. CPU requests keep each
+  label's measured size or existing default. `[test_runs] service_floor`
+  retains the existing 1 GiB memory request. The executor binds its private
+  action temporary directory over `/tmp`; the cluster lives on the work disk.
 - **Sharding.** Each shard is an action with a server of its own, so the
   shards of `conformance` and `integration` need no database slots.
 - **An external server.** A run that is handed `LASH_POSTGRES_DATABASE_URL`

@@ -450,10 +450,9 @@ env = { LASH_SLACK_TEST_NODE = "$(location native//:node)" }
 # cores for lash-perf is exactly what such a suite shows while it is healthy.
 contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # A hermetic PostgreSQL run holds the server beside the test binary: its
-# backends, its shared buffers and a cluster on the action's tmpfs, which is
-# charged to the action as memory. A row measured without the server (these
-# labels used to skip on the pool) never sizes the run below this.
-service_floor = { cpu_count = 2, memory_kb = 1048576, packages = ["lash-internal-postgres-store"] }
+# backends and shared buffers keep the existing 1 GiB memory request. CPU
+# requests still come from each label's measured row or existing default.
+service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store"] }
 
 # Unmeasured runs of these crates keep the larger request they have always had.
 # The same crates are the suites that never join a `:test_batch`.

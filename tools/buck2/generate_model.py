@@ -251,8 +251,7 @@ def test_run_request(
     if floor and package_name in CONTENTION_FLOOR["packages"]:
         request["cpu_count"] = max(request["cpu_count"], CONTENTION_FLOOR["cpu_count"])
     if package_name in SERVICE_FLOOR["packages"]:
-        for size in ("cpu_count", "memory_kb"):
-            request[size] = max(request[size], SERVICE_FLOOR[size])
+        request["memory_kb"] = max(request["memory_kb"], SERVICE_FLOOR["memory_kb"])
     return request
 
 
