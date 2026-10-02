@@ -8,9 +8,10 @@
 //! (FIG-3672 P6). A difference here is a durable-format change. During the
 //! pre-1.0 version freeze, shapes change in place and pins are regenerated.
 //!
-//! FIG-4666 removes the frame claim. `scripts/regenerate-runtime-commit-pins.py`
-//! verifies that restoring that field reproduces every previous digest before
-//! updating the pins; all other committed bytes retain their checks.
+//! `just runtime-commit-pins` proves each delta by reversing named serialized
+//! shape changes until the complete previous digest matches. FIG-4839 covers
+//! FIG-2002's removed policy session id and FIG-4655's output-token limits;
+//! every other committed byte retains its check.
 //!
 //! The two cancelled pins were retaken once, for a change of value and not of
 //! shape (FIG-3672 P9): a host-local stop is now a durable request with
@@ -208,7 +209,7 @@ async fn tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "tool turn",
         &pinned,
-        &["68ee1c125cbc7b5e9e53e3f0f21b57a0482aaa20c0a1ba5804956fb5f692b80a"],
+        &["53de74839885ae4a62004f0557e25e70f533224bf44276baaa000466a59ead7b"],
         r#"{
             "assistant_output": "done",
             "errors": [],
@@ -282,7 +283,7 @@ async fn parallel_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "parallel tool turn",
         &pinned,
-        &["3c6f7abbce54e6cab7e75ed5c7b605b8b415d6fff3f8f7cb52a3b9274d6186e3"],
+        &["fca5fe4370dc92b8f02775f46263bc43ee0569c8b49995bcadda8e8dbb364d7f"],
         r#"{
             "assistant_output": "all three echoed",
             "errors": [],
@@ -379,7 +380,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "provider failure",
         &pinned,
-        &["b10eea05ddaf55f4632fe7c184acbf577d9578261104a5edcec237307bc4b472"],
+        &["35db99db99245a4544fb019ad9e74b4943adbf8682db736b29983c5ac7c2d2ca"],
         r#"{
             "assistant_output": "",
             "errors": [
@@ -417,7 +418,7 @@ async fn cancelled_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled",
         &pinned,
-        &["7cd9a2002d05a8be41c8cdb1e695253f83eb08870f083b28bbea042255de4031"],
+        &["d52162ccc370c0a43f1adc91be828821928d9819dd5b92da0b77833e4d5eaca1"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -479,7 +480,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
     assert_pinned(
         "cancelled mid tool",
         &pinned,
-        &["40ee6b7d3acc3abe46e85c9a475455018eed3536078b29b4791ec704c7d414d2"],
+        &["5335341434c82afc9540af260c99322c838b4f6796faa037dd0aab317c5cce9a"],
         r#"{
             "assistant_output": "",
             "errors": [],
@@ -637,7 +638,7 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
     crate::runtime_support::commit_pins::assert_commit_pins(
         "blocked host",
         &store.runtime_commits(),
-        &["3c6f7abbce54e6cab7e75ed5c7b605b8b415d6fff3f8f7cb52a3b9274d6186e3"],
+        &["fca5fe4370dc92b8f02775f46263bc43ee0569c8b49995bcadda8e8dbb364d7f"],
     );
     assert!(host.received().is_empty(), "the host has taken nothing yet");
 

@@ -4,9 +4,10 @@
 //! driver's recorded state (FIG-3672 P6). During the pre-1.0 version freeze,
 //! shapes change in place and pins are regenerated.
 //!
-//! FIG-4666 removes the frame claim. `scripts/regenerate-runtime-commit-pins.py`
-//! verifies that restoring that field reproduces every previous digest before
-//! updating the pins; all other committed bytes retain their checks.
+//! `just runtime-commit-pins` proves each delta by reversing named serialized
+//! shape changes until the complete previous digest matches. FIG-4839 covers
+//! FIG-2002's removed policy session id and FIG-4655's output-token limits;
+//! every other committed byte retains its check.
 //!
 //! Re-pinned once for a change of value and not of shape (FIG-3600): drive
 //! admission mints a turn's root from its durable input, so a direct turn's
@@ -111,7 +112,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["b6b8fd27f97e364a684760c2d37753f64650ea056a22e49a4272fc10ea4c0b68"],
+        &["40fdc84564544a36de50b9177807ae69ad228ffbd9cc387465f9f313ee772445"],
     );
 }
 
@@ -134,7 +135,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["f647dd629e46fb03bf6443c7cc1ae27c0b0282b856d91a24960ca9944d7a4eda"],
+        &["fd5b77265a332987d98272b66ed24396168d59bf60480301bda96684c5b124bc"],
     );
 }
 
@@ -158,6 +159,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["c3da9a659a531ed6938550ff81458018fc2f050e06e630ed19cff4587d414c2a"],
+        &["f8199c772d2c414324efccc01c6d11b070e90cf03ec069902d47e0eb3849cefa"],
     );
 }
