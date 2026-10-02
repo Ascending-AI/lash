@@ -272,7 +272,9 @@ figures are derived from that record rather than restated here:
 tallies, as do the test262 binaries' outputs.
 `//crates/lash-typescript:test262__test` checks a stratified sample in
 the developer loop. `//crates/lash-typescript:test262_full__test` runs the whole
-selection in the workspace partition and nightly. This proves spec agreement
+selection as corpus-partition cases the Buck2 shards spread, in the workspace
+partition and nightly, and `//crates/lash-typescript:test262_ratchet__test`
+holds the same check in one case for the re-record recipe. This proves spec agreement
 for what the dialect accepts. It does not claim that the bounded dialect
 accepts all of ECMAScript. The Node differential oracle independently pins
 agreement with the deployed Node version, while Test262 pins agreement with

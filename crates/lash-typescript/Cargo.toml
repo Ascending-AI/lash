@@ -92,8 +92,15 @@ path = "tests/fuel_law.rs"
 name = "test262"
 path = "tests/test262_sample.rs"
 
-# The whole Test262 selection against the same record: the workspace
-# partition's tail and the nightly run.
+# The whole Test262 selection against the same record, as disjoint corpus
+# partitions the Buck2 shards spread (FIG-4733): the workspace partition's
+# tail and the nightly run.
 [[test]]
 name = "test262_full"
 path = "tests/test262_full.rs"
+
+# The whole-selection ratchet in one case, so the `TEST262_BLESS` re-record
+# recipe sees the selection whole (FIG-4733).
+[[test]]
+name = "test262_ratchet"
+path = "tests/test262_ratchet.rs"

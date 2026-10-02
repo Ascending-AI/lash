@@ -1,6 +1,8 @@
 //! Test262 conformance, full selection (FIG-3646): every vendored test keeps
-//! its recorded outcome. The documented `TEST262_BLESS=1 cargo test` recipe
-//! rewrites the record from the run instead (see README.md).
+//! its recorded outcome. The corpus runs as [`runner::CORPUS_PARTITIONS`]
+//! disjoint cases, so the Buck2 shards spread them across lanes (FIG-4733).
+//! The whole-selection ratchet and the `TEST262_BLESS` recipe live in
+//! `test262_ratchet.rs`.
 #![expect(
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the helpers around them in this target are test code too"
@@ -40,11 +42,20 @@ fn focused_rows() {
     }
 }
 
-#[test]
-fn full_selection_matches_the_ratchet() {
+/// Corpus partition `index` of the selection (the `LASH_QUICK` subset when
+/// the knob is set): the partition's tests run and compare against the
+/// record. The partitions are disjoint and their union is the selection, so
+/// the target checks every vendored test while the Buck2 shards spread the
+/// cases. Re-recording stays with the `test262_ratchet` target: a bless must
+/// see the whole selection in one run.
+fn run_corpus_partition(index: usize) {
+    assert!(
+        std::env::var_os("TEST262_BLESS").is_none(),
+        "TEST262_BLESS rewrites the whole record; run the test262_ratchet target (see README.md)"
+    );
     let recorded = runner::recorded_outcomes();
     let vendored = runner::vendored_tests().into_iter().collect::<Vec<_>>();
-    let paths = match runner::quick_selection(&vendored) {
+    let selection = match runner::quick_selection(&vendored) {
         Some(subset) => {
             eprintln!(
                 "LASH_QUICK: running {} of {} selected tests",
@@ -55,22 +66,85 @@ fn full_selection_matches_the_ratchet() {
         }
         None => vendored,
     };
+    let paths = runner::corpus_partition(&selection, index);
+    eprintln!(
+        "corpus partition {index}: running {} of {} selected tests",
+        paths.len(),
+        selection.len()
+    );
     let observed = runner::run_all(&paths);
-    if runner::bless(&paths, &observed, &recorded) {
-        eprintln!("blessed the outcomes shards from the run");
-        return;
-    }
     let mismatches = runner::compare(&paths, &observed, &recorded);
-    eprintln!("{}", runner::summary(&recorded));
-    eprintln!("{}", runner::tally_lines(&recorded));
     assert!(
         mismatches.is_empty(),
-        "{} Test262 outcomes changed; a new pass must be promoted, a new failure \
-         fixed or owned, a changed refusal re-recorded (see README.md):\n{}",
+        "corpus partition {index}: {} Test262 outcomes changed; a new pass must be promoted, a \
+         new failure fixed or owned, a changed refusal re-recorded (see README.md):\n{}",
         mismatches.len(),
         mismatches.join("\n")
     );
 }
+
+/// The partitions are disjoint, nonempty and their union is the whole
+/// selection — the property the sharding relies on to keep coverage identical
+/// to the old single-case full run.
+#[test]
+fn corpus_partitions_cover_the_selection() {
+    let vendored = runner::vendored_tests().into_iter().collect::<Vec<_>>();
+    let mut covered = BTreeSet::new();
+    for index in 0..runner::CORPUS_PARTITIONS {
+        let partition = runner::corpus_partition(&vendored, index);
+        assert!(!partition.is_empty(), "corpus partition {index} is empty");
+        for path in partition {
+            assert!(covered.insert(path), "a test is in two corpus partitions");
+        }
+    }
+    assert_eq!(covered.len(), vendored.len());
+}
+
+/// One corpus case per partition so the Buck2 shards can spread them; the
+/// literal count must match `runner::CORPUS_PARTITIONS`.
+macro_rules! corpus_partition_case {
+    ($name:ident, $index:literal) => {
+        #[test]
+        fn $name() {
+            run_corpus_partition($index);
+        }
+    };
+}
+
+const _: () = assert!(runner::CORPUS_PARTITIONS == 32);
+
+corpus_partition_case!(corpus_partition_00, 0);
+corpus_partition_case!(corpus_partition_01, 1);
+corpus_partition_case!(corpus_partition_02, 2);
+corpus_partition_case!(corpus_partition_03, 3);
+corpus_partition_case!(corpus_partition_04, 4);
+corpus_partition_case!(corpus_partition_05, 5);
+corpus_partition_case!(corpus_partition_06, 6);
+corpus_partition_case!(corpus_partition_07, 7);
+corpus_partition_case!(corpus_partition_08, 8);
+corpus_partition_case!(corpus_partition_09, 9);
+corpus_partition_case!(corpus_partition_10, 10);
+corpus_partition_case!(corpus_partition_11, 11);
+corpus_partition_case!(corpus_partition_12, 12);
+corpus_partition_case!(corpus_partition_13, 13);
+corpus_partition_case!(corpus_partition_14, 14);
+corpus_partition_case!(corpus_partition_15, 15);
+corpus_partition_case!(corpus_partition_16, 16);
+corpus_partition_case!(corpus_partition_17, 17);
+corpus_partition_case!(corpus_partition_18, 18);
+corpus_partition_case!(corpus_partition_19, 19);
+corpus_partition_case!(corpus_partition_20, 20);
+corpus_partition_case!(corpus_partition_21, 21);
+corpus_partition_case!(corpus_partition_22, 22);
+corpus_partition_case!(corpus_partition_23, 23);
+corpus_partition_case!(corpus_partition_24, 24);
+corpus_partition_case!(corpus_partition_25, 25);
+corpus_partition_case!(corpus_partition_26, 26);
+corpus_partition_case!(corpus_partition_27, 27);
+corpus_partition_case!(corpus_partition_28, 28);
+corpus_partition_case!(corpus_partition_29, 29);
+corpus_partition_case!(corpus_partition_30, 30);
+corpus_partition_case!(corpus_partition_31, 31);
 
 /// The `LASH_QUICK` subset is deterministic: the same inputs draw the same
 /// tests regardless of input order, each stratum contributes a tenth, and an

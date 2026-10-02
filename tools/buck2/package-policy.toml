@@ -155,13 +155,24 @@ reason = "the no-abort stress binary runs 43 s; too slow for the developer loop;
 # The whole Test262 selection (FIG-3646): about 19,000 programs, measured at
 # 165 s of one core. The developer loop runs the stratified sample
 # (`test262`); the PR partition's tail runs this, and so does the nightly
-# Test262 workflow, uncached.
+# Test262 workflow, uncached. The corpus cases partition the selection so the
+# Buck2 shards spread it (FIG-4733).
 [[rule]]
 packages = ["lash-internal-typescript"]
 kinds = ["test"]
 targets = ["test262_full"]
 tags = ["dev-deferred"]
 reason = "the full Test262 selection runs about 19,000 programs; the developer loop runs its stratified sample, and the PR tail and the nightly Test262 workflow run it whole"
+shards = 8
+
+# The whole-selection ratchet keeps the check in one case so the
+# `TEST262_BLESS` re-record recipe sees the selection whole (FIG-4733).
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["test"]
+targets = ["test262_ratchet"]
+tags = ["dev-deferred"]
+reason = "the whole-selection Test262 ratchet runs about 19,000 programs in one case so TEST262_BLESS rewrites the record from the run it makes; too slow for the developer partition"
 
 [[rule]]
 packages = ["lash-regress"]
@@ -441,7 +452,14 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # The full Test262 selection spreads its programs over every core it gets;
 # measured 2026-09-24 at 165 s of one core in total, 37 s for the slowest
 # test, with a 0.7 GiB peak -- 1.5 GiB keeps the margin the sizing rule asks.
+# The same request covers the corpus shards and the whole-selection ratchet
+# (FIG-4733).
 "lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 1572864 }
+"lash-internal-typescript/test262_ratchet" = { cpu_count = 8, memory_kb = 1572864 }
+# tool_batch_parallelism runs 53 s at its measured 2 cores; inside the 1-CPU
+# protocol-standard batch it stretched to ~105 s of a 115 s batch (FIG-4733).
+# As a large suite it runs as its own target, out of the batch.
+"lash-internal-protocol-standard/tool_batch_parallelism" = { cpu_count = 2, memory_kb = 1048576 }
 "lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
 
 # Requests pinned per Buck2 label, for runs and batches whose size is policy

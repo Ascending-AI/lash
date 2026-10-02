@@ -301,6 +301,30 @@ lash_rust_integration_test(
     ],
     exec_properties = sized_exec_properties("lash-internal-typescript", "test262_full", "//crates/lash-typescript:test262_full__test"),
     extra_compile_data = [],
+    shard_count = 8,
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [
+        "dev-deferred",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "test262_ratchet__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "test262_ratchet",
+    crate_root = "tests/test262_ratchet.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-typescript", "test262_ratchet", "//crates/lash-typescript:test262_ratchet__test"),
+    extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
     manifest_dir = "crates/lash-typescript",

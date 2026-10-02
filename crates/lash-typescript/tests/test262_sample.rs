@@ -1,7 +1,7 @@
 //! Test262 conformance, PR lane (FIG-3646): the policy data is exhaustive and
 //! consistent, every census rejection fires, and a stratified sample of the
-//! selection keeps its recorded outcomes. `test262_full.rs` runs the whole
-//! selection against the same record.
+//! selection keeps its recorded outcomes. `test262_full.rs` and
+//! `test262_ratchet.rs` run the whole selection against the same record.
 #![expect(
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the helpers around them in this target are test code too"

@@ -179,6 +179,9 @@
       ],
       "test262_full": [
         "tests/test262/test/**/*.js"
+      ],
+      "test262_ratchet": [
+        "tests/test262/test/**/*.js"
       ]
     }
   },

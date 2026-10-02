@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 2,
   "cargo_package_count": 55,
-  "cargo_target_count": 218,
+  "cargo_target_count": 219,
   "feature_lane_build_targets": [
     "//crates/lash-conformance:lash-conformance__fv_0f5f2ec4[static]",
     "//crates/lash-conformance:lash-conformance__fv_110ca6ce[static]",
@@ -46511,7 +46511,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_41763c4b"
     ]
   },
-  "generated_label_count": 284,
+  "generated_label_count": 285,
   "packages": [
     {
       "declared_features": [
@@ -48017,8 +48017,7 @@
           "//crates/lash-protocol-standard:lash-protocol-standard__unit_test",
           "//crates/lash-protocol-standard:native_tools__test",
           "//crates/lash-protocol-standard:protocol_scenarios__test",
-          "//crates/lash-protocol-standard:render_cache_law__test",
-          "//crates/lash-protocol-standard:tool_batch_parallelism__test"
+          "//crates/lash-protocol-standard:render_cache_law__test"
         ]
       }
     },
@@ -49619,6 +49618,19 @@
           "clippy_label": "//crates/lash-typescript:test262_full__test[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-typescript:test262_full__test",
+          "shard_count": 8,
+          "tags": [
+            "dev-deferred"
+          ]
+        },
+        {
+          "build_label": "//crates/lash-typescript:test262_ratchet__test",
+          "cargo": "test262_ratchet",
+          "cargo_only": "the whole-selection Test262 ratchet runs about 19,000 programs in one case so TEST262_BLESS rewrites the record from the run it makes; too slow for the developer partition",
+          "check_label": "//crates/lash-typescript:test262_ratchet__test[check]",
+          "clippy_label": "//crates/lash-typescript:test262_ratchet__test[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-typescript:test262_ratchet__test",
           "tags": [
             "dev-deferred"
           ]
@@ -51547,6 +51559,7 @@
     "//crates/lash-typescript:race_any_runtime__test": 300,
     "//crates/lash-typescript:test262__test": 300,
     "//crates/lash-typescript:test262_full__test": 300,
+    "//crates/lash-typescript:test262_ratchet__test": 300,
     "//crates/lash-typescript:test_batch": 300,
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test": 300,
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_23f48b19": 300,
@@ -52084,6 +52097,7 @@
     "//crates/lash-typescript:race_any_runtime__test",
     "//crates/lash-typescript:test262__test",
     "//crates/lash-typescript:test262_full__test",
+    "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-typescript:tsvm_allocations__example",
     "//crates/lash-typescript:tsvm_costs__example",
     "//crates/lash-upgrade-harness:lash-upgrade-harness[static]",
@@ -52369,6 +52383,7 @@
     "//crates/lash-typescript:race_any_runtime__test[check]",
     "//crates/lash-typescript:test262__test[check]",
     "//crates/lash-typescript:test262_full__test[check]",
+    "//crates/lash-typescript:test262_ratchet__test[check]",
     "//crates/lash-typescript:tsvm_allocations__example[check]",
     "//crates/lash-typescript:tsvm_costs__example[check]",
     "//crates/lash-upgrade-harness:lash-upgrade-harness[check]",
@@ -52654,6 +52669,7 @@
     "//crates/lash-typescript:race_any_runtime__test[clippy.txt]",
     "//crates/lash-typescript:test262__test[clippy.txt]",
     "//crates/lash-typescript:test262_full__test[clippy.txt]",
+    "//crates/lash-typescript:test262_ratchet__test[clippy.txt]",
     "//crates/lash-typescript:tsvm_allocations__example[clippy.txt]",
     "//crates/lash-typescript:tsvm_costs__example[clippy.txt]",
     "//crates/lash-upgrade-harness:lash-upgrade-harness[clippy.txt]",
@@ -52939,6 +52955,7 @@
     "//crates/lash-typescript:race_any_runtime__test",
     "//crates/lash-typescript:test262__test",
     "//crates/lash-typescript:test262_full__test",
+    "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-typescript:tsvm_allocations__example",
     "//crates/lash-typescript:tsvm_costs__example",
     "//crates/lash-upgrade-harness:lash-upgrade-harness",
@@ -53225,6 +53242,7 @@
     "//crates/lash-typescript:race_any_runtime__test",
     "//crates/lash-typescript:test262__test",
     "//crates/lash-typescript:test262_full__test",
+    "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-typescript:tsvm_allocations__example",
     "//crates/lash-typescript:tsvm_costs__example",
     "//crates/lash-upgrade-harness:lash-upgrade-harness",
@@ -53360,6 +53378,7 @@
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-rlm:tool_batch_parallelism__test",
     "//crates/lash-protocol-standard:test_batch",
+    "//crates/lash-protocol-standard:tool_batch_parallelism__test",
     "//crates/lash-provider-anthropic:test_batch",
     "//crates/lash-provider-auth:lash-provider-auth__unit_test",
     "//crates/lash-provider-google:block_identity__test",
@@ -53486,6 +53505,7 @@
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-rlm:tool_batch_parallelism__test",
     "//crates/lash-protocol-standard:test_batch",
+    "//crates/lash-protocol-standard:tool_batch_parallelism__test",
     "//crates/lash-provider-anthropic:test_batch",
     "//crates/lash-provider-auth:lash-provider-auth__unit_test",
     "//crates/lash-provider-google:block_identity__test",
@@ -53877,6 +53897,7 @@
     "//crates/lash-typescript:integration__test",
     "//crates/lash-typescript:race_any_runtime__test",
     "//crates/lash-typescript:test262_full__test",
+    "//crates/lash-typescript:test262_ratchet__test",
     "//examples/agent-service:agent-service__unit_test",
     "//examples/agent-service:fresh_boot__test",
     "//examples/agent-workbench:agent-workbench__unit_test",
@@ -53915,8 +53936,7 @@
       "//crates/lash-protocol-standard:lash-protocol-standard__unit_test",
       "//crates/lash-protocol-standard:native_tools__test",
       "//crates/lash-protocol-standard:protocol_scenarios__test",
-      "//crates/lash-protocol-standard:render_cache_law__test",
-      "//crates/lash-protocol-standard:tool_batch_parallelism__test"
+      "//crates/lash-protocol-standard:render_cache_law__test"
     ],
     "//crates/lash-provider-anthropic:test_batch": [
       "//crates/lash-provider-anthropic:charge_safety__test",
@@ -53990,6 +54010,7 @@
     "//crates/lash-protocol-rlm:protocol_drivers__test",
     "//crates/lash-protocol-rlm:tool_batch_parallelism__test",
     "//crates/lash-protocol-standard:test_batch",
+    "//crates/lash-protocol-standard:tool_batch_parallelism__test",
     "//crates/lash-provider-anthropic:test_batch",
     "//crates/lash-provider-auth:lash-provider-auth__unit_test",
     "//crates/lash-provider-google:block_identity__test",
@@ -54054,6 +54075,7 @@
     "//crates/lash-typescript:integration__test",
     "//crates/lash-typescript:race_any_runtime__test",
     "//crates/lash-typescript:test262_full__test",
+    "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-typescript:test_batch",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
@@ -54235,6 +54257,7 @@
     "//crates/lash-typescript:race_any_runtime__test",
     "//crates/lash-typescript:test262__test",
     "//crates/lash-typescript:test262_full__test",
+    "//crates/lash-typescript:test262_ratchet__test",
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test",
     "//crates/lash-upgrade-harness:lash-upgrade-node__bin__unit_test",
     "//crates/lash-upgrade-harness:phase_a__test",

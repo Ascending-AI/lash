@@ -21,8 +21,8 @@ print them, run:
 python3 scripts/check_test262_ratchet.py --base origin/main
 ```
 
-The `test262` and `test262_full` test binaries print the same tallies in their
-output.
+The `test262` and `test262_ratchet` test binaries print the same tallies in
+their output.
 
 ## Selection
 
@@ -92,10 +92,12 @@ The runner admits each test the way a cell is admitted: lowered, linked
 against a host environment, compiled from the linked artifact, then run under
 a deterministic instruction budget. The ratchet has three layers:
 
-- **Each outcome.** `test262` (the sample, in `//:dev_tests`) and
-  `test262_full` (the whole selection, in the `//:workspace_tests` tail and the
-  nightly `Test262 nightly` workflow) fail when a test's outcome changes from
-  its record in any of three ways:
+- **Each outcome.** `test262` (the sample, in `//:dev_tests`), `test262_full`
+  (the whole selection as corpus-partition cases the Buck2 shards spread, in
+  the `//:workspace_tests` tail and the nightly `Test262 nightly` workflow)
+  and `test262_ratchet` (the same check as one whole-selection case, in the
+  tail; FIG-4733) fail when a test's outcome changes from its record in any
+  of three ways:
   - a new failure;
   - a pass that is not promoted;
   - a refusal whose code changed.
@@ -112,7 +114,7 @@ To re-record after a deliberate change, run:
 
 ```sh
 . ./env.sh
-kiln test //crates/lash-typescript:test262_full__test \
+kiln test //crates/lash-typescript:test262_ratchet__test \
   --test_arg=--exact --test_arg=full_selection_matches_the_ratchet \
   --local-test-execution --nocache_test_results \
   --test_env=BUILD_WORKSPACE_DIRECTORY="$PWD" \

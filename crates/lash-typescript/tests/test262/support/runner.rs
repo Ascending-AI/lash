@@ -548,6 +548,23 @@ pub(crate) fn quick_selection(paths: &[String]) -> Option<Vec<String>> {
     Some(quick_subset(paths, &includes).into_iter().collect())
 }
 
+/// The count of corpus partitions `test262_full.rs` defines: each is one
+/// `#[test]` case, so the Buck2 shards spread them across lanes while their
+/// union stays the whole selection (FIG-4733).
+pub(crate) const CORPUS_PARTITIONS: usize = 32;
+
+/// Partition `index` of `paths`, `0 <= index < CORPUS_PARTITIONS`: the paths
+/// whose FNV-1a hash lands in slice `index`, in input order. The partitions
+/// are deterministic and disjoint, and their union is `paths`.
+pub(crate) fn corpus_partition(paths: &[String], index: usize) -> Vec<String> {
+    assert!(index < CORPUS_PARTITIONS, "corpus partition out of range");
+    paths
+        .iter()
+        .filter(|path| fnv1a64(path) % CORPUS_PARTITIONS as u64 == index as u64)
+        .cloned()
+        .collect()
+}
+
 /// The harness includes with no in-dialect rendering, each with the dialect
 /// capability its rendering would need.
 pub(crate) fn unshimmable_includes() -> BTreeMap<String, String> {

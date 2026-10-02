@@ -178,7 +178,6 @@ lash_batch_test(
         ":native_tools__test",
         ":protocol_scenarios__test",
         ":render_cache_law__test",
-        ":tool_batch_parallelism__test",
     ],
 )
 

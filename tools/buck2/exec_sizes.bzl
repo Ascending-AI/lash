@@ -465,6 +465,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-typescript:race_any_runtime__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-typescript:test262__test": {"cpu_count": 3, "memory_kb": 1048576},
     "//crates/lash-typescript:test262_full__test": {"cpu_count": 8, "memory_kb": 1048576},
+    "//crates/lash-typescript:test262_ratchet__test": {"cpu_count": 8, "memory_kb": 1572864},
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_23f48b19": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-upgrade-harness:lash-upgrade-harness__unit_test__fv_74f05782": {"cpu_count": 1, "memory_kb": 1048576},
