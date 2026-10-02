@@ -15,6 +15,7 @@ synthetic-next = [
     "lash/synthetic-next",
     "lash-postgres-store/synthetic-next",
     "lashlang/synthetic-next",
+    "lash-vm-client/synthetic-next",
 ]
 
 [lib]

@@ -475,10 +475,10 @@ latency-gate *args:
 
 # Builds Phase A's two builds of head (ADR 0115 §6, FIG-3805) with Buck2: N
 # (the default build) and N+1 (the `synthetic-next` feature), each as a
-# `lash-upgrade-node` and a `lashctl`, copied into `<artifacts>/bin/n` and
+# `lash-upgrade-node`, a `lashctl` and a `lash-vm-worker`, copied into `<artifacts>/bin/n` and
 # `<artifacts>/bin/n+1`. Each feature variant's label is read from its
 # generated target inventory, so a change to either build's feature set moves no
-# recipe.
+# recipe. Each node gets the worker that speaks its own protocol.
 _upgrade-harness-builds artifacts:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -489,9 +489,10 @@ _upgrade-harness-builds artifacts:
   node_next="$(python3 scripts/resolve_buck2_target.py //crates/lash-upgrade-harness lash-upgrade-node__bin --feature synthetic-next)"
   lashctl_next="$(python3 scripts/resolve_buck2_target.py //crates/lashctl lashctl --feature synthetic-next)"
   report="$artifacts/build-report.json"
-  worker=//crates/lash-vm-worker:lash-vm-worker__bin
+  worker_n=//crates/lash-vm-worker:lash-vm-worker__bin
+  worker_next="$(python3 scripts/resolve_buck2_target.py //crates/lash-vm-worker lash-vm-worker__bin --feature synthetic-next --feature testing)"
   scripts/hermetic-build.sh build --materializations final --build-report "$report" \
-    "$node_next" "$node_n" //crates/lashctl:lashctl "$lashctl_next" "$worker"
+    "$node_next" "$node_n" //crates/lashctl:lashctl "$lashctl_next" "$worker_n" "$worker_next"
   output() {
     python3 tools/buck2/outputs.py --report "$report" --label "$1" --single
   }
@@ -499,8 +500,8 @@ _upgrade-harness-builds artifacts:
   cp "$(output "$node_n")" "$artifacts/bin/n/lash-upgrade-node"
   cp "$(output //crates/lashctl:lashctl)" "$artifacts/bin/n/lashctl"
   cp "$(output "$lashctl_next")" "$artifacts/bin/n+1/lashctl"
-  # Build N links Lashlang modules through the worker shipped beside it.
-  cp "$(output "$worker")" "$artifacts/bin/n/lash-vm-worker"
+  cp "$(output "$worker_n")" "$artifacts/bin/n/lash-vm-worker"
+  cp "$(output "$worker_next")" "$artifacts/bin/n+1/lash-vm-worker"
 
 # Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
 # (the default build) and N+1 (the `synthetic-next` feature), run as separate
@@ -562,13 +563,6 @@ phase-a *legs:
   esac
   rm -rf "$artifacts"
   just _upgrade-harness-builds "$artifacts"
-  # Build N+1's worker writes N+1's Lashlang formats over the worker protocol
-  # the node speaks: the harness forwards `synthetic-next` to Lashlang, not to
-  # the worker client. Buck2 has no such worker target, so Cargo builds it.
-  cargo build --locked -p lash-internal-vm-worker --bin lash-vm-worker \
-    --features lashlang/synthetic-next,lash-core-execution/synthetic-next
-  cp "${CARGO_TARGET_DIR:-{{repo}}/target}/debug/lash-vm-worker" "$artifacts/bin/n+1/lash-vm-worker"
-  cargo test --locked -p lash-upgrade-harness --test phase_a --no-run
 
   export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
   export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
