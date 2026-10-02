@@ -7,6 +7,7 @@ use lash_core::{
     RuntimeErrorCode,
 };
 use lash_sansio::SessionId;
+use restate_sdk::errors::TerminalError;
 
 use super::{RestateControllerContext, RestateRuntimeEffectController};
 use crate::durable_wait::{
@@ -35,16 +36,31 @@ where
         &self,
         session_id: Option<&SessionId>,
     ) -> Result<(), RuntimeError> {
-        if let Some(session_id) = session_id
-            && self
-                .context
-                .session_is_revoked(&self.namespace, SessionId::from(session_id.to_string()))
-                .await
-                .map_err(engine_error)?
+        if self
+            .session_revoked(session_id)
+            .await
+            .map_err(engine_error)?
         {
             return Err(restate_unknown_or_revoked());
         }
         Ok(())
+    }
+
+    /// The journaled read of `session_id`'s revocation, with the engine's
+    /// own failure of the read left typed for a caller that tells its
+    /// cancellation apart.
+    pub(super) async fn session_revoked(
+        &self,
+        session_id: Option<&SessionId>,
+    ) -> Result<bool, TerminalError> {
+        match session_id {
+            Some(session_id) => {
+                self.context
+                    .session_is_revoked(&self.namespace, SessionId::from(session_id.to_string()))
+                    .await
+            }
+            None => Ok(false),
+        }
     }
 
     /// The turn-control peek a `PeekAwaitEvent` effect journals. The effect

@@ -32,6 +32,7 @@ use lash_core::{
     RuntimeEffectControllerError, RuntimeEffectInvocation, RuntimeErrorCode, ServedOnly, StartKey,
 };
 use lash_sansio::sync::MutexExt as _;
+use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::Json;
 
 use super::context::RestateControllerContext;
@@ -84,7 +85,7 @@ where
     let mark = FrontierMark::ProcessStart {
         start_key: start_key.clone(),
     };
-    pass_frontier(context, invocation, mark, served_only).await
+    pass_frontier(context, invocation, mark, served_only, |_, fault| fault).await
 }
 
 /// Journals a timer's frontier marker: a served-only sleep whose marker's
@@ -95,25 +96,40 @@ where
 /// attempt that died before journaling its sleep lets that sleep be journaled
 /// on the redrive; the next dispatching effect of the drifted command still
 /// answers at its own frontier.
+///
+/// `failure` answers a marker the engine failed: the sleep's controller tells
+/// the engine's cancellation of a group child apart from a fault there.
 pub(super) async fn pass_sleep_frontier<'ctx, C>(
     context: &C,
     invocation: &RuntimeEffectInvocation,
     served_only: Option<&ServedOnly>,
+    failure: impl FnOnce(TerminalError, RuntimeEffectControllerError) -> RuntimeEffectControllerError,
 ) -> Result<(), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
-    pass_frontier(context, invocation, FrontierMark::Sleep, served_only).await
+    pass_frontier(
+        context,
+        invocation,
+        FrontierMark::Sleep,
+        served_only,
+        failure,
+    )
+    .await
 }
 
 /// Journals `mark` at `lash:{replay_key}:frontier`. A served-only effect's
 /// marker whose closure runs is the live frontier: the run proposes nothing
 /// and the effect refuses. Otherwise the recorded mark must be `mark`.
+///
+/// `failure` answers a marker step the engine failed, from the engine's
+/// terminal and the controller fault it reads as by default.
 async fn pass_frontier<'ctx, C>(
     context: &C,
     invocation: &RuntimeEffectInvocation,
     mark: FrontierMark,
     served_only: Option<&ServedOnly>,
+    failure: impl FnOnce(TerminalError, RuntimeEffectControllerError) -> RuntimeEffectControllerError,
 ) -> Result<(), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -133,10 +149,11 @@ where
         Some(live) => live.serve(run).await?,
     };
     let Json(recorded) = journaled.map_err(|terminal| {
-        RuntimeEffectControllerError::new(
+        let fault = RuntimeEffectControllerError::new(
             RuntimeErrorCode::EngineEffectController,
             format!("Restate frontier marker `{name}` failed: {terminal}"),
-        )
+        );
+        failure(terminal, fault)
     })?;
     recorded_frontier_mark(&name, recorded, &mark)
 }

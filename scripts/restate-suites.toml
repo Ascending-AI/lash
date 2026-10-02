@@ -50,8 +50,6 @@ endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 # not by the module sweep here.
 skips = [
   "tests::conformance_and_poison::a_cancel_decided_before_a_sink_is_refused_at_the_sink",
-  # FIG-4756: unfinished cancelled/ended work; restore after both-leg teardown is clean.
-  "tests::conformance_and_poison::a_wait_cancelled_before_it_parks_is_still_released",
   # FIG-4757: unfinished cancelled/ended work; restore after both-leg teardown is clean.
   "tests::conformance_and_poison::declared_start_cancel_at_each_point",
   # FIG-4758: unfinished cancelled/ended work; restore after both-leg teardown is clean.

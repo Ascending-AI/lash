@@ -493,3 +493,129 @@ pub(super) async fn start_atomic_child(
         Arc::clone(&executors.runs),
     )
 }
+
+/// A controller bound to a group child's cancel fact, as group dispatch binds
+/// a wait child's, over a recording context. The fact's watch is never asked:
+/// the laws below end before any wait parks.
+fn bound_child_controller(
+    context: &Arc<super::RecordingContext>,
+) -> crate::RestateRuntimeEffectController<'static, Arc<super::RecordingContext>> {
+    let connection = crate::RestateConnection::with_transport(
+        "http://ingress.invalid",
+        ScriptedIngress::new(Vec::new()) as Arc<dyn HttpTransport>,
+    );
+    crate::RestateRuntimeEffectController::new_for_test(Arc::clone(context))
+        .with_group_child_cancel(crate::effect_group::GroupChildCancel::new(
+            crate::RestateIngressClient::new(connection),
+            crate::services::DEFAULT_NAMESPACE.clone(),
+            GROUP.to_owned(),
+            0,
+        ))
+}
+
+/// An event-wait child the engine cancels before it parks (FIG-4756): the
+/// index decided the child's cancel and cancelled its invocation while the
+/// child was still on the journaled read of its session's revocation, ahead
+/// of its wait. The `409` there is the child's decided cancel, its typed
+/// end, which its dispatch settles `Cancelled`.
+///
+/// Red before FIG-4756: the read reported the `409` as an engine fault, a
+/// live fault dispatch never records, so the child's invocation failed
+/// retryably and replayed the journaled cancellation into the same fault on
+/// every retry, never settling.
+#[tokio::test]
+async fn an_event_wait_child_cancelled_before_it_parks_ends_cancelled() {
+    use lash_core::RuntimeEffectController as _;
+
+    let context = Arc::new(super::RecordingContext::default());
+    let scope = ExecutionScope::turn(
+        lash_core::SessionId::from("fig-4756-session"),
+        lash_core::TurnId::from("fig-4756-turn"),
+    );
+    let key = super::test_restate_await_event_key(
+        &scope,
+        lash_core::AwaitEventWaitIdentity::process_signal(
+            lash_core::ProcessId::fixture("fig-4756-process"),
+            "exit",
+            1,
+        ),
+    )
+    .expect("the wait key mints");
+    context.cancel_revocation_read.store(true, Ordering::SeqCst);
+
+    let error = bound_child_controller(&context)
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                RuntimeEffectInvocation::new(
+                    EffectAddress::new(scope, format!("{GROUP}:child:0"))
+                        .expect("valid child address"),
+                    RuntimeAttribution::none(),
+                    "effect",
+                ),
+                RuntimeEffectCommand::AwaitEvent { key },
+            ),
+            RuntimeEffectLocalExecutor::await_event(
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            ),
+        )
+        .await
+        .expect_err("the cancelled child's wait never resolves");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        "the engine's cancellation ahead of the park is the child's typed cancel: {error}"
+    );
+    assert_ne!(
+        error.turn_failure_cause(),
+        lash_core::TurnFailureCause::LiveFault,
+        "a decided cancel is the child's recorded end, never a fault the engine retries"
+    );
+    assert!(
+        context.awaited_requests.lock().expect("lock").is_empty(),
+        "the child ended before its wait parked"
+    );
+}
+
+/// The timer half (FIG-4756): the engine's cancellation lands on the sleep's
+/// frontier marker, the journaled step ahead of its timer.
+///
+/// Red before FIG-4756: the marker reported the `409` as an engine fault.
+#[tokio::test]
+async fn a_timer_child_cancelled_before_it_parks_ends_cancelled() {
+    use lash_core::RuntimeEffectController as _;
+
+    let context = Arc::new(super::RecordingContext::default());
+    context.cancel_after_next_frontier_marker();
+
+    let error = bound_child_controller(&context)
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                RuntimeEffectInvocation::new(
+                    EffectAddress::new(scope(), format!("{GROUP}:child:0"))
+                        .expect("valid child address"),
+                    RuntimeAttribution::none(),
+                    "effect",
+                ),
+                RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For {
+                        duration_ms: 3_600_000,
+                    },
+                },
+            ),
+            RuntimeEffectLocalExecutor::sleep(tokio_util::sync::CancellationToken::new()),
+        )
+        .await
+        .expect_err("the cancelled child's timer never fires");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+        "the engine's cancellation ahead of the timer is the child's typed cancel: {error}"
+    );
+    assert!(
+        context.sleeps.lock().expect("lock").is_empty(),
+        "the child ended before its timer was journaled"
+    );
+}

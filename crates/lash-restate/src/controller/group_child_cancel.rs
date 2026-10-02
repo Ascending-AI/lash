@@ -30,6 +30,25 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         self.options.group_child_cancel.is_some() && terminal.code() == 409
     }
 
+    /// The failure of a journaled step a wait takes before it parks, as the
+    /// bound group child meets it. The engine's cancellation surfaces at
+    /// whichever await the child is on when the signal lands, and a child
+    /// cancelled before it parks is on one of these steps, not on its wait:
+    /// the 409 is the child's decided cancel there too, its typed end, never
+    /// a fault of the attempt (FIG-4756). Anything else is the controller
+    /// fault `fault` names.
+    pub(super) fn wait_step_failure(
+        &self,
+        terminal: TerminalError,
+        fault: impl FnOnce(TerminalError) -> RuntimeEffectControllerError,
+    ) -> RuntimeEffectControllerError {
+        if self.is_group_child_engine_cancel(&terminal) {
+            group_child_cancelled()
+        } else {
+            fault(terminal)
+        }
+    }
+
     /// The cancel fact a wait of this controller races as a journaled arm: a
     /// bound group child's, for a wait that observes no turn and belongs to
     /// no process segment.

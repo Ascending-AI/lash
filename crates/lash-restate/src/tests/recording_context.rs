@@ -235,6 +235,9 @@ pub(super) struct RecordingContext {
     session_waits: Mutex<HashMap<SessionId, Vec<AwaitEventKey>>>,
     revoked_sessions: Mutex<HashSet<SessionId>>,
     pub(super) session_revocation_checks: AtomicUsize,
+    /// Set, the engine cancels the invocation while the next read of a
+    /// session's revocation awaits its answer: the read answers `409`.
+    pub(super) cancel_revocation_read: AtomicBool,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
     /// Every effect-group notice awaited, in order, by group.
     pub(super) group_notices: Mutex<Vec<(String, crate::effect_group::EffectGroupNotice)>>,
@@ -292,6 +295,15 @@ impl RecordingContext {
         self.cancel_after_runs
             .lock_recover()
             .push(format!(".{operation}:v1"));
+    }
+
+    /// The engine cancels the invocation while the next frontier marker
+    /// awaits its answer: the marker's closure ran, and the step answers
+    /// `409`.
+    pub(super) fn cancel_after_next_frontier_marker(&self) {
+        self.cancel_after_runs
+            .lock_recover()
+            .push(":frontier".to_owned());
     }
 
     /// The next submission is refused, after another delivery of the start
@@ -999,6 +1011,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     {
         self.session_revocation_checks
             .fetch_add(1, Ordering::SeqCst);
+        if self.cancel_revocation_read.swap(false, Ordering::SeqCst) {
+            return Box::pin(async { Err(TerminalError::new_with_code(409, "cancelled")) });
+        }
         let revoked = self.revoked_sessions.lock_recover().contains(&session_id);
         Box::pin(async move { Ok(revoked) })
     }

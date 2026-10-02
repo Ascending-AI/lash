@@ -1191,6 +1191,7 @@ where
                     &self.context,
                     &invocation,
                     local_executor.served_only().as_ref(),
+                    |terminal, fault| self.wait_step_failure(terminal, |_| fault),
                 )
                 .await?;
                 let RuntimeSleepOptions {
@@ -1277,9 +1278,23 @@ where
                 // skipped when Restate replays that recorded result. Emit the
                 // revocation observation here, where every live and replayed
                 // wait crosses the same durable command boundary.
-                self.require_active_session(key.scope.session_id())
+                // A group child cancelled before it parks meets the engine's
+                // cancellation at one of the steps ahead of its wait.
+                let engine_fault = |err: TerminalError| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::EngineEffectController,
+                        err.to_string(),
+                    )
+                };
+                if self
+                    .session_revoked(key.scope.session_id())
                     .await
-                    .map_err(RuntimeEffectControllerError::from)?;
+                    .map_err(|err| self.wait_step_failure(err, engine_fault))?
+                {
+                    return Err(RuntimeEffectControllerError::from(
+                        restate_unknown_or_revoked(),
+                    ));
+                }
                 // A turn's cancellation reaches this wait only through the
                 // durable gate race below (FIG-3672 P9); a process drive's
                 // wait that observes no turn, such as a process body's
@@ -1310,12 +1325,7 @@ where
                     clock.as_ref(),
                 )
                 .await
-                .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineEffectController,
-                        err.to_string(),
-                    )
-                })?;
+                .map_err(|err| self.wait_step_failure(err, engine_fault))?;
                 let replay_key = invocation.effect_replay_key().to_string();
                 // A process segment's signal wait also races the drain's
                 // hand-over (FIG-3799); every other wait keeps its shape.
