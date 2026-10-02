@@ -1016,7 +1016,7 @@ fn drain_area_witnesses() {
     // W0292: lash_core::SchemaContract::with_override [function]
     let _: fn(
         lash_core::SchemaContract,
-        String,
+        lash_core::SchemaDialect,
         lash_core::JsonSchema,
     ) -> lash_core::SchemaContract = lash_core::SchemaContract::with_override;
     // W0293: lash_core::SchemaProjectionOverride [struct]
@@ -1097,11 +1097,19 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash_core::facade_support::EffectId| {
         let _ = &value.0;
     });
-    // W0319: lash_core::test_support::SchemaDialect::as_str [function]
-    let _ = lash_core::test_support::SchemaDialect::as_str;
-    // W0320: lash_core::test_support::SchemaDialect::new [function]
-    let _: fn(String) -> lash_core::test_support::SchemaDialect =
-        lash_core::test_support::SchemaDialect::new;
+    // W0319: lash_core::SchemaDialect::as_str [function]
+    let _ = lash_core::SchemaDialect::as_str;
+    type_witness::<lash::schema::SchemaDialect>();
+    member_witness([
+        lash::schema::SchemaDialect::OpenaiToolParameters,
+        lash::schema::SchemaDialect::OpenaiStrictToolParameters,
+        lash::schema::SchemaDialect::OpenaiStructuredOutput,
+        lash::schema::SchemaDialect::AnthropicToolInput,
+        lash::schema::SchemaDialect::AnthropicOutputConfigJsonSchema,
+        lash::schema::SchemaDialect::BedrockClaudeOutputConfigJsonSchema,
+        lash::schema::SchemaDialect::GoogleSchema,
+        lash::schema::SchemaDialect::JsonPromptSchema,
+    ]);
     // W0321: lash_core::facade_support::SchemaResolutionError [struct]
     type_witness::<lash_core::facade_support::SchemaResolutionError>();
     // W0322: lash_core::facade_support::SchemaResolutionError::diagnostics [field]

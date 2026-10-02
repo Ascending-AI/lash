@@ -814,7 +814,7 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
         }))
         .expect("valid declared schema")
         .with_override(
-            lash_sansio::SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS,
+            lash_sansio::SchemaDialect::OpenaiStrictToolParameters,
             lash_sansio::JsonSchema::admit(override_schema)
                 .expect("valid declared projection schema"),
         ),

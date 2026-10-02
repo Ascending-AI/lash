@@ -8,6 +8,86 @@ use schemars::JsonSchema;
 use super::*;
 
 #[test]
+fn decoded_schema_contract_refuses_unknown_dialect() {
+    for dialect in ["openai_tool_paramters", "custom_provider", ""] {
+        let contract = serde_json::json!({
+            "canonical": {"type": "object"},
+            "projection": {
+                "overrides": [{"dialect": dialect, "schema": {"type": "object"}}]
+            }
+        });
+        let remote_error = serde_json::from_value::<RemoteSchemaContract>(contract.clone())
+            .expect_err("unknown wire dialect must be refused before conversion");
+        assert!(remote_error.to_string().contains("unknown variant"));
+        let core_error = serde_json::from_value::<lash_sansio::SchemaContract>(contract)
+            .expect_err("unknown contract dialect must be refused before resolution");
+        assert!(core_error.to_string().contains("unknown variant"));
+    }
+}
+
+#[test]
+fn schema_override_round_trip_finds_every_dialect() {
+    use lash_sansio::{
+        JsonSchema, ProjectionMode, SchemaContract, SchemaDialect, SchemaPurpose,
+        SchemaResolutionRequest, resolve_schema,
+    };
+
+    let dialects = [
+        SchemaDialect::OpenaiToolParameters,
+        SchemaDialect::OpenaiStrictToolParameters,
+        SchemaDialect::OpenaiStructuredOutput,
+        SchemaDialect::AnthropicToolInput,
+        SchemaDialect::AnthropicOutputConfigJsonSchema,
+        SchemaDialect::BedrockClaudeOutputConfigJsonSchema,
+        SchemaDialect::GoogleSchema,
+        SchemaDialect::JsonPromptSchema,
+    ];
+    let mut contract = SchemaContract::admit(serde_json::json!({"type": "object"})).unwrap();
+    for dialect in dialects {
+        contract = contract
+            .with_override(dialect, JsonSchema::any())
+            .with_override(
+                dialect,
+                JsonSchema::admit(serde_json::json!({
+                    "type": "object", "description": dialect.as_str()
+                }))
+                .unwrap(),
+            );
+    }
+    assert_eq!(contract.projection.overrides.len(), dialects.len());
+    let encoded = serde_json::to_value(RemoteSchemaContract::from(contract)).unwrap();
+    let remote: RemoteSchemaContract = serde_json::from_value(encoded).unwrap();
+    let mut contract = SchemaContract::from(remote);
+    for mode in [
+        ProjectionMode::Auto,
+        ProjectionMode::ExplicitOnly,
+        ProjectionMode::Exact,
+    ] {
+        contract.projection.mode = mode;
+        for dialect in dialects {
+            let resolved = resolve_schema(
+                &contract,
+                SchemaResolutionRequest {
+                    provider: "test",
+                    purpose: SchemaPurpose::ToolInput,
+                    dialects: &[dialect],
+                },
+            )
+            .unwrap();
+            assert_eq!(resolved.dialect, dialect);
+            assert_eq!(
+                resolved.schema,
+                serde_json::json!({
+                    "type": "object", "description": dialect.as_str()
+                })
+            );
+            assert!(resolved.diagnostics.is_empty());
+            assert!(resolved.omission_null_paths.is_empty());
+        }
+    }
+}
+
+#[test]
 fn execution_policy_rejects_the_retired_session_id() {
     let policy = RemoteProcessExecutionPolicy::new(
         RemoteTurnBudget::Unbounded,

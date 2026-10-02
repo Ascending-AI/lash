@@ -32,7 +32,7 @@ impl ToolArgumentDecoder {
                 },
             )
             .map_err(|error| projection_error(provider, error))?;
-            if resolved.dialect == lash_sansio::SchemaDialect::openai_strict_tool_parameters()
+            if resolved.dialect == lash_sansio::SchemaDialect::OpenaiStrictToolParameters
                 && !resolved.omission_null_paths.is_empty()
             {
                 omission_paths_by_tool.insert(tool.name.clone(), resolved.omission_null_paths);

@@ -76,7 +76,7 @@ impl RemoteProjectionMode {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSchemaProjectionOverride {
-    pub dialect: String,
+    pub dialect: lash_sansio::SchemaDialect,
     pub schema: lash_sansio::JsonSchema,
 }
 

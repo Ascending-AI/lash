@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::sync::MutexExt;
 use crate::{
-    JsonSchema, SchemaContract, SchemaProjectionOverride, SchemaPurpose, ToolCatalogBuildError,
+    JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaPurpose,
+    ToolCatalogBuildError,
 };
 
 /// Automatic retry policy for a tool's execution.
@@ -862,27 +863,25 @@ impl ToolDefinition {
 
     pub fn with_input_schema_projection(
         mut self,
-        profile: impl Into<String>,
+        dialect: SchemaDialect,
         schema: JsonSchema,
     ) -> Self {
-        let profile = profile.into();
         self.contract
             .input_schema
             .projection
-            .set_override(SchemaProjectionOverride::new(profile, schema));
+            .set_override(SchemaProjectionOverride::new(dialect, schema));
         self
     }
 
     pub fn with_output_schema_projection(
         mut self,
-        profile: impl Into<String>,
+        dialect: SchemaDialect,
         schema: JsonSchema,
     ) -> Self {
-        let profile = profile.into();
         self.contract
             .output_schema
             .projection
-            .set_override(SchemaProjectionOverride::new(profile, schema));
+            .set_override(SchemaProjectionOverride::new(dialect, schema));
         self
     }
 

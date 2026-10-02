@@ -45,7 +45,7 @@ impl SchemaContract {
         JsonSchema::admit(canonical).map(Self::new)
     }
 
-    pub fn with_override(mut self, dialect: impl Into<String>, schema: JsonSchema) -> Self {
+    pub fn with_override(mut self, dialect: SchemaDialect, schema: JsonSchema) -> Self {
         self.projection
             .set_override(SchemaProjectionOverride::new(dialect, schema));
         self
@@ -135,83 +135,57 @@ impl ProjectionMode {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct SchemaProjectionOverride {
-    pub dialect: String,
+    pub dialect: SchemaDialect,
     pub schema: JsonSchema,
 }
 
 impl SchemaProjectionOverride {
-    pub(crate) fn new(dialect: impl Into<String>, schema: JsonSchema) -> Self {
-        Self {
-            dialect: dialect.into(),
-            schema,
-        }
+    pub(crate) fn new(dialect: SchemaDialect, schema: JsonSchema) -> Self {
+        Self { dialect, schema }
     }
 }
 
+/// The schema dialects supported by Lash.
+///
+/// Out-of-tree providers use an existing dialect or require a new variant here.
 #[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
-#[serde(transparent)]
-pub struct SchemaDialect(String);
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum SchemaDialect {
+    OpenaiToolParameters,
+    OpenaiStrictToolParameters,
+    OpenaiStructuredOutput,
+    AnthropicToolInput,
+    AnthropicOutputConfigJsonSchema,
+    BedrockClaudeOutputConfigJsonSchema,
+    GoogleSchema,
+    JsonPromptSchema,
+}
 
 impl SchemaDialect {
-    pub const OPENAI_TOOL_PARAMETERS: &'static str = "openai_tool_parameters";
-    pub const OPENAI_STRICT_TOOL_PARAMETERS: &'static str = "openai_strict_tool_parameters";
-    pub const OPENAI_STRUCTURED_OUTPUT: &'static str = "openai_structured_output";
-    pub const ANTHROPIC_TOOL_INPUT: &'static str = "anthropic_tool_input";
-    pub const ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA: &'static str =
-        "anthropic_output_config_json_schema";
-    pub const BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA: &'static str =
-        "bedrock_claude_output_config_json_schema";
-    pub const GOOGLE_SCHEMA: &'static str = "google_schema";
-    pub const JSON_PROMPT_SCHEMA: &'static str = "json_prompt_schema";
-
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn openai_tool_parameters() -> Self {
-        Self::new(Self::OPENAI_TOOL_PARAMETERS)
-    }
-
-    pub fn openai_strict_tool_parameters() -> Self {
-        Self::new(Self::OPENAI_STRICT_TOOL_PARAMETERS)
-    }
-
-    pub fn openai_structured_output() -> Self {
-        Self::new(Self::OPENAI_STRUCTURED_OUTPUT)
-    }
-
-    pub fn anthropic_tool_input() -> Self {
-        Self::new(Self::ANTHROPIC_TOOL_INPUT)
-    }
-
-    pub fn anthropic_output_config_json_schema() -> Self {
-        Self::new(Self::ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA)
-    }
-
-    pub fn bedrock_claude_output_config_json_schema() -> Self {
-        Self::new(Self::BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA)
-    }
-
-    pub fn google_schema() -> Self {
-        Self::new(Self::GOOGLE_SCHEMA)
-    }
-}
-
-impl From<&str> for SchemaDialect {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<String> for SchemaDialect {
-    fn from(value: String) -> Self {
-        Self::new(value)
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenaiToolParameters => "openai_tool_parameters",
+            Self::OpenaiStrictToolParameters => "openai_strict_tool_parameters",
+            Self::OpenaiStructuredOutput => "openai_structured_output",
+            Self::AnthropicToolInput => "anthropic_tool_input",
+            Self::AnthropicOutputConfigJsonSchema => "anthropic_output_config_json_schema",
+            Self::BedrockClaudeOutputConfigJsonSchema => "bedrock_claude_output_config_json_schema",
+            Self::GoogleSchema => "google_schema",
+            Self::JsonPromptSchema => "json_prompt_schema",
+        }
     }
 }
 
@@ -242,35 +216,35 @@ impl ProviderSchemaCapabilities {
     pub fn openai(strict_tools: bool) -> Self {
         Self {
             tool_input: vec![if strict_tools {
-                SchemaDialect::openai_strict_tool_parameters()
+                SchemaDialect::OpenaiStrictToolParameters
             } else {
-                SchemaDialect::openai_tool_parameters()
+                SchemaDialect::OpenaiToolParameters
             }],
-            structured_output: vec![SchemaDialect::openai_structured_output()],
+            structured_output: vec![SchemaDialect::OpenaiStructuredOutput],
             ..Default::default()
         }
     }
 
     pub fn anthropic() -> Self {
         Self {
-            tool_input: vec![SchemaDialect::anthropic_tool_input()],
-            structured_output: vec![SchemaDialect::anthropic_output_config_json_schema()],
+            tool_input: vec![SchemaDialect::AnthropicToolInput],
+            structured_output: vec![SchemaDialect::AnthropicOutputConfigJsonSchema],
             ..Default::default()
         }
     }
 
     pub fn bedrock_claude() -> Self {
         Self {
-            tool_input: vec![SchemaDialect::anthropic_tool_input()],
-            structured_output: vec![SchemaDialect::bedrock_claude_output_config_json_schema()],
+            tool_input: vec![SchemaDialect::AnthropicToolInput],
+            structured_output: vec![SchemaDialect::BedrockClaudeOutputConfigJsonSchema],
             ..Default::default()
         }
     }
 
     pub fn google() -> Self {
         Self {
-            tool_input: vec![SchemaDialect::google_schema()],
-            structured_output: vec![SchemaDialect::google_schema()],
+            tool_input: vec![SchemaDialect::GoogleSchema],
+            structured_output: vec![SchemaDialect::GoogleSchema],
             ..Default::default()
         }
     }
@@ -365,12 +339,12 @@ pub fn resolve_schema(
             .projection
             .overrides
             .iter()
-            .find(|projection| projection.dialect == dialect.as_str())
+            .find(|projection| projection.dialect == *dialect)
         {
             let diagnostics = diagnostics;
             return Ok(ResolvedSchema {
                 schema: override_schema.schema.as_value().clone(),
-                dialect: dialect.clone(),
+                dialect: *dialect,
                 diagnostics,
                 omission_null_paths: Vec::new(),
             });
@@ -384,7 +358,7 @@ pub fn resolve_schema(
             )),
             // Google's automatic projection is a permissive pass-through, not
             // an exactness validator. Exact contracts need an explicit override.
-            ProjectionMode::Exact if dialect.as_str() == SchemaDialect::GOOGLE_SCHEMA => {
+            ProjectionMode::Exact if *dialect == SchemaDialect::GoogleSchema => {
                 diagnostics.push(
                     "google_schema: exact projection is unavailable without an explicit override"
                         .to_string(),
@@ -398,7 +372,7 @@ pub fn resolve_schema(
                     let diagnostics = diagnostics;
                     return Ok(ResolvedSchema {
                         schema: contract.canonical().clone(),
-                        dialect: dialect.clone(),
+                        dialect: *dialect,
                         diagnostics,
                         omission_null_paths: Vec::new(),
                     });
@@ -415,7 +389,7 @@ pub fn resolve_schema(
                     diagnostics.extend(projection.diagnostics);
                     return Ok(ResolvedSchema {
                         schema: projection.schema,
-                        dialect: dialect.clone(),
+                        dialect: *dialect,
                         diagnostics,
                         omission_null_paths: projection.omission_null_paths,
                     });
@@ -428,7 +402,7 @@ pub fn resolve_schema(
     Err(SchemaResolutionError::new(
         request.provider,
         request.purpose,
-        request.dialects.last().cloned(),
+        request.dialects.last().copied(),
         diagnostics,
     ))
 }
@@ -515,50 +489,42 @@ pub fn project_for_dialect(
     schema: &Value,
     dialect: &SchemaDialect,
 ) -> Result<SchemaProjection, SchemaResolutionError> {
-    match dialect.as_str() {
-        SchemaDialect::OPENAI_TOOL_PARAMETERS => project_tool_parameters(schema).map_err(|err| {
+    match dialect {
+        SchemaDialect::OpenaiToolParameters => project_tool_parameters(schema).map_err(|err| {
             SchemaResolutionError::new(
                 "schema",
                 SchemaPurpose::ToolInput,
-                Some(dialect.clone()),
+                Some(*dialect),
                 err.diagnostics,
             )
         }),
-        SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS => project_strict_tool_parameters(schema)
+        SchemaDialect::OpenaiStrictToolParameters => project_strict_tool_parameters(schema)
             .map_err(|err| {
                 SchemaResolutionError::new(
                     "schema",
                     SchemaPurpose::ToolInput,
-                    Some(dialect.clone()),
+                    Some(*dialect),
                     err.diagnostics,
                 )
             }),
-        SchemaDialect::OPENAI_STRUCTURED_OUTPUT => {
-            project_structured_output(schema).map_err(|err| {
-                SchemaResolutionError::new(
-                    "schema",
-                    SchemaPurpose::StructuredOutput,
-                    Some(dialect.clone()),
-                    err.diagnostics,
-                )
-            })
-        }
-        SchemaDialect::ANTHROPIC_TOOL_INPUT
-        | SchemaDialect::ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA
-        | SchemaDialect::BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA => {
+        SchemaDialect::OpenaiStructuredOutput => project_structured_output(schema).map_err(|err| {
+            SchemaResolutionError::new(
+                "schema",
+                SchemaPurpose::StructuredOutput,
+                Some(*dialect),
+                err.diagnostics,
+            )
+        }),
+        SchemaDialect::AnthropicToolInput
+        | SchemaDialect::AnthropicOutputConfigJsonSchema
+        | SchemaDialect::BedrockClaudeOutputConfigJsonSchema => {
             project_anthropic_bedrock_schema(schema, dialect)
         }
-        SchemaDialect::GOOGLE_SCHEMA | SchemaDialect::JSON_PROMPT_SCHEMA => Ok(SchemaProjection {
+        SchemaDialect::GoogleSchema | SchemaDialect::JsonPromptSchema => Ok(SchemaProjection {
             schema: schema.clone(),
             diagnostics: Vec::new(),
             omission_null_paths: Vec::new(),
         }),
-        other => Err(SchemaResolutionError::new(
-            "schema",
-            SchemaPurpose::StructuredOutput,
-            Some(dialect.clone()),
-            vec![format!("unsupported schema dialect {other}")],
-        )),
     }
 }
 
@@ -583,7 +549,7 @@ pub fn project_anthropic_bedrock_schema(
         Err(SchemaResolutionError::new(
             "schema",
             SchemaPurpose::StructuredOutput,
-            Some(dialect.clone()),
+            Some(*dialect),
             sanitizer.errors,
         ))
     }
@@ -1159,6 +1125,43 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn schema_dialect_wire_spellings_match_pre_enum_constants() {
+        let spellings = [
+            (
+                SchemaDialect::OpenaiToolParameters,
+                "openai_tool_parameters",
+            ),
+            (
+                SchemaDialect::OpenaiStrictToolParameters,
+                "openai_strict_tool_parameters",
+            ),
+            (
+                SchemaDialect::OpenaiStructuredOutput,
+                "openai_structured_output",
+            ),
+            (SchemaDialect::AnthropicToolInput, "anthropic_tool_input"),
+            (
+                SchemaDialect::AnthropicOutputConfigJsonSchema,
+                "anthropic_output_config_json_schema",
+            ),
+            (
+                SchemaDialect::BedrockClaudeOutputConfigJsonSchema,
+                "bedrock_claude_output_config_json_schema",
+            ),
+            (SchemaDialect::GoogleSchema, "google_schema"),
+            (SchemaDialect::JsonPromptSchema, "json_prompt_schema"),
+        ];
+        for (dialect, spelling) in spellings {
+            assert_eq!(dialect.as_str(), spelling);
+            assert_eq!(serde_json::to_value(dialect).unwrap(), json!(spelling));
+            assert_eq!(
+                serde_json::from_value::<SchemaDialect>(json!(spelling)).unwrap(),
+                dialect
+            );
+        }
+    }
+
     fn required_names(schema: &Value) -> Vec<String> {
         let mut names = schema["required"]
             .as_array()
@@ -1500,7 +1503,7 @@ mod tests {
         }))
         .expect("valid declared schema")
         .with_override(
-            SchemaDialect::OPENAI_TOOL_PARAMETERS,
+            SchemaDialect::OpenaiToolParameters,
             crate::JsonSchema::admit(json!({
                 "type": "object",
                 "properties": { "raw": { "type": "string", "enum": ["x"] } }
@@ -1513,7 +1516,7 @@ mod tests {
             SchemaResolutionRequest {
                 provider: "test",
                 purpose: SchemaPurpose::ToolInput,
-                dialects: &[SchemaDialect::openai_tool_parameters()],
+                dialects: &[SchemaDialect::OpenaiToolParameters],
             },
         )
         .unwrap();
@@ -1538,7 +1541,7 @@ mod tests {
             SchemaResolutionRequest {
                 provider: "test",
                 purpose: SchemaPurpose::StructuredOutput,
-                dialects: &[SchemaDialect::openai_structured_output()],
+                dialects: &[SchemaDialect::OpenaiStructuredOutput],
             },
         )
         .unwrap_err();
@@ -1571,7 +1574,7 @@ mod tests {
             SchemaResolutionRequest {
                 provider: "test",
                 purpose: SchemaPurpose::StructuredOutput,
-                dialects: &[SchemaDialect::bedrock_claude_output_config_json_schema()],
+                dialects: &[SchemaDialect::BedrockClaudeOutputConfigJsonSchema],
             },
         )
         .unwrap();

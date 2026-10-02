@@ -257,7 +257,7 @@ impl OpenAiCompatibleProvider {
                         "name": tool.name,
                         "description": tool.description,
                         "parameters": resolved.schema,
-                        "strict": resolved.dialect == lash_sansio::SchemaDialect::openai_strict_tool_parameters(),
+                        "strict": resolved.dialect == lash_sansio::SchemaDialect::OpenaiStrictToolParameters,
                     },
                 }))
             })

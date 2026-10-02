@@ -155,7 +155,7 @@ fn model_tool_preserves_schema_projection_overrides() {
     )
     .expect("valid declared tool schemas")
     .with_input_schema_projection(
-        "provider.tool_parameters",
+        crate::SchemaDialect::OpenaiToolParameters,
         crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": { "raw": { "type": "string", "enum": ["x"] } }
@@ -163,7 +163,7 @@ fn model_tool_preserves_schema_projection_overrides() {
         .expect("valid declared projection schema"),
     )
     .with_output_schema_projection(
-        "provider.structured_output",
+        crate::SchemaDialect::OpenaiStructuredOutput,
         crate::JsonSchema::admit(serde_json::json!({
             "type": "object",
             "properties": {},
@@ -186,7 +186,7 @@ fn model_tool_preserves_schema_projection_overrides() {
     );
     assert_eq!(
         model_tool.output_schema.projection.overrides[0].dialect,
-        "provider.structured_output"
+        crate::SchemaDialect::OpenaiStructuredOutput
     );
 }
 

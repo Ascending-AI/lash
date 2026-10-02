@@ -17,7 +17,7 @@ fn projected_contract() -> SchemaContract {
     SchemaContract::admit(json!({"type":"object","properties":{"canonical":{"type":"string"}}}))
         .expect("valid declared schema")
         .with_override(
-            SchemaDialect::google_schema().as_str(),
+            SchemaDialect::GoogleSchema,
             lash_sansio::JsonSchema::admit(
                 json!({"type":"object","properties":{"projected":{"type":"string"}}}),
             )

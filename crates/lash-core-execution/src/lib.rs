@@ -516,14 +516,14 @@ pub use lash_sansio::{
     JsonSchema, LlmCallError, MediaType, Message, MessageOrigin, MessageRole, NodeId, Observation,
     ObservedProcessFailure, OmittedToolCalls, OutputRetentionPolicy, OutputValue, Part, PartKind,
     PluginMessage, PluginRuntimeEvent, ProjectionMode, RetainedOutput, SchemaAdmissionError,
-    SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
-    TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolArgumentProjectionPolicy,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
-    ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
-    ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId,
-    ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract,
-    ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause,
-    TurnId, TurnOutputSource, ValueMismatch,
+    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
+    SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow,
+    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
+    ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass,
+    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
+    ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock,
+    ToolViewMeta, TurnCause, TurnId, TurnOutputSource, ValueMismatch,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// Project a successful tool control into its terminal turn outcome.

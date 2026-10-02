@@ -370,8 +370,32 @@ fn head_ownership_refusal_is_public(
 
 fn assert_store_object(_: &dyn RuntimeStore) {}
 
+fn schema_dialect_types_are_nameable() {
+    use lash::schema::{JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride};
+
+    let dialect = SchemaDialect::OpenaiToolParameters;
+    let contract = SchemaContract::default().with_override(dialect, JsonSchema::any());
+    let _: SchemaProjectionOverride = contract.projection.overrides[0].clone();
+    let _: lash::remote::llm::RemoteSchemaProjectionOverride =
+        lash::remote::llm::RemoteSchemaProjectionOverride {
+            dialect,
+            schema: JsonSchema::any(),
+        };
+    let _ = lash::tools::ToolDefinition::raw(
+        "schema",
+        "schema",
+        "Schema",
+        serde_json::json!({}),
+        serde_json::json!({}),
+    )
+    .unwrap()
+    .with_input_schema_projection(dialect, JsonSchema::any())
+    .with_output_schema_projection(SchemaDialect::OpenaiStructuredOutput, JsonSchema::any());
+}
+
 fn main() {
     let _ = assert_store_object;
+    let _ = schema_dialect_types_are_nameable;
     let _ = head_ownership_refusal_is_public;
     let _ = SessionHeadMeta::assemble(
         &SessionId::from("facade"),

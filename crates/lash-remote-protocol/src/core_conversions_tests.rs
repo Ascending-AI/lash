@@ -236,7 +236,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             }))
             .expect("valid declared schema")
             .with_override(
-                lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
+                lash_core::SchemaDialect::OpenaiToolParameters,
                 lash_sansio::JsonSchema::admit(serde_json::json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
@@ -348,7 +348,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     ));
     assert_eq!(
         core.tools[0].input_schema.projection.overrides[0].dialect,
-        lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS
+        lash_core::SchemaDialect::OpenaiToolParameters
     );
 
     let response_metadata = BTreeMap::from([
