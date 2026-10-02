@@ -259,6 +259,7 @@ impl LashRuntime {
             crate::runtime::drive::DriveLimits {
                 follow_on: crate::runtime::drive::FollowOnRecovery::Decline,
                 max_roots: None,
+                acceptor: true,
             },
             |run| run.driven_inputs.contains(&accepted_id),
         ))

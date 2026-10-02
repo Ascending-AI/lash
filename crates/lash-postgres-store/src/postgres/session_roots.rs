@@ -557,9 +557,11 @@ pub(crate) async fn unfinished_root_conn(
             .await
             .map_err(store_sqlx_error)?;
     row.map(|(root, json)| {
+        let admission = decode_root_admission(&json)?;
         Ok(UnfinishedRoot {
             root: TurnId::from(root),
-            head: decode_root_admission(&json)?.head,
+            head: admission.head,
+            executor: admission.executor,
         })
     })
     .transpose()

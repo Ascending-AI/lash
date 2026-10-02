@@ -118,6 +118,25 @@ the relay's claim TTL. A relay pass asks the session for the row only once the
 claim has lapsed, which presumes the acceptor lost; until then no second drive
 runs the same root beside its acceptor.
 
+The claim is a liveness hint, not the exclusion. An acceptor that is alive but
+slower than the claim loses it to a relay pass, and the session's drive then
+admits the row's root as an engine run of its own. From that admission on the
+root's recorded executor decides who runs it: two different executors an engine
+holds a run for (the root's own run, or the run of a process that drives the
+root inline) never share a root, and an acceptor's inline drive, under any
+scope, never takes a root such a run holds. The acceptor's drive admission finds
+the unfinished root recorded under the other executor, seals nothing over its
+fence, and fails retryably with `SessionRootPending`; `admit_root` itself
+refuses the same mismatch with `RootHeldByAnotherExecutor`, which the root
+records as the refusal `HeldByAnotherExecutor` and cedes. The acceptor's retry
+finds its input answered once that run ends the root. A lost acceptor recorded
+nothing, so the relay's ask drives its root once, as the session's own run; an
+acceptor that recorded its root before it was lost is redriven by its own
+engine, and the lost-root pass ends the root if that run is gone for good. A
+inline drive no engine holds (an in-process session drive or queue drain) is
+outside the rule: its root is resumed by the next drive, and it resumes an
+unfinished root, under the drive fence as before.
+
 The root then issues journaled `AdmitRoot`, keyed by the root rather than by a
 particular drive attempt. Its stored admission includes the exact inputs and
 queued work, base head, turn index and executable generation. The store binds

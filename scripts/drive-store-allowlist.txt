@@ -19,7 +19,7 @@ crates/lash-core/src/runtime/drive/admission.rs  |  .load_pending_follow_on()  |
 crates/lash-core/src/runtime/drive/admission.rs  |  .pending_session_work_ordering()  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .read_session_state_version()  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  .seal_drive_epoch(  |  1  # RECORDED
-crates/lash-core/src/runtime/drive/admission.rs  |  .unfinished_root()  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .unfinished_root()  |  2  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  let park = match store.load_turn_park().await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  let stored_epoch = match store.drive_epoch().await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  .committed_turn_exists(&self.root)  |  1  # RECORDED admitted-head inspection step reads committed evidence once
@@ -30,5 +30,5 @@ crates/lash-core/src/runtime/drive/root.rs  |  .load_session_head_meta()  |  1  
 crates/lash-core/src/runtime/drive/root.rs  |  .raise_pending_follow_on_attempts(&self.fence, &owed.follow_on_turn_id)  |  1  # RECORDED follow-on recovery decision step raises the recovery count under the fence (FIG-4361)
 crates/lash-core/src/runtime/drive/root.rs  |  .validate_turn_cancellation_binding(  |  1  # RECORDED root admission step checks the session's turn-cancellation binding under the fence before it admits
 crates/lash-core/src/runtime/drive/root.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED follow-on recovery decision step reads the base generation once (FIG-4380)
-crates/lash-core/src/runtime/drive/root.rs  |  if let Some(admission) = self.store.admit_root(&request).await? {  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  let admission = match self.store.admit_root(&request).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED follow-on recovery decision step retains the base its turn runs on under the fence (FIG-4380)

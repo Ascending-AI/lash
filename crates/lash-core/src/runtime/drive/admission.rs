@@ -69,6 +69,30 @@ pub(in crate::runtime) struct AdmitDriveRunner {
     /// The drain this admission hands over for, when its drive named one
     /// (FIG-4639).
     pub(in crate::runtime) drain: Option<DrainRead>,
+    /// Who runs the roots this drive admits: an unfinished root recorded
+    /// under an executor that excludes it is left to that executor
+    /// (FIG-4765).
+    pub(in crate::runtime) admitter: Admitter,
+}
+
+/// Who runs the roots a drive admits (FIG-4765).
+#[derive(Clone, Debug)]
+pub(crate) struct Admitter {
+    /// The execution that runs them, as their admission records it.
+    pub(crate) executor: crate::store::RootExecutor,
+    /// The drive is an acceptor's: a child session's turn driven inline in
+    /// its parent's execution, which an engine holds whatever its scope.
+    pub(crate) acceptor: bool,
+}
+
+impl Admitter {
+    /// An engine's drive, which runs each root as the root's own run.
+    pub(crate) fn engine() -> Self {
+        Self {
+            executor: crate::store::RootExecutor::Root,
+            acceptor: false,
+        }
+    }
 }
 
 /// The drain mark an admission reads before it admits (ADR 0106 §1): the
@@ -248,6 +272,45 @@ impl AdmitDriveRunner {
         ))
     }
 
+    /// Refuse the attempt while the session's unfinished root is another
+    /// executor's to run (FIG-4765).
+    ///
+    /// The root's recorded executor decides who runs it. When an engine
+    /// holds that executor's run, the engine redrives it and answers for it
+    /// if it is lost, so another engine-held run, and an acceptor driving
+    /// its child session's turn inline under any scope, seals nothing over
+    /// its fence and admits nothing beside it, whatever ingress claim lapsed
+    /// in between. A session drive or queue drain no engine holds resumes
+    /// the root as before, under the drive fence. The refusal is the
+    /// attempt's, never a recorded verdict: the engine's retry re-decides
+    /// admission once that execution has ended the root.
+    fn leave_to_recorded_executor(
+        &self,
+        unfinished: Option<&crate::store::UnfinishedRoot>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let Some(held) = unfinished else {
+            return Ok(());
+        };
+        let Admitter { executor, acceptor } = &self.admitter;
+        let excluded = held.executor.excludes(executor)
+            || (*acceptor && held.executor.is_engine_held() && held.executor != *executor);
+        if !excluded {
+            return Ok(());
+        }
+        Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::SessionRootPending,
+            format!(
+                "session `{session_id}` admits nothing to {admitting:?} while root `{root}` \
+                 is run by {recorded:?}; that execution ends the root",
+                session_id = self.request.session,
+                admitting = executor,
+                root = held.root,
+                recorded = held.executor,
+            ),
+        )
+        .retryable_uncommitted_derivation())
+    }
+
     /// The work this admission drives next, and the root it runs under.
     ///
     /// A follow-on the head owes comes first (ADR 0101 §3, FIG-3542): while
@@ -255,7 +318,9 @@ impl AdmitDriveRunner {
     /// anything else is admitted. It always belongs to the unfinished root (a
     /// frame switch's commit ends no root), and its recovery's final commit
     /// ends that root. Then the session's unfinished root, which owns the
-    /// session until it ends, resumed under its own id (FIG-3927). Then the
+    /// session until it ends, resumed under its own id (FIG-3927). Both are
+    /// left to the root's recorded executor when it excludes this drive's
+    /// (FIG-4765). Then the
     /// command lane: open session commands apply before any turn-lane
     /// work (ADR 0101 §4). Then the turn lane in `enqueue_seq` order across
     /// both admission tables, with no kind priority (ADR 0101 §5): the head
@@ -274,6 +339,15 @@ impl AdmitDriveRunner {
             .await
             .map_err(|error| store_fault("pending follow-on read", error))?
         {
+            // The follow-on belongs to the unfinished root, and so does its
+            // recovery.
+            self.leave_to_recorded_executor(
+                store
+                    .unfinished_root()
+                    .await
+                    .map_err(|error| store_fault("unfinished root read", error))?
+                    .as_ref(),
+            )?;
             return Ok(Some((
                 owed.recovery_root(),
                 AdmittedWork::FollowOn {
@@ -285,14 +359,15 @@ impl AdmitDriveRunner {
         let unfinished = store
             .unfinished_root()
             .await
-            .map_err(|error| store_fault("unfinished root read", error))?
-            .map(|unfinished| {
-                let work = match unfinished.head {
-                    crate::store::AdmittedHead::Input(head) => AdmittedWork::Input { head },
-                    crate::store::AdmittedHead::Batch(head) => AdmittedWork::Queued { head },
-                };
-                (unfinished.root, work)
-            });
+            .map_err(|error| store_fault("unfinished root read", error))?;
+        self.leave_to_recorded_executor(unfinished.as_ref())?;
+        let unfinished = unfinished.map(|unfinished| {
+            let work = match unfinished.head {
+                crate::store::AdmittedHead::Input(head) => AdmittedWork::Input { head },
+                crate::store::AdmittedHead::Batch(head) => AdmittedWork::Queued { head },
+            };
+            (unfinished.root, work)
+        });
         if unfinished.is_some() {
             return Ok(unfinished);
         }

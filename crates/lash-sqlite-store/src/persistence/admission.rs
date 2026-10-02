@@ -44,7 +44,8 @@ pub(super) fn follow_on_blocks_admission_conn(
 ///
 /// A recorded admission is returned unchanged, whatever fence or incarnation
 /// asks: a re-execution of the step reads back what it chose and never
-/// widens (FIG-3840).
+/// widens (FIG-3840). An executor the recorded one excludes is refused
+/// instead (FIG-4765).
 ///
 /// [`RootSqliteStore::admit_root`]: lash_core_execution::store::RootSqliteStore::admit_root
 pub(crate) async fn admit_root_sqlite(
@@ -70,9 +71,18 @@ pub(crate) async fn admit_root_sqlite(
                     .optional()
                     .map_err(sqlite_error)?;
                 if let Some(Some(json)) = existing {
-                    return Ok(TxOutcome::Commit(Some(
-                        crate::session_roots::decode_root_admission(&json)?,
-                    )));
+                    let admission = crate::session_roots::decode_root_admission(&json)?;
+                    // The recorded executor decides who runs the root
+                    // (FIG-4765).
+                    if admission.executor.excludes(&request.executor) {
+                        return Err(StoreError::RootHeldByAnotherExecutor {
+                            session_id: session_id.clone(),
+                            root: request.root.clone(),
+                            recorded: Box::new(admission.executor),
+                            admitting: Box::new(request.executor.clone()),
+                        });
+                    }
+                    return Ok(TxOutcome::Commit(Some(admission)));
                 }
                 if follow_on_blocks_admission_conn(tx, session_id, FollowOnAdmission::Idle)? {
                     return Ok(TxOutcome::Commit(None));

@@ -475,6 +475,13 @@ pub trait RootStore: Send + Sync {
     /// root is refused ([`StoreError::UnfinishedRootConflict`]) while an
     /// admitted root lacks terminal evidence, and a stale fence is refused
     /// [`StoreError::StaleDriveFence`] before anything is read.
+    ///
+    /// The recorded executor decides who runs the root (FIG-4765): a call
+    /// whose `request.executor` the recorded one excludes
+    /// ([`RootExecutor::excludes`]) is refused
+    /// [`StoreError::RootHeldByAnotherExecutor`] and reads nothing back, so
+    /// no second engine-held execution runs a root beside the one that
+    /// holds it.
     async fn admit_root(
         &self,
         request: &AdmitRootRequest,
@@ -599,6 +606,8 @@ pub enum AdmittedHead {
 pub struct UnfinishedRoot {
     pub root: TurnId,
     pub head: AdmittedHead,
+    /// The execution its admission recorded as the one that runs it.
+    pub executor: RootExecutor,
 }
 
 /// What a root's admission took ([`RootStore::admit_root`]): the rows it
@@ -651,6 +660,34 @@ pub enum RootExecutor {
 }
 
 impl RootExecutor {
+    /// Whether an engine holds a run for this executor: the root's own run,
+    /// or the run of the process that drives the root inline. The engine
+    /// redrives such a run itself, and its lost-root recovery ends the root
+    /// when the run is gone for good. Any other inline drive is a session
+    /// drive or queue drain under its own scope, which no engine holds.
+    #[must_use]
+    pub fn is_engine_held(&self) -> bool {
+        match self {
+            Self::Root
+            | Self::Inline {
+                scope: crate::ExecutionScope::Process { .. },
+            } => true,
+            Self::Inline { .. } => false,
+        }
+    }
+
+    /// Whether a root recorded under this executor is closed to `admitting`
+    /// (FIG-4765): two different engine-held runs never share a root,
+    /// whatever claim or lease either holds. The recorded one runs it, and
+    /// its engine answers for it if it is lost. The same executor reads its
+    /// own admission back. A drive no engine holds neither excludes nor is
+    /// excluded: its root is resumed by the session's next drive, and it
+    /// resumes an unfinished root in turn, under the drive fence.
+    #[must_use]
+    pub fn excludes(&self, admitting: &Self) -> bool {
+        self != admitting && self.is_engine_held() && admitting.is_engine_held()
+    }
+
     /// The executor a stored admission (`session_roots.admission_json`)
     /// records, read without decoding the rows it admitted.
     pub fn from_stored_admission(admission_json: &str) -> Result<Self, StoreError> {
@@ -746,6 +783,10 @@ pub enum RootAdmissionRefusal {
     /// The head row is no longer open: another root settled it, the host
     /// cancelled it, or `vacuum()` pruned it after either.
     HeadGone,
+    /// The root is recorded under another executor, whose engine holds its
+    /// run ([`StoreError::RootHeldByAnotherExecutor`], FIG-4765). The record
+    /// never changes, so every execution of this admission cedes alike.
+    HeldByAnotherExecutor,
 }
 
 /// A root's admission request ([`RootStore::admit_root`]). `base` is the

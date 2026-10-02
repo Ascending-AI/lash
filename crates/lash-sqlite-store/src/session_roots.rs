@@ -514,9 +514,11 @@ pub(crate) fn unfinished_root_conn(
         .optional()
         .map_err(sqlite_error)?;
     row.map(|(root, json)| {
+        let admission = decode_root_admission(&json)?;
         Ok(UnfinishedRoot {
             root: TurnId::from(root),
-            head: decode_root_admission(&json)?.head,
+            head: admission.head,
+            executor: admission.executor,
         })
     })
     .transpose()

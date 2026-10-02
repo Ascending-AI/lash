@@ -1384,7 +1384,18 @@ impl AdmitRootRunner {
             admitted_generation: self.admitted_generation.clone(),
             executor: self.executor.clone(),
         };
-        if let Some(admission) = self.store.admit_root(&request).await? {
+        let admission = match self.store.admit_root(&request).await {
+            // The record decides (FIG-4765): the root is run by the executor
+            // its admission names, so this execution cedes it. The recorded
+            // executor never changes, so the refusal is the step's outcome.
+            Err(crate::StoreError::RootHeldByAnotherExecutor { .. }) => {
+                return Ok(RootAdmissionProbe::Answer(RootAdmissionAnswer::Refused {
+                    refusal: RootAdmissionRefusal::HeldByAnotherExecutor,
+                }));
+            }
+            answer => answer?,
+        };
+        if let Some(admission) = admission {
             let causes = admission
                 .queued
                 .as_ref()

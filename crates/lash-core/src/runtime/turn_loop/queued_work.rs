@@ -147,6 +147,7 @@ impl LashRuntime {
             crate::runtime::drive::DriveLimits {
                 follow_on: crate::runtime::drive::FollowOnRecovery::Recover,
                 max_roots: None,
+                acceptor: false,
             },
             // The command lane applies first and runs no turn: the drain
             // answers the first root that took turn-lane work.

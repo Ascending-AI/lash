@@ -197,6 +197,19 @@ pub enum StoreError {
         session_id: crate::SessionId,
         root: crate::TurnId,
     },
+    /// The root's admission is recorded under an executor whose engine holds
+    /// its run, and another execution asked to admit it (FIG-4765). The
+    /// recorded executor runs the root; the asker waits for its end.
+    #[error(
+        "root {root} of session {session_id} is run by {recorded:?}; {admitting:?} does not \
+         admit it"
+    )]
+    RootHeldByAnotherExecutor {
+        session_id: crate::SessionId,
+        root: crate::TurnId,
+        recorded: Box<super::RootExecutor>,
+        admitting: Box<super::RootExecutor>,
+    },
     /// A pending follow-on owns the session (ADR 0101 §3, FIG-3542): no other
     /// turn commits and no other head write changes the fact until the
     /// follow-on's own terminal commit.
@@ -1034,6 +1047,7 @@ impl StoreError {
             | Self::SessionDeleted { .. }
             | Self::UnsupportedStoreOperation { .. }
             | Self::UnfinishedRootConflict { .. }
+            | Self::RootHeldByAnotherExecutor { .. }
             | Self::FollowOnPending { .. }
             | Self::FollowOnFrameNotCurrent { .. }
             | Self::FollowOnHeadInvariant { .. }
@@ -1149,6 +1163,7 @@ impl StoreError {
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
 
             Self::UnfinishedRootConflict { .. } => "UnfinishedRootConflict",
+            Self::RootHeldByAnotherExecutor { .. } => "RootHeldByAnotherExecutor",
             Self::FollowOnPending { .. } => "FollowOnPending",
             Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",
             Self::FollowOnHeadInvariant { .. } => "FollowOnHeadInvariant",

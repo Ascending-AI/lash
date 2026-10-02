@@ -306,6 +306,7 @@ pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(store: Arc<d
         Some(lash_core::store::UnfinishedRoot {
             root: TurnId::from("q"),
             head: AdmittedHead::Batch(batch.batch_id.clone()),
+            executor: admission.executor.clone(),
         })
     );
     assert_eq!(terminal_of(&store, &session_id, "q").await, None);

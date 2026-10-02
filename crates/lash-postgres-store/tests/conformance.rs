@@ -2098,6 +2098,9 @@ mod root_control {
     (a_command_enqueued_after_an_input_roots_admission_waits_for_the_next_boundary, "drive-command-after-admission"),
     (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
     (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
+    (a_root_recorded_under_one_executor_is_never_admitted_by_another, "drive-root-one-executor"),
+    (a_lost_acceptors_root_is_driven_once_by_the_sessions_drive, "drive-root-lost-acceptor"),
+    (admit_root_refuses_another_engine_held_executor, "root-admission-executor"),
     ]);
 
     lash_conformance::queued_input_roots_tests!({

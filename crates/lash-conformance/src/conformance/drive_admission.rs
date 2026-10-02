@@ -524,6 +524,7 @@ pub async fn one_unfinished_root_per_session(
             let unfinished = Some(crate::store::UnfinishedRoot {
                 root: root.clone(),
                 head,
+                executor: request.executor.clone(),
             });
             assert_eq!(
                 parts
