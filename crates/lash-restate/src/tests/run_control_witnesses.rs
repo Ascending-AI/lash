@@ -214,11 +214,7 @@ impl SessionShifts for Shifts {
                 self.commits.fetch_add(1, Ordering::SeqCst);
                 Ok(RunOutcome::Committed {
                     run: run.clone(),
-                    outcome: lash_core::facade_support::TurnOutcome::Finished(
-                        lash_core::facade_support::TurnFinish::AssistantMessage {
-                            text: "restored".into(),
-                        },
-                    ),
+                    kind: lash_core::store::RunTerminalKind::Answered,
                 })
             }
             .await,

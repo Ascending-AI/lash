@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use super::admission::{Admitted, AdmittedWork, ParkRef, SealRefusal, ShiftRequestId};
 use super::contracts::ShiftRequest;
 use crate::store::TurnCommitId;
-use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
+use crate::{AdmittedScope, RuntimeError, SessionId, TurnId};
 
 /// The prefix of the session-operation id a shift's admission steps are
 /// recorded under: the scope gives the admission journal a session-bearing
@@ -127,8 +127,12 @@ pub fn shift_close_run_replay_key(run: &TurnId) -> String {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "run_outcome", rename_all = "snake_case")]
 pub enum RunOutcome {
-    /// The run's turns ran and its terminal commit landed.
-    Committed { run: TurnId, outcome: TurnOutcome },
+    /// The run's turns ran and its terminal commit landed. The answer is
+    /// read from the run's durable terminal record, never from this reply.
+    Committed {
+        run: TurnId,
+        kind: crate::store::RunTerminalKind,
+    },
     /// The run applied the session's open command run (ADR 0101 §4); it ran
     /// no turn.
     Applied { run: TurnId },

@@ -5,7 +5,7 @@
 //! acceptance asks the engine for a shift; nothing here runs a turn itself.
 //! The engine's `LashSession` shift admits the input and executes its run in a
 //! `LashTurn` workflow, on the kernel shift the core installed. The laws
-//! read the outcome from the shift and from durable session state, never
+//! read status from the shift and the answer from durable terminal state, never
 //! from a caller-held future.
 
 #![expect(
@@ -21,6 +21,7 @@ use lash_core::engine::{RunOutcome, ShiftOutcome, ShiftRequestId, ShiftStop};
 use lash_core::facade_support::{TurnFinish, TurnOutcome, TurnStop};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core::store::RunStore as _;
 use lash_core::{SessionId, StoreSet as _, TurnInputStore as _};
 use lash_restate_test::{
     RestateTestBackend, SESSION_SHIFT_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
@@ -138,18 +139,214 @@ async fn attach(
     .expect("the shift's outcome")
 }
 
-fn answers(outcome: &ShiftOutcome) -> Vec<String> {
-    outcome
-        .ran
-        .iter()
-        .map(|run| match run {
-            RunOutcome::Committed {
-                outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage { text }),
-                ..
-            } => text.clone(),
+async fn committed_outcome(
+    backend: &RestateTestBackend,
+    session: &SessionId,
+    run: &lash_core::TurnId,
+) -> TurnOutcome {
+    let terminal = backend
+        .stores()
+        .session_store_factory()
+        .run_terminal(session, run)
+        .await
+        .expect("run terminal read")
+        .expect("run terminal");
+    let lash_core::store::RunTerminalCause::Committed { outcome, .. } = terminal.cause else {
+        panic!("the run committed: {terminal:?}");
+    };
+    outcome.into()
+}
+
+async fn answers(
+    backend: &RestateTestBackend,
+    session: &SessionId,
+    shift: &ShiftOutcome,
+) -> Vec<String> {
+    let mut answers = Vec::new();
+    for status in &shift.ran {
+        let outcome = committed_outcome(backend, session, status.run()).await;
+        answers.push(match outcome {
+            TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) => text,
             other => format!("{other:?}"),
-        })
-        .collect()
+        });
+    }
+    answers
+}
+
+/// A turn's response occupies one payload in the engine journal. The two
+/// buckets distinguish fixed command overhead from copies of the response.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn each_response_is_journaled_once_at_the_payload_buckets() {
+    let mut measurements = Vec::new();
+    for size in [8 * 1024, 256 * 1024] {
+        let backend = lash_restate_test::backend(0x4850, ServerConfig::default())
+            .await
+            .expect("backend");
+        let payload = "r".repeat(size);
+        let provider = {
+            let payload = payload.clone();
+            lash_core::testing::TestProvider::builder()
+                .kind("journal-bytes")
+                .complete(move |_request: LlmRequest| {
+                    let payload = payload.clone();
+                    async move { Ok::<_, LlmTransportError>(text(payload)) }
+                })
+                .build()
+                .into_handle()
+        };
+        let core = build_core(&backend, provider, "journal-bytes");
+        let session = created_session(&core, "journal-bytes")
+            .await
+            .open()
+            .await
+            .expect("session");
+        let handle = session
+            .send(lash::TurnInput::text("answer with the payload"))
+            .id("payload-run")
+            .await
+            .expect("send");
+        let receipt = handle.receipt().clone();
+        let shift = attach(
+            &backend,
+            &SessionId::from("journal-bytes"),
+            request_of(&receipt.input_id),
+        )
+        .await;
+        assert_eq!(
+            answers(&backend, &SessionId::from("journal-bytes"), &shift).await,
+            std::slice::from_ref(&payload)
+        );
+        backend.server().settle().await;
+        let journals: Vec<_> = backend
+            .server()
+            .invocations()
+            .into_iter()
+            .filter(|view| {
+                view.target.starts_with("LashSession/") || view.target.starts_with("LashTurn/")
+            })
+            .flat_map(|view| backend.server().journal(&view.id).expect("journal"))
+            .collect();
+        let bytes: usize = journals.iter().map(|entry| entry.payload.len()).sum();
+        for entry in &journals {
+            let copies = String::from_utf8_lossy(&entry.payload)
+                .matches(&payload)
+                .count();
+            if copies != 0 {
+                println!(
+                    "response_entry={:?} kind={:?} bytes={} copies={copies}",
+                    entry.name,
+                    entry.ty,
+                    entry.payload.len()
+                );
+            }
+        }
+        let copies: usize = journals
+            .iter()
+            .map(|entry| {
+                String::from_utf8_lossy(&entry.payload)
+                    .matches(&payload)
+                    .count()
+            })
+            .sum();
+        println!("payload_bytes={size} journal_bytes={bytes} payload_copies={copies}");
+        measurements.push((size, bytes, copies));
+        drop(handle);
+        drop(session);
+        drop(core);
+        drop(backend);
+    }
+    for (size, bytes, copies) in &measurements {
+        assert_eq!(
+            *copies, 1,
+            "{size} response bytes occupy {copies} copies in {bytes} journal bytes"
+        );
+    }
+    assert!(
+        measurements[1].1 - measurements[0].1 <= measurements[1].0 - measurements[0].0 + 1024,
+        "journal growth is one response plus fixed overhead: {measurements:?}"
+    );
+}
+
+/// A worker restart discards its payload dictionary. The paid completion is
+/// served from the journal, and the reopened session answers the exact text.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn digest_references_survive_a_cold_reopen_without_rebuying_the_completion() {
+    let backend = lash_restate_test::backend(0x4851, ServerConfig::default())
+        .await
+        .expect("backend");
+    let payload = "quoted \"\\\n雪 🦀".repeat(8192);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let gate = Arc::new(ModelGate::default());
+    let provider = {
+        let payload = payload.clone();
+        let calls = Arc::clone(&calls);
+        let gate = Arc::clone(&gate);
+        lash_core::testing::TestProvider::builder()
+            .kind("cold-journal-payload")
+            .complete(move |_request: LlmRequest| {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                let payload = payload.clone();
+                let gate = Arc::clone(&gate);
+                async move {
+                    if call == 0 {
+                        gate.reached.notify_one();
+                        gate.release.notified().await;
+                    }
+                    Ok::<_, LlmTransportError>(text(payload))
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let core = build_core(&backend, provider.clone(), "cold-journal-payload");
+    let session = created_session(&core, "cold-journal-payload")
+        .await
+        .open()
+        .await
+        .expect("session");
+    let session_id = SessionId::from("cold-journal-payload");
+    let handle = session
+        .send(lash::TurnInput::text("answer"))
+        .id("cold-payload-run")
+        .await
+        .expect("send");
+    let receipt = handle.receipt().clone();
+    tokio::time::timeout(Duration::from_secs(20), gate.reached.notified())
+        .await
+        .expect("model reached");
+    let server = backend.server();
+    let mut held = Box::pin(server.hold_service(TURN_DRIVER_SERVICE));
+    tokio::select! {
+        biased;
+        _ = &mut held => panic!("the model is still held"),
+        () = async { gate.release.notify_one(); } => {}
+    }
+    let held = tokio::time::timeout(Duration::from_secs(20), held)
+        .await
+        .expect("run suspends after recording the model reply");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    drop(handle);
+    drop(session);
+    drop(core);
+    let backend = backend.restart().await.expect("cold worker restart");
+    let core = build_core(&backend, provider, "cold-journal-payload");
+    let reopened = core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("cold session reopen");
+    drop(held);
+    let shift = attach(&backend, &session_id, request_of(&receipt.input_id)).await;
+    assert_eq!(
+        answers(&backend, &session_id, &shift).await,
+        std::slice::from_ref(&payload)
+    );
+    assert!(transcript(&reopened).await.contains("雪"));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "redrive serves the paid completion"
+    );
 }
 
 /// The session's messages, encoded as JSON, for ordering checks.
@@ -181,7 +378,10 @@ async fn idle_send_is_admitted_at_once() {
         .receipt()
         .clone();
     let outcome = attach(&world.backend, &session_id, request_of(&receipt.input_id)).await;
-    assert_eq!(answers(&outcome), ["answer 1"]);
+    assert_eq!(
+        answers(&world.backend, &session_id, &outcome).await,
+        ["answer 1"]
+    );
     assert_eq!(outcome.stop, ShiftStop::Idle);
     assert!(
         session
@@ -505,12 +705,16 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
     match outcome.ran.as_slice() {
         [
             RunOutcome::Committed {
-                outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
+                kind: lash_core::store::RunTerminalKind::Cancelled,
                 ..
             },
         ] => {}
         other => panic!("the running turn stops cancelled: {other:?}"),
     }
+    assert!(matches!(
+        committed_outcome(&world.backend, &session_id, outcome.ran[0].run()).await,
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+    ));
     attach(&world.backend, &session_id, request_of(&queued.input_id)).await;
     let applied: Vec<_> = session
         .durable()
@@ -553,7 +757,10 @@ async fn dropping_the_handle_stops_nothing() {
         receipt.input_id
     };
     let outcome = attach(&world.backend, &session_id, request_of(&input_id)).await;
-    assert_eq!(answers(&outcome), ["answer 1"]);
+    assert_eq!(
+        answers(&world.backend, &session_id, &outcome).await,
+        ["answer 1"]
+    );
     assert_eq!(world.calls.load(Ordering::SeqCst), 1);
 }
 
@@ -880,7 +1087,10 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
     // ends: no sibling ever ran, and the work is not stranded.
     world.gate.release.notify_one();
     let outcome = attach(&world.backend, &session_id, request_of(receipt.input_id())).await;
-    assert_eq!(answers(&outcome), ["answer 1", "answer 2"]);
+    assert_eq!(
+        answers(&world.backend, &session_id, &outcome).await,
+        ["answer 1", "answer 2"]
+    );
     assert!(
         session
             .durable()

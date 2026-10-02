@@ -67,11 +67,9 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_close_run_scope(
-        self,
-    ) -> Result<crate::store::RunTerminal, RuntimeEffectControllerError> {
+    pub fn into_close_run_scope(self) -> Result<(), RuntimeEffectControllerError> {
         match self {
-            Self::CloseRunScope { terminal } => Ok(*terminal),
+            Self::CloseRunScope => Ok(()),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::CloseRunScope,
                 other.kind(),

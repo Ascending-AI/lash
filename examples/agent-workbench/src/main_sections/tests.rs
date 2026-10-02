@@ -924,7 +924,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         [TurnCancelReceipt::TerminalAttached {
             cancellation: RecordedTurnCancellation::Requested(requested),
             terminal: lash::TurnTerminal::Committed {
-                outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
+                stop: Some(lash::TurnStop::Cancelled { evidence }),
                 ..
             },
             ..

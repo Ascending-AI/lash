@@ -5054,7 +5054,7 @@
           const receipt = await response.json();
           const cancellations = receipt.cancellations || [];
           const committed = cancellations.find(item => item.terminal?.status === "committed");
-          const evidence = committed?.terminal?.outcome?.stopped?.cancelled?.evidence;
+          const evidence = committed?.terminal?.stop?.cancelled?.evidence;
           const escalated = cancellations.find(item => item.cancellation?.outcome === "escalated");
           const unresolved = cancellations.find(item =>
             item.status === "cancellation_recorded_terminal_pending");

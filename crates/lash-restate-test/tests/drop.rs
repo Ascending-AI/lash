@@ -238,18 +238,19 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
     .await
     .expect("the turn finishes")
     .expect("the shift answers");
-    match outcome.ran.as_slice() {
-        [lash_core::engine::RunOutcome::Committed { outcome, .. }] => assert!(
-            matches!(
-                outcome,
-                lash_core::facade_support::TurnOutcome::Finished(
-                    lash_core::facade_support::TurnFinish::AssistantMessage { text }
-                ) if text == "done"
-            ),
-            "the turn answers: {outcome:?}"
-        ),
-        other => panic!("the shift runs the one run: {other:?}"),
-    }
+    let [lash_core::engine::RunOutcome::Committed { run, .. }] = outcome.ran.as_slice() else {
+        panic!("the shift runs the one run: {outcome:?}");
+    };
+    let terminal = lash_core::StoreSet::session_store_factory(backend.stores().as_ref())
+        .run_terminal(&lash_core::SessionId::from("drop"), run)
+        .await
+        .expect("read terminal")
+        .expect("committed terminal");
+    assert!(matches!(terminal.cause,
+        lash_core::store::RunTerminalCause::Committed {
+            outcome: lash_core::store::RunCommittedOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage { text }), ..
+        } if text == "done"));
     watch
 }
 

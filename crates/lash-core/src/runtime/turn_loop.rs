@@ -558,7 +558,7 @@ mod tests {
     use super::{ActiveTurnControl, next_physical_turn_id, publish_terminal_after_commit};
     use crate::{
         AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
-        ResolveOutcome, RuntimeError, TurnAddress, TurnFinish, TurnOutcome, TurnTerminal,
+        ResolveOutcome, RuntimeError, TurnAddress, TurnTerminal,
     };
 
     /// Refuses every terminal publication and forwards the rest of the
@@ -665,9 +665,7 @@ mod tests {
                 &control,
                 &resolver,
                 &TurnTerminal::Committed {
-                    outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                        text: "committed".to_string(),
-                    }),
+                    stop: None,
                     session_revision: Some(1),
                 },
                 &SessionId::from("committed-session"),

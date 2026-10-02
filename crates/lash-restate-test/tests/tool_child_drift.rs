@@ -447,15 +447,26 @@ impl Turn {
         ticker.abort();
         let answer = match finished {
             Ok(Ok(outcome)) => match outcome.ran.as_slice() {
-                [
-                    RunOutcome::Committed {
-                        outcome:
-                            lash_core::facade_support::TurnOutcome::Finished(
-                                lash_core::facade_support::TurnFinish::AssistantMessage { text },
-                            ),
-                        ..
-                    },
-                ] => text.clone(),
+                [RunOutcome::Committed { run, .. }] => {
+                    match lash_core::StoreSet::session_store_factory(self.backend.stores().as_ref())
+                        .run_terminal(&lash_core::SessionId::from(SESSION), run)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .cause
+                    {
+                        lash_core::store::RunTerminalCause::Committed {
+                            outcome:
+                                lash_core::store::RunCommittedOutcome::Finished(
+                                    lash_core::facade_support::TurnFinish::AssistantMessage {
+                                        text,
+                                    },
+                                ),
+                            ..
+                        } => text,
+                        other => format!("run terminal: {other:?}"),
+                    }
+                }
                 other => format!("shift ran {other:?}, stopped {:?}", outcome.stop),
             },
             other => format!(

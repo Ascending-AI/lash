@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use lash_core::engine::RunOutcome;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core::store::RunStore as _;
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
     CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
@@ -183,7 +184,20 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     // a later shift finishes it. The run's answer is its handle's.
     let answer = match shift {
         Ok(Ok(outcome)) => match outcome.ran.as_slice() {
-            [RunOutcome::Committed { outcome, .. }] => committed_text(outcome),
+            [RunOutcome::Committed { run, .. }] => match backend
+                .stores()
+                .session_store_factory()
+                .run_terminal(&lash_core::SessionId::from(SESSION), run)
+                .await
+                .expect("read terminal")
+                .expect("committed terminal")
+                .cause
+            {
+                lash_core::store::RunTerminalCause::Committed { outcome, .. } => {
+                    committed_text(&outcome.into())
+                }
+                other => format!("run terminal: {other:?}"),
+            },
             _ => match tokio::time::timeout(std::time::Duration::from_secs(8), handle.output())
                 .await
             {

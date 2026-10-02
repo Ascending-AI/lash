@@ -243,11 +243,7 @@ impl SessionShifts for RollShifts {
                     ledger.consumed.push(run.as_str().to_owned());
                 }
                 Ok(RunOutcome::Committed {
-                    outcome: lash_core::facade_support::TurnOutcome::Finished(
-                        lash_core::facade_support::TurnFinish::AssistantMessage {
-                            text: format!("answered {}", run.as_str()),
-                        },
-                    ),
+                    kind: lash_core::store::RunTerminalKind::Answered,
                     run,
                 })
             }

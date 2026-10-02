@@ -78,7 +78,7 @@
 //! input to the drain generation `G`.
 //!
 //! **The recorded outcome (ADR 0115 §3.4).** `LashTurn` keeps the run's
-//! outcome under the stamped `{format, body}` envelope at
+//! status under the stamped `{format, body}` envelope at
 //! [`LASH_TURN_OUTCOME_FORMAT_VERSION`], and `outcome` dispatches on the
 //! stamp before it decodes, so a later reader of another build is refused
 //! typed rather than by an accident of decoding.
@@ -163,6 +163,9 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 /// And again for FIG-4639: on a recorded `AdmitVerdict::Draining`, `shift`
 /// sends its continuation under the stable name and stops `Draining`.
 ///
+/// Generation 5 (FIG-4850): run and shift replies carry terminal status;
+/// the answer body lives in the run's durable terminal record.
+///
 /// version_guard(
 ///     shapes(cover(RestateSessionShiftRequest, RestateRunRequest)),
 ///     shapes(
@@ -182,7 +185,7 @@ use continuation::{continuation_generation, drain_answered, session_shift_contin
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.session_shift"
-pub const LASH_SESSION_SHIFT_VERSION: u32 = 4;
+pub const LASH_SESSION_SHIFT_VERSION: u32 = 5;
 
 /// The shift handler's name on `LashSession`.
 const SHIFT_HANDLER: &str = "shift";
@@ -1390,7 +1393,7 @@ async fn execute_run_journal(
         }
     };
     // The run's scope close runs on the key's `close` handler, not here
-    // (FIG-4035): `run` returns once the run's report is handed over, so
+    // (FIG-4035): `run` returns once the run's terminal status is handed over, so
     // the session's shift admits its next run beside the close. The send is
     // journaled, so a replay sends it once. The close is its `ScopeClose`
     // obligation's immediate delivery, so however often it runs, the scope

@@ -3,7 +3,8 @@
 //! the close the terminal transaction armed as the `ScopeClose` obligation's
 //! immediate attempt. It runs only inside the engine's recorded `CloseRunScope`
 //! step, and only after the run's final commit wrote that evidence; a
-//! replay decodes the evidence it closed and never runs it.
+//! replay acknowledges the recorded close and never redelivers it. Its
+//! outcome carries no copy of the answer held by the terminal record.
 //!
 //! A store, ledger or scope owner that did not answer is the attempt's
 //! fault, never the step's outcome: the body marks it with derivation retry
@@ -93,8 +94,6 @@ impl RuntimeEffectLocalRunner for CloseRunScopeRunner {
         )
         .await
         .map_err(|error| attempt_fault("run scope close", error))?;
-        Ok(RuntimeEffectOutcome::CloseRunScope {
-            terminal: Box::new(terminal),
-        })
+        Ok(RuntimeEffectOutcome::CloseRunScope)
     }
 }

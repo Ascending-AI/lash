@@ -582,9 +582,7 @@ where
         TurnId::fixture(format!("{prefix}-attach-after-turn")),
     );
     let after_terminal = crate::TurnTerminal::Committed {
-        outcome: crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
-            text: "attach-after".to_string(),
-        }),
+        stop: None,
         session_revision: Some(1),
     };
     let after_key = make()
@@ -616,9 +614,7 @@ where
         TurnId::fixture(format!("{prefix}-attach-before-turn")),
     );
     let before_terminal = crate::TurnTerminal::Committed {
-        outcome: crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
-            text: "attach-before".to_string(),
-        }),
+        stop: None,
         session_revision: Some(2),
     };
     let attach_address = before.clone();

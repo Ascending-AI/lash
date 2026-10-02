@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 use crate::conformance::durable_turn_address;
 use crate::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectHost, ExecutionScope, Resolution, TurnAddress,
-    TurnCancelMode, TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence, TurnFinish,
-    TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
+    TurnCancelMode, TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence, TurnStop,
+    TurnTerminal, TurnWorkDriver,
 };
 use lash_core::testing::conformance_support::{ActiveTurnControl, TurnCancelPeekIdentity};
 use pretty_assertions::assert_eq;
@@ -145,7 +145,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         .expect("escalated abort is what commits");
     assert_eq!(settled, abort_evidence);
     let terminal = TurnTerminal::Committed {
-        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence: settled }),
+        stop: Some(TurnStop::Cancelled { evidence: settled }),
         session_revision: Some(9),
     };
     active
@@ -158,7 +158,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(
         .expect("attach terminal")
     {
         TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
+            stop: Some(TurnStop::Cancelled { evidence }),
             session_revision: Some(9),
         } => assert_eq!(evidence, abort_evidence),
         other => panic!("attached terminal does not name the escalated abort: {other:?}"),
@@ -241,7 +241,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(
         .expect("honoured stop commits");
     assert_eq!(settled, honoured);
     let terminal = TurnTerminal::Committed {
-        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence: settled }),
+        stop: Some(TurnStop::Cancelled { evidence: settled }),
         session_revision: Some(10),
     };
     active
@@ -322,7 +322,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
     assert_eq!(observed, evidence);
 
     let terminal = TurnTerminal::Committed {
-        outcome: crate::TurnOutcome::Stopped(TurnStop::Cancelled { evidence: observed }),
+        stop: Some(TurnStop::Cancelled { evidence: observed }),
         session_revision: Some(7),
     };
     recovered
@@ -336,7 +336,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
     assert!(matches!(
         attached,
         TurnTerminal::Committed {
-            outcome: crate::TurnOutcome::Stopped(TurnStop::Cancelled {
+            stop: Some(TurnStop::Cancelled {
                 evidence: TurnCancellationEvidence {
                     ref request_id,
                     origin: Some(ref origin),
@@ -353,9 +353,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
         .publish_terminal(
             host.as_ref(),
             &TurnTerminal::Committed {
-                outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                    text: "stale completion".to_string(),
-                }),
+                stop: None,
                 session_revision: Some(6),
             },
         )
@@ -368,7 +366,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(
     assert!(matches!(
         attached_again,
         TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled {
+            stop: Some(TurnStop::Cancelled {
                 evidence: TurnCancellationEvidence {
                     ref request_id,
                     origin: Some(ref origin),
@@ -399,15 +397,13 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(
     );
     let terminal = match (seal.expect("seal"), cancel.expect("cancel").outcome) {
         (None, TurnCancelOutcome::CompletionWonRace) => TurnTerminal::Committed {
-            outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                text: "completion won".to_string(),
-            }),
+            stop: None,
             session_revision: Some(8),
         },
         (Some(evidence), TurnCancelOutcome::Requested(requested)) => {
             assert_eq!(evidence, requested);
             TurnTerminal::Committed {
-                outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
+                stop: Some(TurnStop::Cancelled { evidence }),
                 session_revision: Some(8),
             }
         }
@@ -423,16 +419,16 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(
         .expect("attach race terminal");
     // Whichever side won, the attached terminal must be the one that was
     // published: a cancelled terminal names the racing request, a completed
-    // one carries the completion text.
+    // one carries no stop.
     match attached {
         TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
+            stop: Some(TurnStop::Cancelled { evidence }),
             ..
         } => assert_eq!(evidence.request_id, "race-request"),
-        TurnTerminal::Committed {
-            outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage { text }),
-            ..
-        } => assert_eq!(text, "completion won"),
+        TurnTerminal::Committed { stop: None, .. } => assert!(matches!(
+            terminal,
+            TurnTerminal::Committed { stop: None, .. }
+        )),
         other => panic!("attached terminal does not match the settled gate: {other:?}"),
     }
     assert!(matches!(

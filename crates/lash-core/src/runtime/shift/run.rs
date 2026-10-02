@@ -245,7 +245,10 @@ impl LashRuntime {
         let outcome = match frames.final_turn() {
             Some(turn) => RunOutcome::Committed {
                 run,
-                outcome: turn.outcome.clone(),
+                kind: crate::store::RunTerminalKind::of_stop(match &turn.outcome {
+                    crate::TurnOutcome::Stopped(stop) => Some(stop),
+                    _ => None,
+                }),
             },
             None => RunOutcome::Ceded { run },
         };
@@ -506,7 +509,10 @@ impl LashRuntime {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => ExecutedRun {
                 outcome: RunOutcome::Committed {
                     run,
-                    outcome: turn.outcome.clone(),
+                    kind: crate::store::RunTerminalKind::of_stop(match &turn.outcome {
+                        crate::TurnOutcome::Stopped(stop) => Some(stop),
+                        _ => None,
+                    }),
                 },
                 run: Some(crate::AgentFrameRun {
                     turns: vec![turn],

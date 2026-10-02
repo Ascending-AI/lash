@@ -15,6 +15,7 @@ use group_child_cancel::group_child_cancelled;
 pub(crate) use group_commit::committed_final_is_not_a_tool_terminal;
 mod group_read;
 pub(crate) mod journal_budget;
+mod journal_payload;
 mod journaled_effect;
 use journaled_effect::EngineFaults;
 mod live_frontier;
@@ -357,6 +358,7 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     read_ahead: group_read::GroupReadAhead,
     /// The ranks this controller's own §4 commits reserved (FIG-4308).
     commit_receipts: group_commit::GroupCommitReceipts,
+    payloads: journal_payload::JournalPayloads,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -408,6 +410,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             namespace: crate::RestateNamespace::default(),
             read_ahead: group_read::GroupReadAhead::default(),
             commit_receipts: group_commit::GroupCommitReceipts::default(),
+            payloads: journal_payload::JournalPayloads::default(),
             _ctx: PhantomData,
         }
     }

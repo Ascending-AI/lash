@@ -837,7 +837,7 @@ finish(await handle);
         receipt.cancellations.as_slice(),
         [TurnCancelReceipt::TerminalAttached {
             terminal: lash::TurnTerminal::Committed {
-                outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. }),
+                stop: Some(lash::TurnStop::Cancelled { .. }),
                 ..
             },
             ..
@@ -913,7 +913,7 @@ impl lash::TurnAttach for ConcurrentCancelTerminal {
                 .publish_turn_done(&address.session_id, &address.turn_id);
         }
         Ok(lash::TurnTerminal::Committed {
-            outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
+            stop: Some(lash::TurnStop::Cancelled { evidence }),
             session_revision: None,
         })
     }
@@ -1098,8 +1098,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
                 cancellation: RecordedTurnCancellation::Requested(evidence),
                 terminal:
                     lash::TurnTerminal::Committed {
-                        outcome:
-                            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {
+                        stop:
+                            Some(lash::TurnStop::Cancelled {
                                 evidence: committed,
                             }),
                         ..

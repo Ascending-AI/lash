@@ -1,7 +1,7 @@
 {
   "scenario": "service-EffectGroupPayload",
   "service": "EffectGroupPayload",
-  "generation": "4fe4c9d94749",
+  "generation": "e1b5f7c925ec",
   "handlers": {
     "get": [
       [

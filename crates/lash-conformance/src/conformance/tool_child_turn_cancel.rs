@@ -768,9 +768,9 @@ pub async fn cancel_dispositions_survive_group_child_teardown_and_redrive(
             .expect("a fresh driver attaches to the terminal after child teardown");
         assert!(
             matches!(terminal, crate::TurnTerminal::Committed {
-        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence: ref recorded }), ..
+        stop: Some(TurnStop::Cancelled { evidence: ref recorded }), ..
     } if recorded == evidence),
-            "the recorded TurnStop survives control reattachment: {terminal:?}"
+            "the typed TurnStop survives control reattachment: {terminal:?}"
         );
         let run = store
             .run_terminal(&session_id, &turn_id)

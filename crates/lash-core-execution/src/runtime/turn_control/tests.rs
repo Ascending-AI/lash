@@ -175,14 +175,17 @@ fn cancel_request_without_undelivered_fails_decode() {
 
 #[test]
 fn terminal_success_has_no_cancellation_evidence() {
-    let terminal = TurnTerminal::Committed {
-        outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-            text: "done".to_string(),
+    let terminal = TurnTerminal::committed(
+        &TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: "the answer lives in the terminal record".repeat(4096),
         }),
-        session_revision: None,
-    };
+        None,
+    );
     let encoded = terminal_resolution(&terminal).expect("encode terminal");
-    assert!(matches!(encoded, Resolution::Ok(_)));
+    assert_eq!(
+        encoded,
+        Resolution::Ok(serde_json::json!({"status": "committed", "stop": null}))
+    );
 }
 
 #[test]

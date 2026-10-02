@@ -275,9 +275,7 @@ pub(super) async fn retiring_a_run_never_cancels_a_terminal_its_commit_still_pub
         .await
         .expect("derive the final turn's terminal key");
     let terminal = lash_core::facade_support::TurnTerminal::Committed {
-        outcome: lash_sansio::TurnOutcome::Finished(lash_sansio::TurnFinish::AssistantMessage {
-            text: "committed before its run closed".to_string(),
-        }),
+        stop: None,
         session_revision: Some(2),
     };
     let published = serde_json::to_value(&terminal).expect("encode the terminal");

@@ -1471,12 +1471,12 @@ async fn a_committed_run_answers_its_follower_while_the_session_wait_index_is_ba
     .await;
 }
 
-/// The committed outcome a terminal carries, as JSON: a terminal has no
+/// The committed status a terminal carries, as JSON: a terminal has no
 /// equality of its own.
-fn committed_outcome(terminal: &lash_core::facade_support::TurnTerminal) -> serde_json::Value {
+fn committed_status(terminal: &lash_core::facade_support::TurnTerminal) -> serde_json::Value {
     match terminal {
-        lash_core::facade_support::TurnTerminal::Committed { outcome, .. } => {
-            serde_json::to_value(outcome).expect("encode the outcome")
+        lash_core::facade_support::TurnTerminal::Committed { .. } => {
+            serde_json::to_value(terminal).expect("encode the terminal status")
         }
         lash_core::facade_support::TurnTerminal::Failed { error } => {
             panic!("the turn committed, yet its terminal failed: {error:?}")
@@ -1548,7 +1548,7 @@ async fn a_dropped_terminal_attach_leaves_no_second_server_invocation(
         .await_terminal(&address)
         .await
         .expect("an attach after the terminal resolved reads it");
-    assert_eq!(committed_outcome(&terminal), committed_outcome(&after));
+    assert_eq!(committed_status(&terminal), committed_status(&after));
     assert_eq!(
         terminal_attaches(&world.backend, &wait),
         1,
@@ -1819,7 +1819,7 @@ async fn live_restate_a_dropped_terminal_attach_leaves_no_second_server_invocati
         .await_terminal(&address)
         .await
         .expect("an attach after the terminal resolved reads it");
-    assert_eq!(committed_outcome(&terminal), committed_outcome(&after));
+    assert_eq!(committed_status(&terminal), committed_status(&after));
     assert_eq!(
         live_terminal_attaches(&world.backend, &wait).await,
         1,

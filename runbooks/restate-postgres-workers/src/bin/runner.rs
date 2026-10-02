@@ -7,9 +7,8 @@ use lash::runtime::AwaitEventResolver as _;
 use lash::sync::MutexExt;
 use lash::{
     AwaitEventKey, AwaitEventWaitIdentity, Resolution, TurnAddress, TurnCancelOutcome,
-    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnOutcome, TurnStop, TurnTerminal,
-    TurnWorkDriver, persistence::SessionHistoryStore, persistence::TurnInputStore,
-    runtime::ExecutionScope,
+    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnStop, TurnTerminal, TurnWorkDriver,
+    persistence::SessionHistoryStore, persistence::TurnInputStore, runtime::ExecutionScope,
 };
 use lash::{
     restate::RestateAdminClient, restate::RestateAuthorityId, restate::RestateConnection,

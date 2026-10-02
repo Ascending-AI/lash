@@ -143,13 +143,14 @@ pub async fn a_committed_run_answers_its_terminal_by_run(
     );
     let outcome = shift(&runner, &parts, "run-answered-shift").await;
     let committed = match &outcome.ran[..] {
-        [RunOutcome::Committed { run: ran, outcome }] if *ran == run => outcome.clone(),
+        [RunOutcome::Committed { run: ran, kind }] if *ran == run => *kind,
         _ => panic!("the run commits: {outcome:?}"),
     };
     let evidence = terminal(&parts, &run)
         .await
         .expect("the run's final commit wrote its evidence");
     assert_eq!(evidence.kind(), RunTerminalKind::Answered);
+    assert_eq!(committed, evidence.kind());
     // The evidence carries the outcome the run committed, so a follower
     // answers from this row alone (FIG-4345).
     assert_eq!(
@@ -157,8 +158,11 @@ pub async fn a_committed_run_answers_its_terminal_by_run(
         RunTerminalCause::Committed {
             commit: TurnCommitId::new(run.clone(), 0),
             turn: run.clone(),
-            outcome: crate::store::RunCommittedOutcome::of_turn_outcome(&committed)
-                .expect("a committed run ended in a finish or a stop"),
+            outcome: crate::store::RunCommittedOutcome::Finished(
+                crate::TurnFinish::AssistantMessage {
+                    text: "answer 1".into()
+                }
+            ),
         }
     );
     assert!(evidence.head_revision.is_some(), "a head commit wrote it");

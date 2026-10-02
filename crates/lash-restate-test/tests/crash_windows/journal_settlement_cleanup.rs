@@ -93,7 +93,7 @@ impl SessionShifts for HeldShifts {
         self.held().await;
         RunEnd::owing_nothing(Ok(RunOutcome::Committed {
             run,
-            outcome: lash_core::facade_support::TurnOutcome::Finished(finish),
+            kind: lash_core::store::RunTerminalKind::Answered,
         }))
     }
 

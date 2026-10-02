@@ -15,12 +15,13 @@ use lash_core::{
 use restate_sdk::serde::Json;
 
 use super::context::RestateControllerContext;
-use super::effect_journal::{JournaledEffectRecord, JournaledEntry};
+use super::effect_journal::{EFFECT_JOURNAL_VERSION, JournaledEffectRecord, JournaledEntry};
 use super::journal_budget::{
     JournaledBudgetVerdict, budget_verdict, gave_up_over_budget_entry, group_open_budget_verdict,
     group_open_gave_up_over_budget, journalable_recorded_effect, recorded_effect_from_journal,
     unjournalable_envelope_give_up,
 };
+use super::journal_payload::PayloadEntry;
 use super::{
     RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController,
     execute_restate_journaled_effect, restate_effect_name, validate_recorded_effect_envelope,
@@ -419,13 +420,15 @@ where
         let Json(entry) = self
             .context
             .run_json_or_retry_send(effect_name.clone(), async move {
-                future.await.map(|recorded| JournaledEntry {
-                    build_generation,
-                    record: journalable_recorded_effect(
-                        &poisoned_effect_name,
-                        payload_budget,
-                        recorded,
-                    ),
+                future.await.map(|recorded| {
+                    self.payloads.encode(JournaledEntry {
+                        build_generation,
+                        record: journalable_recorded_effect(
+                            &poisoned_effect_name,
+                            payload_budget,
+                            recorded,
+                        ),
+                    })
                 })
             })
             .await
@@ -502,10 +505,10 @@ where
                 effect_name.clone(),
                 run_retry_policy,
                 Box::pin(async move {
-                    JournaledEntry {
+                    self.payloads.encode(JournaledEntry {
                         build_generation,
                         record: future.await,
-                    }
+                    })
                 }),
             )
             .await
@@ -543,12 +546,38 @@ where
         &self,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
         effect_name: &str,
-        entry: JournaledEntry,
+        entry: PayloadEntry,
         first: bool,
     ) -> Result<RecordedRuntimeEffect, RestateEffectError> {
-        if first && let Some(sentinel) = &self.folded_sentinel {
-            sentinel.check(entry.build_generation.as_ref()).await;
+        if let Some(error) = &entry.payload_encoding_error {
+            return Err(RestateEffectError::Refused(
+                RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
+                    error.clone(),
+                ),
+            ));
         }
+        if first && let Some(sentinel) = &self.folded_sentinel {
+            sentinel.check(entry.body.get("build_generation")).await;
+        }
+        let entry = if entry
+            .body
+            .get("effect_journal_version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(u64::from(EFFECT_JOURNAL_VERSION))
+        {
+            self.payloads
+                .decode(entry)
+                .map_err(RestateEffectError::Refused)?
+        } else {
+            // Generation dispatch precedes reference resolution and shape decoding.
+            serde_json::from_value::<JournaledEntry>(entry.body).map_err(|error| {
+                RestateEffectError::Refused(RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
+                    error.to_string(),
+                ))
+            })?
+        };
         recorded_effect_from_journal(envelope, effect_name, entry.record)
             .map_err(RestateEffectError::Refused)
     }

@@ -1,13 +1,13 @@
 {
   "scenario": "scalar-lashlang-tool-attempt",
-  "generation": "4fe4c9d94749",
+  "generation": "e1b5f7c925ec",
   "journal": [
     {
       "name": "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt",
       "body": {
         "effect": {
           "Ok": {
-            "effect_journal_version": 15,
+            "effect_journal_version": 16,
             "envelope": {
               "hash": "f7ad7d3f10f56d7c41279ad7aa6b2f1ffd9407b8ad742ab53c9f65ddd458361a",
               "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt\"},\"effect_id\":\"scalar-lashlang-tool-attempt\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"tc_7e2a5c0150edab4b541cc68f1ee8533d820e6c728412935281c82692987477d8\",\"tool_id\":\"tool:replay_scalar_counter\",\"tool_name\":\"replay_scalar_counter\",\"args\":{\"call\":\"replay-scalar-call\"}},\"attempt\":1,\"max_attempts\":1}}"

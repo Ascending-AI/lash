@@ -94,7 +94,13 @@ use serde::{Deserialize, Serialize};
 /// (`usage`, absent for an effect that dispatched nothing), and the entry is
 /// followed by the run's one-way settle send (ADR 0125).
 ///
+/// 16 (FIG-4850): canonical envelopes and outcomes reference prior payloads
+/// by digest. Replay rebuilds the dictionary from journal entries, including
+/// within the same entry, before validating the canonical envelope.
+/// A scope close records its acknowledgement without the terminal's answer.
+///
 /// version_guard(
+///     shapes(path = "crates/lash-restate/src/controller/journal_payload.rs", cover(PayloadEntry, PayloadReference)),
 ///     shapes(cover(RecordedRuntimeEffect, GaveUpEntry, Stamped, FrontierMark)),
 ///     roots(JournaledEffectRecord),
 ///     items(EFFECT_JOURNAL_VERSION_FIELD, stamped),
@@ -108,7 +114,7 @@ use serde::{Deserialize, Serialize};
 /// )
 /// version_surface = "drain"
 /// format_manifest = "engine:restate.effect_journal"
-pub const EFFECT_JOURNAL_VERSION: u32 = 15;
+pub const EFFECT_JOURNAL_VERSION: u32 = 16;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

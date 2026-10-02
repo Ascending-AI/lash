@@ -367,11 +367,7 @@ impl SessionShifts for ScriptedShifts {
                     }
                 }
                 Ok(RunOutcome::Committed {
-                    outcome: lash_core::facade_support::TurnOutcome::Finished(
-                        lash_core::facade_support::TurnFinish::AssistantMessage {
-                            text: format!("answered {}", run.as_str()),
-                        },
-                    ),
+                    kind: lash_core::store::RunTerminalKind::Answered,
                     run,
                 })
             }

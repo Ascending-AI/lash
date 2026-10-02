@@ -500,7 +500,7 @@ pub async fn a_run_recorded_under_one_executor_is_never_admitted_by_another(
         matches!(
             &outcome,
             RunOutcome::Committed {
-                outcome: crate::TurnOutcome::Finished(_),
+                kind: crate::store::RunTerminalKind::Answered,
                 ..
             }
         ),
@@ -589,7 +589,7 @@ pub async fn a_lost_acceptors_run_is_executed_once_by_the_sessions_shift(
         matches!(
             &outcome,
             RunOutcome::Committed {
-                outcome: crate::TurnOutcome::Finished(_),
+                kind: crate::store::RunTerminalKind::Answered,
                 ..
             }
         ),
@@ -758,12 +758,23 @@ pub async fn a_refused_acceptor_adopts_the_outcome_its_runs_executor_recorded(
     .await
     .expect("the session's shift ran")
     .expect("the session's shift commits the relay-taken run");
-    let RunOutcome::Committed {
-        outcome: committed, ..
-    } = outcome
-    else {
+    let RunOutcome::Committed { run, .. } = outcome else {
         panic!("the run's executor committed it: {outcome:?}");
     };
+    let terminal = f
+        .parts
+        .store
+        .run_terminal(&f.parts.session_id, &run)
+        .await
+        .expect("read terminal")
+        .expect("the run committed");
+    let crate::store::RunTerminalCause::Committed {
+        outcome: committed, ..
+    } = terminal.cause
+    else {
+        panic!("the run committed: {terminal:?}");
+    };
+    let committed = crate::TurnOutcome::from(committed);
     let sealed = f.epoch().await;
 
     // The acceptor wakes: its run ended under its recorded executor.

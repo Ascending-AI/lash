@@ -1383,7 +1383,6 @@ async fn emit_close_step(
         )
         .await
         .and_then(crate::RuntimeEffectOutcome::into_close_run_scope)
-        .map(|_| ())
         .map_err(|error| controller_abort(Some(run), error))
 }
 

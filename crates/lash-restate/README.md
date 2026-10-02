@@ -68,6 +68,20 @@ Replaying a handler with the same turn id returns Restate-recorded effect
 outcomes, validates the current Lash envelope hash, and retries the final commit
 without exposing partial session state.
 
+Each handler's effect journal keeps a payload of at least 1 KiB inline once.
+Later envelopes and outcomes name it by a domain-separated BLAKE3 digest.
+Replay rebuilds the dictionary from served entries before checking the exact
+canonical envelope bytes. A discarded run cannot supply a reference, and a
+missing reference is a typed integrity refusal. The dictionary lasts for the
+handler attempt; cold reopen reads the journal to rebuild it.
+
+`RunOutcome::Committed` and the shift reply carry the run id and terminal
+kind. Callers read the answer from `RunTerminalCause::Committed` in the run's
+durable terminal record, or through the send handle. The turn's workflow state
+and replies therefore carry no second copy of the answer. The committed turn's
+terminal promise carries its status and typed stop, preserving cancellation
+evidence without the answer. A scope close records only its acknowledgement.
+
 For host-tier HTTP integration, use `RestateIngressClient` to submit `/send`
 requests and capture the returned invocation id. The client accepts Restate's
 `Accepted` and `PreviouslyAccepted` send statuses and returns the

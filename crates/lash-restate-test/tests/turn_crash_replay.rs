@@ -26,6 +26,7 @@ use std::time::Instant;
 use lash_core::engine::RunOutcome;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core::store::RunStore as _;
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::protocol::generated::CallCommandMessage;
 use lash_restate_test::{
@@ -220,11 +221,24 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> 
     .await;
     let answer = match shift {
         Ok(Ok(outcome)) => match outcome.ran.as_slice() {
-            [RunOutcome::Committed { outcome, .. }] => match outcome {
-                lash_core::facade_support::TurnOutcome::Finished(
-                    lash_core::facade_support::TurnFinish::AssistantMessage { text },
-                ) => text.clone(),
-                other => format!("no message: {other:?}"),
+            [RunOutcome::Committed { run, .. }] => match backend
+                .stores()
+                .session_store_factory()
+                .run_terminal(&session_id, run)
+                .await
+                .expect("read terminal")
+                .expect("committed terminal")
+                .cause
+            {
+                lash_core::store::RunTerminalCause::Committed { outcome, .. } => {
+                    match lash_core::facade_support::TurnOutcome::from(outcome) {
+                        lash_core::facade_support::TurnOutcome::Finished(
+                            lash_core::facade_support::TurnFinish::AssistantMessage { text },
+                        ) => text.clone(),
+                        other => format!("no message: {other:?}"),
+                    }
+                }
+                other => format!("run terminal: {other:?}"),
             },
             other => format!("shift ran {other:?}, stopped {:?}", outcome.stop),
         },

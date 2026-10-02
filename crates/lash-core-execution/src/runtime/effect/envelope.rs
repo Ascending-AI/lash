@@ -1463,10 +1463,8 @@ pub enum RuntimeEffectOutcome {
     ReadSessionCommandRun {
         batches: Vec<crate::QueuedWorkBatch>,
     },
-    /// The terminal evidence of the run the close closed.
-    CloseRunScope {
-        terminal: Box<crate::store::RunTerminal>,
-    },
+    /// The run's scope close was delivered after its terminal evidence.
+    CloseRunScope,
     /// The session's `CloseSession` intent, boxed; `None` when the session
     /// had no durable record and nothing was closed.
     BeginSessionClose {
@@ -1879,7 +1877,7 @@ impl RuntimeEffectOutcome {
             Self::RenderCompactionPrompt { .. } => RuntimeEffectKind::RenderCompactionPrompt,
             Self::ResolveConfigTransaction { .. } => RuntimeEffectKind::ResolveConfigTransaction,
             Self::ReadSessionCommandRun { .. } => RuntimeEffectKind::ReadSessionCommandRun,
-            Self::CloseRunScope { .. } => RuntimeEffectKind::CloseRunScope,
+            Self::CloseRunScope => RuntimeEffectKind::CloseRunScope,
             Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,

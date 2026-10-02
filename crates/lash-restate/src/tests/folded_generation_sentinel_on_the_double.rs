@@ -127,11 +127,7 @@ impl SessionShifts for HeldShifts {
                 self.recorded_step(&controller, format!("first-step:{run}"))
                     .await?;
                 Ok(RunOutcome::Committed {
-                    outcome: lash_core::facade_support::TurnOutcome::Finished(
-                        lash_core::facade_support::TurnFinish::AssistantMessage {
-                            text: format!("answered {run}"),
-                        },
-                    ),
+                    kind: lash_core::store::RunTerminalKind::Answered,
                     run,
                 })
             }

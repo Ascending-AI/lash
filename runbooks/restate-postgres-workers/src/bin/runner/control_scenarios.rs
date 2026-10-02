@@ -689,7 +689,7 @@ pub(super) fn assert_engine_restart_cancelled_terminal(
     request_id: &str,
 ) -> Result<()> {
     let TurnTerminal::Committed {
-        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
+        stop: Some(TurnStop::Cancelled { evidence }),
         ..
     } = terminal
     else {
@@ -767,7 +767,7 @@ pub(super) async fn drive_break_glass_scenario(
                 !matches!(
                     terminal,
                     TurnTerminal::Committed {
-                        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
+                        stop: Some(TurnStop::Cancelled { .. }),
                         ..
                     }
                 ),
@@ -826,15 +826,12 @@ pub(super) fn assert_requested(outcome: &TurnCancelOutcome, request_id: &str) ->
 
 pub(super) fn assert_cancelled_terminal(terminal: &TurnTerminal, request_id: &str) -> Result<()> {
     let TurnTerminal::Committed {
-        outcome,
+        stop: Some(TurnStop::Cancelled { evidence }),
         session_revision: _,
     } = terminal
     else {
         anyhow::bail!("expected committed cancellation terminal, got {terminal:?}")
     };
-    let evidence = outcome
-        .cancellation()
-        .context("terminal was not Cancelled")?;
     anyhow::ensure!(
         evidence.request_id == request_id,
         "terminal evidence mismatch: {evidence:?}"
@@ -847,11 +844,11 @@ pub(super) fn assert_cancelled_terminal(terminal: &TurnTerminal, request_id: &st
 }
 
 pub(super) fn assert_non_cancel_terminal(terminal: &TurnTerminal) -> Result<()> {
-    let TurnTerminal::Committed { outcome, .. } = terminal else {
+    let TurnTerminal::Committed { stop, .. } = terminal else {
         anyhow::bail!("expected committed completion terminal, got {terminal:?}")
     };
     anyhow::ensure!(
-        outcome.cancellation().is_none(),
+        !matches!(stop, Some(TurnStop::Cancelled { .. })),
         "completion-sealed terminal reported Cancelled"
     );
     Ok(())
