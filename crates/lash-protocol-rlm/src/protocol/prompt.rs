@@ -35,39 +35,50 @@ fn module_is_runtime_internal(path: &[String]) -> bool {
 
 /// The host surface a dialect has to describe, walked once.
 ///
-/// Both dialects advertise the same inventory and spell it differently, so the
-/// walk lives here and each dialect formats the rows. A TypeScript session used
-/// to receive no inventory at all: its execution section rendered tool
-/// signatures and nothing else, so the trigger sources, their event types and
-/// the `triggers.*` operations were invisible — while the host prompt told the
+/// Every dialect advertises the same inventory and spells it through the
+/// shared shape model, so the walk lives here, carries `SchemaShape`, and
+/// leaves only spelling to the dialect. A TypeScript session used to receive
+/// no inventory at all: its execution section rendered tool signatures and
+/// nothing else, so the trigger sources, their event types and the
+/// `triggers.*` operations were invisible — while the host prompt told the
 /// model to use them. A judged row watched a model search for `cron.Schedule`,
 /// find nothing, and conclude the trigger APIs did not exist.
-pub(crate) struct HostSurfaceInventory<'a> {
-    pub(crate) operations: Vec<HostSurfaceOperation<'a>>,
-    pub(crate) data_types: Vec<(String, &'a lashlang::TypeExpr)>,
-    pub(crate) constructors: Vec<HostSurfaceConstructor<'a>>,
+pub(crate) struct HostSurfaceInventory {
+    pub(crate) operations: Vec<HostSurfaceOperation>,
+    pub(crate) data_types: Vec<(String, lash_sansio::SchemaShape)>,
+    pub(crate) constructors: Vec<HostSurfaceConstructor>,
     /// `(trigger source type, event type name)`.
     pub(crate) trigger_sources: Vec<(String, String)>,
 }
 
-pub(crate) struct HostSurfaceOperation<'a> {
+pub(crate) struct HostSurfaceOperation {
     pub(crate) alias: String,
     pub(crate) operation: String,
-    pub(crate) input: &'a lashlang::TypeExpr,
-    pub(crate) output: &'a lashlang::TypeExpr,
+    pub(crate) input: lash_sansio::SchemaShape,
+    pub(crate) output: lash_sansio::SchemaShape,
 }
 
-pub(crate) struct HostSurfaceConstructor<'a> {
+pub(crate) struct HostSurfaceConstructor {
     pub(crate) path: String,
-    pub(crate) input: &'a lashlang::TypeExpr,
-    /// Already resolved to a nominal name (`TriggerSource<cron.Tick>`), which
-    /// is spelled the same in both dialects.
-    pub(crate) output: String,
+    pub(crate) input: lash_sansio::SchemaShape,
+    pub(crate) output: HostSurfaceConstructorOutput,
+}
+
+/// What a value constructor hands back.
+///
+/// A trigger-source constructor answers a nominal application —
+/// `TriggerSource<cron.Tick>` — which stays as its two names here: the
+/// wrapper is a bare identifier every dialect spells alike, and the argument
+/// is a host type's real dotted name for the dialect's own name speller.
+/// Anything else is an ordinary shape.
+pub(crate) enum HostSurfaceConstructorOutput {
+    Nominal { wrapper: String, argument: String },
+    Shape(Box<lash_sansio::SchemaShape>),
 }
 
 pub(crate) fn host_surface_inventory(
     surface: &lashlang::LashlangHostEnvironment,
-) -> HostSurfaceInventory<'_> {
+) -> HostSurfaceInventory {
     // Operations with real Lashlang types (trigger and other host primitives)
     // are listed here. Tool-catalog operations are bridged with placeholder
     // `any` types and documented in full under **Tools**, so they are skipped to
@@ -99,8 +110,8 @@ pub(crate) fn host_surface_inventory(
                 operations.push(HostSurfaceOperation {
                     alias: module.alias.clone(),
                     operation: operation.clone(),
-                    input: &binding.input_ty,
-                    output: &binding.output_ty,
+                    input: lashlang::type_expr_to_schema_shape(&binding.input_ty),
+                    output: lashlang::type_expr_to_schema_shape(&binding.output_ty),
                 });
             }
         }
@@ -109,7 +120,12 @@ pub(crate) fn host_surface_inventory(
         .resources
         .named_data_types()
         .filter(|(name, _)| !name.starts_with("__"))
-        .map(|(_, data_type)| (data_type.name().to_string(), data_type.ty()))
+        .map(|(_, data_type)| {
+            (
+                data_type.name().to_string(),
+                lashlang::type_expr_to_schema_shape(data_type.ty()),
+            )
+        })
         .collect();
     let constructors = surface
         .resources
@@ -120,13 +136,22 @@ pub(crate) fn host_surface_inventory(
                 lashlang::TypeExpr::Ref(name) => surface
                     .resources
                     .resolve_trigger_source(name.as_str())
-                    .map(|binding| format!("TriggerSource<{}>", binding.event_type_name()))
-                    .unwrap_or_else(|| lashlang::format_type_expr(&constructor.output_ty)),
-                other => lashlang::format_type_expr(other),
+                    .map(|binding| HostSurfaceConstructorOutput::Nominal {
+                        wrapper: "TriggerSource".to_string(),
+                        argument: binding.event_type_name().to_string(),
+                    })
+                    .unwrap_or_else(|| {
+                        HostSurfaceConstructorOutput::Shape(Box::new(
+                            lashlang::type_expr_to_schema_shape(&constructor.output_ty),
+                        ))
+                    }),
+                other => HostSurfaceConstructorOutput::Shape(Box::new(
+                    lashlang::type_expr_to_schema_shape(other),
+                )),
             };
             HostSurfaceConstructor {
                 path: constructor.path.join("."),
-                input: &constructor.input_ty,
+                input: lashlang::type_expr_to_schema_shape(&constructor.input_ty),
                 output,
             }
         })

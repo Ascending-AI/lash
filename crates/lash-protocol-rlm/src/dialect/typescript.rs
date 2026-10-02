@@ -115,71 +115,6 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     field_miss_rule: "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.",
 };
 
-/// Lashlang's type syntax in TypeScript's spelling.
-///
-/// The host surface is declared once, in Lashlang `TypeExpr`s, and both
-/// dialects have to describe it. Rendering `list[str]` or `-> float` to a
-/// TypeScript reader would be the same defect ADR 0063 closes everywhere else,
-/// so the mapping is explicit rather than a formatted passthrough.
-/// A host type's name as TypeScript can spell it.
-///
-/// Host data types are named with dots (`cron.Tick`), which is a valid
-/// *reference* in Lashlang and not a valid TypeScript identifier. The
-/// declaration already renders as `type cron_Tick = …`, so every reference to
-/// it has to agree — otherwise the model is shown a type it cannot resolve
-/// against the declaration immediately above it.
-fn typescript_type_name(name: &str) -> String {
-    name.replace('.', "_")
-}
-
-fn typescript_type(ty: &lashlang::TypeExpr) -> String {
-    match ty {
-        lashlang::TypeExpr::Any | lashlang::TypeExpr::Dict => "unknown".to_string(),
-        lashlang::TypeExpr::Str => "string".to_string(),
-        lashlang::TypeExpr::Int | lashlang::TypeExpr::Float => "number".to_string(),
-        lashlang::TypeExpr::Bool => "boolean".to_string(),
-        lashlang::TypeExpr::Null => "null".to_string(),
-        lashlang::TypeExpr::Enum(values) => values
-            .iter()
-            .map(|value| format!("\"{value}\""))
-            .collect::<Vec<_>>()
-            .join(" | "),
-        lashlang::TypeExpr::List(item) => format!("Array<{}>", typescript_type(item)),
-        lashlang::TypeExpr::Object(fields) => {
-            if fields.is_empty() {
-                return "Record<string, never>".to_string();
-            }
-            let fields = fields
-                .iter()
-                .map(|field| {
-                    let optional = if field.optional { "?" } else { "" };
-                    format!("{}{optional}: {}", field.name, typescript_type(&field.ty))
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            format!("{{ {fields} }}")
-        }
-        lashlang::TypeExpr::Ref(name) => typescript_type_name(name),
-        lashlang::TypeExpr::Process(process) => match process.as_signature() {
-            Some(signature) => format!(
-                "Process<[{}], {}>",
-                signature
-                    .params()
-                    .iter()
-                    .map(|param| format!("{}: {}", param.name, typescript_type(&param.ty)))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                typescript_type(signature.output())
-            ),
-            None => "Process".to_string(),
-        },
-        lashlang::TypeExpr::TriggerHandle(event) => {
-            format!("TriggerHandle<{}>", typescript_type(event))
-        }
-        other => lashlang::format_type_expr(other),
-    }
-}
-
 /// The host surface, in this dialect's spelling.
 ///
 /// A TypeScript session used to receive no inventory at all: the section
@@ -188,23 +123,12 @@ fn typescript_type(ty: &lashlang::TypeExpr) -> String {
 /// host's own prompt told the model to use them. A judged row watched a
 /// model search for `cron.Schedule`, find nothing, and conclude the trigger
 /// APIs did not exist.
-/// `TriggerSource<cron.Tick>` → `TriggerSource<cron_Tick>`.
 ///
-/// The inventory resolves a constructor's output to a nominal label built from
-/// the host type's own dotted name; only the payload inside the angle brackets
-/// needs this dialect's spelling.
-fn typescript_nominal_output(output: &str) -> String {
-    match output.split_once('<') {
-        Some((head, tail)) => {
-            format!(
-                "{head}<{}",
-                typescript_type_name(tail.trim_end_matches('>'))
-            ) + ">"
-        }
-        None => typescript_type_name(output),
-    }
-}
-
+/// Every row spells the inventory's `SchemaShape` through the same
+/// [`lash_typescript::render_schema_shape`] the tool declarations use, so a
+/// named host type reads the same in its `type … =` declaration and in every
+/// reference — `TriggerSource<cron.Tick>` renders `TriggerSource<cron_Tick>`
+/// — and no row can arrive in Lashlang notation (FIG-4673).
 fn render_host_surface_section(
     tool_catalog: &lash_core::ToolCatalog,
     host_environment: &lashlang::LashlangHostEnvironment,
@@ -258,8 +182,9 @@ fn render_host_surface_section(
                     "{}.{}(input: {}): Promise<{}>; // lashlang `{}_{}`",
                     operation.alias,
                     operation.operation,
-                    typescript_type(operation.input).replace("Record<string, never>", "{}"),
-                    typescript_type(operation.output),
+                    lash_typescript::render_schema_shape(&operation.input)
+                        .replace("Record<string, never>", "{}"),
+                    lash_typescript::render_schema_shape(&operation.output),
                     operation.alias,
                     operation.operation,
                 );
@@ -281,11 +206,11 @@ fn render_host_surface_section(
         let lines = inventory
             .data_types
             .iter()
-            .map(|(name, ty)| {
+            .map(|(name, shape)| {
                 format!(
                     "// {name}\n    type {} = {};",
-                    name.replace('.', "_"),
-                    typescript_type(ty)
+                    lash_typescript::render_type_name(name),
+                    lash_typescript::render_schema_shape(shape)
                 )
             })
             .collect::<Vec<_>>()
@@ -297,11 +222,20 @@ fn render_host_surface_section(
             .constructors
             .iter()
             .map(|constructor| {
+                let output = match &constructor.output {
+                    crate::protocol::prompt::HostSurfaceConstructorOutput::Nominal {
+                        wrapper,
+                        argument,
+                    } => format!("{wrapper}<{}>", lash_typescript::render_type_name(argument)),
+                    crate::protocol::prompt::HostSurfaceConstructorOutput::Shape(shape) => {
+                        lash_typescript::render_schema_shape(shape)
+                    }
+                };
                 format!(
                     "{}(input: {}): {}",
                     constructor.path,
-                    typescript_type(constructor.input),
-                    typescript_nominal_output(&constructor.output)
+                    lash_typescript::render_schema_shape(&constructor.input),
+                    output
                 )
             })
             .collect::<Vec<_>>()
@@ -317,7 +251,7 @@ fn render_host_surface_section(
             .map(|(source_ty, event)| {
                 format!(
                     "- `{source_ty}` is a `triggers.register` `source` and emits `{}`",
-                    typescript_type_name(event)
+                    lash_typescript::render_type_name(event)
                 )
             })
             .collect::<Vec<_>>()
@@ -646,6 +580,116 @@ mod tests {
         for leak in ["list[", "-> str", ": str`", "float`", "trigger.register("] {
             assert!(!section.contains(leak), "`{leak}` leaked: {section}");
         }
+    }
+
+    /// Every type the section shows is spelled by the dialect's one
+    /// renderer, so a named host type reads the same in its declaration and
+    /// in every reference.
+    ///
+    /// The host surface used to spell types from `TypeExpr` text of its own:
+    /// a union — `triggers.list`'s `target` filter — arrived in Lashlang
+    /// notation (`str`, `enum[...]`), and a catalog tool's `$ref` to a host
+    /// data type rendered as `__lash_tool_<hex>`, a name no declaration
+    /// defines. Both rows now read the same `SchemaShape` the tool
+    /// signatures use (FIG-4673).
+    #[test]
+    fn host_surface_types_are_spelled_by_the_dialects_one_renderer() {
+        let mut resources = lashlang::LashlangHostCatalog::new();
+        resources
+            .add_trigger_source_constructor(
+                ["cron", "Schedule"],
+                lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+                    name: "expr".into(),
+                    ty: lashlang::TypeExpr::Str,
+                    optional: false,
+                }]),
+                lashlang::NamedDataType::object(
+                    "cron.Tick",
+                    vec![lashlang::TypeField {
+                        name: "fired_at".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: false,
+                    }],
+                )
+                .expect("valid tick type"),
+            )
+            .expect("cron trigger source");
+        let dialect = SessionDialect::new(
+            std::sync::Arc::new(crate::dialect::TypescriptDialect),
+            lash_lashlang_runtime::LashlangSurface {
+                abilities: lashlang::LashlangAbilities::all(),
+                language_features: Default::default(),
+                resources,
+            },
+            RlmDialectServices {
+                workers: lash_vm_client::service::Service::default(),
+                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
+                deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
+                channel: crate::plugin::RlmChannel::Cell,
+            },
+        );
+        // A catalog tool whose contract names the host's data type: its row
+        // is rendered from the tool's schema and the declaration from the
+        // host catalog, and the model resolves the reference only when the
+        // two spellings agree.
+        let tool = lash_core::ToolDefinition::raw(
+            "tool:probe/read_tick",
+            "read_tick",
+            "Read a tick",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "tick": { "$ref": "cron.Tick" } },
+                "required": ["tick"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "$ref": "cron.Tick" }),
+        )
+        .with_tool_binding(ToolBinding::new(["probe"], "read"));
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+        let section = dialect
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &catalog,
+                crate::plugin::RlmChannel::Cell,
+                None,
+            )
+            .expect("render execution section");
+
+        assert!(section.contains("type cron_Tick ="), "{section}");
+        assert!(
+            section.contains("probe.read({ tick: cron_Tick }): Promise<cron_Tick>"),
+            "a tool row spells a named host type the way its declaration does: {section}"
+        );
+        assert!(
+            !section.contains("__lash_tool_"),
+            "no reference may spell a name no declaration defines: {section}"
+        );
+
+        // `triggers.list`'s `target` filter is a union of records; it used
+        // to arrive in Lashlang notation — `enum[...]` and `str` — a syntax
+        // no TypeScript cell can write.
+        let host_surface = section
+            .split_once("### Host Surface")
+            .expect("host surface")
+            .1;
+        assert!(
+            host_surface.contains("triggers.list(input:"),
+            "{host_surface}"
+        );
+        for leak in ["enum[", "list[", "dict", "->"] {
+            assert!(
+                !host_surface.contains(leak),
+                "Lashlang notation `{leak}` reached the TypeScript prompt: {host_surface}"
+            );
+        }
+        assert!(
+            host_surface.contains("$lash_definition_id: string"),
+            "the union's fields render as TypeScript properties: {host_surface}"
+        );
     }
 
     #[test]

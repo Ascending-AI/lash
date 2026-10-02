@@ -119,6 +119,77 @@ pub fn type_expr_to_json_schema(ty: &TypeExpr) -> Value {
     }
 }
 
+/// A host type as the contract layer's [`lash_sansio::SchemaShape`].
+///
+/// Prompt surfaces never read a `TypeExpr`: they spell the shared shape
+/// model, so this is the projection they start from. It is built directly
+/// rather than through [`type_expr_to_json_schema`], which is a serializer
+/// for contracts and artifacts — it emits `additionalProperties: true` for
+/// every object, where the reading a prompt needs keeps the truth this type
+/// carries: `Object` is a closed record (the importer only builds one from a
+/// closed schema), `Dict` is the open one, and a `Ref` stays a named
+/// reference for the dialect's own name speller.
+pub fn type_expr_to_schema_shape(ty: &TypeExpr) -> lash_sansio::SchemaShape {
+    use lash_sansio::{
+        ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeField, ShapeKind,
+    };
+    let kind = match ty {
+        TypeExpr::Any => ShapeKind::Unknown,
+        TypeExpr::Dict => ShapeKind::Object(ObjectShape {
+            fields: Vec::new(),
+            extra_keys: ExtraKeys::Open(Box::new(SchemaShape::unknown())),
+        }),
+        TypeExpr::Str => ShapeKind::Str,
+        TypeExpr::Int => ShapeKind::Int,
+        TypeExpr::Float => ShapeKind::Float,
+        TypeExpr::Bool => ShapeKind::Bool,
+        TypeExpr::Null => ShapeKind::Null,
+        TypeExpr::Enum(values) => ShapeKind::Literals(
+            values
+                .iter()
+                .map(|value| Value::String(value.to_string()))
+                .collect(),
+        ),
+        TypeExpr::List(item) => ShapeKind::List(Box::new(type_expr_to_schema_shape(item))),
+        TypeExpr::Object(fields) => ShapeKind::Object(ObjectShape {
+            fields: fields
+                .iter()
+                .map(|field| ShapeField {
+                    name: field.name.to_string(),
+                    required: !field.optional,
+                    shape: type_expr_to_schema_shape(&field.ty),
+                })
+                .collect(),
+            extra_keys: ExtraKeys::Closed,
+        }),
+        TypeExpr::Ref(name) => ShapeKind::Named(name.to_string()),
+        TypeExpr::Process(process) => ShapeKind::Process(process.as_signature().map(|signature| {
+            ProcessShape {
+                params: signature
+                    .params()
+                    .iter()
+                    .map(|param| ProcessParamShape {
+                        name: param.name.to_string(),
+                        shape: type_expr_to_schema_shape(&param.ty),
+                    })
+                    .collect(),
+                output: Box::new(type_expr_to_schema_shape(signature.output())),
+            }
+        })),
+        TypeExpr::TriggerHandle(payload) => {
+            ShapeKind::Handle(Box::new(type_expr_to_schema_shape(payload)))
+        }
+        TypeExpr::Union(members) => ShapeKind::Union(
+            members
+                .as_slice()
+                .iter()
+                .map(type_expr_to_schema_shape)
+                .collect(),
+        ),
+    };
+    SchemaShape::from(kind)
+}
+
 #[expect(
     clippy::expect_used,
     reason = "a lash type declaration is a struct of strings and types and always serializes to JSON, per the message"
@@ -738,6 +809,46 @@ mod tests {
         assert_eq!(
             import_schema(&json!({ "$ref": "lash.TriggerRegistration" })),
             TypeExpr::Ref("lash.TriggerRegistration".into())
+        );
+    }
+
+    /// The prompt projection reads `TypeExpr` directly: a `TypeExpr::Object`
+    /// is a *closed* record and `TypeExpr::Dict` the open one, and neither
+    /// reading survives the JSON round-trip — the serializer emits
+    /// `additionalProperties: true` for both, which the shape importer reads
+    /// back as open.
+    #[test]
+    fn schema_shape_projection_keeps_closed_and_open_objects_apart() {
+        use lash_sansio::{ExtraKeys, ShapeKind};
+
+        let closed = type_expr_to_schema_shape(&TypeExpr::Object(vec![
+            field("name", TypeExpr::Str, false),
+            field("tick", TypeExpr::Ref("cron.Tick".into()), true),
+        ]));
+        let ShapeKind::Object(object) = &closed.kind else {
+            panic!("an Object projects to an object shape, not {closed:?}");
+        };
+        assert_eq!(object.extra_keys, ExtraKeys::Closed);
+        assert_eq!(
+            object
+                .fields
+                .iter()
+                .map(|field| (field.name.as_str(), field.required))
+                .collect::<Vec<_>>(),
+            [("name", true), ("tick", false)]
+        );
+        assert_eq!(
+            object.fields[1].shape.kind,
+            ShapeKind::Named("cron.Tick".to_string())
+        );
+
+        let open = type_expr_to_schema_shape(&TypeExpr::Dict);
+        let ShapeKind::Object(object) = &open.kind else {
+            panic!("a Dict projects to an open object shape, not {open:?}");
+        };
+        assert!(
+            matches!(object.extra_keys, ExtraKeys::Open(_)),
+            "Dict stays open, not {open:?}"
         );
     }
 

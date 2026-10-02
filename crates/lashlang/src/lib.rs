@@ -78,7 +78,7 @@ pub use introspection::{
 };
 pub use json_schema::{
     JsonSchemaError, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
-    json_schema_to_type_expr, type_expr_to_json_schema,
+    json_schema_to_type_expr, type_expr_to_json_schema, type_expr_to_schema_shape,
 };
 pub use lash_sansio::MediaType;
 pub use linker::{

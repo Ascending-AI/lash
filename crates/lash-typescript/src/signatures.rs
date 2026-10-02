@@ -62,7 +62,7 @@ pub fn render_schema_shape(shape: &SchemaShape) -> String {
         ),
         ShapeKind::Object(object) => render_object(object),
         ShapeKind::Union(members) => render_union(members.iter().map(render_schema_shape)),
-        ShapeKind::Named(name) => render_identifier(name),
+        ShapeKind::Named(name) => render_type_name(name),
         ShapeKind::Process(None) => "Process".to_string(),
         ShapeKind::Process(Some(signature)) => format!(
             "Process<[{}], {}>",
@@ -193,6 +193,19 @@ fn render_object(object: &ObjectShape) -> String {
         members.push(format!("[key: string]: {extra}"));
     }
     format!("{{ {} }}", members.join("; "))
+}
+
+/// A named host type as an identifier this dialect can write.
+///
+/// Host data types are dotted names (`cron.Tick`): a valid schema `$ref`,
+/// not a valid TypeScript name. The one spelling — dots to underscores —
+/// is used in the `type … =` declaration and in every `ShapeKind::Named`
+/// reference alike, so the model is never shown a name it cannot resolve
+/// against the declaration above it. A name still not writable — a reserved
+/// word, or one colliding with the generated-binding namespace — takes the
+/// generated encoding instead.
+pub fn render_type_name(name: &str) -> String {
+    render_identifier(&name.replace('.', "_"))
 }
 
 fn render_identifier(name: &str) -> String {
