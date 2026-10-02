@@ -769,8 +769,8 @@ class RustRuntimeDocInputTests(unittest.TestCase):
     fails here until `RUST_RUNTIME_DOC_INPUTS` catches up.
     """
 
-    # Leading `./` and `../` are stripped first so a crate-relative
-    # `include_str!("../../../docs/x.md")` is caught too.
+    # Rust includes resolve beside their source. Paths joined to
+    # CARGO_MANIFEST_DIR resolve beside the package manifest.
     LITERAL = re.compile(r'"((?:\.{1,2}/)*(?:docs/[^"\s]+|CONTEXT\.md))"')
 
     @classmethod
@@ -790,9 +790,36 @@ class RustRuntimeDocInputTests(unittest.TestCase):
         for source in self.sources:
             body = source.read_text(encoding="utf-8", errors="replace")
             for match in self.LITERAL.finditer(body):
-                path = re.sub(r"^(?:\.{1,2}/)+", "", match.group(1))
+                literal = match.group(1)
+                normalized = re.sub(r"^(?:\.{1,2}/)+", "", literal)
+                candidates = [source.parent / literal]
+                for parent in source.parents:
+                    if (parent / "Cargo.toml").is_file():
+                        candidates.append(parent / normalized)
+                        break
+                candidates.append(ROOT / normalized)
+                path = next(
+                    (
+                        candidate.resolve().relative_to(ROOT).as_posix()
+                        for candidate in candidates
+                        if candidate.is_file()
+                    ),
+                    normalized,
+                )
                 found.setdefault(path, []).append(source.relative_to(ROOT).as_posix())
         return found
+
+    def test_crate_relative_docs_are_checked_at_their_real_paths(self) -> None:
+        referenced = self.referenced_paths()
+        self.assertIn(
+            "crates/lash/tests/otel_trace_evidence.rs",
+            referenced["crates/lash/docs/instrumentation-contract.md"],
+        )
+        self.assertNotIn("docs/instrumentation-contract.md", referenced)
+        self.assertIn(
+            "crates/lash-typescript/tests/deviation_register.rs",
+            referenced["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
+        )
 
     def test_the_sweep_finds_the_sources_it_is_meant_to_read(self) -> None:
         # A silent zero-hit sweep would be a guard that cannot fail.

@@ -112,6 +112,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
 ]
 
 [[lane]]
