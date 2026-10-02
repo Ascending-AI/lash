@@ -1625,7 +1625,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(
             set(exclusions) - BUCK2_TEST_NAMED_TOOLS,
             {"scripts/test-gate-worktree-concurrency.sh", "scripts/test-mcp-catalog.sh",
-             "scripts/test-restate-workers-trace-scrub.sh"},
+             "scripts/test-restate-workers-trace-scrub.sh",
+             "scripts/test_landing_gates.py"},
         )
         self.assertGreater(len(candidates), 5, "discovery found nothing")
 

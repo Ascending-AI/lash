@@ -236,14 +236,13 @@ name: Extra
 jobs:
   verify:
     runs-on: ubuntu-latest
-    env:
-      LASH_POSTGRES_DATABASE_URL: postgres://lash@localhost/lash
     steps:
-      - run: cargo test
+      - run: cargo test -p lash-sim --test cross_backend_store_differential --locked
 """,
         )
         violations = checker.check_repository(self.root)
         self.assertEqual(len(violations), 1, violations)
+        self.assertIn("extra.yaml", violations[0].path)
 
     def test_a_similarly_named_binary_is_not_matched(self) -> None:
         scripts = self.root / "scripts"

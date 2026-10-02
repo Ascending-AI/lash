@@ -102,7 +102,13 @@ async fn run_fixture(
     )
     .map_err(|error| error.to_string())?;
     let deployment = restate
-        .serve(&engine, engine.endpoint_builder(worker)?.build())
+        .serve(
+            &engine,
+            engine
+                .endpoint_builder(worker)
+                .map_err(|error| error.to_string())?
+                .build(),
+        )
         .await
         .map_err(|error| format!("{error:#}"))?;
     let operation = async {
