@@ -527,6 +527,7 @@ RUST_RUNTIME_DOC_INPUTS = frozenset(
     {
         "crates/lash/docs/instrumentation-contract.md",
         "docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md",
+        "crates/lashlang/docs/ir-specification.md",
     }
 )
 

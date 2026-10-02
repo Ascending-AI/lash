@@ -11,6 +11,8 @@ mod diagnostic_rendering;
 mod functions;
 #[path = "intrinsic_fuel.rs"]
 mod intrinsic_fuel;
+#[path = "ir_spec.rs"]
+mod ir_spec;
 #[path = "language.rs"]
 mod language;
 #[path = "nesting_cap.rs"]
