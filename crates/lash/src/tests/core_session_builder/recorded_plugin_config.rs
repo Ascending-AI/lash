@@ -67,10 +67,6 @@ impl lash_core::ConfigOwner for ProbeOwner {
     type Refusal = ProbeRefusal;
     type RunOptions = lash_core::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "probe-config:1"
-    }
-
     /// The stated cap, or the default of 8.
     fn create(
         &self,

@@ -91,10 +91,6 @@ impl lash_core::ConfigOwner for DialectConfigOwner {
     type Refusal = DialectRefusal;
     type RunOptions = lash_core::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "dialect-owner:1"
-    }
-
     fn create(
         &self,
         input: Option<DialectConfig>,

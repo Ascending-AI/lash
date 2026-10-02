@@ -22,18 +22,17 @@
 //!    (`SessionConfigAdmin::commands`) is generated from the registrations,
 //!    so it needs no edit; the facade's catalog law lists every core
 //!    command name and moves with it.
-//! 4. Bump [`CORE_CONFIG_IMPLEMENTATION`] only when an existing reducer's
-//!    behavior changes; a transaction recorded under the old identity then
-//!    waits for a build that runs it. Adding a command changes no existing
+//! 4. A reducer has no identity of its own: a queued transaction is resolved
+//!    by the build whose lane admits its command root. When an existing
+//!    reducer's behavior changes, bump `JOURNAL_LOGIC_EPOCH`, as for any
+//!    handler logic that moves without a format version, so the changed
+//!    build runs on its own lane. Adding a command changes no existing
 //!    reducer.
 
 use super::{
     CORE_CONFIG_OWNER, CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar,
     ConfigRegistrationError, CoreConfig, CreationFacts, OwnerChange, RegisteredOwner,
 };
-
-/// The core owner's reducer implementation identity.
-pub const CORE_CONFIG_IMPLEMENTATION: &str = "lash-core-config:1";
 
 /// The owner of the session's core config.
 #[derive(Clone, Copy, Debug, Default)]
@@ -121,10 +120,6 @@ impl ConfigOwner for CoreConfigOwner {
     type Recorded = CoreConfig;
     type Refusal = CoreConfigRefusal;
     type RunOptions = super::NoRunOptions;
-
-    fn implementation(&self) -> &str {
-        CORE_CONFIG_IMPLEMENTATION
-    }
 
     /// The core config is created from the session's policy, never through
     /// the owner: this records nothing.

@@ -736,6 +736,7 @@ pub mod persistence {
 /// Plugin contracts, manifests, and operation types.
 pub mod plugins {
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::ConfigRegistry;
     pub use lash_core::plugin::{
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, CompactionSystemPrompt,
         DecidedContextPressure, PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture,
@@ -758,7 +759,6 @@ pub mod plugins {
         DefinitionAcquisition, RecordedKeyFence, ReferrerAcquisition, RefusedWriteRange,
         ResolvedProcessDefinition, ServedOnlyRange, WeakProcessEngineRegistry,
     };
-    pub use lash_core::{ConfigImplementationMismatch, ConfigRegistry};
     pub use lash_core_store::session_identity::FrameNodeIdError;
     pub use lash_core_worker::execution::runtime::ProcessExecutionEnvLoadError;
     pub use lash_protocol_standard::BatchSugar;

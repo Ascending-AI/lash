@@ -6,9 +6,7 @@ use super::*;
 /// A counter owner: it records a count and a label set at creation. The
 /// label has no command, so it is immutable; `Increment` adds to the count
 /// and refuses to pass `limit`, and the final candidate may not exceed 100.
-struct CounterOwner {
-    implementation: &'static str,
-}
+struct CounterOwner;
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -47,10 +45,6 @@ impl ConfigOwner for CounterOwner {
     type Recorded = CounterConfig;
     type Refusal = CounterRefusal;
     type RunOptions = CounterRun;
-
-    fn implementation(&self) -> &str {
-        self.implementation
-    }
 
     fn create(
         &self,
@@ -134,7 +128,6 @@ impl ConfigCommand for Increment {
 
 struct CounterFactory {
     id: &'static str,
-    implementation: &'static str,
     reductions: Arc<AtomicUsize>,
 }
 
@@ -142,7 +135,6 @@ impl CounterFactory {
     fn new(id: &'static str) -> Self {
         Self {
             id,
-            implementation: "counter:1",
             reductions: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -167,9 +159,7 @@ impl PluginFactory for CounterFactory {
     }
 
     fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
-        reg.owner(CounterOwner {
-            implementation: self.implementation,
-        })?;
+        reg.owner(CounterOwner)?;
         let reductions = Arc::clone(&self.reductions);
         reg.command::<Increment>(move |recorded, command| {
             reductions.fetch_add(1, Ordering::SeqCst);
@@ -331,8 +321,13 @@ fn ingress_refuses_unknown_owners_commands_and_arguments_typed() {
         .admit("t", 0, vec![increment("first", 1, 10)])
         .expect("admitted");
     assert_eq!(
-        admitted.implementations,
-        BTreeMap::from([("first".to_string(), "counter:1".to_string())])
+        admitted,
+        ConfigTransactionRecord {
+            id: "t".to_string(),
+            expected_revision: 0,
+            entries: vec![increment("first", 1, 10)],
+        },
+        "the record is the submitter's request and nothing of this build"
     );
 }
 
@@ -482,7 +477,6 @@ fn refused_over(
         id: "t".to_string(),
         expected_revision: base.config_revision,
         entries: vec![entry],
-        implementations: BTreeMap::new(),
     };
     let resolution = registry
         .resolve(base, &transaction, &crate::EmptyLlmProfiles)
@@ -748,28 +742,6 @@ fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
         ),
         "the core share is no namespace a run's options apply to"
     );
-}
-
-#[test]
-fn a_transaction_admitted_under_other_reducers_is_not_resolved_here() {
-    let (registry, _, _) = counters();
-    let transaction = registry
-        .admit("t", 0, vec![increment("first", 1, 10)])
-        .expect("admitted");
-    let mut rebuilt = CounterFactory::new("first");
-    rebuilt.implementation = "counter:2";
-    let rebuilt = self::registry(vec![Arc::new(rebuilt)]);
-    assert_eq!(
-        rebuilt.check_implementations(&transaction),
-        Err(ConfigImplementationMismatch {
-            owner: "first".to_string(),
-            recorded: "counter:1".to_string(),
-            current: Some("counter:2".to_string()),
-        })
-    );
-    registry
-        .check_implementations(&transaction)
-        .expect("the admitting registry runs its own reducers");
 }
 
 #[test]

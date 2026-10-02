@@ -187,10 +187,6 @@ impl crate::ConfigOwner for FactsOwner {
     type Refusal = String;
     type RunOptions = crate::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "conformance-recorded-facts:1"
-    }
-
     fn create(
         &self,
         input: Option<FactsConfig>,

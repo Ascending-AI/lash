@@ -718,11 +718,10 @@ pub use llm_profile::{
     LlmProfileMetadataBuilder, ReasoningRefused, RecordedLlmProfile,
 };
 pub use plugin::{
-    AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
-    ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
-    ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
-    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationConfigError, CreationFacts,
-    NoRunOptions, OwnerChange, PluginConfig,
+    AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
+    ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
+    ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
+    CreationConfigError, CreationFacts, NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,

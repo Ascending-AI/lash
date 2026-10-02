@@ -1344,31 +1344,6 @@ impl RuntimeError {
         )
     }
 
-    /// The typed refusal of a config transaction whose resolution a build
-    /// would run with other reducers than it was admitted under (FIG-4379):
-    /// an owner's reducer implementation is part of the executable identity
-    /// an unresolved transaction binds. Its command root parks before any
-    /// reducer runs, for a build that runs the admitted reducers.
-    pub fn retired_config_reducer(owner: &str, recorded: &str, current: Option<&str>) -> Self {
-        let current_spelling = current.unwrap_or("none");
-        Self::refused_generation(
-            ExecutableGenerationRefusal {
-                found: Some(ExecutableGeneration::new(format!(
-                    "config-owner:{owner}:{recorded}"
-                ))),
-                current: current.map(|current| {
-                    ExecutableGeneration::new(format!("config-owner:{owner}:{current}"))
-                }),
-            },
-            format!(
-                "the config transaction was admitted under config owner `{owner}`'s reducer \
-                 implementation {recorded}, and this build runs {current_spelling}: its \
-                 resolution was refused before any reducer ran; resolve it under a build that \
-                 runs {recorded}, or cancel it"
-            ),
-        )
-    }
-
     fn refused_generation(refusal: ExecutableGenerationRefusal, message: String) -> Self {
         let mut error = Self::new(RuntimeErrorCode::RetiredGeneration, message);
         error.executable_generation_refusal = Some(Box::new(refusal));

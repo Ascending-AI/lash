@@ -40,10 +40,6 @@ impl lash_core::ConfigOwner for LineageOwner {
     type Refusal = LineageRefusal;
     type RunOptions = lash_core::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "lineage:1"
-    }
-
     fn create(
         &self,
         _input: Option<LineageConfig>,

@@ -51,12 +51,11 @@ pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
     ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
-    RLM_CONFIG_IMPLEMENTATION, RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner,
-    RlmConfigRefusal, RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig,
-    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
-    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmPrompt,
-    SetRlmPromptContext, SetRlmRender, UnsetBound, UnsetChannel, rlm_lashlang_surface,
-    rlm_protocol_config, rlm_session_config,
+    RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner, RlmConfigRefusal,
+    RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmProtocolPluginFactory, RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal,
+    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
+    UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
 };
 pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,

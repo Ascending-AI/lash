@@ -268,9 +268,6 @@ impl TryFrom<serde_json::Value> for StandardRunOptions {
     }
 }
 
-/// The identity of the standard owner's reducers.
-pub const STANDARD_CONFIG_IMPLEMENTATION: &str = "lash-standard-config:1";
-
 /// The standard protocol's config owner: it records the creator's render
 /// options, its prompt and this host's configured behaviour. Its render and
 /// prompt commands keep the behaviour pinned.
@@ -334,10 +331,6 @@ impl ConfigOwner for StandardConfigOwner {
     type Recorded = StandardRecordedConfig;
     type Refusal = StandardConfigRefusal;
     type RunOptions = StandardRunOptions;
-
-    fn implementation(&self) -> &str {
-        STANDARD_CONFIG_IMPLEMENTATION
-    }
 
     /// Every session records its namespace: the creator's render options,
     /// or none, under which the recorded render applies, and its

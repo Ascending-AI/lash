@@ -290,9 +290,9 @@ fact (target session, process, sequence, event type, input, authority and
 cause) rather than host-configured delivery policy, merge key or delivery
 metadata. A command's digest covers the command, its delivery policy, its
 authority and its merge key. A config transaction command's digest covers
-its id, the revision it was written against and its ordered commands, never
-the reducer identities ingress stamped on it, so a resubmission from another
-build is the same request; the lane refuses a changed one as
+its id, the revision it was written against and its ordered commands, and
+the record holds nothing of the build that took it, so a resubmission from
+another build is the same request; the lane refuses a changed one as
 `ConfigSubmitError::ChangedContent`. System source-key namespaces belong to
 their item kinds.
 Admission reserves `command:` for session commands and `process:` for process

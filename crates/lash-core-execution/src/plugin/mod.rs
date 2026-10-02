@@ -43,11 +43,10 @@ pub use actions::{
     PluginTaskContext, ProcessReadService, SessionParam, SessionReadService,
 };
 pub use config::{
-    AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
-    ConfigCommandCatalog, ConfigCommandDescriptor, ConfigImplementationMismatch, ConfigOwner,
-    ConfigRegistrar, ConfigRegistrationError, ConfigRegistry, ConfigSubmitError, ConfigTransaction,
-    ConfigWire, CoreConfigOwner, CoreConfigRefusal, CreationConfigError, CreationFacts,
-    NoRunOptions, OwnerChange, PluginConfig,
+    AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
+    ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
+    ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
+    CreationConfigError, CreationFacts, NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use error::{
     PluginError, PluginErrorClass, ToolIntentCommandFailure, ToolIntentRuntimeFailure,

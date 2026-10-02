@@ -4,8 +4,7 @@
 //! list of typed commands, each owned by the core owner or by an installed
 //! plugin's [`ConfigOwner`](crate::plugin::ConfigOwner). Ingress admits the
 //! transaction against the host's config registry (every owner and command
-//! registered, every argument decoding), records the reducer implementation
-//! of every owner it names, and enqueues it as
+//! registered, every argument decoding) and enqueues it as
 //! [`SessionCommand::ApplyConfigTransaction`](crate::SessionCommand) under
 //! the caller's stable id. Nothing is judged against the session's config
 //! at ingress: submission completes while a root owns the head, and the
@@ -20,11 +19,11 @@
 //!    drain scope, resolves the transaction over the boundary's config: a
 //!    stale base, an owner's typed refusal, or every touched owner's
 //!    complete replacement with each command's output. Its first execution
-//!    runs the reducers only when this build runs the implementations the
-//!    transaction was admitted under; otherwise the attempt ends unrecorded,
-//!    typed [`RuntimeErrorCode::RetiredGeneration`], and the command root
-//!    parks for a build that does. A replay reads the resolution back and
-//!    never runs a reducer again, whatever code the build now runs.
+//!    runs this build's reducers: an owner's reducers are its plugin's
+//!    behaviour, which the build generation hashes (FIG-4791), so the lane
+//!    that admitted the command root is the one whose reducers decide it,
+//!    and a redrive of the root stays on that lane. A replay reads the
+//!    resolution back and never runs a reducer again.
 //! 2. One fenced commit publishes the recorded resolution, advances
 //!    `config_revision` exactly once when it applied, and settles the
 //!    command with its [`ConfigTransactionOutcome`]. A stale or refused
@@ -87,8 +86,7 @@ impl LashRuntime {
 
     /// Admit `transaction` under the caller's stable `id`, written against
     /// `expected_revision`: every command's owner and name registered and
-    /// every argument decoding, with the reducer implementation of every
-    /// named owner.
+    /// every argument decoding.
     fn admit_config_transaction(
         &self,
         id: String,
@@ -306,7 +304,6 @@ impl LashRuntime {
     ) -> Result<crate::ConfigResolution, RuntimeError> {
         let session_id = self.state.session_id.clone();
         let registry = self.config_registry()?;
-        let mismatch = registry.check_implementations(transaction).err();
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 controller.execution_scope().clone(),
@@ -319,7 +316,6 @@ impl LashRuntime {
             registry,
             base: crate::store::persisted_session_config_from_state(&self.state),
             transaction: transaction.clone(),
-            mismatch: mismatch.clone(),
             models: Arc::clone(&self.host.core.providers.models),
         };
         controller
@@ -335,18 +331,7 @@ impl LashRuntime {
             )
             .await
             .and_then(crate::RuntimeEffectOutcome::into_config_resolution)
-            .map_err(
-                |error| match (&mismatch, error.code == RuntimeErrorCode::RetiredGeneration) {
-                    // The typed refusal the command root parks on, with the
-                    // reducer identities it names.
-                    (Some(mismatch), true) => RuntimeError::retired_config_reducer(
-                        &mismatch.owner,
-                        &mismatch.recorded,
-                        mismatch.current.as_deref(),
-                    ),
-                    _ => error.into_runtime_error(),
-                },
-            )
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)
     }
 }
 
@@ -385,9 +370,6 @@ struct ResolveConfigTransactionRunner {
     registry: Arc<crate::ConfigRegistry>,
     base: crate::PersistedSessionConfig,
     transaction: crate::ConfigTransactionRecord,
-    /// The owner whose installed reducer is not the one the transaction was
-    /// admitted under, when one is not.
-    mismatch: Option<crate::ConfigImplementationMismatch>,
     /// The host's models a model command mints its key's binding through.
     models: Arc<dyn crate::LlmProfiles>,
 }
@@ -419,17 +401,6 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
                     self.transaction.id
                 ),
             ));
-        }
-        // Resolving with other reducers than the transaction was admitted
-        // under would decide it with code it was not admitted to run. The
-        // attempt ends unrecorded, and the command root parks until a build
-        // that runs the admitted reducers resolves it.
-        if let Some(mismatch) = self.mismatch {
-            return Err(crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::RetiredGeneration,
-                mismatch.to_string(),
-            )
-            .retryable_uncommitted_derivation());
         }
         // A recorded namespace its owner cannot read is corruption of the
         // session's config, never this transaction's refusal.

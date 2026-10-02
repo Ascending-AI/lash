@@ -850,10 +850,6 @@ impl lash_core::ConfigOwner for DefaultsOwner {
     type Refusal = String;
     type RunOptions = lash_core::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "partial-create-defaults:1"
-    }
-
     fn create(
         &self,
         input: Option<DefaultsConfig>,

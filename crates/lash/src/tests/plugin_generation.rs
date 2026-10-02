@@ -11,10 +11,17 @@
 //!   with the plugin's revision bumped, as a deployment of its own with its
 //!   own plugins, and N is marked draining. The root in flight finishes on N
 //!   under N's plugin; every root after it runs on N+1 under N+1's.
+//! - A config owner's reducers are its plugin's behaviour (FIG-4791): builds
+//!   that differ only in them differ in `G`, and a config transaction is
+//!   resolved by the build whose lane admits its command root. One admitted
+//!   on build N resolves there under N's reducers; one submitted through N
+//!   and still queued when N drains is admitted and resolved on N+1 under
+//!   N+1's. Neither parks.
 //!
 //! The generation laws build real engines whose generation the core binds.
-//! The in-flight law runs on the Restate server double over SQLite memory,
-//! SQLite file and PostgreSQL, each build stamped with the generation its
+//! The config law runs on the Restate server double over SQLite memory. The
+//! in-flight law runs on the double over SQLite memory, SQLite file and
+//! PostgreSQL, each build stamped with the generation its
 //! composition computes; the PostgreSQL leg is ignored in ordinary runs and
 //! requires `LASH_POSTGRES_DATABASE_URL`.
 
@@ -444,4 +451,252 @@ in_flight_laws! {
     in_flight_segments_finish_on_the_old_build_sqlite_file: Storage::SqliteFile;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     in_flight_segments_finish_on_the_old_build_postgres: Storage::Postgres;
+}
+
+/// The namespace of the config law's owner: how much its reducers added.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct Tally {
+    total: u32,
+}
+
+/// The owner of [`PLUGIN`]'s namespace. It refuses nothing.
+struct TallyOwner;
+
+impl lash_core::ConfigOwner for TallyOwner {
+    type Create = Tally;
+    type Recorded = Tally;
+    type Refusal = String;
+    type RunOptions = lash_core::NoRunOptions;
+
+    fn create(
+        &self,
+        input: Option<Tally>,
+        _facts: lash_core::CreationFacts<'_, Tally>,
+    ) -> std::result::Result<Option<Tally>, String> {
+        Ok(Some(input.unwrap_or(Tally { total: 0 })))
+    }
+
+    fn validate(
+        &self,
+        _value: &Tally,
+        _base: Option<&Tally>,
+        _facts: &lash_core::CandidateFacts<'_>,
+    ) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    fn apply_run_options(
+        &self,
+        recorded: &Tally,
+        _options: lash_core::NoRunOptions,
+    ) -> std::result::Result<Tally, String> {
+        Ok(recorded.clone())
+    }
+}
+
+/// Add to the tally. What it adds is the reducer's: the revision of the
+/// build that resolves it, which is also its output.
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, lash_core::facade_support::JsonSchema,
+)]
+#[schemars(crate = "lash_core::facade_support::schemars")]
+#[serde(deny_unknown_fields)]
+struct Count {}
+
+impl lash_core::ConfigCommand for Count {
+    type Owner = TallyOwner;
+    type Output = u32;
+    const NAME: &'static str = "count";
+}
+
+/// [`PLUGIN`] at behaviour `revision`, owning a config namespace whose
+/// reducers are that revision's.
+struct Tallying {
+    revision: u32,
+}
+
+impl lash_core::facade_support::PluginFactory for Tallying {
+    fn id(&self) -> &'static str {
+        PLUGIN
+    }
+
+    fn declaration(&self) -> PluginDeclaration {
+        let mut declaration = PluginDeclaration::initial(PLUGIN);
+        declaration.behavior_revision =
+            BehaviorRevision::new(self.revision).expect("a revision counts from one");
+        declaration
+    }
+
+    fn build(
+        &self,
+        ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        named(PLUGIN).build(ctx)
+    }
+
+    fn register_config(
+        &self,
+        registrar: &mut lash_core::ConfigRegistrar,
+    ) -> std::result::Result<(), lash_core::ConfigRegistrationError> {
+        let revision = self.revision;
+        registrar.owner(TallyOwner)?;
+        registrar.command::<Count>(move |recorded, Count {}| {
+            Ok(lash_core::OwnerChange {
+                recorded: Tally {
+                    total: recorded.total + revision,
+                },
+                output: revision,
+            })
+        })
+    }
+}
+
+fn tallying(revision: u32) -> Arc<dyn PluginFactory> {
+    Arc::new(Tallying { revision })
+}
+
+/// FIG-4791: builds N and N+1 differ only in a config owner's reducers,
+/// which is a bump of its plugin's behaviour revision and so another `G`.
+/// A transaction whose command root N admits resolves on N under N's
+/// reducers. One submitted through N and still queued when N+1 registers and
+/// N drains is admitted by N+1, resolves there under N+1's reducers and
+/// settles: no root of the session parks.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_config_transaction_resolves_on_the_lane_that_admits_it() -> Result<()> {
+    let old_generation = generation_of(vec![tallying(1)]).await;
+    let next_generation = generation_of(vec![tallying(2)]).await;
+    assert_ne!(
+        old_generation, next_generation,
+        "an owner's reducers are its plugin's behaviour, which names the lane"
+    );
+
+    let (opening, _keep) = prepare(Storage::SqliteMemory).await;
+    let double = lash_restate_test::backend_with_store_set(
+        SEED,
+        lash_restate_test::ServerConfig {
+            build_generation: old_generation.clone(),
+            ..lash_restate_test::ServerConfig::default()
+        },
+        lash_restate_test::DeploymentHooks::default(),
+        |clock| async move {
+            open(opening, clock, DrainLever::default())
+                .await
+                .map_err(lash_restate_test::BackendError::Stores)
+        },
+    )
+    .await
+    .expect("the Restate double over the law's stores");
+    let model = Arc::new(Model::holding(0));
+    let old_core = deployed(
+        double.lash_backend(),
+        double.explicit_reconcile_session_work(),
+        vec![tallying(1)],
+        &model,
+    );
+    assert_eq!(old_core.build_generation(), &old_generation);
+
+    let session = "config-owner-generation";
+    let handle = old_core.session(session).created().await.open().await?;
+    let session_id = lash_core::SessionId::from(session);
+    let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
+        .await?
+        .expect("an opened session has a store");
+    let port = old_core.substrate_slot.ports().await.queued;
+    let config = handle.admin().config();
+
+    // Submit one `Count` through build N's ingress, drive the session once
+    // from N, and read how the transaction settled.
+    let count = async |id: &str| -> Result<crate::config::ConfigTransactionOutcome> {
+        let revision = config.revision().await?;
+        let crate::config::ConfigSettlement::Pending(receipt) = config
+            .submit(
+                crate::config::ConfigWrite::new(id, revision),
+                crate::config::ConfigTransaction::of(Count {}),
+            )
+            .await?
+        else {
+            panic!("a store-backed session queues its transaction");
+        };
+        let request = DriveRequestId::new(id);
+        port.schedule_drive(&session_id, request.clone());
+        let outcome = tokio::time::timeout(WEDGE, port.await_drive(&session_id, &request))
+            .await
+            .expect("the drive ends")
+            .expect("the drive is not refused");
+        assert_eq!(outcome.stop, DriveStop::Idle, "{id}: {outcome:?}");
+        assert_eq!(
+            store.load_turn_park().await.expect("read the park"),
+            None,
+            "{id}: the command root never parks"
+        );
+        match config.settle(receipt).await? {
+            crate::config::ConfigSettlement::Settled(outcome) => Ok(outcome),
+            unsettled => panic!("{id}: the drive settles the transaction: {unsettled:?}"),
+        }
+    };
+
+    // N is the only build: it admits the transaction's root and its
+    // reducers resolve it.
+    assert_eq!(
+        count("on-n").await?,
+        crate::config::ConfigTransactionOutcome::Applied {
+            base_revision: 0,
+            revision: 1,
+            outputs: vec![serde_json::json!(1)],
+        }
+    );
+
+    // The roll: N+1 registers with the owner's reducers changed, and N is
+    // marked draining.
+    let next = double
+        .add_separate_build(
+            next_generation.clone(),
+            "next",
+            lash_restate_test::DeploymentHooks::default(),
+        )
+        .await
+        .expect("register build N+1 on the double");
+    let next_core = deployed(
+        next.lash_backend(),
+        next.explicit_reconcile_session_work(),
+        vec![tallying(2)],
+        &model,
+    );
+    assert_eq!(next_core.build_generation(), &next_generation);
+    assert!(
+        double
+            .lash_backend()
+            .generation_drain()
+            .mark_draining(&old_generation, 1)
+            .await
+            .expect("mark build N draining"),
+        "the law's mark is N's first"
+    );
+
+    // N's ingress still takes the submission. N+1's lane admits its root, so
+    // N+1's reducers resolve it, and it settles.
+    assert_eq!(
+        count("after-the-roll").await?,
+        crate::config::ConfigTransactionOutcome::Applied {
+            base_revision: 1,
+            revision: 2,
+            outputs: vec![serde_json::json!(2)],
+        }
+    );
+    drop(next_core);
+    drop(old_core);
+    Ok(())
 }

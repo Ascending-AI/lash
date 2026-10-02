@@ -1110,10 +1110,6 @@ impl lash_core::ConfigOwner for InheritingCapConfigOwner {
     type Refusal = CapRefusal;
     type RunOptions = lash_core::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "inheriting-cap:1"
-    }
-
     /// The stated cap, else the parent's, else 1.
     fn create(
         &self,

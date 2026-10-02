@@ -39,9 +39,6 @@ use super::RlmProtocolPluginConfig;
 use super::channel::RlmChannel;
 use super::config::RlmRecordedBehaviour;
 
-/// The identity of the RLM owner's reducers.
-pub const RLM_CONFIG_IMPLEMENTATION: &str = "lash-rlm-config:1";
-
 /// The RLM namespace a session records.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
@@ -217,10 +214,6 @@ impl ConfigOwner for RlmConfigOwner {
     type Recorded = RlmRecordedConfig;
     type Refusal = RlmConfigRefusal;
     type RunOptions = RlmRunOptions;
-
-    fn implementation(&self) -> &str {
-        RLM_CONFIG_IMPLEMENTATION
-    }
 
     /// The creator's stated facts, the presentation format a root or child
     /// session defaults to, this host's channel and dialect, and the

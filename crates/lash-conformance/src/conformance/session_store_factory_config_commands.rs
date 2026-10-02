@@ -373,10 +373,6 @@ fn config_transaction_command(model: &str) -> crate::SessionCommand {
                 command: "set_llm_profile".to_string(),
                 args: serde_json::json!({ "model": model }),
             }],
-            implementations: std::collections::BTreeMap::from([(
-                crate::CORE_CONFIG_OWNER.to_string(),
-                crate::CORE_CONFIG_IMPLEMENTATION.to_string(),
-            )]),
         }),
     }
 }

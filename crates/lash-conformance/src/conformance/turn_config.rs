@@ -1338,10 +1338,6 @@ where
     type Refusal = String;
     type RunOptions = crate::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "conformance-shaped-config:1"
-    }
-
     fn create(
         &self,
         input: Option<R>,

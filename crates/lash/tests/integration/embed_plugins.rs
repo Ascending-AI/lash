@@ -49,10 +49,6 @@ impl lash::plugins::ConfigOwner for TestConfigOwner {
     type Refusal = String;
     type RunOptions = lash::plugins::NoRunOptions;
 
-    fn implementation(&self) -> &str {
-        "test_typed:1"
-    }
-
     fn create(
         &self,
         input: Option<TestPluginConfig>,

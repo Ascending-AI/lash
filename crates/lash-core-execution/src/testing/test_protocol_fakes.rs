@@ -185,10 +185,6 @@ impl ConfigOwner for TestCodeConfigOwner {
     type Refusal = TestCodeConfigRefusal;
     type RunOptions = TestCodeCreateExtras;
 
-    fn implementation(&self) -> &str {
-        "test-code-protocol:1"
-    }
-
     fn create(
         &self,
         input: Option<TestCodeCreateExtras>,

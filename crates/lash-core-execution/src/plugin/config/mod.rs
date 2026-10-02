@@ -21,6 +21,12 @@
 //!   over one private candidate, into a recorded
 //!   [`ConfigResolution`], which one fenced commit publishes with one config
 //!   revision step ([`ConfigRegistry::resolve`]).
+//! - An owner's reducers are its plugin's behaviour (FIG-4791): a change to
+//!   them is a bump of the plugin's declared
+//!   [`behavior_revision`](super::PluginDeclaration::behavior_revision),
+//!   which the build generation hashes. They have no identity of their own
+//!   and a transaction records none: the build whose lane admits its command
+//!   root resolves it, and a redrive of that root stays on that lane.
 //!
 //! The [`ConfigRegistry`] holds every registration: the one list the
 //! resolver, the ingress check and the [catalog](ConfigRegistry::catalog)
@@ -33,7 +39,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-pub use self::core::{CORE_CONFIG_IMPLEMENTATION, CoreConfigOwner, CoreConfigRefusal};
+pub use self::core::{CoreConfigOwner, CoreConfigRefusal};
 pub use lash_core_store::config_transaction::{
     CORE_CONFIG_OWNER, ConfigCommandEntry, ConfigFault, ConfigRefusal, ConfigRefusalReason,
     ConfigResolution, ConfigResolutionDecision, ConfigTransactionOutcome, ConfigTransactionRecord,
@@ -89,12 +95,6 @@ pub trait ConfigOwner: Send + Sync + 'static {
     /// run that states one does not decode, whatever value it states. An
     /// owner whose namespace no run overrides uses [`NoRunOptions`].
     type RunOptions: ConfigWire;
-
-    /// The identity of this owner's reducers. A config transaction records
-    /// the identity each named owner ran at ingress; a drain that runs a
-    /// different identity resolves nothing and waits for a build that runs
-    /// the recorded one.
-    fn implementation(&self) -> &str;
 
     /// The namespace a session being created records: the creator's input,
     /// this owner's defaults, and what a child inherits from `facts.parent`.
@@ -330,7 +330,6 @@ pub struct ConfigCommandCatalog {
 }
 
 trait ErasedOwner: Send + Sync {
-    fn implementation(&self) -> String;
     fn refusal_schema(&self) -> serde_json::Value;
     fn create(
         &self,
@@ -419,10 +418,6 @@ fn corrupt(owner_id: &str, error: impl std::fmt::Display) -> RecordedNamespaceCo
 }
 
 impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
-    fn implementation(&self) -> String {
-        self.0.implementation().to_string()
-    }
-
     fn refusal_schema(&self) -> serde_json::Value {
         schema_of::<O::Refusal>()
     }
@@ -695,20 +690,6 @@ pub enum ConfigSubmitError {
     Registration(ConfigRegistrationError),
 }
 
-/// A recorded transaction's owners run reducers other than the ones it was
-/// admitted under: resolving it here would decide it with code it was not
-/// admitted to run, so it waits for a build that runs the recorded ones.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "config owner `{owner}` runs reducer implementation {current:?}, but the transaction was \
-     admitted under {recorded:?}"
-)]
-pub struct ConfigImplementationMismatch {
-    pub owner: String,
-    pub recorded: String,
-    pub current: Option<String>,
-}
-
 /// An ordered config transaction a host builds: typed commands, each carried
 /// to the owner that registered its type, and named entries a remote caller
 /// supplies with their owner.
@@ -867,8 +848,8 @@ impl ConfigRegistry {
     }
 
     /// Admit a transaction at ingress: every command names a registered
-    /// owner and command and its arguments decode. The record carries each
-    /// named owner's reducer implementation.
+    /// owner and command and its arguments decode. The record carries the
+    /// submitter's request and nothing of this build.
     pub fn admit(
         &self,
         id: impl Into<String>,
@@ -878,7 +859,6 @@ impl ConfigRegistry {
         if entries.is_empty() {
             return Err(ConfigSubmitError::Empty);
         }
-        let mut implementations = BTreeMap::new();
         for entry in &entries {
             let command = self.command(&entry.owner, &entry.command)?;
             command
@@ -888,15 +868,11 @@ impl ConfigRegistry {
                     command: entry.command.clone(),
                     detail,
                 })?;
-            if let Some(registered) = self.owners.get(&entry.owner) {
-                implementations.insert(entry.owner.clone(), registered.owner.implementation());
-            }
         }
         Ok(ConfigTransactionRecord {
             id: id.into(),
             expected_revision,
             entries,
-            implementations,
         })
     }
 
@@ -962,28 +938,6 @@ impl ConfigRegistry {
                 }
             })
             .collect()
-    }
-
-    /// Whether this registry runs the reducers `transaction` was admitted
-    /// under.
-    pub fn check_implementations(
-        &self,
-        transaction: &ConfigTransactionRecord,
-    ) -> Result<(), ConfigImplementationMismatch> {
-        for (owner, recorded) in &transaction.implementations {
-            let current = self
-                .owners
-                .get(owner)
-                .map(|registered| registered.owner.implementation());
-            if current.as_deref() != Some(recorded.as_str()) {
-                return Err(ConfigImplementationMismatch {
-                    owner: owner.clone(),
-                    recorded: recorded.clone(),
-                    current,
-                });
-            }
-        }
-        Ok(())
     }
 
     /// Resolve `transaction` over `base`, the session's config at the

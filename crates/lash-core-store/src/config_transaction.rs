@@ -5,8 +5,7 @@
 //! the reserved core owner or an installed plugin — with its arguments. The
 //! transaction rides the session's command lane as
 //! [`SessionCommand::ApplyConfigTransaction`](crate::queued_work_vocabulary::SessionCommand), carrying
-//! the config revision its submitter wrote it against and the reducer
-//! implementation each named owner ran at ingress.
+//! the config revision its submitter wrote it against.
 //!
 //! At the command drain the transaction is resolved once and the resolution
 //! is recorded before anything publishes ([`ConfigResolution`]): either the
@@ -106,10 +105,6 @@ pub struct ConfigTransactionRecord {
     pub expected_revision: u64,
     /// The commands, applied in order to one private candidate.
     pub entries: Vec<ConfigCommandEntry>,
-    /// Each named owner's reducer implementation identity at ingress. A
-    /// drain whose installed owners differ resolves nothing and waits for a
-    /// build that runs these reducers.
-    pub implementations: BTreeMap<String, String>,
 }
 
 impl ConfigTransactionRecord {
@@ -525,10 +520,10 @@ mod tests {
         }
     }
 
-    /// The digest names what the submitter asked for, never the reducer
-    /// identities ingress stamped on it.
+    /// The digest names what the submitter asked for: the revision it wrote
+    /// against and its ordered commands.
     #[test]
-    fn the_digest_covers_the_request_and_not_the_admitted_implementations() {
+    fn the_digest_covers_the_revision_and_the_ordered_commands() {
         let entry = ConfigCommandEntry {
             owner: "counter".to_string(),
             command: "increment".to_string(),
@@ -538,11 +533,6 @@ mod tests {
             id: "tx".to_string(),
             expected_revision: 4,
             entries: vec![entry.clone()],
-            implementations: BTreeMap::from([("counter".to_string(), "a".to_string())]),
-        };
-        let restamped = ConfigTransactionRecord {
-            implementations: BTreeMap::from([("counter".to_string(), "b".to_string())]),
-            ..record.clone()
         };
         let rewritten = ConfigTransactionRecord {
             expected_revision: 5,
@@ -560,7 +550,7 @@ mod tests {
         };
 
         let digest = record.digest().expect("digest");
-        assert_eq!(restamped.digest().expect("digest"), digest);
+        assert_eq!(record.clone().digest().expect("digest"), digest);
         assert_ne!(rewritten.digest().expect("digest"), digest);
         assert_ne!(reordered.digest().expect("digest"), digest);
     }

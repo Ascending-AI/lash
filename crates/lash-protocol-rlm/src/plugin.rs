@@ -17,9 +17,8 @@ pub use config::{
     UnsetChannel,
 };
 pub use config_owner::{
-    RLM_CONFIG_IMPLEMENTATION, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
-    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, SetRlmPrompt, SetRlmPromptContext,
-    SetRlmRender,
+    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, RlmRenderRefusal,
+    RlmRunOptions, SetRlmPrompt, SetRlmPromptContext, SetRlmRender,
 };
 pub use config_types::{
     ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,
