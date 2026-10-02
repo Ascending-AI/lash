@@ -1427,6 +1427,26 @@ async fn mismatched_handle(server: HarnessServer) {
         after.iter().map(|run| &run.id).collect::<Vec<_>>(),
         vec![&paused[0].id]
     );
+    // The refusals took nothing from the handle: under its own session it
+    // still resumes the run, which commits the root and ends the drive.
+    f.driver.restored.store(true, Ordering::SeqCst);
+    let own = RootRef {
+        session: f.driver.session.clone(),
+        root: f.driver.root.clone(),
+    };
+    assert_eq!(
+        control
+            .resume_root(&own, Some(&handle), &[])
+            .await
+            .expect("a resume under the run's own session"),
+        EngineAck::Resumed
+    );
+    let outcome = f
+        .attach_within(DriveRequestId::new("initial"))
+        .await
+        .expect("the resumed drive ends");
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(f.driver.commits.load(Ordering::SeqCst), 1);
     f.finish().await;
 }
 
