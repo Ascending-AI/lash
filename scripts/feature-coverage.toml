@@ -323,6 +323,22 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "rlm,testing", "--locked"],
 ]
 
+# The exact facade combination Figments builds lash-runtime with. A compile
+# break that only shows under `otel-trace` in this resolution
+# (`lash-internal-core-execution`'s intent_executor.rs) once reached main and
+# blocked Figments' re-pin: the per-feature lanes each leave one of these
+# features off. The lane owns no coverage rows -- every feature it combines
+# already has its ON/OFF witnesses in the `runtime-features` and
+# `otel-feature-chain` lanes, and a coverage row's exact-ON command could not
+# carry the seven-feature set anyway.
+[[lane]]
+name = "figments-facade"
+features = []
+commands = [
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,postgres,restate,openai,typescript,testing,otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm,postgres,restate,openai,typescript,testing,otel-trace", "--locked"],
+]
+
 [[lane]]
 name = "protocol-rlm-testing"
 features = [

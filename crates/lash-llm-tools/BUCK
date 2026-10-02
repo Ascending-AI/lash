@@ -146,6 +146,31 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-llm-tools__fv_74f7cb7b",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_llm_tools",
+    declared_features = [
+        "default",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-llm-tools", "lash_llm_tools"),
+    compile_data_patterns = [
+        "Cargo.toml",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-llm-tools",
+    package_name = "lash-internal-llm-tools",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_1dc4861b", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_ec001ad5", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4bed59f4", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_053948a5", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_e2609413", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_415959af", "//crates/lash-lashlang-runtime:lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_79eb9917", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_44cefd74", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_a3f213ea", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_d8c13069", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_beff7c52", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_21bc92aa", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_9c3c6c6a", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_5d16a431", "//crates/lash-provider-auth:lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_de2cfef1", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_f8672dd1", "//crates/lash-remote-protocol:lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_131d14b9", "//crates/lash-restate-test:lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_1f405863", "//crates/lash-restate:lash-restate": "//crates/lash-restate:lash-restate__fv_86219a01", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_68d1a38d", "//crates/lash-subagents:lash-subagents": "//crates/lash-subagents:lash-subagents__fv_127c212f", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_6f5ee1e0", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6", "//crates/lash-typescript:lash-typescript": "//crates/lash-typescript:lash-typescript__fv_46d89c44", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_744bc894", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_6f7ff3d2", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_75dd54d4", "//crates/lash:lash": "//crates/lash:lash__fv_ec3ed243", "//crates/lashlang:lashlang": "//crates/lashlang:lashlang__fv_bf5ed0ed"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-llm-tools__fv_84b97d01",
     build_script = None,
     crate_features = [
