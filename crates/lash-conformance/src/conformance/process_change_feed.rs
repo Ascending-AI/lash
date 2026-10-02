@@ -9,6 +9,52 @@ use super::process_registry::{plain_event_type, registration};
 use super::*;
 use pretty_assertions::assert_eq;
 
+/// Hang detector for the reader, not a latency expectation. Every terminal
+/// transition is committed before the bound starts, and the reader does most
+/// of its paging after that: a store that serializes its writers on the change
+/// clock lets few reads through while they run. A loaded store only makes the
+/// reader later.
+const FEED_HANG_BOUND: Duration = Duration::from_secs(60);
+
+/// How far the feed reader has got, shared so a hung reader can be reported.
+#[derive(Clone, Default)]
+struct ReaderProgress {
+    cursor: ProcessChangeCursor,
+    terminal_observations: BTreeMap<String, usize>,
+}
+
+/// The expected labels whose terminal record the feed serves after `cursor`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the read is established by the setup above"
+)]
+async fn terminal_labels_after(
+    registry: &Arc<dyn ProcessRegistry>,
+    mut cursor: ProcessChangeCursor,
+    expected_ids: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut labels = BTreeSet::new();
+    loop {
+        let (records, next_cursor) = registry
+            .processes_changed_since(cursor, 256)
+            .await
+            .expect("committed feed read");
+        if records.is_empty() {
+            return labels;
+        }
+        cursor = next_cursor;
+        for change in records {
+            if let ProcessChange::Upsert { record } = change
+                && record.is_terminal()
+                && let Some(label) = record.identity.label.as_deref()
+                && expected_ids.contains(label)
+            {
+                labels.insert(label.to_string());
+            }
+        }
+    }
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -25,15 +71,16 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
         .collect::<BTreeSet<_>>();
     let start_barrier = Arc::new(tokio::sync::Barrier::new(WRITER_COUNT + 1));
     let writers_done = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(std::sync::Mutex::new(ReaderProgress::default()));
 
     let reader_registry = Arc::clone(&registry);
     let reader_expected_ids = expected_ids.clone();
     let reader_start = Arc::clone(&start_barrier);
     let reader_done = Arc::clone(&writers_done);
+    let reader_progress = Arc::clone(&progress);
     let reader = crate::task::spawn(async move {
         reader_start.wait().await;
         let mut cursor = ProcessChangeCursor::initial();
-        let mut terminal_observations = BTreeMap::<String, usize>::new();
 
         loop {
             let (records, next_cursor) = reader_registry
@@ -41,12 +88,18 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                 .await
                 .expect("concurrent feed read");
             if records.is_empty() {
-                if reader_done.load(Ordering::SeqCst)
-                    && reader_expected_ids
+                // The feed is drained up to `cursor`. Once every writer has
+                // returned and its terminal transition has been read, the
+                // reader has reached the committed set; a repeat would have
+                // been counted on the way here.
+                let reached = reader_done.load(Ordering::SeqCst) && {
+                    let progress = reader_progress.lock().expect("reader progress lock");
+                    reader_expected_ids
                         .iter()
-                        .all(|id| terminal_observations.get(id).copied() == Some(1))
-                {
-                    return terminal_observations;
+                        .all(|id| progress.terminal_observations.contains_key(id))
+                };
+                if reached {
+                    return;
                 }
                 tokio::task::yield_now().await;
                 tokio::time::sleep(Duration::from_millis(1)).await;
@@ -58,6 +111,8 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                 "a non-empty process change page must advance the cursor"
             );
             cursor = next_cursor;
+            let mut progress = reader_progress.lock().expect("reader progress lock");
+            progress.cursor = cursor;
             for change in records {
                 let ProcessChange::Upsert { record } = change else {
                     continue;
@@ -68,7 +123,10 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                     continue;
                 };
                 if reader_expected_ids.contains(label) && record.is_terminal() {
-                    *terminal_observations.entry(label.to_string()).or_default() += 1;
+                    *progress
+                        .terminal_observations
+                        .entry(label.to_string())
+                        .or_default() += 1;
                 }
             }
         }
@@ -131,13 +189,50 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
     }
     writers_done.store(true, Ordering::SeqCst);
 
-    let terminal_observations = tokio::time::timeout(Duration::from_secs(10), reader)
-        .await
-        .expect("reader timed out waiting for every terminal transition")
-        .expect("reader task panicked");
+    // Every terminal transition is committed. The reader finishes when its
+    // feed reaches that set, however long the store takes to serve it; the
+    // bound only catches a reader that never gets there, and its report tells
+    // a transition the reader's cursor passed from one still ahead of it.
+    let reader_abort = reader.abort_handle();
+    match tokio::time::timeout(FEED_HANG_BOUND, reader).await {
+        Ok(joined) => joined.expect("reader task panicked"),
+        Err(_) => {
+            reader_abort.abort();
+            let ReaderProgress {
+                cursor,
+                terminal_observations,
+            } = progress.lock().expect("reader progress lock").clone();
+            let committed =
+                terminal_labels_after(&registry, ProcessChangeCursor::initial(), &expected_ids)
+                    .await;
+            let ahead = terminal_labels_after(&registry, cursor, &expected_ids).await;
+            let passed = committed
+                .iter()
+                .filter(|id| !terminal_observations.contains_key(*id) && !ahead.contains(*id))
+                .collect::<Vec<_>>();
+            let unread = ahead
+                .iter()
+                .filter(|id| !terminal_observations.contains_key(*id))
+                .collect::<Vec<_>>();
+            panic!(
+                "the reader did not reach the committed terminal set within \
+                 {FEED_HANG_BOUND:?}: {} of {} terminal transitions committed, {} read; \
+                 the reader's cursor {cursor:?} passed {passed:?} without reading them \
+                 (missed) and had not yet read {unread:?} (still ahead of it)",
+                committed.len(),
+                expected_ids.len(),
+                terminal_observations.len(),
+            );
+        }
+    }
+    let terminal_observations = progress
+        .lock()
+        .expect("reader progress lock")
+        .terminal_observations
+        .clone();
     let missing = expected_ids
         .iter()
-        .filter(|id| terminal_observations.get(*id).copied() != Some(1))
+        .filter(|id| !terminal_observations.contains_key(*id))
         .cloned()
         .collect::<Vec<_>>();
     assert!(
