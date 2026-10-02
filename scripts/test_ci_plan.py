@@ -1235,7 +1235,7 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         self.assertTrue(shared.broad)
 
     def test_a_schema_file_selects_its_declared_readers(self) -> None:
-        path = "schemas/host/workflow-graph/v21.schema.json"
+        path = next((ROOT / "schemas/host/workflow-graph").glob("v*.schema.json")).relative_to(ROOT).as_posix()
         scope = self.scope(path)
         self.assertEqual((path,), scope.files)
         self.assertFalse(scope.broad or scope.repository)
@@ -1243,7 +1243,7 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         _labels, builds = ci_plan.affected_buck2_labels(scope, set(), [], {})
         self.assertEqual(["//:schema_checks"], builds)
         # A deleted schema changes a glob; no file query can ask about it.
-        self.assertTrue(self.scope("schemas/host/workflow-graph/v0.schema.json").broad)
+        self.assertTrue(self.scope("schemas/host/workflow-graph/deleted.schema.json").broad)
 
     def test_the_justfile_selects_only_its_recipes_contract_tests(self) -> None:
         tests = frozenset({"scripts/test_with_service.py", "scripts/test_test_xml.py"})
@@ -2037,7 +2037,7 @@ class ReleaseJournalReplaySelectionTests(unittest.TestCase):
         self.assertIn("release_journal_replay", job["if"])
         self.assertFalse(job.get("continue-on-error", False))
         self.assertIn("FIG-4097", (ROOT / ".github/workflows/release-journal-replay.yml").read_text())
-        self.assertEqual("fixtures/release-rehearsal/fig-4532-rehearsal-20261001/replay-corpus", job["env"]["LASH_REPLAY_CORPUS_ROOT"])
+        self.assertEqual("crates/lash-restate/testdata/replay-corpus", job["env"]["LASH_REPLAY_CORPUS_ROOT"])
         commands = "\n".join(step.get("run", "") for step in job["steps"])
         self.assertIn("tests::replay_corpus::", commands)
         self.assertIn("--test_env LASH_REPLAY_CORPUS_ROOT=", commands)

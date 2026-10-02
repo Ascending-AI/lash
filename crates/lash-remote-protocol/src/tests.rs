@@ -893,7 +893,7 @@ fn remote_trigger_dtos_json_round_trip() {
     .expect_err("version-57 trigger registration must be refused before body decoding");
     assert!(matches!(
         error,
-        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(57) && local == crate::VersionRange::exactly(100)
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(57) && local == crate::REMOTE_PROTOCOL
     ));
 
     let cause = RemoteCausalRef::TriggerOccurrence {
@@ -957,7 +957,7 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
             .expect_err("version-62 session spelling must be refused");
     assert!(matches!(
         error,
-        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(62) && local == crate::VersionRange::exactly(100)
+        RemoteProtocolError::Unsupported { peer, local } if peer == crate::VersionRange::exactly(62) && local == crate::REMOTE_PROTOCOL
     ));
 
     assert_eq!(
@@ -965,9 +965,9 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
             &crate::negotiation::test_negotiated(),
             RemoteTriggerSubscriptionFilter::for_session("session-blue")
         ))
-        .expect("serialize canonical version-100 filter"),
+        .expect("serialize canonical current-version filter"),
         serde_json::json!({
-            "protocol_version": 100,
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
             "registrant_scope_id": "session:session-blue",
         })
     );
@@ -1194,7 +1194,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 100,
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1723,7 +1723,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
     assert!(
         matches!(
             decode_empty_envelope(37),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(37) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(37) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
     );
@@ -1756,7 +1756,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
     assert!(
         matches!(
             decode_empty_envelope(38),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(38) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(38) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
     );
@@ -1808,7 +1808,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
     assert!(
         matches!(
             decode_empty_envelope(39),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(39) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(39) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
     );
@@ -1837,7 +1837,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
     assert!(
         matches!(
             decode_empty_envelope(40),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(40) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(40) && local == crate::REMOTE_PROTOCOL
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
     );

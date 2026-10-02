@@ -1,0 +1,58 @@
+{
+  "generation": {
+    "bytecode_format_version": 30,
+    "segment_state_version": 23,
+    "vm_continuation_format_version": 29
+  },
+  "input": {
+    "args": {},
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:parked-loop",
+    "module_ref": "lashlang:v2:blake3:parked-loop",
+    "process_ref": {
+      "component": "parked-loop",
+      "pos": 0
+    }
+  },
+  "program": "for (const item of [1]) { await sleep(item); } finish(null);",
+  "program_hash": "blake3:11b011c1fc17df4d6cad470bbd1065665cdfd647918d4b6227c242e6e5ea33f8",
+  "segment_state": {
+    "commands": {
+      "dispatched": "b455a28b3c942b7064416064130948637df805d313b053af4c5b9eb0521acd42",
+      "next": 0
+    },
+    "effect_omissions": {},
+    "event_sequence": 0,
+    "held_tool_calls": {},
+    "incorporation_ledger": {
+      "incorporated": []
+    },
+    "outstanding_groups": [],
+    "pending_summary": [],
+    "signal_wait_ordinals": {},
+    "started_process_ids": [],
+    "version": 23,
+    "vm": {
+      "bytes": "gqJ2bcUEEHsiZm9ybWF0X3ZlcnNpb24iOjI5LCJleGVjdXRhYmxlIjoiYmxha2UzOjkyMWIxN2IxNzU5MTM2ZmQyYmEzZGRiZGZhYTExNDFhYjQ5Mzk3OTQ0OWQ3YTE5ZTQ2YzdkZDJkNjRhYTQxNzkiLCJyZWZlcmVuY2Vfc2VtYW50aWNzIjpmYWxzZSwiaW5zdHJ1Y3Rpb25fcG9pbnRlciI6NywiYWN0aXZlX2Z1bmN0aW9uIjpudWxsLCJvcGVyYW5kX3N0YWNrIjpbeyJraW5kIjoibnVsbCJ9XSwicGVuZGluZ190b29scyI6e30sImV4ZWN1dGlvbl9ub25jZSI6MTYyOTQyMDg0MTY2NTg2MDc1MzUsImxhc3RfdmFsdWUiOnsia2luZCI6InNldCIsInZhbHVlIjp7ImtpbmQiOiJudWxsIn19LCJzbG90cyI6W3sia2luZCI6InNldCIsInZhbHVlIjp7ImtpbmQiOiJudW1iZXIiLCJ2YWx1ZSI6eyJ2ZXJzaW9uIjoxLCJiaXRzIjo0NjA3MTgyNDE4ODAwMDE3NDA4fX19XSwiZ2xvYmFscyI6eyJraW5kIjoicmVjb3JkIiwidmFsdWUiOltdfSwiaXRlcmF0b3Jfc3RhY2siOlt7ImN1cnNvciI6eyJMaXZlIjp7InNvdXJjZSI6eyJraW5kIjoicmVmIiwidmFsdWUiOjF9LCJuZXh0X2luZGV4IjoxfX0sImJpbmRpbmdfc2xvdCI6MCwicmVzdG9yZV92YWx1ZSI6eyJraW5kIjoidW5zZXQifX1dLCJmcmFtZV9zdGFjayI6W10sImhhbmRsZXJfc3RhY2siOltdLCJmaW5hbGx5X3N0YWNrIjpbXSwib2NjdXJyZW5jZV9jb3VudGVycyI6eyJub2RlOjFkZTZlY2E3ZmJiNWMwMmZhM2IzMmQ0NyI6MSwibm9kZTo2NjBmMzI1ZDUzY2U5OTE5MWY0NmM4ZjEiOjF9LCJtb2RlIjoiUHJvY2VzcyIsInByb2ZpbGUiOm51bGwsInBlbmRpbmdfZXJyb3Jfc3BhbiI6bnVsbCwiaW5zdHJ1Y3Rpb25zX2V4ZWN1dGVkIjo3LCJoZWFwIjp7ImFsbG9jYXRpb25fY291bnRlciI6MSwib2JqZWN0cyI6W3siaWQiOjEsIm9iamVjdCI6eyJraW5kIjoibGlzdCIsIml0ZW1zIjpbeyJraW5kIjoibnVtYmVyIiwidmFsdWUiOnsidmVyc2lvbiI6MSwiYml0cyI6NDYwNzE4MjQxODgwMDAxNzQwOH19XSwiaG9sZXMiOltdfX1dfSwicmVzdW1lIjp7ImtpbmQiOiJuZXh0X2luc3RydWN0aW9uIn19p3JlcXVlc3TA",
+      "definition_ids": [],
+      "hash": "318c7eb674c33a5431ea3be488bcf28b49de1c188885b49b02cc8a7bb9b91163",
+      "kind": "continuation",
+      "owner": "process:p_0926e047cf4f778da52b8dd14bacc5f2",
+      "vm_contract": {
+        "abi": 14,
+        "accounting": 3,
+        "bytecode": 30,
+        "continuation": 29,
+        "snapshot": 14
+      }
+    },
+    "worker_recovery": {
+      "boundary": 0,
+      "totals": {
+        "attempts": 0,
+        "cpu_nanos": 0,
+        "replacement": false,
+        "unknown_cpu_attempts": 0
+      }
+    }
+  }
+}

@@ -13,32 +13,107 @@ use service_journals::HandlerJournals;
 
 const CORPUS_ROOT_ENV: &str = "LASH_REPLAY_CORPUS_ROOT";
 const REGENERATE_ENV: &str = "LASH_REGENERATE";
-const FORMAT_NOTE: &str =
-    "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names";
-const SERVICE_FORMAT_NOTE: &str = "lash-restate service handler journals v1; per handler, each distinct ordered command \
-     sequence its invocations wrote on the server double, minted ids elided as #";
 
+/// One scenario's journal, as the build of generation `generation` wrote it.
+///
+/// The fixture carries no provenance of its own: a release corpus names its
+/// source commit once, in its capture manifest.
 #[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReplayCorpusFixture {
     scenario: String,
-    recorded_at_git_sha: String,
-    format: String,
-    journal_logic_epoch: u32,
-    journal_steps: Vec<String>,
-    records: BTreeMap<String, RecordedRuntimeEffect>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    process_command_facts: BTreeMap<String, serde_json::Value>,
+    /// The drain generation `G` of the capturing build. Builds sharing it
+    /// replay this journal; any other build routes it to a drain.
+    generation: lash_core::engine::BuildGeneration,
+    /// The journal, in the order the handler ran its steps.
+    journal: Vec<JournalEntry>,
+}
+
+/// One journaled step: its Restate name and the entry the build wrote under it.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournalEntry {
+    name: String,
+    body: JournalBody,
+}
+
+/// What a step journaled, verbatim: a runtime effect's stamped record or a
+/// process command's fact.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum JournalBody {
+    Effect(serde_json::Value),
+    ProcessCommandFact(serde_json::Value),
+}
+
+impl JournalBody {
+    fn journaled(name: &str, bytes: &[u8]) -> Self {
+        let value = serde_json::from_slice(bytes).expect("a journaled entry is JSON");
+        if super::recording_context::is_process_command_journal_fact(name) {
+            Self::ProcessCommandFact(value)
+        } else {
+            Self::Effect(value)
+        }
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        let (Self::Effect(value) | Self::ProcessCommandFact(value)) = self;
+        serde_json::to_vec(value).expect("encode a journaled entry")
+    }
+}
+
+/// The corpus's standard-protocol composition, bound by a real core before
+/// its generation can be used to stamp or compare a journal.
+pub(super) async fn current_generation() -> lash_core::engine::BuildGeneration {
+    let connection = RestateConnection::new("https://restate.invalid");
+    let backend = lash_core::Backend::new(Arc::new(RestateEngine::new(
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("corpus stores"),
+        ),
+        RestateConfig::new(connection.clone(), connection, test_restate_authority_id()),
+    )));
+    let core = service_journals::build_core(backend, &Arc::new(tokio::sync::Semaphore::new(0)));
+    core.build_generation().clone()
+}
+
+/// The journal a recording left behind, in step order.
+fn recorded_journal(context: &ReplayableRecordingContext) -> Vec<JournalEntry> {
+    let records = context.records.lock_recover();
+    let journal = context
+        .runs()
+        .into_iter()
+        .map(|name| {
+            let bytes = records
+                .get(&name)
+                .unwrap_or_else(|| panic!("step `{name}` journaled no entry"));
+            JournalEntry {
+                body: JournalBody::journaled(&name, bytes),
+                name,
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        journal.len(),
+        records.len(),
+        "every journaled entry belongs to exactly one step"
+    );
+    journal
+}
+
+fn journal_steps(journal: &[JournalEntry]) -> Vec<String> {
+    journal.iter().map(|entry| entry.name.clone()).collect()
 }
 
 /// One lash Restate service's journals, recorded from its real handlers on
 /// the server double (FIG-4805).
 #[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ServiceJournalFixture {
     scenario: String,
     service: String,
-    recorded_at_git_sha: String,
-    format: String,
-    journal_logic_epoch: u32,
+    generation: lash_core::engine::BuildGeneration,
     handlers: HandlerJournals,
 }
 
@@ -154,6 +229,7 @@ fn every_restate_service_in_the_source_has_a_recorded_scenario() {
         "the services the source declares are the services lash serves"
     );
     let fixtures = fixture_scenario_names();
+    let generation = read_fixture(SCENARIOS[0]).generation;
     for service in lash_service_names() {
         assert!(
             fixtures.contains(&service_scenario_name(&service)),
@@ -163,10 +239,9 @@ fn every_restate_service_in_the_source_has_a_recorded_scenario() {
         let fixture = read_service_fixture(&service);
         assert_eq!(fixture.service, service);
         assert_eq!(fixture.scenario, service_scenario_name(&service));
-        assert_eq!(fixture.format, SERVICE_FORMAT_NOTE);
-        assert!(
-            !fixture.recorded_at_git_sha.is_empty(),
-            "{service} must name the commit it was recorded from"
+        assert_eq!(
+            fixture.generation, generation,
+            "{service} belongs to the corpus's generation"
         );
     }
 }
@@ -190,7 +265,7 @@ async fn replay_corpus_service_journals_match_the_real_handlers() {
         let result = replay_service_fixture(
             read_service_fixture(&service),
             current,
-            crate::JOURNAL_LOGIC_EPOCH,
+            &recorded.generation,
         )
         .unwrap_or_else(|error| {
             panic!(
@@ -201,7 +276,7 @@ async fn replay_corpus_service_journals_match_the_real_handlers() {
         match result {
             ReplayComparison::Compared => println!("{service}: handler journals compared"),
             ReplayComparison::DifferentGeneration { recorded, current } => println!(
-                "{service}: different generation, not compared (recorded epoch {recorded}, current {current})",
+                "{service}: different generation, not compared (recorded {recorded}, current {current})",
             ),
         }
     }
@@ -214,16 +289,12 @@ async fn replay_corpus_service_journals_match_the_real_handlers() {
 fn replay_service_fixture(
     fixture: ServiceJournalFixture,
     current: &HandlerJournals,
-    current_epoch: u32,
+    generation: &lash_core::engine::BuildGeneration,
 ) -> Result<ReplayComparison, ReplayDivergence> {
-    assert_ne!(
-        fixture.journal_logic_epoch, 0,
-        "capture epoch must be positive"
-    );
-    if fixture.journal_logic_epoch != current_epoch {
+    if fixture.generation != *generation {
         return Ok(ReplayComparison::DifferentGeneration {
-            recorded: fixture.journal_logic_epoch,
-            current: current_epoch,
+            recorded: fixture.generation,
+            current: generation.clone(),
         });
     }
     let differing = fixture
@@ -262,20 +333,14 @@ async fn replay_corpus_fixtures_match_current_controller() {
     for scenario in SCENARIOS {
         let fixture = read_fixture(*scenario);
         assert_eq!(fixture.scenario, scenario.name);
-        assert_eq!(fixture.format, FORMAT_NOTE);
-        assert!(
-            !fixture.recorded_at_git_sha.is_empty(),
-            "{} must name the commit it was recorded from",
-            scenario.name
-        );
 
-        let result = replay_fixture(*scenario, fixture, crate::JOURNAL_LOGIC_EPOCH)
+        let result = replay_fixture(*scenario, fixture, &current_generation().await)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
         match result {
             ReplayComparison::Compared => println!("{}: journal replay compared", scenario.name),
             ReplayComparison::DifferentGeneration { recorded, current } => println!(
-                "{}: different generation, not compared (recorded epoch {recorded}, current {current})",
+                "{}: different generation, not compared (recorded {recorded}, current {current})",
                 scenario.name,
             ),
         }
@@ -286,7 +351,10 @@ async fn replay_corpus_fixtures_match_current_controller() {
 #[derive(Debug, PartialEq, Eq)]
 enum ReplayComparison {
     Compared,
-    DifferentGeneration { recorded: u32, current: u32 },
+    DifferentGeneration {
+        recorded: lash_core::engine::BuildGeneration,
+        current: lash_core::engine::BuildGeneration,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -317,56 +385,45 @@ enum ReplayFailure {
 async fn replay_fixture(
     scenario: Scenario,
     fixture: ReplayCorpusFixture,
-    current_epoch: u32,
+    current: &lash_core::engine::BuildGeneration,
 ) -> Result<ReplayComparison, ReplayDivergence> {
-    assert_ne!(
-        fixture.journal_logic_epoch, 0,
-        "capture epoch must be positive"
-    );
-    if fixture.journal_logic_epoch != current_epoch {
+    if fixture.generation != *current {
         return Ok(ReplayComparison::DifferentGeneration {
-            recorded: fixture.journal_logic_epoch,
-            current: current_epoch,
+            recorded: fixture.generation,
+            current: current.clone(),
         });
     }
+    let recorded = journal_steps(&fixture.journal);
     let context = Arc::new(ReplayableRecordingContext::default());
-    context.install_recorded_runtime_effects(fixture.records);
-    context.install_recorded_process_command_facts(fixture.process_command_facts);
+    *context.records.lock_recover() = fixture
+        .journal
+        .into_iter()
+        .map(|entry| (entry.name, entry.body.bytes()))
+        .collect();
     context.start_replay();
     Box::pin(drive_scenario(scenario, Arc::clone(&context), true))
         .await
         .map_err(ReplayDivergence)?;
     let current = context.runs();
-    if fixture.journal_steps != current {
-        return Err(ReplayDivergence(ReplayFailure::Steps {
-            recorded: fixture.journal_steps,
-            current,
-        }));
+    if recorded != current {
+        return Err(ReplayDivergence(ReplayFailure::Steps { recorded, current }));
     }
     Ok(ReplayComparison::Compared)
 }
 
-fn added_step_fixture() -> ReplayCorpusFixture {
-    let scenario = Scenario {
+/// A copy of a committed journal with one more step than this build's
+/// handler runs, stamped with this build's generation.
+async fn added_step_fixture() -> ReplayCorpusFixture {
+    let mut fixture = read_fixture(Scenario {
         name: "scalar-lashlang-tool-attempt",
+    });
+    fixture.generation = current_generation().await;
+    let added = JournalEntry {
+        name: "lash:release-journal-added-step".to_string(),
+        body: fixture.journal[0].body.clone(),
     };
-    let mut fixture: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(fixture_path(scenario)).expect("read fixture copy"))
-            .expect("fixture JSON");
-    let records = fixture["records"].as_object_mut().expect("record map");
-    let record = records
-        .values()
-        .next()
-        .expect("scalar recorded step")
-        .clone();
-    records.insert("lash:release-journal-added-step".to_string(), record);
-    // A fixture copy with one more ctx.run result than the current controller.
-    fixture["journal_logic_epoch"] = serde_json::json!(crate::JOURNAL_LOGIC_EPOCH);
-    fixture["journal_steps"] = serde_json::json!([
-        "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt",
-        "lash:release-journal-added-step",
-    ]);
-    serde_json::from_value(fixture).expect("decode fixture copy")
+    fixture.journal.push(added);
+    fixture
 }
 
 #[tokio::test]
@@ -375,8 +432,8 @@ async fn an_added_run_step_with_unchanged_epoch_requires_the_exact_bump_message(
         Scenario {
             name: "scalar-lashlang-tool-attempt",
         },
-        added_step_fixture(),
-        crate::JOURNAL_LOGIC_EPOCH,
+        added_step_fixture().await,
+        &current_generation().await,
     )
     .await
     .expect_err("an added ctx.run step must diverge");
@@ -387,27 +444,29 @@ async fn an_added_run_step_with_unchanged_epoch_requires_the_exact_bump_message(
 }
 
 #[tokio::test]
-async fn an_epoch_bump_does_not_compare_the_added_step_journal() {
+async fn another_generation_does_not_compare_the_added_step_journal() {
+    let other = lash_core::engine::BuildGeneration::for_test("another-build");
+    assert_ne!(other, current_generation().await);
     assert_eq!(
         replay_fixture(
             Scenario {
                 name: "scalar-lashlang-tool-attempt"
             },
-            added_step_fixture(),
-            crate::JOURNAL_LOGIC_EPOCH + 1,
+            added_step_fixture().await,
+            &other,
         )
         .await
         .expect("another generation is routed separately"),
         ReplayComparison::DifferentGeneration {
-            recorded: crate::JOURNAL_LOGIC_EPOCH,
-            current: crate::JOURNAL_LOGIC_EPOCH + 1,
+            recorded: current_generation().await,
+            current: other,
         },
     );
 }
 
 /// A service fixture and the journals of a build whose `drive` handler
 /// journals one more step than the fixture recorded.
-fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJournals) {
+async fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJournals) {
     let journal = |steps: &[&str]| {
         BTreeMap::from([(
             "drive".to_string(),
@@ -420,9 +479,7 @@ fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJournal
     let fixture = ServiceJournalFixture {
         scenario: service_scenario_name("LashSession"),
         service: "LashSession".to_string(),
-        recorded_at_git_sha: "self-test".to_string(),
-        format: SERVICE_FORMAT_NOTE.to_string(),
-        journal_logic_epoch: crate::JOURNAL_LOGIC_EPOCH,
+        generation: current_generation().await,
         handlers: journal(&["InputCommand", "RunCommand lash.drive.leg", "OutputCommand"]),
     };
     let current = journal(&[
@@ -434,10 +491,10 @@ fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJournal
     (fixture, current)
 }
 
-#[test]
-fn an_added_handler_step_with_unchanged_epoch_requires_the_exact_bump_message() {
-    let (fixture, current) = service_fixture_and_an_added_step();
-    let error = replay_service_fixture(fixture, &current, crate::JOURNAL_LOGIC_EPOCH)
+#[tokio::test]
+async fn an_added_handler_step_with_unchanged_epoch_requires_the_exact_bump_message() {
+    let (fixture, current) = service_fixture_and_an_added_step().await;
+    let error = replay_service_fixture(fixture, &current, &current_generation().await)
         .expect_err("an added ctx.run step must diverge");
     assert_eq!(
         error.to_string(),
@@ -445,40 +502,49 @@ fn an_added_handler_step_with_unchanged_epoch_requires_the_exact_bump_message() 
     );
 }
 
-#[test]
-fn an_epoch_bump_does_not_compare_the_added_handler_step() {
-    let (fixture, current) = service_fixture_and_an_added_step();
+#[tokio::test]
+async fn another_generation_does_not_compare_the_added_handler_step() {
+    let (fixture, current) = service_fixture_and_an_added_step().await;
+    let other = lash_core::engine::BuildGeneration::for_test("another-service-build");
+    assert_ne!(other, fixture.generation);
     assert_eq!(
-        replay_service_fixture(fixture, &current, crate::JOURNAL_LOGIC_EPOCH + 1)
+        replay_service_fixture(fixture, &current, &other)
             .expect("another generation is routed separately"),
         ReplayComparison::DifferentGeneration {
-            recorded: crate::JOURNAL_LOGIC_EPOCH,
-            current: crate::JOURNAL_LOGIC_EPOCH + 1,
+            recorded: current_generation().await,
+            current: other,
         },
     );
 }
 
 #[test]
-fn every_replay_fixture_records_its_capture_epoch_and_step_order() {
-    for scenario in SCENARIOS {
-        let fixture: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(fixture_path(*scenario)).expect("read replay fixture"),
-        )
-        .expect("fixture JSON");
-        assert!(
-            fixture["journal_logic_epoch"]
-                .as_u64()
-                .is_some_and(|epoch| epoch > 0)
+fn every_replay_fixture_records_one_generation_and_an_ordered_journal() {
+    let fixtures = SCENARIOS
+        .iter()
+        .map(|scenario| read_fixture(*scenario))
+        .collect::<Vec<_>>();
+    for fixture in &fixtures {
+        assert!(!fixture.journal.is_empty(), "{}", fixture.scenario);
+        assert_eq!(
+            fixture.generation, fixtures[0].generation,
+            "one corpus is one build's journals"
         );
-        assert!(
-            fixture["journal_steps"]
-                .as_array()
-                .is_some_and(|steps| !steps.is_empty())
+        let mut names = journal_steps(&fixture.journal);
+        names.sort();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            fixture.journal.len(),
+            "{}: a step journals once",
+            fixture.scenario
         );
     }
     for service in lash_service_names() {
         let fixture = read_service_fixture(&service);
-        assert!(fixture.journal_logic_epoch > 0);
+        assert_eq!(
+            fixture.generation, fixtures[0].generation,
+            "{service} is in the same generation"
+        );
         assert!(
             !fixture.handlers.is_empty()
                 && fixture.handlers.values().all(|journals| {
@@ -525,8 +591,6 @@ async fn regenerate_replay_corpus_fixtures() {
         Ok("1"),
         "set {REGENERATE_ENV}=1 to acknowledge replacing the committed replay corpus"
     );
-    let git_sha = recorded_at_git_sha();
-
     for scenario in SCENARIOS {
         let context = Arc::new(ReplayableRecordingContext::default());
         Box::pin(drive_scenario(*scenario, Arc::clone(&context), false))
@@ -534,12 +598,8 @@ async fn regenerate_replay_corpus_fixtures() {
             .expect("record scenario");
         let fixture = ReplayCorpusFixture {
             scenario: scenario.name.to_string(),
-            recorded_at_git_sha: git_sha.clone(),
-            format: FORMAT_NOTE.to_string(),
-            journal_logic_epoch: crate::JOURNAL_LOGIC_EPOCH,
-            journal_steps: context.runs(),
-            records: context.recorded_runtime_effects(),
-            process_command_facts: context.recorded_process_command_facts(),
+            generation: current_generation().await,
+            journal: recorded_journal(&context),
         };
         let path = fixture_path(*scenario);
         std::fs::create_dir_all(path.parent().expect("fixture parent"))
@@ -548,12 +608,15 @@ async fn regenerate_replay_corpus_fixtures() {
     }
 
     let mut recorded = Box::pin(service_journals::record()).await;
+    assert_eq!(
+        recorded.generation,
+        current_generation().await,
+        "one corpus uses one core composition"
+    );
     for service in lash_service_names() {
         let fixture = ServiceJournalFixture {
             scenario: service_scenario_name(&service),
-            recorded_at_git_sha: git_sha.clone(),
-            format: SERVICE_FORMAT_NOTE.to_string(),
-            journal_logic_epoch: crate::JOURNAL_LOGIC_EPOCH,
+            generation: recorded.generation.clone(),
             handlers: recorded
                 .journals
                 .remove(&service)
@@ -800,19 +863,6 @@ fn crate_dir() -> PathBuf {
         || Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf(),
         |root| PathBuf::from(root).join("crates/lash-restate"),
     )
-}
-
-fn recorded_at_git_sha() -> String {
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(crate_dir())
-        .output()
-        .expect("run git rev-parse for replay corpus metadata");
-    assert!(output.status.success(), "git rev-parse HEAD must succeed");
-    String::from_utf8(output.stdout)
-        .expect("git SHA must be UTF-8")
-        .trim()
-        .to_string()
 }
 
 fn json_with_newline(value: &impl Serialize) -> Vec<u8> {

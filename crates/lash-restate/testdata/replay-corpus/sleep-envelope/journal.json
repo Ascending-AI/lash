@@ -1,22 +1,23 @@
 {
   "scenario": "sleep-envelope",
-  "recorded_at_git_sha": "6a3685df4c5a0ec1be98c6a7a32529112af7ff69",
-  "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
-  "journal_logic_epoch": 1,
-  "journal_steps": [
-    "lash:sleep:test"
-  ],
-  "records": {
-    "lash:sleep:test": {
-      "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"sleep:test\"},\"effect_id\":\"sleep:test\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0}},\"command\":{\"type\":\"sleep\",\"spec\":{\"kind\":\"for\",\"duration_ms\":1}}}",
-        "hash": "a118fa4ffd6ec6228d6bdc8300fa3afa9b1fe44da829d5dc839065bf3fd775fd"
-      },
-      "outcome": {
-        "Ok": {
-          "type": "sleep"
+  "generation": "1654dff52a0a",
+  "journal": [
+    {
+      "name": "lash:sleep:test",
+      "body": {
+        "effect": {
+          "effect_journal_version": 15,
+          "envelope": {
+            "hash": "a118fa4ffd6ec6228d6bdc8300fa3afa9b1fe44da829d5dc839065bf3fd775fd",
+            "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"sleep:test\"},\"effect_id\":\"sleep:test\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0}},\"command\":{\"type\":\"sleep\",\"spec\":{\"kind\":\"for\",\"duration_ms\":1}}}"
+          },
+          "outcome": {
+            "Ok": {
+              "type": "sleep"
+            }
+          }
         }
       }
     }
-  }
+  ]
 }

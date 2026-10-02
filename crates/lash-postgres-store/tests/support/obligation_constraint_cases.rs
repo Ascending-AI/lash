@@ -77,11 +77,13 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
     assert_eq!(cases.len(), 480);
     let ddl = lash_postgres_store::PostgresStorage::schema_ddl();
     let migrations = include_str!("../../src/postgres/migrate.rs");
-    let mut constraints = 0;
+    let mut published = 0;
     let mut mismatches = Vec::new();
     for (schema, source) in [("schema", ddl), ("migration", migrations)] {
         for constraint in source.lines().filter_map(obligation_constraint) {
-            constraints += 1;
+            if schema == "schema" {
+                published += 1;
+            }
             if schema == "migration" {
                 assert!(
                     ddl.lines()
@@ -150,9 +152,11 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
                 .expect("drop obligation projection");
         }
     }
+    // The release catalog carries no step; a later step's CHECK is exercised
+    // by the same loop and must match the published DDL.
     assert_eq!(
-        constraints, 12,
-        "exercise all ten published and two migration PostgreSQL CHECKs"
+        published, 10,
+        "exercise all ten published PostgreSQL CHECKs"
     );
     connection
         .close()
@@ -160,7 +164,7 @@ pub async fn postgres_obligation_checks_reject_incomplete_variants() {
         .expect("close obligation CHECK fixture");
     assert!(
         mismatches.is_empty(),
-        "{} incorrect verdicts across {constraints} constraints:\n{}",
+        "{} incorrect verdicts across {published} published constraints:\n{}",
         mismatches.len(),
         mismatches.join("\n")
     );

@@ -38,43 +38,6 @@ use crate::guarded_tx::WriterFence;
 use crate::schema_shape::{Installation, read_search_path, resolve_installation};
 use crate::*;
 
-/// The DDL that creates `lash_migrations`, byte-for-byte the block
-/// `schema.sql` carries: the bootstrap and the 133→134 expand step provision
-/// the identical table, and a test asserts the bytes agree.
-const MIGRATIONS_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_migrations (
-    phase TEXT NOT NULL
-        CONSTRAINT ck_lash_migrations_phase
-        CHECK (phase IN ('expand', 'backfill', 'contract')),
-    migration TEXT NOT NULL,
-    release TEXT NOT NULL,
-    state TEXT NOT NULL
-        CONSTRAINT ck_lash_migrations_state
-        CHECK (state IN ('running', 'applied')),
-    from_version INTEGER,
-    to_version INTEGER NOT NULL,
-    started_at_ms BIGINT NOT NULL,
-    finished_at_ms BIGINT,
-    backfill_cursor TEXT,
-    backfill_rows BIGINT,
-    PRIMARY KEY (phase, migration),
-    CONSTRAINT ck_lash_migrations_backfill_progress
-        CHECK ((phase = 'backfill' AND backfill_rows IS NOT NULL AND backfill_rows >= 0)
-            OR (phase <> 'backfill' AND backfill_cursor IS NULL AND backfill_rows IS NULL))
-);";
-
-/// The DDL that creates `lash_fleet_format`, byte-for-byte the block
-/// `schema.sql` carries: the bootstrap and the 135→136 expand step provision
-/// the identical table, and a test asserts the bytes agree.
-const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_format (
-    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
-    format_version INTEGER NOT NULL,
-    finalize_hold_reason TEXT,
-    finalize_held_at_ms BIGINT,
-    CONSTRAINT ck_fleet_format_singleton CHECK (singleton),
-    CONSTRAINT ck_fleet_format_finalize_hold
-        CHECK ((finalize_hold_reason IS NULL) = (finalize_held_at_ms IS NULL))
-);";
-
 /// Phase A's single post-cut expand. None of these objects constrains writes
 /// made by N: the column is nullable, the table is new, and the index is not
 /// unique. Its catalog step moves the component stamp to the next version in
@@ -126,72 +89,6 @@ SELECT (SELECT max(session_id) FROM batch),
 const SYNTHETIC_NEXT_CONTRACT_DDL: &str =
     "ALTER TABLE lash_session_head VALIDATE CONSTRAINT ck_lash_session_head_synthetic_next_note";
 
-/// The 139→140 expand step (FIG-3600 S7): the logical-root family. The
-/// session head gains its closing intent, a park its engine reference and
-/// resume intent, a park event the `redrive_requested` kind, and the store
-/// gains `lash_session_roots`, `lash_session_root_inputs` and
-/// `lash_control_intents` with their indexes, each stated as `schema.sql`
-/// states it. Every statement is guarded, so a replay after a crash is a
-/// no-op.
-const LOGICAL_ROOT_FAMILY_DDL: &str = "ALTER TABLE lash_session_meta ADD COLUMN IF NOT EXISTS closing_intent BIGINT;
-ALTER TABLE lash_turn_parks ADD COLUMN IF NOT EXISTS engine_ref TEXT;
-ALTER TABLE lash_turn_parks ADD COLUMN IF NOT EXISTS resume_intent BIGINT;
-ALTER TABLE lash_turn_park_events DROP CONSTRAINT IF EXISTS ck_turn_park_events_kind;
-ALTER TABLE lash_turn_park_events ADD CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested'));
-CREATE TABLE IF NOT EXISTS lash_session_roots (
-    session_id TEXT NOT NULL,
-    root TEXT NOT NULL,
-    executor_json TEXT,
-    admission_json TEXT,
-    admitted_generation TEXT,
-    terminal_kind TEXT,
-    terminal_cause_json TEXT,
-    terminal_head_revision BIGINT,
-    terminal_at_ms BIGINT,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_session_roots_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_session_roots_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
-    PRIMARY KEY (session_id, root),
-    CONSTRAINT ck_session_roots_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
-);
-CREATE TABLE IF NOT EXISTS lash_session_root_inputs (
-    session_id TEXT NOT NULL,
-    input_id TEXT NOT NULL,
-    root TEXT NOT NULL,
-    PRIMARY KEY (session_id, input_id)
-);
-CREATE TABLE IF NOT EXISTS lash_control_intents (
-    intent_id BIGSERIAL PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    format BIGINT NOT NULL,
-    kind TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('redrive', 'cancel', 'fork', 'close_session')),
-    kind_json TEXT NOT NULL,
-    state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'refused')),
-    state_json TEXT NOT NULL,
-    engine_half_owed BOOLEAN NOT NULL GENERATED ALWAYS AS ((state = 'pending' AND obligation_state IN ('due', 'claimed')) IS TRUE) STORED,
-    created_at_ms BIGINT NOT NULL,
-    engine_ref TEXT,
-    obligation_id TEXT,
-    obligation_state TEXT,
-    obligation_attempts INTEGER NOT NULL DEFAULT 0,
-    obligation_due_at_ms BIGINT,
-    obligation_claim_token TEXT,
-    obligation_stall_reason TEXT,
-    obligation_last_error TEXT,
-    obligation_last_error_code TEXT CONSTRAINT ck_control_intents_obligation_error_code CHECK ((obligation_last_error IS NULL) = (obligation_last_error_code IS NULL)),
-    obligation_settled_at_ms BIGINT,
-    CONSTRAINT ck_control_intents_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
-    ON lash_control_intents(session_id, kind);";
-
 /// One expand-phase step this build's migrate runner can apply.
 ///
 /// `from_version`/`to_version` are component versions, the numbers the stamp
@@ -211,66 +108,10 @@ struct ExpandMigration {
     statements: &'static str,
 }
 
-/// The expand catalog this build carries. Pre-1.0 the first step let
-/// component 133 gain the ledger itself and become 134 (FIG-3816); the second
-/// adds `lash_session_head.pending_follow_on_json`, the frame-handoff follow-on a
-/// session head carries, and becomes 135 (FIG-3542); the third adds
-/// `lash_fleet_format`, the deployment's fleet-format row, and becomes 136
-/// (FIG-3796); the fourth restamps 136 to 137 on a vocabulary-only change
-/// (FIG-3814); the fifth adds `lash_session_meta.drive_root_start`, the
-/// admitted root's start marker, and becomes 138 (FIG-3815). Newer schema
-/// generations append to this list; steps are never
-/// removed or edited — the ledger names them permanently.
-/// Component 139 (FIG-3607) re-keys the process relations, which is no
-/// expand step, so nothing chains from 138: a 133–138 catalog plans to the
-/// typed recreate refusal. The sixth step adds the logical-root family and
-/// carries 139 to 140 (FIG-3600); the seventh restamps 140 to 141 when the
-/// journaled effect envelope gains the session close (FIG-3600).
-/// Phase A's synthetic successor (ADR 0115 §6) appends the one step past the
-/// version `schema.sql` provisions.
+/// The production baseline has no predecessor transitions. Fresh stores are
+/// provisioned from `schema.sql`; unsupported populated stores are refused.
+/// The synthetic successor retains its ordinary adjacent catalog step.
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
-    ExpandMigration {
-        id: "0134-migrations-ledger",
-        from_version: 133,
-        to_version: 134,
-        statements: MIGRATIONS_TABLE_DDL,
-    },
-    ExpandMigration {
-        id: "0135-pending-follow-on",
-        from_version: 134,
-        to_version: 135,
-        statements: "ALTER TABLE lash_session_head ADD COLUMN IF NOT EXISTS pending_follow_on_json TEXT",
-    },
-    ExpandMigration {
-        id: "0136-fleet-format",
-        from_version: 135,
-        to_version: 136,
-        statements: FLEET_FORMAT_TABLE_DDL,
-    },
-    ExpandMigration {
-        id: "0137-runtime-error-vocabulary",
-        from_version: 136,
-        to_version: 137,
-        statements: "-- component 137 (FIG-3814): vocabulary-only change; nothing to apply.",
-    },
-    ExpandMigration {
-        id: "0138-drive-root-start",
-        from_version: 137,
-        to_version: 138,
-        statements: "ALTER TABLE lash_session_meta ADD COLUMN IF NOT EXISTS drive_root_start TEXT",
-    },
-    ExpandMigration {
-        id: "0140-logical-root-family",
-        from_version: 139,
-        to_version: 140,
-        statements: LOGICAL_ROOT_FAMILY_DDL,
-    },
-    ExpandMigration {
-        id: "0141-begin-session-close",
-        from_version: 140,
-        to_version: 141,
-        statements: "-- component 141 (FIG-3600): envelope-vocabulary-only change; nothing to apply.",
-    },
     #[cfg(feature = "synthetic-next")]
     ExpandMigration {
         id: "synthetic-next-expand",

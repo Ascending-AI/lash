@@ -184,7 +184,7 @@ fn model_reply(request: &LlmRequest) -> LlmResponse {
     }
 }
 
-fn build_core(
+pub(super) fn build_core(
     backend: lash_core::Backend,
     release: &Arc<tokio::sync::Semaphore>,
 ) -> lash::LashCore {
@@ -284,8 +284,14 @@ fn lash_service(registered: &str) -> Option<&'static str> {
 
 /// Runs the workload on a fresh double over SQLite memory and returns the
 /// deployment once every handler it started has ended.
-async fn run_workload() -> RestateTestBackend {
-    let backend = lash_restate_test::backend(SEED, ServerConfig::default())
+async fn run_workload() -> (RestateTestBackend, lash_core::engine::BuildGeneration) {
+    // The double serves before its workload's core exists. Its fixed stamp
+    // must therefore be the generation this same composition really binds.
+    let config = ServerConfig {
+        build_generation: super::current_generation().await,
+        ..ServerConfig::default()
+    };
+    let backend = lash_restate_test::backend(SEED, config)
         .await
         .expect("the double over SQLite memory");
     let server = backend.server().clone();
@@ -467,7 +473,7 @@ async fn run_workload() -> RestateTestBackend {
         views.iter().all(|view| view.status == "completed")
     })
     .await;
-    backend
+    (backend, core.build_generation().clone())
 }
 
 /// A journal step with its minted ids elided: every run of twelve or more
@@ -501,6 +507,8 @@ pub(super) type HandlerJournals = BTreeMap<String, BTreeSet<Vec<String>>>;
 
 /// What the workload's deployment served and journaled.
 pub(super) struct ServiceJournals {
+    /// The complete generation the workload's core bound into its engine.
+    pub(super) generation: lash_core::engine::BuildGeneration,
     /// Every lash service the deployment registered, by stable name.
     pub(super) served: BTreeSet<String>,
     /// The journals of each lash service's handlers, by stable name.
@@ -510,7 +518,7 @@ pub(super) struct ServiceJournals {
 /// Runs the workload through the real handlers and reads back the commands
 /// each lash service journaled.
 pub(super) async fn record() -> ServiceJournals {
-    let backend = run_workload().await;
+    let (backend, generation) = run_workload().await;
     let server = backend.server();
     // The double's own handler host is registered beside lash's services.
     let served = server
@@ -554,5 +562,9 @@ pub(super) async fn record() -> ServiceJournals {
             .or_default()
             .insert(steps);
     }
-    ServiceJournals { served, journals }
+    ServiceJournals {
+        generation,
+        served,
+        journals,
+    }
 }

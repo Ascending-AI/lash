@@ -1724,7 +1724,7 @@ use worker_recovery::WorkerRecoveryLedger;
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]
-mod segment_trace_tests;
+pub(crate) mod segment_trace_tests;
 #[cfg(test)]
 #[path = "process/signal_wait_tests.rs"]
 mod signal_wait_tests;

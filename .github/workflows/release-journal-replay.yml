@@ -49,8 +49,8 @@ jobs:
     environment: build-cache
     env:
       # FIG-4495 repoints this at fixtures/release/v1.0.0/replay-corpus at the cut.
-      # Persisted replay leg of FIG-4532's full regenerate rehearsal.
-      LASH_REPLAY_CORPUS_ROOT: fixtures/release-rehearsal/fig-4532-rehearsal-20261001/replay-corpus
+      # Current-tree journals during the freeze; the release tag supplies the immutable corpus.
+      LASH_REPLAY_CORPUS_ROOT: crates/lash-restate/testdata/replay-corpus
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Configure shared build cache

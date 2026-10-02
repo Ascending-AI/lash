@@ -8,6 +8,8 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
+from unittest.mock import patch
 import tempfile
 import unittest
 
@@ -25,7 +27,7 @@ def plant_tree(root: Path) -> None:
         if leg.name == "replay-corpus":
             source = root / leg.source / "scenario"
             source.mkdir(parents=True, exist_ok=True)
-            (source / "journal.json").write_text(json.dumps({"journal_logic_epoch": 7}) + "\n")
+            (source / "journal.json").write_text(json.dumps({"generation": "0123456789ab"}) + "\n")
             continue
         source = root / leg.source
         if leg.source.endswith(".db"):
@@ -77,10 +79,24 @@ class CaptureTests(unittest.TestCase):
             (self.repo / "fixtures/durable-read/v1/sqlite/durable-core.db").read_bytes(),
         )
 
-    def test_manifest_records_the_replay_capture_epoch(self):
+    def test_the_source_commit_is_the_manifests_only_provenance(self):
         self.assertEqual(self.run_capture("--dry-run"), 0)
         manifest = json.loads((self.dest / "manifest.json").read_text())
-        self.assertEqual(manifest["journal_logic_epoch"], 7)
+        self.assertEqual(
+            set(manifest),
+            {"schema", "tag", "source_commit", "dry_run", "captured_at", "legs"},
+        )
+
+    def test_journals_of_two_generations_are_refused(self):
+        other = self.repo / "crates/lash-restate/testdata/replay-corpus/other"
+        other.mkdir()
+        (other / "journal.json").write_text(json.dumps({"generation": "ba9876543210"}) + "\n")
+        self.assertEqual(self.run_capture("--dry-run"), 2)
+
+    def test_a_journal_without_a_generation_is_refused(self):
+        journal = self.repo / "crates/lash-restate/testdata/replay-corpus/scenario/journal.json"
+        journal.write_text(json.dumps({"journal_logic_epoch": 7}) + "\n")
+        self.assertEqual(self.run_capture("--dry-run"), 2)
 
     def test_dry_run_without_dest_lands_in_a_temp_dir(self):
         self.assertEqual(capture.main(
@@ -112,10 +128,35 @@ class CaptureTests(unittest.TestCase):
         # report a capture error rather than capture the wrong commit.
         self.assertEqual(self.run_capture(), 2)
 
-    def test_regeneration_uses_named_cargo_recipes(self):
-        for environment, _argv in (capture.SQLITE_REGENERATE, capture.POSTGRES_REGENERATE,
-                                    capture.REPLAY_CORPUS_REGENERATE):
-            self.assertEqual(environment, {"LASH_REGENERATE": "1"})
+    def test_a_regeneration_must_leave_tagged_fixtures_unchanged(self):
+        def git(*args):
+            return subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=capture",
+                                   "-c", "user.email=capture@example.invalid", *args],
+                                  check=True, capture_output=True)
+        git("init", "--quiet")
+        git("add", "--all")
+        git("commit", "--quiet", "-m", "tagged fixtures")
+        capture.require_committed_fixtures_unchanged(self.repo, capture.LEGS)
+        fixture = self.repo / "crates/lash-restate/testdata/replay-corpus/scenario/journal.json"
+        fixture.write_text("different build\n")
+        with self.assertRaises(capture.CaptureError):
+            capture.require_committed_fixtures_unchanged(self.repo, capture.LEGS)
+        git("add", str(fixture.relative_to(self.repo)))
+        with self.assertRaises(capture.CaptureError):
+            capture.require_committed_fixtures_unchanged(self.repo, capture.LEGS)
+
+    def test_generator_switches_reach_the_kiln_test_action(self):
+        leg = next(leg for leg in capture.LEGS if leg.name == "replay-corpus")
+        with patch.object(capture.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+            capture.run_generators(self.repo, (leg,))
+        command = run.call_args.args[0]
+        self.assertIn("--test_env=LASH_REGENERATE=1", command)
+        self.assertEqual(run.call_args.kwargs["env"]["BUILD_WORKSPACE_DIRECTORY"], str(self.repo))
+
+    def test_regeneration_uses_owning_kiln_targets(self):
+        for leg in capture.LEGS:
+            for environment, _argv in leg.regenerate:
+                self.assertEqual(environment, {"LASH_REGENERATE": "1"})
         commands = [
             argv
             for leg in capture.LEGS
@@ -123,10 +164,10 @@ class CaptureTests(unittest.TestCase):
         ]
         self.assertGreater(len(commands), 0)
         for argv in commands:
-            self.assertEqual(argv[:2], ["cargo", "test"])
-            self.assertIn("--locked", argv)
-            self.assertIn("--", argv)
-            self.assertNotIn("kiln", argv)
+            self.assertEqual(argv[:2], ["kiln", "test"])
+            self.assertIn("--test_arg=--exact", argv)
+            self.assertIn("--test_arg=--ignored", argv)
+            self.assertTrue(argv[2].startswith("//crates/"))
 
 
 if __name__ == "__main__":

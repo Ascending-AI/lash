@@ -382,11 +382,11 @@ mod tests {
             format!("{good}:9"),
             good.replace(":1:2", ":-1:2"),
             good.replace(":1:2", ":+1:2"),
-            "lashpc3::p_00000000000070008000000000000003:1:2".to_string(),
-            "lashpc3:e:r1.61:1:2".to_string(),
-            "lashpc3:e:p-7:1:2".to_string(),
-            "lashpc3:e:p_0000000000000000000000000000003:1:2".to_string(),
-            "lashpc3:e:process:1:2".to_string(),
+            format!("lashpc{PROCESS_CURSOR_VERSION}::p_00000000000070008000000000000003:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:r1.61:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:p-7:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:p_0000000000000000000000000000003:1:2"),
+            format!("lashpc{PROCESS_CURSOR_VERSION}:e:process:1:2"),
         ] {
             assert_eq!(
                 ProcessCursor::parse(&bad),

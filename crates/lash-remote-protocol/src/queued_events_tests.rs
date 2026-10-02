@@ -62,7 +62,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
         old["protocol_version"] = serde_json::json!(52);
         assert!(matches!(
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
-            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(52) && local == crate::VersionRange::exactly(100)
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(52) && local == crate::REMOTE_PROTOCOL
         ));
     }
 }

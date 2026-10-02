@@ -762,22 +762,41 @@ async fn a_segment_from_another_build_refuses_and_lands_on_the_drain_list() {
 async fn a_schema_refusal_alone_is_still_a_refusal() {
     // The boundary a host hits first, and the one that produced the crash loop
     // this surface exists to replace.
+    let refusal = lash_core::compat::CompatRefusal::Unstamped {
+        component: "durable core".to_string(),
+        writing_release: None,
+    };
     let store = FakeStore::default().with_database(
         "durable core",
         37,
-        StoreSchemaVerdict::Mismatch { found: 36 },
+        StoreSchemaVerdict::Refused {
+            refusal: refusal.clone(),
+        },
     );
     let report = probe_store(&store, PreflightOptions::summary())
         .await
         .expect("the probe reads the store");
     assert_eq!(report.outcome, PreflightOutcome::Refused);
     assert_eq!(report.schema.outcome, "refused");
-    assert_eq!(report.schema.databases[0].found, Some(36));
+    assert_eq!(
+        report.schema.databases[0].verdict,
+        SchemaVerdictReport::Refused {
+            refusal: refusal.clone()
+        }
+    );
+    // The message is the refusal's own, which names its remedy.
     let message = report.refusal_message().expect("a refusal has a message");
     assert!(
-        message.contains("schema `durable core` is at version 36"),
+        message.contains(&format!("schema `durable core` is refused: {refusal}")),
         "{message}"
     );
+    assert!(
+        report.to_string().contains(&refusal.to_string()),
+        "{report}"
+    );
+    let wire = serde_json::to_value(&report.schema.databases[0]).expect("report encodes");
+    assert_eq!(wire["verdict"], "refused");
+    assert_eq!(wire["refusal"]["refusal"], "unstamped");
 }
 
 #[tokio::test]
@@ -793,10 +812,11 @@ async fn an_unreadable_database_is_undecided_rather_than_ready() {
         .await
         .expect("the probe reads the store");
     assert_eq!(report.outcome, PreflightOutcome::Undecided);
-    assert_eq!(report.schema.databases[0].verdict, "unreadable");
     assert_eq!(
-        report.schema.databases[0].reason.as_deref(),
-        Some("file is not a database")
+        report.schema.databases[0].verdict,
+        SchemaVerdictReport::Unreadable {
+            reason: "file is not a database".to_string()
+        }
     );
     assert_eq!(
         report.refusal_message(),

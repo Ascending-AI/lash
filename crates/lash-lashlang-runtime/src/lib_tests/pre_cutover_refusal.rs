@@ -1,22 +1,15 @@
-//! Under the current, temporary cutover policy, process state written before
-//! FIG-3571 is refused with a typed terminal before any effect, never
-//! re-driven under the carrier IR's node ids. The refusals name the old
-//! version, so a later migration or drain can identify that state.
+//! Process state another generation wrote is refused with a typed terminal
+//! before any effect, never re-driven under this build's node ids. The
+//! refusals name the generation they found, so a drain can identify that
+//! state.
 //!
-//! Each case runs `run_lashlang_process` on the real predecessor bytes behind
-//! an effect controller that counts every crossing, and asserts the run ends
-//! typed with zero crossings and without ever building its execution runtime.
+//! Each case runs `run_lashlang_process` on a segment parked by this build and
+//! restamped as another generation's, behind an effect controller that counts
+//! every crossing, and asserts the run ends typed with zero crossings and
+//! without ever building its execution runtime.
 
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-/// The module artifact the pre-FIG-3571 writer published (source commit
-/// 3e7301d21cdddb0126761cba300645b15a2b9cda), as its store bytes.
-const MODULE_ARTIFACT_PRE_FIG3571: &[u8] =
-    include_bytes!("../fixtures/lashlang_module_artifact_pre_fig3571.json");
-/// A segment the pre-FIG-3571 writer parked (source commit d5d4956d3).
-const SEGMENT_V17_PARKED_PRE_FIG3571: &[u8] =
-    include_bytes!("../fixtures/lashlang_segment_v17_parked_pre_fig3571.json");
 
 /// Counts every crossing of the controller boundary and executes none.
 #[derive(Default)]
@@ -84,10 +77,8 @@ impl lash_core::RuntimeEffectController for CrossingCounter {
     }
 }
 
-/// An artifact store that serves stored bytes, which the typed view decodes
-/// through the same decoder, and the same error mapping, as every store's.
 struct StoredBytesArtifactStore {
-    bytes: &'static [u8],
+    bytes: Vec<u8>,
 }
 
 #[async_trait::async_trait]
@@ -250,49 +241,6 @@ fn assert_stopped_before_any_effect(run: &RefusedRun) {
     );
 }
 
-/// A module artifact the pre-FIG-3571 writer published cannot decode under
-/// the carrier IR. That is deterministic, so the run ends Abandoned with the
-/// shared `ResumeRefused { RetiredGeneration }` terminal, naming the module
-/// ref it refused, instead of retrying a fault that can never clear.
-async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law() {
-    let stored: serde_json::Value = serde_json::from_slice(MODULE_ARTIFACT_PRE_FIG3571)
-        .expect("the predecessor artifact is JSON");
-    let decode = lashlang::ModuleArtifact::from_store_bytes(MODULE_ARTIFACT_PRE_FIG3571)
-        .expect_err("the predecessor artifact must not decode under the carrier IR");
-    assert!(matches!(
-        lash_core::ArtifactStoreError::from(decode),
-        lash_core::ArtifactStoreError::UnsupportedGeneration { .. }
-    ));
-    let (process_name, process_ref) = stored["exports"]["processes"]
-        .as_object()
-        .and_then(|processes| processes.iter().next())
-        .expect("the predecessor exports one process");
-    let input = LashlangProcessInput {
-        module_ref: serde_json::from_value(stored["module_ref"].clone())
-            .expect("predecessor module ref"),
-        process_ref: serde_json::from_value(process_ref.clone()).expect("predecessor process ref"),
-        host_requirements_ref: serde_json::from_value(stored["host_requirements_ref"].clone())
-            .expect("predecessor host requirements ref"),
-        process_name: process_name.clone(),
-        args: serde_json::Map::new(),
-    };
-
-    let run = run_counted(
-        lashlang::LashlangArtifacts::new(Arc::new(StoredBytesArtifactStore {
-            bytes: MODULE_ARTIFACT_PRE_FIG3571,
-        })),
-        &input,
-        None,
-    )
-    .await;
-    assert_resume_refused_before_any_effect(
-        &run,
-        lash_core::ProcessResumeRefusal::RetiredGeneration {
-            found: input.module_ref.to_string(),
-        },
-    );
-}
-
 /// A sleep process the current build published, for the handover cases: were
 /// it resumed, its first act would be a sleep effect.
 async fn published_sleep_process() -> (LashlangArtifacts, LashlangProcessInput) {
@@ -330,29 +278,30 @@ async fn published_sleep_process() -> (LashlangArtifacts, LashlangProcessInput) 
     (store, input)
 }
 
-fn parked_handover(program_hash: String) -> lash_core::SegmentHandover {
-    let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
-        .unwrap_or_else(|error| panic!("the parked-segment fixture is JSON: {error}"));
-    lash_core::SegmentHandover {
+/// The handover of a segment another generation parked: this build's golden
+/// with its envelope restamped one version on.
+fn other_generation_handover(program_hash: String) -> (lash_core::SegmentHandover, u32) {
+    let mut segment_state =
+        crate::process::segment_trace_tests::parked_loop_segment_golden()["segment_state"].clone();
+    let other_version = crate::LASHLANG_SEGMENT_STATE_VERSION + 1;
+    segment_state["version"] = serde_json::json!(other_version);
+    let handover = lash_core::SegmentHandover {
         reason: lash_core::BoundaryReason::JournalBudget,
         program_hash,
-        engine_state: serde_json::to_vec(&fixture["segment_state"])
+        engine_state: serde_json::to_vec(&segment_state)
             .unwrap_or_else(|error| panic!("re-encode the parked handover: {error}")),
-    }
+    };
+    (handover, other_version)
 }
 
-/// A segment the pre-FIG-3571 writer parked carries that build's program
-/// identity, so its handover is refused at the identity fence: the shared
-/// resume refusal, naming the identity it found.
-async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law() {
-    let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
-        .unwrap_or_else(|error| panic!("the parked-segment fixture is JSON: {error}"));
-    let recorded = fixture["program_hash"]
-        .as_str()
-        .unwrap_or_else(|| panic!("the fixture records its program hash"))
-        .to_string();
+/// A segment another build parked carries that build's program identity, so
+/// its handover is refused at the identity fence: the shared resume refusal,
+/// naming the identity it found.
+async fn another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law() {
+    let recorded = "sha256:another-build".to_string();
     let (store, input) = published_sleep_process().await;
-    let run = run_counted(store, &input, Some(parked_handover(recorded.clone()))).await;
+    let (handover, _) = other_generation_handover(recorded.clone());
+    let run = run_counted(store, &input, Some(handover)).await;
     assert_resume_refused_before_any_effect(
         &run,
         lash_core::ProcessResumeRefusal::RetiredGeneration { found: recorded },
@@ -360,43 +309,61 @@ async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_
 }
 
 /// Behind the identity fence the parked bytes still meet the segment-version
-/// fence: even under a matching identity, a v17 segment is refused with the
-/// shared resume refusal before its continuation is restored.
-async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect_law() {
+/// fence: even under a matching identity, another generation's segment is
+/// refused with the shared resume refusal before its continuation is restored.
+async fn another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect_law()
+{
     let (store, input) = published_sleep_process().await;
     let current = crate::process::lashlang_program_hash(&input);
-    let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)
-        .unwrap_or_else(|error| panic!("the parked-segment fixture is JSON: {error}"));
-    let parked_version = fixture["segment_state"]["version"]
-        .as_u64()
-        .unwrap_or_else(|| panic!("the fixture records its segment-state version"));
-    let run = run_counted(store, &input, Some(parked_handover(current))).await;
+    let (handover, other_version) = other_generation_handover(current);
+    let run = run_counted(store, &input, Some(handover)).await;
     assert_resume_refused_before_any_effect(
         &run,
         lash_core::ProcessResumeRefusal::RetiredGeneration {
-            found: format!("lashlang-segment-state-v{parked_version}"),
+            found: format!("lashlang-segment-state-v{other_version}"),
         },
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn retired_process_shapes_refuse_before_registration_or_effects() {
-    pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law().await;
-    pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law().await;
-    pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect_law().await;
+async fn another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect() {
+    another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law().await;
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
-    pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect_law().await;
+async fn another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect() {
+    another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect_law()
+        .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect() {
-    pre_fig3571_parked_segment_is_refused_at_the_identity_fence_before_any_effect_law().await;
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect() {
-    pre_fig3571_parked_segment_is_refused_at_the_version_fence_before_any_effect_law().await;
+async fn another_artifact_family_is_a_typed_terminal_before_any_effect() {
+    let (store, input) = published_sleep_process().await;
+    let bytes = store
+        .store()
+        .get_module_artifact(input.module_ref.as_str())
+        .await
+        .expect("read current artifact")
+        .expect("published artifact");
+    let mut wire: serde_json::Value = serde_json::from_slice(&bytes).expect("artifact JSON");
+    wire["family"] = serde_json::json!("unsupported-artifact-family");
+    let bytes = serde_json::to_vec(&wire).expect("encode foreign artifact family");
+    let decode =
+        lashlang::ModuleArtifact::from_store_bytes(&bytes).expect_err("foreign family refuses");
+    assert!(matches!(
+        lash_core::ArtifactStoreError::from(decode),
+        lash_core::ArtifactStoreError::UnsupportedGeneration { .. }
+    ));
+    let run = run_counted(
+        lashlang::LashlangArtifacts::new(Arc::new(StoredBytesArtifactStore { bytes })),
+        &input,
+        None,
+    )
+    .await;
+    assert_resume_refused_before_any_effect(
+        &run,
+        lash_core::ProcessResumeRefusal::RetiredGeneration {
+            found: input.module_ref.to_string(),
+        },
+    );
 }

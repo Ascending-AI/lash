@@ -214,26 +214,31 @@ The replay law reads `LASH_REPLAY_CORPUS_ROOT` as the directory containing
 `lash.release-fixtures-manifest.v1`. An explicit root has no fallback.
 Without the variable it reads `testdata/replay-corpus`.
 
-Each capture records `journal_logic_epoch` and the ordered `journal_steps`.
-The capture manifest records the epoch read from those journals. When the
-current `JOURNAL_LOGIC_EPOCH` matches, replay checks the envelopes and exact
-step sequence. It also runs one workload through the real handlers on the
-server double and checks each lash service's handler journals against its
-`service-<Service>` scenario, so a `ctx.run` added to a handler diverges. A
-law derives the service list from the source and fails when a service has no
-scenario. A divergence fails with
-`journal logic changed: bump JOURNAL_LOGIC_EPOCH`. A different epoch returns
+Each `journal.json` records the complete build generation `G` that wrote it.
+Controller fixtures hold one ordered `journal` of named effects or process
+command facts. Each `service-<Service>` fixture holds the ordered command
+sequences its real handlers wrote on the server double. A law derives the
+service list from the source and fails when a service has no scenario.
+The capture manifest names the source commit; journals repeat no provenance.
+
+Both fixture kinds use the generation bound by the corpus's real
+standard-protocol core, including its fixture process-engine plugin in hook
+order. Replay compares only matching generations. A handler step added,
+removed or reordered then fails with
+`journal logic changed: bump JOURNAL_LOGIC_EPOCH`. Another generation returns
 `DifferentGeneration` and prints `different generation, not compared`.
-The added-step self-test proves the unchanged-epoch failure and the distinct
-result after an epoch bump, without changing production constants.
+Controller and service added-step self-tests prove both outcomes without
+changing production constants.
 
 ```sh
 kiln test //crates/lash-restate:lash-restate__unit_test \
+  --local-test-execution --no-test-cache \
   --test_arg=tests::replay_corpus:: --test_arg=--nocapture \
   --test_env LASH_REPLAY_CORPUS_ROOT=crates/lash-restate/testdata/replay-corpus
 ```
 
 The `Release journal replay` workflow runs on main and registered-surface
 pull requests. It stays non-required under FIG-4097 during the version
-freeze. The cut repoints its root to
-`fixtures/release/v1.0.0/replay-corpus` and makes the job required.
+freeze and reads the current-tree corpus at `testdata/replay-corpus`. The cut
+repoints its root to `fixtures/release/v1.0.0/replay-corpus` and makes the job
+required as described in `docs/release/cut-1.0.md`.

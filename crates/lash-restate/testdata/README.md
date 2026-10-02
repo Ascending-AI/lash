@@ -16,8 +16,9 @@ The service list is derived:
 `#[restate_sdk::object]` or `#[restate_sdk::workflow]` in `src` has no
 scenario. Regenerate the corpus to record one.
 
-The ignored generator writes under `CARGO_MANIFEST_DIR` and records the checkout's
-Git revision. Regenerate the corpus from the repository root with:
+The ignored generator writes under `BUILD_WORKSPACE_DIRECTORY` when supplied,
+otherwise `CARGO_MANIFEST_DIR`. Every fixture records the corpus core's complete
+build generation; the capture manifest owns its Git revision. Regenerate the corpus from the repository root with:
 
 ```console
 kiln test //crates/lash-restate:lash-restate__unit_test \

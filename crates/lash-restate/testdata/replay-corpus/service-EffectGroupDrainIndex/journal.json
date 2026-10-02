@@ -1,9 +1,7 @@
 {
   "scenario": "service-EffectGroupDrainIndex",
   "service": "EffectGroupDrainIndex",
-  "recorded_at_git_sha": "6b665cd0a405d3abe245d6473eb5085ab2d79add",
-  "format": "lash-restate service handler journals v1; per handler, each distinct ordered command sequence its invocations wrote on the server double, minted ids elided as #",
-  "journal_logic_epoch": 1,
+  "generation": "1654dff52a0a",
   "handlers": {
     "register": [
       [

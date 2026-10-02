@@ -2173,11 +2173,28 @@ async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::Trigg
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn first_ingress_and_replay_share_canonical_subscription_order(
+/// First delivery and replay both preserve subscription-key order, independent of hash order.
+pub async fn first_ingress_and_replay_share_canonical_subscription_order(
     store: Arc<dyn crate::TriggerStore>,
 ) {
     let owner_scope = crate::TriggerOwnerScope::host("fig811").unwrap();
-    for key in ["gamma", "alpha"] {
+    // The fixture opposes hash order, so canonical-order coverage cannot pass
+    // by accident: the key that sorts first has the id that sorts last.
+    let (first_key, second_key) = [
+        ("alpha", "gamma"),
+        ("alpha", "beta"),
+        ("beta", "gamma"),
+        ("delta", "omega"),
+        ("kappa", "sigma"),
+        ("lambda", "theta"),
+    ]
+    .into_iter()
+    .find(|(first, second)| {
+        crate::deterministic_subscription_id(&owner_scope, first)
+            > crate::deterministic_subscription_id(&owner_scope, second)
+    })
+    .unwrap();
+    for key in [second_key, first_key] {
         let mut draft = sample_draft(
             &SessionId::from("fig811"),
             key,
@@ -2199,12 +2216,6 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
     let request = button_occurrence("canonical-order-source", "canonical-order-occurrence");
     let first = store.ingest_occurrence(request.clone()).await.unwrap();
     let replay = store.ingest_occurrence(request).await.unwrap();
-    let alpha_id = crate::deterministic_subscription_id(&owner_scope, "alpha");
-    let gamma_id = crate::deterministic_subscription_id(&owner_scope, "gamma");
-    assert!(
-        alpha_id > gamma_id,
-        "fixture must oppose hash order so canonical-order coverage cannot pass accidentally"
-    );
     let keys = |ingress: &crate::TriggerIngressReceipt| {
         ingress
             .reservations
@@ -2212,11 +2223,9 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
             .map(|reservation| reservation.subscription.subscription_key.clone())
             .collect::<Vec<_>>()
     };
-    assert_eq!(keys(&first), vec!["alpha".to_string(), "gamma".to_string()]);
-    assert_eq!(
-        keys(&replay),
-        vec!["alpha".to_string(), "gamma".to_string()]
-    );
+    let canonical = vec![first_key.to_string(), second_key.to_string()];
+    assert_eq!(keys(&first), canonical);
+    assert_eq!(keys(&replay), canonical);
 }
 
 #[expect(
