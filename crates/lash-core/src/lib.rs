@@ -127,6 +127,7 @@ pub mod facade_support {
         UnrecordedSessionSources, opener_for_execution_scope, scope_status,
     };
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
+    pub use lash_core_ids::operational_metrics::StoreObserver;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.

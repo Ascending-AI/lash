@@ -382,15 +382,19 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         engine_execution_id: None,
         generation: None,
     };
+    let clock = lash_core::testing::TestClock::new(0);
     let record = |payload: TraceLanguageExecutionPayload| {
-        product_record(lash_trace::TraceEvent::LanguageExecution {
+        clock.advance(1);
+        let mut record = product_record(lash_trace::TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
             event: TraceLanguageExecution {
                 event_key: "loop-branch".to_string(),
                 identity: identity.clone(),
                 payload,
             },
-        })
+        });
+        record.timestamp = lash_core::Clock::timestamp_datetime(&clock);
+        record
     };
     let records = Arc::new(std::sync::Mutex::new(vec![record(
         TraceLanguageExecutionPayload::ExecutionStarted {

@@ -1924,6 +1924,9 @@ async fn live_workbench_restate_state_over_stores(
             live_restate_authority_id(),
         ),
     ));
+    let host_backend = lash::Backend::new(backend.clone());
+    let tracing = lash::runtime::TraceRuntime::new(host_backend.clock())
+        .with_product_observer(lashlang_execution_sink);
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -1932,13 +1935,10 @@ async fn live_workbench_restate_state_over_stores(
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend.clone().into(),
-    )
-    .with_lashlang_execution_sink(lashlang_execution_sink);
-    let core = LashCore::rlm_builder(
-        lash::Backend::new(backend.clone()),
-        factory,
-    )
+        &host_backend,
+    );
+    let core = LashCore::rlm_builder(host_backend, factory)
+        .trace_runtime(tracing)
         .serve_workbench_llm_profile(provider, model)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

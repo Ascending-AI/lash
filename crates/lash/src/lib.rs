@@ -794,10 +794,6 @@ pub mod plugins {
         BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
         ReplaceToolArgsDirective, ShortCircuitToolDirective, TurnPluginDirective,
     };
-    /// What [`PluginFactory::process_engine_contributions`] is handed: a host
-    /// factory that wraps another (the RLM factory, say) forwards it so the
-    /// wrapped factory's process engines are still contributed (FIG-4373).
-    pub use lash_core::plugin::ProcessEngineContributionContext;
     /// Hook contracts and reports used by plugin authors.
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
@@ -864,6 +860,10 @@ pub mod plugins {
         PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
         ProcessReadService, SessionParam, SessionReadService,
     };
+    /// What [`PluginFactory::process_engine_contributions`] is handed: a host
+    /// factory that wraps another (the RLM factory, say) forwards it so the
+    /// wrapped factory's process engines are still contributed (FIG-4373).
+    pub use lash_core::plugin::{PluginExecutionTrace, ProcessEngineContributionContext};
     /// Engine registry and narrowed execution contexts used to host custom process engines.
     pub use lash_core::runtime::{
         ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunGuard,
@@ -1426,6 +1426,7 @@ pub mod runtime {
 /// Trace context, events, and sink configuration.
 pub mod tracing {
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    pub use lash_core::facade_support::StoreObserver;
     /// Where engine code stands when it observes, and the journaled-step
     /// boundary that grants the right to.
     pub use lash_core::trace::{JournalFrontier, LiveStep, StepIssue, TraceStanding};

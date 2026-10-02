@@ -20,7 +20,8 @@ use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 #[tokio::test(flavor = "current_thread")]
 async fn runtime_pool_failures_observe_the_injected_store_instruments() {
     let observed = lash_core::operational_metrics::TestMetrics::install();
-    let runtime = lash_core::trace::TraceRuntime::new(Arc::new(lash_core::SystemClock));
+    let runtime =
+        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock));
     let observer = StoreObserver::new(runtime.metrics().clone());
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://fixture:fixture@127.0.0.1:1/fixture")

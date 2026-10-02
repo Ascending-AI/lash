@@ -1374,6 +1374,8 @@ async fn subagents_plugin_builds_without_mode_context() {
         lash_core::lifetime::starter,
     );
     let ctx = PluginSessionContext {
+        tracing: lash_core::trace::TraceRuntime::default(),
+        trace: None,
         owner: lash_core::RuntimeOwner::Session(SessionId::from("parent")),
         tool_access: lash_core::SessionToolAccess::default(),
         subagent: None,

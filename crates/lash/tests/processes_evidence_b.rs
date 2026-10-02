@@ -402,8 +402,8 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineContributionContext::new;
     // W0458: lash::plugins::ProcessEngineContributionContext::process_lifecycle_available [function]
     let _ = lash::plugins::ProcessEngineContributionContext::process_lifecycle_available;
-    // W0459: lash::plugins::ProcessEngineContributionContext::trace_context [function]
-    let _ = lash::plugins::ProcessEngineContributionContext::trace_context;
+    // W0459: lash::plugins::ProcessEngineContributionContext::trace_runtime [function]
+    let _ = lash::plugins::ProcessEngineContributionContext::trace_runtime;
     // W0460: lash::plugins::ProcessEngineRunContext [struct]
     type_witness::<lash::plugins::ProcessEngineRunContext>();
     // W0461: lash::plugins::ProcessEngineRunContext::cancellation_token [function]

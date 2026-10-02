@@ -832,7 +832,7 @@ pub struct LashCoreBuilder {
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
-    trace_runtime: Option<lash_core::trace::TraceRuntime>,
+    trace_runtime: Option<lash_core::runtime::TraceRuntime>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
@@ -1022,7 +1022,7 @@ impl LashCoreBuilder {
     }
 
     /// Install the shared tracing runtime used by the engine and every plugin.
-    pub fn trace_runtime(mut self, runtime: lash_core::trace::TraceRuntime) -> Self {
+    pub fn trace_runtime(mut self, runtime: lash_core::runtime::TraceRuntime) -> Self {
         self.trace_runtime = Some(runtime);
         self
     }
@@ -1132,6 +1132,13 @@ impl LashCoreBuilder {
             crate::process_observation::ProcessObservationHub::new(self.process_observation_config),
         );
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
+        let observation_sink = match core.tracing.emitter().product_observer() {
+            Some(configured) => Arc::new(lash_trace::TeeTraceSink::new([
+                Arc::clone(configured),
+                observation_sink,
+            ])) as Arc<dyn lash_trace::TraceSink>,
+            None => observation_sink,
+        };
         let core = core.with_process_observation_sink(observation_sink);
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
@@ -1358,7 +1365,7 @@ fn refuse_foreign_backend_factories<'a>(
 pub(crate) fn build_plugin_host(
     protocol_factory: Option<&Arc<dyn PluginFactory>>,
     plugin_factories: &[Arc<dyn PluginFactory>],
-    tracing: &lash_core::trace::TraceRuntime,
+    tracing: &lash_core::runtime::TraceRuntime,
 ) -> Result<PluginHost> {
     let mut factories =
         Vec::with_capacity(usize::from(protocol_factory.is_some()) + plugin_factories.len());

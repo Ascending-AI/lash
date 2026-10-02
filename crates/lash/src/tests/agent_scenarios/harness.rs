@@ -300,11 +300,11 @@ impl AgentScenarioSetup {
         let tracing = lash_core::trace::TraceRuntime::new(backend.clock())
             .with_product_observer(graph_store.clone());
         let factory = rlm_factory(&backend);
-        let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
+        let store_factory = backend.session_store_factory();
         let turn_budget = self
             .max_turns
             .map_or(crate::TurnBudget::Unbounded, crate::TurnBudget::bounded);
-        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(backend.into(), factory))
+        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
             .trace_runtime(tracing)
             .serve_test_llm_profile(provider, mock_llm_profile_spec());
         if let Some(tools) = self.tool_provider {
