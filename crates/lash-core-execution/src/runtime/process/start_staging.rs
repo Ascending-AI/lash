@@ -262,29 +262,13 @@ pub struct HostStartAdmission {
     pub session_turn_admission: Option<SessionTurnAdmission>,
 }
 
-impl HostStartAdmission {
-    /// The catalog of the admission `host_start` carries, if any.
-    pub fn catalog(host_start: Option<&Self>) -> Option<&dyn crate::store::RuntimeStore> {
-        host_start.and_then(|host_start| host_start.session_catalog.as_deref())
-    }
-
-    /// The host session-turn admission, if this executor carries one.
-    pub fn session_turn_admission(host_start: Option<&Self>) -> Option<&SessionTurnAdmission> {
-        host_start.and_then(|host_start| host_start.session_turn_admission.as_ref())
-    }
-}
-
 /// The stores one process start writes through.
 pub struct ProcessStartStores<'a> {
     pub registry: &'a dyn ProcessRegistry,
     pub env_store: Option<&'a Arc<dyn ProcessExecutionEnvStore>>,
     /// The engines a start names artifacts through, and the
     /// [`ArtifactReferrerPorts`] that hold them.
-    pub engines: Option<&'a ProcessEngineRegistry>,
-    /// Whether an engine start with no engine registry is refused (a durable
-    /// controller) or registered without staging engine artifacts (the local
-    /// executor, whose host may serve engine rows elsewhere).
-    pub engines_required: bool,
+    pub engines: &'a ProcessEngineRegistry,
     /// The session catalog a root start's host session-lookup grant is
     /// checked against, inside the recorded admission this registration
     /// runs in. `None` refuses a host-granted start.
@@ -305,7 +289,7 @@ pub struct ProcessStartStores<'a> {
 
 impl ProcessStartStores<'_> {
     fn ports(&self) -> Option<&ArtifactReferrerPorts> {
-        self.engines.and_then(ProcessEngineRegistry::artifact_ports)
+        self.engines.artifact_ports()
     }
 }
 
@@ -791,12 +775,12 @@ fn creation_config(
     registration: &ProcessRegistration,
     env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<Option<serde_json::Value>, RuntimeEffectControllerError> {
-    let (ProcessInput::Engine { kind, .. }, Some(engines), Some(env_spec)) =
-        (registration.input.as_ref(), stores.engines, env_spec)
+    let (ProcessInput::Engine { kind, .. }, Some(env_spec)) =
+        (registration.input.as_ref(), env_spec)
     else {
         return Ok(None);
     };
-    Ok(engines.require(kind)?.creation_config(env_spec)?)
+    Ok(stores.engines.require(kind)?.creation_config(env_spec)?)
 }
 
 async fn stage_engine<'a>(
@@ -808,19 +792,7 @@ async fn stage_engine<'a>(
     let ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
         return Ok(None);
     };
-    let Some(engines) = stores.engines else {
-        if stores.engines_required {
-            return Err(RuntimeEffectControllerError::foreign(
-                "process_engine_registry_unavailable",
-                TurnFailureCause::Outcome,
-                format!(
-                    "admitted {} requires an engine but the executor has no process-engine registry",
-                    stores.executor
-                ),
-            ));
-        }
-        return Ok(None);
-    };
+    let engines = stores.engines;
     let names = engines.require(kind)?.start_artifacts(payload)?;
     if names.is_empty() {
         return Ok(None);
@@ -861,7 +833,20 @@ async fn resolve_start_target<'a>(
 ) -> Result<(Option<StagedDefinition<'a>>, ProcessRegistration), RuntimeEffectControllerError> {
     match registration.input.as_ref() {
         ProcessStartTarget::Input(input) => {
+            let identity = match input {
+                ProcessInput::Engine { kind, payload } => {
+                    Some(stores.engines.admit(kind, payload, env_spec).await?)
+                }
+                _ => None,
+            };
             let input = Arc::new(input.clone());
+            let declared_label = registration.identity.label.clone();
+            let registration = match identity {
+                Some(identity) => registration
+                    .with_admitted_identity(identity)
+                    .with_host_facing_label(declared_label),
+                None => registration,
+            };
             Ok((None, registration.with_input(input)))
         }
         ProcessStartTarget::Definition {
@@ -905,7 +890,8 @@ async fn stage_definition<'a>(
     args: &serde_json::Map<String, serde_json::Value>,
     env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<(StagedDefinition<'a>, ProcessRegistration), RuntimeEffectControllerError> {
-    let (Some(engines), Some(ports)) = (stores.engines, stores.ports()) else {
+    let engines = stores.engines;
+    let Some(ports) = stores.ports() else {
         return Err(RuntimeEffectControllerError::foreign(
             "process_definition_store_unavailable",
             TurnFailureCause::Outcome,

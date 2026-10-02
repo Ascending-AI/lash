@@ -1741,6 +1741,8 @@ impl EffectBackedProcessService {
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
                 &self.registry,
             ))),
+            crate::ProcessEngineRegistry::new(),
+            crate::runtime::HostStartAdmission::default(),
         )
         .with_process_env_store(Arc::clone(&self.process_env_store))
         .with_process_effect_controller(

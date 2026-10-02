@@ -2373,15 +2373,20 @@ pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processe
     });
     let receiver = crate::ExecutionScope::runtime_operation("work-wait-seam");
     let await_backend = || {
-        crate::RuntimeEffectLocalExecutor::processes(registry.clone(), port.clone())
-            .into_process()
-            .expect("production process executor")
-            .execute(
-                &receiver,
-                crate::ProcessCommand::Await {
-                    process_id: port.process_id.clone(),
-                },
-            )
+        crate::RuntimeEffectLocalExecutor::processes(
+            registry.clone(),
+            port.clone(),
+            crate::ProcessEngineRegistry::new(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .into_process()
+        .expect("production process executor")
+        .execute(
+            &receiver,
+            crate::ProcessCommand::Await {
+                process_id: port.process_id.clone(),
+            },
+        )
     };
     assert!(matches!(
         await_backend().await.expect("reattached terminal"),

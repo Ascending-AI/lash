@@ -248,6 +248,8 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 .process_work()
                 .cloned()
                 .expect("process service requires process-work wiring"),
+            self.current.host.core.process_engines.clone(),
+            crate::runtime::HostStartAdmission::default(),
         )
         .with_process_starts(
             self.current
@@ -261,7 +263,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,
         ))
-        .with_process_engines(self.current.host.core.process_engines.clone())
         .with_process_attachments(Arc::clone(
             self.current
                 .host
@@ -414,7 +415,7 @@ impl ProcessCapability {
             .with_wake_session_id(wake_session_id);
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self
-            .admit_and_stamp_engine_start(current, registration, validation_env_spec.as_ref())
+            .admit_session_turn_start(current, registration, validation_env_spec.as_ref())
             .await?;
         let execution_context = options.execution_context(&scope);
         let runner = ProcessCommandRunner::new(
@@ -447,15 +448,22 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let env_spec = match request.env_ref.as_ref() {
-            Some(env_ref) => Some(
-                crate::load_process_execution_env(
-                    current.host.core.durability.process_env_store.as_ref(),
-                    env_ref,
-                )
-                .await?,
-            ),
-            None => None,
+        let env_spec = if matches!(
+            &request.input,
+            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn { .. })
+        ) {
+            match request.env_ref.as_ref() {
+                Some(env_ref) => Some(
+                    crate::load_process_execution_env(
+                        current.host.core.durability.process_env_store.as_ref(),
+                        env_ref,
+                    )
+                    .await?,
+                ),
+                None => None,
+            }
+        } else {
+            None
         };
         // A leaf start declares no observer edge (#1534 gives the *run* its own
         // possession, which is what makes `await handle` reachable). Observation
@@ -505,15 +513,8 @@ impl ProcessCapability {
             )
             .with_consumer_hold(scope.consumer_hold.clone());
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
-        // A redrive presents the same start key, and the registrar returns the
-        // retained process untouched (ADR 0107): its recorded attempt bound
-        // stands whatever this declaration carried.
-        // A recorded intent declares its own execution env, so the engine gate
-        // loads the recorded environment reference. It must
-        // run here: once the start command crosses the journal the entry is
-        // committed and replays forever.
         let registration = self
-            .admit_and_stamp_engine_start(current, registration, env_spec.as_ref())
+            .admit_session_turn_start(current, registration, env_spec.as_ref())
             .await?
             .with_host_facing_label(declared_label);
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
@@ -527,69 +528,32 @@ impl ProcessCapability {
             .await
     }
 
-    /// Admit immutable recorded inputs and stamp the sole engine identity.
-    ///
-    /// A session-turn start's child is admitted here too, before its
-    /// handoff: its complete facts resolve against the environment the start
-    /// captured on this deployment's plugin set, so a child the plugin set
-    /// cannot run is refused before anything is registered, never on the
-    /// worker (FIG-4396).
-    async fn admit_and_stamp_engine_start(
+    /// Check the session child's creation facts against the parent's plugin set.
+    async fn admit_session_turn_start(
         &self,
         current: &CurrentOwnerCapability,
         registration: crate::ProcessStartRegistration,
         env_spec: Option<&crate::ProcessExecutionEnvSpec>,
     ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
-        let (kind, payload) = match registration.input.as_ref() {
-            crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { kind, payload }) => {
-                (kind, payload)
-            }
-            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn {
+        if let crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn {
+            create_request,
+            ..
+        }) = registration.input.as_ref()
+        {
+            let Some(env_spec) = env_spec else {
+                return Err(crate::PluginError::Session(format!(
+                    "process `{}` requires a captured execution env",
+                    registration.refusal_name()
+                )));
+            };
+            super::super::session_init::admit_session_turn_child(
+                current,
                 create_request,
-                ..
-            }) => {
-                let Some(env_spec) = env_spec else {
-                    return Err(crate::PluginError::Session(format!(
-                        "process `{}` requires a captured execution env",
-                        registration.refusal_name()
-                    )));
-                };
-                super::super::session_init::admit_session_turn_child(
-                    current,
-                    create_request,
-                    env_spec,
-                    &registration.refusal_name(),
-                )?;
-                return Ok(registration);
-            }
-            crate::ProcessStartTarget::Input(crate::ProcessInput::External { .. })
-            | crate::ProcessStartTarget::Definition { .. } => {
-                return Ok(registration);
-            }
-        };
-        // Deliberate asymmetry between the two routes, and not a new refusal.
-        // A request-shaped start captures the live session env before it reaches
-        // this gate (`capture_execution_env`), so its env is never absent. A
-        // recorded intent must be validated against the env its own record
-        // carries — substituting the live session env would make the admitted
-        // start depend on when it was realized, which a journaled command may
-        // never do. With no recorded env there is nothing to validate against,
-        // and such a start was already refused with this exact error downstream
-        // in `validate_process_registration`; the gate only moves the same
-        // refusal ahead of the journal.
-        let Some(env_spec) = env_spec else {
-            return Err(crate::PluginError::Session(format!(
-                "process `{}` requires a captured execution env",
-                registration.refusal_name()
-            )));
-        };
-        let identity = current
-            .host
-            .core
-            .process_engines
-            .admit(kind, payload, Some(env_spec))
-            .await?;
-        Ok(registration.with_admitted_identity(identity))
+                env_spec,
+                &registration.refusal_name(),
+            )?;
+        }
+        Ok(registration)
     }
 
     pub(in crate::runtime::session_manager) async fn await_process(

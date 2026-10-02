@@ -623,8 +623,9 @@ async fn segment_body(
                     RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&registry),
                         Arc::new(crate::NoProcessWork::for_registry(registry)),
+                        crate::testing::process_engine_fixture(),
+                        crate::runtime::HostStartAdmission::default(),
                     )
-                    .with_process_engines(crate::testing::process_engine_fixture())
                     .with_process_env_store(Arc::clone(&scenario.env_store)),
                 )
                 .await;

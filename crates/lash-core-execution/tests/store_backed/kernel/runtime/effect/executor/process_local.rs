@@ -65,6 +65,162 @@ mod tests {
     /// The start laws' server-double seed.
     const SEED: u64 = 0x90_ca1;
 
+    #[tokio::test]
+    async fn local_start_admits_payload_and_stamps_engine_identity() {
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry = backend.process_registry();
+        let env_store = backend.process_env_store();
+        let engines = crate::ProcessEngineRegistry::new().with_registration(
+            crate::ProcessEngineRegistration::new(
+                Arc::new(crate::testing::FixtureProcessEngine),
+                crate::ProcessEngineAdmission::new("testing-fixture", |kind, payload, env| {
+                    assert!(env.is_some(), "admission receives the recorded environment");
+                    if payload["marker"] == "invalid" {
+                        return Err(crate::PluginError::Session(
+                            "invalid fixture payload".to_owned(),
+                        ));
+                    }
+                    if payload["marker"] == "missing-config" {
+                        return Err(crate::PluginError::MissingRecordedProcessConfig {
+                            engine_kind: kind.to_owned(),
+                        });
+                    }
+                    Ok(crate::ProcessIdentity::labelled(kind, Some("engine-stamp")))
+                }),
+            )
+            .expect("matching engine kind"),
+        );
+        for marker in ["invalid", "missing-config", "valid"] {
+            let registration = engine_registration(marker, marker);
+            let key = registration.start_key.clone().expect("key");
+            let envelope = start_envelope(
+                env_store.as_ref(),
+                marker,
+                registration,
+                crate::ProcessExecutionEnvSpec::new(
+                    crate::AdmittedPluginConfig::default(),
+                    crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                        crate::MaxToolCalls::new(1024),
+                    ),
+                ),
+            )
+            .await;
+            let crate::RuntimeEffectCommand::Process { command } = envelope.command else {
+                panic!("expected a process command");
+            };
+            let outcome = crate::RuntimeEffectLocalExecutor::processes(
+                registry.clone(),
+                Arc::new(crate::NoProcessWork::for_registry(registry.clone())),
+                engines.clone(),
+                crate::runtime::HostStartAdmission::default(),
+            )
+            .with_process_env_store(env_store.clone())
+            .into_process()
+            .expect("process executor")
+            .execute(
+                &crate::ExecutionScope::runtime_operation("runtime"),
+                *command,
+            )
+            .await;
+            if marker == "missing-config" {
+                let error = outcome.expect_err("typed admission refusal");
+                assert_eq!(
+                    error.code,
+                    crate::RuntimeErrorCode::MissingRecordedProcessConfig
+                );
+                assert_eq!(
+                    error.cause,
+                    Some(crate::RuntimeErrorCause::MissingRecordedProcessConfig {
+                        engine_kind: "testing-fixture".to_owned(),
+                    })
+                );
+                assert!(
+                    registry
+                        .get_process_by_start_key(&key)
+                        .await
+                        .expect("read key")
+                        .is_none()
+                );
+            } else if marker == "invalid" {
+                assert!(
+                    outcome
+                        .expect_err("invalid payload is refused")
+                        .to_string()
+                        .contains("invalid fixture payload")
+                );
+                assert!(
+                    registry
+                        .get_process_by_start_key(&key)
+                        .await
+                        .expect("read key")
+                        .is_none()
+                );
+            } else {
+                let crate::ProcessEffectOutcome::Start { record, .. } =
+                    outcome.expect("valid start")
+                else {
+                    panic!("expected a start");
+                };
+                assert_eq!(
+                    record.identity,
+                    crate::ProcessIdentity::labelled("testing-fixture", Some("engine-stamp"))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn every_local_start_requires_engine_admission() {
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry = backend.process_registry();
+        let env_store = backend.process_env_store();
+        let registration = engine_registration("seam-admission", "unchecked");
+        let key = registration.start_key.clone().expect("start key");
+        let envelope = start_envelope(
+            env_store.as_ref(),
+            "seam-admission",
+            registration,
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                ),
+            ),
+        )
+        .await;
+        let outcome = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry),
+            Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::ProcessEngineRegistry::new(),
+            crate::runtime::HostStartAdmission::default(),
+        )
+        .with_process_env_store(env_store)
+        .into_process()
+        .expect("process executor")
+        .execute(
+            &crate::ExecutionScope::runtime_operation("runtime"),
+            match envelope.command {
+                crate::RuntimeEffectCommand::Process { command } => *command,
+                other => panic!("expected process command: {other:?}"),
+            },
+        )
+        .await;
+        let error = outcome.expect_err("an unconfigured engine must be refused");
+        assert!(
+            error.to_string().contains("is not configured"),
+            "engine admission must supply the refusal: {error:?}"
+        );
+        assert!(
+            registry
+                .get_process_by_start_key(&key)
+                .await
+                .expect("read key")
+                .is_none()
+        );
+    }
+
     fn runtime_controller(backend: &crate::Backend) -> Arc<dyn RuntimeEffectController> {
         crate::support::scoped_controller(
             backend,
@@ -207,8 +363,9 @@ mod tests {
             crate::RuntimeEffectLocalExecutor::processes(
                 Arc::clone(&registry),
                 Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+                crate::testing::process_engine_fixture(),
+                crate::runtime::HostStartAdmission::default(),
             )
-            .with_process_engines(crate::testing::process_engine_fixture())
             .with_process_env_store(Arc::clone(&env_store))
         };
         let first = started_record(
@@ -362,8 +519,9 @@ mod tests {
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
 
         let started = started_record(
@@ -487,8 +645,9 @@ mod tests {
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(Arc::clone(&env_store));
         let returned = started_record(
             execute_in_handler(&double, envelope, executor)
@@ -605,13 +764,14 @@ mod tests {
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
             Arc::clone(&process_work) as Arc<dyn crate::ProcessWorkSubstrate>,
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
         )
         .with_process_starts(
             backend.obligation_ledger(crate::store::ObligationKind::ProcessStart),
             backend.clock(),
             crate::runtime::drive::relay::RelayPolicy::default(),
         )
-        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(backend.process_env_store());
 
         let outcome = runtime_controller(&backend)
@@ -781,8 +941,9 @@ mod tests {
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+            crate::testing::process_engine_fixture(),
+            crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_engines(crate::testing::process_engine_fixture())
         .with_process_env_store(Arc::clone(&env_store));
 
         let returned = started_record(
@@ -980,6 +1141,8 @@ mod tests {
                 crate::RuntimeEffectLocalExecutor::processes(
                     Arc::clone(&registry),
                     Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+                    crate::ProcessEngineRegistry::new(),
+                    crate::runtime::HostStartAdmission::default(),
                 )
                 .with_process_effect_controller(resolutions)
                 .into_process()

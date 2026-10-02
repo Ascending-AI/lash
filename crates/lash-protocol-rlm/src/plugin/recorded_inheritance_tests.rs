@@ -160,9 +160,10 @@ async fn register_on(
                     lash_core::RuntimeEffectLocalExecutor::processes(
                         backend.process_registry(),
                         Arc::clone(backend.process_work().port()),
+                        engines,
+                        lash_core::runtime::HostStartAdmission::default(),
                     )
-                    .with_process_env_store(backend.process_env_store())
-                    .with_process_engines(engines),
+                    .with_process_env_store(backend.process_env_store()),
                 )
                 .await
                 .expect("the process start runs through its Restate registration");

@@ -1,0 +1,21 @@
+error[E0308]: mismatched types
+ --> tests/ui/process_execution_requires_admission.rs:4:33
+  |
+4 |     execution.process_engines = None;
+  |     -------------------------   ^^^^ expected `ProcessEngineRegistry`, found `Option<_>`
+  |     |
+  |     expected due to the type of this binding
+  |
+  = note: expected struct `ProcessEngineRegistry`
+               found enum `Option<_>`
+
+error[E0308]: mismatched types
+ --> tests/ui/process_execution_requires_admission.rs:5:28
+  |
+5 |     execution.host_start = None;
+  |     --------------------   ^^^^ expected `Box<HostStartAdmission>`, found `Option<_>`
+  |     |
+  |     expected due to the type of this binding
+  |
+  = note: expected struct `Box<HostStartAdmission>`
+               found enum `Option<_>`

@@ -245,6 +245,8 @@ impl EffectBackedProcessService {
             Arc::new(crate::NoProcessWork::for_registry(Arc::clone(
                 &self.registry,
             ))),
+            crate::ProcessEngineRegistry::new(),
+            crate::runtime::HostStartAdmission::default(),
         );
         if let Some(turn_cancellation) = scope.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);

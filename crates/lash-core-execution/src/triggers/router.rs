@@ -843,6 +843,8 @@ impl TriggerRouter {
                     let mut executor = crate::RuntimeEffectLocalExecutor::processes(
                         Arc::clone(&process_registry),
                         Arc::clone(self.process_work.port()),
+                        self.process_engines.clone().unwrap_or_default(),
+                        crate::runtime::HostStartAdmission::default(),
                     );
                     if let Some(starts) = self.process_starts.as_ref() {
                         executor = executor.with_process_starts(
@@ -853,9 +855,6 @@ impl TriggerRouter {
                     }
                     if let Some(store) = self.process_env_store.as_ref() {
                         executor = executor.with_process_env_store(Arc::clone(store));
-                    }
-                    if let Some(engines) = self.process_engines.as_ref() {
-                        executor = executor.with_process_engines(engines.clone());
                     }
                     // The start's recorded admission asks the host's
                     // restorer: a replay reads the step's record, a refusal
@@ -1021,9 +1020,9 @@ impl TriggerRouter {
             registry,
             process_work: port,
             process_env_store: self.process_env_store.clone(),
-            process_engines: self.process_engines.clone(),
+            process_engines: self.process_engines.clone().unwrap_or_default(),
             // A trigger delivery's start is never a host-granted root.
-            host_start: None,
+            host_start: Box::new(crate::runtime::HostStartAdmission::default()),
             turn_cancellation: None,
             effect_controller: None,
             attachments: None,
@@ -1100,14 +1099,6 @@ impl TriggerRouter {
         let attribution = delivery_attribution(subscription);
         let trigger_occurrence_invocation =
             crate::runtime::causal::trigger_occurrence_invocation(attribution.clone(), &causal_ref);
-        // Engine-admission ruling (FIG-1488): this route deliberately stays
-        // outside the gate. A delivery does not carry a caller-supplied engine
-        // payload — it replays the subscription's own durable target and the
-        // `target_identity` recorded when the subscription was registered, so
-        // the admission decision was made once at registration. Re-gating per
-        // occurrence would make a delivery fail on catalog drift the
-        // subscription already survived, and every delivery for one reservation
-        // must stay deterministic.
         let registration = crate::ProcessStartRegistration::of_target(
             target,
             crate::ProcessProvenance::new(subscription.registrant.clone())

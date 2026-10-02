@@ -845,21 +845,8 @@ impl ToolIntentIngress {
                 // `Detached` or `Until` a session the host holds (FIG-3607
                 // R3). The start's recorded admission checks that session is
                 // live, never a lookup ahead of it (ADR 0105 §1).
-                let env_spec = match request.env_ref.as_ref() {
-                    Some(env_ref) => Some(
-                        lash_core::runtime::load_process_execution_env(
-                            self.core.env.core.durability.process_env_store.as_ref(),
-                            env_ref,
-                        )
-                        .await
-                        .map_err(lash_core::PluginError::from)?,
-                    ),
-                    None => None,
-                };
                 let observers = request.observers.clone();
-                let registration = self
-                    .admit_engine_start(request.into_registration(), env_spec.as_ref())
-                    .await?;
+                let registration = request.into_registration();
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
@@ -1051,36 +1038,6 @@ impl ToolIntentIngress {
             .await
     }
 
-    /// The gate may use that immutable environment to derive identity, but cannot inspect a
-    /// live catalog or artifact store, so replaying the same intent is safe.
-    async fn admit_engine_start(
-        &self,
-        registration: lash_core::ProcessStartRegistration,
-        env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
-    ) -> Result<lash_core::ProcessStartRegistration, lash_core::PluginError> {
-        let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine { kind, payload }) =
-            registration.input.as_ref()
-        else {
-            return Ok(registration);
-        };
-        // `LashCore::env.core` deliberately carries no engines: every runtime
-        // construction site installs the plugin-contributed ones onto a clean
-        // clone (see `LashCoreBuilder::build`). Resolve the same way a session
-        // open does, or a plugin-contributed kind would be refused here as
-        // unregistered.
-        let engines = self.resolved_process_engines()?;
-        let identity = engines.admit(kind, payload, env_spec).await?;
-        Ok(registration.with_admitted_identity(identity))
-    }
-
-    /// The engine registry a session opened on this core would see: this core's
-    /// directly-wired engines plus the plugin-contributed ones.
-    fn resolved_process_engines(
-        &self,
-    ) -> Result<lash_core::facade_support::ProcessEngineRegistry, lash_core::PluginError> {
-        Ok(self.core.host_process_engines.clone())
-    }
-
     fn process_registry(
         &self,
     ) -> Result<std::sync::Arc<dyn lash_core::ProcessRegistry>, lash_core::PluginError> {
@@ -1156,35 +1113,45 @@ impl ToolIntentIngress {
             lash_core::ProcessCommand::PublishDefinition { .. }
                 | lash_core::ProcessCommand::GetDefinition { .. }
         );
+        let local_executor = if definition_command {
+            lash_core::RuntimeEffectLocalExecutor::definition_artifacts(
+                self.core.host_process_engines.clone(),
+                lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+                    self.scope
+                        .journal_identity()
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+                )),
+            )
+        } else {
+            lash_core::RuntimeEffectLocalExecutor::processes(
+                registry,
+                std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
+                self.core.host_process_engines.clone(),
+                lash_core::runtime::HostStartAdmission {
+                    session_catalog: Some(std::sync::Arc::clone(&self.core.store_factory) as _),
+                    session_turn_admission: None,
+                },
+            )
+            .with_process_attachments(self.core.backend.attachment_referrers())
+            .with_process_starts(
+                self.core
+                    .backend
+                    .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+                std::sync::Arc::clone(&self.core.env.core.clock),
+                self.core.env.core.control.relay_policy(),
+            )
+            .with_process_env_store(std::sync::Arc::clone(
+                &self.core.env.core.durability.process_env_store,
+            ))
+            .with_process_outcome_observer(outcome_observer)
+        };
         let outcome = scoped
             .execute_process_effect(
                 lash_core::RuntimeEffectEnvelope::new(
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                if definition_command {
-                    lash_core::RuntimeEffectLocalExecutor::definition_artifacts(self.core.host_process_engines.clone(),
-                        lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(self.scope.journal_identity().map_err(|e| lash_core::PluginError::Session(e.to_string()))?)))
-                } else {
-                lash_core::RuntimeEffectLocalExecutor::processes(
-                    registry,
-                    std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
-                )
-                .with_process_attachments(self.core.backend.attachment_referrers())
-                .with_process_starts(
-                    self.core
-                        .backend
-                        .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-                    std::sync::Arc::clone(&self.core.env.core.clock),
-                    self.core.env.core.control.relay_policy(),
-                )
-                .with_process_env_store(std::sync::Arc::clone(
-                    &self.core.env.core.durability.process_env_store,
-                ))
-                .with_process_session_catalog(std::sync::Arc::clone(&self.core.store_factory) as _)
-                .with_process_engines(self.core.host_process_engines.clone())
-                .with_process_outcome_observer(outcome_observer)
-                },
+                local_executor,
             )
             .await
             // Kept typed rather than flattened to prose: the durable-identity

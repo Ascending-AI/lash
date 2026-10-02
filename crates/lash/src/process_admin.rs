@@ -391,21 +391,26 @@ impl Processes {
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
-                    .with_process_attachments(self.core.backend.attachment_referrers())
-                    .with_process_starts(
-                        self.core
-                            .backend
-                            .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-                        Arc::clone(&self.core.env.core.clock),
-                        self.core.env.core.control.relay_policy(),
-                    )
-                    .with_process_env_store(Arc::clone(
-                        &self.core.env.core.durability.process_env_store,
-                    ))
-                    .with_process_session_catalog(Arc::clone(&self.core.store_factory) as _)
-                    .with_session_turn_admission(session_turn_admission)
-                    .with_process_engines(self.core.host_process_engines.clone()),
+                lash_core::RuntimeEffectLocalExecutor::processes(
+                    registry,
+                    process_work,
+                    self.core.host_process_engines.clone(),
+                    lash_core::runtime::HostStartAdmission {
+                        session_catalog: Some(Arc::clone(&self.core.store_factory) as _),
+                        session_turn_admission,
+                    },
+                )
+                .with_process_attachments(self.core.backend.attachment_referrers())
+                .with_process_starts(
+                    self.core
+                        .backend
+                        .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+                    Arc::clone(&self.core.env.core.clock),
+                    self.core.env.core.control.relay_policy(),
+                )
+                .with_process_env_store(Arc::clone(
+                    &self.core.env.core.durability.process_env_store,
+                )),
             )
             .await?;
         match outcome {
@@ -418,12 +423,6 @@ impl Processes {
         }
     }
 
-    /// Engine-admission ruling (FIG-1488): this route deliberately stays outside
-    /// the gate. It is an operator seam — the host names the registration
-    /// itself, on its own authority, exactly as a host calling the process
-    /// registry directly does. The gate exists to stop a *model or leaf* payload
-    /// from becoming a committed start; it is not a guard against the operator's
-    /// own request. `ProcessEngine::run` still refuses an unrunnable row.
     /// The scope a host start may live until: `session_id`, looked up now.
     ///
     /// A host start is a root: it has no starter, so its lifetime is

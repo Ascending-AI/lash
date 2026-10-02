@@ -56,12 +56,18 @@ pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, 
         lash_core::ExecutionScope::runtime_operation(format!("crash-matrix-process-start-{seed}"))
             .journal_identity()
             .map_err(|error| format!("start journal identity: {error}"))?;
+    let engines = world
+        .core()?
+        .session_administration()
+        .await
+        .process_engines()
+        .clone();
     let started = lash_core::runtime::register_process_start(
         &lash_core::runtime::ProcessStartStores {
             registry: registry.as_ref(),
             env_store: Some(&env_store),
-            engines: None,
-            engines_required: false,
+            engines: &engines,
+
             session_catalog: None,
             session_turn_admission: None,
             executor: "process start crash matrix",

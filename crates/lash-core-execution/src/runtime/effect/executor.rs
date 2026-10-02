@@ -173,12 +173,12 @@ pub struct ProcessLocalExecution {
     /// the row itself.
     pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
-    pub process_engines: Option<crate::ProcessEngineRegistry>,
+    /// The required registry that admits every engine start inside its recorded step.
+    pub process_engines: crate::ProcessEngineRegistry,
     /// What a host start's recorded admission consults: the session catalog
     /// its host session-lookup grant is checked against, and the mint of a
-    /// session-turn start's default binding. `None` refuses every
-    /// host-granted start and records no default.
-    pub host_start: Option<Box<crate::runtime::HostStartAdmission>>,
+    /// session-turn start's default binding.
+    pub host_start: Box<crate::runtime::HostStartAdmission>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     /// The attachment referrers a delivered terminal is acquired through
@@ -689,32 +689,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// Binds the session catalog a root start's host session-lookup grant is
-    /// checked against inside the start's recorded admission, so a replay
-    /// after the session was deleted answers the recorded start instead of
-    /// refusing it (ADR 0105 §1).
-    pub fn with_process_session_catalog(
-        mut self,
-        catalog: Arc<dyn crate::store::RuntimeStore>,
-    ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
-            &mut self.state
-        {
-            execution.host_start.get_or_insert_default().session_catalog = Some(catalog);
-        }
-        self
-    }
-
-    /// Binds process engines that own start-time artifact lifecycle hooks.
-    pub fn with_process_engines(mut self, engines: crate::ProcessEngineRegistry) -> Self {
-        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
-            &mut self.state
-        {
-            execution.process_engines = Some(engines);
-        }
-        self
-    }
-
     /// This is public for **effect-host implementors** that transfer local
     /// execution into a durable controller while preserving the conformance
     /// fault seam.
@@ -727,11 +701,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Binds process registry and required process-work services for effect-host implementors
-    /// executing process effects natively.
+    /// Binds process services and the admission capabilities every start requires.
+    ///
+    /// Engine validation and identity stamping run inside the start's recorded
+    /// registration, using this registry. An empty registry refuses engine starts.
+    /// Host session grants and session-turn validation use `host_start`; a host
+    /// without those grants supplies an explicit default that refuses them.
     pub fn processes(
         registry: Arc<dyn ProcessRegistry>,
         process_work: Arc<dyn crate::ProcessWorkSubstrate>,
+        process_engines: crate::ProcessEngineRegistry,
+        host_start: crate::runtime::HostStartAdmission,
     ) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
@@ -740,8 +720,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     process_work,
                     process_starts: None,
                     process_env_store: None,
-                    process_engines: None,
-                    host_start: None,
+                    process_engines,
+                    host_start: Box::new(host_start),
                     turn_cancellation: None,
                     effect_controller: None,
                     attachments: None,

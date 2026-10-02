@@ -1992,6 +1992,11 @@ fn admit_ingress_engine(
     payload: &serde_json::Value,
     env: Option<&lash_core::ProcessExecutionEnvSpec>,
 ) -> std::result::Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+    if payload.get("program").and_then(serde_json::Value::as_str) == Some("invalid") {
+        return Err(lash_core::PluginError::Session(
+            "invalid ingress engine program".to_owned(),
+        ));
+    }
     let env = env.ok_or_else(|| {
         lash_core::PluginError::Session(
             "ingress admission requires the recorded execution environment".to_string(),
@@ -2128,10 +2133,8 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     )
 }
 
-/// FIG-1488: the host front door is a start route too. A submitted intent naming
-/// an engine kind this host never registered must be refused before anything is
-/// journaled or registered, and an admitted one must carry the engine identity
-/// stamp — neither happened while ingress built its Start command unchecked.
+/// The host front door records engine admission too: an unconfigured engine
+/// registers no process, and an admitted one carries the engine identity stamp.
 #[tokio::test]
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
     let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
@@ -2168,6 +2171,29 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         0,
         "a refused start must register nothing"
     );
+
+    let invalid = ingress
+        .submit(
+            ingress
+                .key("ingress-invalid-engine-payload", 0)
+                .expect("submission key"),
+            engine_start_intent(
+                INGRESS_ENGINE_KIND,
+                serde_json::json!({"program": "invalid"}),
+            ),
+        )
+        .await;
+    assert!(
+        matches!(
+            invalid,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Refused { .. },
+                ..
+            }
+        ),
+        "a plugin-contributed engine must validate its payload: {invalid:?}"
+    );
+    assert_eq!(registered_process_count(&registry).await?, 0);
 
     let payload = serde_json::json!({"program": "known"});
     let admitted_key = ingress
@@ -2206,6 +2232,20 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         .expect("known payload and recorded environment"),
         "the admitted row must carry the engine identity stamp"
     );
+    let replay = ingress
+        .submit(
+            ingress
+                .key("ingress-registered-engine", 0)
+                .expect("same submission key"),
+            engine_start_intent(INGRESS_ENGINE_KIND, payload),
+        )
+        .await;
+    assert!(matches!(
+        replay,
+        crate::tools::ToolIntentIngressOutcome::Admitted { replayed: true, .. }
+    ));
+    assert_eq!(started_process_id(&replay), started.id);
+    assert_eq!(registered_process_count(&registry).await?, 1);
     Ok(())
 }
 

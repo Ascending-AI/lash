@@ -364,7 +364,12 @@ mod served_only_outside_a_run {
                                 }),
                             },
                         ),
-                        RuntimeEffectLocalExecutor::processes(registry, Arc::new(NoopProcessWork)),
+                        RuntimeEffectLocalExecutor::processes(
+                            registry,
+                            Arc::new(NoopProcessWork),
+                            lash_core::ProcessEngineRegistry::new(),
+                            lash_core::runtime::HostStartAdmission::default(),
+                        ),
                     )
                     .await
                     .map(|_| ());

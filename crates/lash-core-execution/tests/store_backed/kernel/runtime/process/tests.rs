@@ -400,6 +400,8 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
             crate::RuntimeEffectLocalExecutor::processes(
                 Arc::clone(&registry_dyn),
                 Arc::new(crate::NoProcessWork::for_registry(registry_dyn)),
+                crate::ProcessEngineRegistry::new(),
+                crate::runtime::HostStartAdmission::default(),
             ),
         )
         .await

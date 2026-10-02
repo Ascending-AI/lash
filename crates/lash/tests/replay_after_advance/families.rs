@@ -669,7 +669,12 @@ pub async fn attach_await(kind: StorageKind, live: bool) {
                                 lash_core::ProcessCommand::Await { process_id: target },
                             ),
                         ),
-                        lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work),
+                        lash_core::RuntimeEffectLocalExecutor::processes(
+                            registry,
+                            process_work,
+                            lash_core::ProcessEngineRegistry::new(),
+                            lash_core::runtime::HostStartAdmission::default(),
+                        ),
                     )
                     .await
                     .map_err(|error| format!("{error:?}"))?;

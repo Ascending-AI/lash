@@ -1601,6 +1601,8 @@ impl<'run> RuntimeExecutionContext<'run> {
                         "process execution has no process-work port",
                     )
                 })?,
+            self.dispatch.process_engines.clone(),
+            crate::runtime::HostStartAdmission::default(),
         )
         .with_process_attachments(Arc::clone(self.attachment_store.referrers()))
         .with_process_effect_controller(owned_controller);

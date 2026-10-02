@@ -309,8 +309,8 @@ impl World {
         crate::ProcessStartStores {
             registry: self.registry.as_ref(),
             env_store: Some(self.ports.env()),
-            engines: Some(&self.engines),
-            engines_required: true,
+            engines: &self.engines,
+
             session_catalog: None,
             session_turn_admission: None,
             executor: "definition conformance start",
