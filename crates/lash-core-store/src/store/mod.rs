@@ -54,6 +54,8 @@ pub mod queued_work;
 mod record_schema_version;
 #[cfg(feature = "synthetic-next")]
 mod synthetic_next;
+#[cfg(feature = "synthetic-next")]
+mod synthetic_next_versions;
 pub use physical_turn::PhysicalTurn;
 mod control_intent;
 mod drive_fence;

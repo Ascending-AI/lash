@@ -15,6 +15,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::append_vec::AppendVec;
+use crate::blake3_domains::BLAKE3_DOMAINS;
 use crate::llm::types::LlmToolSpec;
 use crate::{
     AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord,
@@ -23,83 +24,6 @@ use crate::{
     ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest,
     ToolRetryPolicy, ToolValue,
 };
-
-/// Reserved BLAKE3 domains used by workspace hash owners. Entries are
-/// append-only so a retired domain cannot be silently reused.
-/// version_reservations = "append-only hash-domain reservations, including retired names"
-const BLAKE3_DOMAINS: &[&str] = &[
-    "lash-accepted-turn-input/v1",
-    "lash-anthropic-tool-call-wire/v1",
-    "lash-append-request/v2",
-    "lash-attachment/v2",
-    "lash-blob/v2",
-    "lash-build-generation/v1",
-    "lash-composition-tool/v2",
-    "lash-config-transaction/v1",
-    "lash-create-session-request/v1",
-    "lash-derived-trigger-subscription/v2",
-    "lash-draft-node/v3",
-    "lash-frame-node/v3",
-    "lash-google-upload-credential-scope/v2",
-    "lash-google-user-prompt-id/v1",
-    "lash-history-lineage/v1",
-    "lash-history-node/v3",
-    "lash-intent/v2",
-    "lash-keyed-turn-input/v1",
-    "lash-lifted-process-name/v2",
-    "lash-lashlang-cell-generation/v1",
-    "lash-lashlang-content/v2",
-    "lash-lashlang-execution-site/v2",
-    "lash-lashlang-executable/v1",
-    "lash-lashlang-program/v2",
-    "lash-lashlang-program/v3",
-    "lash-llm-request-content/v1",
-    "lash-model-facing-composition/v2",
-    "lash-model-facing-composition/v3",
-    "lash-openai-responses-request/v2",
-    "lash-plugin-snapshot-revision/v2",
-    "lash-provider-call-correlation/v1",
-    "lash-provider-prompt-cache-key/v1",
-    "lash-provider-session-affinity/v1",
-    "lash-process-env/v4",
-    "lash-process-env/v5",
-    "lash-process-env/v6",
-    "lash-process-lease/v2",
-    "lash-protocol-materialization/v1",
-    "lash-queued-work-batch/v2",
-    "lash-queued-work-claim-lease/v2",
-    "lash-record-config-request/v1",
-    "lash-rolling-history-compaction/v1",
-    "lash-rolling-history-compaction/v2",
-    "lash-standard-compaction/v1",
-    "lash-rlm-execution-state-leaf/v2",
-    "lash-rlm-stall-reply/v2",
-    "lash-runtime-effect-envelope/v2",
-    "lash-runtime-effect-envelope/v3",
-    "lash-runtime-usage-payload/v2",
-    "lash-runtime-usage-payload/v3",
-    "lash-runtime-usage-payload/v4",
-    "lash-session-append-draft-fallback/v2",
-    "lash-stable-identity/v2",
-    "lash-tool-call-id/v1",
-    "lash-tool-catalog-authority/v2",
-    "lash-tool-intent-payload/v2",
-    "lash-tool-intent-payload/v3",
-    "lash-tool-output-spill/v2",
-    "lash-tool-schema-cache/v2",
-    "lash-turn-input/v2",
-    "lash-usage-ledger-request/v1",
-    "lash-usage-fact-payload/v4",
-    "lash-workflow-edge/v2",
-    "lash-workflow-node/v2",
-    "lash-workflow-node/v3",
-    "lash-workflow-source/v3",
-    "lash-workflow-source/v4",
-    "lash.agent-frame-key/v2",
-    "lashlang-dispatched-ordinals/v1",
-    "lashlang-process-start/v2",
-    "lashlang-process-start/v3",
-];
 
 /// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
 ///
@@ -402,58 +326,7 @@ mod blake3_domain_tests {
     use std::path::{Path, PathBuf};
 
     use super::BLAKE3_DOMAINS;
-
-    // Permanently reserved, but no longer used: the plugin snapshot revision
-    // after FIG-2113; the v2 queued-work claim lease after FIG-2878 replaced
-    // delimiter joining with canonical framing; effect envelope v2 predates
-    // admitted effect addresses; the retired compaction v1 predates binding
-    // the identity to request content, and v2 predates the plugin cutover; the v2 usage payload after FIG-2765 moved
-    // it to a disposition-carrying encoding; and the v3 payload after the same
-    // ticket's fix round replaced the hole *count* with per-attempt descriptors;
-    // and the v2 tool-intent payload after FIG-2994 moved the start intent from a
-    // caller-minted request to an id-less declaration. The v2 model-facing
-    // composition hash was superseded by v3.
-    const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
-        "lash-process-env/v4",
-        "lash-process-env/v5",
-        "lash-model-facing-composition/v2",
-        "lash-plugin-snapshot-revision/v2",
-        "lash-queued-work-claim-lease/v2",
-        "lash-rolling-history-compaction/v1",
-        "lash-rolling-history-compaction/v2",
-        "lash-runtime-effect-envelope/v2",
-        "lash-runtime-usage-payload/v2",
-        "lash-runtime-usage-payload/v3",
-        // FIG-4236: usage is engine-owned accounting; the runtime-commit usage
-        // payload and the usage-ledger boundary request are deleted, and their
-        // tags stay reserved.
-        "lash-runtime-usage-payload/v4",
-        "lash-usage-ledger-request/v1",
-        "lash-tool-intent-payload/v2",
-        "lash-lashlang-execution-site/v2",
-        // FIG-3863: the process lease format is deleted, but its hash tag
-        // remains permanently reserved so it cannot identify another format.
-        "lash-process-lease/v2",
-        // FIG-3571: the program generation also names the executable, segment
-        // state and replay-key grammar, under v3.
-        "lash-lashlang-program/v2",
-        // FIG-3420: the filesystem spill path is deleted; retained output is a
-        // journaled session attachment, so the spill domain is permanently
-        // retired rather than reused.
-        "lash-tool-output-spill/v2",
-        "lash-workflow-node/v2",
-        // FIG-3571: source identity digests the admitted program, never
-        // printed text, under v4.
-        "lash-workflow-source/v3",
-        "lashlang-process-start/v2",
-        // FIG-3607: a process id is minted by the registrar, never derived,
-        // so the deterministic Lashlang child-process id is retired.
-        "lashlang-process-start/v3",
-        // FIG-4379: session config is owner-namespaced and the protocol
-        // materialization format is deleted; the tag remains permanently
-        // reserved so it cannot identify another format.
-        "lash-protocol-materialization/v1",
-    ];
+    use crate::blake3_domains::RETIRED_BLAKE3_DOMAINS;
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {
         fn visit(directory: &Path, sources: &mut Vec<PathBuf>) {
@@ -583,7 +456,9 @@ fn encode() {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             used, active,
-            "BLAKE3_DOMAINS must exactly match BLAKE3 domain literals used in workspace Rust sources"
+            "the generated BLAKE3_DOMAINS must exactly match the BLAKE3 domains used in workspace \
+             Rust sources: declare each as a `lash*/vN` identity constant and run \
+             `python3 scripts/release_baseline.py tables --write`"
         );
     }
 }

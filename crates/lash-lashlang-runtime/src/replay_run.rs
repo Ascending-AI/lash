@@ -123,10 +123,17 @@ pub fn lashlang_cell_generation() -> lash_core::ExecutableGeneration {
     ))
 }
 
-// The instruction accounting is part of the cell journal grammar: moving it
-// moves this grammar with it.
+/// The instruction accounting the cell journal grammar was written against.
+/// The accounting is part of the grammar: moving it moves this grammar with
+/// it, so the pin is a constant of its own that the grammar's owner moves by
+/// hand, and that the release reset sets with every other counter.
+///
+/// version_surface = "drain"
+/// version_guard(unshaped = "a pin on lashlang::INSTRUCTION_ACCOUNTING_VERSION, which guards the accounting's own shapes")
+const CELL_GRAMMAR_INSTRUCTION_ACCOUNTING_VERSION: u32 = 3;
+
 const _: () = assert!(
-    lashlang::INSTRUCTION_ACCOUNTING_VERSION == 3,
+    lashlang::INSTRUCTION_ACCOUNTING_VERSION == CELL_GRAMMAR_INSTRUCTION_ACCOUNTING_VERSION,
     "an instruction-accounting change is a cell journal grammar change: bump \
      LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION and update this pin"
 );

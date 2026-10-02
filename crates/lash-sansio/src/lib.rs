@@ -1,5 +1,6 @@
 pub mod append_vec;
 pub mod attachment;
+mod blake3_domains;
 pub mod causal;
 mod compat;
 pub mod core_support;

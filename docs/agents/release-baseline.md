@@ -15,9 +15,26 @@ at 1. String identities retain their prefix and suffix and use version 1.
 Until FIG-4485 executes, the check deliberately fails on production values.
 Unregistered version constants, inline family counters or string literals,
 unresolved constants and unsupported source expressions fail. Test fixtures and upstream endpoint versions
-are outside identity discovery. Append-only domain reservation arrays declare
-`version_reservations` with their reason; the reset retains historical names and
-adds the discovered current domains at v1.
+are outside identity discovery. Domain reservation arrays declare
+`version_reservations` with their reason.
+
+The reset edits registered constants and nothing else in Rust. Code that
+cannot name a constant reads a table generated from the inventory:
+
+- `crates/lash-sansio/src/blake3_domains.rs` lists the BLAKE3 domains in use
+  (the inventory's `lash*/vN` identities) and the retired names, which are the
+  `[[retired_hash_domain]]` rows of the registry. The reset appends the names
+  it supersedes to the registry.
+- `crates/lash-core-store/src/store/synthetic_next_versions.rs` holds the
+  version N writes of each surface the synthetic N+1 moves, for the pins and
+  lifts of surfaces owned above `lash-core-store`.
+
+After changing a version constant or a hash domain, run
+`python3 scripts/release_baseline.py tables --write`; `check` and
+`test_release_baseline.py` fail on a stale table. A pin on another crate's
+version is a constant of its own with a `version_surface` marker, and an
+admission floor names its surface with `floor_of` in the registry, so the
+reset reaches both through the inventory.
 
 Compare the source inventory with a compiled operator's durable-format table
 and version response without a database connection:
@@ -37,6 +54,20 @@ PostgreSQL shape, durable-store and replay-corpus generators. Historical
 predecessor captures remain immutable. FIG-4495 owns tagged release capture.
 `--source-only` is for a disposable scratch proof and skips generation.
 
+Nothing else builds the reset tree, so rehearse it on `origin/main` on a
+schedule, in a disposable fork:
+
+```sh
+kiln fork lash cut-rehearsal
+kiln gate lash cut-rehearsal -- env BAZEL_TRUSTED=true \
+    bash scripts/ci/with-service.sh pg16 -- scripts/release-rehearsal.sh
+kiln rm lash cut-rehearsal
+```
+
+It applies the reset, builds the workspace and runs `release_baseline.py
+check`. Fix each red on main by replacing the literal it found with its
+owner's constant or a generated table; never patch the reset tree by hand.
+
 The ignored PostgreSQL catalog and fresh-ledger laws name FIG-4493. Run them
 explicitly with `--ignored --exact` during rehearsal. The cut removes their
 ignore attributes. SQLite's production-empty and synthetic-adjacent law runs
@@ -55,7 +86,7 @@ its stamp, its release-stamp entry and its catalog's step numbers all read it.
 The synthetic-next build writes the version after it, so its catalog steps are
 written as `CONSTANT` to `CONSTANT + 1` and follow the reset without an edit.
 `schema.sql` states the PostgreSQL version in its header and its seed row;
-`release_reset.py` rewrites both. `release_baseline.py check` and
+`release_reset.py` restates both with the patterns the check reads them by. `release_baseline.py check` and
 `release_reset.py --apply` hold the artifact, the backends and the catalogs to
 the constants on every tree, before and after the cut, and the scratch reset
 law proves it on the reset tree with red mutants.

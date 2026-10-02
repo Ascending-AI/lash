@@ -524,7 +524,7 @@ async fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 #[tokio::test]
 async fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
     const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
-    const { assert!(RLM_SNAPSHOT_VERSION > EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION) };
+    const { assert!(RLM_SNAPSHOT_VERSION != EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION) };
 
     #[derive(Serialize)]
     struct PreviousEnvelope {

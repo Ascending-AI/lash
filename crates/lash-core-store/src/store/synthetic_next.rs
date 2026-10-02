@@ -11,12 +11,38 @@
 //! N's epoch their readers admit the pinned version, and after finalize an
 //! older projection is regenerated from its module (FIG-4262).
 //!
-//! The versions of surfaces this crate does not own are spelled as literals:
-//! `lash-core-store` sits below their crates. Each owner's
-//! `every_guarded_surface_decodes_its_supported_range` law, run under the
-//! same feature, fails when a literal and the owner's constant disagree.
+//! `lash-core-store` sits below the crates that own some of these surfaces,
+//! so it cannot name their constants. It reads the version N writes of each
+//! from [`PREDECESSOR_WRITES`], the table `scripts/release_baseline.py`
+//! generates from the owners' constants, and spells no version itself. Each
+//! owner's `every_guarded_surface_decodes_its_supported_range` law, run
+//! under the same feature, fails when the table and the owner's constant
+//! disagree.
 
 use super::fleet_format::{Lift, RecordUpcaster, WriterPin};
+use super::synthetic_next_versions::PREDECESSOR_WRITES;
+
+/// The version N writes of the surface registered as `constant`.
+const fn predecessor(constant: &'static str) -> u32 {
+    let name = constant.as_bytes();
+    let mut row = 0;
+    while row < PREDECESSOR_WRITES.len() {
+        let candidate = PREDECESSOR_WRITES[row].0.as_bytes();
+        let mut at = 0;
+        while at < name.len() && at < candidate.len() && name[at] == candidate[at] {
+            at += 1;
+        }
+        if at == name.len() && at == candidate.len() {
+            return PREDECESSOR_WRITES[row].1;
+        }
+        row += 1;
+    }
+    panic!("the release inventory lists no surface the synthetic N+1 moves under this name")
+}
+
+const PROCESS_EVENT_VOCABULARY_NEXT: u32 = predecessor("PROCESS_EVENT_VOCABULARY_VERSION") + 1;
+const SCOPE_STORAGE_PAYLOAD_NEXT: u32 = predecessor("SCOPE_STORAGE_PAYLOAD_VERSION") + 1;
+const NATIVE_DRIVER_STATE_NEXT: u32 = predecessor("NATIVE_DRIVER_STATE_VERSION") + 1;
 
 /// A tree lift that moves the record's version `field` to `to`.
 fn restamp(
@@ -74,17 +100,32 @@ fn lift_process_wake_delivery(value: &mut serde_json::Value) -> Result<(), crate
 /// `PROCESS_EVENT_VOCABULARY_VERSION` N+1: an effect-summary event carries
 /// its vocabulary under `vocabulary_version`.
 fn lift_process_event_vocabulary(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(value, "process effect event", "vocabulary_version", 2)
+    restamp(
+        value,
+        "process effect event",
+        "vocabulary_version",
+        PROCESS_EVENT_VOCABULARY_NEXT,
+    )
 }
 
 /// `SCOPE_STORAGE_PAYLOAD_VERSION` N+1.
 fn lift_scope_storage_payload(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(value, "scope storage payload", "version", 3)
+    restamp(
+        value,
+        "scope storage payload",
+        "version",
+        SCOPE_STORAGE_PAYLOAD_NEXT,
+    )
 }
 
 /// `NATIVE_DRIVER_STATE_VERSION` N+1.
 fn lift_native_driver_state(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(value, "native driver state", "schema_version", 3)
+    restamp(
+        value,
+        "native driver state",
+        "schema_version",
+        NATIVE_DRIVER_STATE_NEXT,
+    )
 }
 
 /// A Restate object family's stamped body, or a `LashTurn` outcome's: N+1
@@ -111,6 +152,19 @@ const fn decoder(constant: &'static str, from_version: u32) -> RecordUpcaster {
         from_version,
         lift: Lift::Decoder,
     }
+}
+
+/// [`tree`] for a surface owned above this crate, from the version N writes.
+const fn owner_tree(
+    constant: &'static str,
+    lift: fn(&mut serde_json::Value) -> Result<(), crate::StoreError>,
+) -> RecordUpcaster {
+    tree(constant, predecessor(constant), lift)
+}
+
+/// [`decoder`] for a surface owned above this crate, from the version N writes.
+const fn owner_decoder(constant: &'static str) -> RecordUpcaster {
+    decoder(constant, predecessor(constant))
 }
 
 /// One lift per guarded surface, from the version N writes.
@@ -152,25 +206,20 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
         "OBLIGATION_LEDGER_VOCABULARY_VERSION",
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
     ),
-    tree(
+    owner_tree(
         "PROCESS_EVENT_VOCABULARY_VERSION",
-        1,
         lift_process_event_vocabulary,
     ),
-    tree(
-        "SCOPE_STORAGE_PAYLOAD_VERSION",
-        2,
-        lift_scope_storage_payload,
-    ),
-    decoder("LASHLANG_SNAPSHOT_VERSION", 14),
-    decoder("RLM_SNAPSHOT_VERSION", 26),
-    decoder("NATIVE_TRANSPORT_VERSION", 1),
-    tree("NATIVE_DRIVER_STATE_VERSION", 2, lift_native_driver_state),
-    decoder("SQLITE_BLOB_ENVELOPE_VERSION", 1),
-    tree("EFFECT_GROUP_STATE_FORMAT_VERSION", 1, lift_object_body),
-    tree("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION", 1, lift_object_body),
-    tree("DURABLE_WAIT_REGISTRY_FORMAT_VERSION", 1, lift_object_body),
-    tree("LASH_TURN_OUTCOME_FORMAT_VERSION", 1, lift_object_body),
+    owner_tree("SCOPE_STORAGE_PAYLOAD_VERSION", lift_scope_storage_payload),
+    owner_decoder("LASHLANG_SNAPSHOT_VERSION"),
+    owner_decoder("RLM_SNAPSHOT_VERSION"),
+    owner_decoder("NATIVE_TRANSPORT_VERSION"),
+    owner_tree("NATIVE_DRIVER_STATE_VERSION", lift_native_driver_state),
+    owner_decoder("SQLITE_BLOB_ENVELOPE_VERSION"),
+    owner_tree("EFFECT_GROUP_STATE_FORMAT_VERSION", lift_object_body),
+    owner_tree("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION", lift_object_body),
+    owner_tree("DURABLE_WAIT_REGISTRY_FORMAT_VERSION", lift_object_body),
+    owner_tree("LASH_TURN_OUTCOME_FORMAT_VERSION", lift_object_body),
 ];
 
 const fn pin(constant: &'static str, version: u32) -> WriterPin {
@@ -179,6 +228,11 @@ const fn pin(constant: &'static str, version: u32) -> WriterPin {
         generation: 1,
         version,
     }
+}
+
+/// [`pin`] for a surface owned above this crate, at the version N writes.
+const fn owner_pin(constant: &'static str) -> WriterPin {
+    pin(constant, predecessor(constant))
 }
 
 /// While `F` is N's epoch, every surface N+1 moves is written at N's version:
@@ -216,19 +270,19 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
         "OBLIGATION_LEDGER_VOCABULARY_VERSION",
         super::OBLIGATION_LEDGER_VOCABULARY_VERSION - 1,
     ),
-    pin("PROCESS_EVENT_VOCABULARY_VERSION", 1),
-    pin("SCOPE_STORAGE_PAYLOAD_VERSION", 2),
-    pin("LASHLANG_SNAPSHOT_VERSION", 14),
-    pin("WORKFLOW_GRAPH_SCHEMA_VERSION", 21),
-    pin("RLM_SNAPSHOT_VERSION", 26),
-    pin("NATIVE_TRANSPORT_VERSION", 1),
-    pin("NATIVE_DRIVER_STATE_VERSION", 2),
-    pin("SQLITE_BLOB_ENVELOPE_VERSION", 1),
-    pin("EFFECT_GROUP_STATE_FORMAT_VERSION", 1),
-    pin("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION", 1),
-    pin("DURABLE_WAIT_REGISTRY_FORMAT_VERSION", 1),
-    pin("LASH_TURN_OUTCOME_FORMAT_VERSION", 1),
-    pin("RESTATE_WIRE_VERSION", 1),
+    owner_pin("PROCESS_EVENT_VOCABULARY_VERSION"),
+    owner_pin("SCOPE_STORAGE_PAYLOAD_VERSION"),
+    owner_pin("LASHLANG_SNAPSHOT_VERSION"),
+    owner_pin("WORKFLOW_GRAPH_SCHEMA_VERSION"),
+    owner_pin("RLM_SNAPSHOT_VERSION"),
+    owner_pin("NATIVE_TRANSPORT_VERSION"),
+    owner_pin("NATIVE_DRIVER_STATE_VERSION"),
+    owner_pin("SQLITE_BLOB_ENVELOPE_VERSION"),
+    owner_pin("EFFECT_GROUP_STATE_FORMAT_VERSION"),
+    owner_pin("EFFECT_GROUP_PAYLOAD_FORMAT_VERSION"),
+    owner_pin("DURABLE_WAIT_REGISTRY_FORMAT_VERSION"),
+    owner_pin("LASH_TURN_OUTCOME_FORMAT_VERSION"),
+    owner_pin("RESTATE_WIRE_VERSION"),
     pin(
         "PROCESS_CURSOR_VERSION",
         lash_sansio::PROCESS_CURSOR_VERSION - 1,

@@ -627,11 +627,13 @@ suffix = "_FAMILY_VERSION"
 reason = "hash-domain family tag: an identity-preimage component, not a durable format stamp"
 
 # Constants whose names look like versions but version nothing durable,
-# and admission floors or aliases of a registered writer version.
+# and admission floors or aliases of a registered writer version. A floor that
+# names its surface with `floor_of` is reset with it at the release cut.
 [[unregistered]]
 constant = "OLDEST_SUPPORTED_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
 reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
+floor_of = "CURRENT_SESSION_STATE_VERSION"
 
 [[unregistered]]
 constant = "MIN_SUPPORTED_SCHEMA_VERSION"
@@ -711,3 +713,98 @@ outside_manifest = "live worker admission; not a parked VM format"
 constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"
 constant_path = "crates/lash-vm-protocol/src/version.rs"
 reason = "lower read bound for WORKER_PROTOCOL_VERSION, not a separately written format"
+
+# BLAKE3 hash domains that are permanently reserved but no longer used: a
+# retired name must never identify another format. The domains in use are the
+# `lash*/vN` identity constants the release inventory resolves;
+# `python3 scripts/release_baseline.py tables --write` generates
+# crates/lash-sansio/src/blake3_domains.rs from both, and the release reset
+# appends the names it supersedes here.
+
+[[retired_hash_domain]]
+name = "lash-process-env/v4"
+reason = "superseded process-environment identity"
+
+[[retired_hash_domain]]
+name = "lash-process-env/v5"
+reason = "superseded process-environment identity"
+
+[[retired_hash_domain]]
+name = "lash-model-facing-composition/v2"
+reason = "the v2 model-facing composition hash was superseded by v3"
+
+[[retired_hash_domain]]
+name = "lash-plugin-snapshot-revision/v2"
+reason = "FIG-2113: the plugin snapshot revision is no longer hashed"
+
+[[retired_hash_domain]]
+name = "lash-queued-work-claim-lease/v2"
+reason = "FIG-2878: canonical framing replaced delimiter joining"
+
+[[retired_hash_domain]]
+name = "lash-rolling-history-compaction/v1"
+reason = "predates binding the identity to request content"
+
+[[retired_hash_domain]]
+name = "lash-rolling-history-compaction/v2"
+reason = "predates the plugin cutover"
+
+[[retired_hash_domain]]
+name = "lash-runtime-effect-envelope/v2"
+reason = "predates admitted effect addresses"
+
+[[retired_hash_domain]]
+name = "lash-runtime-usage-payload/v2"
+reason = "FIG-2765: the payload moved to a disposition-carrying encoding"
+
+[[retired_hash_domain]]
+name = "lash-runtime-usage-payload/v3"
+reason = "FIG-2765: per-attempt descriptors replaced the hole count"
+
+[[retired_hash_domain]]
+name = "lash-runtime-usage-payload/v4"
+reason = "FIG-4236: usage is engine-owned accounting; the runtime-commit usage payload is deleted"
+
+[[retired_hash_domain]]
+name = "lash-usage-ledger-request/v1"
+reason = "FIG-4236: usage is engine-owned accounting; the usage-ledger boundary request is deleted"
+
+[[retired_hash_domain]]
+name = "lash-tool-intent-payload/v2"
+reason = "FIG-2994: the start intent moved from a caller-minted request to an id-less declaration"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-execution-site/v2"
+reason = "superseded execution-site identity"
+
+[[retired_hash_domain]]
+name = "lash-process-lease/v2"
+reason = "FIG-3863: the process lease format is deleted"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-program/v2"
+reason = "FIG-3571: the program generation also names the executable, segment state and replay-key grammar, under v3"
+
+[[retired_hash_domain]]
+name = "lash-tool-output-spill/v2"
+reason = "FIG-3420: the filesystem spill path is deleted; retained output is a journaled session attachment"
+
+[[retired_hash_domain]]
+name = "lash-workflow-node/v2"
+reason = "superseded workflow-node identity"
+
+[[retired_hash_domain]]
+name = "lash-workflow-source/v3"
+reason = "FIG-3571: source identity digests the admitted program, never printed text, under v4"
+
+[[retired_hash_domain]]
+name = "lashlang-process-start/v2"
+reason = "superseded Lashlang child-process id"
+
+[[retired_hash_domain]]
+name = "lashlang-process-start/v3"
+reason = "FIG-3607: a process id is minted by the registrar, never derived"
+
+[[retired_hash_domain]]
+name = "lash-protocol-materialization/v1"
+reason = "FIG-4379: session config is owner-namespaced and the protocol materialization format is deleted"

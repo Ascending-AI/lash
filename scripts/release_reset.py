@@ -64,9 +64,11 @@ def plan(repo: Path):
         successor = expected + 1 if type(expected) is int and row["synthetic"] != row["default"] else expected
         constant(repo / path, name, expected, successor)
 
-    # The session admission floor is a separately registered support constant.
-    constant(repo / "crates/lash-core-store/src/store/state_version.rs",
-             "OLDEST_SUPPORTED_SESSION_STATE_VERSION", 1, 1)
+    # An admission floor the registry ties to a surface moves with it.
+    for path, floor, surface in baseline.floors(repo):
+        expected = declared[f"{path}:{surface}"]
+        constant(repo / path, floor, expected, expected)
+
     for path, changes in replacements.items():
         text = path.read_text()
         for (start, end), value in sorted(changes.items(), reverse=True):
@@ -74,51 +76,25 @@ def plan(repo: Path):
         if text != path.read_text():
             edits[path] = text
 
-    # Domain reservations retain retired names. Add the newly reset current
-    # hash domains from the discovered constants, so their runtime check holds.
-    path = repo / "crates/lash-sansio/src/core_support.rs"
-    text = edits.get(path, path.read_text())
-    domains = sorted({value for value in declared.values()
-                      if isinstance(value, str) and re.fullmatch(r"lash[^/]+/v1", value)})
-    table = re.search(r"const BLAKE3_DOMAINS: &\[&str\] = &\[(.*?)\n\];", text, re.DOTALL)
-    if table is None:
-        raise baseline.BaselineError("cannot read the hash-domain reservations")
-    additions = [value for value in domains if json.dumps(value) not in table[1]]
-    if additions:
-        text = text[:table.end(1)] + "".join(f'\n    {json.dumps(value)},' for value in additions) + text[table.end(1):]
-    retired = re.search(r"const RETIRED_BLAKE3_DOMAINS: &\[&str\] = &\[(.*?)\n    \];", text, re.DOTALL)
-    if retired is None:
-        raise baseline.BaselineError("cannot read the retired hash-domain reservations")
-    old_domains = sorted({row["default"] for row in rows
-                          if isinstance(row["default"], str)
-                          and re.fullmatch(r"lash[^/]+/v[0-9]+", row["default"])
-                          and row["default"] not in domains})
-    additions = [value for value in old_domains if json.dumps(value) not in retired[1]]
-    if additions:
-        text = text[:retired.end(1)] + "".join(f'\n        {json.dumps(value)},' for value in additions) + text[retired.end(1):]
-    if text != path.read_text():
-        edits[path] = text
-
-    # These literals are deliberately below their owning crates. Keep the
-    # synthetic old-writer pins and predecessor decoders aligned with N = 1.
-    path = repo / "crates/lash-core-store/src/store/synthetic_next.rs"
-    text = path.read_text()
-    text = re.sub(r'(\b(?:pin|decoder|tree)\(\s*"[A-Z_]+",\s*)\d+', r"\g<1>1", text)
-    for function in ("lift_scope_storage_payload", "lift_native_driver_state"):
-        text = re.sub(r"(fn " + function + r"\(.*?restamp\(.*?)\b3(\)\s*\})",
-                      r"\g<1>2\2", text, flags=re.DOTALL)
-    if text != path.read_text():
-        edits[path] = text
-
-    # The cell grammar statically pins its instruction-accounting contract.
-    path = repo / "crates/lash-lashlang-runtime/src/replay_run.rs"
-    text = edits.get(path, path.read_text())
-    text = re.sub(r"(lashlang::INSTRUCTION_ACCOUNTING_VERSION\s*==\s*)\d+", r"\g<1>1", text)
-    if text != path.read_text():
-        edits[path] = text
+    # The value tables follow the reset constants. A hash domain the reset
+    # supersedes stays reserved: it joins the registry's retired names.
+    after = [{**row, "default": declared[row["key"]],
+              "synthetic": declared[row["key"]] + (row["synthetic"] != row["default"])
+              if type(row["default"]) is int else declared[row["key"]]} for row in rows]
+    retired = baseline.retired_hash_domains(repo)
+    superseded = sorted(set(baseline.hash_domains(rows)) - set(baseline.hash_domains(after)) - set(retired))
+    if superseded:
+        path = repo / baseline.REGISTRY
+        edits[path] = path.read_text().rstrip("\n") + "\n" + "".join(
+            f'\n[[retired_hash_domain]]\nname = {json.dumps(name)}\n'
+            'reason = "superseded by the 1.0 baseline reset"\n' for name in superseded)
+    for relative, text in baseline.generated_tables(after, [*retired, *superseded]).items():
+        path = repo / relative
+        if not path.is_file() or text != path.read_text():
+            edits[path] = text
 
     # Delete the production predecessor chain, preserving cfg-gated N+1 rows.
-    path = repo / "crates/lash-postgres-store/src/postgres/migrate.rs"
+    path = repo / baseline.POSTGRES_CATALOG
     text = path.read_text()
     for table, item in [("EXPAND_MIGRATIONS", "ExpandMigration"),
                         ("BACKFILL_MIGRATIONS", "BackfillMigration"),
@@ -146,13 +122,7 @@ def plan(repo: Path):
     path = repo / baseline.POSTGRES_SCHEMA
     constant, _ = baseline.store_versions(repo)["POSTGRES"]
     version = declared[f"{baseline.STORE_VERSIONS}:{constant}"]
-    text = path.read_text()
-    text, headers = re.subn(r"\A(-- lash-postgres-store schema, component version )\d+\.",
-                            rf"\g<1>{version}.", text)
-    text, seeds = re.subn(r"(VALUES \('lash-postgres-store', )\d+, \d+\)",
-                          rf"\g<1>{version}, {version})", text)
-    if (headers, seeds) != (1, 1):
-        raise baseline.BaselineError(f"cannot find the component version {path.name} states")
+    text = baseline.postgres_schema_at(path.read_text(), version)
     if text != path.read_text():
         edits[path] = text
 
@@ -269,9 +239,11 @@ def main():
             path.write_text(text)
         if not args.source_only:
             regenerate(repo)
-        errors = baseline.mismatches(baseline.inventory(repo))
+        rows = baseline.inventory(repo)
+        errors = baseline.mismatches(rows)
         errors += baseline.sqlite_stamp_mismatches(repo)
         errors += baseline.postgres_stamp_mismatches(repo)
+        errors += baseline.table_mismatches(repo, rows)
         if errors:
             raise baseline.BaselineError("\n".join(errors))
         return 0
