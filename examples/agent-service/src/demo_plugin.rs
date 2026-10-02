@@ -327,21 +327,10 @@ mod tests {
         let process_id = lash::ProcessId::fixture("board-context-process");
         let wake = lash::process::ProcessWakeDelivery {
             version: lash::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: "board-context-wake".to_string(),
             target_session_id: session_id.clone(),
             process_id: process_id.clone(),
             sequence: 1,
             event_type: "process.wake".to_string(),
-            event_invocation: lash::runtime::RuntimeInvocation {
-                attribution: lash::runtime::RuntimeAttribution::for_session(session_id.clone()),
-                subject: lash::durability::RuntimeSubject::ProcessEvent {
-                    process_id: process_id.clone(),
-                    sequence: 1,
-                    event_type: "process.wake".to_string(),
-                },
-                caused_by: None,
-                replay: None,
-            },
             process_caused_by: None,
             authority: Default::default(),
             input: "observe the board".to_string(),

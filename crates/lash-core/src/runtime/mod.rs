@@ -320,7 +320,7 @@ pub use process::{
     TerminalProcessStatus, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, admitted_signal_wait,
+    WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry, admitted_signal_wait,
     allocate_process_event_sequence, apply_process_event_projection, artifact_store_plugin_error,
     check_retained_start, current_epoch_ms, fold_process_record, lifetime,
     load_process_execution_env, materialize_process_event_semantics, mint_process_id,

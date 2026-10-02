@@ -60,3 +60,72 @@ fn sequential_process_id_mint_preserves_every_ordinal_and_parses() {
         );
     }
 }
+
+fn process_wake(
+    target_session_id: &str,
+    process_id: ProcessId,
+    sequence: u64,
+) -> ProcessWakeDelivery {
+    ProcessWakeDelivery {
+        version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        target_session_id: SessionId::from(target_session_id),
+        process_id,
+        sequence,
+        event_type: "process.wake".to_string(),
+        process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
+        input: "wake".to_string(),
+        created_at_ms: 10,
+    }
+}
+
+#[test]
+fn process_wake_v1_identity_golden() {
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:02x}")).collect() };
+    let process_id = crate::process_id_for_test("process:λ");
+    let preimage = process_wake_identity_preimage(&SessionId::from("session\0x"), &process_id, 42);
+    assert_eq!(
+        hex(&preimage),
+        "6c6173682d737461626c652d6964656e74697479020100000000000000116c6173682e70726f636573732d77616b65000000000000000973657373696f6e00780000000000000022705f3732383666323863306130393737653138633335666635643130373538363633000000000000002a"
+    );
+    assert_eq!(
+        process_wake("session\0x", process_id, 42).wake_id(),
+        *"wake:v1:blake3:7fe5d63df8c2f43b4c31274fc065b7dd306e42e69abfdb821b9bc73915dac87a"
+    );
+}
+
+/// A wake's identity is a function of its target session, process and event
+/// sequence and of nothing else it carries, so two wakes agree on their id
+/// exactly when they agree on those three.
+#[test]
+fn a_process_wake_id_is_computed_from_its_target_process_and_sequence() {
+    let process_id = crate::process_id_for_test("process");
+    let wake = process_wake("session", process_id.clone(), 4);
+    let mut same_wake = wake.clone();
+    same_wake.event_type = "process.other".to_string();
+    same_wake.input = "other".to_string();
+    same_wake.created_at_ms = 99;
+    assert_eq!(same_wake.wake_id(), wake.wake_id());
+    for other in [
+        process_wake("other-session", process_id.clone(), 4),
+        process_wake("session", crate::process_id_for_test("other-process"), 4),
+        process_wake("session", process_id, 5),
+    ] {
+        assert_ne!(other.wake_id(), wake.wake_id());
+    }
+}
+
+/// The encoded wake carries neither a stored id nor a copy of the event's
+/// invocation.
+#[test]
+fn an_encoded_process_wake_states_no_identity_and_no_event_invocation() {
+    let encoded = serde_json::to_value(process_wake(
+        "session",
+        crate::process_id_for_test("process"),
+        4,
+    ))
+    .expect("encode wake delivery");
+    let fields = encoded.as_object().expect("wake delivery object");
+    assert!(!fields.contains_key("wake_id"));
+    assert!(!fields.contains_key("event_invocation"));
+}

@@ -89,21 +89,10 @@ fn oracle_wake_draft(session_id: &SessionId, row_id: &str) -> QueuedWorkBatchDra
     let process_id = || lash_core::runtime::ProcessId::fixture(row_id);
     lash_core::runtime::process_wake_batch_draft(lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: format!("{row_id}-wake-1"),
         target_session_id: session_id.clone(),
         process_id: process_id(),
         sequence: 1,
         event_type: "process.wake".to_string(),
-        event_invocation: lash_core::runtime::RuntimeInvocation {
-            attribution: lash_core::runtime::RuntimeAttribution::for_session(session_id.clone()),
-            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: row_id.to_string(),

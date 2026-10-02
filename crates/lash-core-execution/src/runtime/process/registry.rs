@@ -266,7 +266,6 @@ impl WakeDiscardReason {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WakeDelivery {
-    pub delivery_id: String,
     pub wake: ProcessWakeDelivery,
     pub disposition: WakeDeliveryLifecycle,
     pub attempts: u64,
@@ -276,26 +275,21 @@ pub struct WakeDelivery {
 }
 
 impl WakeDelivery {
-    pub fn pending(
-        wake: ProcessWakeDelivery,
-        config: WakeDeliveryConfig,
-    ) -> Result<Self, PluginError> {
-        if !super::wake::is_process_wake_id(&wake.wake_id) {
-            return Err(PluginError::InvalidProcessWakeIdentity {
-                wake_id: wake.wake_id,
-            });
-        }
+    pub fn pending(wake: ProcessWakeDelivery, config: WakeDeliveryConfig) -> Self {
         let next_attempt_at_ms = wake.created_at_ms;
-        let delivery_id = wake.wake_id.clone();
-        Ok(Self {
-            delivery_id,
+        Self {
             expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
             wake,
             disposition: WakeDeliveryLifecycle::Pending,
             attempts: 0,
             first_attempt_ms: None,
             next_attempt_at_ms,
-        })
+        }
+    }
+
+    /// The delivery's key: the identity of the wake it delivers.
+    pub fn delivery_id(&self) -> WakeId {
+        self.wake.wake_id()
     }
 
     pub fn state(&self) -> WakeDeliveryState {
@@ -309,75 +303,8 @@ impl WakeDelivery {
             WakeDeliveryLifecycle::Enqueuing { claim_token } => Ok(claim_token),
             _ => Err(PluginError::Session(format!(
                 "wake delivery `{}` is not enqueuing",
-                self.delivery_id
+                self.delivery_id()
             ))),
-        }
-    }
-}
-
-#[cfg(test)]
-mod wake_delivery_identity_tests {
-    use super::*;
-
-    #[test]
-    fn delivery_row_reuses_structural_wake_id() {
-        let wake = ProcessWakeDelivery {
-            version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
-            target_session_id: SessionId::from("session"),
-            process_id: crate::process_id_for_test("process"),
-            sequence: 1,
-            event_type: "process.wake".to_string(),
-            event_invocation: crate::RuntimeInvocation::effect(
-                crate::EffectAddress::new(
-                    crate::ExecutionScope::process(crate::process_id_for_test("process")),
-                    "replay",
-                )
-                .expect("valid wake address"),
-                crate::RuntimeAttribution::none(),
-                "effect",
-            ),
-            process_caused_by: None,
-            authority: crate::QueuedWorkAuthority::default(),
-            input: "wake".to_string(),
-            created_at_ms: 10,
-        };
-        let delivery = WakeDelivery::pending(wake, WakeDeliveryConfig::default()).unwrap();
-        assert_eq!(
-            delivery.delivery_id,
-            format!("wake:v1:blake3:{}", "a".repeat(64))
-        );
-    }
-
-    #[test]
-    fn delivery_row_rejects_untrusted_wake_identity() {
-        for wake_id in ["", "wake:v1:blake3:abc", "wake:v1:sha256:0000"] {
-            let wake = ProcessWakeDelivery {
-                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-                wake_id: wake_id.to_string(),
-                target_session_id: SessionId::from("session"),
-                process_id: crate::process_id_for_test("process"),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-                event_invocation: crate::RuntimeInvocation::effect(
-                    crate::EffectAddress::new(
-                        crate::ExecutionScope::process(crate::process_id_for_test("process")),
-                        "replay",
-                    )
-                    .expect("valid wake address"),
-                    crate::RuntimeAttribution::none(),
-                    "effect",
-                ),
-                process_caused_by: None,
-                authority: crate::QueuedWorkAuthority::default(),
-                input: "wake".to_string(),
-                created_at_ms: 10,
-            };
-            assert!(matches!(
-                WakeDelivery::pending(wake, WakeDeliveryConfig::default()),
-                Err(PluginError::InvalidProcessWakeIdentity { wake_id: rejected })
-                    if rejected == wake_id
-            ));
         }
     }
 }
@@ -478,10 +405,10 @@ impl WakeDeliveryReport {
                 report.blocked_groups.push(WakeDeliveryBlockedGroup {
                     target_session_id: delivery.wake.target_session_id.clone(),
                     process_id: delivery.wake.process_id.clone(),
-                    blocking_delivery_id: delivery.delivery_id.clone(),
+                    blocking_delivery_id: delivery.delivery_id().into_inner(),
                     blocking_sequence: delivery.wake.sequence,
                     reason,
-                    redrive_delivery_id: delivery.delivery_id.clone(),
+                    redrive_delivery_id: delivery.delivery_id().into_inner(),
                 });
             }
         }

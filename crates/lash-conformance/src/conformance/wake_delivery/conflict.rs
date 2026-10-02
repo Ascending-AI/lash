@@ -148,7 +148,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
             8,
         )
     };
-    let delivery_state = |delivery_id: String| {
+    let delivery_state = |delivery_id: crate::WakeId| {
         let registry = Arc::clone(&registry);
         async move {
             registry
@@ -156,7 +156,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
                 .await
                 .expect("list wake deliveries")
                 .into_iter()
-                .find(|row| row.delivery_id == delivery_id)
+                .find(|row| row.delivery_id() == delivery_id)
                 .expect("delivery row")
                 .disposition
         }
@@ -199,7 +199,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
     assert_eq!(transient.discarded_content_conflict, 0, "{transient:?}");
     assert_eq!(transient.enqueued, 0, "{transient:?}");
     assert_eq!(
-        delivery_state(changed.wake_id.clone()).await,
+        delivery_state(changed.wake_id()).await,
         crate::WakeDeliveryLifecycle::Pending,
         "a transient store fault stays retryable"
     );
@@ -224,7 +224,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
         "{unacknowledged:?}"
     );
     assert_eq!(
-        delivery_state(changed.wake_id.clone()).await,
+        delivery_state(changed.wake_id()).await,
         crate::WakeDeliveryLifecycle::Pending,
         "the sender has not acknowledged the discard"
     );
@@ -244,7 +244,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
     assert_eq!(discarded.retryable_failures, 0, "{discarded:?}");
     assert_eq!(discarded.enqueued, 0, "{discarded:?}");
     assert_eq!(
-        delivery_state(changed.wake_id.clone()).await,
+        delivery_state(changed.wake_id()).await,
         crate::WakeDeliveryLifecycle::Discarded {
             reason: crate::WakeDiscardReason::ContentConflict,
         }
@@ -275,7 +275,7 @@ pub async fn conflicting_wake_delivery_is_terminal_and_later_delivery_progresses
     assert_eq!(progressed.floor_absorbed, 0, "{progressed:?}");
     assert_eq!(progressed.retryable_failures, 0, "{progressed:?}");
     assert_eq!(
-        delivery_state(later.wake_id.clone()).await,
+        delivery_state(later.wake_id()).await,
         crate::WakeDeliveryLifecycle::Enqueued
     );
     clock.advance(1_000);

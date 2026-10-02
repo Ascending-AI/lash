@@ -167,21 +167,10 @@ fn fixture_wake() -> lash_core::runtime::ProcessWakeDelivery {
     let process_id = queue_wake_process();
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "durable-read-queue-wake".to_string(),
         target_session_id: SessionId::from(SESSION_ID),
         process_id: process_id.clone(),
         sequence: 1,
         event_type: "process.wake".to_string(),
-        event_invocation: lash_core::runtime::RuntimeInvocation {
-            attribution: lash_core::runtime::RuntimeAttribution::for_session(SESSION_ID),
-            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
-                process_id,
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: "durable read queued task".to_string(),

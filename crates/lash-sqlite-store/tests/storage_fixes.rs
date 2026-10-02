@@ -295,21 +295,10 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
     let sequence = 1;
     let wake = ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: format!("wake:{text}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),
-        event_invocation: RuntimeInvocation {
-            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id: process_id.clone(),
-                sequence,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: text.to_string(),

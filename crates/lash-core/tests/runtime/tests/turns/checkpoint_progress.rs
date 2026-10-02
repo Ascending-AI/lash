@@ -1767,7 +1767,7 @@ pub(super) async fn next_turn_input_turn_admits_process_wake_at_active_checkpoin
         .expect("queued work after pending input drain")
         .is_empty(),
         "process wake `{}` should be admitted at the user-input turn checkpoint",
-        wake.wake_id
+        wake.wake_id()
     );
 
     let requests = requests.lock_recover().clone();
@@ -1986,7 +1986,7 @@ pub(super) async fn wake_admitted_at_a_terminal_checkpoint_drives_a_follow_on_tu
         .expect("queued work after the follow-on turn")
         .is_empty(),
         "wake `{}` should be completed by the follow-on turn",
-        wake.wake_id
+        wake.wake_id()
     );
 
     // The lease is the same lane at the same generation on both sides of the
@@ -2400,7 +2400,7 @@ pub(super) async fn process_wake_admitted_at_checkpoint_is_completed_when_turn_i
         .expect("queued work after cancellation")
         .is_empty(),
         "admitted wake `{}` should be completed by the cancelled turn",
-        wake.wake_id
+        wake.wake_id()
     );
     let handler = double
         .open_handler(AdmittedScope::turn(

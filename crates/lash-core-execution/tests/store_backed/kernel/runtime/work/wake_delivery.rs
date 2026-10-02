@@ -49,20 +49,10 @@ mod tests {
         registry
             .inject_claimed_wake_delivery(crate::ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-                wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
                 target_session_id: SessionId::from("wake-target"),
                 process_id: old.id.clone(),
                 sequence: 1,
                 event_type: "producer.wake".to_string(),
-                event_invocation: crate::RuntimeInvocation::effect(
-                    crate::EffectAddress::new(
-                        crate::ExecutionScope::process(old.id.clone()),
-                        "wake-replay",
-                    )
-                    .expect("valid wake delivery address"),
-                    crate::RuntimeAttribution::none(),
-                    "wake-effect",
-                ),
                 process_caused_by: None,
                 authority: crate::QueuedWorkAuthority::default(),
                 input: "wake".to_string(),

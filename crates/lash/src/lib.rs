@@ -1250,7 +1250,7 @@ pub mod process {
         ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
         RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
         ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey, TerminalProcessStatus,
-        TriggerDeliveryPin, WatchedRegistry, facade_support::ObservedProcess,
+        TriggerDeliveryPin, WakeId, WatchedRegistry, facade_support::ObservedProcess,
         facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
         facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
         facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,

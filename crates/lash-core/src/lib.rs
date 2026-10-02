@@ -774,7 +774,7 @@ pub use runtime::{
     TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
     TurnLaneAdmissionPolicy, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
+    WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
     WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
     artifact_store_plugin_error, effect_groups_unsupported, lifetime, mint_process_id,
     park_turn_of_refused_group_child, park_turn_refused_by_generation, retry_cancel_watch,

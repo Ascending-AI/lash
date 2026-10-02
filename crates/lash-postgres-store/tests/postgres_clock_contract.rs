@@ -209,21 +209,10 @@ fn clock_contract_wake(session_id: &SessionId) -> lash_core_execution::ProcessWa
     let process_id = || ProcessId::fixture("clock-contract-wake-process");
     lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "clock-contract-wake-1".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
         sequence: 1,
         event_type: "process.wake".to_string(),
-        event_invocation: lash_core_execution::RuntimeInvocation {
-            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id.clone()),
-            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: "clock-contract queued work".to_string(),

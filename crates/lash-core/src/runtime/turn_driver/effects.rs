@@ -712,21 +712,10 @@ mod checkpoint_admission_determinism_tests {
                 enqueued_at_ms: 0,
                 payload: crate::QueuedWorkPayload::process_wake(crate::ProcessWakeDelivery {
                     version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-                    wake_id: format!("{batch_id}-wake"),
                     target_session_id: SessionId::from("p7"),
                     process_id: crate::ProcessId::fixture("p7-process"),
                     sequence: 1,
                     event_type: "process.wake".into(),
-                    event_invocation: crate::RuntimeInvocation {
-                        attribution: crate::RuntimeAttribution::for_session("p7"),
-                        subject: crate::RuntimeSubject::ProcessEvent {
-                            process_id: crate::ProcessId::fixture("p7-process"),
-                            sequence: 1,
-                            event_type: "process.wake".into(),
-                        },
-                        caused_by: None,
-                        replay: None,
-                    },
                     process_caused_by: None,
                     authority: crate::QueuedWorkAuthority::new("p7"),
                     input: "checkpoint admission".into(),

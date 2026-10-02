@@ -12644,21 +12644,26 @@
         },
         {
           "additionalProperties": false,
+          "description": "A stored wake-delivery row is keyed by an id other than the one its wake computes.",
           "properties": {
             "message": {
               "additionalProperties": false,
               "properties": {
+                "delivery_id": {
+                  "type": "string"
+                },
                 "wake_id": {
                   "type": "string"
                 }
               },
               "required": [
+                "delivery_id",
                 "wake_id"
               ],
               "type": "object"
             },
             "type": {
-              "const": "invalid_process_wake_identity",
+              "const": "wake_delivery_identity_mismatch",
               "type": "string"
             }
           },

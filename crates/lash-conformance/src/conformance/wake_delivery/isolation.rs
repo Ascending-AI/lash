@@ -122,7 +122,7 @@ async fn assert_healthy_enqueued(page: &WakePage, registry: &Arc<dyn crate::Proc
         .expect("inspect claimed siblings");
     let healthy = rows
         .iter()
-        .find(|row| row.delivery_id == page.healthy.wake_id)
+        .find(|row| row.delivery_id() == page.healthy.wake_id())
         .expect("healthy delivery");
     assert_eq!(healthy.state(), crate::WakeDeliveryState::Enqueued);
     assert!(
@@ -176,7 +176,7 @@ pub async fn bad_wake_source_does_not_strand_claimed_siblings(
         .expect("inspect bad source disposition");
     let bad = rows
         .iter()
-        .find(|row| row.delivery_id == page.bad.wake_id)
+        .find(|row| row.delivery_id() == page.bad.wake_id())
         .expect("bad delivery");
     assert_eq!(
         bad.state(),
@@ -191,7 +191,7 @@ pub async fn bad_wake_source_does_not_strand_claimed_siblings(
     );
     let tail_row = rows
         .iter()
-        .find(|row| row.delivery_id == tail.wake_id)
+        .find(|row| row.delivery_id() == tail.wake_id())
         .expect("blocked tail delivery");
     assert_eq!(tail_row.state(), crate::WakeDeliveryState::Pending);
     assert_eq!(
@@ -205,11 +205,11 @@ pub async fn bad_wake_source_does_not_strand_claimed_siblings(
     assert_eq!(durable_report.blocked_groups.len(), 1);
     assert_eq!(
         durable_report.blocked_groups[0].blocking_delivery_id,
-        page.bad.wake_id
+        page.bad.wake_id()
     );
     assert_eq!(
         durable_report.blocked_groups[0].redrive_delivery_id,
-        page.bad.wake_id
+        page.bad.wake_id()
     );
     assert_eq!(
         serde_json::to_value(&durable_report).expect("serialize durable report")["source_unreadable"],
@@ -303,7 +303,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
         .expect("inspect deferred source");
     let bad = rows
         .iter()
-        .find(|row| row.delivery_id == page.bad.wake_id)
+        .find(|row| row.delivery_id() == page.bad.wake_id())
         .expect("deferred delivery");
     assert_eq!(bad.state(), crate::WakeDeliveryState::Pending);
     assert!(
@@ -323,7 +323,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
         .expect("inspect expiry bound");
     let bad = rows
         .iter()
-        .find(|row| row.delivery_id == page.bad.wake_id)
+        .find(|row| row.delivery_id() == page.bad.wake_id())
         .expect("bounded retry");
     assert_eq!(
         bad.next_attempt_at_ms, expiry,
@@ -369,7 +369,7 @@ pub async fn wake_defer_failure_does_not_strand_claimed_siblings(
         .expect("inspect failed retry");
     let bad = rows
         .iter()
-        .find(|row| row.delivery_id == page.bad.wake_id)
+        .find(|row| row.delivery_id() == page.bad.wake_id())
         .expect("failed retry row");
     assert_eq!(
         bad.state(),
@@ -444,7 +444,10 @@ pub async fn bad_wake_source_page_recovers_after_restart(
     for stale in claims {
         assert!(matches!(
             registry
-                .mark_wake_enqueued(&stale.delivery_id, stale.claim_token().expect("old token"))
+                .mark_wake_enqueued(
+                    &stale.delivery_id(),
+                    stale.claim_token().expect("old token")
+                )
                 .await
                 .expect("old owner is fenced"),
             crate::WakeDeliveryClaimOutcome::ClaimLost { .. }
@@ -496,7 +499,7 @@ pub async fn lost_bad_source_claim_does_not_settle_the_new_owner(
     for claim in &current {
         let row = rows
             .iter()
-            .find(|row| row.delivery_id == claim.delivery_id)
+            .find(|row| row.delivery_id() == claim.delivery_id())
             .expect("replacement row");
         assert_eq!(
             row.disposition, claim.disposition,
@@ -505,16 +508,16 @@ pub async fn lost_bad_source_claim_does_not_settle_the_new_owner(
     }
     let bad = current
         .iter()
-        .find(|row| row.delivery_id == page.bad.wake_id)
+        .find(|row| row.delivery_id() == page.bad.wake_id())
         .expect("new bad source owner");
     let healthy = current
         .iter()
-        .find(|row| row.delivery_id == page.healthy.wake_id)
+        .find(|row| row.delivery_id() == page.healthy.wake_id())
         .expect("new healthy source owner");
     assert_eq!(
         registry
             .discard_wake_delivery(
-                &bad.delivery_id,
+                &bad.delivery_id(),
                 bad.claim_token().expect("new bad token"),
                 crate::WakeDiscardReason::Expired
             )
@@ -525,7 +528,7 @@ pub async fn lost_bad_source_claim_does_not_settle_the_new_owner(
     assert_eq!(
         registry
             .mark_wake_enqueued(
-                &healthy.delivery_id,
+                &healthy.delivery_id(),
                 healthy.claim_token().expect("new healthy token")
             )
             .await

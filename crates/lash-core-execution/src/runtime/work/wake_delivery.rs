@@ -241,7 +241,7 @@ impl WakeDeliveryDriver {
             .await
             {
                 tracing::warn!(
-                    delivery_id = %delivery.delivery_id,
+                    delivery_id = %delivery.delivery_id(),
                     error = %error,
                     "process wake attempt failed; continuing the claimed page"
                 );
@@ -285,7 +285,7 @@ impl WakeDeliveryDriver {
                 WakeDeliverySettlement::Retry
             };
             tracing::warn!(
-                delivery_id = %delivery.delivery_id,
+                delivery_id = %delivery.delivery_id(),
                 process_id = %delivery.wake.process_id,
                 error = %error,
                 terminal = error.is_terminal(),
@@ -312,7 +312,7 @@ impl WakeDeliveryDriver {
             Ok(lookup) => lookup,
             Err(error) => {
                 tracing::warn!(
-                    delivery_id = %delivery.delivery_id,
+                    delivery_id = %delivery.delivery_id(),
                     target_session_id = %target_session_id,
                     error = %error,
                     "process wake target lookup failed; delivery remains pending"
@@ -349,7 +349,7 @@ impl WakeDeliveryDriver {
             }
             crate::store::SessionLookup::Absent => {
                 tracing::debug!(
-                    delivery_id = %delivery.delivery_id,
+                    delivery_id = %delivery.delivery_id(),
                     target_session_id = %target_session_id,
                     "process wake target has never existed; delivery remains pending"
                 );
@@ -395,7 +395,7 @@ impl WakeDeliveryDriver {
                     .await
                 {
                     tracing::debug!(
-                        delivery_id = %delivery.delivery_id,
+                        delivery_id = %delivery.delivery_id(),
                         target_session_id = %target_session_id,
                         batch_id = %enqueued.batch_id,
                         %refusal,
@@ -404,7 +404,7 @@ impl WakeDeliveryDriver {
                 }
                 if enqueue_outcome.process_wake_was_absorbed() {
                     tracing::info!(
-                        delivery_id = %delivery.delivery_id,
+                        delivery_id = %delivery.delivery_id(),
                         target_session_id = %target_session_id,
                         batch_id = %enqueued.batch_id,
                         source_key = ?enqueued.source_key,
@@ -414,7 +414,7 @@ impl WakeDeliveryDriver {
                     report.floor_absorbed += 1;
                 } else {
                     tracing::info!(
-                        delivery_id = %delivery.delivery_id,
+                        delivery_id = %delivery.delivery_id(),
                         target_session_id = %target_session_id,
                         batch_id = %enqueued.batch_id,
                         source_key = ?enqueued.source_key,
@@ -471,7 +471,7 @@ impl WakeDeliveryDriver {
                 existing_batch_id, ..
             }) => {
                 tracing::warn!(
-                    delivery_id = %delivery.delivery_id,
+                    delivery_id = %delivery.delivery_id(),
                     target_session_id = %target_session_id,
                     process_id = %delivery.wake.process_id,
                     sequence = delivery.wake.sequence,
@@ -492,7 +492,7 @@ impl WakeDeliveryDriver {
             }
             Err(error) => {
                 tracing::warn!(
-                    delivery_id = %delivery.delivery_id,
+                    delivery_id = %delivery.delivery_id(),
                     target_session_id = %target_session_id,
                     error = %error,
                     "process wake enqueue failed; delivery remains pending"
@@ -527,13 +527,13 @@ impl WakeDeliveryDriver {
         match settlement {
             WakeDeliverySettlement::Discard(reason) => {
                 match registry
-                    .discard_wake_delivery(&delivery.delivery_id, claim_token, reason)
+                    .discard_wake_delivery(&delivery.delivery_id(), claim_token, reason)
                     .await
                 {
                     Ok(WakeDeliveryClaimOutcome::Applied) => {
                         if let Some(log) = rewind_log {
                             tracing::info!(
-                                delivery_id = %delivery.delivery_id,
+                                delivery_id = %delivery.delivery_id(),
                                 target_session_id = %log.session_id,
                                 process_id = %log.process_id,
                                 sequence = log.sequence,
@@ -543,7 +543,7 @@ impl WakeDeliveryDriver {
                             );
                         } else {
                             tracing::info!(
-                                delivery_id = %delivery.delivery_id,
+                                delivery_id = %delivery.delivery_id(),
                                 target_session_id = %delivery.wake.target_session_id,
                                 reason = reason.as_str(),
                                 "process wake delivery discarded"
@@ -553,7 +553,7 @@ impl WakeDeliveryDriver {
                     }
                     Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
                         tracing::debug!(
-                            delivery_id = %delivery.delivery_id,
+                            delivery_id = %delivery.delivery_id(),
                             ?state,
                             reason = reason.as_str(),
                             "concurrent process wake transition won before discard"
@@ -561,7 +561,7 @@ impl WakeDeliveryDriver {
                     }
                     Err(error) => {
                         tracing::warn!(
-                            delivery_id = %delivery.delivery_id,
+                            delivery_id = %delivery.delivery_id(),
                             reason = reason.as_str(),
                             error = %error,
                             "process wake discard transition failed; delivery deferred"
@@ -572,12 +572,12 @@ impl WakeDeliveryDriver {
             }
             WakeDeliverySettlement::Enqueued => {
                 match registry
-                    .mark_wake_enqueued(&delivery.delivery_id, claim_token)
+                    .mark_wake_enqueued(&delivery.delivery_id(), claim_token)
                     .await
                 {
                     Ok(WakeDeliveryClaimOutcome::Applied) => {
                         tracing::info!(
-                            delivery_id = %delivery.delivery_id,
+                            delivery_id = %delivery.delivery_id(),
                             state = "enqueued",
                             "process wake delivery marked terminal"
                         );
@@ -585,14 +585,14 @@ impl WakeDeliveryDriver {
                     }
                     Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
                         tracing::debug!(
-                            delivery_id = %delivery.delivery_id,
+                            delivery_id = %delivery.delivery_id(),
                             ?state,
                             "concurrent process wake transition already settled delivery"
                         );
                     }
                     Err(error) => {
                         tracing::warn!(
-                            delivery_id = %delivery.delivery_id,
+                            delivery_id = %delivery.delivery_id(),
                             error = %error,
                             "process wake terminal mark failed; delivery deferred"
                         );
@@ -629,7 +629,7 @@ impl WakeDeliveryDriver {
     ) -> Result<(), PluginError> {
         match registry
             .defer_wake_delivery(
-                &delivery.delivery_id,
+                &delivery.delivery_id(),
                 delivery.claim_token()?,
                 clock
                     .timestamp_ms()

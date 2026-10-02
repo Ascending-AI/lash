@@ -279,21 +279,10 @@ mod typed_payload_tests {
     fn wake(sequence: u64) -> crate::ProcessWakeDelivery {
         crate::ProcessWakeDelivery {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: format!("process-1-wake-{sequence}"),
             target_session_id: SessionId::from("s"),
             process_id: crate::ProcessId::fixture("process-1"),
             sequence,
             event_type: "process.wake".to_string(),
-            event_invocation: crate::RuntimeInvocation {
-                attribution: crate::RuntimeAttribution::for_session("s"),
-                subject: crate::RuntimeSubject::ProcessEvent {
-                    process_id: crate::ProcessId::fixture("process-1"),
-                    sequence,
-                    event_type: "process.wake".to_string(),
-                },
-                caused_by: None,
-                replay: None,
-            },
             process_caused_by: None,
             authority: crate::QueuedWorkAuthority::default(),
             input: "task".to_string(),

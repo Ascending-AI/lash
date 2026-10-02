@@ -971,8 +971,4 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessWakeDelivery| {
         let _ = &value.created_at_ms;
     });
-    // W0325: lash::process::ProcessWakeDelivery::event_invocation [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.event_invocation;
-    });
 }

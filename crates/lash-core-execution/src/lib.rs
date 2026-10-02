@@ -846,7 +846,7 @@ pub use runtime::{
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputState, TurnLaneAdmissionPolicy, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WatchedRegistry,
+    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry,
     WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
     admit_session_view, apply_parent_end_plan, artifact_referrer_ended, effect_groups_unsupported,
     end_parent_scope, end_session_roots, lifetime, live_session_view, mint_process_id,

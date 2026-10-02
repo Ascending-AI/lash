@@ -184,36 +184,27 @@ mod tests {
         );
     }
 
-    fn wake_delivery_json() -> String {
-        let wake = lash_core_execution::runtime::ProcessWakeDelivery {
+    fn wake() -> lash_core_execution::runtime::ProcessWakeDelivery {
+        lash_core_execution::runtime::ProcessWakeDelivery {
             version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
             target_session_id: SessionId::from("session"),
             process_id: lash_core_execution::ProcessId::fixture("process"),
             sequence: 4,
             event_type: "process.wake".to_string(),
-            event_invocation: lash_core_execution::RuntimeInvocation::effect(
-                lash_core_execution::EffectAddress::new(
-                    lash_core_execution::ExecutionScope::process(
-                        lash_core_execution::ProcessId::fixture("process"),
-                    ),
-                    "replay",
-                )
-                .expect("valid wake address"),
-                lash_core_execution::RuntimeAttribution::none(),
-                "effect",
-            ),
             process_caused_by: None,
             authority: lash_core_execution::QueuedWorkAuthority::default(),
             input: "wake".to_string(),
             created_at_ms: 10,
-        };
-        serde_json::to_string(&wake).expect("encode wake delivery")
+        }
+    }
+
+    fn wake_delivery_json() -> String {
+        serde_json::to_string(&wake()).expect("encode wake delivery")
     }
 
     fn wake_row() -> WakeDeliveryRow {
         WakeDeliveryRow {
-            delivery_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
+            delivery_id: wake().wake_id().into_inner(),
             state_label: "enqueuing".to_string(),
             claim_token: Some("claim".to_string()),
             attempts: 2,
@@ -232,7 +223,7 @@ mod tests {
         let delivery = row
             .project(lash_core_execution::FleetFormat::current())
             .expect("a well-formed row projects");
-        assert_eq!(delivery.delivery_id, delivery_id);
+        assert_eq!(delivery.delivery_id(), delivery_id);
         assert_eq!(delivery.state(), WakeDeliveryState::Enqueuing);
         assert_eq!(delivery.claim_token().expect("claim token"), "claim");
         assert_eq!(delivery.attempts, 2);
@@ -242,6 +233,28 @@ mod tests {
         assert_eq!(delivery.disposition.discard_reason(), None);
         assert_eq!(delivery.wake.sequence, 4);
         assert_eq!(delivery.wake.target_session_id, "session");
+    }
+
+    /// The row's key is the wake's identity, and the wake states it only
+    /// through what it is computed from: a row keyed by any other id is
+    /// refused, never projected as that other delivery.
+    #[test]
+    fn a_wake_delivery_row_keyed_by_another_wakes_id_is_refused() {
+        let error = WakeDeliveryRow {
+            delivery_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
+            ..wake_row()
+        }
+        .project(lash_core_execution::FleetFormat::current())
+        .expect_err("a row whose key is not its wake's identity is refused");
+        assert!(
+            matches!(
+                &error,
+                PluginError::WakeDeliveryIdentityMismatch { delivery_id, wake_id }
+                    if *delivery_id == format!("wake:v1:blake3:{}", "a".repeat(64))
+                        && *wake_id == wake().wake_id()
+            ),
+            "unexpected refusal: {error}"
+        );
     }
 
     #[test]
@@ -457,7 +470,10 @@ mod tests {
         .expect_err("the state label is parsed before the payload is decoded");
         assert!(
             matches!(&error, PluginError::Session(message)
-                if message == "wake delivery `wake:v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` has unknown state `settled`"),
+            if *message == format!(
+                "wake delivery `{}` has unknown state `settled`",
+                wake().wake_id()
+            )),
             "unexpected refusal: {error}"
         );
     }

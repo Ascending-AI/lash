@@ -279,7 +279,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         ),
     )
     .await;
-    let expected_wake_id = wake.wake_id.clone();
+    let expected_wake_id = wake.wake_id();
     let expected_sequence = wake.sequence;
     let expected_text = format!(
         "Background process wake\nProcess: {}\nEvent: process.wake #{expected_sequence}\nWake input:\ndeploy complete",

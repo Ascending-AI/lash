@@ -1176,7 +1176,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
     assert_eq!(batch_ids.len(), 1);
     assert!(causes.iter().any(|cause| {
         cause.event_type == "process.wake"
-            && cause.id == wake.wake_id
+            && cause.id == wake.wake_id()
             && cause.text.contains("deploy complete")
     }));
 

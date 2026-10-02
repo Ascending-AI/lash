@@ -11,21 +11,10 @@ pub(crate) fn queued_work_test_draft(
     let process_id = || ProcessId::fixture(source_key);
     workbench_process_wake_draft(lash::process::ProcessWakeDelivery {
         version: lash::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: format!("{source_key}-wake-1"),
         target_session_id: session_id.clone(),
         process_id: process_id(),
         sequence: 1,
         event_type: "process.wake".to_string(),
-        event_invocation: lash::runtime::RuntimeInvocation {
-            attribution: lash::runtime::RuntimeAttribution::for_session(session_id.clone()),
-            subject: lash::durability::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash::persistence::QueuedWorkAuthority::default(),
         input: source_key.to_string(),

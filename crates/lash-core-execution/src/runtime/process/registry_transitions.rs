@@ -227,7 +227,7 @@ pub fn wake_discard_reason_from_label(
 /// Columns of a persisted wake-delivery row, before projection.
 #[derive(Clone, Debug)]
 pub struct WakeDeliveryRow {
-    /// `delivery_id`, the structural wake identity.
+    /// `delivery_id`, which must be the identity the decoded wake computes.
     pub delivery_id: String,
     pub state_label: String,
     /// `claim_token`, the ownership fence of the current `enqueuing` claim.
@@ -309,8 +309,16 @@ impl WakeDeliveryRow {
             }
         };
         let wake = decode_process_wake_delivery(&self.delivery_json, fleet_format)?;
+        // The row is keyed by the identity its wake computes. A key that
+        // names any other wake is refused, never read as that delivery.
+        let wake_id = wake.wake_id();
+        if wake_id != self.delivery_id {
+            return Err(PluginError::WakeDeliveryIdentityMismatch {
+                delivery_id: self.delivery_id,
+                wake_id: wake_id.into_inner(),
+            });
+        }
         Ok(WakeDelivery {
-            delivery_id: self.delivery_id,
             wake,
             disposition,
             attempts: self.attempts as u64,

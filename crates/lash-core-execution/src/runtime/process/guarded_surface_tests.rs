@@ -80,21 +80,10 @@ fn write_wake(fleet: FleetFormat) -> Vec<u8> {
         version: fleet.writer_version(lash_core_store::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: "wake:law".to_owned(),
         target_session_id: crate::SessionId::from("target"),
         process_id: process_id.clone(),
         sequence: 7,
         event_type: "process.ready".to_owned(),
-        event_invocation: crate::RuntimeInvocation {
-            attribution: crate::RuntimeAttribution::for_session("target"),
-            subject: crate::RuntimeSubject::ProcessEvent {
-                process_id: process_id.clone(),
-                sequence: 7,
-                event_type: "process.ready".to_owned(),
-            },
-            caused_by: Some(crate::CausalRef::Process { process_id }),
-            replay: None,
-        },
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: "wake".to_owned(),

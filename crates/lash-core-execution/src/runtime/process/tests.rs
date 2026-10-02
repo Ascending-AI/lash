@@ -131,7 +131,7 @@ fn process_wake_turn_cause_preserves_process_origin() {
 }
 
 #[test]
-fn process_wake_delivery_carries_event_invocation_and_process_cause() {
+fn process_wake_delivery_carries_its_process_cause() {
     let process_caused_by = crate::CausalRef::SessionNode {
         session_id: SessionId::from("target"),
         node_id: "trigger:button".to_string(),
@@ -140,14 +140,6 @@ fn process_wake_delivery_carries_event_invocation_and_process_cause() {
 
     assert_eq!(wake.event_type, "process.ready");
     assert_eq!(wake.process_caused_by, Some(process_caused_by));
-    assert!(matches!(
-        wake.event_invocation.subject,
-        crate::RuntimeSubject::ProcessEvent {
-            process_id,
-            sequence: 7,
-            event_type,
-        } if process_id == crate::process_id_for_test("process-1") && event_type == "process.ready"
-    ));
 }
 
 fn wake_delivery(
@@ -157,23 +149,10 @@ fn wake_delivery(
     let event_type = event_type.into();
     ProcessWakeDelivery {
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "wake:abc".to_string(),
         target_session_id: SessionId::from("target"),
         process_id: crate::process_id_for_test("process-1"),
         sequence: 7,
         event_type: event_type.clone(),
-        event_invocation: crate::RuntimeInvocation {
-            attribution: crate::RuntimeAttribution::for_session("target"),
-            subject: crate::RuntimeSubject::ProcessEvent {
-                process_id: crate::process_id_for_test("process-1"),
-                sequence: 7,
-                event_type,
-            },
-            caused_by: Some(crate::CausalRef::Process {
-                process_id: crate::process_id_for_test("process-1"),
-            }),
-            replay: None,
-        },
         process_caused_by,
         authority: crate::QueuedWorkAuthority::default(),
         input: "line one\nline two".to_string(),

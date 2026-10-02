@@ -772,15 +772,103 @@ pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 4;
 /// format_manifest = "ProcessWakeDelivery"
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 5;
 
+/// version_guard(
+///     items(process_wake_identity_preimage),
+/// )
+/// version_surface = "coexist"
+const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
+
+/// Permanent tag registry for process-wake identities.
+///
+/// Version 1 has no sum variants: its complete grammar is target session,
+/// process id, then event sequence. Retired tags remain burned when variants
+/// are introduced in a later family version.
+fn process_wake_identity_preimage(
+    target_session_id: &SessionId,
+    process_id: &ProcessId,
+    sequence: u64,
+) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.process-wake",
+        PROCESS_WAKE_FAMILY_VERSION,
+    );
+    identity.string(target_session_id);
+    identity.string(process_id);
+    identity.u64(sequence);
+    identity.finish()
+}
+
+/// The identity of one process wake: the rendered hash of the wake's target
+/// session, process and event sequence.
+///
+/// Sealed: the only way to obtain one is [`ProcessWakeDelivery::wake_id`], so
+/// a wake id always names the wake it was computed from. It encodes as its
+/// text and has no decoder; a stored copy is compared against the wake's own.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct WakeId(String);
+
+impl WakeId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::ops::Deref for WakeId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for WakeId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for WakeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl From<WakeId> for String {
+    fn from(value: WakeId) -> Self {
+        value.into_inner()
+    }
+}
+
+impl PartialEq<str> for WakeId {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<String> for WakeId {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<WakeId> for String {
+    fn eq(&self, other: &WakeId) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProcessWakeDelivery {
     pub version: u32,
-    pub wake_id: String,
     pub target_session_id: SessionId,
     pub process_id: ProcessId,
     pub sequence: u64,
     pub event_type: String,
-    pub event_invocation: crate::RuntimeInvocation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_caused_by: Option<crate::CausalRef>,
     /// Authority captured from the durable process originator at event append.
@@ -789,6 +877,22 @@ pub struct ProcessWakeDelivery {
     pub authority: crate::QueuedWorkAuthority,
     pub input: String,
     pub created_at_ms: u64,
+}
+
+impl ProcessWakeDelivery {
+    /// This wake's identity, computed from the target session, process and
+    /// event sequence it carries. A wake states its identity nowhere else.
+    pub fn wake_id(&self) -> WakeId {
+        WakeId(crate::stable_identity::rendered_hash(
+            "wake",
+            PROCESS_WAKE_FAMILY_VERSION,
+            &process_wake_identity_preimage(
+                &self.target_session_id,
+                &self.process_id,
+                self.sequence,
+            ),
+        ))
+    }
 }
 fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bool {
     authority.principal.is_none() && authority.elevation.is_none()
@@ -829,13 +933,13 @@ pub fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvR
 
 pub fn process_wake_turn_cause(wake: &ProcessWakeDelivery) -> crate::TurnCause {
     crate::TurnCause {
-        id: wake.wake_id.clone(),
+        id: wake.wake_id().into_inner(),
         event_type: wake.event_type.clone(),
         origin: crate::MessageOrigin::Process {
             process_id: wake.process_id.clone(),
             event_type: wake.event_type.clone(),
             sequence: wake.sequence,
-            wake_id: Some(wake.wake_id.clone()),
+            wake_id: Some(wake.wake_id().into_inner()),
             caused_by: wake.process_caused_by.clone(),
         },
         text: process_wake_turn_text(wake),

@@ -374,21 +374,10 @@ pub(super) fn queued_work_stress_wake(
         version: fleet_format.writer_version(lash_core::surface_format!(
             lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: format!("wake:{session_id}:{sequence}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),
-        event_invocation: lash_core::RuntimeInvocation {
-            attribution: RuntimeAttribution::for_session(session_id),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id: process_id.clone(),
-                sequence,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core::QueuedWorkAuthority::default(),
         input: input.to_string(),

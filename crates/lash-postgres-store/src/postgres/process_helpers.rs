@@ -556,9 +556,9 @@ pub(crate) async fn insert_wake_delivery_tx(
     let Some(wake) = wake else {
         return Ok(());
     };
-    let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config)?;
+    let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config);
     sqlx::query(process_sql().wake_postgres.insert_pending.sql())
-        .bind(&delivery.delivery_id)
+        .bind(delivery.delivery_id().as_str())
         .bind(delivery.wake.process_id.as_str())
         .bind(delivery.wake.target_session_id.as_str())
         .bind(delivery.wake.sequence as i64)

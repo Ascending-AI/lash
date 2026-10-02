@@ -338,7 +338,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
             "checkpoint": "prepared",
             "process_id": PROCESS_ID,
             "session_id": SESSION_ID,
-            "delivery_id": wake.wake_id,
+            "delivery_id": wake.wake_id(),
             "sequence": wake.sequence,
         })
     );
@@ -372,7 +372,7 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
         json!({
             "checkpoint": "receiver_enqueued_sender_unmarked",
             "process_id": PROCESS_ID,
-            "delivery_id": delivery.delivery_id,
+            "delivery_id": delivery.delivery_id(),
             "claim_token": delivery.claim_token().context("claimed delivery token")?,
             "batch_id": batch.batch_id,
             "enqueue_seq": batch.enqueue_seq,
@@ -452,7 +452,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
         json!({
             "checkpoint": "recovered_exactly_once",
             "process_id": PROCESS_ID,
-            "delivery_id": delivery.delivery_id,
+            "delivery_id": delivery.delivery_id(),
             "sequence": delivery.wake.sequence,
             "attempts": delivery.attempts,
             "sender_state": delivery.state(),

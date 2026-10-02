@@ -139,7 +139,7 @@ pub use process::{
     TerminalProcessStatus, TriggerDeliveryBinding, UnavailableProcessService,
     WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
+    WakeDeliveryState, WakeDiscardReason, WakeId, WatchedRegistry, WeakProcessEngineRegistry,
     abandoned_consumer_refusal, admitted_signal_wait, allocate_process_event_sequence,
     apply_parent_end_plan, apply_process_event_projection, artifact_referrer_ended,
     check_retained_start, check_trigger_delivery_start, current_epoch_ms, end_parent_scope,

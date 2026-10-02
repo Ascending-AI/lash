@@ -1289,21 +1289,10 @@ pub fn queued_process_wake_draft(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: format!("wake:{session_id}:{text}"),
         target_session_id: session_id.clone(),
         process_id: crate::ProcessId::fixture(&format!("process:{text}")),
         sequence: 1,
         event_type: "process.wake".to_string(),
-        event_invocation: RuntimeInvocation {
-            attribution: RuntimeAttribution::for_session(session_id),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id: crate::ProcessId::fixture(&format!("process:{text}")),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: text.to_string(),

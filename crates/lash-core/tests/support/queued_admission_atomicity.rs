@@ -63,21 +63,10 @@ fn wake(sequence: u64, text: &str) -> lash_core::runtime::ProcessWakeDelivery {
     let process_id = || lash_core::runtime::ProcessId::fixture("atomicity-process");
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: format!("atomicity-process-wake-{sequence}"),
         target_session_id: SessionId::from("root"),
         process_id: process_id(),
         sequence,
         event_type: "process.wake".to_string(),
-        event_invocation: lash_core::runtime::RuntimeInvocation {
-            attribution: lash_core::runtime::RuntimeAttribution::for_session("root"),
-            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: text.to_string(),

@@ -125,7 +125,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ProcessHandedOver { .. }
             | PluginError::ProcessTerminalOutcomeMismatch { .. }
             | PluginError::ReservedProcessEvent { .. }
-            | PluginError::InvalidProcessWakeIdentity { .. }
+            | PluginError::WakeDeliveryIdentityMismatch { .. }
             | PluginError::ProcessWakeDeliveryFormatVersionMismatch { .. }
             | PluginError::ProcessRegistryCursorBackendMismatch { .. }) => {
                 Self::new(RuntimeErrorCode::Plugin, err.to_string())

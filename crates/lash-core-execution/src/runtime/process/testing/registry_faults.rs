@@ -322,9 +322,9 @@ impl ProcessRegistryFaults {
         &self,
         wake: crate::ProcessWakeDelivery,
     ) -> Result<(), crate::PluginError> {
-        let mut delivery = crate::WakeDelivery::pending(wake, self.inner.wake_delivery_config())?;
+        let mut delivery = crate::WakeDelivery::pending(wake, self.inner.wake_delivery_config());
         delivery.disposition = crate::WakeDeliveryLifecycle::Enqueuing {
-            claim_token: format!("injected:{}", delivery.delivery_id),
+            claim_token: format!("injected:{}", delivery.delivery_id()),
         };
         delivery.attempts = 1;
         self.injected_wakes.lock_recover().push(delivery);

@@ -223,7 +223,8 @@ plugin_error_samples! {
     ReservedProcessEvent { .. } => PluginError::ReservedProcessEvent {
         event_type: "sampled".to_string(),
     },
-    InvalidProcessWakeIdentity { .. } => PluginError::InvalidProcessWakeIdentity {
+    WakeDeliveryIdentityMismatch { .. } => PluginError::WakeDeliveryIdentityMismatch {
+        delivery_id: "sampled".to_string(),
         wake_id: "sampled".to_string(),
     },
     ProcessWakeDeliveryFormatVersionMismatch { .. } => {

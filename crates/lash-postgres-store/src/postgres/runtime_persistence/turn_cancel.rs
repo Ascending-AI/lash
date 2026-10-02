@@ -366,21 +366,10 @@ mod tests {
         let process_id = lash_sansio::ProcessId::fixture("process");
         let wake = lash_core_execution::ProcessWakeDelivery {
             version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: "wake".into(),
             target_session_id: session.clone(),
             process_id: process_id.clone(),
             sequence: 1,
             event_type: "process.wake".into(),
-            event_invocation: lash_core_execution::RuntimeInvocation {
-                attribution: lash_core_execution::RuntimeAttribution::for_session(&session),
-                subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
-                    process_id,
-                    sequence: 1,
-                    event_type: "process.wake".into(),
-                },
-                caused_by: None,
-                replay: None,
-            },
             process_caused_by: None,
             authority: Default::default(),
             input: "wake payload".into(),

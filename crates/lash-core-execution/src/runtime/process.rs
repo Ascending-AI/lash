@@ -67,7 +67,7 @@ pub use events::{
     ProcessEventSemanticsSpec, ProcessEventType, ProcessOutcomeNotRetained, ProcessResumeRefusal,
     ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessTerminal,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessValueSelector, ProcessWake,
-    ProcessWakeDelivery, ProcessWakeSpec, admitted_signal_wait, process_signal_event_type,
+    ProcessWakeDelivery, ProcessWakeSpec, WakeId, admitted_signal_wait, process_signal_event_type,
     process_signal_name_from_event_type, process_signal_wait_key, runtime_lifecycle_event_type,
     terminal_append_request, terminal_event_type_name, validate_process_signal_name,
 };

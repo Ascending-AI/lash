@@ -231,11 +231,11 @@ async fn ordering_group_discard_case(
         .into_iter()
         .next()
         .expect("ordering-group head is claimable");
-    assert_eq!(head.delivery_id, wakes[0].wake_id);
+    assert_eq!(head.delivery_id(), wakes[0].wake_id());
     assert_eq!(
         registry
             .discard_wake_delivery(
-                &head.delivery_id,
+                &head.delivery_id(),
                 head.claim_token().expect("ordering-group head claim token"),
                 reason,
             )
@@ -254,7 +254,7 @@ async fn ordering_group_discard_case(
         "{case} discard ordering-group classification disagreed"
     );
     if !blocks {
-        assert_eq!(claimed[0].delivery_id, wakes[1].wake_id);
+        assert_eq!(claimed[0].delivery_id(), wakes[1].wake_id());
     }
     let report = registry
         .wake_delivery_report()
@@ -730,7 +730,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     assert_eq!(
         registry
             .mark_wake_enqueued(
-                &claimed[0].delivery_id,
+                &claimed[0].delivery_id(),
                 claimed[0].claim_token().expect("retarget claim token"),
             )
             .await
@@ -742,7 +742,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .await
         .expect("read settled retarget-race wake")
         .into_iter()
-        .find(|delivery| delivery.delivery_id == claimed[0].delivery_id)
+        .find(|delivery| delivery.delivery_id() == claimed[0].delivery_id())
         .expect("settled retarget-race delivery");
     assert_eq!(
         retarget_delivery.state(),
@@ -814,7 +814,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     assert_eq!(
         registry
             .defer_wake_delivery(
-                &crashed_claim[0].delivery_id,
+                &crashed_claim[0].delivery_id(),
                 &stale_token,
                 crashed_claim[0].next_attempt_at_ms.saturating_add(1),
             )
@@ -835,7 +835,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     assert_eq!(
         registry
             .mark_wake_enqueued(
-                &recovered.delivery_id,
+                &recovered.delivery_id(),
                 recovered.claim_token().expect("recovered claim token"),
             )
             .await
@@ -948,7 +948,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     assert_eq!(
         registry
             .defer_wake_delivery(
-                &deferred.delivery_id,
+                &deferred.delivery_id(),
                 deferred.claim_token().expect("deferred claim token"),
                 retry_at,
             )
@@ -1022,7 +1022,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     assert_eq!(
         registry
             .discard_wake_delivery(
-                &blocked_head.delivery_id,
+                &blocked_head.delivery_id(),
                 blocked_head
                     .claim_token()
                     .expect("blocked-head claim token"),
@@ -1050,10 +1050,14 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .find(|group| group.process_id == blocked_process_id)
         .expect("blocked group must be visible in the delivery report");
     assert_eq!(blocked_group.target_session_id, target_session_id);
-    assert_eq!(blocked_group.blocking_delivery_id, blocked_head.delivery_id);
+    assert_eq!(
+        blocked_group.blocking_delivery_id,
+        blocked_head.delivery_id()
+    );
     assert_eq!(blocked_group.reason, crate::WakeDiscardReason::Expired);
     assert_eq!(
-        blocked_group.redrive_delivery_id, blocked_head.delivery_id,
+        blocked_group.redrive_delivery_id,
+        blocked_head.delivery_id(),
         "the report must name the actionable redrive lever"
     );
     lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
@@ -1465,7 +1469,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
             delivery.wake.process_id == process_id && delivery.wake.sequence == old_wake.sequence
         })
         .expect("old sender-floor row")
-        .delivery_id;
+        .delivery_id();
     let old_batch = target
         .list_queued_work(target_session_id)
         .await
@@ -1484,7 +1488,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
             .await
             .expect("list sender rows after process prune")
             .iter()
-            .all(|delivery| delivery.delivery_id != old_sender_id),
+            .all(|delivery| delivery.delivery_id() != old_sender_id),
         "process prune must cascade every old-incarnation sender row"
     );
 
@@ -1520,7 +1524,8 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         })
         .expect("the restarted run's wake must create a sender outbox row");
     assert_ne!(
-        new_sender.delivery_id, old_sender_id,
+        new_sender.delivery_id(),
+        old_sender_id,
         "the restarted run's wake must not collide with the pruned run's delivery id"
     );
     assert_eq!(new_sender.state(), crate::WakeDeliveryState::Pending);
@@ -1531,7 +1536,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         "old_sequence": old_wake.sequence,
         "new_sequence": new_wake.sequence,
         "old_delivery_id": old_sender_id,
-        "new_delivery_id": new_sender.delivery_id,
+        "new_delivery_id": new_sender.delivery_id(),
         "new_delivery_state": format!("{:?}", new_sender.state()),
     }));
 
@@ -1646,20 +1651,10 @@ async fn mixed_era_floor_and_ordering(
             version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
                 PROCESS_WAKE_DELIVERY_FORMAT_VERSION
             )),
-            wake_id: format!("wake:mixed-era:{sequence}"),
             target_session_id: SessionId::from(target_session_id.to_string()),
             process_id: process_id.clone(),
             sequence,
             event_type: "producer.wake".to_string(),
-            event_invocation: crate::RuntimeInvocation::effect(
-                crate::EffectAddress::new(
-                    crate::ExecutionScope::process(process_id.clone()),
-                    format!("wake:mixed-era:{sequence}"),
-                )
-                .expect("valid process wake test address"),
-                crate::RuntimeAttribution::none(),
-                format!("wake:mixed-era:{sequence}"),
-            ),
             process_caused_by: None,
             authority: crate::QueuedWorkAuthority::default(),
             input: format!("old dense wake {sequence}"),
@@ -1677,20 +1672,10 @@ async fn mixed_era_floor_and_ordering(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: "wake:mixed-era:3".to_string(),
         target_session_id: SessionId::from(target_session_id.to_string()),
         process_id: process_id.clone(),
         sequence: 3,
         event_type: "producer.wake".to_string(),
-        event_invocation: crate::RuntimeInvocation::effect(
-            crate::EffectAddress::new(
-                crate::ExecutionScope::process(process_id.clone()),
-                "wake:mixed-era:3",
-            )
-            .expect("valid process wake test address"),
-            crate::RuntimeAttribution::none(),
-            "wake:mixed-era:3",
-        ),
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: "old dense wake 3".to_string(),
@@ -1731,20 +1716,10 @@ async fn mixed_era_floor_and_ordering(
                 version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
                     PROCESS_WAKE_DELIVERY_FORMAT_VERSION
                 )),
-                wake_id: "wake:mixed-era:2".to_string(),
                 target_session_id: SessionId::from(target_session_id.to_string()),
                 process_id: process_id.clone(),
                 sequence: 2,
                 event_type: "producer.wake".to_string(),
-                event_invocation: crate::RuntimeInvocation::effect(
-                    crate::EffectAddress::new(
-                        crate::ExecutionScope::process(process_id.clone()),
-                        "wake:mixed-era:2",
-                    )
-                    .expect("valid process wake test address"),
-                    crate::RuntimeAttribution::none(),
-                    "wake:mixed-era:2",
-                ),
                 process_caused_by: None,
                 authority: crate::QueuedWorkAuthority::default(),
                 input: "old dense wake 2".to_string(),
@@ -1832,20 +1807,10 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: "wake:store-rewind:10".to_string(),
         target_session_id: SessionId::from(target_session_id.to_string()),
         process_id: process_id.clone(),
         sequence: 10,
         event_type: "producer.wake".to_string(),
-        event_invocation: crate::RuntimeInvocation::effect(
-            crate::EffectAddress::new(
-                crate::ExecutionScope::process(process_id.clone()),
-                "wake:store-rewind:10",
-            )
-            .expect("valid process wake test address"),
-            crate::RuntimeAttribution::none(),
-            "wake:store-rewind:10",
-        ),
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: "receiver state surviving a sender-store rewind".to_string(),

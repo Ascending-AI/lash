@@ -811,11 +811,10 @@ async fn apply_operation(
                 }
                 if let Some(wake) = appended.wake_delivery {
                     let delivery =
-                        WakeDelivery::pending(wake, handles.registry.wake_delivery_config())
-                            .map_err(|error| error.to_string())?;
+                        WakeDelivery::pending(wake, handles.registry.wake_delivery_config());
                     model
                         .wake_deliveries
-                        .entry(delivery.delivery_id.clone())
+                        .entry(delivery.delivery_id().into_inner())
                         .or_insert(delivery);
                 }
             }
@@ -958,7 +957,7 @@ async fn apply_operation(
             for claim in claims {
                 model
                     .wake_deliveries
-                    .insert(claim.delivery_id.clone(), claim);
+                    .insert(claim.delivery_id().into_inner(), claim);
             }
         }
         StoreContractOp::MarkWake { stale } => {
@@ -1220,25 +1219,29 @@ async fn settle_wake(
     } else {
         token.to_string()
     };
-    let before = wake_delivery_snapshot(&handles.registry, &delivery.delivery_id).await?;
+    let before = wake_delivery_snapshot(&handles.registry, &delivery.delivery_id()).await?;
     let outcome = match settle {
         WakeSettle::Mark => {
             handles
                 .registry
-                .mark_wake_enqueued(&delivery.delivery_id, &token)
+                .mark_wake_enqueued(&delivery.delivery_id(), &token)
                 .await
         }
         WakeSettle::Discard => {
             handles
                 .registry
-                .discard_wake_delivery(&delivery.delivery_id, &token, WakeDiscardReason::TargetGone)
+                .discard_wake_delivery(
+                    &delivery.delivery_id(),
+                    &token,
+                    WakeDiscardReason::TargetGone,
+                )
                 .await
         }
         WakeSettle::Defer => {
             handles
                 .registry
                 .defer_wake_delivery(
-                    &delivery.delivery_id,
+                    &delivery.delivery_id(),
                     &token,
                     delivery.next_attempt_at_ms.saturating_add(1),
                 )
@@ -1250,7 +1253,7 @@ async fn settle_wake(
         if matches!(outcome, WakeDeliveryClaimOutcome::Applied) {
             return Err("Stale-authority non-mutation: stale wake claim was applied".to_string());
         }
-        let after = wake_delivery_snapshot(&handles.registry, &delivery.delivery_id).await?;
+        let after = wake_delivery_snapshot(&handles.registry, &delivery.delivery_id()).await?;
         if before != after {
             return Err(
                 "Stale-authority non-mutation: stale wake claim mutated its delivery".to_string(),
@@ -1259,7 +1262,7 @@ async fn settle_wake(
     } else if matches!(outcome, WakeDeliveryClaimOutcome::Applied) {
         let expected = model
             .wake_deliveries
-            .get_mut(&delivery.delivery_id)
+            .get_mut(delivery.delivery_id().as_str())
             .expect("claimed delivery is modeled");
         match settle {
             WakeSettle::Mark => {
@@ -1288,7 +1291,7 @@ async fn wake_delivery_snapshot(
         .await
         .map_err(|error| error.to_string())?
         .into_iter()
-        .find(|delivery| delivery.delivery_id == delivery_id)
+        .find(|delivery| delivery.delivery_id() == *delivery_id)
         .map(serde_json::to_value)
         .transpose()
         .map_err(|error| error.to_string())
@@ -1589,7 +1592,7 @@ async fn assert_wake_group_order_and_claim_ownership(
         "Wake group order + claim ownership: concurrent claimant acquired an owned head"
     );
     let stale = registry
-        .mark_wake_enqueued(&first[0].delivery_id, "not-the-claim-token")
+        .mark_wake_enqueued(&first[0].delivery_id(), "not-the-claim-token")
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -1598,7 +1601,7 @@ async fn assert_wake_group_order_and_claim_ownership(
     );
     let applied = registry
         .mark_wake_enqueued(
-            &first[0].delivery_id,
+            &first[0].delivery_id(),
             first[0].claim_token().expect("claim token"),
         )
         .await
@@ -1731,7 +1734,6 @@ async fn assert_enqueued_wake_high_water_safety(
          {conflict:?}"
     );
     let mut rewound = runtime_wake_for(&session, &process, 1);
-    rewound.wake_id = "wake:law-high-water-process:rewound:1".to_string();
     rewound.created_at_ms = 2;
     let retry = runtime
         .enqueue_queued_work_with_outcome(process_wake_batch_draft(rewound))
@@ -1849,7 +1851,7 @@ async fn assert_prune_reregister_wake_fence(
     let marked = handles
         .registry
         .mark_wake_enqueued(
-            &claimed_delivery.delivery_id,
+            &claimed_delivery.delivery_id(),
             claimed_delivery
                 .claim_token()
                 .map_err(|error| TestCaseError::fail(error.to_string()))?,
@@ -2226,21 +2228,10 @@ fn runtime_wake_for(
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.clone(),
         process_id: process_id.clone(),
         sequence,
         event_type: "property.wake".to_string(),
-        event_invocation: RuntimeInvocation {
-            attribution: RuntimeAttribution::for_session(session_id),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id: process_id.clone(),
-                sequence,
-                event_type: "property.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: format!("wake-{sequence}"),

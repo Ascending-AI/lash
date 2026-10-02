@@ -587,21 +587,10 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: format!("wake-{sequence}"),
         target_session_id: SessionId::from("root"),
         process_id: crate::ProcessId::fixture("process-1"),
         sequence,
         event_type: "process.wake".to_string(),
-        event_invocation: RuntimeInvocation {
-            attribution: RuntimeAttribution::for_session("root"),
-            subject: RuntimeSubject::ProcessEvent {
-                process_id: crate::ProcessId::fixture("process-1"),
-                sequence,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: "wake payload".to_string(),

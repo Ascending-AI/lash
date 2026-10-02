@@ -195,25 +195,14 @@ async fn enqueue_checkpoint_row(
             .to_string(),
         CheckpointRow::QueuedWork => {
             let process_id = crate::ProcessId::fixture(&format!("{session_id}-producer"));
-            let wake_id = format!("wake:{session_id}:1");
             let wake = crate::ProcessWakeDelivery {
                 version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
                     PROCESS_WAKE_DELIVERY_FORMAT_VERSION
                 )),
-                wake_id: wake_id.clone(),
                 target_session_id: session_id.clone(),
                 process_id: process_id.clone(),
                 sequence: 1,
                 event_type: "producer.wake".to_string(),
-                event_invocation: crate::RuntimeInvocation::effect(
-                    crate::EffectAddress::new(
-                        crate::ExecutionScope::process(process_id),
-                        wake_id.clone(),
-                    )
-                    .expect("valid process wake address"),
-                    crate::RuntimeAttribution::none(),
-                    wake_id,
-                ),
                 process_caused_by: None,
                 authority: crate::QueuedWorkAuthority::default(),
                 input: words.to_string(),

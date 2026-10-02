@@ -41,10 +41,14 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::process::ProcessWakeDelivery| {
         let _ = &value.version;
     });
-    // W0333: lash::process::ProcessWakeDelivery::wake_id [field]
-    field_witness(|value: &lash::process::ProcessWakeDelivery| {
-        let _ = &value.wake_id;
-    });
+    // W0333: lash::process::ProcessWakeDelivery::wake_id [function]
+    let _ = lash::process::ProcessWakeDelivery::wake_id;
+    // W0325: lash::process::WakeId [struct]
+    type_witness::<lash::process::WakeId>();
+    // W0325: lash::process::WakeId::as_str [function]
+    let _ = lash::process::WakeId::as_str;
+    // W0325: lash::process::WakeId::into_inner [function]
+    let _ = lash::process::WakeId::into_inner;
     // W0334: lash::process::ProcessWakeSpec [struct]
     type_witness::<lash::process::ProcessWakeSpec>();
     // W0335: lash::process::ProcessWakeSpec::input [field]
@@ -599,10 +603,8 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::process::WakeDelivery| {
         let _ = &value.attempts;
     });
-    // W0546: lash::process::WakeDelivery::delivery_id [field]
-    field_witness(|value: &lash::process::WakeDelivery| {
-        let _ = &value.delivery_id;
-    });
+    // W0546: lash::process::WakeDelivery::delivery_id [function]
+    let _ = lash::process::WakeDelivery::delivery_id;
     // W0547: lash::process::WakeDelivery::disposition [field]
     field_witness(|value: &lash::process::WakeDelivery| {
         let _ = &value.disposition;

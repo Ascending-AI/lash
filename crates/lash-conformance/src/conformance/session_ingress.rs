@@ -253,21 +253,10 @@ fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWake
         version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION
         )),
-        wake_id: format!("{process}-wake-{sequence}"),
         target_session_id: session(),
         process_id: crate::ProcessId::fixture(process),
         sequence,
         event_type: "process.wake".to_string(),
-        event_invocation: crate::RuntimeInvocation {
-            attribution: crate::RuntimeAttribution::for_session(SESSION_INGRESS_SESSION_ID),
-            subject: crate::RuntimeSubject::ProcessEvent {
-                process_id: crate::ProcessId::fixture(process),
-                sequence,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: crate::QueuedWorkAuthority::default(),
         input: text.to_string(),

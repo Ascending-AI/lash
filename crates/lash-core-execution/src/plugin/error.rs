@@ -852,13 +852,14 @@ define_plugin_errors! {
         => Self::ReservedProcessEvent { .. }
         => "reserved_process_event"
         => crate::ToolFailureClass::InvalidRequest;
-#[error("process wake delivery carries an invalid wake identity `{wake_id}`")]
-    InvalidProcessWakeIdentity { wake_id: String }
-        => PluginError::InvalidProcessWakeIdentity { wake_id }
-        => { wake_id: String }
-        => Self::InvalidProcessWakeIdentity { wake_id: wake_id.clone() }
-        => Self::InvalidProcessWakeIdentity { .. }
-        => "invalid_process_wake_identity"
+/// A stored wake-delivery row is keyed by an id other than the one its wake computes.
+    #[error("wake delivery row `{delivery_id}` holds a wake whose identity is `{wake_id}`")]
+    WakeDeliveryIdentityMismatch { delivery_id: String, wake_id: String }
+        => PluginError::WakeDeliveryIdentityMismatch { delivery_id, wake_id }
+        => { delivery_id: String, wake_id: String }
+        => Self::WakeDeliveryIdentityMismatch { delivery_id: delivery_id.clone(), wake_id: wake_id.clone() }
+        => Self::WakeDeliveryIdentityMismatch { .. }
+        => "wake_delivery_identity_mismatch"
         => crate::ToolFailureClass::InvalidRequest;
 #[error(
         "process wake delivery format version {found} is incompatible with version {expected}; drain in-flight sessions on the old build before deploying this build, or recreate development/test stores"
@@ -1096,7 +1097,7 @@ impl PluginError {
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }
-            | Self::InvalidProcessWakeIdentity { .. }
+            | Self::WakeDeliveryIdentityMismatch { .. }
             | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
             | Self::ProcessRegistryCursorBackendMismatch { .. } => Terminal,
         }

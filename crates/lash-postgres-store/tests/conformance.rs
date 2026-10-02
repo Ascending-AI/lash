@@ -1137,22 +1137,10 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let store = Arc::new(factory.clone()) as Arc<dyn RuntimeStore>;
     let wake = lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "wake:source-lock".to_string(),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: ProcessId::fixture("wake-source-lock-process"),
         sequence: 1,
         event_type: "producer.wake".to_string(),
-        event_invocation: lash_core_execution::RuntimeInvocation::effect(
-            lash_core_execution::EffectAddress::new(
-                lash_core_execution::ExecutionScope::process(ProcessId::fixture(
-                    "wake-source-lock-process",
-                )),
-                "wake-source-lock",
-            )
-            .expect("valid wake effect address"),
-            lash_core_execution::RuntimeAttribution::for_session(session_id),
-            "wake-source-lock",
-        ),
         process_caused_by: None,
         authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: "wake".to_string(),
@@ -1329,14 +1317,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("connect storage with short lock timeout");
     let bounded_store = bounded_storage.store();
     let mut timeout_wake = wake;
-    timeout_wake.wake_id = "wake:source-lock-timeout".to_string();
     timeout_wake.sequence = 2;
-    timeout_wake.event_invocation.subject =
-        lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
-            process_id: timeout_wake.process_id.clone(),
-            sequence: timeout_wake.sequence,
-            event_type: timeout_wake.event_type.clone(),
-        };
     let timeout_draft = lash_core_execution::runtime::process_wake_batch_draft(timeout_wake);
     let timeout_retry_draft = timeout_draft.clone();
     let timeout_source_key = timeout_draft

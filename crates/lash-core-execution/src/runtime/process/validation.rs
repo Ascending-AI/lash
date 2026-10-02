@@ -813,7 +813,6 @@ pub fn prepare_process_event_append(
                 record,
                 existing.sequence,
                 existing.event_type.clone(),
-                existing.invocation.clone(),
                 existing.occurred_at,
                 existing.semantics.wake.clone(),
                 wake_session_id,
@@ -928,7 +927,6 @@ pub fn prepare_process_event_append(
         record,
         event.sequence,
         event.event_type.clone(),
-        event.invocation.clone(),
         event.occurred_at,
         semantics.wake.clone(),
         wake_session_id,
@@ -1000,7 +998,6 @@ fn prepare_wake_delivery(
     record: &ProcessRecord,
     sequence: u64,
     event_type: String,
-    event_invocation: crate::RuntimeInvocation,
     occurred_at: u64,
     wake: Option<super::events::ProcessWake>,
     wake_session_id: Option<&SessionId>,
@@ -1026,7 +1023,6 @@ fn prepare_wake_delivery(
         process_id: process_id.clone(),
         sequence,
         event_type,
-        event_invocation,
         process_caused_by: record.provenance.caused_by.clone(),
         authority: match &record.provenance.originator {
             super::model::ProcessOriginator::Host { .. } => {

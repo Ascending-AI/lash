@@ -870,21 +870,10 @@ fn admission_observability_wake(session_id: &SessionId) -> lash_core::runtime::P
     let process_id = || lash_core::runtime::ProcessId::fixture("differential-process");
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: "differential-process-wake-1".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
         sequence: 1,
         event_type: "process.wake".to_string(),
-        event_invocation: lash_core::runtime::RuntimeInvocation {
-            attribution: lash_core::runtime::RuntimeAttribution::for_session(session_id.clone()),
-            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
         process_caused_by: None,
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: "exercise queued-work admission state".to_string(),

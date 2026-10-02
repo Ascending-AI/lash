@@ -796,12 +796,12 @@ impl SqliteProcessRegistry {
         let Some(wake) = wake else {
             return Ok(());
         };
-        let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config)?;
+        let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config);
         crate::conn::cached_execute(
             conn,
             process_sql().wake_sqlite.insert_pending.sql(),
             params![
-                delivery.delivery_id.as_str(),
+                delivery.delivery_id().as_str(),
                 delivery.wake.process_id.as_str(),
                 delivery.wake.target_session_id.as_str(),
                 delivery.wake.sequence as i64,
