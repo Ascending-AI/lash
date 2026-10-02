@@ -231,7 +231,7 @@ pub enum CommandShape {
 
 impl CommandShape {
     fn of_sub_key(sub: &str) -> Option<Self> {
-        use lash_core::runtime::causal::CommandSubKey;
+        use lash_core::runtime::CommandSubKey;
         Some(match CommandSubKey::parse(sub)? {
             CommandSubKey::Value => Self::Value,
             CommandSubKey::Sleep => Self::Sleep,

@@ -20,6 +20,9 @@ pub use lash_core_execution::runtime::attachment_delivery;
 pub use lash_core_execution::runtime::causal;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::causal;
+/// A command's journal suffix, which a language runtime's replay read parses
+/// to classify a recorded command.
+pub use lash_core_execution::runtime::causal::CommandSubKey;
 /// The operation name a process sleep's replay key and durable effect summary
 /// carry, which a language runtime's process sleep records against.
 pub use lash_core_execution::runtime::causal::PROCESS_SLEEP_OPERATION;
