@@ -636,7 +636,7 @@ where
                 })
             })
             .await?;
-            if recorded_signal != signal {
+            if !recorded_signal.same_signal(&signal) {
                 return Err(RuntimeEffectControllerError::new(
                     RuntimeErrorCode::EffectReplayDivergence,
                     format!(

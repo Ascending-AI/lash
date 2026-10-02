@@ -608,6 +608,15 @@ impl Processes {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessStartReceipt> {
+        // The caller's context is snapshotted here, before the first await,
+        // unless the request states its own: a detached host start links
+        // whoever started it.
+        let request = if request.trace_cause.is_root() {
+            let captured = self.core.env.core.tracing.scopes().capture_current();
+            request.with_trace_cause(lash_core::TraceCause::linked_to(captured))
+        } else {
+            request
+        };
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
         // own start paths is refused, never adopted (ADR 0107).
@@ -866,6 +875,14 @@ impl Processes {
         signal: lash_core::ProcessSignal,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
+        // The producer's context is snapshotted here, before the first
+        // await, unless the signal states its own.
+        let signal = if signal.trace_cause.is_root() {
+            let captured = self.core.env.core.tracing.scopes().capture_current();
+            signal.with_trace_cause(lash_core::TraceCause::linked_to(captured))
+        } else {
+            signal
+        };
         let command = lash_core::ProcessCommand::Signal { signal };
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())

@@ -1443,8 +1443,8 @@ pub mod tracing {
         TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainCompletion,
         TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceLinks, TraceLlmAttempt,
         TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
-        TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
-        W3cTraceState,
+        TraceScopeOffer, TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
+        W3cTraceFlags, W3cTraceId, W3cTraceState,
     };
     pub use lash_trace::{
         TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,

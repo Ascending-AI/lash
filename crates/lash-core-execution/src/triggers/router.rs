@@ -1124,6 +1124,15 @@ impl TriggerRouter {
         ))
         .with_extra_event_types(subscription.event_types.clone())
         .with_execution_env_ref(Some(subscription.env_ref.clone()))
+        // Each delivery is independent work the fire produced: its process
+        // links the occurrence's retained anchor, on every redrive alike.
+        .with_trace(lash_trace::TraceScopeOffer::caused_by(
+            occurrence
+                .trace
+                .as_ref()
+                .map(lash_trace::DurableTraceScope::linked_cause)
+                .unwrap_or_default(),
+        ))
         .with_wake_session_id(
             subscription
                 .wake_target
@@ -1536,6 +1545,7 @@ pub fn trigger_occurrence_request_matches_record(
         source,
         session_id: _,
         outcome,
+        trace: _,
     } = request;
     let TriggerOccurrenceRecord {
         occurrence_id: _,
@@ -1547,6 +1557,7 @@ pub fn trigger_occurrence_request_matches_record(
         session_id: _,
         outcome: stored_outcome,
         occurred_at_ms: _,
+        trace: _,
     } = record;
     source_type == stored_source_type
         && source_key == stored_source_key

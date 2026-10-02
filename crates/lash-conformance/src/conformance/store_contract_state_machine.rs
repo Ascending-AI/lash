@@ -2236,6 +2236,7 @@ fn runtime_wake_for(
         authority: crate::QueuedWorkAuthority::default(),
         input: format!("wake-{sequence}"),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

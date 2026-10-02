@@ -717,9 +717,11 @@ mod checkpoint_admission_determinism_tests {
                     authority: crate::QueuedWorkAuthority::new("p7"),
                     input: "checkpoint admission".into(),
                     created_at_ms: 0,
+                    trace_cause: Default::default(),
                 }),
                 submission_digest: String::new(),
                 terminal: None,
+                trace_cause: Default::default(),
             }],
         }
     }

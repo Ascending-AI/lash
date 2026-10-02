@@ -104,6 +104,7 @@ mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod segment_budget;
 mod segment_redrive;
+mod trace_provenance;
 pub use segment_budget::{
     SegmentBudgetHarness, SegmentBudgetObservation,
     segment_budget_and_continuation_preserve_results_across_waits,

@@ -59,6 +59,7 @@ fn peer_record(
         consumer_hold: _,
         trigger_delivery_pin: _,
         engine_config,
+        trace: _,
     } = registration;
     Ok(RemoteProcessRecord {
         process_id: lash_sansio::ProcessId::fixture("registration-parity"),
@@ -81,6 +82,7 @@ fn peer_record(
         first_started: None,
         cancel_request: None,
         lifecycle: RemoteProcessLifecycleState::Running { park: None },
+        trace: None,
     })
 }
 

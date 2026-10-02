@@ -64,6 +64,11 @@ pub struct ProcessEventSemantics {
     /// other event does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal_wait: Option<ProcessSignalWaitBinding>,
+    /// What caused the event, as the append that inserted it retained it:
+    /// the producer a wait this event resolves links. Written once with the
+    /// event; a replayed append reads it back whatever it carried.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 /// The wait one signal event resolves: the ordinal of the process's wait for
@@ -691,11 +696,34 @@ impl ProcessSignalIdentity {
 pub struct ProcessSignal {
     pub identity: ProcessSignalIdentity,
     pub payload: serde_json::Value,
+    /// What caused the signal, for telemetry: its producer's context. The
+    /// append that admits the signal retains it on the event beside the
+    /// payload and wait binding; a redelivery reads the retained cause back.
+    /// It is no part of the signal: neither its identity, its append key
+    /// nor what a replay compares covers it.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl ProcessSignal {
     pub fn new(identity: ProcessSignalIdentity, payload: serde_json::Value) -> Self {
-        Self { identity, payload }
+        Self {
+            identity,
+            payload,
+            trace_cause: lash_trace::TraceCause::Root,
+        }
+    }
+
+    /// Sets what caused the signal ([`Self::trace_cause`]).
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
+    }
+
+    /// Whether `other` is this signal: the same identity and payload,
+    /// whatever context either was sent under.
+    pub fn same_signal(&self, other: &Self) -> bool {
+        self.identity == other.identity && self.payload == other.payload
     }
 
     /// The append this signal makes: its event type and payload under the
@@ -706,6 +734,7 @@ impl ProcessSignal {
             ProcessEventAppendRequest::new(self.identity.event_type(), self.payload.clone())
                 .with_replay_key(self.identity.append_key());
         request.signal_identity = Some(self.identity.clone());
+        request.trace_cause = self.trace_cause.clone();
         request
     }
 }
@@ -941,6 +970,12 @@ pub struct ProcessEventAppendRequest {
     /// encodes exactly as it did before this field existed.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub wake_suppressed: bool,
+    /// What caused the event, for telemetry
+    /// ([`ProcessSignal::trace_cause`]): the append that inserts the event
+    /// retains it on the event's semantics and on the wake it delivers. It
+    /// takes no part in the append's replay identity or its payload match.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl ProcessEventAppendRequest {
@@ -953,6 +988,7 @@ impl ProcessEventAppendRequest {
             replay: None,
             signal_identity: None,
             wake_suppressed: false,
+            trace_cause: lash_trace::TraceCause::Root,
         }
     }
 

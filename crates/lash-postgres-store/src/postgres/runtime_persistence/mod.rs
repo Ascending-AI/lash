@@ -292,6 +292,7 @@ async fn enqueue_queued_work_with_outcome_tx(
         .bind(now as i64)
         .bind(submission_digest.as_str())
         .bind(encode_json(&batch.payload)?)
+        .bind(lash_core_execution::store_backend_support::encode_trace_cause(&batch.trace_cause)?)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

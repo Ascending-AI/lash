@@ -14,9 +14,10 @@ lash_store_sql::statements! {
         /// backstop.
         insert_new = "INSERT INTO queued_work_batches (enqueue_seq,
                  batch_id, session_id, source_key, delivery_policy, work_kind,
-                 authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json
+                 authority_json, merge_key, enqueued_at_ms, submission_digest, payload_json,
+                 trace_cause_json
              )
-             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?11)";
+             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?11, ?12)";
 
         /// The facts the settlement verdict consults about live batch `?2`
         /// of session `?1`: a tombstone answers nothing, as a missing row
@@ -38,7 +39,7 @@ lash_store_sql::statements! {
         /// Same lock fork as [`settlement_facts`](Self::settlement_facts).
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
@@ -61,7 +62,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
@@ -88,7 +89,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
@@ -117,7 +118,7 @@ lash_store_sql::statements! {
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, enqueued_at_ms, submission_digest,
-                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json
+                    admitted_root, admitted_by, terminal_cause, terminal_at_ms, payload_json, trace_cause_json
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'

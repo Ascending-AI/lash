@@ -747,6 +747,13 @@ fn submitted_registration(record: &ProcessRecord) -> ProcessRegistration {
         consumer_hold: None,
         trigger_delivery_pin: None,
         engine_config: record.engine_config.clone(),
+        // The retained scope's cause and anchor ride the typed input: the
+        // segment reads its ancestry from them, never from a header.
+        trace: record
+            .trace
+            .as_ref()
+            .map(lash_core::DurableTraceScope::offer)
+            .unwrap_or_default(),
     }
 }
 

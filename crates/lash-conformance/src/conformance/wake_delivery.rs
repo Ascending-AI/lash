@@ -1659,6 +1659,7 @@ async fn mixed_era_floor_and_ordering(
             authority: crate::QueuedWorkAuthority::default(),
             input: format!("old dense wake {sequence}"),
             created_at_ms: sequence,
+            trace_cause: Default::default(),
         };
         dense_batches.push(
             target
@@ -1680,6 +1681,7 @@ async fn mixed_era_floor_and_ordering(
         authority: crate::QueuedWorkAuthority::default(),
         input: "old dense wake 3".to_string(),
         created_at_ms: 3,
+        trace_cause: Default::default(),
     });
     // Until vacuum the settled wake's tombstone answers its redelivery.
     let answered = target
@@ -1724,6 +1726,7 @@ async fn mixed_era_floor_and_ordering(
                 authority: crate::QueuedWorkAuthority::default(),
                 input: "old dense wake 2".to_string(),
                 created_at_ms: 2,
+                trace_cause: Default::default(),
             },
         ))
         .await
@@ -1815,6 +1818,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         authority: crate::QueuedWorkAuthority::default(),
         input: "receiver state surviving a sender-store rewind".to_string(),
         created_at_ms: 10,
+        trace_cause: Default::default(),
     };
     let old_batch = target
         .enqueue_queued_work(crate::process_wake_batch_draft(old.clone()))

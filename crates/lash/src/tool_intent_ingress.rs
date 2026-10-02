@@ -199,6 +199,23 @@ pub struct ToolIntentIngress {
     core: crate::LashCore,
     session_id: SessionId,
     scope: lash_core::ExecutionScope,
+    trace: crate::send::SendTraceContext,
+}
+
+/// What one submission offers its ledger row's trace scope, captured once
+/// when the submission was made.
+struct SubmissionTrace {
+    offer: lash_core::TraceScopeOffer,
+    submitted_at_ms: u64,
+}
+
+impl SubmissionTrace {
+    fn offered(
+        &self,
+        record: lash_core::ToolIntentSubmissionRecord,
+    ) -> lash_core::ToolIntentSubmissionRecord {
+        record.with_trace_offer(self.offer.clone(), self.submitted_at_ms)
+    }
 }
 
 enum RealizationFailure {
@@ -245,6 +262,40 @@ impl ToolIntentIngress {
             core,
             session_id,
             scope,
+            trace: crate::send::SendTraceContext::Ambient,
+        }
+    }
+
+    /// Link the intents this ingress submits to `context`, the trace
+    /// context of whatever caused them. An explicit context wins over the
+    /// caller's ambient one, which is then never consulted.
+    ///
+    /// The link sits beside an intent, never inside it: the first
+    /// submission of an identity retains the context it was given, and a
+    /// redelivery under another context is the same submission and keeps
+    /// the first one.
+    pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
+        self.trace = crate::send::SendTraceContext::Captured(Some(context));
+        self
+    }
+
+    /// Snapshot the caller's current trace context now, through the core's
+    /// telemetry adapter, instead of when each submission is made.
+    pub fn capture_trace_context(mut self) -> Self {
+        self.trace = crate::send::SendTraceContext::Captured(
+            self.core.env.core.tracing.scopes().capture_current(),
+        );
+        self
+    }
+
+    /// What a submission made now offers its ledger row.
+    fn submission_trace(&self) -> SubmissionTrace {
+        SubmissionTrace {
+            offer: lash_core::TraceScopeOffer::caused_by(
+                self.trace
+                    .cause_through(self.core.env.core.tracing.scopes().as_ref()),
+            ),
+            submitted_at_ms: self.core.env.core.clock.timestamp_ms(),
         }
     }
 
@@ -312,8 +363,10 @@ impl ToolIntentIngress {
             replay_key = %identity.replay_key,
             submitted_kind = %intent.kind().as_str(),
         );
+        // The caller's context is snapshotted here, before the first await.
+        let trace = self.submission_trace();
         async {
-            let outcome = self.submit_inner(key, intent).await;
+            let outcome = self.submit_inner(key, intent, &trace).await;
             Self::record_decision(&identity, &outcome);
             outcome
         }
@@ -325,13 +378,14 @@ impl ToolIntentIngress {
         &self,
         key: ToolIntentIngressKey,
         intent: lash_core::ToolIntent,
+        trace: &SubmissionTrace,
     ) -> ToolIntentIngressOutcome {
         if let Some(refusal) = self.validate(&key, &intent) {
             return ToolIntentIngressOutcome::Refused { refusal };
         }
         let identity = key.identity;
         let submitted_intent = intent.clone();
-        let (outcome, replayed) = match self.realize(&identity, intent).await {
+        let (outcome, replayed) = match self.realize(&identity, intent, trace).await {
             Ok((result, replayed)) => (
                 lash_core::ToolIntentExecutionOutcome::Executed {
                     identity: identity.clone(),
@@ -352,7 +406,7 @@ impl ToolIntentIngress {
                     },
                 };
                 if let Err(store_error) = self
-                    .retain_outcome(&identity, submitted_intent.clone(), outcome.clone())
+                    .retain_outcome(&identity, submitted_intent.clone(), outcome.clone(), trace)
                     .await
                 {
                     outcome = lash_core::ToolIntentExecutionOutcome::Refused {
@@ -511,10 +565,11 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
+        trace: &SubmissionTrace,
     ) -> std::result::Result<(lash_core::ToolIntentRealized, bool), RealizationFailure> {
         let kind = intent.kind();
         let submitted_intent = intent.clone();
-        if let Some(recorded) = self.admit_submission(identity, &intent).await? {
+        if let Some(recorded) = self.admit_submission(identity, &intent, trace).await? {
             return Ok((recorded, true));
         }
         let (result, replayed) = self
@@ -595,7 +650,7 @@ impl ToolIntentIngress {
             identity: identity.clone(),
             realized: realized.clone(),
         };
-        self.retain_outcome(identity, submitted_intent, outcome)
+        self.retain_outcome(identity, submitted_intent, outcome, trace)
             .await
             .map_err(|error| RealizationFailure::Command(kind, error))?;
         Ok((realized, replayed))
@@ -629,19 +684,20 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: &lash_core::ToolIntent,
+        trace: &SubmissionTrace,
     ) -> std::result::Result<Option<lash_core::ToolIntentRealized>, RealizationFailure> {
         let kind = intent.kind();
         let submitted =
-            lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone()).map_err(
-                |error| {
+            lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
+                .map(|record| trace.offered(record))
+                .map_err(|error| {
                     RealizationFailure::Command(
                         kind,
                         lash_core::PluginError::Session(format!(
                             "failed to hash tool-intent submission: {error}"
                         )),
                     )
-                },
-            )?;
+                })?;
         let admission = self
             .process_registry()
             .map_err(|error| RealizationFailure::Command(kind, error))?
@@ -693,9 +749,11 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         submitted: lash_core::ToolIntent,
         outcome: lash_core::ToolIntentExecutionOutcome,
+        trace: &SubmissionTrace,
     ) -> Result<(), lash_core::PluginError> {
         let registry = self.process_registry()?;
         let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
+            .map(|record| trace.offered(record))
             .map_err(|error| {
                 lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::RecordEncodingFailed,

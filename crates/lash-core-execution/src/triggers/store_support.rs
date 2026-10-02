@@ -362,6 +362,7 @@ mod tests {
             session_id: None,
             outcome: TriggerOccurrenceOutcome::Fired,
             occurred_at_ms: 1,
+            trace: None,
         };
         let subscription = fixture_record();
         let decoded = decode_trigger_delivery(

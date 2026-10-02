@@ -33,6 +33,11 @@ pub struct RemoteTriggerOccurrenceRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     pub outcome: RemoteTriggerOccurrenceOutcome,
+    /// What the fire offers the occurrence's trace scope: its cause and
+    /// candidate anchor. The first ingest retains it; it is no part of the
+    /// occurrence's identity.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
+    pub trace: lash_trace::TraceScopeOffer,
 }
 
 impl RemoteTriggerOccurrenceRequest {
@@ -50,6 +55,7 @@ impl RemoteTriggerOccurrenceRequest {
             source: None,
             session_id: None,
             outcome: RemoteTriggerOccurrenceOutcome::Fired,
+            trace: lash_trace::TraceScopeOffer::default(),
         }
     }
 
@@ -108,6 +114,9 @@ pub struct RemoteTriggerOccurrenceRecord {
     pub session_id: Option<SessionId>,
     pub outcome: RemoteTriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
+    /// The fire's retained trace scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<lash_trace::DurableTraceScope>,
 }
 
 /// Typed provider-route refusals, with the remaining runtime vocabulary

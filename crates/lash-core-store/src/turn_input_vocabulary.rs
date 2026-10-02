@@ -373,6 +373,13 @@ pub struct PendingTurnInputDraft {
     /// input its first attempt left unpinned.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pin: bool,
+    /// What caused the submission, for telemetry: the producer's context as
+    /// its first acceptance captured it. The accepting write retains it
+    /// beside the row and no later write changes it. It is no part of the
+    /// submission, so a retry under another context is the same submission
+    /// and reads the retained cause back.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 impl PendingTurnInputDraft {
     /// Constructs a `PendingTurnInputDraft` for store and durable-substrate implementors while
@@ -390,7 +397,14 @@ impl PendingTurnInputDraft {
             input,
             run_spec: crate::run_spec::RunSpec::default(),
             pin: false,
+            trace_cause: lash_trace::TraceCause::Root,
         }
+    }
+
+    /// Sets what caused the submission ([`Self::trace_cause`]).
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
     }
 
     /// Pins the input in its acceptance transaction.
@@ -462,8 +476,8 @@ impl PendingTurnInputDraft {
     ///   omitted spec and an explicit default are the same submission.
     ///
     /// Excluded: the session id and source key (the row is found by them), the
-    /// generated input id, the enqueue time, and every lifecycle and admission
-    /// field. The preimage is the `lash.turn-input-submission` identity family
+    /// generated input id, the enqueue time, the trace cause, and every
+    /// lifecycle and admission field. The preimage is the `lash.turn-input-submission` identity family
     /// at [`TURN_INPUT_SUBMISSION_FAMILY_VERSION`]; the rendered form is
     /// `turn-input-submission:v<family>:blake3:<hex>`.
     pub fn submission_digest(&self) -> Result<String, serde_json::Error> {
@@ -667,6 +681,10 @@ pub struct PendingTurnInput {
     /// (FIG-3838). An admission never mixes inputs whose specs differ.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_spec: Option<crate::run_spec::RunSpecHash>,
+    /// What caused the submission, as its first acceptance retained it
+    /// ([`PendingTurnInputDraft::trace_cause`]).
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 /// Host-facing projection of one undelivered pending turn-input record.

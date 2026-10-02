@@ -223,6 +223,7 @@ pub(super) async fn signal_id_deduplicates_append_without_caller_replay_key(engi
         signal_name: SIGNAL.to_owned(),
         signal_id: "signal-s".to_owned(),
         payload,
+        trace_cause: Default::default(),
     };
     // The append commits; the deployment dies before its run result reaches
     // the journal, and the append runs again.

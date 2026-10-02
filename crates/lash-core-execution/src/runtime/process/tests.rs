@@ -158,6 +158,7 @@ fn wake_delivery(
         authority: crate::QueuedWorkAuthority::default(),
         input: "line one\nline two".to_string(),
         created_at_ms: 123,
+        trace_cause: Default::default(),
     }
 }
 

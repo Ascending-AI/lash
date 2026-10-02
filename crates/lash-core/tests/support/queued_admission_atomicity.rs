@@ -71,6 +71,7 @@ fn wake(sequence: u64, text: &str) -> lash_core::runtime::ProcessWakeDelivery {
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

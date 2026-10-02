@@ -376,6 +376,7 @@ mod tests {
             authority: Default::default(),
             input: "wake payload".into(),
             created_at_ms: 0,
+            trace_cause: Default::default(),
         };
         let affected = lash_core_execution::TurnCancelAffectedWake::deferred("batch".into(), wake);
         append_turn_cancel_wake_tx(&mut tx, &session, &turn, &affected)

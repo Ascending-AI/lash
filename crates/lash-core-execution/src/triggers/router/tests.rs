@@ -42,6 +42,7 @@ fn occurrence_uses_idempotency_key_and_structural_conflict_material() {
         session_id: None,
         outcome: TriggerOccurrenceOutcome::Fired,
         occurred_at_ms: 42,
+        trace: None,
     };
     assert_eq!(
         serde_json::to_value(&request).expect("serialize fired occurrence request")["outcome"],

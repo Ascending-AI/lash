@@ -97,6 +97,7 @@ fn oracle_wake_draft(session_id: &SessionId, row_id: &str) -> QueuedWorkBatchDra
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: row_id.to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     })
 }
 

@@ -297,3 +297,125 @@ fn record_identity_is_stable_per_fact_and_distinct_per_attempt() {
     assert_eq!(first, again);
     assert_eq!(first.id, id);
 }
+
+/// The cause of a scope that admits several rows: one row's cause is the
+/// scope's, an owned invocation heading the rows keeps its parent, and
+/// independent producers fan in as links in admission order.
+#[test]
+fn an_admitting_scope_takes_its_members_causes_in_admission_order() {
+    let linked = |span| TraceCause::linked_to(Some(carrier(span)));
+    assert_eq!(TraceCause::of_admitted([]), TraceCause::Root);
+    assert_eq!(
+        TraceCause::of_admitted([&TraceCause::Root]),
+        TraceCause::Root
+    );
+    assert_eq!(TraceCause::of_admitted([&linked(1)]), linked(1));
+
+    let parent = TraceCause::Parent(carrier(9));
+    assert_eq!(TraceCause::of_admitted([&parent, &linked(1)]), parent);
+
+    let fan_in = TraceCause::of_admitted([&linked(1), &TraceCause::Root, &parent, &linked(1)]);
+    assert_eq!(
+        fan_in
+            .contexts()
+            .iter()
+            .map(TraceCarrier::span_id)
+            .collect::<Vec<_>>(),
+        [carrier(1).span_id(), carrier(9).span_id()],
+        "each producer is linked once, in the order its row was admitted"
+    );
+    assert!(matches!(fan_in, TraceCause::Linked(_)));
+}
+
+/// An offer is what an admission hands its store: empty, it costs one word
+/// and no bytes on the wire; the inserting store turns it into the retained
+/// scope, and a retained scope's children are parented or linked to its
+/// anchor, never to a context it was not admitted with.
+#[test]
+fn an_offer_becomes_the_scope_its_inserting_admission_retains() {
+    assert_eq!(
+        std::mem::size_of::<TraceScopeOffer>(),
+        std::mem::size_of::<usize>()
+    );
+    let empty = TraceScopeOffer::default();
+    assert!(empty.is_empty());
+    assert_eq!(
+        empty,
+        TraceScopeOffer::new(TraceCause::Root, TraceAnchor::Untraced)
+    );
+    assert_eq!(serde_json::to_value(&empty).unwrap(), json!({}));
+    assert_eq!(empty.cause(), &TraceCause::Root);
+    assert_eq!(empty.anchor(), &TraceAnchor::Untraced);
+
+    let cause = TraceCause::linked_to(Some(carrier(1)));
+    let anchor = TraceAnchor::Context(carrier(2));
+    let offer = TraceScopeOffer::new(cause.clone(), anchor.clone());
+    assert!(!offer.is_empty());
+    let stored = serde_json::to_value(&offer).unwrap();
+    assert_eq!(
+        stored,
+        json!({
+            "cause": {
+                "relation": "linked",
+                "from": { "contexts": [{ "traceparent": carrier(1).traceparent() }] },
+            },
+            "anchor": {
+                "state": "context",
+                "context": { "traceparent": carrier(2).traceparent() },
+            },
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<TraceScopeOffer>(stored).unwrap(),
+        offer
+    );
+    assert!(serde_json::from_value::<TraceScopeOffer>(json!({ "baggage": "x" })).is_err());
+
+    let scope = offer.clone().into_scope(run_scope(), 1_700_000_000_000);
+    assert_eq!(
+        scope,
+        DurableTraceScope {
+            scope: run_scope(),
+            cause,
+            anchor,
+            started_at_ms: 1_700_000_000_000,
+        }
+    );
+    assert_eq!(scope.offer(), offer);
+    assert_eq!(scope.parent_cause(), TraceCause::Parent(carrier(2)));
+    assert_eq!(
+        scope.linked_cause(),
+        TraceCause::linked_to(Some(carrier(2)))
+    );
+
+    // An untraced scope gives its children no anchor to hang under.
+    let untraced = TraceScopeOffer::caused_by(TraceCause::linked_to(Some(carrier(1))))
+        .into_scope(run_scope(), 1);
+    assert_eq!(untraced.parent_cause(), TraceCause::Root);
+    assert_eq!(untraced.linked_cause(), TraceCause::Root);
+
+    // The verdict is the store's: only an inserted scope holds a permit.
+    assert!(
+        TraceScopeAdmission::of(scope.clone(), true)
+            .permit()
+            .is_some()
+    );
+    assert!(TraceScopeAdmission::of(scope, false).permit().is_none());
+
+    // A host intent's scope is owned by the runtime that declared it.
+    let process = ProcessId::fixture("p");
+    assert_eq!(
+        serde_json::to_value(TraceScopeId::admission(TraceScopeOwner::ToolIntent {
+            owner: RuntimeOwner::Process(process.clone()),
+            replay_key: "tool-intent:v2:blake3:00".to_string(),
+        }))
+        .unwrap(),
+        json!({
+            "owner": {
+                "kind": "tool_intent",
+                "owner": { "process": process.as_str() },
+                "replay_key": "tool-intent:v2:blake3:00",
+            },
+        })
+    );
+}

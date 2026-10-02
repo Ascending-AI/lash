@@ -18,6 +18,7 @@ pub(crate) struct PendingTurnInputRow {
     /// The root whose admission holds the row; `None` while it is open.
     pub(crate) admitted_root: Option<String>,
     run_spec_hash: Option<String>,
+    trace_cause: lash_core_execution::TraceCause,
 }
 
 pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
@@ -45,6 +46,10 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
         )?,
         admitted_root: row.get("admitted_root"),
         run_spec_hash: row.get("run_spec_hash"),
+        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            "PendingTurnInput",
+            row.get::<Option<String>, _>("trace_cause_json").as_deref(),
+        )?,
     })
 }
 
@@ -62,6 +67,7 @@ pub(crate) fn pending_turn_input_from_row(
         run_spec: row
             .run_spec_hash
             .map(lash_core_execution::RunSpecHash::from_stored),
+        trace_cause: row.trace_cause,
     })
 }
 

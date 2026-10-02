@@ -595,6 +595,7 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
         authority: crate::QueuedWorkAuthority::default(),
         input: "wake payload".to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

@@ -383,6 +383,7 @@ pub(super) fn queued_work_stress_wake(
         authority: lash_core::QueuedWorkAuthority::default(),
         input: input.to_string(),
         created_at_ms: sequence,
+        trace_cause: Default::default(),
     }
 }
 

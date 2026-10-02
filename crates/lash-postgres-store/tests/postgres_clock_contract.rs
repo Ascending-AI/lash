@@ -217,6 +217,7 @@ fn clock_contract_wake(session_id: &SessionId) -> lash_core_execution::ProcessWa
         authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: "clock-contract queued work".to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     }
 }
 

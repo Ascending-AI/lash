@@ -699,6 +699,13 @@ pub use lash_sansio::{
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
+    DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
+    TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
+    TraceCause, TraceLinks, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
+    TraceScopeOffer, TraceScopeOwner, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState,
+};
+pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
     TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
     TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,

@@ -300,6 +300,73 @@ impl RuntimeEffectEnvelope {
     }
 }
 
+impl RuntimeEffectCommand {
+    /// This command without the trace provenance it carries, when it
+    /// carries any: the business projection the envelope's canonical form
+    /// is taken over. A trace cause, offer or scope sits beside a command's
+    /// payload for the store that admits it; it is never part of what a
+    /// replay compares.
+    pub fn without_trace_provenance(&self) -> Option<Self> {
+        match self {
+            Self::IngestTriggerOccurrence { request } if !request.trace.is_empty() => {
+                let mut request = request.clone();
+                request.trace = lash_trace::TraceScopeOffer::default();
+                Some(Self::IngestTriggerOccurrence { request })
+            }
+            Self::AcceptTurnInput { draft } if !draft.trace_cause.is_root() => {
+                let mut draft = draft.clone();
+                draft.trace_cause = lash_trace::TraceCause::Root;
+                Some(Self::AcceptTurnInput { draft })
+            }
+            Self::Process { command } => {
+                command
+                    .without_trace_provenance()
+                    .map(|command| Self::Process {
+                        command: Box::new(command),
+                    })
+            }
+            _ => None,
+        }
+    }
+}
+
+impl ProcessCommand {
+    /// [`RuntimeEffectCommand::without_trace_provenance`] for a process
+    /// command.
+    pub fn without_trace_provenance(&self) -> Option<Self> {
+        match self {
+            Self::Start {
+                registration,
+                observers,
+                execution_context,
+            } if !registration.trace.is_empty() => Some(Self::Start {
+                registration: registration
+                    .clone()
+                    .with_trace(lash_trace::TraceScopeOffer::default()),
+                observers: observers.clone(),
+                execution_context: execution_context.clone(),
+            }),
+            Self::Signal { signal } if !signal.trace_cause.is_root() => Some(Self::Signal {
+                signal: signal
+                    .clone()
+                    .with_trace_cause(lash_trace::TraceCause::Root),
+            }),
+            Self::EmitEvent {
+                process_id,
+                request,
+            } if !request.trace_cause.is_root() => {
+                let mut request = request.clone();
+                request.trace_cause = lash_trace::TraceCause::Root;
+                Some(Self::EmitEvent {
+                    process_id: process_id.clone(),
+                    request,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
 fn validate_effect_command(
     address: &EffectAddress,
     command: &RuntimeEffectCommand,

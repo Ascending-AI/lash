@@ -74,8 +74,8 @@ pub use telemetry::{
     InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
     TraceCause, TraceDomainProjector, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceTransitionKind,
-    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+    TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 
 /// Version of the durable trace JSONL schema, written to

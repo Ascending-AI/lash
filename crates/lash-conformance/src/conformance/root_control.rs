@@ -291,6 +291,7 @@ impl AdmittedRoot {
                 admitted_generation: lash_core::engine::BuildGeneration::for_test("root-control"),
                 executor: lash_core::store::RootExecutor::Root,
                 plugins: Default::default(),
+                trace_anchor: Default::default(),
             })
             .await
             .expect("admit the root")
@@ -772,6 +773,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
         executor: lash_core::store::RootExecutor::Root,
         plugins: Default::default(),
+        trace_anchor: Default::default(),
     };
     parts
         .store

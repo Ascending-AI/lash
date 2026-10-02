@@ -287,6 +287,7 @@ mod typed_payload_tests {
             authority: crate::QueuedWorkAuthority::default(),
             input: "task".to_string(),
             created_at_ms: 1,
+            trace_cause: Default::default(),
         }
     }
 

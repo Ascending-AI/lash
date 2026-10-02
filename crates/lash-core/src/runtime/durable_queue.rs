@@ -170,10 +170,17 @@ impl DurableSessionOps {
         source_key: Option<String>,
         run_spec: crate::RunSpec,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
-        self.enqueue_turn_inputs(store, vec![(input, source_key)], ingress, run_spec, false)
-            .await?
-            .pop()
-            .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
+        self.enqueue_turn_inputs(
+            store,
+            vec![(input, source_key)],
+            ingress,
+            run_spec,
+            false,
+            lash_trace::TraceCause::Root,
+        )
+        .await?
+        .pop()
+        .ok_or_else(|| store_error("a batch of one admitted no pending turn input"))
     }
 
     /// Durably accept `inputs`, each filed under its source key, as one
@@ -188,6 +195,11 @@ impl DurableSessionOps {
     /// `pin` pins every input in the transaction that accepts it, so the
     /// revision each one's root publishes is retained before the root can
     /// start (FIG-4731).
+    ///
+    /// `trace_cause` is what caused the request, as its caller captured it;
+    /// this method consults no ambient context. Every input the request
+    /// newly admits retains it, and a row an earlier request admitted keeps
+    /// the cause that request gave it.
     pub async fn enqueue_turn_inputs(
         &self,
         store: &crate::store::SessionStore,
@@ -195,6 +207,7 @@ impl DurableSessionOps {
         ingress: crate::TurnInputIngress,
         run_spec: crate::RunSpec,
         pin: bool,
+        trace_cause: lash_trace::TraceCause,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
         let (enqueued, revision) = enqueue_turn_inputs_to_store(
@@ -205,6 +218,7 @@ impl DurableSessionOps {
             ingress,
             run_spec,
             pin,
+            trace_cause,
         )
         .await?;
         self.publish_queue_changed(
@@ -386,6 +400,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         ingress,
         run_spec,
         false,
+        lash_trace::TraceCause::Root,
     )
     .await?
     .0
@@ -409,6 +424,10 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 /// A backend that does not fold answers `Enqueued`; the relay then takes
 /// each row's claim as before. The revision a fused admission read rides
 /// back so the caller's queue event does not read the head again.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one request names its session, store and relay, then what every input of it shares"
+)]
 pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     session_id: SessionId,
     store: crate::store::SessionStore,
@@ -417,12 +436,14 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     ingress: crate::TurnInputIngress,
     run_spec: crate::RunSpec,
     pin: bool,
+    trace_cause: lash_trace::TraceCause,
 ) -> Result<(Vec<crate::PendingTurnInput>, Option<SessionRevision>), crate::RuntimeError> {
     let mut drafts = Vec::with_capacity(inputs.len());
     for (input, source_key) in inputs {
         let mut draft =
             crate::PendingTurnInputDraft::new(session_id.clone(), ingress.clone(), input)
-                .with_run_spec(run_spec.clone());
+                .with_run_spec(run_spec.clone())
+                .with_trace_cause(trace_cause.clone());
         // A keyed input's id is its key's: a host re-attaches by the key alone.
         if let Some(key) = source_key.as_deref() {
             draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(

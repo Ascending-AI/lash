@@ -19,6 +19,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             wake_session_id,
             observers,
             event_types,
+            trace_cause,
         } = value;
         let target: lash_core::ProcessStartTarget = input.try_into()?;
         let mut request = lash_core::ProcessStartRequest::new(
@@ -47,7 +48,8 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
         let mut request = request
             .with_wake_session_id(wake_session_id)
             .with_observers(observers)
-            .with_event_types(event_types.into_iter().map(Into::into));
+            .with_event_types(event_types.into_iter().map(Into::into))
+            .with_trace_cause(trace_cause);
         if let Some(identity) = identity {
             request = request.with_declared_identity(identity.into());
         }
@@ -80,6 +82,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             wake_session_id,
             observers,
             event_types,
+            trace_cause,
             ..
         } = value;
         Ok(Self {
@@ -94,6 +97,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             wake_session_id,
             observers,
             event_types: event_types.into_iter().map(Into::into).collect(),
+            trace_cause,
         })
     }
 }
@@ -331,13 +335,14 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessSignal {
             signal_name,
             signal_id,
             payload,
+            trace_cause,
         } = value;
         let identity = lash_core::ProcessSignalIdentity::new(process_id, signal_name, signal_id)
             .map_err(|err| RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessSignalRequest",
                 message: err.to_string(),
             })?;
-        Ok(Self::new(identity, payload))
+        Ok(Self::new(identity, payload).with_trace_cause(trace_cause))
     }
 }
 

@@ -476,6 +476,7 @@ impl LashRuntime {
                 crate::TurnInputIngress::NextTurn,
                 crate::RunSpec::default(),
                 false,
+                lash_trace::TraceCause::Root,
             )
             .await
             .map_err(|error| PluginOperationInvokeError::AdmissionRefused(Box::new(error)))?

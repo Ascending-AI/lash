@@ -104,6 +104,7 @@ impl TryFrom<lash_core::runtime::ProcessEventSemantics> for RemoteProcessEventSe
             terminal,
             wake,
             signal_wait,
+            trace_cause,
         } = value;
         Ok(Self {
             terminal: terminal.map(TryInto::try_into).transpose()?,
@@ -111,6 +112,7 @@ impl TryFrom<lash_core::runtime::ProcessEventSemantics> for RemoteProcessEventSe
             signal_wait: signal_wait.map(|binding| RemoteProcessSignalWaitBinding {
                 ordinal: binding.ordinal,
             }),
+            trace_cause,
         })
     }
 }
@@ -123,6 +125,7 @@ impl TryFrom<RemoteProcessEventSemantics> for lash_core::runtime::ProcessEventSe
             terminal,
             wake,
             signal_wait,
+            trace_cause,
         } = value;
         Ok(Self {
             terminal: terminal.map(TryInto::try_into).transpose()?,
@@ -130,6 +133,7 @@ impl TryFrom<RemoteProcessEventSemantics> for lash_core::runtime::ProcessEventSe
             signal_wait: signal_wait.map(|binding| lash_core::runtime::ProcessSignalWaitBinding {
                 ordinal: binding.ordinal,
             }),
+            trace_cause,
         })
     }
 }

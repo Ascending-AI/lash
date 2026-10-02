@@ -19,6 +19,7 @@ pub(crate) struct QueuedBatchRow {
     enqueued_at_ms: u64,
     submission_digest: String,
     terminal: Option<lash_core_execution::store::IngressTerminal>,
+    trace_cause: lash_core_execution::TraceCause,
 }
 
 /// The turn-lane candidate `batch` offers an admission.
@@ -71,6 +72,10 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
                 .map(|at| u64_from_sql("QueuedWorkBatch", "terminal_at_ms", at))
                 .transpose()?,
         )?,
+        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            "QueuedWorkBatch",
+            row.get::<Option<String>, _>("trace_cause_json").as_deref(),
+        )?,
     })
 }
 
@@ -110,6 +115,7 @@ pub(crate) fn queued_work_batch_from_row(
         payload: row.payload,
         submission_digest: row.submission_digest,
         terminal: row.terminal,
+        trace_cause: row.trace_cause,
     };
     Ok(batch)
 }

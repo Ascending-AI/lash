@@ -449,6 +449,10 @@ pub struct QueuedWorkBatch {
     /// it stays until host vacuum (ADR 0101 §8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<crate::store::IngressTerminal>,
+    /// What caused the batch, as its first enqueue retained it
+    /// ([`QueuedWorkBatchDraft::trace_cause`]).
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 impl QueuedWorkBatch {
     pub fn kind(&self) -> QueuedWorkKind {
@@ -508,6 +512,12 @@ pub struct QueuedWorkBatchDraft {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
     pub payload: QueuedWorkPayload,
+    /// What caused the batch, for telemetry: its producer's context. The
+    /// enqueue that inserts the batch retains it beside the row; an absorbed
+    /// re-enqueue reads the retained cause back. It is no part of the
+    /// submission digest.
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
 }
 impl QueuedWorkBatchDraft {
     pub fn new(
@@ -524,7 +534,14 @@ impl QueuedWorkBatchDraft {
             authority: QueuedWorkAuthority::default(),
             merge_key: None,
             payload,
+            trace_cause: lash_trace::TraceCause::Root,
         }
+    }
+
+    /// Sets what caused the batch ([`Self::trace_cause`]).
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
     }
 
     pub fn with_source_key(mut self, source_key: impl Into<String>) -> Self {
@@ -829,6 +846,7 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     let process_id = wake.process_id.clone();
     let sequence = wake.sequence;
     let authority = wake.authority.clone();
+    let trace_cause = wake.trace_cause.clone();
     QueuedWorkBatchDraft::new(
         wake.target_session_id.clone(),
         delivery_policy,
@@ -838,4 +856,5 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     .with_process_wake_source(process_id, sequence)
     .with_authority(authority)
     .with_merge_key(PROCESS_WAKE_MERGE_KEY)
+    .with_trace_cause(trace_cause)
 }

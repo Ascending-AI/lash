@@ -100,6 +100,9 @@ pub struct DurableSession {
     models: Arc<dyn lash_core::LlmProfiles>,
     /// The deployment's usage ledger, read by [`usage`](Self::usage).
     usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
+    /// The core's telemetry adapter: what a [`send`](Self::send) captures
+    /// the caller's trace context from.
+    trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
 }
 
 impl DurableSession {
@@ -116,6 +119,7 @@ impl DurableSession {
         live_replay_store: Arc<dyn LiveReplayStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
         usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
+        trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(
@@ -132,6 +136,7 @@ impl DurableSession {
             live_replay_store,
             models,
             usage_accounting,
+            trace_scopes,
         }
     }
 
@@ -151,6 +156,7 @@ impl DurableSession {
         catalog: Arc<dyn DeploymentStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
         usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
+        trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     ) -> Self {
         Self {
             ops: DurableSessionOps::new(
@@ -167,6 +173,7 @@ impl DurableSession {
             live_replay_store,
             models,
             usage_accounting,
+            trace_scopes,
         }
     }
 
@@ -192,6 +199,11 @@ impl DurableSession {
             live_replay_store: Arc::clone(&self.live_replay_store),
             models: Arc::clone(&self.models),
         })
+    }
+
+    /// The telemetry adapter a send captures the caller's context from.
+    pub(crate) fn trace_scopes(&self) -> &Arc<dyn lash_core::TraceScopeFactory> {
+        &self.trace_scopes
     }
 
     /// The live replay a handle's events come from.

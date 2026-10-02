@@ -166,6 +166,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             provenance,
             env_ref,
             engine_config,
+            trace,
             created_at_ms,
             updated_at_ms,
             external_ref,
@@ -188,6 +189,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
                 .map(|env_ref| env_ref.as_str().parse())
                 .transpose()?,
             engine_config,
+            trace,
             created_at_ms,
             updated_at_ms,
             external_ref: external_ref.map(Into::into),
@@ -218,6 +220,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             provenance,
             env_ref,
             engine_config,
+            trace,
             created_at_ms,
             updated_at_ms,
             external_ref,
@@ -266,6 +269,9 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             })?;
         let mut record = lash_core::ProcessRecord::from_registration(registration, process_id);
         record.engine_config = engine_config;
+        // The record carries the scope its registration retained, or none:
+        // rebuilding it never mints one.
+        record.trace = trace;
         record.created_at_ms = created_at_ms;
         record.updated_at_ms = updated_at_ms;
         record.last_event_sequence = last_event_sequence;

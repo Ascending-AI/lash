@@ -145,6 +145,14 @@ pub(crate) async fn admit_root_postgres(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+    let trace = RootAdmission::trace_scope_of(
+        session_id,
+        &request.root,
+        inputs.as_deref(),
+        queued.as_deref(),
+        request.trace_anchor.clone(),
+        now,
+    );
     let admission = RootAdmission {
         head: request.head.clone(),
         inputs,
@@ -154,6 +162,8 @@ pub(crate) async fn admit_root_postgres(
         generation: request.generation.clone(),
         executor: request.executor.clone(),
         plugins: request.plugins.clone(),
+        trace: Some(trace),
+        recorded_by_this_call: true,
     };
     crate::session_roots::bind_root_inputs_conn(
         &mut tx,

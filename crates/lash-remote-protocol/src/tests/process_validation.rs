@@ -213,6 +213,7 @@ fn terminal_event(status: RemoteTerminalProcessStatus, outcome: RemoteProcessAwa
         terminal: Some(RemoteProcessTerminalSemantics { outcome }),
         wake: None,
         signal_wait: None,
+        trace_cause: Default::default(),
     }
     .validate("RemoteProcessEventSemantics")
     .expect("a terminal outcome must be accepted");

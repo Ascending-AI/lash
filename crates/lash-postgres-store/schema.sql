@@ -492,6 +492,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     terminal_cause TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms BIGINT,
+    trace_cause_json TEXT, -- The batch's trace cause, written once at enqueue; NULL is a root cause.
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -549,6 +550,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash TEXT,
     terminal_at_ms BIGINT, -- When the input's tombstone was written; NULL until then.
+    trace_cause_json TEXT, -- The submission's trace cause, written once at acceptance; NULL is a root cause.
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,

@@ -184,6 +184,15 @@ impl SendTarget {
         }
     }
 
+    /// The caller's trace context now, as the core's telemetry adapter sees
+    /// it. Synchronous: a send snapshots before its first await.
+    pub(crate) fn capture_trace_context(&self) -> Option<lash_core::TraceCarrier> {
+        match self {
+            Self::Live(session) => session.binding.trace_scopes().capture_current(),
+            Self::Durable(durable) => durable.trace_scopes().capture_current(),
+        }
+    }
+
     /// The live replay position now: a cursor taken before an acceptance
     /// sees everything the acceptance's drive publishes.
     fn current_cursor(&self) -> lash_core::SessionCursor {
@@ -279,6 +288,42 @@ pub struct SendBuilder {
     pub(crate) ingress: TurnInputIngress,
     pub(crate) run_spec: RunSpec,
     pub(crate) pin: bool,
+    pub(crate) trace: SendTraceContext,
+}
+
+/// The trace context a send links its input to.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum SendTraceContext {
+    /// Not chosen yet: the acceptance snapshots the caller's context on its
+    /// first poll.
+    #[default]
+    Ambient,
+    /// Chosen by the caller, or snapshotted when the caller asked: the
+    /// acceptance consults nothing else.
+    Captured(Option<lash_core::TraceCarrier>),
+}
+
+impl SendTraceContext {
+    /// The cause the submission carries: a link to the captured context,
+    /// snapshotting it from `target` now when none was chosen.
+    pub(crate) fn into_cause(self, target: &SendTarget) -> lash_core::TraceCause {
+        lash_core::TraceCause::linked_to(match self {
+            Self::Ambient => target.capture_trace_context(),
+            Self::Captured(context) => context,
+        })
+    }
+
+    /// [`Self::into_cause`] for a submission that captures through
+    /// `scopes` directly.
+    pub(crate) fn cause_through(
+        &self,
+        scopes: &dyn lash_core::TraceScopeFactory,
+    ) -> lash_core::TraceCause {
+        lash_core::TraceCause::linked_to(match self {
+            Self::Ambient => scopes.capture_current(),
+            Self::Captured(context) => context.clone(),
+        })
+    }
 }
 
 impl SendBuilder {
@@ -290,7 +335,31 @@ impl SendBuilder {
             ingress: TurnInputIngress::NextTurn,
             run_spec: RunSpec::default(),
             pin: false,
+            trace: SendTraceContext::Ambient,
         }
+    }
+
+    /// Link this input to `context`, the trace context of whatever caused
+    /// it. An explicit context wins over the caller's ambient one, which is
+    /// then never consulted.
+    ///
+    /// The link is telemetry beside the submission, not part of it: the
+    /// first acceptance of an [`id`](Self::id) retains the context it was
+    /// given, and a retry under another context is the same submission and
+    /// keeps the first one.
+    pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
+        self.trace = SendTraceContext::Captured(Some(context));
+        self
+    }
+
+    /// Snapshot the caller's current trace context now, through the core's
+    /// telemetry adapter, instead of when the send is first polled. Use it
+    /// when the builder is awaited somewhere the caller's context no longer
+    /// is, such as a spawned task. With no adapter installed there is
+    /// nothing to capture and the input is linked to nothing.
+    pub fn capture_trace_context(mut self) -> Self {
+        self.trace = SendTraceContext::Captured(self.target.capture_trace_context());
+        self
     }
 
     /// Pin this input in the transaction that accepts it: the state its
@@ -396,7 +465,11 @@ impl SendBuilder {
             ingress,
             run_spec,
             pin,
+            trace,
         } = self;
+        // The caller's context is snapshotted once, here, on the first poll
+        // and before the first await: nothing later changes the edge.
+        let trace_cause = trace.into_cause(&target);
         let context = target.context().await?;
         // The host id names the root; the drive runs the root's turns under
         // it, so the input carries no turn id of its own. An input sent
@@ -416,6 +489,7 @@ impl SendBuilder {
                 ingress,
                 run_spec,
                 pin,
+                trace_cause,
             )
             .await?
             .pop()

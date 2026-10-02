@@ -593,6 +593,11 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                         .bind(&submission_digest)
                         .bind(now as i64)
                         .bind(run_spec.column())
+                        .bind(
+                            lash_core_execution::store_backend_support::encode_trace_cause(
+                                &draft.trace_cause,
+                            )?,
+                        )
                         .execute(&mut **tx)
                         .await
                         .map_err(|err| {

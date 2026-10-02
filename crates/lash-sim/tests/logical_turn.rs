@@ -994,6 +994,7 @@ fn withheld_wake(session_id: &SessionId) -> lash_core::runtime::QueuedWorkBatchD
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
         input: "work withheld at terminal checkpoint".to_string(),
         created_at_ms: 1,
+        trace_cause: Default::default(),
     })
 }
 

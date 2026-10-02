@@ -213,6 +213,7 @@ impl SessionBuilder {
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
             self.core.backend.usage_accounting(),
+            Arc::clone(self.core.env.core.tracing.scopes()),
         )
     }
 
@@ -352,6 +353,7 @@ impl SessionBuilder {
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
             self.core.backend.usage_accounting(),
+            Arc::clone(self.core.env.core.tracing.scopes()),
         ))
     }
 
@@ -1103,6 +1105,7 @@ impl LashSession {
             self.binding.catalog(),
             self.binding.llm_profiles(),
             self.binding.usage_accounting(),
+            self.binding.trace_scopes(),
         )
     }
 
