@@ -326,6 +326,30 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     } else {
         builder
     };
+    // Deployment policy example. Choose these limits for the host's workload
+    // before build(); session settings instead use recorded config commands.
+    // let builder = builder
+    //     .output_retention(lash::attachments::OutputRetentionPolicy {
+    //         inline_limit_bytes: 64 * 1024, witness_bytes: 4 * 1024,
+    //     })
+    //     .max_attachment_bytes(Some(32 * 1024 * 1024))
+    //     .attachment_read_policy(lash::attachments::AttachmentReadPolicy::DEFAULT)
+    //     .attachment_upload_expiry(Duration::from_secs(24 * 60 * 60))
+    //     .recovery_lease(lash::RecoveryLeaseConfig {
+    //         generation_rank: 1, ..Default::default()
+    //     })
+    //     .recovery_pass_budget(lash::RecoveryPassBudget {
+    //         attempt: Duration::from_secs(30), tick_wait: Duration::from_secs(1),
+    //     })
+    //     .termination(lash::runtime::TerminationPolicy::default())
+    //     .abort_drain_grace(Duration::from_secs(2))
+    //     .trigger_route_restorer(host_trigger_route_restorer)
+    //     .process_observation_config(lash::process_observation::ProcessObservationConfig::default())
+    //     .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
+    //         lash::observe::InMemoryLiveReplayStoreConfig::default(),
+    //     )))
+    //     .trace_context(TraceContext::default());
+    // host_trigger_route_restorer is the host's Arc<dyn lash::triggers::TriggerRouteRestorer>.
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
     // Web search/fetch ride the free Parallel Search MCP server, attached with
@@ -542,6 +566,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             post(prune_trigger_mutation_receipts),
         )
         .merge(trigger_occurrence_admin_routes())
+        .merge(operator_routes())
         // Deliberately absent from the UI, and deliberately unscheduled: see
         // the handler's contract.
         .route("/api/admin/store-maintenance", post(run_store_maintenance))

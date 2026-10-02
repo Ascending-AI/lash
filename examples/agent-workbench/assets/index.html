@@ -2421,6 +2421,15 @@
         grid-template-columns: 1fr;
       }
     }
+    .operator-dialog { width: min(960px, calc(100vw - 32px)); max-height: 90dvh; overflow: auto; background: var(--form); color: var(--chalk); border: 1px solid currentColor; padding: 24px; }
+    .operator-dialog::backdrop { background: #000a; }
+    .operator-dialog form, .operator-dialog details { margin-block: 16px; }
+    .operator-dialog label { display: block; margin-block: 8px; }
+    .operator-dialog input, .operator-dialog select, .operator-dialog textarea { width: 100%; }
+    .operator-dialog textarea { min-height: 120px; font-family: monospace; }
+    .operator-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+    .operator-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
+    .operator-park { border-top: 1px solid currentColor; padding-block: 12px; }
   </style>
 </head>
 <body>
@@ -2517,6 +2526,7 @@
           <div class="subtitle" id="streamState">connecting…</div>
         </div>
         <div class="topbar-right">
+          <button id="operatorOpen" class="ghost-btn" type="button">operator</button>
           <button id="reset" class="ghost-btn" type="button" title="Clear the conversation and reset the session">reset</button>
           <button id="stop" class="stop" type="button" hidden title="Stop after the current step: the response finishes, its tool calls complete and commit, then the turn ends (Esc).">stop after step</button>
           <button id="abort" class="stop" type="button" hidden title="Abort now: cancel the running turn immediately and drop uncommitted work (Shift+Esc).">abort</button>
@@ -2657,6 +2667,55 @@
     </section>
   </div>
 
+  <dialog id="operatorDialog" class="operator-dialog" aria-labelledby="operatorTitle">
+    <div class="operator-actions"><h2 id="operatorTitle">Deployment operator</h2><button id="operatorClose" class="ghost-btn" type="button">close</button></div>
+    <p>Session controls apply to the selected session. Parked work and deployment drain cover every session.</p>
+    <p id="operatorSession"></p>
+    <p id="operatorError" role="alert" hidden></p>
+    <details open><summary>Parked work</summary>
+      <div class="operator-actions"><button id="operatorParks" type="button">refresh parks</button><button id="operatorParksNext" type="button" disabled>next page</button><button id="operatorEvents" type="button">read new events</button></div>
+      <div id="operatorParkList"></div><label>Event feed cursor<input id="operatorEventsAfter" placeholder="Optional JSON cursor, retained after every page" spellcheck="false" /></label><pre id="operatorEventList"></pre>
+    </details>
+    <details><summary>Drain and stalled deliveries</summary>
+      <label>Host admission state<select id="operatorAdmission"><option value="true">accepting new work</option><option value="false">admission closed by host</option></select></label>
+      <p>This reports the admission state you supply. Closing admission remains the host's responsibility.</p>
+      <button id="operatorDrain" type="button">deployment status</button>
+      <label>Build generation<input id="operatorGeneration" pattern="[0-9a-f]{12}" placeholder="12 lowercase hexadecimal characters" /></label>
+      <div class="operator-actions"><button id="operatorGenerationStatus" type="button">generation status</button><button id="operatorGenerationStart" type="button">drain generation</button><button id="operatorGenerationEnd" type="button">end generation drain</button></div>
+      <label>Delivery kind<select id="operatorObligationKind"></select></label>
+      <div class="operator-actions"><button id="operatorStalls" type="button">list stalled deliveries</button><button id="operatorStallsNext" type="button" disabled>next page</button></div>
+      <div id="operatorStallList"></div><pre id="operatorDrainResult"></pre>
+    </details>
+    <details><summary>Usage ledger</summary>
+      <p>Exports retain every fact or meter and its cursor. Unreported amounts remain unknown until provider reconciliation can recover them.</p>
+      <div class="operator-actions"><button id="operatorUsageFacts" type="button">export usage facts</button><button id="operatorUsageMeters" type="button">export usage meters</button><button id="operatorUsageReconcile" type="button">reconcile unreported usage</button></div>
+      <pre id="operatorUsageResult"></pre>
+    </details>
+    <details><summary>Recorded session settings</summary>
+      <button id="operatorConfigRead" type="button">read recorded settings</button>
+      <pre id="operatorRecordedConfig"></pre>
+      <form id="operatorConfigForm">
+        <label>Command<select id="operatorConfigCommand"></select></label>
+        <label>Command arguments<textarea id="operatorConfigArgs" spellcheck="false" required></textarea></label>
+        <label>Request id<input id="operatorConfigId" required /></label>
+        <label>Expected config revision<input id="operatorConfigRevision" type="number" min="0" required /></label>
+        <button type="submit">submit recorded change</button>
+      </form>
+      <button id="operatorConfigSettle" type="button" disabled>await config settlement</button><pre id="operatorConfigResult"></pre>
+    </details>
+    <details><summary>Session commands and context compaction</summary>
+      <p>Commands apply at a run boundary. Retain the receipt to await or withdraw accepted work.</p>
+      <form id="operatorCommandForm">
+        <label>Request id<input id="operatorCommandId" required /></label>
+        <label>Command<textarea id="operatorCommandArgs" spellcheck="false" required>{"kind":"refresh_tool_catalog","reason":"operator refresh"}</textarea></label>
+        <button type="submit">submit command</button>
+      </form>
+      <label>Command receipt<textarea id="operatorCommandReceipt" spellcheck="false" placeholder="Receipt returned by submission"></textarea></label>
+      <div class="operator-actions"><button id="operatorCommandSettle" type="button">await settlement</button><button id="operatorCommandWithdraw" type="button">withdraw command</button></div>
+      <form id="operatorCompactForm"><label>Compaction instructions<textarea id="operatorCompactInstructions" spellcheck="false"></textarea></label><button type="submit">compact context</button></form>
+      <pre id="operatorCommandResult"></pre>
+    </details>
+  </dialog>
   <script>
     let scopedSessionId = new URLSearchParams(window.location.search).get("session_id");
     const nativeFetch = window.fetch.bind(window);
@@ -7811,6 +7870,166 @@
        the static markup happened to say. The snapshot request is bounded, so
        this always advances to a real phase — a refused connection and a
        backend that accepts and then blocks now converge on the same render. */
+
+    const operatorDialog = document.getElementById("operatorDialog");
+    const op = id => document.getElementById("operator" + id);
+    let operatorSession = null;
+    let operatorParkCursor = null;
+    let operatorEventsCursor = null;
+    let operatorStallCursor = null;
+    let operatorConfigReceipt = null;
+    const operatorConfigTemplates = {
+      set_llm_profile: {model: ""}, set_reasoning: {reasoning: "provider_default"},
+      set_turn_budget: {turn_budget: {bounded: 20}}, set_max_tool_calls: {max_tool_calls: 1024},
+      set_tool_access: {access: {mode: "ambient"}}, set_autonomy: {autonomous: false},
+      set_charge_safety: {charge_safety: {mode: "require_guarantee"}},
+      set_no_progress_budget: {no_progress_budget: {bounded: 12}},
+      set_generation: {generation: {mode: "merge", generation: {}}},
+      set_attachment_acceptance: {acceptance: {revision: "operator-1", acceptors: []}},
+      set_standard_prompt: {prompt: {}}, set_standard_prompt_context: {context: []}, set_standard_render: {render: null},
+      set_rlm_prompt: {prompt: {}}, set_rlm_prompt_context: {context: []}, set_rlm_render: {print: {}, preview: {}}
+    };
+    for (const name of Object.keys(operatorConfigTemplates)) {
+      const option = document.createElement("option"); option.value = name;
+      option.textContent = name.replaceAll("_", " "); op("ConfigCommand").append(option);
+    }
+    for (const kind of ["ingress", "control_intent", "scope_close", "parent_end", "session_delete", "trigger_delivery", "process_start", "process_terminal", "artifact_cleanup"]) {
+      const option = document.createElement("option"); option.value = kind; option.textContent = kind.replaceAll("_", " "); op("ObligationKind").append(option);
+    }
+    function operatorTemplate() {
+      const name = op("ConfigCommand").value;
+      const args = structuredClone(operatorConfigTemplates[name]);
+      if (name === "set_llm_profile") args.model = modelInput.value;
+      op("ConfigArgs").value = JSON.stringify(args, null, 2);
+      op("ConfigId").value = crypto.randomUUID();
+    }
+    op("ConfigCommand").addEventListener("change", operatorTemplate);
+    op("ConfigArgs").addEventListener("input", () => { op("ConfigId").value = crypto.randomUUID(); });
+    op("ConfigRevision").addEventListener("input", () => { op("ConfigId").value = crypto.randomUUID(); });
+    op("CommandArgs").addEventListener("input", () => { op("CommandId").value = crypto.randomUUID(); });
+    function operatorSessionPath(suffix) {
+      if (!operatorSession) throw new Error("Select a session first.");
+      return "/api/admin/sessions/" + encodeURIComponent(operatorSession) + suffix;
+    }
+    async function operatorRequest(path, method = "GET", body) {
+      const response = await fetch(path, {method, headers: body === undefined ? {} : {"content-type": "application/json"}, body: body === undefined ? undefined : JSON.stringify(body)});
+      const text = await response.text();
+      let result;
+      try { result = JSON.parse(text); }
+      catch { throw new Error("Request failed (" + response.status + "): " + text); }
+      if (!response.ok) throw new Error(JSON.stringify(result));
+      return result;
+    }
+    const operatorShow = (id, result) => { op(id).textContent = JSON.stringify(result, null, 2); };
+    function operatorAction(id, action, event = "click") {
+      op(id).addEventListener(event, async e => {
+        e.preventDefault(); op("Error").hidden = true;
+        const button = e.currentTarget.tagName === "FORM" ? e.submitter : e.currentTarget;
+        if (button.disabled) return;
+        button.disabled = true;
+        try { await action(); }
+        catch (error) { op("Error").textContent = error.message; op("Error").hidden = false; }
+        finally { button.disabled = id === "ParksNext" ? !operatorParkCursor : id === "StallsNext" ? !operatorStallCursor : false; }
+      });
+    }
+    operatorAction("Open", async () => {
+      operatorSession = scopedSessionId;
+      op("Session").textContent = "Selected session: " + (operatorSession || "none");
+      operatorConfigReceipt = null; op("ConfigSettle").disabled = true;
+      op("ConfigRevision").value = ""; op("RecordedConfig").textContent = "Read settings before submitting a change.";
+      op("CommandId").value = crypto.randomUUID(); op("CommandReceipt").value = "";
+      operatorTemplate(); operatorDialog.showModal(); await operatorReadParks();
+    });
+    operatorAction("Close", async () => operatorDialog.close());
+    async function operatorReadParks(after = null) {
+      const query = after ? "?after=" + encodeURIComponent(JSON.stringify(after)) : "";
+      const page = await operatorRequest("/api/admin/parks" + query);
+      operatorParkCursor = page.next; op("ParksNext").disabled = !page.next;
+      op("ParkList").replaceChildren();
+      if (!page.records.length) op("ParkList").textContent = "No parked work.";
+      for (const park of page.records) {
+        const row = document.createElement("div"); row.className = "operator-park";
+        const description = document.createElement("pre"); description.textContent = JSON.stringify(park, null, 2); row.append(description);
+        for (const verb of park.target.kind === "turn" ? ["redrive", "cancel", "fork"] : ["redrive"]) {
+          const button = document.createElement("button"); button.type = "button"; button.textContent = verb;
+          button.addEventListener("click", async () => {
+            button.disabled = true; op("Error").hidden = true;
+            try { operatorShow("EventList", await operatorRequest("/api/admin/parks/" + verb, "POST", {target: park.target, park_id: park.park_id})); await operatorReadParks(); }
+            catch (error) { op("Error").textContent = error.message; op("Error").hidden = false; }
+            finally { button.disabled = false; }
+          }); row.append(button);
+        }
+        op("ParkList").append(row);
+      }
+    }
+    operatorAction("Parks", () => operatorReadParks());
+    operatorAction("ParksNext", () => operatorReadParks(operatorParkCursor));
+    operatorAction("Events", async () => {
+      const after = op("EventsAfter").value.trim();
+      operatorEventsCursor = after ? JSON.parse(after) : null;
+      const query = operatorEventsCursor ? "?after=" + encodeURIComponent(JSON.stringify(operatorEventsCursor)) : "";
+      const result = await operatorRequest("/api/admin/parks/events" + query); operatorEventsCursor = result.next; op("EventsAfter").value = JSON.stringify(result.next); operatorShow("EventList", result);
+    });
+    operatorAction("Drain", async () => operatorShow("DrainResult", await operatorRequest("/api/admin/drain?accepting_new_work=" + op("Admission").value)));
+    for (const [id, method] of [["GenerationStatus", "GET"], ["GenerationStart", "POST"], ["GenerationEnd", "DELETE"]]) {
+      operatorAction(id, async () => {
+        const generation = op("Generation").value;
+        if (!/^[0-9a-f]{12}$/.test(generation)) throw new Error("Enter a 12 character lowercase hexadecimal generation.");
+        operatorShow("DrainResult", await operatorRequest("/api/admin/generations/" + generation + "/drain", method));
+      });
+    }
+    async function operatorReadStalls(after = null) {
+      const query = after ? "?after=" + encodeURIComponent(after) : "";
+      const result = await operatorRequest("/api/admin/obligations/" + op("ObligationKind").value + query);
+      operatorStallCursor = result.next; op("StallsNext").disabled = !result.next; op("StallList").replaceChildren();
+      if (!result.records.length) op("StallList").textContent = "No stalled deliveries.";
+      for (const record of result.records) {
+        const row = document.createElement("div"); const detail = document.createElement("pre"); detail.textContent = JSON.stringify(record, null, 2);
+        const button = document.createElement("button"); button.type = "button"; button.textContent = "rearm";
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try { operatorShow("DrainResult", await operatorRequest("/api/admin/obligations/rearm", "POST", {kind: record.kind, id: record.id})); await operatorReadStalls(); }
+          catch (error) { op("Error").textContent = error.message; op("Error").hidden = false; }
+          finally { button.disabled = false; }
+        }); row.append(detail, button); op("StallList").append(row);
+      }
+    }
+    operatorAction("Stalls", () => operatorReadStalls());
+    operatorAction("StallsNext", () => operatorReadStalls(operatorStallCursor));
+    op("ObligationKind").addEventListener("change", () => { operatorStallCursor = null; op("StallsNext").disabled = true; op("StallList").replaceChildren(); });
+    async function operatorExportUsage(kind) {
+      const pages = []; let after = null;
+      do {
+        const query = after ? "?after=" + encodeURIComponent(JSON.stringify(after)) : "";
+        const page = await operatorRequest(operatorSessionPath("/usage/" + kind) + query);
+        pages.push(page); after = page.next;
+      } while (after);
+      const blob = new Blob([JSON.stringify({session_id: operatorSession, pages}, null, 2)], {type: "application/json"});
+      const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = operatorSession + "-usage-" + kind + ".json"; link.click(); URL.revokeObjectURL(url);
+      operatorShow("UsageResult", {exported_pages: pages.length, records: pages.reduce((sum, page) => sum + (Object.values(page).find(Array.isArray) || []).length, 0)});
+    }
+    operatorAction("UsageFacts", () => operatorExportUsage("facts"));
+    operatorAction("UsageMeters", () => operatorExportUsage("meters"));
+    operatorAction("UsageReconcile", async () => operatorShow("UsageResult", await operatorRequest(operatorSessionPath("/usage/reconcile"), "POST")));
+    operatorAction("ConfigRead", async () => {
+      const result = await operatorRequest(operatorSessionPath("/config")); op("ConfigRevision").value = result.catalog.revision; op("ConfigId").value = crypto.randomUUID(); operatorShow("RecordedConfig", result);
+    });
+    operatorAction("ConfigForm", async () => {
+      const expected_revision = Number(op("ConfigRevision").value);
+      if (!op("ConfigRevision").value || !Number.isSafeInteger(expected_revision) || expected_revision < 0) throw new Error("Read the recorded config revision first.");
+      const result = await operatorRequest(operatorSessionPath("/config"), "POST", {id: op("ConfigId").value, expected_revision, commands: [{kind: op("ConfigCommand").value, args: JSON.parse(op("ConfigArgs").value)}]});
+      operatorConfigReceipt = result.receipt || null; op("ConfigSettle").disabled = !operatorConfigReceipt; operatorShow("ConfigResult", result);
+    }, "submit");
+    operatorAction("ConfigSettle", async () => operatorShow("ConfigResult", await operatorRequest(operatorSessionPath("/config/settle"), "POST", operatorConfigReceipt)));
+    operatorAction("CommandForm", async () => {
+      const result = await operatorRequest(operatorSessionPath("/commands"), "POST", {id: op("CommandId").value, command: JSON.parse(op("CommandArgs").value)});
+      op("CommandReceipt").value = JSON.stringify(result, null, 2); operatorShow("CommandResult", result);
+    }, "submit");
+    for (const [id, suffix] of [["CommandSettle", "settle"], ["CommandWithdraw", "withdraw"]]) {
+      operatorAction(id, async () => operatorShow("CommandResult", await operatorRequest(operatorSessionPath("/commands/" + suffix), "POST", JSON.parse(op("CommandReceipt").value))));
+    }
+    operatorAction("CompactForm", async () => operatorShow("CommandResult", await operatorRequest(operatorSessionPath("/compact"), "POST", {instructions: op("CompactInstructions").value || null})), "submit");
+
     renderShellStatus();
     loadState().catch(() => {}).finally(() => {
       refreshWork();

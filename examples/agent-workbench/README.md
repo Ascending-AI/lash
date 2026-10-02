@@ -734,3 +734,57 @@ row count, a swallowed gap prevents recovery, a missing terminal replacement
 leaves the authoritative message absent, disconnect-as-cancel prevents the turn
 from completing, lag without resync loses ordered product events, and raw
 failure text fails the safe-copy assertion.
+
+## Operator controls
+
+The **operator** button opens deployment controls separately from the chat.
+Every route checks `WorkbenchAuthorizationAction::OperateDeployment`; replace
+`allow_all()` with the host's operator policy when exposing this example.
+
+Parked work is paged through `GET /api/admin/parks`. Each row keeps its typed
+reason and `park_id`. Redrive, cancel and fork submit that exact token to
+`POST /api/admin/parks/{verb}`. Process parks support redrive; cancel and fork
+apply to turn parks. `GET /api/admin/parks/events` retains both feeds' cursor.
+If an event cursor has been compacted, relist and start the event feed again.
+
+`GET /api/admin/drain?accepting_new_work=true` reports deployment status. The
+admission flag describes the host's routing policy; the route does not close
+admission. `GET`, `POST` and `DELETE /api/admin/generations/{generation}/drain`
+read, start and end a generation drain. Drain an old generation from its
+replacement deployment. `GET /api/admin/obligations/{kind}` lists stalled
+rows, including the last typed error. `POST /api/admin/obligations/rearm` takes
+`{"kind":"ingress","id":"..."}` and reports whether that row was rearmed.
+These controls complement the bootstrap's stalled-obligation logger.
+
+Session controls use `/api/admin/sessions/{session_id}`:
+
+- `GET /usage/facts` and `GET /usage/meters` export ledger pages. The panel
+  follows `next` to download all pages as JSON. Reuse each opaque cursor with
+  the same owner. `POST /usage/reconcile` asks the provider to recover
+  unreported amounts and returns both recovered and unresolved attempts.
+- `GET /config` returns registered command schemas and their revision, plus
+  values from the committed `DurableSession` view. `POST /config` takes a
+  stable `id`, `expected_revision` and an ordered list of typed commands,
+  each shaped as `{"kind":"set_autonomy","args":{"autonomous":true}}`.
+  All core commands and both protocols' prompt, context and render commands
+  have typed request variants. This RLM host admits RLM protocol commands;
+  standard protocol commands require a standard session. An absent owner
+  returns `unknown_owner` without enqueuing anything.
+- `POST /config/settle` accepts a retained receipt and returns applied, stale,
+  refused, pending or cancelled evidence. A stale edit publishes nothing.
+  Read the new revision before submitting the intended edit under a new id.
+- `POST /commands` takes `id` and a typed `SessionCommand`. Config
+  transactions use `/config` so callers cannot mint recorded resolutions.
+  `/commands/settle` and `/commands/withdraw` accept the returned receipt;
+  withdrawal answers `withdrawn` or `already_admitted`. Receipt/session
+  mismatches are refused before any command operation.
+- `POST /compact` takes optional `instructions`. The engine applies the
+  compaction command at a run boundary and reports whether it opened a
+  frame. Pending errors retain their receipt for later settlement.
+
+Page reads default to 50 records and accept a nonzero `limit` up to 200.
+The commented builder block in `src/main_sections/bootstrap.rs` demonstrates
+output retention, attachment limits and expiry, recovery lease and pass
+budgets, termination, abort drain grace, trigger route restoration, process
+observation, live replay and trace context. Those deployment policies are
+chosen before building the core; session changes use recorded commands.

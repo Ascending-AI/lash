@@ -156,6 +156,9 @@ pub(crate) use session_routes::*;
 #[path = "main_sections/turn_ingress.rs"]
 mod turn_ingress;
 pub(crate) use turn_ingress::*;
+#[path = "main_sections/operator.rs"]
+mod operator;
+pub(crate) use operator::*;
 #[path = "main_sections/admin.rs"]
 mod admin;
 pub(crate) use admin::*;
