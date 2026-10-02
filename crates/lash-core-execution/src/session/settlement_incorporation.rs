@@ -14,54 +14,16 @@
 //! `started_process_ids` does, so a redrive or a segment handover cannot
 //! incorporate the same settlement twice.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
-use serde::{Deserialize, Serialize};
 
 use super::execution_context::RuntimeExecutionContext;
 use crate::ProcessId;
 use crate::runtime::effect::ToolSettlement;
 use crate::runtime::effect::executor::RuntimeEffectControllerError;
 
-/// Which recorded settlement is being incorporated — its once-only identity
-/// (ADR 0099 §6).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum SettlementSource {
-    /// A scalar or batch tool call the opener admitted live, named by its
-    /// lash-minted identity.
-    Invocation { call_id: crate::ToolCallId },
-    /// Rank `rank` of durable effect group `group_key`, settled by child
-    /// `child_replay_key`.
-    GroupRank {
-        group_key: String,
-        rank: u64,
-        child_replay_key: String,
-    },
-}
-
-/// What the opener has incorporated so far: the once-only set. Travels with
-/// the execution context across segment handover beside
-/// `started_process_ids`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IncorporationLedger {
-    pub incorporated: BTreeSet<SettlementSource>,
-}
-
-impl IncorporationLedger {
-    /// Whether nothing has been incorporated.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.incorporated.is_empty()
-    }
-
-    /// Adopt everything `other` incorporated. Incorporation only ever grows a
-    /// ledger, so a restored snapshot is merged, never assigned.
-    pub fn absorb(&mut self, other: Self) {
-        self.incorporated.extend(other.incorporated);
-    }
-}
+pub use lash_core_store::effect_opener::{IncorporationLedger, SettlementSource};
 
 /// What one incorporation applied, in counts. A source already in the ledger
 /// returns every count as zero — the second call is the no-op the ledger

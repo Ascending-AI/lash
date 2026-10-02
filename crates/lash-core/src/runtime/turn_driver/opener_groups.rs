@@ -5,9 +5,10 @@
 //! with the turn's own execution context before the turn's outcome and
 //! accounting commit. Worker loss is not an exit: a dead worker never reaches
 //! this code, and the redriven turn closes the same groups when *it* exits.
-//! An abort is not an exit either: a turn that aborts on a live fault or a
-//! park records nothing and is redriven, so its groups stay live for the
-//! redrive exactly as a dead worker's do.
+//! A physical segment boundary transfers the logical opener to its
+//! continuation; its groups stay live. An abort is not an exit either: a turn
+//! that aborts on a live fault or a park records nothing and is redriven, so
+//! its groups stay live for the redrive exactly as a dead worker's do.
 //!
 //! The end runs while the turn is still registered as a live opener, because
 //! finalization's first step may have to run a child no process is running,
@@ -15,7 +16,56 @@
 
 use super::*;
 
+/// The opener stays live until the commit decides whether this segment
+/// continues its Run or becomes a terminal cancellation.
+pub(in crate::runtime) struct OpenerForCommit<'run> {
+    pub(in crate::runtime) context: Option<crate::RuntimeExecutionContext<'run>>,
+    pub(in crate::runtime) messages: crate::tool_dispatch::CheckpointMessageBuffer,
+}
+
+impl OpenerForCommit<'_> {
+    pub(in crate::runtime) async fn close(self) -> Result<Vec<crate::PluginMessage>, RuntimeError> {
+        if let Some(context) = self.context {
+            context
+                .close_opener_groups()
+                .await
+                .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        }
+        Ok(self.messages.drain())
+    }
+}
+
 impl<'run> RuntimeTurnDriver<'run> {
+    pub(in crate::runtime) fn take_opener_for_commit(
+        &self,
+        event_tx: &TurnObserver,
+    ) -> Result<OpenerForCommit<'run>, RuntimeError> {
+        let context = if self.opener_state.holds_groups() {
+            let context = self
+                .execution_context_observing(
+                    crate::engine::NullObservationSink::arc(),
+                    event_tx,
+                    Arc::new(crate::ChronologicalProjection::default()),
+                )
+                .map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::ToolCatalogResolutionFailed,
+                        error.to_string(),
+                    )
+                })?;
+            Some(match self.live_opener.lock_recover().take() {
+                Some(guard) => context.with_live_opener_guard(Arc::new(guard)),
+                None => context,
+            })
+        } else {
+            None
+        };
+        Ok(OpenerForCommit {
+            context,
+            messages: self.checkpoint_messages.clone(),
+        })
+    }
+
     /// The opener's end ahead of the turn's terminal checkpoint: close,
     /// finalize and incorporate every group the turn formed, so what the
     /// losers' settlements carry — checkpoint messages, possession, usage —
@@ -51,6 +101,9 @@ impl<'run> RuntimeTurnDriver<'run> {
         result: Result<(crate::MessageSequence, usize), RuntimeError>,
         event_tx: &TurnObserver,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
+        if result.is_ok() && self.segment.taken.is_some() {
+            return result;
+        }
         if let Err(error) = &result
             && error.turn_failure_cause().aborts_invocation()
         {

@@ -30,6 +30,9 @@
 
 use super::*;
 
+#[path = "opener_groups.rs"]
+mod opener_groups;
+
 /// The run's cell. `before` is bound before the cell stops and read after
 /// it resumes; the process waits for `signal`.
 fn cell(signal: &str) -> String {

@@ -865,6 +865,18 @@ Declining a boundary at a *non-capturable* point stays correct —
 `record_segment_boundary_decline`, "lashlang segment boundary declined at
 non-capturable point" — and declining because a child is unsettled does not.
 
+A Run carries its retained group cursors, tool-call reservations and once-only
+incorporation ledger in the kernel `RunContinuation`, atomically with the
+boundary's head commit. This includes groups opened by earlier cells and
+boundaries between cells, for both `HandOver` and `JournalBudget`. The RLM
+cell envelope carries only cell-local state. The predecessor leaves the groups
+live; the successor registers the same logical opener and reattaches its
+cursors before executing. A cancellation sealed while committing the boundary
+turns it into a logical terminal and closes those groups before that terminal
+commits. A terminal path that bypasses the effect loop recovers the same state
+from the owed continuation. Process continuations keep their own lifecycle
+storage; they share the settlement identity vocabulary, not the Run's state.
+
 **Bound retained work per exact logical opener**, including nested,
 accepted-unclaimed, running, closing and **settled-but-still-required** children
 and group metadata. Bounding only *outstanding* work bounds nothing: width-two

@@ -284,6 +284,7 @@ impl LashRuntime {
             TurnStop::PluginAbort,
         );
         Box::pin(self.finish_turn(TurnCommitContext {
+            opener: None,
             finish: TurnFinishInput {
                 turn_pipeline,
                 recorded_assembly,
@@ -465,6 +466,17 @@ impl LashRuntime {
         // continuation counts on from the iterations its run already spent;
         // a turn outside a shift, or one carrying withheld work to the run's
         // follow-on, takes no boundary.
+        let continuation = self
+            .state
+            .pending_follow_on
+            .as_deref()
+            .filter(|owed| owed.is_turn(&trace_turn_id))
+            .and_then(|owed| owed.continuation.as_ref());
+        let opener_state = continuation
+            .map(|owed| crate::session::OpenerState::from_snapshot(owed.opener.clone()))
+            .transpose()
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?
+            .unwrap_or_default();
         let segment = crate::runtime::turn_driver::TurnSegment::new(
             shift_fence.is_some()
                 && self.shift_run.is_some()
@@ -473,11 +485,7 @@ impl LashRuntime {
                     scoped_effect_controller.execution_scope(),
                     crate::ExecutionScope::Turn { .. }
                 ),
-            self.state
-                .pending_follow_on
-                .as_deref()
-                .filter(|owed| owed.is_turn(&trace_turn_id))
-                .and_then(|owed| owed.continuation.as_ref()),
+            continuation,
         );
         let session = self
             .session
@@ -515,7 +523,7 @@ impl LashRuntime {
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
             live_opener: std::sync::Mutex::new(None),
-            opener_state: crate::session::OpenerState::default(),
+            opener_state,
             turn_cancel: None,
             children_stop: CancellationToken::new(),
             turn_observations: super::turn_observation_cursor(
@@ -564,6 +572,7 @@ impl LashRuntime {
                 if let Some(evidence) = honoured {
                     driver.record_turn_cancel(evidence);
                     let cancellation_messages = driver.turn_pipeline.message_sequence();
+                    let opener = driver.take_opener_for_commit(observer)?;
                     let mut driver = driver.reclaim();
                     driver
                         .withheld_terminal_work
@@ -572,6 +581,7 @@ impl LashRuntime {
                     return Box::pin(self.finish_cancelled_turn_after_effect_abort(
                         CancelledTurnFinishContext {
                             driver,
+                            opener,
                             cancellation_messages,
                             finish_scoped_effect_controller: &finish_scoped_effect_controller,
                             shift_fence,
@@ -600,6 +610,7 @@ impl LashRuntime {
                 return Err(err);
             }
         };
+        let opener = driver.take_opener_for_commit(observer)?;
         let driver = driver.reclaim();
         self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
         tracing::debug!(
@@ -626,6 +637,7 @@ impl LashRuntime {
                 .with_follow_on_allowed(follow_on_allowed);
         let finish_result = Box::pin(
             self.finish_turn(TurnCommitContext {
+                opener: Some(opener),
                 finish: TurnFinishInput {
                     turn_pipeline,
                     recorded_assembly: recorded_assembly

@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::TurnId;
+use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 /// Trace a final commit whose head compare-and-set the store rejected,
 /// naming the runtime that attempted it.
@@ -224,6 +225,7 @@ impl CommittedTurn {
 /// handles the settlement runs under.
 pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     pub(in crate::runtime) finish: TurnFinishInput,
+    pub(in crate::runtime) opener: Option<crate::runtime::turn_driver::OpenerForCommit<'run>>,
     pub(in crate::runtime) admissions: &'commit LogicalTurnAdmissions,
     pub(in crate::runtime) scoped_effect_controller: &'commit ScopedEffectController<'run>,
     /// The cancellation the turn recorded honouring, if any: a journaled
@@ -241,6 +243,7 @@ pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
 /// effect loop left behind, handed to the commit phase to settle.
 pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) driver: TurnDriverRemainder,
+    pub(super) opener: crate::runtime::turn_driver::OpenerForCommit<'run>,
     pub(super) cancellation_messages: crate::MessageSequence,
     pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
     pub(super) shift_fence: Option<&'cancel ShiftFence>,
@@ -295,6 +298,7 @@ impl LashRuntime {
         )
         .with_metrics(self.host.core.tracing.metrics().clone());
         self.finish_turn(TurnCommitContext {
+            opener: None,
             finish: TurnFinishInput {
                 segment_boundary: None,
                 turn_pipeline: pipeline,
@@ -312,6 +316,98 @@ impl LashRuntime {
         })
         .await
         .map(|_| ())
+    }
+
+    fn recover_terminal_opener<'run>(
+        &self,
+        pipeline: &TurnBoundary,
+        turn: &TurnId,
+        controller: &ScopedEffectController<'run>,
+        fence: Option<&ShiftFence>,
+        observer: &TurnObserver,
+    ) -> Result<Option<crate::runtime::turn_driver::OpenerForCommit<'run>>, RuntimeError> {
+        let Some(continuation) = pipeline
+            .state()
+            .pending_follow_on
+            .as_deref()
+            .filter(|owed| owed.is_turn(turn))
+            .and_then(|owed| owed.continuation.as_ref())
+        else {
+            return Ok(None);
+        };
+        let opener = crate::session::OpenerState::from_snapshot(continuation.opener.clone())
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        if !opener.holds_groups() {
+            return Ok(None);
+        }
+        let services = self
+            .runtime_session_services_for_turn(fence, pipeline.graph_appends())
+            .map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
+            })?;
+        let session = self.session.as_ref().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                "terminal opener has no session",
+            )
+        })?;
+        let frame = pipeline
+            .state()
+            .current_frame_node_id
+            .clone()
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    "terminal opener has no agent frame",
+                )
+            })?;
+        let messages = crate::tool_dispatch::CheckpointMessageBuffer::default();
+        let context = session
+            .code_execution_context(
+                &self.state.session_id,
+                frame,
+                services.state_service(),
+                services.lifecycle_service(),
+                services.graph_service(),
+                services.model_tool_process_service(),
+                controller.clone(),
+                services.direct_completion_client(controller.clone(), Some(turn.clone())),
+                services.trigger_router(),
+                services.process_engines().clone(),
+                crate::engine::NullObservationSink::arc(),
+                Arc::new(crate::ChronologicalProjection::default()),
+                crate::TurnContext::default(),
+                pipeline
+                    .state()
+                    .process_execution_env_spec(pipeline.state().effective_policy()),
+                messages.clone(),
+                Arc::clone(&self.host.core.attachment_source_policy),
+            )
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ToolCatalogResolutionFailed,
+                    error.to_string(),
+                )
+            })?
+            .with_opener_state(opener)
+            .with_turn_cancel_scope(crate::ExecutionScope::turn(
+                self.state.session_id.clone(),
+                turn.clone(),
+            ));
+        let context = match crate::runtime::turn_driver::register_live_opener(
+            &self.host,
+            controller,
+            context.dispatch(),
+            observer,
+            CancellationToken::new(),
+        ) {
+            Some(guard) => context.with_live_opener_guard(Arc::new(guard)),
+            None => context,
+        };
+        Ok(Some(crate::runtime::turn_driver::OpenerForCommit {
+            context: Some(context),
+            messages,
+        }))
     }
 
     /// Commit one physical turn. A stopped turn's terminal, held since the
@@ -353,6 +449,7 @@ impl LashRuntime {
         let termination = self.recorded_termination()?;
         let TurnCommitContext {
             finish,
+            opener,
             admissions,
             scoped_effect_controller,
             honoured_cancel,
@@ -368,7 +465,7 @@ impl LashRuntime {
         let TurnFinishInput {
             mut turn_pipeline,
             recorded_assembly: assembly,
-            new_messages,
+            mut new_messages,
             turn_index,
             trace_turn_id,
             segment_boundary,
@@ -500,6 +597,52 @@ impl LashRuntime {
         // cancel races a successor shift, the final commit's shift fence and
         // head CAS are the arbiters.
         let interrupted = cancellation.is_some();
+        if segment_boundary.is_none() || interrupted {
+            let opener = match opener {
+                Some(opener) => Some(opener),
+                None => self.recover_terminal_opener(
+                    &turn_pipeline,
+                    &trace_turn_id,
+                    scoped_effect_controller,
+                    shift_fence,
+                    observer,
+                )?,
+            };
+            if let Some(opener) = opener {
+                let mut facts = opener.close().await?;
+                crate::runtime::turn_driver::normalize_plugin_message_attachments(
+                    &mut facts,
+                    self.host.core.durability.attachment_store.as_ref(),
+                    self.host.core.attachment_source_policy.as_ref(),
+                )
+                .await?;
+                if !facts.is_empty() && new_messages.is_empty() {
+                    new_messages = turn_pipeline.message_sequence();
+                }
+                let mut appended = Vec::new();
+                for (ordinal, fact) in facts.into_iter().enumerate() {
+                    if !matches!(fact.role, MessageRole::User | MessageRole::System) {
+                        continue;
+                    }
+                    let id = format!("{trace_turn_id}:opener-end:{ordinal}");
+                    let mut parts = fact.parts;
+                    reassign_part_ids(&id, &mut parts);
+                    appended.push(Message {
+                        reply_marker: None,
+                        id,
+                        role: fact.role,
+                        parts: shared_parts(parts),
+                        origin: fact.origin.or_else(|| {
+                            Some(crate::MessageOrigin::Plugin {
+                                plugin_id: "plugin".to_string(),
+                                transient: false,
+                            })
+                        }),
+                    });
+                }
+                new_messages.extend(appended);
+            }
+        }
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
         let turn_trace = self.host.core.tracing.turn_execution(
@@ -832,6 +975,7 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let CancelledTurnFinishContext {
             driver,
+            opener,
             cancellation_messages,
             finish_scoped_effect_controller,
             shift_fence,
@@ -874,6 +1018,7 @@ impl LashRuntime {
         let admissions = LogicalTurnAdmissions::new(pending_queued, pending_turn_inputs)
             .with_undelivered(withheld_terminal_work);
         Box::pin(self.finish_turn(TurnCommitContext {
+            opener: Some(opener),
             finish: TurnFinishInput {
                 segment_boundary: None,
                 turn_pipeline,
@@ -1000,6 +1145,7 @@ impl LashRuntime {
         .with_metrics(self.host.core.tracing.metrics().clone());
         turn_pipeline.apply_prepared_messages(&messages);
         Box::pin(self.finish_turn(TurnCommitContext {
+            opener: None,
             finish: TurnFinishInput {
                 segment_boundary: None,
                 turn_pipeline,

@@ -220,13 +220,20 @@ pub(super) fn follow_on_after_turn(
                     format!("the continuation of `{turn_id}` requires the frame the turn ran in"),
                 )
             })?;
+            let captured = segment_boundary.ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    "a segment boundary requires its logical opener's captured state",
+                )
+            })?;
             (
                 frame_id,
                 String::new(),
                 Some(crate::store::RunContinuation {
                     reason: *reason,
-                    protocol_iterations: segment_boundary.map_or(0, |taken| taken.iterations),
-                    cell: segment_boundary.and_then(|taken| taken.cell.clone()),
+                    protocol_iterations: captured.iterations,
+                    cell: captured.cell.clone(),
+                    opener: captured.opener.clone(),
                 }),
                 owed.map_or(0, |owed| owed.chain_depth),
             )

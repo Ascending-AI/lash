@@ -2,7 +2,9 @@ use super::*;
 use crate::runtime::turn_control::ActiveTurnControl;
 
 mod context;
+pub(in crate::runtime) use context::register_live_opener;
 mod effects;
+pub(in crate::runtime) use effects::normalize_plugin_message_attachments;
 mod events;
 mod failures;
 mod handlers;
@@ -10,6 +12,7 @@ mod lease;
 mod local_effects;
 mod machine;
 mod opener_groups;
+pub(in crate::runtime) use opener_groups::OpenerForCommit;
 mod segment;
 pub(in crate::runtime) use segment::{BoundaryTaken, TurnSegment};
 mod streaming;
@@ -84,8 +87,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// Registered the first time the turn builds a tool-execution context and
     /// re-registered on each later one, so a tool child of a group this turn
     /// opened borrows the turn's *current* live context. Deregistered when the
-    /// guard is released at the end of `run`, after the turn's end has closed
-    /// and finalized every group the turn held (ADR 0099 §7): finalization may
+    /// guard is released at the end of `run`. A segment boundary registers
+    /// again through its commit decision, and its continuation registers the
+    /// same logical opener. A terminal closes and finalizes every held group
+    /// before committing (ADR 0099 §7): finalization may
     /// have to run a child no process is running, and that child resolves its
     /// executor through this registration.
     pub(super) live_opener: std::sync::Mutex<Option<crate::facade_support::LiveOpenerGuard>>,

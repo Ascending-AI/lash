@@ -641,7 +641,7 @@ impl RuntimeTurnDriver<'_> {
     }
 }
 
-async fn normalize_plugin_message_attachments(
+pub(in crate::runtime) async fn normalize_plugin_message_attachments(
     messages: &mut [crate::PluginMessage],
     attachment_store: &crate::RuntimeAttachmentStore,
     policy: &dyn crate::AttachmentSourcePolicy,

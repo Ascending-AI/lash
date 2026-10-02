@@ -127,37 +127,50 @@ impl<'run> RuntimeTurnDriver<'run> {
         dispatch: &std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
         stream_event_tx: &TurnObserver,
     ) {
-        let Some(tool_children) = self.host.core.control.tool_children.as_ref() else {
-            return;
-        };
-        let Some(opener) = crate::facade_support::opener_for_execution_scope(
-            self.scoped_effect_controller.admitted_scope(),
-        ) else {
-            return;
-        };
-        let Ok(Some(lent_controller)) = self
-            .host
-            .core
-            .control
-            .effect_host
-            .scoped_static(self.scoped_effect_controller.admitted_scope().clone())
-        else {
-            return;
-        };
-        let ended = CancellationToken::new();
-        let gate = {
-            let ended = ended.clone();
-            move || !ended.is_cancelled()
-        };
-        let context = crate::facade_support::LiveOpenerContext::capture_with_observer(
-            dispatch.as_ref(),
-            lent_controller,
-            crate::engine::GatedObservationSink::new(gate, Arc::new(stream_event_tx.clone())),
+        if let Some(registration) = register_live_opener(
+            &self.host,
+            &self.scoped_effect_controller,
+            dispatch,
+            stream_event_tx,
             self.children_stop.clone(),
-        );
-        let registration = tool_children
-            .openers()
-            .register_with_token(opener, context, ended);
-        *self.live_opener.lock_recover() = Some(registration);
+        ) {
+            *self.live_opener.lock_recover() = Some(registration);
+        }
     }
+}
+
+pub(in crate::runtime) fn register_live_opener(
+    host: &RuntimeHost,
+    scoped_effect_controller: &ScopedEffectController<'_>,
+    dispatch: &Arc<crate::tool_dispatch::ToolDispatchContext<'_>>,
+    stream_event_tx: &TurnObserver,
+    children_stop: CancellationToken,
+) -> Option<crate::facade_support::LiveOpenerGuard> {
+    let tool_children = host.core.control.tool_children.as_ref()?;
+    let opener = crate::facade_support::opener_for_execution_scope(
+        scoped_effect_controller.admitted_scope(),
+    )?;
+    let Ok(Some(lent_controller)) = host
+        .core
+        .control
+        .effect_host
+        .scoped_static(scoped_effect_controller.admitted_scope().clone())
+    else {
+        return None;
+    };
+    let ended = CancellationToken::new();
+    let gate = {
+        let ended = ended.clone();
+        move || !ended.is_cancelled()
+    };
+    let context = crate::facade_support::LiveOpenerContext::capture_with_observer(
+        dispatch.as_ref(),
+        lent_controller,
+        crate::engine::GatedObservationSink::new(gate, Arc::new(stream_event_tx.clone())),
+        children_stop,
+    );
+    let registration = tool_children
+        .openers()
+        .register_with_token(opener, context, ended);
+    Some(registration)
 }

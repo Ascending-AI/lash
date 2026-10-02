@@ -71,9 +71,8 @@ impl RuntimeTurnDriver<'_> {
     /// context's forwarder publishes a child's events into this turn's
     /// observer, and an opener still registered when the run ends would keep
     /// publishing into a turn whose observation stream has closed.
-    /// This is still "registered until the opener settles" in ADR 0099 §2's
-    /// sense: on today's path the effect loop *is* the turn, and the durable
-    /// live-to-closing transition of §7 does not exist yet.
+    /// A segment boundary releases this physical turn's registration while
+    /// its continuation retains the logical opener's live groups.
     pub(in crate::runtime) async fn run(
         &mut self,
         messages: crate::MessageSequence,

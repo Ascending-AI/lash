@@ -678,13 +678,13 @@ pub mod persistence {
         HydratedCheckpointComponent, HydratedSessionCheckpoint, InterruptedTurnClosure,
         OperationId, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
         ParkId, ParkReason, ParkReasonCode, ParkReport, PendingFollowOn, PhysicalTurn, ProcessPark,
-        ProcessParkKey, ProcessParkQuery, RunContinuation, RuntimeCommit, RuntimeCommitReceipt,
-        RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
-        SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, SuspendedCell, TurnChange,
-        TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause,
-        TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery, TurnParkTarget, TurnParkWrite,
-        TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        validate_turn_commit_outcome_code,
+        ProcessParkKey, ProcessParkQuery, RunContinuation, RunOpenerGroup, RunOpenerState,
+        RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator, RuntimeTurnCommitStamp,
+        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+        SuspendedCell, TurnChange, TurnChangeCursor, TurnChangeKind, TurnChangePage,
+        TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkOrigin, TurnParkQuery,
+        TurnParkTarget, TurnParkWrite, TurnProjectionWatermark, UnparkCause, UnsettledTurnCounts,
+        commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical run's durable terminal evidence and the store segment that
     /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the

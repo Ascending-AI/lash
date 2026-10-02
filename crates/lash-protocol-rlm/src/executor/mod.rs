@@ -1173,9 +1173,6 @@ async fn suspend_cell(
         host: host.ledgers(),
         cell_tool_calls: ctx.cell_tool_calls_snapshot(),
         started_process_ids: ctx.started_process_ids(),
-        incorporation_ledger: ctx.incorporation_ledger_snapshot(),
-        outstanding_groups: ctx.outstanding_groups_snapshot(),
-        held_tool_calls: ctx.held_tool_calls_snapshot(),
     };
     state.suspend_cell(segment.encode()?);
     Ok(())

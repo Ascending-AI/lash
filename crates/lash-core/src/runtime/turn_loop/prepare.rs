@@ -148,6 +148,7 @@ impl LashRuntime {
                 .with_metrics(self.host.core.tracing.metrics().clone());
                 turn_pipeline.apply_prepared_messages(&messages);
                 return Box::pin(self.finish_turn(TurnCommitContext {
+                    opener: None,
                     finish: TurnFinishInput {
                         segment_boundary: None,
                         turn_pipeline,

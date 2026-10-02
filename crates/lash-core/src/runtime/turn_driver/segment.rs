@@ -21,6 +21,7 @@ pub(in crate::runtime) struct BoundaryTaken {
     /// The code cell the boundary stopped inside, which the continuation
     /// issues again.
     pub(in crate::runtime) cell: Option<crate::store::SuspendedCell>,
+    pub(in crate::runtime) opener: crate::store::RunOpenerState,
 }
 
 /// What a turn carries for its run's segment boundaries.
@@ -112,6 +113,7 @@ impl RuntimeTurnDriver<'_> {
         self.segment.taken = Some(BoundaryTaken {
             iterations: self.segment.spent_through(iteration, run_offset),
             cell: None,
+            opener: self.opener_state.snapshot(),
         });
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary { reason });
         Ok(true)
@@ -161,6 +163,7 @@ impl RuntimeTurnDriver<'_> {
                 .segment
                 .spent_through(machine.protocol_iteration(), run_offset),
             cell: Some(cell),
+            opener: self.opener_state.snapshot(),
         });
         machine.finish_with_outcome(TurnOutcome::SegmentBoundary {
             reason: crate::BoundaryReason::HandOver,

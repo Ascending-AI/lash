@@ -137,6 +137,54 @@ impl OpenerState {
         self.ledger.lock_recover().absorb(ledger);
     }
 
+    /// Capture the logical Run's state without closing or consuming a group.
+    #[must_use]
+    pub fn snapshot(&self) -> crate::store::RunOpenerState {
+        let registry = self.groups.lock_recover();
+        crate::store::RunOpenerState {
+            incorporation: self.ledger_snapshot(),
+            groups: registry
+                .outstanding
+                .iter()
+                .map(|handle| crate::store::RunOpenerGroup {
+                    group_key: handle.group_key().to_string(),
+                    children: handle.children(),
+                    consumed: handle.consumed(),
+                    held_tool_calls: registry
+                        .reserved
+                        .get(handle.group_key())
+                        .copied()
+                        .unwrap_or(0),
+                })
+                .collect(),
+        }
+    }
+
+    /// Reattach a continuation's groups before the successor executes. A
+    /// malformed cursor refuses recovery rather than losing a held group.
+    pub fn from_snapshot(
+        snapshot: crate::store::RunOpenerState,
+    ) -> Result<Self, RuntimeEffectControllerError> {
+        let mut registry = OpenerGroupRegistry::default();
+        for group in snapshot.groups {
+            let handle = crate::EffectGroupHandle::restored(
+                group.group_key,
+                group.children,
+                group.consumed,
+            )?;
+            if group.held_tool_calls != 0 {
+                registry
+                    .reserved
+                    .insert(handle.group_key().to_string(), group.held_tool_calls);
+            }
+            registry.outstanding.push(handle);
+        }
+        Ok(Self {
+            ledger: Arc::new(std::sync::Mutex::new(snapshot.incorporation)),
+            groups: Arc::new(std::sync::Mutex::new(registry)),
+        })
+    }
+
     /// Whether the opener still holds a group cursor its end must close.
     #[must_use]
     pub fn holds_groups(&self) -> bool {

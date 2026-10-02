@@ -594,7 +594,7 @@ async fn a_cancel_after_the_hand_over_reaches_the_continuation(storage: Storage)
 
 /// The double over `storage` with one build, whose run invocations end
 /// after `budget` effects.
-async fn budget_world(storage: Storage, budget: u64) -> World {
+pub(super) async fn budget_world(storage: Storage, budget: u64) -> World {
     let (opening, keep) = prepare(storage).await;
     let lever = DrainLever::default();
     let opened = lever.clone();

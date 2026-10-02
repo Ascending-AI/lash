@@ -80,14 +80,46 @@ pub struct RunContinuation {
     /// protocol steps, whose continuation asks the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cell: Option<SuspendedCell>,
+    /// The logical opener's groups and incorporation ledger. Every physical
+    /// boundary carries them, including a boundary between code cells.
+    pub opener: RunOpenerState,
+}
+
+/// The logical Run's opener state transferred by a physical boundary.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunOpenerState {
+    /// The settlements already incorporated by any earlier cell or segment.
+    pub incorporation: crate::effect_opener::IncorporationLedger,
+    /// Groups whose consumers stopped before exhaustion, in formation order.
+    pub groups: Vec<RunOpenerGroup>,
+}
+
+/// A retained group's consumer cursor and tool-call reservation.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunOpenerGroup {
+    /// The durable group's identity, reused by the successor.
+    pub group_key: String,
+    /// The group's fixed number of children.
+    pub children: usize,
+    /// The settled prefix the consumer has already consumed.
+    pub consumed: usize,
+    /// The tool-call reservation this group continues to hold.
+    pub held_tool_calls: usize,
 }
 
 /// A code cell a segment boundary stopped inside (FIG-4739): what the turn's
 /// machine was waiting on, so the continuation's machine waits on it again.
 ///
-/// The cell's own state — the VM continuation and every ledger its host
-/// holds — is the protocol plugin's, committed with the session's execution
-/// state by the boundary's commit. This record carries only what the turn
+/// The cell's own state — the VM continuation and its cell-local ledgers —
+/// is the protocol plugin's, committed with the session's execution state by
+/// the boundary's commit. The Run's opener state lives beside this record
+/// in its continuation. This record carries only what the turn
 /// machine held: the cell and the protocol driver's state for it.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

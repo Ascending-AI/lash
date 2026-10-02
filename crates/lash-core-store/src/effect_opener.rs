@@ -29,6 +29,7 @@
 //! nothing parses either back.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use crate::admitted_scope::AdmittedScope;
 use crate::{SessionId, TurnId};
@@ -37,6 +38,46 @@ use crate::{SessionId, TurnId};
 /// encoding is a stable-identity preimage (tool-call admissions and stored
 /// scope ids derive from it), so its bytes are kept as first written.
 const SESSION_OPERATION_TAG: &str = "drain:";
+
+/// Which recorded settlement is being incorporated — its once-only identity
+/// (ADR 0099 §6).
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub enum SettlementSource {
+    /// A scalar or batch tool call the opener admitted live, named by its
+    /// lash-minted identity.
+    Invocation { call_id: lash_sansio::ToolCallId },
+    /// Rank `rank` of durable effect group `group_key`, settled by child
+    /// `child_replay_key`.
+    GroupRank {
+        group_key: String,
+        rank: u64,
+        child_replay_key: String,
+    },
+}
+
+/// What the opener has incorporated so far: the once-only set. Travels with
+/// its owner's segment handover. A Run carries it in its kernel continuation;
+/// a process carries it in its own continuation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct IncorporationLedger {
+    pub incorporated: BTreeSet<SettlementSource>,
+}
+
+impl IncorporationLedger {
+    /// Whether nothing has been incorporated.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.incorporated.is_empty()
+    }
+
+    /// Adopt everything `other` incorporated. Incorporation only ever grows a
+    /// ledger, so a restored snapshot is merged, never assigned.
+    pub fn absorb(&mut self, other: Self) {
+        self.incorporated.extend(other.incorporated);
+    }
+}
 
 /// The exact logical opener that durable work binds (ADR 0099 §1).
 ///

@@ -9,9 +9,10 @@
 //! it stopped on again and runs on as if it had never stopped.
 //!
 //! What a process segment hands over, a cell hands over too: the VM
-//! continuation, the command ordinals, the started children, the
-//! incorporation ledger and the held groups. A cell owns more than a process
-//! body does, and all of it is plain data: its prints and printed images,
+//! continuation, the command ordinals and the started children. The kernel's
+//! Run continuation carries the opener's incorporation ledger and held groups.
+//! A cell owns more than a process body does, and all of it is plain data:
+//! its prints and printed images,
 //! the calls it made, the tool calls it counts against `max_tool_calls`, and
 //! everything it linked against, which its journal recorded before its first
 //! effect — the binding set, the projected bindings, the host environment
@@ -93,9 +94,6 @@ pub(super) struct CellSegmentState {
     /// The tool calls the cell has made, by group key (FIG-4546).
     pub cell_tool_calls: BTreeMap<String, usize>,
     pub started_process_ids: Vec<lash_core::ProcessId>,
-    pub incorporation_ledger: lash_core::session::IncorporationLedger,
-    pub outstanding_groups: Vec<lash_core::EffectGroupHandle>,
-    pub held_tool_calls: BTreeMap<String, usize>,
 }
 
 impl CellSegmentState {
@@ -129,21 +127,6 @@ impl CellSegmentState {
     /// The parent ledgers of `ctx` a boundary hands over.
     pub(super) fn restore_context(&self, ctx: &RuntimeExecutionContext<'_>) {
         ctx.restore_started_process_ids(&self.started_process_ids);
-        ctx.restore_incorporation_ledger(self.incorporation_ledger.clone());
         ctx.restore_cell_tool_calls(self.cell_tool_calls.clone());
-        ctx.restore_outstanding_groups(
-            self.outstanding_groups
-                .iter()
-                .filter_map(|handle| {
-                    lash_core::EffectGroupHandle::restored(
-                        handle.group_key(),
-                        handle.children(),
-                        handle.consumed(),
-                    )
-                    .ok()
-                })
-                .collect(),
-            &self.held_tool_calls,
-        );
     }
 }
