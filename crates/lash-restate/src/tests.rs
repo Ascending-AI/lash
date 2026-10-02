@@ -1566,6 +1566,7 @@ mod indexed_waits;
 mod ingress_recovery;
 mod observer_intent_on_the_double;
 mod postgres_ingress;
+mod process_attach_wait_end;
 mod process_await_redrive;
 mod process_cancel_race;
 mod process_cancel_race_sdk;

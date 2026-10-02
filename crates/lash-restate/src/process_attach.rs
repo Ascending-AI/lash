@@ -24,19 +24,31 @@
 //! edge on every stored attachment the terminal delivers, in a journaled step
 //! (ADR 0124): the waiter records the value only after it holds what the
 //! value names, so the process's own edges may end once the key resolves.
+//!
+//! The workflow lives as long as the wait it serves, not as long as the
+//! process. It registers a watch on its wait with the wait's index and races
+//! the terminal against it: a wait that ends first, cancelled, timed out or
+//! closed by its call's cancel decision, ends the workflow, which cancels its
+//! own terminal read. A process nothing will ever end, or one its caller
+//! chose to leave running, therefore holds no waiter for a caller that is
+//! gone.
 
 use std::sync::Arc;
 
 use lash_core::runtime::attachment_delivery::{DeliveryAcquisition, source_gone_output};
 use lash_core::{AwaitEventKey, ProcessAwaitOutput, ProcessId, Resolution};
-use restate_sdk::context::WorkflowContext;
-use restate_sdk::errors::HandlerResult;
+use restate_sdk::context::{
+    CallFuture as _, ContextAwakeables as _, ContextClient as _, WorkflowContext,
+};
+use restate_sdk::errors::{HandlerResult, TerminalError};
+use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::compat::{Call, Reply};
 use crate::controller::RestateControllerContext as _;
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
+    LASH_REPLAY_KEY_HEADER, RestateDurableWaitAddress, RestateDurableWaitAwakeableRequest,
+    RestateDurableWaitRegistration, RestateDurableWaitResolveRequest, RestateTurnCancelWake,
     durable_wait_index_object_key,
 };
 
@@ -103,15 +115,53 @@ impl LashProcessAttach for LashProcessAttachImpl {
     ) -> HandlerResult<Reply<()>> {
         let (wire, request) = call.open()?;
         let RestateProcessAttachRequest { process_id, key } = request;
+        let replay_key = key.key_id.clone();
+        let address = RestateDurableWaitAddress::for_key(&key);
+        let index_key = durable_wait_index_object_key(&address);
+        // Watch the wait before reading the terminal: the index wakes the
+        // watch however the wait ends, and at once for a wait that already
+        // ended, so no terminal read outlives the wait it would resolve.
+        let (awakeable_id, wait_ended) = ctx.awakeable::<Json<RestateTurnCancelWake>>();
+        let watch = RestateDurableWaitAwakeableRequest {
+            key: key.clone(),
+            awakeable_id,
+        };
+        let registration = self
+            .namespace
+            .durable_wait_registry(&ctx, index_key.clone())
+            .register_awakeable(watch.clone())
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone())
+            .call()
+            .await?
+            .into_body();
+        if registration == RestateDurableWaitRegistration::Revoked {
+            return Ok(Reply::at(wire, ()));
+        }
         // The terminal lives on the stable root, whatever lane the process's
         // last segment ran under (FIG-3795).
-        let output = crate::process::await_terminal_on_stable_root(
+        let terminal = crate::process::await_terminal_on_stable_root(
             &ctx,
             &self.namespace,
             process_id.clone(),
         )
-        .call()
-        .await;
+        .call();
+        let terminal_read = terminal
+            .invocation_handle()
+            .await?
+            .invocation_id()
+            .to_owned();
+        // The wait's end is listed first: with both ready, a terminal nobody
+        // is left to receive is not acquired for them.
+        let output = restate_sdk::select! {
+            wake = wait_ended => {
+                wake?;
+                // The read is this workflow's own call, so it ends here with
+                // the workflow.
+                ctx.invocation_handle(terminal_read).cancel();
+                return Ok(Reply::at(wire, ()));
+            },
+            output = terminal => output,
+        };
         // A terminal is a fact, not an error of the wait: a failed or cancelled
         // process resolves its waiters successfully with that terminal as the
         // value, exactly as the inline await path returns it.
@@ -121,7 +171,17 @@ impl LashProcessAttach for LashProcessAttachImpl {
                 let delivered = match self.acquire_delivered(&ctx, &key, &output).await? {
                     DeliveryAcquisition::Held => Ok(output),
                     DeliveryAcquisition::SourceGone { digest } => Ok(source_gone_output(&digest)),
-                    DeliveryAcquisition::ReceiverEnded { .. } => return Ok(Reply::at(wire, ())),
+                    DeliveryAcquisition::ReceiverEnded { .. } => {
+                        // Nothing resolves the key, so nothing else drops
+                        // the watch.
+                        self.namespace
+                            .durable_wait_registry(&ctx, index_key)
+                            .unregister_awakeable(watch)
+                            .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
+                            .call()
+                            .await?;
+                        return Ok(Reply::at(wire, ()));
+                    }
                     DeliveryAcquisition::Refused { refusal } => Err(refusal),
                 };
                 match delivered {
@@ -151,14 +211,13 @@ impl LashProcessAttach for LashProcessAttachImpl {
                 raw: None,
             }),
         };
-        let replay_key = key.key_id.clone();
-        let address = RestateDurableWaitAddress::for_key(&key);
         // Resolve through the index rather than the wait workflow directly: the
         // index retains the resolution for a registration that has not happened
         // yet, so a terminal that beats the parked turn's registration is not
-        // lost.
+        // lost. The resolve ends the wait, so it also drops this workflow's
+        // watch.
         self.namespace
-            .durable_wait_registry(&ctx, durable_wait_index_object_key(&address))
+            .durable_wait_registry(&ctx, index_key)
             .resolve(RestateDurableWaitResolveRequest { key, resolution })
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()

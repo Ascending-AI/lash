@@ -454,9 +454,13 @@ impl World {
         }
     }
 
+    /// The index's row for `address`'s wait: its registration or retained
+    /// resolution. The attach's watch on the wait lives in the index's
+    /// metadata, and is not the wait.
     async fn registry_state(&self, address: &RestateDurableWaitAddress) -> Vec<String> {
         let object_key = durable_wait_index_object_key(address);
-        match &self.engine {
+        let wait_row = crate::durable_wait::durable_wait_index_state_key(address);
+        let keys: Vec<String> = match &self.engine {
             Engine::Double(engine) => engine
                 .server()
                 .object_state("LashDurableWaitIndex", &object_key)
@@ -473,7 +477,8 @@ impl World {
                 let rows: Vec<Row> = admin.query_json(&format!("SELECT key FROM state WHERE service_name = 'LashDurableWaitIndex' AND service_key = '{}'", object_key.replace('\'', "''"))).await.expect("wait registry state");
                 rows.into_iter().map(|row| row.key).collect()
             }
-        }
+        };
+        keys.into_iter().filter(|key| *key == wait_row).collect()
     }
 }
 

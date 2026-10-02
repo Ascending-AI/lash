@@ -429,6 +429,32 @@ fn revoke_durable_wait_awakeable(
         Json(RestateTurnCancelWake::SessionRevoked),
     );
 }
+
+/// Wake and drop every awakeable entry watching a wait `ended` selects,
+/// because that wait has ended with `resolution`. Answers whether an entry
+/// was dropped, so the caller stores the metadata it changed.
+///
+/// An entry is owed its wake by every way its wait can end: a resolve, a
+/// settle, its owning group child's cancel decision and a cancellation of
+/// the scope's waits. A watcher left unwoken outlives the wait it watches;
+/// a process attach would then hold its terminal read for a caller that is
+/// gone.
+fn wake_ended_waits(
+    ctx: &ObjectContext<'_>,
+    metadata: &mut RestateDurableWaitIndexMetadata,
+    resolution: &Resolution,
+    mut ended: impl FnMut(&AwaitEventKey) -> bool,
+) -> bool {
+    let before = metadata.awakeables.len();
+    metadata.awakeables.retain(|entry| {
+        let ended = ended(&entry.key);
+        if ended {
+            resolve_durable_wait_awakeable(ctx, entry, resolution);
+        }
+        !ended
+    });
+    metadata.awakeables.len() != before
+}
 pub(crate) fn restate_durable_wait_request(
     key: &AwaitEventKey,
     deadline: Option<std::time::Instant>,
@@ -1290,7 +1316,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let (wire, request) = call.open()?;
         let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
             return Ok(Reply::at(wire, ()));
         }
@@ -1300,6 +1326,21 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             // attach must not restore a session-lifetime index row.
             ctx.clear(&durable_wait_index_state_key(&address));
             return Ok(Reply::at(wire, ()));
+        }
+        // A wait that ended inside its own workflow, on its deadline or its
+        // invocation's cancel, reaches the index only here. A turn-control
+        // gate settles its entries through `resolve`.
+        if !request.key.wait.is_turn_control()
+            && wake_ended_waits(&ctx, &mut metadata, &request.resolution, |key| {
+                *key == request.key
+            })
+        {
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                object.writer,
+                metadata,
+            );
         }
         store_indexed_wait(
             &ctx,
@@ -1322,6 +1363,12 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
             return Ok(Reply::at(wire, RestateDurableWaitRegistration::Revoked));
+        }
+        // A key its owning group child's cancel decision closed has ended,
+        // whether or not its wait ever registered: no resolve of it lands.
+        if metadata.is_cancel_decided(&request.key.scope, &request.key.wait)? {
+            resolve_durable_wait_awakeable(&ctx, &request, &Resolution::Cancelled);
+            return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
         }
         if let Some(resolution) = object_state::get_stamped::<IndexedWait>(
             &ctx,
@@ -1458,15 +1505,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 RestateDurableWaitResolveResponse::Outcome(outcome),
             ));
         }
-        let mut retained = Vec::with_capacity(metadata.awakeables.len());
-        for entry in std::mem::take(&mut metadata.awakeables) {
-            if entry.key == request.key {
-                resolve_durable_wait_awakeable(&ctx, &entry, &settled);
-            } else {
-                retained.push(entry);
-            }
-        }
-        metadata.awakeables = retained;
+        wake_ended_waits(&ctx, &mut metadata, &settled, |key| *key == request.key);
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -1502,7 +1541,14 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         } else {
             id
         };
-        if !metadata.revoked && metadata.cancel_decided.insert(id) {
+        if metadata.revoked {
+            return Ok(Reply::at(wire, ()));
+        }
+        // The closed key's wait is over, parked or not: wake what watches it.
+        let woke = wake_ended_waits(&ctx, &mut metadata, &Resolution::Cancelled, |key| {
+            key.scope == request.scope && key.wait == request.wait
+        });
+        if metadata.cancel_decided.insert(id) || woke {
             object_state::set_stamped(
                 &ctx,
                 DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -1516,7 +1562,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn cancel_all(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
         let (wire, ()) = call.open()?;
         let object = self.admit(&ctx).await?;
-        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let (waits, _controls) = split_cancellable_waits(
             load_indexed_waits(&ctx)
                 .await?
@@ -1524,6 +1570,16 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 .map(|wait| wait.key)
                 .collect(),
         );
+        if wake_ended_waits(&ctx, &mut metadata, &Resolution::Cancelled, |key| {
+            waits.contains(key)
+        }) {
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                object.writer,
+                metadata,
+            );
+        }
         resolve_indexed_waits(&ctx, object.writer, &self.namespace, waits, true).await?;
         Ok(Reply::at(wire, ()))
     }

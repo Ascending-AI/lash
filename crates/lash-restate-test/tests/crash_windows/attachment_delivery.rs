@@ -393,6 +393,29 @@ impl Harness {
             }
         }
     }
+    /// `invocation` journaled no `name` step.
+    async fn assert_no_run(&self, invocation: &str, name: &str) {
+        let steps = match self {
+            Self::Double(backend) => backend
+                .server()
+                .journal(invocation)
+                .unwrap()
+                .iter()
+                .filter(|entry| {
+                    entry.ty == MessageType::RunCommand
+                        && entry.name.as_deref().is_some_and(|n| n.contains(name))
+                })
+                .count(),
+            Self::Live { backend, .. } => backend
+                .journal(invocation)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.contains(name))
+                .count(),
+        };
+        assert_eq!(steps, 0, "no journaled `{name}` step");
+    }
     async fn handler_id(&self) -> String {
         match self {
             Self::Double(backend) => {
@@ -828,10 +851,13 @@ async fn delivery_law(storage: Storage, live: bool) {
             .iter()
             .filter(|r| *r == &claim.referrer())
             .count();
+        // The attach lives as long as the wait it serves: the receiver's
+        // retirement ended it before the producer's terminal, so it acquires
+        // nothing for a receiver that is gone.
         assert_eq!(
             attempts,
-            if case == 2 { 2 } else { 1 },
-            "only StorageFailure retries"
+            if case == 2 { 2 } else { 0 },
+            "only StorageFailure retries, and a retired receiver is never attempted"
         );
         if case == 2 {
             let resolution = harness
@@ -845,13 +871,15 @@ async fn delivery_law(storage: Storage, live: bool) {
                 lash_core::Resolution::Ok(serde_json::to_value(&terminal).unwrap())
             );
         }
-        harness
-            .assert_run(
-                attach.as_str(),
-                "process-attach-acquire",
-                (case == 2).then_some(&terminal),
-            )
-            .await;
+        if case == 2 {
+            harness
+                .assert_run(attach.as_str(), "process-attach-acquire", Some(&terminal))
+                .await;
+        } else {
+            harness
+                .assert_no_run(attach.as_str(), "process-attach-acquire")
+                .await;
+        }
         drop(core);
         harness.finish().await;
     }
