@@ -867,7 +867,7 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
     .map_session_store_factory(|_| store_factory)
     .map_worker_recovery(|_| worker_recovery.clone())
     .into_backend();
-    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+    let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         backend,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
@@ -879,10 +879,12 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
                 recovery_artifact_store(),
                 lash_lashlang_runtime::LashlangSurface::default(),
                 worker_recovery,
-            )
-            .with_execution_trace(trace_sink, lash_trace::TraceContext::default()),
+            ),
         ),
     );
+    if let Some(sink) = trace_sink {
+        runtime_host.tracing = runtime_host.tracing.clone().with_product_observer(sink);
+    }
     DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(plugin_host),
         runtime_host,

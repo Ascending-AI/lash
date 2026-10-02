@@ -1027,7 +1027,6 @@ async fn run_seed_probe_inner(
     let execution_sink: Option<Arc<dyn lash_core::facade_support::TraceSink>> = graph_store
         .as_ref()
         .map(|store| Arc::clone(store) as Arc<dyn lash_core::facade_support::TraceSink>);
-    let trace_context = lash_core::TraceContext::default();
     let language_features = LashlangLanguageFeatures::default().with_label_annotations();
     // The probe's every port lives on the Restate double (D1 F2): the engine
     // drives the spawned SessionTurn processes through the worker installed
@@ -1036,6 +1035,10 @@ async fn run_seed_probe_inner(
         .await
         .expect("build the Restate server double");
     let backend: lash_core::Backend = double.lash_backend();
+    let mut tracing = lash_core::trace::TraceRuntime::new(backend.clock());
+    if let Some(sink) = execution_sink {
+        tracing = tracing.with_product_observer(sink);
+    }
     // The RLM protocol plugin (which compiles + stores the parent turn's process
     // artifacts) and the process engine that the worker runs those artifacts
     // through must share ONE artifact store; otherwise the worker cannot load the
@@ -1053,7 +1056,6 @@ async fn run_seed_probe_inner(
                     .with_lashlang_language_features(language_features), std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
                 &backend,
             )
-            .with_lashlang_execution_trace(execution_sink.clone(), trace_context.clone())
             // This harness assembles the plugin host and process engine by hand
             // (no core install step records lifecycle availability), so declare
             // it explicitly: the worker below runs real processes.
@@ -1073,7 +1075,7 @@ async fn run_seed_probe_inner(
         ),
     ];
     let registry = backend.process_registry();
-    let host_plugins = PluginHost::new(factories.clone());
+    let host_plugins = PluginHost::new(factories.clone()).with_trace_runtime(tracing.clone());
     let process_abilities = LashlangAbilities::default().with_sleep();
     let mut extensions = host_plugins.extensions().clone();
     extensions.insert(
@@ -1094,14 +1096,11 @@ async fn run_seed_probe_inner(
     )
     .with_plugin_extensions(&extensions)
     .expect("process lashlang surface should merge plugin extensions");
-    let process_engine = Arc::new(
-        LashlangProcessEngine::new(
-            artifact_store.clone(),
-            process_surface,
-            backend.worker_recovery(),
-        )
-        .with_execution_trace(execution_sink, trace_context),
-    );
+    let process_engine = Arc::new(LashlangProcessEngine::new(
+        artifact_store.clone(),
+        process_surface,
+        backend.worker_recovery(),
+    ));
     let plugins = host_plugins
         .with_extensions(extensions)
         .build_session(PluginSessionRequest::creation("root", Default::default()))
@@ -1112,6 +1111,7 @@ async fn run_seed_probe_inner(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
+        config.tracing = tracing.clone();
         config.providers.models = lash_core::testing::standard_test_llm_profiles(provider.clone());
         config.with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
             process_engine.clone(),
@@ -1140,6 +1140,7 @@ async fn run_seed_probe_inner(
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 );
+                config.tracing = tracing.clone();
                 config.providers.models =
                     lash_core::testing::standard_test_llm_profiles(provider.clone());
                 config.with_process_engine_registration(

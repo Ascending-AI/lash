@@ -57,6 +57,9 @@ impl LashCoreBuilder {
         if let Some(policy) = self.process_wake_delivery_policy.take() {
             core.control.process_wake_delivery_policy = policy;
         }
+        if let Some(runtime) = self.trace_runtime.take() {
+            core.tracing = runtime;
+        }
         if let Some(sink) = self.trace_sink.take() {
             core.tracing = core.tracing.clone().with_trace_sink(sink);
         }

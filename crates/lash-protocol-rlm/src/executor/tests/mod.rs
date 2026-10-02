@@ -80,6 +80,10 @@ async fn execute_code_with_trigger_test_render(
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
+    let ctx = match execution_trace {
+        Some(trace) => ctx.with_trace_standing(trace.into_standing()),
+        None => ctx,
+    };
     super::execute_code_with_channel_and_bounds_with_trigger_resolver(
         &crate::dialect::TypescriptDialect,
         state,
@@ -90,7 +94,6 @@ async fn execute_code_with_trigger_test_render(
         deferred_tool_resolver,
         deferred_trigger_resolver,
         session_projected_bindings,
-        execution_trace,
         execution_bounds,
         channel,
         code_renderer,
@@ -152,7 +155,7 @@ use deferred_and_processes::*;
 use lifecycle_and_diagnostics::*;
 
 fn test_trace(sink: Arc<dyn TraceSink>) -> lash_core::plugin::PluginExecutionTrace {
-    test_trace_with_clock(sink, Arc::new(lash_core::SystemClock))
+    test_trace_with_clock(sink, Arc::new(lash_core::facade_support::SystemClock))
 }
 
 fn test_trace_with_clock(

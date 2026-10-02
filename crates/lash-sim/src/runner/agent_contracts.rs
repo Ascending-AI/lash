@@ -974,9 +974,11 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
             .build(),
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
-    )
-    .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
+    );
+    let tracing = lash_core::trace::TraceRuntime::new(backend.clock())
+        .with_product_observer(graph_store.clone());
     let mut builder = lash::LashCore::rlm_builder(backend, factory)
+        .trace_runtime(tracing)
         // The process surface is rendered from the tool catalogue, so a host that
         // wants `processes.*` inside a cell installs the plugin that supplies it.
         // Without it every fixed process contract's first cell dies on

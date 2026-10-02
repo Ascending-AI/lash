@@ -999,8 +999,9 @@ fn product_trace(
     sink: Option<Arc<dyn lash_trace::TraceSink>>,
     context: lash_trace::TraceContext,
 ) -> lash_core::plugin::PluginExecutionTrace {
-    let mut runtime = lash_core::trace::TraceRuntime::new(Arc::new(lash_core::SystemClock))
-        .with_base_context(context);
+    let mut runtime =
+        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock))
+            .with_base_context(context);
     if let Some(sink) = sink {
         runtime = runtime.with_product_observer(sink);
     }

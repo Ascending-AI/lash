@@ -832,6 +832,7 @@ pub struct LashCoreBuilder {
     output_retention: Option<lash_core::OutputRetentionPolicy>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
+    trace_runtime: Option<lash_core::trace::TraceRuntime>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
@@ -862,6 +863,7 @@ impl LashCoreBuilder {
             attachment_upload_expiry: None,
             output_retention: None,
             process_wake_delivery_policy: None,
+            trace_runtime: None,
             trace_sink: None,
             trace_level: None,
             trace_context: None,
@@ -1016,6 +1018,12 @@ impl LashCoreBuilder {
 
     pub fn configure_plugins(mut self, configure: impl FnOnce(&mut PluginStack)) -> Self {
         configure(&mut self.plugin_stack);
+        self
+    }
+
+    /// Install the shared tracing runtime used by the engine and every plugin.
+    pub fn trace_runtime(mut self, runtime: lash_core::trace::TraceRuntime) -> Self {
+        self.trace_runtime = Some(runtime);
         self
     }
 

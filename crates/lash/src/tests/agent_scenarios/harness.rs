@@ -296,16 +296,16 @@ impl AgentScenarioSetup {
                     ),
                 )
             });
-        let factory =
-            rlm_factory(&backend.clone().into())
-                .with_lashlang_execution_sink(
-                    Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
-                );
+        let backend: lash_core::Backend = backend.into();
+        let tracing = lash_core::trace::TraceRuntime::new(backend.clock())
+            .with_product_observer(graph_store.clone());
+        let factory = rlm_factory(&backend);
         let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let turn_budget = self
             .max_turns
             .map_or(crate::TurnBudget::Unbounded, crate::TurnBudget::bounded);
         let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(backend.into(), factory))
+            .trace_runtime(tracing)
             .serve_test_llm_profile(provider, mock_llm_profile_spec());
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);

@@ -651,12 +651,13 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     let (release_tx, release_rx) = oneshot::channel();
     let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
     let backend = double_backend().await;
+    let tracing = lash_core::trace::TraceRuntime::new(backend.clock())
+        .with_product_observer(graph_store.clone());
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
         backend.clone(),
-        rlm_factory(&backend.clone()).with_lashlang_execution_sink(
-            Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
-        ),
+        rlm_factory(&backend),
     ))
+    .trace_runtime(tracing)
     .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
