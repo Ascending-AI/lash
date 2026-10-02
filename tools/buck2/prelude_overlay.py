@@ -44,7 +44,7 @@ INPUT_SHA256 = {
 OUTPUT_SHA256 = {
     "decls/rust_rules.bzl": "47697afc63938954bec4b58038ccc2b74b501b5aef7b528d808afcf7c1a9dc53",
     "rust/build.bzl": "ae771a2c0dab138cb63a4d37e6fb7a7efe29076ed83c9b45c990a698cf1577ba",
-    "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
+    "rust/cargo_buildscript.bzl": "fd469811f1b079822d5962b6cb63ca25c0a220d9f25260b15021f6e6b5d0213d",
     "rust/clippy_configuration.bzl": "e786cb238303595ccad5606bfc3599bee8ef0971cd0c4cceb88ad07f536eb6a3",
     "rust/failure_filter.bzl": "a4b818d0f799a4a32d5ffd3aab5753cd61956e3471e0faa687cc2e46470bd0a3",
     "rust/link_info.bzl": "3ac50277c98282863c8be30a8fee1d9fc3fa294e363cc4374578ba2c97f46eec",
@@ -85,6 +85,7 @@ PREVIOUS_OUTPUT_SHA256 = {
         "6ec035fcd09446d60560711c37532f8d749401c50e50767ac8eebcddcb2a9e03",
     },
     "rust/cargo_buildscript.bzl": {
+        "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
         "49e261487744c64fda39e73f15a0c440fa4af8ae9a4cb6f4ec12bcb4257ff607",
         "ca0aa5435d5dfa26c4f1de95309bb2968f315e922ae3a0bb324e604b293d8e1f",
         "9a62bdd91096b79fd9a63ab20cd42cd68c6ea3b1decca4569278c2e7adc7b2a7",
