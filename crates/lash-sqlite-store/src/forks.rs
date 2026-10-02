@@ -260,6 +260,13 @@ pub(super) async fn fork_at_in_catalog(
                 }
             }
             let config = request.config.clone();
+            // The fork's head republishes its fork point's plugin config, so
+            // the namespaces are admitted like any other publication
+            // (FIG-4746).
+            tx.admit_plugin_writers(
+                &lash_core_execution::store::plugin_writers::PluginPublication::of_session_config(&config),
+            )
+            .map_err(sqlite_error)?;
             let meta = lash_core_execution::store::SessionHeadMeta::assemble(
                 &request.session_id,
                 lash_core_execution::store::SessionHeadPayload {

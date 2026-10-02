@@ -6,6 +6,7 @@
 pub mod checkpoint_blob_refs;
 pub mod deleted_sessions;
 pub mod fleet_format;
+pub mod fleet_plugin_writers;
 pub mod fork_lineage;
 pub mod graph_nodes;
 pub mod head;

@@ -630,6 +630,10 @@ pub mod persistence {
         };
     }
     pub use lash_core::session_graph::WindowAnchor;
+    pub use lash_core::store::PluginWriterRangesFuture;
+    pub use lash_core::store::plugin_writers::{
+        PluginPublication, PluginWriterRanges, PluginWriterRegistration, PluginWriterStamp,
+    };
     /// The drive epoch a session drive's seal raises (FIG-3600): one segment
     /// of [`RuntimeStore`], implemented by every store a runtime drives,
     /// and the fence it yields, the one authority every drive write presents.

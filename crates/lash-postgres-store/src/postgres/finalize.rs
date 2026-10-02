@@ -18,6 +18,7 @@ use lash_core_execution::StoreError;
 use lash_core_execution::store::fleet_finalize::{
     FinalizeError, FinalizeHold, FinalizeMode, FinalizeRefusal, FleetEpochFlip,
 };
+use lash_core_execution::store::plugin_writers::PluginWriterRegistration;
 use sqlx::PgPool;
 
 use crate::guarded_tx::{FleetRowTx, WriterFence, begin_fleet_row};
@@ -107,6 +108,7 @@ pub(crate) async fn begin_flip(
     fence: &WriterFence,
     target: u32,
     mode: FinalizeMode,
+    plugins: &[PluginWriterRegistration],
 ) -> Result<PendingFlip, FinalizeError> {
     let mut row = begin_fleet_row(pool, fence).await?;
     if mode == FinalizeMode::Automatic
@@ -115,12 +117,29 @@ pub(crate) async fn begin_flip(
         return Err(FinalizeRefusal::Held { hold }.into());
     }
     let recorded = row.recorded;
+    // The plugin writer ranges move in this transaction, under the row lock
+    // that moves `F` (FIG-4746): no writer is admitted against a range that
+    // disagrees with the epoch it fenced on.
+    let ranges = crate::guarded_tx::read_plugin_writers(row.connection()).await?;
+    let finalized = ranges.finalized(plugins);
     if recorded >= target {
+        // A recorded range changes only with `F`. A plugin the record does
+        // not name is provisioned, which changes no range.
+        let changed = ranges.changed_in(&finalized);
+        if !changed.is_empty() {
+            return Err(FinalizeRefusal::PluginRangesNeedEpochMove {
+                fleet: recorded,
+                plugins: changed,
+            }
+            .into());
+        }
+        row.record_plugin_writers(&finalized).await?;
         return Ok(PendingFlip {
             row,
             flip: FleetEpochFlip::AlreadyFinalized { fleet: recorded },
         });
     }
+    row.record_plugin_writers(&finalized).await?;
     let version = i32::try_from(target).map_err(|_| StoreError::StoredDataCorrupt {
         record_kind: "lash_fleet_format.format_version",
         message: format!("not a fleet-format version: {target}"),
@@ -139,13 +158,15 @@ pub(crate) async fn begin_flip(
     })
 }
 
-/// Move `F` to this build's `F_self` in one transaction.
+/// Move `F` to this build's `F_self`, and each of `plugins`' writer ranges
+/// to its native format, in one transaction.
 pub(crate) async fn flip(
     pool: &PgPool,
     fence: &WriterFence,
     mode: FinalizeMode,
+    plugins: &[PluginWriterRegistration],
 ) -> Result<FleetEpochFlip, FinalizeError> {
-    let pending = begin_flip(pool, fence, fence.writable().max(), mode).await?;
+    let pending = begin_flip(pool, fence, fence.writable().max(), mode, plugins).await?;
     Ok(pending.commit(fence).await?)
 }
 

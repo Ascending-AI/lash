@@ -367,6 +367,11 @@ impl SqliteStore {
                 let fleet = tx.fleet();
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
+                    // The commit's plugin state and config namespaces are
+                    // admitted against the fleet record's writer ranges
+                    // before anything of the commit is written (FIG-4746).
+                    tx.admit_plugin_writers(planner.plugin_publication())
+                        .map_err(sqlite_error)?;
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
                     let admitted = tx
                         .query_row(

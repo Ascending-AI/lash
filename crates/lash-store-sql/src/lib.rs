@@ -148,6 +148,7 @@ pub const TABLES: &[&str] = &[
     session::checkpoint_blob_refs::TABLE,
     session::deleted_sessions::TABLE,
     session::fleet_format::TABLE,
+    session::fleet_plugin_writers::TABLE,
     session::fork_lineage::TABLE,
     session::graph_nodes::TABLE,
     session::head::TABLE,

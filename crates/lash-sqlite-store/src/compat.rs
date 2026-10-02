@@ -190,6 +190,75 @@ pub(crate) fn fence(
     FleetFormat::fence(fleet, writable).map_err(crate::sqlite_conversion_error)
 }
 
+/// The fleet record's per-plugin writer ranges (FIG-4746), which the durable
+/// core carries beside `F`: every plugin namespace a SQLite store publishes
+/// is written to that database.
+const PLUGIN_WRITERS: &str = "SELECT plugin_id, min_format, max_format FROM lash_plugin_writers";
+
+const RECORD_PLUGIN_WRITER: &str =
+    "INSERT INTO lash_plugin_writers (plugin_id, min_format, max_format)
+     VALUES (?1, ?2, ?3)
+     ON CONFLICT (plugin_id) DO UPDATE SET
+         min_format = excluded.min_format,
+         max_format = excluded.max_format";
+
+fn plugin_writer_refusal(refusal: CompatRefusal) -> rusqlite::Error {
+    incompatible(refusal)
+}
+
+/// Read the recorded writer ranges. A range that is not one, or a record
+/// that cannot be read at all, is refused typed: the store fails closed.
+pub(crate) fn read_plugin_writers(
+    conn: &Connection,
+) -> rusqlite::Result<lash_core_execution::store::plugin_writers::PluginWriterRanges> {
+    let unreadable = |error: rusqlite::Error| {
+        plugin_writer_refusal(CompatRefusal::PluginWriterRangeMalformed {
+            plugin: String::new(),
+            detail: format!("the writer ranges are unreadable: {error}"),
+        })
+    };
+    let rows: Vec<(String, i64, i64)> = conn
+        .prepare_cached(PLUGIN_WRITERS)
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .collect()
+        })
+        .map_err(unreadable)?;
+    lash_core_execution::store::plugin_writers::PluginWriterRanges::from_rows(rows)
+        .map_err(plugin_writer_refusal)
+}
+
+/// Record `entries` in the fleet record, replacing each plugin's range.
+pub(crate) fn record_plugin_writers(
+    conn: &Connection,
+    entries: &std::collections::BTreeMap<String, VersionRange>,
+) -> rusqlite::Result<()> {
+    for (plugin, range) in entries {
+        conn.prepare_cached(RECORD_PLUGIN_WRITER)?.execute(params![
+            plugin,
+            i64::from(range.min()),
+            i64::from(range.max())
+        ])?;
+    }
+    Ok(())
+}
+
+/// Admit `publication` against the recorded ranges inside the publishing
+/// transaction, and record the entries it provisions.
+pub(crate) fn admit_plugin_writers(
+    tx: &Transaction<'_>,
+    publication: &lash_core_execution::store::plugin_writers::PluginPublication,
+) -> rusqlite::Result<()> {
+    if publication.is_empty() {
+        return Ok(());
+    }
+    let seeded = read_plugin_writers(tx)?
+        .admit(publication)
+        .map_err(plugin_writer_refusal)?;
+    record_plugin_writers(tx, &seeded)
+}
+
 /// One step of [`advance_set`], as its observer sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AdvanceStep {
@@ -453,6 +522,33 @@ pub(crate) fn check_set(location: &SqliteLocation) -> rusqlite::Result<()> {
 impl lash_core_execution::FleetFormatStore for crate::SqliteStore {
     fn fleet_format(&self) -> FleetFormat {
         self.conn.fleet()
+    }
+
+    fn plugin_writers(&self) -> lash_core_execution::store::PluginWriterRangesFuture<'_> {
+        Box::pin(async move {
+            self.conn
+                .read(|tx| read_plugin_writers(tx))
+                .await
+                .map_err(crate::sqlite_error)
+        })
+    }
+
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        registrations: &'a [lash_core_execution::store::plugin_writers::PluginWriterRegistration],
+    ) -> lash_core_execution::store::PluginWriterRangesFuture<'a> {
+        let registrations = registrations.to_vec();
+        Box::pin(async move {
+            self.conn
+                .write(move |tx| {
+                    let recorded = read_plugin_writers(tx)?;
+                    let provisioned = recorded.provisioned(&registrations, tx.finalized());
+                    record_plugin_writers(tx, &provisioned)?;
+                    Ok(recorded.with(provisioned))
+                })
+                .await
+                .map_err(crate::sqlite_error)
+        })
     }
 }
 

@@ -487,6 +487,15 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         request: &lash_core_execution::ForkSessionRequest,
     ) -> Result<lash_core_execution::ForkSessionReceipt, StoreError> {
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
+        // The fork's head republishes its fork point's plugin config, so the
+        // namespaces are admitted like any other publication, before any
+        // lock or write of the fork (FIG-4746).
+        tx.admit_plugin_writers(
+            &lash_core_execution::store::plugin_writers::PluginPublication::of_session_config(
+                &request.config,
+            ),
+        )
+        .await?;
         // Target identity fences precede source-retention fences. This unlocked
         // fast path only decides already-materialized targets and permanent
         // tombstones; keep the post-lock checks below for concurrent changes.

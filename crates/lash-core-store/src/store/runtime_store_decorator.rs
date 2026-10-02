@@ -466,6 +466,17 @@ where
     fn fleet_format(&self) -> FleetFormat {
         self.inner().fleet_format()
     }
+
+    fn plugin_writers(&self) -> super::PluginWriterRangesFuture<'_> {
+        self.inner().plugin_writers()
+    }
+
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        registrations: &'a [super::plugin_writers::PluginWriterRegistration],
+    ) -> super::PluginWriterRangesFuture<'a> {
+        self.inner().provision_plugin_writers(registrations)
+    }
 }
 
 /// A deployment's attachment root set forwards wholesale from a decorator

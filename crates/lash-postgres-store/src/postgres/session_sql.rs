@@ -690,6 +690,35 @@ lash_store_sql::statements! {
     }
 }
 
+lash_store_sql::statements! {
+    /// `fleet_plugin_writers` statements: the fleet record's per-plugin
+    /// writer ranges (FIG-4746). Every one runs under the `fleet_format`
+    /// row's lock, a writer's share lock or finalize's update lock.
+    pub(crate) struct FleetPluginWriterStatements @ "fleet_plugin_writers" {
+        /// Every recorded range.
+        select_all = "SELECT plugin_id, min_format, max_format FROM fleet_plugin_writers";
+
+        /// The ranges of the named plugins: what one publication is admitted
+        /// against.
+        select_named = "SELECT plugin_id, min_format, max_format FROM fleet_plugin_writers
+             WHERE plugin_id = ANY(?1)";
+
+        /// Provision a plugin the record does not name. A recorded range is
+        /// left alone: two publications that both provision it agree on what
+        /// the first one recorded.
+        insert_if_absent = "INSERT INTO fleet_plugin_writers (plugin_id, min_format, max_format)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (plugin_id) DO NOTHING";
+
+        /// Finalize's move of a range, under the row lock that moves `F`.
+        upsert = "INSERT INTO fleet_plugin_writers (plugin_id, min_format, max_format)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (plugin_id) DO UPDATE SET
+                 min_format = EXCLUDED.min_format,
+                 max_format = EXCLUDED.max_format";
+    }
+}
+
 /// Every session-core statement this store issues, rendered once.
 pub(crate) struct SessionSql {
     /// `session_meta` statements both backends issue verbatim.
@@ -726,6 +755,8 @@ pub(crate) struct SessionSql {
     pub(crate) release_stamp: ReleaseStampStatements,
     /// `fleet_format` statements only PostgreSQL issues.
     pub(crate) fleet_format: FleetFormatStatements,
+    /// `fleet_plugin_writers` statements only PostgreSQL issues.
+    pub(crate) fleet_plugin_writers: FleetPluginWriterStatements,
 }
 
 static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
@@ -748,6 +779,7 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         checkpoint_edges: CheckpointBlobRefPostgresStatements::render(dialect),
         release_stamp: ReleaseStampStatements::render(dialect),
         fleet_format: FleetFormatStatements::render(dialect),
+        fleet_plugin_writers: FleetPluginWriterStatements::render(dialect),
     }
 });
 

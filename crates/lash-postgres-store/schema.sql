@@ -70,6 +70,19 @@ CREATE TABLE IF NOT EXISTS lash_fleet_format (
         CHECK ((finalize_hold_reason IS NULL) = (finalize_held_at_ms IS NULL))
 );
 
+-- The fleet record's per-plugin writer ranges (FIG-4746), beside `F`: the
+-- format versions the fleet permits each plugin's state and config namespaces
+-- to be published in. Its rows are read and written only under the
+-- `lash_fleet_format` row's lock. A publishing transaction holds that row
+-- `FOR SHARE` and admits every namespace it writes against its plugin's row;
+-- finalize holds it `FOR UPDATE` and moves the ranges in the transaction that
+-- moves `F`. Bounds are validated when read, so a malformed row refuses typed.
+CREATE TABLE IF NOT EXISTS lash_fleet_plugin_writers (
+    plugin_id TEXT PRIMARY KEY,
+    min_format INTEGER NOT NULL,
+    max_format INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lash_blobs (
     hash TEXT PRIMARY KEY,
     content BYTEA NOT NULL

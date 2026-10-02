@@ -229,6 +229,38 @@ a SQLite store
 (`crates/lash-sqlite-store/src/backend.rs:234`, `:372`, `:382`,
 `crates/lash-sqlite-store/src/finalize.rs:25`, `:49`, `:85`, `:147`, `:180`).
 
+#### 2.5 Per-plugin writer ranges
+
+The fleet record carries one writer range per plugin id beside `F`: the
+format versions the fleet permits that plugin's state and config namespaces
+to be published in. PostgreSQL keeps them in `lash_fleet_plugin_writers`,
+read and written only under the `lash_fleet_format` row's lock; SQLite keeps
+them in the durable core's `lash_plugin_writers`, the database every plugin
+namespace is published to
+(`crates/lash-core-store/src/store/plugin_writers.rs`).
+
+Every publication is described by the stamps of what it writes: a commit's
+changed plugin-state component and recorded config, a created or forked
+session's config, and a process execution environment's config. The guarded
+transaction admits them before its first write, and a stamp outside its
+plugin's range refuses `PluginWriterOutsideRange` with nothing published. A
+malformed range refuses `PluginWriterRangeMalformed`. Process rows and
+trigger targets hold an environment's content reference, never a namespace.
+
+Ranges are provisioned from plugin registrations. Inside a rollback window a
+provisioned plugin is permitted its oldest writable format; once `F` is the
+provisioning build's own epoch it is permitted everything up to its native
+format. A plugin the record does not name may publish its first format, which
+records `[1,1]`; any other format refuses `PluginWriterUnprovisioned`.
+
+Only finalize moves a recorded range, in the transaction that moves `F`: each
+registered plugin's range rises to its native format and keeps its floor, so
+history stays readable through the plugin's migrate steps. A finalize that
+would change a range while `F` already is the build's epoch refuses
+`PluginRangesNeedEpochMove` and changes nothing. SQLite's sealed intent
+carries the moved ranges, so the open that completes a crashed finalize needs
+no registrations.
+
 ### 3. Restate
 
 SQL cannot fence a Restate invocation atomically. Restate compatibility uses
@@ -401,7 +433,8 @@ lifts (`crates/lash-core-store/src/store/synthetic_next.rs:1`).
 `crates/lash-upgrade-harness/tests/phase_a/main.rs:13` registers expanded-store
 rollback, skipped-release refusal, writer/finalize races, wire negotiation,
 object-sweep recovery, generation handover and rollback, retention and
-delivery rollback, history after finalize, and workflow-graph range checks.
+delivery rollback, history after finalize, workflow-graph range checks, and
+the plugin writer-range rollback over a SQLite store.
 `operator_json_contract` lives in `crates/lashctl/tests/`.
 
 The store matrix is SQLite file, SQLite memory and PostgreSQL. Hosts are the

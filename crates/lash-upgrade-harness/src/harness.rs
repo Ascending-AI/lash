@@ -447,6 +447,30 @@ impl NodeBinary {
         report(&self.path, "retention", output)
     }
 
+    /// Run one `plugin-state` step of this build over the SQLite store
+    /// directory `store_dir`.
+    pub fn plugin_state(
+        &self,
+        store_dir: &Path,
+        session: &str,
+        action: &str,
+        generation: Option<&str>,
+    ) -> Result<crate::node::plugin_state::PluginStateReport> {
+        let mut command = Command::new(&self.path);
+        command
+            .arg("plugin-state")
+            .arg("--store-dir")
+            .arg(store_dir)
+            .args(["--session", session, "--action", action]);
+        if let Some(generation) = generation {
+            command.args(["--generation", generation]);
+        }
+        let output = command
+            .output()
+            .with_context(|| format!("run {} plugin-state {action}", self.label()))?;
+        report(&self.path, "plugin-state", output)
+    }
+
     /// Send `message` to `session` as a host of this build, in the
     /// background: the turn settles while the leg moves deployments.
     pub fn spawn_turn(&self, case: &Case, session: &str, message: &str) -> Result<PendingTurn> {

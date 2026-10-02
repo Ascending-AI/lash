@@ -814,6 +814,18 @@ CREATE TABLE IF NOT EXISTS lash_compat (
     fleet_format INTEGER NOT NULL,
     CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
 );
+
+-- The fleet record's per-plugin writer ranges (FIG-4746), beside `F`: the
+-- format versions the fleet permits each plugin's state and config namespaces
+-- to be published in. Every publication is admitted against its plugin's row
+-- inside its write transaction, and only finalize moves a recorded range, in
+-- the transaction that moves `fleet_format`. Bounds are validated when read,
+-- so a malformed row refuses typed instead of being rejected unseen.
+CREATE TABLE IF NOT EXISTS lash_plugin_writers (
+    plugin_id  TEXT PRIMARY KEY,
+    min_format INTEGER NOT NULL,
+    max_format INTEGER NOT NULL
+);
 ";
 
 // This database's schema version, and the history of what each value

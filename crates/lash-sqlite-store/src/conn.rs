@@ -458,6 +458,11 @@ impl WriterFence {
         let fleet = crate::compat::fence(tx, armed.database, armed.writable)?;
         Ok(self.observe(fleet))
     }
+
+    /// The build's writable range for `F`, once an installer armed the fence.
+    fn writable(&self) -> Option<VersionRange> {
+        self.armed.get().map(|armed| armed.writable)
+    }
 }
 
 /// A write transaction past its fence: the transaction, and the epoch `F`
@@ -467,12 +472,34 @@ impl WriterFence {
 pub(crate) struct FencedTx<'c> {
     tx: Transaction<'c>,
     fleet: FleetFormat,
+    /// The build's writable range for `F`: the fleet is finalized at this
+    /// build's epoch when `fleet` is its top.
+    writable: Option<VersionRange>,
 }
 
 impl FencedTx<'_> {
     /// The epoch this transaction runs under.
     pub(crate) fn fleet(&self) -> FleetFormat {
         self.fleet
+    }
+
+    /// Admit the plugin namespaces this transaction publishes against the
+    /// fleet record's writer ranges (FIG-4746), before the transaction writes
+    /// any of them. The reserved lock the transaction holds keeps a finalize
+    /// from moving a range until it ends. A refusal is typed, and the
+    /// caller's rollback leaves nothing published.
+    pub(crate) fn admit_plugin_writers(
+        &self,
+        publication: &lash_core_execution::store::plugin_writers::PluginPublication,
+    ) -> rusqlite::Result<()> {
+        crate::compat::admit_plugin_writers(&self.tx, publication)
+    }
+
+    /// Whether the fleet epoch is this build's own: no older build writes
+    /// beside this transaction.
+    pub(crate) fn finalized(&self) -> bool {
+        self.writable
+            .is_some_and(|writable| self.fleet.version() == writable.max())
     }
 }
 
@@ -848,7 +875,11 @@ impl SqliteConnection {
                         sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
                         let fleet = fence.check(&tx)?;
                         sim_fault!(fault_injector, AfterFence, write_transaction_ordinal);
-                        let tx = FencedTx { tx, fleet };
+                        let tx = FencedTx {
+                            tx,
+                            fleet,
+                            writable: fence.writable(),
+                        };
                         let outcome = f(&tx)?;
                         let value = match outcome {
                             TxOutcome::Commit(value) => {

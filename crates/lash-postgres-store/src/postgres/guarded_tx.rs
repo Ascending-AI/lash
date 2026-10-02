@@ -39,6 +39,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use lash_core_execution::compat::{CompatRefusal, ComponentId, VersionRange};
+use lash_core_execution::store::plugin_writers::{
+    PluginPublication, PluginWriterRanges, PluginWriterRegistration,
+};
 use lash_core_execution::{FleetFormat, StoreError};
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
@@ -213,6 +216,50 @@ fn missing_fence_row(detail: &str) -> StoreError {
 pub(crate) struct GuardedTx<'c> {
     tx: Transaction<'c, Postgres>,
     fleet: FleetFormat,
+    /// Whether the epoch the fence read is the top of this build's writable
+    /// range: the fleet is finalized at this build's epoch.
+    finalized: bool,
+}
+
+/// A plugin writer range the fleet record does not admit, as the store's
+/// typed refusal.
+fn plugin_writer_refusal(refusal: CompatRefusal) -> StoreError {
+    StoreError::Incompatible { refusal }
+}
+
+/// Decode `(plugin, min, max)` rows of the fleet record's writer ranges.
+fn plugin_writer_ranges(rows: Vec<(String, i32, i32)>) -> Result<PluginWriterRanges, StoreError> {
+    PluginWriterRanges::from_rows(
+        rows.into_iter()
+            .map(|(plugin, min, max)| (plugin, i64::from(min), i64::from(max))),
+    )
+    .map_err(plugin_writer_refusal)
+}
+
+/// A range's bounds as the columns that record them.
+fn plugin_writer_bounds(plugin: &str, range: VersionRange) -> Result<(i32, i32), StoreError> {
+    match (i32::try_from(range.min()), i32::try_from(range.max())) {
+        (Ok(min), Ok(max)) => Ok((min, max)),
+        _ => Err(plugin_writer_refusal(
+            CompatRefusal::PluginWriterRangeMalformed {
+                plugin: plugin.to_owned(),
+                detail: format!("range {range} does not fit the fleet record"),
+            },
+        )),
+    }
+}
+
+/// Every recorded writer range, read on `connection`. The caller holds the
+/// fleet-format row's lock, or reads for inspection only.
+pub(crate) async fn read_plugin_writers(
+    connection: &mut PgConnection,
+) -> Result<PluginWriterRanges, StoreError> {
+    let rows: Vec<(String, i32, i32)> =
+        sqlx::query_as(session_sql().fleet_plugin_writers.select_all.sql())
+            .fetch_all(connection)
+            .await
+            .map_err(store_sqlx_error)?;
+    plugin_writer_ranges(rows)
 }
 
 /// `F` moved to another writable epoch between a commit's encoding and its
@@ -241,6 +288,86 @@ impl GuardedTx<'_> {
                 current: self.fleet,
             })
         }
+    }
+
+    /// Admit the plugin namespaces this transaction publishes against the
+    /// fleet record's writer ranges (FIG-4746), before the transaction writes
+    /// any of them.
+    ///
+    /// The share lock the fence took on the fleet-format row is what makes
+    /// the read hold: finalize moves a range only under that row's update
+    /// lock, so no recorded range changes until this transaction ends. A
+    /// plugin the record does not name is provisioned here when it publishes
+    /// its first format; two transactions that provision it at once agree on
+    /// the row the first one committed. A refusal is typed, and dropping the
+    /// transaction leaves nothing published.
+    pub(crate) async fn admit_plugin_writers(
+        &mut self,
+        publication: &PluginPublication,
+    ) -> Result<(), StoreError> {
+        if publication.is_empty() {
+            return Ok(());
+        }
+        let plugins: Vec<String> = publication
+            .plugins()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        loop {
+            let rows: Vec<(String, i32, i32)> =
+                sqlx::query_as(session_sql().fleet_plugin_writers.select_named.sql())
+                    .bind(&plugins)
+                    .fetch_all(&mut *self.tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+            let seeded = plugin_writer_ranges(rows)?
+                .admit(publication)
+                .map_err(plugin_writer_refusal)?;
+            if seeded.is_empty() {
+                return Ok(());
+            }
+            let mut provisioned = 0;
+            for (plugin, range) in &seeded {
+                let (min, max) = plugin_writer_bounds(plugin, *range)?;
+                provisioned +=
+                    sqlx::query(session_sql().fleet_plugin_writers.insert_if_absent.sql())
+                        .bind(plugin)
+                        .bind(min)
+                        .bind(max)
+                        .execute(&mut *self.tx)
+                        .await
+                        .map_err(store_sqlx_error)?
+                        .rows_affected();
+            }
+            // Every row this transaction inserted is the one it was admitted
+            // against. A row another transaction committed first is read and
+            // admitted again.
+            if provisioned == seeded.len() as u64 {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Provision a writer range for every plugin of `registrations` the
+    /// fleet record does not name, and answer the recorded ranges.
+    pub(crate) async fn provision_plugin_writers(
+        &mut self,
+        registrations: &[PluginWriterRegistration],
+    ) -> Result<PluginWriterRanges, StoreError> {
+        let recorded = read_plugin_writers(&mut self.tx).await?;
+        for (plugin, range) in recorded.provisioned(registrations, self.finalized) {
+            let (min, max) = plugin_writer_bounds(&plugin, range)?;
+            sqlx::query(session_sql().fleet_plugin_writers.insert_if_absent.sql())
+                .bind(&plugin)
+                .bind(min)
+                .bind(max)
+                .execute(&mut *self.tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        // Read again: a plugin another transaction provisioned first keeps
+        // the range that transaction recorded.
+        read_plugin_writers(&mut self.tx).await
     }
 
     pub(crate) async fn commit(self) -> Result<(), sqlx::Error> {
@@ -278,7 +405,11 @@ where
 {
     let mut tx = acquire.begin().await.map_err(store_sqlx_error)?;
     let fleet = fence.admit(&mut tx).await?;
-    Ok(GuardedTx { tx, fleet })
+    Ok(GuardedTx {
+        tx,
+        fleet,
+        finalized: fleet.version() == fence.state.writable.max(),
+    })
 }
 
 /// A schema migration's transaction entry: `BEGIN`, then the fence, on the
@@ -308,7 +439,11 @@ pub(crate) async fn begin_migration<'c>(
         Some(recorded) => fence.accept(recorded).await?,
         None => FleetFormat::current(),
     };
-    Ok(GuardedTx { tx, fleet })
+    Ok(GuardedTx {
+        tx,
+        fleet,
+        finalized: fleet.version() == fence.state.writable.max(),
+    })
 }
 
 /// The fleet-format row locked for an update: finalize's side of the fence
@@ -331,6 +466,25 @@ pub(crate) struct FleetRowTx {
 impl FleetRowTx {
     pub(crate) fn connection(&mut self) -> &mut PgConnection {
         &mut self.tx
+    }
+
+    /// Record `ranges` in the fleet record, replacing each named plugin's
+    /// range: finalize's move, in the transaction that moves `F`.
+    pub(crate) async fn record_plugin_writers(
+        &mut self,
+        ranges: &PluginWriterRanges,
+    ) -> Result<(), StoreError> {
+        for (plugin, range) in ranges.iter() {
+            let (min, max) = plugin_writer_bounds(plugin, range)?;
+            sqlx::query(session_sql().fleet_plugin_writers.upsert.sql())
+                .bind(plugin)
+                .bind(min)
+                .bind(max)
+                .execute(&mut *self.tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn commit(self) -> Result<(), StoreError> {
@@ -417,3 +571,7 @@ where
 #[cfg(test)]
 #[path = "guarded_tx_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "plugin_writer_tests.rs"]
+mod plugin_writer_tests;

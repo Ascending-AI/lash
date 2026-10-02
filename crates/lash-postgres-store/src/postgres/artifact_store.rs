@@ -191,7 +191,20 @@ impl PostgresLashlangArtifactStore {
                 kind: claim.referrer().kind(),
             });
         }
+        // A published process execution environment carries plugin config
+        // namespaces: they are admitted against the fleet record's writer
+        // ranges before the artifact is written (FIG-4746).
+        let plugin_publication = match bytes {
+            Some(bytes) if namespace == PROCESS_ENV_NAMESPACE => {
+                lash_core_execution::store::plugin_writers::PluginPublication::of_process_execution_env(bytes)
+                    .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?
+            }
+            _ => Default::default(),
+        };
         let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        tx.admit_plugin_writers(&plugin_publication)
             .await
             .map_err(ArtifactStoreError::from)?;
         lock_referrer_tx(&mut tx, &claim.referrer())

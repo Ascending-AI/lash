@@ -634,6 +634,7 @@ async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
         set.finalize(
             &BuildGeneration::for_test("cold-finalize-old"),
             &Deployments::default(),
+            &[],
             5,
         )
         .await
@@ -897,7 +898,10 @@ async fn a_stale_writer_is_fenced_after_finalize() {
             .expect("read F")
     };
 
-    match set.finalize_as(&retired, &deployments, 5, successor).await {
+    match set
+        .finalize_as(&retired, &deployments, &[], 5, successor)
+        .await
+    {
         Err(FinalizeError::Refused(FinalizeRefusal::GenerationNotDrained { .. })) => {}
         other => panic!("an undrained generation must refuse finalize: {other:?}"),
     }
@@ -917,7 +921,10 @@ async fn a_stale_writer_is_fenced_after_finalize() {
             id: "dp_old".to_owned(),
             uri: None,
         });
-    match set.finalize_as(&retired, &deployments, 5, successor).await {
+    match set
+        .finalize_as(&retired, &deployments, &[], 5, successor)
+        .await
+    {
         Err(FinalizeError::Refused(FinalizeRefusal::DeploymentsRetained { .. })) => {}
         other => panic!("a retained deployment must refuse finalize: {other:?}"),
     }
@@ -943,7 +950,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
 
     deployments.0.lock().expect("deployments").clear();
     let flip = set
-        .finalize_as(&retired, &deployments, 5, successor)
+        .finalize_as(&retired, &deployments, &[], 5, successor)
         .await
         .expect("finalize");
     assert_eq!(
@@ -987,7 +994,7 @@ async fn a_stale_writer_is_fenced_after_finalize() {
     }
 
     assert_eq!(
-        set.finalize_as(&retired, &deployments, 5, successor)
+        set.finalize_as(&retired, &deployments, &[], 5, successor)
             .await
             .expect("finalize reruns"),
         FleetEpochFlip::AlreadyFinalized { fleet: next }

@@ -26,6 +26,13 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                     let inserted =
                         session_meta::write_session_meta(tx, &meta, created_at_ms, fleet_format)?;
                     if inserted {
+                        // The config's plugin namespaces are admitted against
+                        // the fleet record's writer ranges before the head
+                        // that carries them is written (FIG-4746).
+                        tx.admit_plugin_writers(
+                            &lash_core_execution::store::plugin_writers::PluginPublication::of_session_config(&config),
+                        )
+                        .map_err(crate::sqlite_error)?;
                         // The creator's config is baked in with the catalog
                         // row, in this transaction (FIG-4099).
                         let created_head = lash_core_execution::store::SessionHeadMeta::created(

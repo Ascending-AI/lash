@@ -18,6 +18,8 @@ DROP TABLE IF EXISTS lash_migrations CASCADE;
 
 DROP TABLE IF EXISTS lash_fleet_format CASCADE;
 
+DROP TABLE IF EXISTS lash_fleet_plugin_writers CASCADE;
+
 DROP TABLE IF EXISTS lash_blobs CASCADE;
 
 DROP TABLE IF EXISTS lash_session_head CASCADE;

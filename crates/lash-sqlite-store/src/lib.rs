@@ -613,6 +613,8 @@ pub struct StoredSessionCheckpoint {
 mod fence_tests;
 #[cfg(test)]
 mod graph_error_tests;
+#[cfg(all(test, feature = "testing"))]
+mod plugin_writer_tests;
 #[cfg(test)]
 mod read_failure_tests;
 

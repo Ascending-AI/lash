@@ -41,6 +41,7 @@ pub mod history;
 mod history_gate_tests;
 pub mod ingress_obligation;
 mod ingress_terminal;
+pub mod plugin_writers;
 pub use ingress_terminal::{IngressTerminal, IngressTerminalCause};
 mod lease_timings;
 mod maintenance;
@@ -1659,7 +1660,43 @@ pub trait StoreMaintenance: Send + Sync {
 pub trait FleetFormatStore: Send + Sync {
     /// The recorded fleet format this store's writers emit.
     fn fleet_format(&self) -> FleetFormat;
+
+    /// The per-plugin writer ranges the fleet record carries beside `F`
+    /// (FIG-4746), read from the store. A store with no fleet record carries
+    /// none.
+    fn plugin_writers(&self) -> PluginWriterRangesFuture<'_> {
+        Box::pin(async { Ok(plugin_writers::PluginWriterRanges::default()) })
+    }
+
+    /// Provision a writer range for every plugin of `registrations` the
+    /// fleet record does not name, and answer the recorded ranges. A recorded
+    /// range is never changed: only finalize moves one. Inside a rollback
+    /// window a provisioned plugin writes its oldest writable format; once
+    /// the fleet epoch is this build's own it writes up to its native one.
+    ///
+    /// A store with no fleet record has no older build to protect and
+    /// answers the ranges a finalized fleet would record.
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        registrations: &'a [plugin_writers::PluginWriterRegistration],
+    ) -> PluginWriterRangesFuture<'a> {
+        Box::pin(async move {
+            let ranges = plugin_writers::PluginWriterRanges::default();
+            let provisioned = ranges.provisioned(registrations, true);
+            Ok(ranges.with(provisioned))
+        })
+    }
 }
+
+/// What [`FleetFormatStore::plugin_writers`] and
+/// [`FleetFormatStore::provision_plugin_writers`] answer.
+pub type PluginWriterRangesFuture<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<plugin_writers::PluginWriterRanges, StoreError>>
+            + Send
+            + 'a,
+    >,
+>;
 
 /// The runtime's store: one object per catalog, keyed by session (ADR 0112
 /// §1).

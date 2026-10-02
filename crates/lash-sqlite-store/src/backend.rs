@@ -311,10 +311,19 @@ impl SqliteStoreSet {
     /// A SQLite store has no operator hold: the hold stops the fleet's
     /// automatic finalize, `lashctl finalize` over PostgreSQL, and a host
     /// that owns a SQLite store finalizes exactly when it calls this.
+    ///
+    /// `plugins` are the finalizing build's plugin registrations (FIG-4746):
+    /// the durable core's transaction that moves `F` also raises each
+    /// registered plugin's writer range to its native format, so the two
+    /// never disagree, and the sealed intent carries the ranges for the open
+    /// that completes a crashed finalize. A registration that would change a
+    /// recorded range while `F` already is this build's epoch is refused
+    /// typed, and nothing changes.
     pub async fn finalize(
         &self,
         retired: &lash_core_execution::engine::BuildGeneration,
         registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
+        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
         now_ms: u64,
     ) -> Result<
         lash_core_execution::store::fleet_finalize::FleetEpochFlip,
@@ -323,6 +332,7 @@ impl SqliteStoreSet {
         self.finalize_as(
             retired,
             registry,
+            plugins,
             now_ms,
             lash_core_execution::FleetFormat::writable(),
         )
@@ -334,6 +344,7 @@ impl SqliteStoreSet {
         &self,
         retired: &lash_core_execution::engine::BuildGeneration,
         registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
+        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
         now_ms: u64,
         writable: lash_core_execution::compat::VersionRange,
     ) -> Result<
@@ -356,11 +367,12 @@ impl SqliteStoreSet {
         .await?;
         require_retired(&drain, registry).await?;
         let location = self.inner.location.clone();
+        let plugins = plugins.to_vec();
         #[cfg(feature = "testing")]
         let hook = self.inner.options.finalize_hook.clone();
         tokio::task::spawn_blocking(move || {
             let _ownership = ownership;
-            crate::finalize::finalize(&location, busy_timeout, writable, drain, |step| {
+            crate::finalize::finalize(&location, busy_timeout, writable, drain, &plugins, |step| {
                 #[cfg(feature = "testing")]
                 if let (Some(hook), crate::compat::AdvanceStep::Committed(database)) = (&hook, step)
                 {
@@ -370,7 +382,7 @@ impl SqliteStoreSet {
                 let _ = step;
                 Ok(())
             })
-            .map_err(crate::sqlite_error)
+            .map_err(crate::finalize::finalize_error)
         })
         .await
         .map_err(|error| {
@@ -378,7 +390,6 @@ impl SqliteStoreSet {
                 "the SQLite finalize task ended: {error}"
             )))
         })?
-        .map_err(FinalizeError::Store)
     }
 
     /// `sqlite:<canonical durable-core.db path>` or `sqlite-memory:<id>`.

@@ -412,6 +412,11 @@ impl PostgresStore {
         if let Err(moved) = tx.require_encoded_under(encoded_under) {
             return Ok(Err(moved));
         }
+        // The commit's plugin state and config namespaces are admitted
+        // against the fleet record's writer ranges before any lock or write
+        // of the commit (FIG-4746).
+        tx.admit_plugin_writers(planner.plugin_publication())
+            .await?;
         // The simulator's backend-fault plan arms this transaction seam; the
         // `testing` feature is off in production, where these expand to nothing.
         #[cfg(feature = "testing")]

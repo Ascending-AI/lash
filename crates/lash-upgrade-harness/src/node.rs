@@ -25,6 +25,7 @@
 //! records and holds calls as [`provider`] describes.
 
 pub mod objects;
+pub mod plugin_state;
 pub mod process;
 pub mod provider;
 pub mod remote;
@@ -86,6 +87,8 @@ pub enum Command {
     ProcessStatus(ProcessStatusArgs),
     /// Publish, release, relay, retain and inspect artifacts and attachments.
     Retention(RetentionArgs),
+    /// Publish, read or finalize the probe plugin's state over a SQLite store.
+    PluginState(plugin_state::PluginStateArgs),
 }
 
 /// Which store a command opens.
@@ -321,6 +324,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::ProcessSignal(args) => print(&process::signal(args).await?),
         Command::ProcessStatus(args) => print(&process::status(args).await?),
         Command::Retention(args) => retention::run(args).await,
+        Command::PluginState(args) => print(&plugin_state::run(args).await?),
     }
 }
 
@@ -423,7 +427,9 @@ async fn sqlite_upgrade(args: SqliteUpgradeArgs) -> Result<serde_json::Value> {
             let registry = lash_restate::RestateDeploymentRegistry::new(
                 lash_restate::RestateAdminClient::new(args.restate.admin_url),
             );
-            let flip = stores.finalize(&args.generation, &registry, now).await?;
+            let flip = stores
+                .finalize(&args.generation, &registry, &[], now)
+                .await?;
             Ok(serde_json::to_value(flip)?)
         }
     }

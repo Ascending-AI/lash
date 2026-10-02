@@ -16,6 +16,7 @@ mod generation_handoff_rollback;
 mod history_after_finalize;
 mod negotiated_wire_both_directions;
 mod object_sweep_crash_resume;
+mod plugin_writer_rollback;
 mod retention_delivery_rollback;
 mod skipped_compatibility_release_refused;
 mod support;

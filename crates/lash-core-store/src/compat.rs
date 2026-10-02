@@ -978,6 +978,35 @@ pub enum CompatRefusal {
          ranges)"
     )]
     UnknownVocabulary { surface: String, label: String },
+    /// A plugin namespace is stamped with a format the fleet record does not
+    /// permit its plugin to write (FIG-4746). Nothing was published.
+    #[error(
+        "plugin `{plugin}` {namespace:?} format {writer} is outside the writer range {permitted} \
+         the fleet record permits: before finalize a build writes only what the fleet already \
+         reads. Nothing was published; run a build that writes a permitted format, or finalize \
+         the release that introduced format {writer} with `lashctl finalize`"
+    )]
+    PluginWriterOutsideRange {
+        plugin: String,
+        namespace: crate::plugin_state::FormatNamespace,
+        writer: u32,
+        permitted: VersionRange,
+    },
+    /// The fleet record carries no writer range for a plugin (FIG-4746): a
+    /// plugin the record does not name publishes only its first format.
+    #[error(
+        "the fleet record carries no writer range for plugin `{plugin}`, so only its first \
+         format may be published. Nothing was published; provision the plugin's range from its \
+         registration before it writes"
+    )]
+    PluginWriterUnprovisioned { plugin: String },
+    /// A recorded plugin writer range is not a range (FIG-4746). The store
+    /// fails closed: no publication of that store is admitted.
+    #[error(
+        "the fleet record's writer range for plugin `{plugin}` is malformed ({detail}); the \
+         store is refused unchanged. Restore it from a backup"
+    )]
+    PluginWriterRangeMalformed { plugin: String, detail: String },
 }
 
 impl CompatRefusal {
@@ -1015,7 +1044,11 @@ impl CompatRefusal {
             | Self::PartiallyAdvanced {
                 writing_release, ..
             } => *writing_release = release,
-            Self::WriterFloorAbove { .. } | Self::UnknownVocabulary { .. } => {}
+            Self::WriterFloorAbove { .. }
+            | Self::UnknownVocabulary { .. }
+            | Self::PluginWriterOutsideRange { .. }
+            | Self::PluginWriterUnprovisioned { .. }
+            | Self::PluginWriterRangeMalformed { .. } => {}
         }
         self
     }

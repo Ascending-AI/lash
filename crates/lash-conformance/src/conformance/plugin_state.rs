@@ -605,6 +605,44 @@ impl SessionPlugin for FormatPlugin {
     }
 }
 
+/// A commit whose plugin namespaces are stamped outside the fleet record's
+/// writer range is refused typed and leaves the session's head where it was
+/// (FIG-4746).
+#[expect(
+    clippy::unwrap_used,
+    reason = "format law asserts every persisted fixture and commit"
+)]
+async fn assert_plugin_write_refused(
+    store: &Arc<dyn RuntimeStore>,
+    state: &RuntimeSessionState,
+    session_id: &str,
+) {
+    let head = |store: Arc<dyn RuntimeStore>| async move {
+        store
+            .load_session_head_meta(&SessionId::from(session_id))
+            .await
+            .unwrap()
+            .map(|head| (head.head_revision, head.checkpoint_ref))
+    };
+    let before = head(Arc::clone(store)).await;
+    let refused = crate::testing::store_fixtures::commit_runtime_state_for_test(
+        store,
+        RuntimeCommit::persisted_state_for_test(state),
+        "plugin-state-law",
+    )
+    .await;
+    assert!(
+        matches!(
+            refused,
+            Err(crate::StoreError::Incompatible {
+                refusal: lash_core::compat::CompatRefusal::PluginWriterOutsideRange { .. }
+            })
+        ),
+        "a plugin format outside the fleet's writer range must be refused: {refused:?}"
+    );
+    assert_eq!(head(Arc::clone(store)).await, before);
+}
+
 /// FIG-4745's refusal and migration at a real persisted checkpoint boundary.
 #[expect(
     clippy::unwrap_used,
@@ -644,6 +682,29 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
         lash_core::FormatVersion::new(version).unwrap(),
         serde_json::json!({"count": 17}),
     );
+    // The fleet record permits what the plugin's registration provisions
+    // (FIG-4746): the fixture's stored format stands for a build that wrote
+    // it, so that build's registration is what the store is provisioned from.
+    let newest = version.max(2);
+    let permitted = store
+        .provision_plugin_writers(&[crate::store::plugin_writers::PluginWriterRegistration {
+            plugin: "format-state".into(),
+            native: lash_core::FormatVersion::new(newest).unwrap(),
+            writable: (1..=newest)
+                .map(|format| lash_core::FormatVersion::new(format).unwrap())
+                .collect(),
+        }])
+        .await
+        .unwrap()
+        .permitted_writer("format-state")
+        .unwrap();
+    if !permitted.contains(version) {
+        // Inside a rollback window the fleet permits only the oldest format,
+        // so no build can have published this one: the store refuses it and
+        // publishes nothing.
+        assert_plugin_write_refused(&store, &state, session_id).await;
+        return;
+    }
     commit(&store, &mut state).await;
     let mut durable =
         crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
@@ -703,6 +764,13 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
         crate::HydratedCheckpointComponent::Changed { .. }
     ));
     durable.authority.plugin_config = decoded.admitted_plugin_config().config.as_ref().clone();
+    if !permitted.contains(2) {
+        // Inside a rollback window the migrated namespace cannot be written
+        // back in the plugin's native format: the stored bytes stay as they
+        // were until finalize moves the range.
+        assert_plugin_write_refused(&store, &durable, session_id).await;
+        return;
+    }
     commit(&store, &mut durable).await;
     let after =
         crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))

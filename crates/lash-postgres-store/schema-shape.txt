@@ -132,6 +132,11 @@ table lash_fleet_format
   column format_version integer not-null
   column singleton boolean not-null default
   primary-key (singleton)
+table lash_fleet_plugin_writers
+  column max_format integer not-null
+  column min_format integer not-null
+  column plugin_id text not-null
+  primary-key (plugin_id)
 table lash_fork_lineage
   column ancestor_session_id text not-null
   column fork_generation bigint not-null

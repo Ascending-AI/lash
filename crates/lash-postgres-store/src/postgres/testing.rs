@@ -267,12 +267,13 @@ impl HeldFinalize {
             writable,
             lash_core_execution::FleetFormat::from_version(epoch),
         );
-        let flip = crate::finalize::begin_flip(pool, &fence, epoch, FinalizeMode::OverrideHold)
-            .await
-            .map_err(|error| match error {
-                FinalizeError::Store(error) => error,
-                other => StoreError::Backend(other.to_string()),
-            })?;
+        let flip =
+            crate::finalize::begin_flip(pool, &fence, epoch, FinalizeMode::OverrideHold, &[])
+                .await
+                .map_err(|error| match error {
+                    FinalizeError::Store(error) => error,
+                    other => StoreError::Backend(other.to_string()),
+                })?;
         Ok(Self { flip, fence })
     }
 

@@ -635,6 +635,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // under the version freeze): an open reads `F` and never records it, so a
 // catalog without the row refuses `fleet_unrecorded` until migrate runs.
 //
+// Version 141 also carries `lash_fleet_plugin_writers`, the fleet record's
+// per-plugin writer ranges beside `F` (FIG-4746, changed in place under the
+// version freeze). A catalog provisioned before the change fails the
+// open-time shape check and is recreated.
+//
 // Version 141 also drops the named process-definition registry (FIG-4178,
 // changed in place under the version freeze): its catalog table is gone and
 // `lash_artifact_referrers` no longer admits a definition-revision kind —
@@ -934,18 +939,28 @@ impl PostgresStorage {
     /// Rerunning it after `F` has moved finds it finalized and resumes the
     /// backfills, so an interrupted finalize is finished by running it again.
     ///
+    /// `plugins` are the finalizing build's plugin registrations (FIG-4746):
+    /// the transaction that moves `F` also raises each registered plugin's
+    /// writer range to its native format, so a writer never fences on an
+    /// epoch that disagrees with the ranges it is admitted against. A
+    /// registration that would change a recorded range while `F` already is
+    /// this build's epoch is refused typed, and nothing changes. A caller
+    /// holding no registrations passes none and moves `F` alone.
+    ///
     /// [`FinalizeMode::Automatic`]: lash_core_execution::store::fleet_finalize::FinalizeMode::Automatic
     pub async fn finalize(
         &self,
         retired: &lash_core_execution::engine::BuildGeneration,
         registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
         mode: lash_core_execution::store::fleet_finalize::FinalizeMode,
+        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
         now_ms: u64,
     ) -> Result<FinalizeReport, lash_core_execution::store::fleet_finalize::FinalizeError> {
         self.finalize_with(
             retired,
             registry,
             mode,
+            plugins,
             now_ms,
             migrate::BACKFILL_BATCH_ROWS,
         )
@@ -958,6 +973,7 @@ impl PostgresStorage {
         retired: &lash_core_execution::engine::BuildGeneration,
         registry: &dyn lash_core_execution::store::fleet_finalize::DeploymentRegistry,
         mode: lash_core_execution::store::fleet_finalize::FinalizeMode,
+        plugins: &[lash_core_execution::store::plugin_writers::PluginWriterRegistration],
         now_ms: u64,
         batch_rows: i64,
     ) -> Result<FinalizeReport, lash_core_execution::store::fleet_finalize::FinalizeError> {
@@ -972,7 +988,7 @@ impl PostgresStorage {
         )
         .await?;
         require_retired(&drain, registry).await?;
-        let flip = finalize::flip(&self.pool, &self.fence, mode).await?;
+        let flip = finalize::flip(&self.pool, &self.fence, mode, plugins).await?;
         let backfills = migrate::run_backfills(&self.pool, &self.fence, batch_rows)
             .await
             .map_err(|error| match error {

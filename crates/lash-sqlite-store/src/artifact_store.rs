@@ -202,6 +202,7 @@ impl SqliteStore {
         descriptor: BlobArtifactDescriptor,
         bytes: Vec<u8>,
         claim: ReferrerClaim,
+        plugin_publication: lash_core_execution::store::plugin_writers::PluginPublication,
     ) -> Result<(), ArtifactStoreError> {
         if !claim.referrer().kind().holds_artifacts() {
             return Err(ArtifactStoreError::ReferrerKindRefused {
@@ -212,6 +213,10 @@ impl SqliteStore {
         let now_ms = self.clock.timestamp_ms();
         self.conn
             .write(move |tx| {
+                // The plugin namespaces the artifact carries are admitted
+                // against the fleet record's writer ranges before it is
+                // written (FIG-4746).
+                tx.admit_plugin_writers(&plugin_publication)?;
                 let referrer = &claim.referrer();
                 if artifact_fenced_tx(tx, referrer)? {
                     return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
@@ -623,6 +628,7 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
             BlobArtifactDescriptor::lashlang_module(),
             bytes.to_vec(),
             claim.clone(),
+            Default::default(),
         )
         .await
     }
@@ -693,12 +699,18 @@ impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
                 artifact_ref: env_ref.as_str().to_owned(),
             });
         }
+        let plugin_publication =
+            lash_core_execution::store::plugin_writers::PluginPublication::of_process_execution_env(
+                bytes,
+            )
+            .map_err(|error| ArtifactStoreError::Encode(error.to_string()))?;
         self.publish_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
             env_ref.as_str().to_owned(),
             BlobArtifactDescriptor::process_execution_env(),
             bytes.to_vec(),
             claim.clone(),
+            plugin_publication,
         )
         .await
     }

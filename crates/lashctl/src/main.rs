@@ -743,6 +743,9 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                     retired,
                     &registry,
                     *mode,
+                    // The operator binary registers no plugins: it moves `F`
+                    // and leaves every plugin writer range as recorded.
+                    &[],
                     lash_core_execution::facade_support::SystemClock.timestamp_ms(),
                 )
                 .await

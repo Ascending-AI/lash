@@ -10,8 +10,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use lash_core_execution::compat::{CompatStamp, VersionRange};
-use lash_core_execution::store::fleet_finalize::FleetEpochFlip;
+use lash_core_execution::store::fleet_finalize::{FinalizeError, FinalizeRefusal, FleetEpochFlip};
 use lash_core_execution::store::generation_drain::GenerationDrainStatus;
+use lash_core_execution::store::plugin_writers::{PluginWriterRanges, PluginWriterRegistration};
 use lash_core_execution::{FleetFormat, StoreError};
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +31,101 @@ struct AuthorizedFinalize {
     target: u32,
     /// In `SqliteDatabase::ALL` order, read under all three exclusive locks.
     stamps: [CompatStamp; 3],
+    /// The plugin writer ranges this finalize moves or provisions in the
+    /// durable core, as they were recorded when it was sealed (FIG-4746). A
+    /// plugin absent here and present in `plugin_writers` had no range.
+    plugin_writers_from: PluginWriterRanges,
+    /// The ranges those plugins record once the durable core commits. The
+    /// recovering open holds no registrations, so the intent carries them.
+    plugin_writers: PluginWriterRanges,
+}
+
+/// The durable core's side of a finalize: the plugin writer ranges it found
+/// and the ones it records with `F` (FIG-4746).
+#[derive(Default)]
+struct PluginWriterMove {
+    from: PluginWriterRanges,
+    target: PluginWriterRanges,
+    /// Plugins whose recorded range the move changes; a newly provisioned
+    /// plugin is not one.
+    changed: Vec<String>,
+}
+
+impl PluginWriterMove {
+    /// The move a fresh finalize by a build holding `registrations` makes.
+    fn fresh(
+        tx: &rusqlite::Transaction<'_>,
+        registrations: &[PluginWriterRegistration],
+    ) -> rusqlite::Result<Self> {
+        let recorded = crate::compat::read_plugin_writers(tx)?;
+        let finalized = recorded.finalized(registrations);
+        let changed = recorded.changed_in(&finalized);
+        let mut from = std::collections::BTreeMap::new();
+        let mut target = std::collections::BTreeMap::new();
+        for (plugin, range) in finalized.iter() {
+            let before = recorded.permitted_writer(plugin).ok();
+            if before != Some(range) {
+                if let Some(before) = before {
+                    from.insert(plugin.to_owned(), before);
+                }
+                target.insert(plugin.to_owned(), range);
+            }
+        }
+        Ok(Self {
+            from: PluginWriterRanges::default().with(from),
+            target: PluginWriterRanges::default().with(target),
+            changed,
+        })
+    }
+
+    /// The move a sealed intent authorized: each plugin it names still
+    /// records its source range, or already records its target.
+    fn authorized(
+        tx: &rusqlite::Transaction<'_>,
+        intent: &AuthorizedFinalize,
+    ) -> rusqlite::Result<Self> {
+        let recorded = crate::compat::read_plugin_writers(tx)?;
+        for (plugin, target) in intent.plugin_writers.iter() {
+            let found = recorded.permitted_writer(plugin).ok();
+            let source = intent.plugin_writers_from.permitted_writer(plugin).ok();
+            if found != source && found != Some(target) {
+                return Err(invalid(format!(
+                    "the writer range of plugin `{plugin}` changed outside the authorized \
+                     transition"
+                )));
+            }
+        }
+        Ok(Self {
+            from: intent.plugin_writers_from.clone(),
+            target: intent.plugin_writers.clone(),
+            changed: Vec::new(),
+        })
+    }
+
+    fn record(&self, tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+        let entries = self
+            .target
+            .iter()
+            .map(|(plugin, range)| (plugin.to_owned(), range))
+            .collect();
+        crate::compat::record_plugin_writers(tx, &entries)
+    }
+}
+
+/// A finalize's typed outcome behind a SQLite error: a precondition the
+/// databases themselves refuse is a [`FinalizeRefusal`], not a store failure.
+pub(crate) fn finalize_error(error: rusqlite::Error) -> FinalizeError {
+    match error {
+        rusqlite::Error::ToSqlConversionFailure(error) => {
+            match error.downcast::<FinalizeRefusal>() {
+                Ok(refusal) => FinalizeError::Refused(*refusal),
+                Err(error) => FinalizeError::Store(crate::sqlite_error(
+                    rusqlite::Error::ToSqlConversionFailure(error),
+                )),
+            }
+        }
+        error => FinalizeError::Store(crate::sqlite_error(error)),
+    }
 }
 
 fn invalid(detail: impl Into<String>) -> rusqlite::Error {
@@ -127,6 +223,7 @@ pub(crate) fn finalize(
     busy_timeout: Duration,
     writable: VersionRange,
     retired: GenerationDrainStatus,
+    registrations: &[PluginWriterRegistration],
     observe: impl FnMut(AdvanceStep) -> rusqlite::Result<()>,
 ) -> rusqlite::Result<FleetEpochFlip> {
     if !retired.drained() {
@@ -139,6 +236,7 @@ pub(crate) fn finalize(
         writable,
         pending,
         Some(retired),
+        registrations,
         observe,
     )
 }
@@ -162,6 +260,7 @@ pub(crate) async fn recover_on_open(
                 FleetFormat::writable(),
                 Some(pending),
                 None,
+                &[],
                 |_| Ok(()),
             )?;
         }
@@ -180,6 +279,7 @@ fn advance(
     writable: VersionRange,
     pending: Option<AuthorizedFinalize>,
     mut retired: Option<GenerationDrainStatus>,
+    registrations: &[PluginWriterRegistration],
     observe: impl FnMut(AdvanceStep) -> rusqlite::Result<()>,
 ) -> rusqlite::Result<FleetEpochFlip> {
     if let Some(intent) = &pending {
@@ -191,6 +291,7 @@ fn advance(
     let mut lowest = target;
     let mut stamps = Vec::with_capacity(3);
     let mut epochs = Vec::with_capacity(3);
+    let mut plugin_writers = PluginWriterMove::default();
     advance_set_observed(
         location,
         busy_timeout,
@@ -216,11 +317,30 @@ fn advance(
                     [i64::from(target)],
                 )?;
             }
+            // The durable core carries the plugin writer ranges beside `F`,
+            // and its one transaction moves both.
+            if database == SqliteDatabase::DurableCore {
+                plugin_writers = match &pending {
+                    Some(intent) => PluginWriterMove::authorized(tx, intent)?,
+                    None => PluginWriterMove::fresh(tx, registrations)?,
+                };
+                plugin_writers.record(tx)?;
+            }
             if database == SqliteDatabase::Triggers && pending.is_none() {
                 if !crate::compat::stamps_agree(&stamps)?
                     || epochs.windows(2).any(|pair| pair[0] != pair[1])
                 {
                     return Err(invalid("a fresh finalize requires a consistent store set"));
+                }
+                // A recorded range changes only with `F`: the move of `F` is
+                // what fences the builds that cannot read the new format.
+                if lowest == target && !plugin_writers.changed.is_empty() {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        FinalizeRefusal::PluginRangesNeedEpochMove {
+                            fleet: target,
+                            plugins: std::mem::take(&mut plugin_writers.changed),
+                        },
+                    )));
                 }
                 if lowest != target {
                     let intent = AuthorizedFinalize {
@@ -234,6 +354,8 @@ fn advance(
                             .as_slice()
                             .try_into()
                             .map_err(|_| invalid("incomplete stamp set"))?,
+                        plugin_writers_from: plugin_writers.from.clone(),
+                        plugin_writers: plugin_writers.target.clone(),
                     };
                     intent.validate(location, writable)?;
                     seal(location, &intent)?;

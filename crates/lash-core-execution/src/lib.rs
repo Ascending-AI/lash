@@ -39,6 +39,7 @@ pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_referrers;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_store::process_id_for_test;
+pub use lash_core_store::process_identity::process_execution_env_ref_for_bytes;
 pub use lash_core_store::process_identity::process_id_from_handle_json;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::runtime_error::{

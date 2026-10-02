@@ -144,7 +144,9 @@ async fn finalize(
     registry: &Registry,
     mode: FinalizeMode,
 ) -> Result<crate::FinalizeReport, FinalizeError> {
-    storage.finalize_with(retired, registry, mode, 10, 3).await
+    storage
+        .finalize_with(retired, registry, mode, &[], 10, 3)
+        .await
 }
 
 fn fenced<T: std::fmt::Debug>(outcome: Result<T, StoreError>, what: &str) {
@@ -529,7 +531,7 @@ async fn interrupted_backfill_resumes_idempotently() {
     drained(&n, &old).await;
 
     // Finalize's flip alone: its backfill step is what gets interrupted.
-    crate::finalize::flip(next.pool(), &next.fence, FinalizeMode::Automatic)
+    crate::finalize::flip(next.pool(), &next.fence, FinalizeMode::Automatic, &[])
         .await
         .expect("finalize moves F");
     sqlx::query(
@@ -644,7 +646,7 @@ async fn contract_refuses_until_backfills_complete() {
         ),
         "{before_finalize:?}"
     );
-    crate::finalize::flip(next.pool(), &next.fence, FinalizeMode::Automatic)
+    crate::finalize::flip(next.pool(), &next.fence, FinalizeMode::Automatic, &[])
         .await
         .expect("finalize moves F");
 

@@ -157,4 +157,23 @@ impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
     fn fleet_format(&self) -> FleetFormat {
         self.fence.fleet()
     }
+
+    fn plugin_writers(&self) -> lash_core_execution::store::PluginWriterRangesFuture<'_> {
+        Box::pin(async move {
+            let mut connection = self.pool.acquire().await.map_err(crate::store_sqlx_error)?;
+            crate::guarded_tx::read_plugin_writers(&mut connection).await
+        })
+    }
+
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        registrations: &'a [lash_core_execution::store::plugin_writers::PluginWriterRegistration],
+    ) -> lash_core_execution::store::PluginWriterRangesFuture<'a> {
+        Box::pin(async move {
+            let mut tx = crate::guarded_tx::begin_guarded(&self.pool, &self.fence).await?;
+            let ranges = tx.provision_plugin_writers(registrations).await?;
+            tx.commit().await.map_err(crate::store_sqlx_error)?;
+            Ok(ranges)
+        })
+    }
 }

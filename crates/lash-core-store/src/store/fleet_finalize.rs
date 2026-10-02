@@ -156,6 +156,17 @@ pub enum FinalizeRefusal {
         hold.reason
     )]
     Held { hold: FinalizeHold },
+    /// The finalizing build's registrations would change a recorded plugin
+    /// writer range while `F` already is this build's epoch (FIG-4746). A
+    /// writer range changes only in the transaction that moves `F`, which is
+    /// what fences the builds that cannot read the new format.
+    #[error(
+        "the plugin writer range(s) of {} would change while the fleet epoch is already {fleet}, \
+         this build's own: a writer range changes only with `F`. Finalize from the release \
+         whose epoch is above {fleet}",
+        plugins.join(", ")
+    )]
+    PluginRangesNeedEpochMove { fleet: u32, plugins: Vec<String> },
 }
 
 /// What a finalize found and did to `F`.

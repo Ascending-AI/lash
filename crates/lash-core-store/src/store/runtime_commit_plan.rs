@@ -133,6 +133,10 @@ pub struct RuntimeCommitPlanner {
     operation_key: String,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
     turn_input_applications: Vec<crate::TurnInputApplication>,
+    /// The plugin namespaces the commit publishes, read off its payload
+    /// (FIG-4746): the backend admits them against the fleet record's writer
+    /// ranges inside the commit's transaction, before it writes anything.
+    plugin_publication: super::plugin_writers::PluginPublication,
 }
 
 impl RuntimeCommitPlanner {
@@ -162,6 +166,8 @@ impl RuntimeCommitPlanner {
             })
             .collect();
         let turn_input_applications = commit.turn_input_applications();
+        let plugin_publication =
+            super::plugin_writers::PluginPublication::of_runtime_commit(&commit)?;
 
         Ok(Self {
             commit,
@@ -170,7 +176,15 @@ impl RuntimeCommitPlanner {
             operation_key,
             realized_node_timestamps,
             turn_input_applications,
+            plugin_publication,
         })
+    }
+
+    /// The plugin namespaces this commit publishes. A backend admits them
+    /// against the fleet record's writer ranges under its guarded
+    /// transaction before any write of the commit.
+    pub fn plugin_publication(&self) -> &super::plugin_writers::PluginPublication {
+        &self.plugin_publication
     }
 
     /// Borrow the validated request whose backend writes the plan prescribes.
