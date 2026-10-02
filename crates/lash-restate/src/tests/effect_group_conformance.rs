@@ -565,18 +565,7 @@ impl LiveConformanceHarness {
                     tokio::spawn(async move {
                         loop {
                             tokio::time::sleep(Duration::from_secs(20)).await;
-                            for view in watched.invocations() {
-                                if view.status != "completed" {
-                                    let journal: Vec<_> = watched
-                                        .journal(&view.id)
-                                        .unwrap_or_default()
-                                        .into_iter()
-                                        .map(|entry| format!("{:?}:{:?}", entry.ty, entry.name))
-                                        .collect();
-                                    println!("WATCHDOG {view:?} journal={journal:?}");
-                                }
-                            }
-                            println!("WATCHDOG timers {:?}", watched.timers());
+                            println!("WATCHDOG {}", admin::open_invocations_report(&watched));
                         }
                     });
                 }

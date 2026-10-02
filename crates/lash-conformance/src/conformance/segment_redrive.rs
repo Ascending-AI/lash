@@ -507,7 +507,7 @@ async fn die(crash: &ConformanceCrash) -> ConformanceTurnEnd {
 /// Waits until the child the segment started has run and settled, so the
 /// crash lands on a quiet child.
 async fn child_settled(scenario: &Scenario) {
-    tokio::time::timeout(CHILD_SETTLE_TIMEOUT, async {
+    let settled = tokio::time::timeout(CHILD_SETTLE_TIMEOUT, async {
         loop {
             // The child's id is known once its start answered or its body ran.
             if let Some(child_id) = scenario.child_id() {
@@ -523,13 +523,33 @@ async fn child_settled(scenario: &Scenario) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "the child started under `{}` settled",
-            scenario.child_start_key
-        )
-    });
+    .await;
+    if settled.is_ok() {
+        return;
+    }
+    // What the child's row says where the wait gave up: a child that never
+    // ran, one still running and one whose id was never seen read apart.
+    let child = match scenario.child_id() {
+        Some(child_id) => match scenario.registry.get_process(&child_id).await {
+            Ok(Some(record)) => format!(
+                "`{child_id}`: status {:?}, started {:?}, external reference {:?}, cancel \
+                 request {:?}, park {:?}, outcome {:?}",
+                record.status,
+                record.first_started,
+                record.external_ref,
+                record.cancel_request,
+                record.park,
+                record.outcome
+            ),
+            Ok(None) => format!("`{child_id}` has no row"),
+            Err(error) => format!("`{child_id}`, unreadable: {error}"),
+        },
+        None => "no id seen: its start has not answered and its body has not run".to_string(),
+    };
+    panic!(
+        "the child started under `{}` settled within {CHILD_SETTLE_TIMEOUT:?}; child {child}",
+        scenario.child_start_key
+    );
 }
 
 /// One execution of the segment body. The crashing execution dies at the

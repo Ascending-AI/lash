@@ -915,12 +915,18 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
             biased;
             end = ended.recv() => match end {
                 Some(SegmentEnd::Crashed) => {}
+                // The segment's own panic is on stderr; the engine's open
+                // invocations say what it was waiting on.
                 end => panic!(
-                    "the segment of process `{process_id}` ended ({end:?}) before its crash fired"
+                    "the segment of process `{process_id}` ended ({end:?}) before its crash \
+                     fired; the engine holds:{}",
+                    self.admin.open_invocations_report()
                 ),
             },
             ran = &mut call => panic!(
-                "the invocation of process `{process_id}` completed before its crash fired: {ran:?}"
+                "the invocation of process `{process_id}` completed before its crash fired: \
+                 {ran:?}; the engine holds:{}",
+                self.admin.open_invocations_report()
             ),
         }
         self.crashed_segments.lock().await.insert(

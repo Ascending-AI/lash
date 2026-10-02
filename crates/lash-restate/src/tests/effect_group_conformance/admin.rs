@@ -35,7 +35,39 @@ pub(in crate::tests) enum HarnessAdmin {
     },
 }
 
+/// Every invocation of `server` that has not completed — its status,
+/// attempts, last failure and the journal it holds — and the timers pending
+/// on it: what a law that waited an invocation out in vain reports.
+pub(super) fn open_invocations_report(server: &lash_restate_test::RestateTestServer) -> String {
+    let mut report = String::new();
+    for view in server.invocations() {
+        if view.status == "completed" {
+            continue;
+        }
+        let journal: Vec<_> = server
+            .journal(&view.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| format!("{:?}:{:?}", entry.ty, entry.name))
+            .collect();
+        report.push_str(&format!("\n  {view:?} journal={journal:?}"));
+    }
+    report.push_str(&format!("\n  timers {:?}", server.timers()));
+    report
+}
+
 impl HarnessAdmin {
+    /// The engine's open invocations and pending timers, for a law's failure
+    /// message. A live server's are read from its own admin API instead.
+    pub(in crate::tests) fn open_invocations_report(&self) -> String {
+        match self {
+            Self::InProcess { server } => open_invocations_report(server),
+            Self::Live { admin_url } => {
+                format!("\n  (a live server: read its invocations at {admin_url})")
+            }
+        }
+    }
+
     pub(super) fn connection(&self) -> RestateConnection {
         match self {
             Self::Live { admin_url } => RestateConnection::new(admin_url.clone()),
