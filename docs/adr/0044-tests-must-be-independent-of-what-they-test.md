@@ -51,6 +51,14 @@ exhaustive scheduler. Such a scheduler cannot cover SQLite threads, PostgreSQL,
 live Restate or provider transport; adding it does not replace evidence at
 those boundaries.
 
+A law injects faults and pauses only at trait seams. At the store and
+deployment seams it arms a `Script`, generated from the operation lists; at any
+other injected trait it implements (the stalled execution, an effect layer, the
+provider, the engine double) it holds the call at a `Gate`. Runtime code
+carries no test hook. An in-process race with no trait between its steps stays
+covered by real-timing laws and the soak; a law that must order it extracts
+that boundary as an injected trait first.
+
 ## Deletions
 
 A claim that a test cannot fail needs mutation evidence: break the production
@@ -71,6 +79,7 @@ the oracle.
 
 ## Implementation
 
+- [Script](../../crates/lash-core-store/src/testing/script.rs) and [Gate](../../crates/lash-core-store/src/testing/gate.rs), over the [store](../../crates/lash-core-store/src/store/runtime_store_decorator.rs) and [deployment](../../crates/lash-core-execution/src/runtime/deployment_store_decorator.rs) operation lists.
 - [Effect replay invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-sim/src/clock.rs).
 - [Restate test host](../../crates/lash-restate-test/src/lib.rs) and [store gate matrix](../../scripts/ci/store-tests.sh).
 - [Mutation gate stages](../../scripts/ci/confidence-stage.sh) and [synthetic upgrade features](../../crates/lash-upgrade-harness/Cargo.toml).

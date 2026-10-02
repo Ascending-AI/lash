@@ -1752,6 +1752,8 @@ impl<T> RuntimeStore for T where
 
 mod runtime_store_decorator;
 pub use runtime_store_decorator::RuntimeStoreDecorator;
+#[cfg(any(test, feature = "testing"))]
+pub use runtime_store_decorator::StoreOp;
 
 #[cfg(test)]
 mod tests;

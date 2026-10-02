@@ -96,7 +96,61 @@ macro_rules! emit_deployment_decorator {
     };
 }
 
+/// `DeploymentOp` and the deployment half of the scripted store
+/// (`lash_core_store::testing::script`): every listed deployment operation,
+/// routed through the law's script.
+#[cfg(any(test, feature = "testing"))]
+macro_rules! emit_scripted_deployment {
+    ($(
+        $(#[$meta:meta])*
+        fn $name:ident(&self $(, $arg:ident: $arg_ty:ty)*) -> $ret:ty;
+    )*) => {
+        /// A deployment operation a law scripts, named as the operation list
+        /// names it.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[expect(
+            non_camel_case_types,
+            reason = "each variant is spelled as the operation it names"
+        )]
+        pub enum DeploymentOp {
+            $($name,)*
+        }
+
+        impl DeploymentOp {
+            /// Every scriptable deployment operation, in list order.
+            pub const ALL: &[DeploymentOp] = &[$(DeploymentOp::$name,)*];
+
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $(Self::$name => stringify!($name),)*
+                }
+            }
+        }
+
+        impl From<DeploymentOp> for lash_core_store::testing::Op {
+            fn from(op: DeploymentOp) -> Self {
+                Self::listed(op.name())
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl<S> DeploymentStoreDecorator for lash_core_store::testing::Scripted<S>
+        where
+            S: DeploymentStore + ?Sized,
+        {
+            $(
+                $(#[$meta])*
+                async fn $name(&self $(, $arg: $arg_ty)*) -> $ret {
+                    self.call(DeploymentOp::$name, self.inner().$name($($arg),*)).await
+                }
+            )*
+        }
+    };
+}
+
 deployment_operations!(emit_deployment_decorator);
+#[cfg(any(test, feature = "testing"))]
+deployment_operations!(emit_scripted_deployment);
 
 #[cfg(test)]
 mod tests {
@@ -179,5 +233,20 @@ mod tests {
 
         fn is_a_deployment<T: DeploymentStore + ControlIntentStore + ?Sized>() {}
         is_a_deployment::<AcknowledgeHook>();
+    }
+
+    #[test]
+    // Architecture lint: the scripted deployment's operations are the listed
+    // ones, so a rule on any `DeploymentOp` can fire.
+    fn every_deployment_operation_is_scriptable() {
+        let scriptable: Vec<&str> = super::DeploymentOp::ALL
+            .iter()
+            .map(|op| op.name())
+            .collect();
+        assert_eq!(scriptable, super::DEPLOYMENT_OPERATIONS);
+
+        fn is_a_deployment<T: crate::runtime::DeploymentStore + ?Sized>() {}
+        is_a_deployment::<lash_core_store::testing::Scripted<dyn crate::runtime::DeploymentStore>>(
+        );
     }
 }

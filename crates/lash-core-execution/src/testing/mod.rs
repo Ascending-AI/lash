@@ -249,6 +249,14 @@ use crate::{
 /// default on the successor.
 pub use lash_core_store::testing::queued_work_admission_policy;
 
+/// Scripted faults and pauses at the store and deployment seams, and the gate
+/// a law holds any other trait seam at (ADR 0044 §Simulation).
+pub use crate::runtime::DeploymentOp;
+pub use lash_core_store::store::StoreOp;
+pub use lash_core_store::testing::{
+    Call, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script, Scripted,
+};
+
 /// Fresh test executor host identity used by runtime construction.
 ///
 /// Each call represents a distinct boot/executor recovery attempt so crash

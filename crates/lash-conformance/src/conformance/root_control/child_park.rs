@@ -154,30 +154,12 @@ pub async fn a_stopped_child_parks_its_root_once_and_reparks_only_after_a_settle
 
 /// A stalled execution whose probe waits at `gate` and then answers
 /// stopped: a reconcile pass held between its read of the park and its write.
-struct GatedExecution(Arc<ReleaseGate>);
+struct GatedExecution(Arc<Gate>);
 #[async_trait::async_trait]
 impl StalledExecution for GatedExecution {
     async fn still_stopped(&self) -> Result<bool, EngineRefusal> {
-        self.0.reached.fetch_add(1, Ordering::SeqCst);
-        self.0.arrivals.notify_waiters();
-        self.0
-            .permits
-            .acquire()
-            .await
-            .expect("the gate is never closed")
-            .forget();
+        self.0.pass().await;
         Ok(true)
-    }
-}
-impl ReleaseGate {
-    /// Drive `work` until `count` arrivals reached the gate; it must not
-    /// finish before the law lets it through.
-    async fn reached_by<T>(&self, work: &mut (impl Future<Output = T> + Unpin), count: usize) {
-        tokio::select! {
-            biased;
-            _ = work => panic!("the gated work finished before it was let through"),
-            () = self.reached(count) => {}
-        }
     }
 }
 
@@ -219,7 +201,7 @@ pub async fn a_delayed_child_reconcile_never_settles_a_redrive_admitted_since_it
         session: admitted.parts.session_id.clone(),
         root: admitted.root.clone(),
     };
-    let gate = Arc::new(ReleaseGate::default());
+    let gate = Arc::new(Gate::new("the engine probe"));
     let execution = GatedExecution(Arc::clone(&gate));
     let first = ParkReason::engine_retry_exhausted(8, None, "the first pass".into());
     let late = ParkReason::engine_retry_exhausted(9, None, "the delayed pass".into());
@@ -318,7 +300,7 @@ pub async fn concurrent_first_child_reconciles_park_their_root_once(
         session: parts.session_id.clone(),
         root: root.clone(),
     };
-    let gate = Arc::new(ReleaseGate::default());
+    let gate = Arc::new(Gate::new("the engine probe"));
     let execution = GatedExecution(Arc::clone(&gate));
     let reasons = [
         ParkReason::engine_retry_exhausted(8, None, "one pass".into()),

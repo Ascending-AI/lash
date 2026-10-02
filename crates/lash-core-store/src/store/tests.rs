@@ -1117,4 +1117,49 @@ fn decorator_surface_covers_every_component_trait_method() {
         "segment methods with a default that is neither a listed composition nor a forwarded \
          provided method; make them required (ADR 0112 §1): {defaulted:?}"
     );
+
+    // The `@inner` segment: the deployment's control-intent ledger.
+    let ledger: std::collections::BTreeSet<String> =
+        declared_methods(include_str!("control_intent.rs"), "ControlIntentStore")
+            .into_keys()
+            .collect();
+    let listed_ledger: std::collections::BTreeSet<String> =
+        super::runtime_store_decorator::CONTROL_INTENT_OPERATIONS
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
+    assert!(
+        ledger.contains("open_root_intent"),
+        "the ledger scan must reach the trait's last method: {ledger:?}"
+    );
+    assert_eq!(
+        ledger, listed_ledger,
+        "the `@inner` segment of `runtime_store_operations!` must list exactly the \
+         `ControlIntentStore` operations"
+    );
+}
+
+#[test]
+// Architecture lint: the scripted store's operations are the ones a decorator
+// can intercept, no more and no fewer, so a rule on any `StoreOp` can fire.
+fn every_interceptable_operation_is_scriptable() {
+    let interceptable: Vec<&str> = super::runtime_store_decorator::RUNTIME_STORE_OPERATIONS
+        .iter()
+        .filter(|operation| !operation.provided)
+        .map(|operation| operation.name)
+        .chain(
+            super::runtime_store_decorator::CONTROL_INTENT_OPERATIONS
+                .iter()
+                .copied(),
+        )
+        .collect();
+    let scriptable: Vec<&str> = StoreOp::ALL.iter().map(|op| op.name()).collect();
+    assert_eq!(scriptable, interceptable);
+    assert!(scriptable.contains(&"admit_root") && scriptable.contains(&"acknowledge_intent"));
+    let distinct: std::collections::BTreeSet<&str> = scriptable.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        scriptable.len(),
+        "one operation name, one `StoreOp`"
+    );
 }

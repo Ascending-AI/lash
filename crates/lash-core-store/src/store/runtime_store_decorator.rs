@@ -10,11 +10,13 @@ use std::num::NonZeroU32;
 /// declares it (ADR 0112 §2).
 ///
 /// This list is the single place each operation's signature is written. It
-/// generates three surfaces, so none of them can drift from the traits:
+/// generates four surfaces, so none of them can drift from the traits:
 ///
 /// - the defaulted forwarders of [`RuntimeStoreDecorator`];
 /// - each segment trait's blanket implementation for a decorator;
-/// - the inherent forwarders of [`SessionStore`](super::SessionStore).
+/// - the inherent forwarders of [`SessionStore`](super::SessionStore);
+/// - in test builds, `StoreOp` and the scripted store a law arms faults and
+///   pauses on (`crate::testing::script`).
 ///
 /// Each entry carries its session scope in brackets:
 ///
@@ -32,10 +34,14 @@ use std::num::NonZeroU32;
 /// intercepts the primitive intercepts every call of the convenience too; the
 /// view still forwards them.
 ///
+/// The `@inner` segment closes the list. It is the deployment's control-intent
+/// ledger, which a [`RuntimeStore`] does not keep: a decorator has these
+/// operations when the store it wraps is one, and the view has none of them.
+///
 /// Adding an operation to a segment trait and not to this list is the drift
 /// this shape exists to prevent; the
 /// `decorator_surface_covers_every_component_trait_method` lint in
-/// `store::tests` fails when the two disagree.
+/// `store::tests` fails when the two disagree, for the `@inner` segment too.
 macro_rules! runtime_store_operations {
     ($emit:ident) => {
         $emit! {
@@ -134,6 +140,14 @@ macro_rules! runtime_store_operations {
                 [session] fn vacuum(&self, session_id: &SessionId) -> MaintenanceResult<VacuumReport>;
                 [catalog] fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;
             }
+            @inner ControlIntentStore {
+                fn begin_session_close(&self, session_id: &SessionId, at_ms: u64) -> Result<Option<ControlIntent>, StoreError>;
+                fn claim_intent_application(&self, id: ControlIntentId, at_ms: u64) -> Result<IntentApplication, StoreError>;
+                fn acknowledge_intent(&self, id: ControlIntentId, claim: &ClaimToken, at_ms: u64) -> Result<IntentSettle, StoreError>;
+                fn record_intent_failure(&self, id: ControlIntentId, claim: &ClaimToken, error: &str, retryable: bool, at_ms: u64) -> Result<IntentSettle, StoreError>;
+                fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError>;
+                fn open_root_intent(&self, request: &RootIntentRequest, at_ms: u64) -> Result<ControlIntent, RootIntentRefused>;
+            }
         }
     };
 }
@@ -152,7 +166,13 @@ macro_rules! emit_decorator_trait {
                 )*
             )?
         }
-    )*) => {
+    )*
+    @inner $inner:ident {
+        $(
+            $(#[$imeta:meta])*
+            fn $iname:ident(&self $(, $iarg:ident: $iarg_ty:ty)*) -> $iret:ty;
+        )*
+    }) => {
         /// Delegating base for [`RuntimeStore`] decorators.
         ///
         /// Implementors supply one inner store and override only the
@@ -164,7 +184,7 @@ macro_rules! emit_decorator_trait {
         /// `Inner` is the store the decorator wraps. A decorator over a
         /// deployment names its deployment store here, so the deployment's
         /// attachment root set forwards wholesale, and its control-intent
-        /// ledger through the control-intent hooks below, which a decorator
+        /// ledger through the `@inner` operations, which a decorator
         /// overrides like any other operation.
         ///
         /// A decorator must not implement the segment traits directly; doing
@@ -182,78 +202,15 @@ macro_rules! emit_decorator_trait {
                 }
             )*)*
 
-            /// The deployment's control-intent ledger, forwarded to the
-            /// inner store's unless the decorator intercepts it.
-            async fn begin_session_close(
-                &self,
-                session_id: &SessionId,
-                at_ms: u64,
-            ) -> Result<Option<ControlIntent>, StoreError>
-            where
-                Self::Inner: ControlIntentStore,
-            {
-                self.inner().begin_session_close(session_id, at_ms).await
-            }
-
-            async fn claim_intent_application(
-                &self,
-                id: ControlIntentId,
-                at_ms: u64,
-            ) -> Result<IntentApplication, StoreError>
-            where
-                Self::Inner: ControlIntentStore,
-            {
-                self.inner().claim_intent_application(id, at_ms).await
-            }
-
-            async fn acknowledge_intent(
-                &self,
-                id: ControlIntentId,
-                claim: &ClaimToken,
-                at_ms: u64,
-            ) -> Result<IntentSettle, StoreError>
-            where
-                Self::Inner: ControlIntentStore,
-            {
-                self.inner().acknowledge_intent(id, claim, at_ms).await
-            }
-
-            async fn record_intent_failure(
-                &self,
-                id: ControlIntentId,
-                claim: &ClaimToken,
-                error: &str,
-                retryable: bool,
-                at_ms: u64,
-            ) -> Result<IntentSettle, StoreError>
-            where
-                Self::Inner: ControlIntentStore,
-            {
-                self.inner()
-                    .record_intent_failure(id, claim, error, retryable, at_ms)
-                    .await
-            }
-
-            async fn load_intent(
-                &self,
-                id: ControlIntentId,
-            ) -> Result<Option<ControlIntent>, StoreError>
-            where
-                Self::Inner: ControlIntentStore,
-            {
-                self.inner().load_intent(id).await
-            }
-
-            async fn open_root_intent(
-                &self,
-                request: &RootIntentRequest,
-                at_ms: u64,
-            ) -> Result<ControlIntent, RootIntentRefused>
-            where
-                Self::Inner: ControlIntentStore,
-            {
-                self.inner().open_root_intent(request, at_ms).await
-            }
+            $(
+                $(#[$imeta])*
+                async fn $iname(&self $(, $iarg: $iarg_ty)*) -> $iret
+                where
+                    Self::Inner: $inner,
+                {
+                    self.inner().$iname($($iarg),*).await
+                }
+            )*
         }
     };
 }
@@ -272,7 +229,13 @@ macro_rules! emit_component_impls {
                 )*
             )?
         }
-    )*) => {
+    )*
+    @inner $inner:ident {
+        $(
+            $(#[$imeta:meta])*
+            fn $iname:ident(&self $(, $iarg:ident: $iarg_ty:ty)*) -> $iret:ty;
+        )*
+    }) => {
         $(
             #[async_trait::async_trait]
             impl<T> $component for T
@@ -287,6 +250,23 @@ macro_rules! emit_component_impls {
                 )*
             }
         )*
+
+        /// A deployment's control-intent ledger answers through the
+        /// decorator, which forwards to an inner store that keeps one unless
+        /// it intercepts the operation.
+        #[async_trait::async_trait]
+        impl<T> $inner for T
+        where
+            T: RuntimeStoreDecorator + ?Sized,
+            T::Inner: $inner,
+        {
+            $(
+                $(#[$imeta])*
+                async fn $iname(&self $(, $iarg: $iarg_ty)*) -> $iret {
+                    RuntimeStoreDecorator::$iname(self $(, $iarg)*).await
+                }
+            )*
+        }
     };
 }
 
@@ -306,7 +286,13 @@ macro_rules! emit_operation_table {
                 )*
             )?
         }
-    )*) => {
+    )*
+    @inner $inner:ident {
+        $(
+            $(#[$imeta:meta])*
+            fn $iname:ident(&self $(, $iarg:ident: $iarg_ty:ty)*) -> $iret:ty;
+        )*
+    }) => {
         /// Every listed operation, with its segment, its routing, its scope
         /// marker, its parameter types and its return type, as written in
         /// the list.
@@ -334,6 +320,99 @@ macro_rules! emit_operation_table {
                 )*)?
             )*
         ];
+
+        /// The `@inner` segment's operations.
+        pub(crate) const CONTROL_INTENT_OPERATIONS: &[&str] = &[$(stringify!($iname)),*];
+    };
+}
+
+/// `StoreOp` and the scripted store: every operation a decorator can
+/// intercept, routed through the law's script. The `provided` conveniences
+/// have no entry: a decorator answers them through their primitive, which is
+/// scripted.
+#[cfg(any(test, feature = "testing"))]
+macro_rules! emit_scripted_decorator {
+    ($(
+        $component:ident {
+            $(
+                $(#[$meta:meta])*
+                [$($scope:tt)*] fn $name:ident(&self $(, $arg:ident: $arg_ty:ty)*) -> $ret:ty;
+            )*
+            $(provided:
+                $(
+                    $(#[$pmeta:meta])*
+                    [$($pscope:tt)*] fn $pname:ident(&self $(, $parg:ident: $parg_ty:ty)*) -> $pret:ty;
+                )*
+            )?
+        }
+    )*
+    @inner $inner:ident {
+        $(
+            $(#[$imeta:meta])*
+            fn $iname:ident(&self $(, $iarg:ident: $iarg_ty:ty)*) -> $iret:ty;
+        )*
+    }) => {
+        /// A store operation a law scripts, named as the operation list
+        /// names it.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[expect(
+            non_camel_case_types,
+            reason = "each variant is spelled as the operation it names"
+        )]
+        pub enum StoreOp {
+            $($($name,)*)*
+            $($iname,)*
+        }
+
+        impl StoreOp {
+            /// Every scriptable store operation, in list order.
+            pub const ALL: &[StoreOp] = &[
+                $($(StoreOp::$name,)*)*
+                $(StoreOp::$iname,)*
+            ];
+
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $($(Self::$name => stringify!($name),)*)*
+                    $(Self::$iname => stringify!($iname),)*
+                }
+            }
+        }
+
+        impl From<StoreOp> for crate::testing::Op {
+            fn from(op: StoreOp) -> Self {
+                Self::listed(op.name())
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl<S> RuntimeStoreDecorator for crate::testing::Scripted<S>
+        where
+            S: RuntimeStore + ?Sized,
+        {
+            type Inner = S;
+
+            fn inner(&self) -> &S {
+                crate::testing::Scripted::inner(self)
+            }
+
+            $($(
+                $(#[$meta])*
+                async fn $name(&self $(, $arg: $arg_ty)*) -> $ret {
+                    self.call(StoreOp::$name, self.inner().$name($($arg),*)).await
+                }
+            )*)*
+
+            $(
+                $(#[$imeta])*
+                async fn $iname(&self $(, $iarg: $iarg_ty)*) -> $iret
+                where
+                    Self::Inner: $inner,
+                {
+                    self.call(StoreOp::$iname, self.inner().$iname($($iarg),*)).await
+                }
+            )*
+        }
     };
 }
 
@@ -357,6 +436,8 @@ runtime_store_operations!(emit_decorator_trait);
 runtime_store_operations!(emit_component_impls);
 #[cfg(test)]
 runtime_store_operations!(emit_operation_table);
+#[cfg(any(test, feature = "testing"))]
+runtime_store_operations!(emit_scripted_decorator);
 pub(super) use runtime_store_operations;
 
 /// Provided conveniences a decorator answers through its own primitive, for
@@ -455,62 +536,5 @@ where
         id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
         self.inner().recover_abandoned_attachment_write(id).await
-    }
-}
-
-/// A deployment's control-intent ledger answers through the decorator's
-/// hooks, which forward to an inner store that keeps one unless overridden.
-#[async_trait::async_trait]
-impl<T> ControlIntentStore for T
-where
-    T: RuntimeStoreDecorator + ?Sized,
-    T::Inner: ControlIntentStore,
-{
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> Result<Option<ControlIntent>, StoreError> {
-        RuntimeStoreDecorator::begin_session_close(self, session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: ControlIntentId,
-        at_ms: u64,
-    ) -> Result<IntentApplication, StoreError> {
-        RuntimeStoreDecorator::claim_intent_application(self, id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: ControlIntentId,
-        claim: &ClaimToken,
-        at_ms: u64,
-    ) -> Result<IntentSettle, StoreError> {
-        RuntimeStoreDecorator::acknowledge_intent(self, id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: ControlIntentId,
-        claim: &ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> Result<IntentSettle, StoreError> {
-        RuntimeStoreDecorator::record_intent_failure(self, id, claim, error, retryable, at_ms).await
-    }
-
-    async fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError> {
-        RuntimeStoreDecorator::load_intent(self, id).await
-    }
-
-    async fn open_root_intent(
-        &self,
-        request: &RootIntentRequest,
-        at_ms: u64,
-    ) -> Result<ControlIntent, RootIntentRefused> {
-        RuntimeStoreDecorator::open_root_intent(self, request, at_ms).await
     }
 }

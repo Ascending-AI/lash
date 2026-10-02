@@ -13,10 +13,15 @@
 // reader or editor following the merged doc comment — including the
 // submodule's own intra-doc links — would resolve it against *this* module's
 // scope, where none of the linked items exist.
+pub mod gate;
 pub mod graph_integrity;
 pub mod guarded_surfaces;
 pub mod lineage;
+pub mod script;
 pub mod store_fixtures;
+
+pub use gate::{GATE_DEADLINE, Gate};
+pub use script::{Call, FaultKind, Op, Outcome, Phase, Script, Scripted, ScriptedError};
 
 pub use lash_core_ids::test_clock::TestClock;
 

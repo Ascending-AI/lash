@@ -40,6 +40,8 @@ pub use park::{
     root_park_recorded, turn_lane_head,
 };
 mod deployment_store_decorator;
+#[cfg(any(test, feature = "testing"))]
+pub use deployment_store_decorator::DeploymentOp;
 pub use deployment_store_decorator::DeploymentStoreDecorator;
 mod vocabulary;
 pub use vocabulary::*;

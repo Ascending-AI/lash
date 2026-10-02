@@ -181,7 +181,13 @@ macro_rules! emit_session_view {
                 )*
             )?
         }
-    )*) => {
+    )*
+    @inner $inner:ident {
+        $(
+            $(#[$imeta:meta])*
+            fn $iname:ident(&self $(, $iarg:ident: $iarg_ty:ty)*) -> $iret:ty;
+        )*
+    }) => {
         impl SessionStore {
             $(
                 $(

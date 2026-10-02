@@ -7,6 +7,7 @@ use super::drive_admission::{DriveParts, on_tier};
 use lash_core::engine::*;
 use lash_core::store::*;
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::testing::{Gate, Script};
 use lash_sansio::{SessionId, TurnId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -28,41 +29,9 @@ struct Control {
     /// timed out after the server acted.
     lose_resume_reply: AtomicBool,
     cancel_on_resume: Mutex<Option<(Arc<dyn crate::DeploymentStore>, RootIntentRequest)>>,
-    /// Sessions whose every release waits for a permit the law hands out.
-    release_gates: Mutex<Vec<(SessionId, Arc<ReleaseGate>)>>,
+    /// Sessions whose every release waits at a gate the law opens.
+    release_gates: Mutex<Vec<(SessionId, Arc<Gate>)>>,
     events: Arc<Mutex<Vec<&'static str>>>,
-}
-/// Holds each release of one session's root until the law lets it through,
-/// counting the releases that reached it.
-struct ReleaseGate {
-    reached: AtomicUsize,
-    arrivals: tokio::sync::Notify,
-    permits: tokio::sync::Semaphore,
-}
-impl Default for ReleaseGate {
-    fn default() -> Self {
-        Self {
-            reached: AtomicUsize::new(0),
-            arrivals: tokio::sync::Notify::new(),
-            permits: tokio::sync::Semaphore::new(0),
-        }
-    }
-}
-impl ReleaseGate {
-    /// Wait until `count` releases reached the gate.
-    async fn reached(&self, count: usize) {
-        loop {
-            let arrival = self.arrivals.notified();
-            if self.reached.load(Ordering::SeqCst) >= count {
-                return;
-            }
-            arrival.await;
-        }
-    }
-    /// Let the release that has waited longest through.
-    fn open_one(&self) {
-        self.permits.add_permits(1);
-    }
 }
 #[async_trait::async_trait]
 impl SessionControlEngine for Control {
@@ -99,13 +68,7 @@ impl SessionControlEngine for Control {
             .find(|(session, _)| *session == root.session)
             .map(|(_, gate)| Arc::clone(gate));
         if let Some(gate) = gate {
-            gate.reached.fetch_add(1, Ordering::SeqCst);
-            gate.arrivals.notify_waiters();
-            gate.permits
-                .acquire()
-                .await
-                .expect("the gate is never closed")
-                .forget();
+            gate.pass().await;
         }
         if self.permanent.load(Ordering::SeqCst) {
             return Err(EngineRefusal::Permanent {
@@ -619,57 +582,16 @@ fn spawn_drive(
     })
 }
 
-/// Counts the law session's parked-root probes: admission reads the park
-/// before it decides, so every probe is one admission evaluation. The
-/// second probe is held until the law settles — on Restate a refusal's
-/// retry re-decides admission inside its recorded step, and holding that
-/// re-decision at the park read keeps it suspended rather than burning the
-/// invocation's attempt budget, so the settle cannot lose the race.
-struct GateProbe {
-    inner: Arc<dyn crate::RuntimeStore>,
-    probed: AtomicUsize,
-    probed_wake: tokio::sync::Notify,
-    settled: tokio::sync::watch::Receiver<bool>,
-}
-
-impl GateProbe {
-    /// Wait until at least `reads` park reads were probed.
-    async fn await_reads(&self, reads: usize) {
-        loop {
-            let notified = self.probed_wake.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            if self.probed.load(Ordering::SeqCst) >= reads {
-                return;
-            }
-            notified.await;
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for GateProbe {
-    type Inner = dyn crate::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn load_turn_park(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<TurnPark>, crate::StoreError> {
-        let probe = self.probed.fetch_add(1, Ordering::SeqCst) + 1;
-        self.probed_wake.notify_waiters();
-        if probe == 2 {
-            // The racing drive's second evaluation is its retry re-deciding
-            // admission under the still-unsettled intent: hold it until the
-            // law's settle landed, so what it then reads is the settled one.
-            let mut settled = self.settled.clone();
-            let _ = settled.wait_for(|done| *done).await;
-        }
-        self.inner.load_turn_park(session_id).await
-    }
+/// Puts the law session's store under `script` and holds its second
+/// parked-root probe at the returned gate. Admission reads the park before it
+/// decides, so every probe is one admission evaluation. On Restate a
+/// refusal's retry re-decides admission inside its recorded step, and holding
+/// that re-decision at the park read keeps it suspended rather than burning
+/// the invocation's attempt budget, so the law's settle cannot lose the race.
+fn hold_the_second_park_probe(f: &mut Fixture, script: &Script) -> Arc<Gate> {
+    let held = script.on(StoreOp::load_turn_park).nth(2).before().pause();
+    f.parts.store = script.wrap("racing", Arc::clone(&f.parts.store));
+    held
 }
 
 pub async fn a_terminal_root_never_reparks(
@@ -1949,18 +1871,11 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
     // recorded admission step and the open invocation retries until the
     // intent settles. The probe holds that retry's re-decision at the park
     // read, so the law's settle always lands inside the attempt budget.
-    let (settled, settled_rx) = tokio::sync::watch::channel(false);
-    let probe = Arc::new(GateProbe {
-        inner: Arc::clone(&f.parts.store),
-        probed: AtomicUsize::new(0),
-        probed_wake: tokio::sync::Notify::new(),
-        settled: settled_rx,
-    });
-    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimeStore>;
+    let script = Script::new();
+    let held = hold_the_second_park_probe(&mut f, &script);
     let mut racing = spawn_drive(&f, &runner, "racing");
-    tokio::time::timeout(std::time::Duration::from_secs(30), probe.await_reads(1))
-        .await
-        .expect("the racing drive evaluated the parked root");
+    // The racing drive evaluated the parked root.
+    script.called(StoreOp::load_turn_park, 1).await;
     assert_eq!(
         f.parts.calls(),
         0,
@@ -1974,10 +1889,9 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
     // refusal's own retry on Restate. Admission that instead ran the held
     // input reaches a second read only behind a committed root, so a
     // re-decision with nothing run is evidence the gate held.
-    let redecided =
-        tokio::time::timeout(std::time::Duration::from_millis(400), probe.await_reads(2))
-            .await
-            .is_ok();
+    let redecided = tokio::time::timeout(std::time::Duration::from_millis(400), held.reached(1))
+        .await
+        .is_ok();
     if redecided {
         assert_eq!(
             f.parts.calls(),
@@ -2027,7 +1941,7 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
         f.apply(&work, &close, &intent).await,
         ControlIntentState::Acknowledged { .. }
     ));
-    let _ = settled.send(true);
+    held.open_all();
     let raced = match answered {
         Some(raced) => raced,
         None => racing.await.expect("the racing drive ran"),
@@ -2094,24 +2008,16 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
     // the typed retryable one in process, and an invocation the server
     // keeps retrying on Restate. The probe holds that retry's re-decision
     // at the park read until the law's reconcile lands.
-    let (settled, settled_rx) = tokio::sync::watch::channel(false);
-    let probe = Arc::new(GateProbe {
-        inner: Arc::clone(&f.parts.store),
-        probed: AtomicUsize::new(0),
-        probed_wake: tokio::sync::Notify::new(),
-        settled: settled_rx,
-    });
-    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimeStore>;
+    let script = Script::new();
+    let held = hold_the_second_park_probe(&mut f, &script);
     let mut racing = spawn_drive(&f, &runner, "racing");
-    tokio::time::timeout(std::time::Duration::from_secs(30), probe.await_reads(1))
-        .await
-        .expect("the racing drive evaluated the parked root");
+    // The racing drive evaluated the parked root.
+    script.called(StoreOp::load_turn_park, 1).await;
     assert_eq!(f.parts.calls(), 0);
     assert!(f.parts.applications().await.is_empty());
-    let redecided =
-        tokio::time::timeout(std::time::Duration::from_millis(400), probe.await_reads(2))
-            .await
-            .is_ok();
+    let redecided = tokio::time::timeout(std::time::Duration::from_millis(400), held.reached(1))
+        .await
+        .is_ok();
     if redecided {
         assert_eq!(
             f.parts.calls(),
@@ -2155,7 +2061,7 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
         ),
         "the relay settled the lost acknowledgement"
     );
-    let _ = settled.send(true);
+    held.open_all();
     // After the tick the queued send is admitted: the held input drives
     // the root once and the send lands behind it. On Restate the racing
     // invocation's retry admits it; in process the drive answers on the
@@ -2340,8 +2246,8 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     let intent_a = a.verb_at(RootVerb::Cancel, 10).await.expect("cancel A");
     let intent_b = b.verb_at(RootVerb::Cancel, 11).await.expect("cancel B");
     let (work, close) = a.control(false, false);
-    let gate_a = Arc::new(ReleaseGate::default());
-    let gate_b = Arc::new(ReleaseGate::default());
+    let gate_a = Arc::new(Gate::new("the release of A"));
+    let gate_b = Arc::new(Gate::new("the release of B"));
     work.0.release_gates.lock().expect("release gates").extend([
         (a.parts.session_id.clone(), Arc::clone(&gate_a)),
         (b.parts.session_id.clone(), Arc::clone(&gate_b)),
