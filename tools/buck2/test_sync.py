@@ -613,6 +613,14 @@ def check_failure_filter_runs_in_daemon() -> None:
     # The upgrade from the previous overlay output and the stock transform agree.
     assert "rust/failure_filter.bzl" in overlay.PREVIOUS_OUTPUT_SHA256
     assert overlay.upgrade_previous("rust/failure_filter.bzl", overlay.STOCK_FAILURE_FILTER) == filtered
+    # A checkout overlaid before small actions reserved 512 MiB upgrades its
+    # build-script rule to the pinned output, as a fresh expansion does.
+    buildscript = ROOT / ".buck2/prelude/rust/cargo_buildscript.bzl"
+    if buildscript.is_file():
+        current = buildscript.read_text(encoding="utf-8")
+        previous = current.replace("524288", "1572864")
+        assert overlay.digest(previous.encode()) in overlay.PREVIOUS_OUTPUT_SHA256["rust/cargo_buildscript.bzl"]
+        assert overlay.upgrade_previous("rust/cargo_buildscript.bzl", previous) == current
     # Shared platforms stay remote-only: a hybrid executor would run the stock
     # toolchain's locally-preferred links and archives on the developer host.
     platforms = (HERE / "platforms.bzl").read_text(encoding="utf-8")

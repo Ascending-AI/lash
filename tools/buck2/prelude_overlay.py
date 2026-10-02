@@ -935,9 +935,10 @@ def upgrade_previous(relative: str, text: str) -> str:
     if "1572864" in text and relative in {
         "decls/rust_rules.bzl", "rust/tools/BUCK",
         "rust/clippy_configuration.bzl", "rust/tools/tool_rules.bzl",
+        "rust/cargo_buildscript.bzl",
     }:
         text = text.replace("1572864", "524288")
-        if relative != "decls/rust_rules.bzl":
+        if relative not in {"decls/rust_rules.bzl", "rust/cargo_buildscript.bzl"}:
             return text
     if relative == "decls/rust_rules.bzl":
         return add_repo_rooted_srcs_attr(text)
