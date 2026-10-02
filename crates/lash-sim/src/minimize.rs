@@ -231,7 +231,10 @@ pub fn minimize_trace(
         status: &target_status,
         reason: target_oracle_reason.as_str(),
     };
-    if RUN_ONLY_ORACLES.contains(&target.oracle_id) {
+    if RUN_ONLY_ORACLES
+        .iter()
+        .any(|oracle| oracle.id == target.oracle_id)
+    {
         return Err(MinimizeError::Target(format!(
             "oracle `{}` cannot be re-evaluated from a serialized trace because its run-time evidence is not recorded; no minimized package was written",
             target.oracle_id

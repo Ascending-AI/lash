@@ -1209,7 +1209,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         "queued-active-turn-cancel-race",
         "trigger-wakeup-routes-process",
         "durable-effect-crash-reopen-replay",
-        "backend-retry-terminalization",
+        "backend-fault-classification",
         "provider-protocol-terminalization",
         "rlm-standard-protocol-terminal-boundaries",
     ] {

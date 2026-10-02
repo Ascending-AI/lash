@@ -229,84 +229,57 @@ pub enum OracleObservationClass {
     ModelProperty,
 }
 
-pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClass> {
-    use OracleObservationClass::{ModelProperty, RealObservation};
+/// An oracle's identity and evidence class, declared together by its owner.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OracleId<'id> {
+    pub id: &'id str,
+    pub class: OracleObservationClass,
+}
 
-    match oracle_id {
-        "sim.oracle.generated-workload.v1"
-        | "sim.oracle.state-machine-semantic-invariants.v1"
-        | "sim.oracle.operational-coverage.v1"
-        | "sim.oracle.cross-session-isolation.v1"
-        | "sim.oracle.observer-convergence.v1"
-        | "sim.oracle.runtime-session-graph.v1"
-        | "sim.oracle.replay-determinism.v1"
-        | "sim.oracle.scheduler-controlled-delivery.v1"
-        | "sim.oracle.scheduler-owned-runtime-completions.v1"
-        | "sim.oracle.provider-turn-interleaving-depth.v1" => Some(ModelProperty),
-        id if scenario_oracle_partition(id).is_some() => Some(ModelProperty),
-        "runtime.turn_contract"
-        | "sim.oracle.backend-failure-observed.v1"
-        | "sim.oracle.cancellation-observed.v1"
-        | "sim.oracle.durable-content.v1"
-        | "sim.oracle.durable-effect-exactly-once.v1"
-        | "sim.oracle.exec-code-observed.v1"
-        | "sim.oracle.failed-attempt-usage-ledgered.v1"
-        | "sim.oracle.frame-switch-ordering.v1"
-        | "sim.oracle.frame-switch-follow-on-atomicity.v1"
-        | "sim.oracle.frame-switch-seed.v1"
-        | "sim.oracle.generated-final-value-semantic-channel.v1"
-        | "sim.oracle.generated-runtime-provider-matrix.v1"
-        | "sim.oracle.generated-suspend-resume.v1"
-        | "sim.oracle.global-invariants.v1"
-        | "sim.oracle.healthy-long-turn-liveness.v1"
-        | "sim.oracle.independent-checkpoint-state.v1"
-        | "sim.oracle.ingress-session-opened.v1"
-        | "sim.oracle.live-provider-failure-coverage.v1"
-        | "sim.oracle.live-provider-failure-terminalizes.v1"
-        | "sim.oracle.logical-turn-admission-exactly-once.v1"
-        | "sim.oracle.observer-reconnect.v1"
-        | "sim.oracle.pending-tool-completion-through-turn.v1"
-        | "sim.oracle.provider-mutation-rejected.v1"
-        | "sim.oracle.provider-transport-mutation-classified.v1"
-        | "sim.oracle.queued-ingress-observed.v1"
-        | "sim.oracle.runtime-final-value-semantic-channel.v1"
-        | "sim.oracle.runtime-graph-acyclic.v1"
-        | "sim.oracle.runtime-provider-turn.v1"
-        | "sim.oracle.runtime-single-active-agent-frame.v1"
-        | "sim.oracle.runtime-usage-monotonic.v1"
-        | "sim.oracle.postgres-abort-after-begin.v1"
-        | "sim.oracle.postgres-abort-before-commit.v1"
-        | "sim.oracle.postgres-commit-io.v1"
-        | "sim.oracle.postgres-fault-harness.v1"
-        | "sim.oracle.postgres-fault-no-duplicate-effect.v1"
-        | "sim.oracle.postgres-fault-preserves-committed-work.v1"
-        | "sim.oracle.postgres-fault-typed-error.v1"
-        | "sim.oracle.postgres-multi-arm-composition.v1"
-        | "sim.oracle.postgres-reopen-mid-sequence.v1"
-        | "sim.oracle.postgres-reopen-preserves-committed-work.v1"
-        | "sim.oracle.slow-alive-control-commits.v1"
-        | "sim.oracle.slow-alive-lease-loss-refusal.v1"
-        | "sim.oracle.slow-alive-no-partial-write.v1"
-        | "sim.oracle.sqlite-abort-after-begin.v1"
-        | "sim.oracle.sqlite-abort-before-commit.v1"
-        | "sim.oracle.sqlite-commit-io.v1"
-        | "sim.oracle.sqlite-fault-harness.v1"
-        | "sim.oracle.sqlite-fault-no-duplicate-effect.v1"
-        | "sim.oracle.sqlite-fault-preserves-committed-work.v1"
-        | "sim.oracle.sqlite-fault-typed-error.v1"
-        | "sim.oracle.sqlite-multi-arm-composition.v1"
-        | "sim.oracle.sqlite-reopen-mid-sequence.v1"
-        | "sim.oracle.sqlite-reopen-preserves-committed-work.v1"
-        | "sim.oracle.tool-boundary-observed.v1"
-        | "sim.oracle.trigger-delivery-observed.v1" => Some(RealObservation),
-        _ => None,
+impl<'id> OracleId<'id> {
+    pub const fn real(id: &'id str) -> Self {
+        Self {
+            id,
+            class: OracleObservationClass::RealObservation,
+        }
+    }
+
+    pub const fn model(id: &'id str) -> Self {
+        Self {
+            id,
+            class: OracleObservationClass::ModelProperty,
+        }
+    }
+
+    pub fn with_id<'named>(self, id: &'named str) -> OracleId<'named> {
+        OracleId {
+            id,
+            class: self.class,
+        }
+    }
+}
+
+impl std::fmt::Display for OracleId<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.id)
+    }
+}
+
+impl Serialize for OracleId<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.id)
+    }
+}
+
+impl PartialEq<OracleId<'_>> for String {
+    fn eq(&self, other: &OracleId<'_>) -> bool {
+        self == other.id
     }
 }
 
 /// Which scenario-contract oracle partition an oracle id belongs to. This is
 /// the single spelling of the `sim.oracle.scenario.` / `sim.oracle.scenario-mini.`
-/// prefix rule; both the observation classifier above and the oracle census
-/// below classify through it.
+/// prefix rule used by the oracle census.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScenarioOraclePartition {
     Contract,
@@ -340,16 +313,26 @@ pub struct OracleCensus {
 impl OracleCensus {
     /// Its status, observation class and scenario partition all come from the verdict itself.
     pub fn record(&mut self, verdict: &OracleVerdict) {
-        self.record_unverdicted(&verdict.oracle_id, verdict.status.clone());
+        self.record_classified(
+            &verdict.oracle_id,
+            verdict.status.clone(),
+            verdict.observation_class,
+        );
     }
 
     /// Record one evaluated check that produces no `OracleVerdict` row (the
     /// search lane's per-seed trace replay). The
-    /// classification still comes from the observation classifier keyed on
-    /// the check's oracle id.
-    pub fn record_unverdicted(&mut self, oracle_id: &str, status: OracleStatus) {
-        let observation_class = oracle_observation_class(oracle_id)
-            .unwrap_or_else(|| panic!("oracle `{oracle_id}` has no observation-class declaration"));
+    /// classification comes from the check's own declaration.
+    pub fn record_unverdicted(&mut self, oracle_id: OracleId<'_>, status: OracleStatus) {
+        self.record_classified(oracle_id.id, status, oracle_id.class);
+    }
+
+    fn record_classified(
+        &mut self,
+        oracle_id: &str,
+        status: OracleStatus,
+        observation_class: OracleObservationClass,
+    ) {
         self.total += 1;
         if status == OracleStatus::Failed {
             self.failures += 1;
@@ -389,6 +372,18 @@ impl OracleCensus {
     }
 }
 
+impl PartialEq<OracleId<'_>> for &str {
+    fn eq(&self, other: &OracleId<'_>) -> bool {
+        *self == other.id
+    }
+}
+
+impl From<OracleId<'_>> for String {
+    fn from(oracle: OracleId<'_>) -> Self {
+        oracle.id.to_string()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OracleVerdict {
     pub status: OracleStatus,
@@ -398,10 +393,9 @@ pub struct OracleVerdict {
 }
 
 impl OracleVerdict {
-    pub fn passed(oracle_id: impl Into<String>, message: impl Into<String>) -> Self {
-        let oracle_id = oracle_id.into();
-        let observation_class = oracle_observation_class(&oracle_id)
-            .unwrap_or_else(|| panic!("oracle `{oracle_id}` has no observation-class declaration"));
+    pub fn passed(oracle_id: OracleId<'_>, message: impl Into<String>) -> Self {
+        let observation_class = oracle_id.class;
+        let oracle_id = oracle_id.id.to_string();
         Self {
             status: OracleStatus::Passed,
             observation_class,
@@ -410,10 +404,9 @@ impl OracleVerdict {
         }
     }
 
-    pub fn failed(oracle_id: impl Into<String>, message: impl Into<String>) -> Self {
-        let oracle_id = oracle_id.into();
-        let observation_class = oracle_observation_class(&oracle_id)
-            .unwrap_or_else(|| panic!("oracle `{oracle_id}` has no observation-class declaration"));
+    pub fn failed(oracle_id: OracleId<'_>, message: impl Into<String>) -> Self {
+        let observation_class = oracle_id.class;
+        let oracle_id = oracle_id.id.to_string();
         Self {
             status: OracleStatus::Failed,
             observation_class,
@@ -432,35 +425,33 @@ mod observation_class_tests {
     use super::*;
 
     #[test]
-    fn oracle_registration_marks_real_and_model_observations() {
-        assert_eq!(
-            oracle_observation_class("sim.oracle.backend-failure-observed.v1"),
-            Some(OracleObservationClass::RealObservation)
-        );
-        assert_eq!(
-            oracle_observation_class("sim.oracle.runtime-graph-acyclic.v1"),
-            Some(OracleObservationClass::RealObservation)
-        );
-        assert_eq!(
-            oracle_observation_class("sim.oracle.scenario.runtime-contract.v1:example"),
-            Some(OracleObservationClass::ModelProperty)
-        );
-        assert_eq!(
-            oracle_observation_class("sim.oracle.state-machine-semantic-invariants.v1"),
-            Some(OracleObservationClass::ModelProperty)
-        );
-        assert_eq!(
-            oracle_observation_class("sim.oracle.brand-new-oracle-nobody-classified.v1"),
-            None
-        );
+    fn fig_4679_census_uses_the_recorded_observation_class() {
+        let verdict = OracleVerdict {
+            status: OracleStatus::Passed,
+            oracle_id: "sim.oracle.backend-failure-observed.v1".to_string(),
+            observation_class: OracleObservationClass::ModelProperty,
+            message: "recorded model observation".to_string(),
+        };
+        let mut census = OracleCensus::default();
+        census.record(&verdict);
+        assert_eq!(census.model_property_oracles(), 1);
+        assert_eq!(census.real_observation_oracles(), 0);
     }
 
     #[test]
-    #[should_panic(expected = "has no observation-class declaration")]
-    fn unclassified_oracle_cannot_construct_a_verdict() {
-        OracleVerdict::passed(
-            "sim.oracle.brand-new-oracle-nobody-classified.v1",
-            "must not fail open",
+    fn oracle_declaration_supplies_the_verdict_class() {
+        let real = OracleVerdict::passed(crate::oracles::BACKEND_FAILURE_ORACLE, "observed");
+        let model = OracleVerdict::passed(
+            crate::oracles::STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE,
+            "modeled",
+        );
+        assert_eq!(
+            real.observation_class,
+            OracleObservationClass::RealObservation
+        );
+        assert_eq!(
+            model.observation_class,
+            OracleObservationClass::ModelProperty
         );
     }
 

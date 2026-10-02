@@ -36,10 +36,20 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
     // every later execution's group children (see `LawSeamHost`).
     let host = LawSeamHost::over(host);
     let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
-    for action in cold_process::ColdProcessTurnAction::CANCEL_CRASH_ACTIONS {
-        let point = action
-            .point()
-            .expect("every cancellation cut names its crash point");
+    let cuts = [
+        TurnSeamOperation::Store(StoreOperation::AuthorizeTurnCancelClosure),
+        TurnSeamOperation::TurnControl(TurnControlOperation::ResolveBase),
+        TurnSeamOperation::TurnControl(TurnControlOperation::ResolveEscalation),
+        TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume),
+    ]
+    .into_iter()
+    .flat_map(|operation| {
+        [CrashPlacement::Boundary, CrashPlacement::InsideCall].map(|placement| TurnCrashPoint {
+            operation: operation.clone(),
+            placement,
+        })
+    });
+    for point in cuts {
         let scenario = format!("cancel-closure-{}", point_key(&point));
         let identity = ReferenceIdentity::for_scenario(&scenario);
         let store = make(&scenario);

@@ -317,7 +317,10 @@ fn trace_with_events(
         BTreeMap::new(),
         events,
         writes,
-        crate::trace::OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
+        crate::trace::OracleVerdict::passed(
+            crate::oracles::GENERATED_WORKLOAD_BATTERY_ORACLE,
+            "passed",
+        ),
         Vec::new(),
         crate::trace::AbstractWorldView::with_digest(0, 0, Vec::new(), Vec::new()),
     )
@@ -686,7 +689,7 @@ mod tests {
             BTreeMap::new(),
             Vec::new(),
             vec![write],
-            OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
+            OracleVerdict::passed(crate::oracles::GENERATED_WORKLOAD_BATTERY_ORACLE, "passed"),
             Vec::new(),
             AbstractWorldView::with_digest(0, 0, Vec::new(), Vec::new()),
         )

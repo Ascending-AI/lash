@@ -66,8 +66,10 @@ use serde_json::Value;
 use crate::provider::ProviderWireScript;
 use crate::trace::OracleVerdict;
 
-pub const DURABLE_CONTENT_ORACLE: &str = "sim.oracle.durable-content.v1";
-pub const FAILED_ATTEMPT_USAGE_ORACLE: &str = "sim.oracle.failed-attempt-usage-ledgered.v1";
+pub const DURABLE_CONTENT_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.durable-content.v1");
+pub const FAILED_ATTEMPT_USAGE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.failed-attempt-usage-ledgered.v1");
 
 /// The accounting's usage buckets, in this module's own representation so
 /// the oracle does not borrow lash's usage type.

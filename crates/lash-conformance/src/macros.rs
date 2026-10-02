@@ -650,19 +650,6 @@ macro_rules! effect_group_close_race_tests {
     };
 }
 
-/// Register the effect-group laws over a host with no registered group
-/// executors, beside [`effect_group_host_tests!`] on a tier whose host holds
-/// its group executors. The fixture is the same.
-#[macro_export]
-macro_rules! effect_group_unwired_host_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::effect_group_host_tests!(@expand [$(#[$attr])*] $fixture; [
-            (an_unregistered_host_refuses_all_three_from_wiring, "group-unwired", unwired),
-            (a_refused_open_journals_nothing, "group-refused-open", mixed),
-        ]);
-    };
-}
-
 /// Register the durable cancelled-child terminal law.
 #[macro_export]
 macro_rules! __effect_group_cancelled_child_terminal_register {
@@ -1862,47 +1849,6 @@ macro_rules! abandoned_attachment_recovery_tests {
                 let _ = $label;
                 let (factory, make_bytes, reopen) = make().await;
                 $crate::registration_macro_support::$law(factory, make_bytes, reopen).await;
-            }
-        )*
-    };
-}
-
-/// Register atomic runtime-operation effect-group retirement.
-#[macro_export]
-macro_rules! effect_group_runtime_retirement_tests {
-    ($fixture:block) => {
-        $crate::effect_group_runtime_retirement_tests!(@catalogue $fixture; [
-            (effect_group_runtime_operation_retirement_is_atomic, "effect-group-runtime-retirement"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, make, verify) = $fixture;
-                let _ = $label;
-                let observation = $crate::registration_macro_support::$law(make).await;
-                verify(observation).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
-macro_rules! effect_group_quiescent_retirement_tests {
-    ($fixture:block) => {
-        $crate::effect_group_quiescent_retirement_tests!(@catalogue $fixture; [
-            (effect_group_quiescent_retirement_waits_for_live_children, "effect-group-quiescent-retirement"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, make, verify) = $fixture;
-                let _ = $label;
-                let observation = $crate::registration_macro_support::$law(make).await;
-                verify(observation).await;
             }
         )*
     };

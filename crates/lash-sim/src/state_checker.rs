@@ -27,7 +27,8 @@ struct CheckedSession {
 /// compares that independent reconstruction with both the accepted
 /// raw rows and the accepted read-model projection captured at the commit seam.
 /// Verdict id of the independent checkpoint-state checker.
-pub const INDEPENDENT_CHECKPOINT_STATE_ORACLE: &str = "sim.oracle.independent-checkpoint-state.v1";
+pub const INDEPENDENT_CHECKPOINT_STATE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.independent-checkpoint-state.v1");
 
 pub fn checkpoint_state_consistency(
     events: &[DeliveredBoundary],

@@ -285,7 +285,7 @@ pub(super) fn exec_semantic_fact(
     )
 }
 
-pub(super) fn backend_retry_terminalization_fact(
+pub(super) fn backend_fault_classification_fact(
     events: &[DeliveredBoundary],
     fact: &'static str,
 ) -> Result<ScenarioContractGeneratedFact, String> {
@@ -314,36 +314,15 @@ pub(super) fn backend_retry_terminalization_fact(
             .push(event);
     }
     let Some(mut operation_events) = by_session_operation.into_values().find(|events| {
-        let retryable = events.iter().any(|event| {
-            event.observed.get("retryable").and_then(Value::as_bool) == Some(true)
-                && event
-                    .observed
-                    .pointer("/production_store_error/retryable_class")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && event
-                    .observed
-                    .pointer("/fault_injector/point")
-                    .and_then(Value::as_str)
-                    == Some("after_begin")
-        });
-        let terminal = events.iter().any(|event| {
-            event.observed.get("retryable").and_then(Value::as_bool) == Some(false)
-                && event
-                    .observed
-                    .get("store_error_class")
-                    .and_then(Value::as_str)
-                    == Some("terminal_backend_error")
-                && event
-                    .observed
-                    .pointer("/fault_injector/point")
-                    .and_then(Value::as_str)
-                    == Some("commit_io")
-        });
-        retryable && terminal
+        backend_fault_classification_semantics(
+            &events
+                .iter()
+                .map(|event| (*event).clone())
+                .collect::<Vec<_>>(),
+        )
     }) else {
         return Err(format!(
-            "backend semantic fact `{fact}` did not find retryable-to-terminal backend failure sequence"
+            "backend semantic fact `{fact}` did not find classified transaction-fault retry sequence"
         ));
     };
     operation_events.sort_by_key(|event| event.sequence);
@@ -353,14 +332,13 @@ pub(super) fn backend_retry_terminalization_fact(
             json!({
                 "boundary_id": event.boundary_id,
                 "attempt": event.observed.get("attempt").cloned().unwrap_or(Value::Null),
-                "retryable": event.observed.get("retryable").cloned().unwrap_or(Value::Null),
-                "store_error_class": event.observed.get("store_error_class").cloned().unwrap_or(Value::Null),
+                "transient": event.observed.get("transient").cloned().unwrap_or(Value::Null),
             })
         })
         .collect::<Vec<_>>();
     generated_fact(
         fact,
-        "backend failure evidence advances from retryable production StoreError to terminal StoreError",
+        "backend failures retain their production StoreError class across transaction points",
         operation_events,
         json!({
             "backend_failures": observed_events,
@@ -625,7 +603,7 @@ pub(super) fn trigger_wakeup_route_semantics(events: &[DeliveredBoundary]) -> bo
         })
 }
 
-pub(super) fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool {
+pub(crate) fn backend_fault_classification_semantics(events: &[DeliveredBoundary]) -> bool {
     let mut by_session_operation: BTreeMap<(String, String), Vec<&DeliveredBoundary>> =
         BTreeMap::new();
     for event in events
@@ -653,50 +631,41 @@ pub(super) fn backend_retry_terminalization_semantics(events: &[DeliveredBoundar
     by_session_operation.values().any(|events| {
         let mut events = events.clone();
         events.sort_by_key(|event| event.sequence);
-        let mut saw_retryable = false;
         let mut last_attempt = 0;
+        let mut points = BTreeSet::new();
         for event in events {
             let attempt = event
                 .observed
                 .get("attempt")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            if attempt == 0 || attempt <= last_attempt {
+            if attempt == 0
+                || attempt <= last_attempt
+                || event.observed.get("transient").and_then(Value::as_bool) != Some(true)
+                || event
+                    .observed
+                    .pointer("/production_store_error/variant")
+                    .and_then(Value::as_str)
+                    != Some("StorageFailure")
+                || event
+                    .observed
+                    .pointer("/fault_injector/exercised")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+            {
                 return false;
             }
             last_attempt = attempt;
-            let Some(retryable) = event.observed.get("retryable").and_then(Value::as_bool) else {
-                return false;
-            };
-            let Some(store_error_retryable) = event
-                .observed
-                .pointer("/production_store_error/retryable_class")
-                .and_then(Value::as_bool)
-            else {
-                return false;
-            };
-            let observed_fault_point = event
+            let point = event
                 .observed
                 .pointer("/fault_injector/point")
                 .and_then(Value::as_str);
-            if retryable && store_error_retryable && observed_fault_point == Some("after_begin") {
-                saw_retryable = true;
-                continue;
+            if point != event.payload.get("fault_point").and_then(Value::as_str) {
+                return false;
             }
-            if saw_retryable
-                && !retryable
-                && !store_error_retryable
-                && observed_fault_point == Some("commit_io")
-                && event
-                    .observed
-                    .get("store_error_class")
-                    .and_then(Value::as_str)
-                    == Some("terminal_backend_error")
-            {
-                return true;
-            }
+            points.insert(point);
         }
-        false
+        points.contains(&Some("after_begin")) && points.contains(&Some("commit_io"))
     })
 }
 

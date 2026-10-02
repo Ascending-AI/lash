@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
 use super::{
@@ -23,7 +22,6 @@ use crate::{
 /// the control is armed. Every group operation lands on the controller it
 /// layers, so durable effect-group state stays in the substrate under test.
 ///
-/// [`SeamLayer::over`] layers a controller a law holds;
 /// [`SeamLayer::over_scoped`] layers the controller a tier's turn runner lends,
 /// which on Restate is borrowed from the turn's handler.
 #[derive(Clone)]
@@ -33,14 +31,6 @@ pub(crate) struct SeamLayer {
 }
 
 impl SeamLayer {
-    /// `inner` behind this seam.
-    pub(crate) fn over(
-        self,
-        inner: Arc<dyn RuntimeEffectController>,
-    ) -> Arc<dyn RuntimeEffectController> {
-        crate::testing::LayeredEffectHost::layer_controller(inner, Arc::new(self))
-    }
-
     /// The controller a turn runner lent, behind this seam for as long as the
     /// runner's borrow lives.
     #[expect(
@@ -338,172 +328,5 @@ impl crate::testing::EffectLayer for RoutedSeamLayer {
             Some(seam) => seam.resolve_await_event(inner, key, resolution).await,
             None => inner.resolve_await_event(key, resolution).await,
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct CrashAfterCheckpointExecutionController {
-    pub(super) inner: Arc<dyn RuntimeEffectController>,
-}
-
-#[async_trait::async_trait]
-impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.inner.await_event_authority_binding_id()
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
-        self.inner
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        resolution: crate::Resolution,
-    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if !matches!(
-            &envelope.command,
-            crate::RuntimeEffectCommand::Checkpoint {
-                // The recorded AfterWork outcome supplies predecessor
-                // authority. Crashing after BeforeCompletion executes forces
-                // recovery to reclaim and journal its replacement authority.
-                checkpoint: crate::CheckpointKind::BeforeCompletion,
-            }
-        ) {
-            return self.inner.execute_effect(envelope, executor).await;
-        }
-        let crash_after_execution =
-            RuntimeEffectLocalExecutor::testing(move |envelope| async move {
-                let _outcome = executor.execute(envelope).await;
-                std::process::exit(86);
-            });
-        self.inner
-            .execute_effect(envelope, crash_after_execution)
-            .await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    fn group_child_scoped_controller(
-        &self,
-        admitted: crate::AdmittedScope,
-        binding: crate::GroupChildBinding,
-    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::TurnCancelWait,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, rank)
-            .await
     }
 }

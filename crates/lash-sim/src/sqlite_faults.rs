@@ -21,7 +21,7 @@ pub const DEFAULT_SQLITE_FAULT_SEED_BASE: u64 = 0x0000_0000_0859_0000;
 ///
 /// Every id a profile emits names the backend it judged, so a PostgreSQL
 /// failure is never filed under a SQLite oracle and the declared inventory in
-/// `crate::trace::oracle_observation_class` can list both. SQLite keeps the
+/// each declaration carries its observation class. SQLite keeps the
 /// exact strings the confidence gate and `crates/lash-sim/README.md` already
 /// document.
 struct BackendFaultNaming {
@@ -29,12 +29,16 @@ struct BackendFaultNaming {
     plan_schema: &'static str,
     composition_schema: &'static str,
     failure_schema: &'static str,
-    harness_oracle: &'static str,
-    typed_error_oracle: &'static str,
-    preserves_committed_work_oracle: &'static str,
-    reopen_preserves_committed_work_oracle: &'static str,
-    no_duplicate_effect_oracle: &'static str,
-    multi_arm_composition_oracle: &'static str,
+    harness_oracle: crate::trace::OracleId<'static>,
+    typed_error_oracle: crate::trace::OracleId<'static>,
+    preserves_committed_work_oracle: crate::trace::OracleId<'static>,
+    reopen_preserves_committed_work_oracle: crate::trace::OracleId<'static>,
+    no_duplicate_effect_oracle: crate::trace::OracleId<'static>,
+    multi_arm_composition_oracle: crate::trace::OracleId<'static>,
+    abort_after_begin_oracle: crate::trace::OracleId<'static>,
+    abort_before_commit_oracle: crate::trace::OracleId<'static>,
+    commit_io_oracle: crate::trace::OracleId<'static>,
+    reopen_mid_sequence_oracle: crate::trace::OracleId<'static>,
 }
 
 const SQLITE_NAMING: BackendFaultNaming = BackendFaultNaming {
@@ -42,12 +46,30 @@ const SQLITE_NAMING: BackendFaultNaming = BackendFaultNaming {
     plan_schema: "lash.sim.sqlite-fault-plan.v1",
     composition_schema: "lash.sim.sqlite-fault-composition.v1",
     failure_schema: "lash.sim.sqlite-substrate-fault-failure.v1",
-    harness_oracle: "sim.oracle.sqlite-fault-harness.v1",
-    typed_error_oracle: "sim.oracle.sqlite-fault-typed-error.v1",
-    preserves_committed_work_oracle: "sim.oracle.sqlite-fault-preserves-committed-work.v1",
-    reopen_preserves_committed_work_oracle: "sim.oracle.sqlite-reopen-preserves-committed-work.v1",
-    no_duplicate_effect_oracle: "sim.oracle.sqlite-fault-no-duplicate-effect.v1",
-    multi_arm_composition_oracle: "sim.oracle.sqlite-multi-arm-composition.v1",
+    harness_oracle: crate::trace::OracleId::real("sim.oracle.sqlite-fault-harness.v1"),
+    typed_error_oracle: crate::trace::OracleId::real("sim.oracle.sqlite-fault-typed-error.v1"),
+    preserves_committed_work_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-fault-preserves-committed-work.v1",
+    ),
+    reopen_preserves_committed_work_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-reopen-preserves-committed-work.v1",
+    ),
+    no_duplicate_effect_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-fault-no-duplicate-effect.v1",
+    ),
+    multi_arm_composition_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-multi-arm-composition.v1",
+    ),
+    abort_after_begin_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-abort-after-begin.v1",
+    ),
+    abort_before_commit_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-abort-before-commit.v1",
+    ),
+    commit_io_oracle: crate::trace::OracleId::real("sim.oracle.sqlite-commit-io.v1"),
+    reopen_mid_sequence_oracle: crate::trace::OracleId::real(
+        "sim.oracle.sqlite-reopen-mid-sequence.v1",
+    ),
 };
 
 const POSTGRES_NAMING: BackendFaultNaming = BackendFaultNaming {
@@ -55,12 +77,30 @@ const POSTGRES_NAMING: BackendFaultNaming = BackendFaultNaming {
     plan_schema: "lash.sim.postgres-fault-plan.v1",
     composition_schema: "lash.sim.postgres-fault-composition.v1",
     failure_schema: "lash.sim.postgres-substrate-fault-failure.v1",
-    harness_oracle: "sim.oracle.postgres-fault-harness.v1",
-    typed_error_oracle: "sim.oracle.postgres-fault-typed-error.v1",
-    preserves_committed_work_oracle: "sim.oracle.postgres-fault-preserves-committed-work.v1",
-    reopen_preserves_committed_work_oracle: "sim.oracle.postgres-reopen-preserves-committed-work.v1",
-    no_duplicate_effect_oracle: "sim.oracle.postgres-fault-no-duplicate-effect.v1",
-    multi_arm_composition_oracle: "sim.oracle.postgres-multi-arm-composition.v1",
+    harness_oracle: crate::trace::OracleId::real("sim.oracle.postgres-fault-harness.v1"),
+    typed_error_oracle: crate::trace::OracleId::real("sim.oracle.postgres-fault-typed-error.v1"),
+    preserves_committed_work_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-fault-preserves-committed-work.v1",
+    ),
+    reopen_preserves_committed_work_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-reopen-preserves-committed-work.v1",
+    ),
+    no_duplicate_effect_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-fault-no-duplicate-effect.v1",
+    ),
+    multi_arm_composition_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-multi-arm-composition.v1",
+    ),
+    abort_after_begin_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-abort-after-begin.v1",
+    ),
+    abort_before_commit_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-abort-before-commit.v1",
+    ),
+    commit_io_oracle: crate::trace::OracleId::real("sim.oracle.postgres-commit-io.v1"),
+    reopen_mid_sequence_oracle: crate::trace::OracleId::real(
+        "sim.oracle.postgres-reopen-mid-sequence.v1",
+    ),
 };
 
 const fn naming(backend: BackendFaultKind) -> &'static BackendFaultNaming {
@@ -114,28 +154,13 @@ impl BackendFaultScenarioKind {
         }
     }
 
-    fn oracle_id(self, backend: BackendFaultKind) -> &'static str {
-        match (backend, self) {
-            (BackendFaultKind::Sqlite, Self::AbortAfterBegin) => {
-                "sim.oracle.sqlite-abort-after-begin.v1"
-            }
-            (BackendFaultKind::Sqlite, Self::AbortBeforeCommit) => {
-                "sim.oracle.sqlite-abort-before-commit.v1"
-            }
-            (BackendFaultKind::Sqlite, Self::CommitIo) => "sim.oracle.sqlite-commit-io.v1",
-            (BackendFaultKind::Sqlite, Self::ReopenMidSequence) => {
-                "sim.oracle.sqlite-reopen-mid-sequence.v1"
-            }
-            (BackendFaultKind::Postgres, Self::AbortAfterBegin) => {
-                "sim.oracle.postgres-abort-after-begin.v1"
-            }
-            (BackendFaultKind::Postgres, Self::AbortBeforeCommit) => {
-                "sim.oracle.postgres-abort-before-commit.v1"
-            }
-            (BackendFaultKind::Postgres, Self::CommitIo) => "sim.oracle.postgres-commit-io.v1",
-            (BackendFaultKind::Postgres, Self::ReopenMidSequence) => {
-                "sim.oracle.postgres-reopen-mid-sequence.v1"
-            }
+    fn oracle_id(self, backend: BackendFaultKind) -> crate::trace::OracleId<'static> {
+        let names = naming(backend);
+        match self {
+            Self::AbortAfterBegin => names.abort_after_begin_oracle,
+            Self::AbortBeforeCommit => names.abort_before_commit_oracle,
+            Self::CommitIo => names.commit_io_oracle,
+            Self::ReopenMidSequence => names.reopen_mid_sequence_oracle,
         }
     }
 }
@@ -235,7 +260,7 @@ pub struct BackendFaultScenarioReport {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BackendFaultOracle {
-    pub oracle_id: &'static str,
+    pub oracle_id: crate::trace::OracleId<'static>,
     pub status: &'static str,
     pub assertion: &'static str,
     pub evidence: Value,
@@ -257,7 +282,7 @@ struct BackendFaultFailurePackage<'a> {
 
 #[derive(Debug)]
 struct ScenarioFailure {
-    oracle_id: &'static str,
+    oracle_id: crate::trace::OracleId<'static>,
     reason: String,
 }
 
@@ -392,19 +417,22 @@ fn generated_multi_arm_plan(
         .iter()
         .find(|boundary| {
             boundary.kind == crate::scheduler::BoundaryKind::BackendFailure
-                && boundary.payload.get("retryable").and_then(Value::as_bool) == Some(true)
+                && boundary.payload.get("fault_point").and_then(Value::as_str)
+                    == Some("after_begin")
         })
         .ok_or_else(|| {
-            "generated workload has no retryable backend-failure boundary".to_string()
+            "generated workload has no after-begin backend-failure boundary".to_string()
         })?;
     let terminal = workload
         .boundaries
         .iter()
         .find(|boundary| {
             boundary.kind == crate::scheduler::BoundaryKind::BackendFailure
-                && boundary.payload.get("retryable").and_then(Value::as_bool) == Some(false)
+                && boundary.payload.get("fault_point").and_then(Value::as_str) == Some("commit_io")
         })
-        .ok_or_else(|| "generated workload has no terminal backend-failure boundary".to_string())?;
+        .ok_or_else(|| {
+            "generated workload has no commit-I/O backend-failure boundary".to_string()
+        })?;
     let points = match workload.seed % 3 {
         0 => [
             BackendFaultPoint::AfterBegin,
@@ -438,7 +466,7 @@ fn generated_multi_arm_plan(
         workload_profile: PROFILE.to_string(),
         workload_max_boundaries: MAX_BOUNDARIES,
         workload_id: workload.workload_id,
-        selection_policy: "the generated workload seed selects one of the three ordered pairs of distinct transaction points; its first retryable and first terminal backend boundaries supply arm identities; both target their first reached occurrence".to_string(),
+        selection_policy: "the generated workload seed selects one of the three ordered pairs of distinct transaction points; its first after-begin and first commit-I/O backend boundaries supply arm identities; both target their first reached occurrence".to_string(),
         max_attempts: 2,
         arms,
     })
@@ -1039,7 +1067,7 @@ fn persist_failure(
         backend,
         seed,
         scenario: BackendFaultScenarioKind::for_seed(seed),
-        oracle_id: failure.oracle_id,
+        oracle_id: failure.oracle_id.id,
         reason: &failure.reason,
         database_root: artifact_root
             .join(format!("seed-{seed:016x}"))
@@ -1277,7 +1305,7 @@ mod tests {
             );
             for id in ids {
                 assert!(
-                    crate::trace::oracle_observation_class(id).is_some(),
+                    id.class == crate::trace::OracleObservationClass::RealObservation,
                     "`{id}` is missing from the declared oracle inventory"
                 );
             }

@@ -504,6 +504,8 @@ jobs:
           python3 tools/buck2/tests/test_timeout_wrapper.py
           python3 tools/buck2/tests/test_ui_fixtures.py
           python3 scripts/check_feature_coverage.py check
+          python3 scripts/check_conformance_mounts.py
+          python3 scripts/test_check_conformance_mounts.py
           python3 scripts/check_retired_terms.py
           python3 scripts/test_check_retired_terms.py
           python3 scripts/check_outcome_suffixes.py

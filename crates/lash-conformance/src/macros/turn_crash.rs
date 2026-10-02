@@ -76,6 +76,9 @@ macro_rules! turn_crash_admission_cells_tests {
             (a_checkpoint_admission_crashed_before_its_record_redelivers_its_rows,
                 "turn-crash-checkpoint-admission"));
         $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
+            (admitted_turn_input_visibility_survives_worker_crash,
+                "held-turn-input-visibility"));
+        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
             (root_end_commit_crash_before_write_replays_once,
                 "turn-crash-root-end-before-write"));
         $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;

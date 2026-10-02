@@ -101,8 +101,8 @@ pub(super) fn scenario_backend_regression_reference(
             "standard provider-error terminalization and RLM exec terminal boundaries stay represented by generated transitions with dynamic backend evidence",
         ),
         "standard.max_turns_after_tool_result" => (
-            "backend-retry-terminalization",
-            "retryable backend conflicts advance attempts and terminate on a non-retryable production StoreError class",
+            "backend-fault-classification",
+            "transaction faults advance attempts and retain their production StoreError class",
         ),
         _ => return None,
     };

@@ -170,16 +170,22 @@ fn scenario_contract_oracles_emit_one_named_verdict_per_contract() {
     );
 
     for (base, contracts) in [
-        (SCENARIO_RUNTIME_CONTRACT_ORACLE, RUNTIME_SCENARIO_CONTRACTS),
         (
-            SCENARIO_STANDARD_CONTRACT_ORACLE,
+            RUNTIME_SCENARIO_CONTRACTS[0].oracle_id,
+            RUNTIME_SCENARIO_CONTRACTS,
+        ),
+        (
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS[0].oracle_id,
             STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
         ),
         (
-            SCENARIO_RLM_CONTRACT_ORACLE,
+            RLM_PROTOCOL_SCENARIO_CONTRACTS[0].oracle_id,
             RLM_PROTOCOL_SCENARIO_CONTRACTS,
         ),
-        (SCENARIO_AGENT_CONTRACT_ORACLE, AGENT_SCENARIO_CONTRACTS),
+        (
+            AGENT_SCENARIO_CONTRACTS[0].oracle_id,
+            AGENT_SCENARIO_CONTRACTS,
+        ),
     ] {
         let suite_verdicts = verdicts
             .iter()
@@ -881,11 +887,15 @@ fn state_machine_semantic_oracle_checks_contract_outcomes_not_presence() {
     let mut retry_not_terminal = events;
     retry_not_terminal.retain(|event| {
         !(event.kind == BoundaryKind::BackendFailure
-            && event.observed.get("retryable").and_then(Value::as_bool) == Some(false))
+            && event.payload.get("fault_point").and_then(Value::as_str) == Some("commit_io"))
     });
     let verdict = state_machine_semantic_invariants(&retry_not_terminal, &summary);
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
-    assert!(verdict.message.contains("backend retry terminalization"));
+    assert!(
+        verdict
+            .message
+            .contains("production backend fault classification")
+    );
 }
 
 #[test]
@@ -1036,8 +1046,8 @@ fn a_slot_claims_its_own_declared_oracle_id_and_no_other() {
     }
 
     let slot = OracleSlot::Battery(CANCELLATION_ORACLE);
-    assert!(slot.declares_oracle_id(CANCELLATION_ORACLE));
-    assert!(!slot.declares_oracle_id(EXEC_CODE_ORACLE));
+    assert!(slot.declares_oracle_id(CANCELLATION_ORACLE.id));
+    assert!(!slot.declares_oracle_id(EXEC_CODE_ORACLE.id));
 }
 
 #[test]

@@ -81,6 +81,14 @@ pub enum BackendFaultPoint {
 }
 
 impl BackendFaultPoint {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::AfterBegin => "after_begin",
+            Self::BeforeCommit => "before_commit",
+            Self::CommitIo => "commit_io",
+        }
+    }
+
     const fn sqlite(self) -> SqliteFaultPoint {
         match self {
             Self::AfterBegin => SqliteFaultPoint::AfterBegin,
@@ -379,16 +387,16 @@ impl GeneratedBackendFaultHarness {
             .or_insert(0);
         *attempts += 1;
         let attempt = *attempts;
-        let retryable = event
-            .payload
-            .get("retryable")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let point = if retryable {
-            SqliteFaultPoint::AfterBegin
-        } else {
-            SqliteFaultPoint::CommitIo
-        };
+        let point: BackendFaultPoint = serde_json::from_value(
+            event
+                .payload
+                .get("fault_point")
+                .cloned()
+                .unwrap_or(Value::Null),
+        )
+        .map_err(|error| {
+            FixedScriptRunnerError::Assertion(format!("backend fault point: {error}"))
+        })?;
         let seed = event.at ^ ((attempt as u64) << 32) ^ 0x4649_4731_3135_3300;
         let session_id = SessionId::from(format!(
             "sim-fault-{}",
@@ -421,7 +429,7 @@ impl GeneratedBackendFaultHarness {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let observations_before = self.injector.observations().len();
         if self.injector_enabled {
-            self.injector.arm(seed, point);
+            self.injector.arm(seed, point.sqlite());
         }
         let result = store.commit_runtime_state(commit).await;
         let observations = self.injector.observations();
@@ -467,28 +475,21 @@ impl GeneratedBackendFaultHarness {
                 event.boundary_id
             ))
         })?;
-        Ok(json!({
-            "session": event.actor_alias,
-            "backend_failure": true,
-            "operation": operation,
-            "attempt": attempt,
-            "retryable": retryable,
-            "store_error_class": if retryable { "retryable_conflict" } else { "terminal_backend_error" },
-            "production_store_error": {
-                "type": "lash_core::StoreError",
-                "variant": error.variant_name(),
-                "message": error.to_string(),
-                "retryable_class": retryable,
-            },
-            "fault_injector": {
-                "enabled": true,
-                "exercised": true,
-                "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
-                "seed": injected.seed,
-                "point": injected.point,
-                "write_transaction_ordinal": injected.write_transaction_ordinal,
-            },
-        }))
+        let mut observation = crate::store::backend_fault_observation(
+            json!(event.actor_alias),
+            operation,
+            attempt,
+            &error,
+        );
+        observation["fault_injector"] = json!({
+            "enabled": true,
+            "exercised": true,
+            "implementation": "lash_sqlite_store::testing::SqliteFaultInjector",
+            "seed": injected.seed,
+            "point": injected.point,
+            "write_transaction_ordinal": injected.write_transaction_ordinal,
+        });
+        Ok(observation)
     }
 
     async fn create_store(
@@ -553,7 +554,7 @@ mod tests {
             json!({
                 "session": session,
                 "operation": "commit_runtime_state:001",
-                "retryable": retryable,
+                "fault_point": if retryable { BackendFaultPoint::AfterBegin } else { BackendFaultPoint::CommitIo },
             }),
         )
     }
@@ -571,6 +572,24 @@ mod tests {
             payload: event.payload.clone(),
             observed,
         }
+    }
+
+    #[tokio::test]
+    async fn fig_4679_commit_io_uses_the_returned_store_error_class() {
+        let mut harness = GeneratedBackendFaultHarness::default();
+        let observed = harness
+            .inject(&event("classification", false, 1))
+            .await
+            .expect("injected commit I/O fault");
+        assert_eq!(
+            observed["production_store_error"]["variant"],
+            "StorageFailure"
+        );
+        assert_eq!(
+            observed["transient"], true,
+            "production storage failures are transient"
+        );
+        assert_eq!(observed["transient"], true);
     }
 
     #[tokio::test]
@@ -635,20 +654,6 @@ mod tests {
             enabled_verdict.message
         );
         assert_eq!(enabled_verdict.oracle_id, BACKEND_FAILURE_ORACLE);
-
-        let mut wrong_point_events = enabled_events.clone();
-        wrong_point_events[0].observed["fault_injector"]["point"] = json!("commit_io");
-        let mut wrong_point_model = ModelStore::default();
-        wrong_point_model.open_session("session-001");
-        for (event, delivered) in [&retry, &terminal].into_iter().zip(&wrong_point_events) {
-            wrong_point_model.apply_observed_boundary(event, &delivered.observed);
-        }
-        let wrong_point =
-            backend_failure_observed(&wrong_point_model.summary(), &wrong_point_events);
-        assert!(
-            !wrong_point.is_passed(),
-            "retryable classification must be grounded in the observed injector point"
-        );
 
         let mut disabled_model = ModelStore::default();
         disabled_model.open_session("session-001");

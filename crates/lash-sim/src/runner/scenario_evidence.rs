@@ -92,7 +92,7 @@ pub(super) fn trace_has_durable_effect_replay(lines: &[&TraceEventLine]) -> bool
     })
 }
 
-pub(super) fn trace_has_backend_retry_terminalization(lines: &[&TraceEventLine]) -> bool {
+pub(super) fn trace_has_backend_fault_classification(lines: &[&TraceEventLine]) -> bool {
     let mut by_operation: BTreeMap<String, Vec<&TraceEventLine>> = BTreeMap::new();
     for line in lines
         .iter()
@@ -109,33 +109,11 @@ pub(super) fn trace_has_backend_retry_terminalization(lines: &[&TraceEventLine])
         by_operation.entry(operation).or_default().push(*line);
     }
     by_operation.values().any(|events| {
-        let retryable = events.iter().any(|line| {
-            line.event
-                .observed
-                .get("retryable")
-                .and_then(Value::as_bool)
-                == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("attempt")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|attempt| attempt > 0)
-        });
-        let terminal = events.iter().any(|line| {
-            line.event
-                .observed
-                .get("retryable")
-                .and_then(Value::as_bool)
-                == Some(false)
-                && line
-                    .event
-                    .observed
-                    .get("store_error_class")
-                    .and_then(Value::as_str)
-                    == Some("terminal_backend_error")
-        });
-        retryable && terminal
+        let delivered = events
+            .iter()
+            .map(|line| line.event.clone())
+            .collect::<Vec<_>>();
+        crate::oracles::backend_fault_classification_semantics(&delivered)
     })
 }
 

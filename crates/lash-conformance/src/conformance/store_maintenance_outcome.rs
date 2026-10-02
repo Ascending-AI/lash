@@ -62,46 +62,6 @@ pub fn report_failure_channels_are_incomplete(backend: &str) {
     );
 }
 
-/// A backend that does not implement the levers must say so.
-///
-/// `lash-perf`'s store is the case this law exists for: an unimplemented lever
-/// fails with [`StoreError::UnsupportedStoreOperation`](crate::StoreError::UnsupportedStoreOperation),
-/// because reporting an empty sweep it never performed is a lie the counters
-/// cannot be distinguished from.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn store_maintenance_unimplemented_levers_fail(
-    backend: &str,
-    store: &dyn crate::store::StoreMaintenance,
-) {
-    let vacuum = store
-        .vacuum(&SessionId::from("maintenance-unimplemented-levers"))
-        .await;
-    let vacuum = vacuum.expect_err(&format!(
-        "{backend}: an unimplemented vacuum must fail, not report an empty sweep"
-    ));
-    assert!(
-        matches!(
-            vacuum.stop,
-            MaintenanceStop::Failed(crate::StoreError::UnsupportedStoreOperation { .. })
-        ),
-        "{backend}: expected an unsupported-operation failure, got {vacuum:?}"
-    );
-    let gc = store.gc_unreachable().await;
-    let gc = gc.expect_err(&format!(
-        "{backend}: an unimplemented gc_unreachable must fail, not report an empty sweep"
-    ));
-    assert!(
-        matches!(
-            gc.stop,
-            MaintenanceStop::Failed(crate::StoreError::UnsupportedStoreOperation { .. })
-        ),
-        "{backend}: expected an unsupported-operation failure, got {gc:?}"
-    );
-}
-
 /// An idle session's levers complete and report zero: emptiness that was
 /// *observed*, not emptiness standing in for a failure.
 #[expect(

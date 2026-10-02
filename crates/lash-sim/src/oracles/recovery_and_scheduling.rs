@@ -30,7 +30,8 @@ pub fn durable_effect_exactly_once(summary: &AbstractWorldView) -> OracleVerdict
     )
 }
 
-pub const HEALTHY_LONG_TURN_LIVENESS_ORACLE: &str = "sim.oracle.healthy-long-turn-liveness.v1";
+pub const HEALTHY_LONG_TURN_LIVENESS_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.healthy-long-turn-liveness.v1");
 
 /// A generated provider turn remained live and committed while its delivered
 /// schedule crossed several production-sized failover windows.
@@ -300,23 +301,23 @@ pub fn operational_coverage(
     {
         missing.push("durable effects");
     }
-    let backend_retryable = events.iter().any(|event| {
+    let backend_after_begin = events.iter().any(|event| {
         event.kind == BoundaryKind::BackendFailure
             && event
-                .observed
-                .get("retryable")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
+                .payload
+                .get("fault_point")
+                .and_then(serde_json::Value::as_str)
+                == Some("after_begin")
     });
-    let backend_terminal = events.iter().any(|event| {
+    let backend_commit_io = events.iter().any(|event| {
         event.kind == BoundaryKind::BackendFailure
-            && !event
-                .observed
-                .get("retryable")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true)
+            && event
+                .payload
+                .get("fault_point")
+                .and_then(serde_json::Value::as_str)
+                == Some("commit_io")
     });
-    if !backend_retryable || !backend_terminal {
+    if !backend_after_begin || !backend_commit_io {
         missing.push("backend choices");
     }
     let backend_retry_attempt = events.iter().any(|event| {
@@ -362,8 +363,8 @@ pub fn state_machine_semantic_invariants(
     if !trigger_wakeup_route_semantics(events) {
         missing.push("trigger wakeup routes through TriggerStore reservation");
     }
-    if !backend_retry_terminalization_semantics(events) {
-        missing.push("backend retry terminalization");
+    if !backend_fault_classification_semantics(events) {
+        missing.push("production backend fault classification");
     }
     if !duplicate_delivery_semantics(events, summary) {
         missing.push("duplicate delivery/replay semantics");

@@ -355,7 +355,7 @@ pub(super) fn mini_agent_parallel_spawn_join(
 }
 
 pub(super) fn verdict_from_bool(
-    oracle_id: &'static str,
+    oracle_id: crate::trace::OracleId<'static>,
     condition: bool,
     passed: &'static str,
     failed: &'static str,
@@ -424,7 +424,7 @@ pub(super) fn scenario_contract_oracle(
     let semantic = scenario_contract_semantics(contract, events, summary, memo);
     if missing.is_empty() && semantic.passed {
         OracleVerdict::passed(
-            oracle_id,
+            SCENARIO_CONTRACT_ORACLE.with_id(&oracle_id),
             format!(
                 "{} contract `{}` passed semantic `{}`: {}. Evidence: {}; adapter: {}",
                 contract.suite,
@@ -444,7 +444,7 @@ pub(super) fn scenario_contract_oracle(
             failures.push(format!("semantic adapter failed: {}", semantic.reason));
         }
         OracleVerdict::failed(
-            oracle_id,
+            SCENARIO_CONTRACT_ORACLE.with_id(&oracle_id),
             format!(
                 "{} contract `{}` failed {} for invariant: {}",
                 contract.suite,

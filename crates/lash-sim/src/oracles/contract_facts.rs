@@ -57,7 +57,7 @@ impl ExtraFact {
             } => tool_reentry_fact(events, fact, require_provider_event_release),
             Self::DurableReplay(fact) => durable_replay_fact(events, fact),
             Self::ObserverReconnect(fact) => observer_reconnect_fact(events, fact),
-            Self::BackendRetry(fact) => backend_retry_terminalization_fact(events, fact),
+            Self::BackendRetry(fact) => backend_fault_classification_fact(events, fact),
             Self::TriggerThenProvider(fact) => trigger_then_provider_fact(events, fact),
             Self::Custom(build) => build(events),
         }

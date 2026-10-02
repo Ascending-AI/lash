@@ -10,144 +10,124 @@ use pretty_assertions::assert_eq;
 /// `Admitted{root}`, and the successor that resumes the root delivers it
 /// exactly once (FIG-3927).
 ///
-/// The crash is an aborted real runtime task at the provider mid-stream seam.
+/// The tier's runner crashes its real turn at the provider mid-stream seam.
 /// Nothing a worker crash does releases a row: only the root's commit or
 /// terminal answers it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
+pub async fn admitted_turn_input_visibility_survives_worker_crash<F, S>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
-    make_invocation: I,
+    host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
-    F: Fn(&str) -> Arc<dyn RuntimeStore>,
-    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
+    F: Fn(&str) -> Arc<S>,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
     let scenario = "held-turn-input-visibility";
     let identity = ReferenceIdentity::for_scenario(scenario);
-    let raw = make(scenario);
-    seed_reference_ingress(&raw, &identity).await;
+    let reader = make(scenario) as Arc<dyn RuntimeStore>;
+    seed_reference_ingress_for_drive(&reader, &identity).await;
+    let host = LawSeamHost::over(host);
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let decorated = SeamStore::steering(raw, control.clone(), vec![reference_steer(&identity)]);
-    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
-    let effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
-        control: control.clone(),
-        executions: Arc::clone(&executions),
-    }
-    .over(invocation.controller_handle());
-    let runtime = Box::pin(build_runtime(
-        Arc::clone(&stores),
-        decorated,
+    let crash = crash_at_armed_point(&control);
+    let crashing = ReferenceTurn::new(
+        &stores,
+        Arc::clone(&reader),
+        &host,
+        &identity,
         control.clone(),
-        Arc::clone(&effect_controller),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
-    let point = TurnCrashPoint {
-        operation: TurnSeamOperation::Provider(ProviderOperation::InitialMidStream),
-        placement: CrashPlacement::ProviderMidStream,
-    };
-    control.arm(point.clone());
-    let task_identity = identity.clone();
-    let task = crate::task::spawn(async move {
-        Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
+        &executions,
+        crashed_turn_timings(),
+    )
+    .before_drive(|control| {
+        control.arm(TurnCrashPoint {
+            operation: TurnSeamOperation::Provider(ProviderOperation::InitialMidStream),
+            placement: CrashPlacement::ProviderMidStream,
+        })
+    })
+    .attempt();
+    let crashing: crate::ConformanceTurnAttempt = Arc::new(move |scoped| {
+        let crashing = Arc::clone(&crashing);
+        let crash = crash.clone();
+        Box::pin(async move {
+            tokio::select! {
+                biased;
+                () = crash.fired() => panic!("the conformance crash killed the attempt"),
+                end = crashing(scoped) => panic!("attempt ended before crash: {end:?}"),
+            }
+        })
     });
-    control.wait_for_hit().await;
-    control.simulate_process_crash();
-    task.abort();
-    let abort = task
-        .await
-        .expect_err("the admitting worker task must be aborted");
-    assert!(
-        abort.is_cancelled(),
-        "the task loss must be an actual abort"
-    );
-
-    let reader = make(scenario);
-    super::admit_reference_session(&reader, &identity).await;
-    let during_crash = reader
-        .list_pending_turn_inputs(&identity.session_id)
-        .await
-        .expect("list inputs after the holder's worker died");
-    assert_eq!(
-        during_crash.len(),
-        2,
-        "both open rows must remain visible after the holder task aborts"
-    );
-    let admitted_status = crate::PendingTurnInputReadStatus::Admitted {
-        root: identity.turn_id.clone(),
-    };
-    let admitted = during_crash
-        .iter()
-        .filter(|read| read.status == admitted_status)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        admitted.len(),
-        1,
-        "exactly the admitted next-turn row is bound to the root"
-    );
-    assert_eq!(
-        pending_input_text(admitted[0]),
-        "durable next-turn input",
-        "the admitted row must be the input the root took before provider execution"
-    );
-    let open = during_crash
-        .iter()
-        .filter(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Open))
-        .collect::<Vec<_>>();
-    assert_eq!(open.len(), 1, "the unadmitted active row remains open");
-    assert_eq!(
-        pending_input_text(open[0]),
-        "active checkpoint input",
-        "the status split must reflect the root's actual admission"
-    );
-
-    let successor_invocation = invocation.redrive();
-    let before_successor = reader
-        .list_pending_turn_inputs(&identity.session_id)
-        .await
-        .expect("list inputs before the successor drives");
-    assert_eq!(
-        serde_json::to_value(&before_successor).expect("encode the reads"),
-        serde_json::to_value(&during_crash).expect("encode the reads"),
-        "a worker crash releases nothing: the admission holds until the root settles it"
-    );
-
-    let successor_control = SeamControl::default();
-    let successor_store = SeamStore::steering(
-        make(scenario),
-        successor_control.clone(),
-        vec![reference_steer(&identity)],
-    );
-    let successor_effect_controller: Arc<dyn RuntimeEffectController> = SeamLayer {
-        control: successor_control.clone(),
-        executions,
-    }
-    .over(successor_invocation.controller_handle());
-    let successor = Box::pin(build_runtime_with_lease_timings(
-        stores,
-        successor_store,
-        successor_control.clone(),
-        Arc::clone(&successor_effect_controller),
+    let (successor, reports) = ReferenceTurn::new(
+        &stores,
+        make(scenario) as Arc<dyn RuntimeStore>,
+        &host,
         &identity,
-        TraceTool::default(),
+        SeamControl::default(),
+        &executions,
         nominal_recovery_timings(),
-    ))
-    .await;
-    successor_control.clear();
-    let recovered = Box::pin(drive_turn(
-        successor,
-        successor_effect_controller,
-        &identity,
-    ))
-    .await
-    .expect("the successor redelivers the crashed holder's input")
-    .expect("the recovered ingress produces a turn");
-    successor_invocation.end();
+    )
+    .before_drive(SeamControl::clear)
+    .reporting();
+    let before_reader = Arc::clone(&reader);
+    let before_identity = identity.clone();
+    let redrive: crate::ConformanceTurnAttempt = Arc::new(move |scoped| {
+        let successor = Arc::clone(&successor);
+        let reader = Arc::clone(&before_reader);
+        let identity = before_identity.clone();
+        Box::pin(async move {
+            super::admit_reference_session(&reader, &identity).await;
+            let during_crash = reader
+                .list_pending_turn_inputs(&identity.session_id)
+                .await
+                .expect("list inputs after the holder's worker died");
+            assert_eq!(
+                during_crash.len(),
+                2,
+                "both open rows must remain visible after the holder task aborts"
+            );
+            let admitted_status = crate::PendingTurnInputReadStatus::Admitted {
+                root: identity.turn_id.clone(),
+            };
+            let admitted = during_crash
+                .iter()
+                .filter(|read| read.status == admitted_status)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                admitted.len(),
+                1,
+                "exactly the admitted next-turn row is bound to the root"
+            );
+            assert_eq!(
+                pending_input_text(admitted[0]),
+                "durable next-turn input",
+                "the admitted row must be the input the root took before provider execution"
+            );
+            let open = during_crash
+                .iter()
+                .filter(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Open))
+                .collect::<Vec<_>>();
+            assert_eq!(open.len(), 1, "the unadmitted active row remains open");
+            assert_eq!(
+                pending_input_text(open[0]),
+                "active checkpoint input",
+                "the status split must reflect the root's actual admission"
+            );
+
+            successor(scoped).await
+        })
+    });
+    runner
+        .run_crashed_then_redriven_turn(reference_admitted_scope(&identity), crashing, redrive)
+        .await;
+    let recovered = reference_turn::reported(reports)
+        .await
+        .map(crate::facade_support::QueuedTurnDrain::ran)
+        .expect("successor drain succeeds")
+        .expect("successor delivers the admitted input");
     let read_model = recovered.state.read_view();
     for expected in ["durable next-turn input", "active checkpoint input"] {
         let count = read_model

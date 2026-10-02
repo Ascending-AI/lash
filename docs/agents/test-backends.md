@@ -8,6 +8,13 @@ The registration bodies in `crates/lash-conformance/src/macros.rs`,
 files below select its laws and supply its fixtures. Check those invocations
 when naming the gates for a new law.
 
+`python3 scripts/check_conformance_mounts.py` follows Cargo targets, Rust
+modules, test bodies and invoked registration macros to find public
+conformance functions with no executable consumer. Dormant macros and imports
+do not count as mounts. Its mutation witnesses run alongside it in CI's
+repository gates. Performance helpers consumed by executable targets remain
+reachable without claiming a backend law ran.
+
 ## Store laws
 
 | Store | Registration and target | Gate or recipe |

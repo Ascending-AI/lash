@@ -1,6 +1,7 @@
 use super::*;
 
-pub const LIVE_PROVIDER_FAILURE_ORACLE: &str = "sim.oracle.live-provider-failure-terminalizes.v1";
+pub const LIVE_PROVIDER_FAILURE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.live-provider-failure-terminalizes.v1");
 
 /// Observed facts from driving a non-retryable provider failure through a LIVE
 /// runtime turn (a real `session.send().output()` whose scripted-transport events
@@ -79,8 +80,8 @@ pub fn live_provider_failure_terminalizes(facts: &LiveProviderFailureFacts) -> O
     }
 }
 
-pub const LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE: &str =
-    "sim.oracle.live-provider-failure-coverage.v1";
+pub const LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.live-provider-failure-coverage.v1");
 
 /// Aggregate the per-combo live-failure facts for a seed: every combo must pass
 /// the per-turn oracle, and the set must exercise more than one provider kind and
@@ -140,7 +141,8 @@ pub fn combine_oracles(oracles: &[OracleVerdict]) -> OracleVerdict {
 /// Verdict id of the aggregate [`combine_oracles`] reports when a whole battery
 /// passed. No single oracle reports under it: it is a function of the battery as
 /// a whole, so a caller that wants it has to evaluate every oracle.
-pub const GENERATED_WORKLOAD_BATTERY_ORACLE: &str = "sim.oracle.generated-workload.v1";
+pub const GENERATED_WORKLOAD_BATTERY_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.generated-workload.v1");
 
 /// The verdict [`combine_oracles`] reports when every oracle in a battery of
 /// `count` passed. Shared so a caller that decides the same predicate without

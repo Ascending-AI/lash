@@ -330,7 +330,7 @@ pub struct ModelOnlyBoundaryReview {
     pub status: &'static str,
     pub production_abstraction_used: &'static str,
     pub model_only_scope: &'static str,
-    pub oracle_id: &'static str,
+    pub oracle_id: crate::trace::OracleId<'static>,
     pub artifact_evidence: &'static str,
 }
 
@@ -527,7 +527,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             status: "engine_handler_backed_crash_redrive",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt and RuntimeEffectLocalExecutor on the scoped controller of a lash-restate handler, on the in-process Restate server double",
             model_only_scope: "the effect body is a scripted no-network outcome; the first attempt dies after the engine records the effect and the server replays the invocation into a redrive",
-            oracle_id: "sim.oracle.durable-effect-exactly-once.v1",
+            oracle_id: crate::oracles::DURABLE_EFFECT_EXACTLY_ONCE_ORACLE,
             artifact_evidence: "durable-effect observations carry runtime_effect.controller=restate_runtime_effect_controller, local_executor_called=true, redrive_local_executor_called=false, and redrive_served_recorded_result=true",
         },
         ModelOnlyBoundaryReview {
@@ -535,7 +535,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             status: "real_sqlite_fault_injector_observation",
             production_abstraction_used: "lash_sqlite_store::testing::SqliteFaultInjector armed at AfterBegin and CommitIo around real RuntimeStore::commit_runtime_state calls",
             model_only_scope: "the generated lane exercises SQLite transaction faults directly; Postgres connection faults remain in the separate backend-contention lane",
-            oracle_id: "sim.oracle.backend-failure-observed.v1",
+            oracle_id: crate::oracles::BACKEND_FAILURE_ORACLE,
             artifact_evidence: "backend failure events include StoreError::StorageFailure plus fault_injector.enabled, exercised, seed, point, and write_transaction_ordinal; disabling the injector changes the oracle result",
         },
         ModelOnlyBoundaryReview {
@@ -543,7 +543,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             status: "runtime_backed_script_mutation_boundary_with_reviewed_live_call_exclusion",
             production_abstraction_used: "ProviderWireScript, ScriptedLlmHttpTransport, and provider failure envelopes",
             model_only_scope: "live provider calls remain excluded; generated mutation boundaries execute malformed/rate-limit scripts through OpenAI-compatible, direct OpenAI, Anthropic, and Google provider parsers using ScriptedLlmHttpTransport",
-            oracle_id: "sim.oracle.provider-mutation-rejected.v1",
+            oracle_id: crate::oracles::PROVIDER_MUTATION_ORACLE,
             artifact_evidence: "provider mutation events include provider_parser_matrix proofs with real_provider_parser_execution=true and all migrated provider kinds",
         },
         ModelOnlyBoundaryReview {
@@ -551,7 +551,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             status: "runtime_effect_controller_backed_with_reviewed_tool_provider_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt, RuntimeEffectLocalExecutor, ToolAttemptLaunch, ToolCallRecord, and ToolCallOutput",
             model_only_scope: "app-specific ToolProvider implementation bodies remain excluded; generated runs execute the attempt on a lash-restate handler's scoped controller with scripted no-network tool outcomes",
-            oracle_id: "sim.oracle.tool-boundary-observed.v1",
+            oracle_id: crate::oracles::TOOL_BOUNDARY_ORACLE,
             artifact_evidence: "tool events carry runtime_effect.controller=restate_runtime_effect_controller, runtime_tool_record, and runtime_tool_output",
         },
         ModelOnlyBoundaryReview {
@@ -559,7 +559,7 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             status: "runtime_effect_controller_backed_with_reviewed_kernel_launch_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ExecCode, RuntimeEffectLocalExecutor, RuntimeEffectOutcome::ExecCode, and ExecResponse",
             model_only_scope: "host kernel process launch remains excluded; generated runs pass the boundary through a lash-restate handler's scoped controller with scripted ExecResponse outcomes that launch no kernel process. ExecCode replays by re-execution (ADR 0103)",
-            oracle_id: "sim.oracle.exec-code-observed.v1",
+            oracle_id: crate::oracles::EXEC_CODE_ORACLE,
             artifact_evidence: "exec-code events carry runtime_effect.controller=restate_runtime_effect_controller, runtime_effect_outcome from the local executor, and exit-code data",
         },
     ]

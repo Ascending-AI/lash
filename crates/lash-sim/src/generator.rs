@@ -1,3 +1,4 @@
+use crate::backend_fault::BackendFaultPoint;
 use lash_sansio::SessionId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -414,7 +415,7 @@ enum PlannedOperation {
         session: usize,
         failure_index: usize,
         operation_index: usize,
-        retryable: bool,
+        fault_point: BackendFaultPoint,
     },
     ProviderMutation {
         session: usize,
@@ -449,16 +450,16 @@ impl StateMachinePlanner {
     fn plan_required_contracts(&mut self) {
         let provider_error_repair_session = 0usize;
         let provider_error_operation =
-            self.plan_backend_failure(provider_error_repair_session, true);
+            self.plan_backend_failure(provider_error_repair_session, BackendFaultPoint::AfterBegin);
         self.plan_backend_retry(
             provider_error_repair_session,
             provider_error_operation,
-            true,
+            BackendFaultPoint::AfterBegin,
         );
         self.plan_backend_retry(
             provider_error_repair_session,
             provider_error_operation,
-            false,
+            BackendFaultPoint::CommitIo,
         );
         let first_provider_turn = self.plan_provider_turn(provider_error_repair_session);
         self.plan_queue_cancel_pair(
@@ -495,9 +496,14 @@ impl StateMachinePlanner {
         let secondary = (primary + 1) % self.sessions.len();
         self.plan_observer_reconnect(primary);
         self.plan_trigger(primary);
-        let backend_retry_operation = self.plan_backend_failure(primary, true);
-        self.plan_backend_retry(primary, backend_retry_operation, true);
-        self.plan_backend_failure(secondary, false);
+        let backend_retry_operation =
+            self.plan_backend_failure(primary, BackendFaultPoint::AfterBegin);
+        self.plan_backend_retry(
+            primary,
+            backend_retry_operation,
+            BackendFaultPoint::AfterBegin,
+        );
+        self.plan_backend_failure(secondary, BackendFaultPoint::CommitIo);
         self.plan_provider_mutation(primary, "malformed_sse_chunk");
         self.plan_provider_mutation(secondary, "rate_limit_error_envelope");
         self.plan_provider_mutation(primary, "dropped_terminal_event");
@@ -537,8 +543,12 @@ impl StateMachinePlanner {
                 }
                 2 => self.plan_trigger(session),
                 3 => {
-                    let retryable = (self.next_usize() & 1) == 0;
-                    self.plan_backend_failure(session, retryable);
+                    let fault_point = if (self.next_usize() & 1) == 0 {
+                        BackendFaultPoint::AfterBegin
+                    } else {
+                        BackendFaultPoint::CommitIo
+                    };
+                    self.plan_backend_failure(session, fault_point);
                 }
                 4 => {
                     let mutation = PROVIDER_MUTATIONS[self.next_usize() % PROVIDER_MUTATIONS.len()];
@@ -632,24 +642,29 @@ impl StateMachinePlanner {
         });
     }
 
-    fn plan_backend_failure(&mut self, session: usize, retryable: bool) -> usize {
+    fn plan_backend_failure(&mut self, session: usize, fault_point: BackendFaultPoint) -> usize {
         let failure_index = self.sessions[session].next_backend_failure();
         self.operations.push(PlannedOperation::BackendFailure {
             session,
             failure_index,
             operation_index: failure_index,
-            retryable,
+            fault_point,
         });
         failure_index
     }
 
-    fn plan_backend_retry(&mut self, session: usize, operation_index: usize, retryable: bool) {
+    fn plan_backend_retry(
+        &mut self,
+        session: usize,
+        operation_index: usize,
+        fault_point: BackendFaultPoint,
+    ) {
         let failure_index = self.sessions[session].next_backend_failure();
         self.operations.push(PlannedOperation::BackendFailure {
             session,
             failure_index,
             operation_index,
-            retryable,
+            fault_point,
         });
     }
 
@@ -974,7 +989,7 @@ impl StateMachinePlanner {
                 session,
                 failure_index,
                 operation_index,
-                retryable,
+                fault_point,
             } => {
                 let session = &self.sessions[session];
                 BoundaryEvent::new(
@@ -982,15 +997,11 @@ impl StateMachinePlanner {
                     session.alias.clone(),
                     BoundaryKind::BackendFailure,
                     at,
-                    if retryable {
-                        "backend.failure.retryable"
-                    } else {
-                        "backend.failure.terminal"
-                    },
+                    format!("backend.failure.{}", fault_point.name()),
                     json!({
                         "session": session.alias.clone(),
                         "operation": format!("commit_runtime_state:{operation_index:03}"),
-                        "retryable": retryable,
+                        "fault_point": fault_point,
                     }),
                 )
             }

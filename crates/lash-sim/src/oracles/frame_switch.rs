@@ -293,7 +293,7 @@ pub(super) fn declared_session_count(expectations: Option<&WorkloadExpectations>
 }
 
 pub(super) fn declared_coverage_shortfall(
-    oracle_id: &'static str,
+    oracle_id: crate::trace::OracleId<'static>,
     observation_class: &str,
     declared: usize,
     observed: usize,

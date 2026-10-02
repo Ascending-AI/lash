@@ -38,32 +38,6 @@ async fn driver_for_session(
     (host, driver)
 }
 
-/// Wait until a host exposes one genuinely registered durable waiter.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn await_event_registration_observed(
-    host: Arc<dyn EffectHost>,
-    session_id: SessionId,
-    key: AwaitEventKey,
-) {
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let outstanding = host
-                .list_outstanding_await_event_keys(&session_id)
-                .await
-                .expect("list outstanding waits for registration barrier");
-            if outstanding.contains(&key) {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the durable waiter is registered before the sweep");
-}
-
 /// Run the exact-address, replay, terminal, sweep, and revocation contract for
 /// a keyed-promise adapter.
 pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(

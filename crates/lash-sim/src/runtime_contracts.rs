@@ -1,3 +1,5 @@
+const RUNTIME_TURN_CONTRACT_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("runtime.turn_contract");
 use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -329,7 +331,7 @@ pub fn runtime_turn_contract(
 ) -> OracleVerdict {
     if observation.session_id != expected_session_id {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!(
                 "session id diverged: expected `{expected_session_id}`, got `{}`",
                 observation.session_id
@@ -338,7 +340,7 @@ pub fn runtime_turn_contract(
     }
     if observation.turn_index != expected_turn_index {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!(
                 "turn index diverged: expected {expected_turn_index}, got {}",
                 observation.turn_index
@@ -348,7 +350,7 @@ pub fn runtime_turn_contract(
     let expected_assistant_message = host_assistant_message(expected_assistant_message);
     if observation.assistant_message != expected_assistant_message {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!(
                 "provider output diverged: expected `{expected_assistant_message}`, got `{}`",
                 observation.assistant_message
@@ -357,7 +359,7 @@ pub fn runtime_turn_contract(
     }
     if observation.provider_exchange_count != expected_provider_exchange_count {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!(
                 "provider exchange count diverged: expected {expected_provider_exchange_count}, got {}",
                 observation.provider_exchange_count
@@ -367,7 +369,7 @@ pub fn runtime_turn_contract(
     let expected_graph_min_count = expected_turn_index * 2 + 1;
     if observation.graph_node_count < expected_graph_min_count {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!(
                 "session graph too small for turn {expected_turn_index}: {} nodes",
                 observation.graph_node_count
@@ -377,7 +379,7 @@ pub fn runtime_turn_contract(
     let expected_transcript_min_count = expected_turn_index * 2;
     if observation.transcript_message_count < expected_transcript_min_count {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!(
                 "transcript too small for turn {expected_turn_index}: {} messages",
                 observation.transcript_message_count
@@ -386,7 +388,7 @@ pub fn runtime_turn_contract(
     }
     if observation.activity_count == 0 {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             "turn emitted no runtime activities".to_string(),
         );
     }
@@ -394,7 +396,7 @@ pub fn runtime_turn_contract(
         && !graph.passed()
     {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!("session graph invariant failed: {graph:?}"),
         );
     }
@@ -402,7 +404,7 @@ pub fn runtime_turn_contract(
         && !agent_frame.passed()
     {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!("agent frame invariant failed: {agent_frame:?}"),
         );
     }
@@ -410,12 +412,12 @@ pub fn runtime_turn_contract(
         && !usage.passed()
     {
         return OracleVerdict::failed(
-            "runtime.turn_contract",
+            RUNTIME_TURN_CONTRACT_ORACLE,
             format!("usage invariant failed: {usage:?}"),
         );
     }
     OracleVerdict::passed(
-        "runtime.turn_contract",
+        RUNTIME_TURN_CONTRACT_ORACLE,
         format!(
             "turn {expected_turn_index} matched session, transcript, graph, and provider output contracts"
         ),

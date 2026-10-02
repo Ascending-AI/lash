@@ -1394,60 +1394,6 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
     assert_eq!(refused.code.as_str(), "await_event_scope_not_retirable");
 }
 
-/// A scope with an actively awaited, unresolved promise is not quiescent:
-/// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` and leaves
-/// it unfenced, and retires it once the wait has resolved (FIG-2499 fix
-/// round 2, ruling 3).
-///
-/// The law holds the waiter alive on purpose. Memory waits are not durable:
-/// a wait whose waiter was dropped before resolution stays a live entry in
-/// every durable host's index or rows and refuses retirement there, while
-/// the in-process host keeps no record of a dropped waiter and retires the
-/// scope. That is the one memory-versus-durable differential in quiescence
-/// (ADR 0049), and a law over the dropped case would assert two answers.
-///
-/// This helper holds a live waiter for a recording fixture. A Restate
-/// fixture supplies its wait-registration witness through
-/// `effect_host_await_events_with_active_wait_witness`.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
-    host: Arc<dyn EffectHost>,
-    assert_retirement: ActiveWaitRetirementAssertion,
-) {
-    let suffix = uuid::Uuid::new_v4().simple();
-    let scope = ExecutionScope::runtime_operation(format!("await-event-live-wait-{suffix}"));
-    let key = host
-        .await_event_key(
-            &scope,
-            AwaitEventWaitIdentity::tool_completion(lash_core::ToolCallId::fixture("call-live")),
-        )
-        .await
-        .expect("the operation mints");
-    let waiter_host = Arc::clone(&host);
-    let waiter_key = key.clone();
-    let waiter = crate::task::spawn(async move {
-        waiter_host
-            .await_await_event(
-                &waiter_key,
-                tokio_util::sync::CancellationToken::new(),
-                None,
-            )
-            .await
-    });
-    // The spawned waiter parks asynchronously; give it the scheduler before
-    // asking for quiescence.
-    for _ in 0..64 {
-        tokio::task::yield_now().await;
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert!(!waiter.is_finished(), "the wait is still open");
-
-    assert_retirement(host, scope, key, waiter).await;
-}
-
 /// Boxed shared assertion supplied to implementation-owned active-wait
 /// witnesses so backend registration code never names an individual law.
 pub type ActiveWaitRetirementAssertion =

@@ -69,15 +69,7 @@
       },
       "placement": "provider_mid_stream"
     },
-    "outcome": "Partial provider stream state is process-local and discarded; the request is replayed.",
-    "level_2": {
-      "exact": {
-        "effect_executions": {
-          "at_crash": 0,
-          "after_recovery": 1
-        }
-      }
-    }
+    "outcome": "Partial provider stream state is process-local and discarded; the request is replayed."
   },
   {
     "point": {
@@ -129,15 +121,7 @@
       },
       "placement": "after_external_effect_before_outcome"
     },
-    "outcome": "The external effect completed inside the tool but no durable outcome was recorded; recovery MUST re-execute it under at-least-once semantics.",
-    "level_2": {
-      "exact": {
-        "effect_executions": {
-          "at_crash": 1,
-          "after_recovery": 2
-        }
-      }
-    }
+    "outcome": "The external effect completed inside the tool but no durable outcome was recorded; recovery MUST re-execute it under at-least-once semantics."
   },
   {
     "point": {
@@ -248,15 +232,7 @@
       },
       "placement": "provider_mid_stream"
     },
-    "outcome": "Partial post-tool provider output is discarded. Level 1 replays the receipt-less effect; level 2 reuses the durable outcome before replaying the request.",
-    "level_2": {
-      "exact": {
-        "effect_executions": {
-          "at_crash": 1,
-          "after_recovery": 1
-        }
-      }
-    }
+    "outcome": "Partial post-tool provider output is discarded. Level 1 replays the receipt-less effect; level 2 reuses the durable outcome before replaying the request."
   },
   {
     "point": {
@@ -342,15 +318,7 @@
       },
       "placement": "boundary"
     },
-    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles the root's admitted rows with the recovered terminal turn.",
-    "level_2": {
-      "exact": {
-        "effect_executions": {
-          "at_crash": 1,
-          "after_recovery": 1
-        }
-      }
-    }
+    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles the root's admitted rows with the recovered terminal turn."
   },
   {
     "point": {
@@ -362,51 +330,7 @@
       },
       "placement": "inside_call"
     },
-    "outcome": "The final CAS landed but its response was lost; the successor observes settled ingress and does not repeat the committed turn.",
-    "level_2": {
-      "exact": {
-        "effect_executions": {
-          "at_crash": 1,
-          "after_recovery": 1
-        }
-      }
-    }
-  },
-  {
-    "scenario": "checkpoint_execute_finalize",
-    "outcome": "A checkpoint executed before its outcome was finalized is read back by the successor from the rows its step bound, which reaches the exact durable terminal state without stranding ingress.",
-    "exact": {
-      "terminal": 1,
-      "pending_inputs": 0,
-      "queued_work": 0
-    }
-  },
-  {
-    "scenario": "checkpoint_replacement_double_crash",
-    "outcome": "After checkpoint authority is replaced and journaled by recovery, a second crash at final commit still recovers to the exact durable terminal state.",
-    "exact": {
-      "terminal": 1,
-      "pending_inputs": 0,
-      "queued_work": 0
-    }
-  },
-  {
-    "scenario": "active_turn_input_pinned_to_recovered_turn",
-    "outcome": "FIG-1573: with the crashed turn seeded without a next-turn row, recovery resumes the unfinished root while an active-turn row is still pinned to the very turn it is about to resume. The resumed turn keeps that row and delivers it at its own checkpoint, so recovery still reaches the exact durable terminal state with no ingress left behind; only the root's terminal re-defers a pinned row, and a sweep that took the row instead would change the replayed provider request.",
-    "exact": {
-      "terminal": 1,
-      "pending_inputs": 0,
-      "queued_work": 0
-    }
-  },
-  {
-    "scenario": "peer_reclaim",
-    "outcome": "After the peer's drive is superseded, the recovery drive resumes the peer's root, reads back its exact queued-work member and settles it with the recovered terminal commit.",
-    "exact": {
-      "terminal": 1,
-      "pending_inputs": 0,
-      "queued_work": 0
-    }
+    "outcome": "The final CAS landed but its response was lost; the successor observes settled ingress and does not repeat the committed turn."
   },
   {
     "error_return": {

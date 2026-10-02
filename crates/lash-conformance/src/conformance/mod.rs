@@ -11,9 +11,7 @@
 //! [`turn_crash_matrix_level_1`] suite executes a real scripted turn through
 //! conformance-owned store, provider, and effect-controller decorators; its
 //! golden trace generates the crash points and its outcome table supplies the
-//! recovery oracle. Backend helper processes run the selected level-2 points
-//! under `SIGKILL`, including provider streaming, external-effect outcome loss,
-//! and final turn control.
+//! recovery oracle. Each backend tier supplies its crash and redrive runner.
 //!
 //! Each generated test constructs its own backend fixture and reports the violated law
 //! independently.

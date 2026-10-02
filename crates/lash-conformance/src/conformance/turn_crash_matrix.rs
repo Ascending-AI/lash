@@ -1,7 +1,7 @@
 //! Trace-derived crash coverage for one real scripted runtime turn.
 //!
 //! This suite instruments only integrator-owned seams: [`RuntimeStore`],
-//! [`crate::Provider`], and [`RuntimeEffectController`]. The runtime turn loop
+//! [`crate::Provider`], and [`crate::RuntimeEffectController`]. The runtime turn loop
 //! has no test hooks or failpoints (ADR 0044). A reference turn containing
 //! next-turn input, queued work, active-turn input at `AfterWork`, a model tool
 //! call, and a final model response produces the committed golden trace. The
@@ -22,7 +22,7 @@
 //! dispatch and no provider request follows, and that the typed store error
 //! reaches the caller. Each placement's ruling is a reviewable row in
 //! `turn_crash_outcomes.json`; a row pinning violations is a known-defect
-//! entry under the same rule as the level-2 defect rulings.
+//! entry that requires a ticket and exact violations.
 //!
 //! The outcome table is hand-written in `turn_crash_outcomes.json`. Its rulings
 //! follow ADR 0101's root admission and stale-drive-fence rules, ADR 0045's stateless
@@ -39,16 +39,11 @@
 //! - in-process points between seam operations are durably equivalent to the
 //!   next seam boundary: no durable fact can change between two seam calls, so
 //!   killing anywhere in that interval recovers from the same durable prefix.
-//! - level 1 uses task cancellation to check every generated semantic point;
-//!   level 2 uses a separate process and `SIGKILL` at the selected durable-risk
-//!   points.
-//! - a level-2 known-defect ruling is not a skip: it requires a ticket and an
-//!   exact defective durable end state. Any other state fails until the entry
-//!   is consciously flipped to the exact correct state when the ticket lands.
+//! - the matrix uses the tier's turn runner to crash and redrive every
+//!   generated semantic point. There is no separate cold-process outcome table.
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
-use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -62,20 +57,15 @@ use serde::{Deserialize, Serialize};
 use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{RuntimeCommit, RuntimeCommitReceipt, SessionWindowRead};
-use crate::{
-    DriveFence, PendingTurnInputDraft, RuntimeEffectController, RuntimeStore, SessionHeadMeta,
-    StoreError,
-};
+use crate::{DriveFence, PendingTurnInputDraft, RuntimeStore, SessionHeadMeta, StoreError};
 
 mod admission_crash_cells;
 mod after_commit_redrive;
 mod cancel_closure;
-mod cold_process;
 mod direct_acceptance;
 mod error_return;
 mod expectations;
 mod held_turn_input;
-mod invocation_effect_host;
 mod layered_group_child;
 mod recovery;
 mod reference_turn;
@@ -91,11 +81,6 @@ pub use admission_crash_cells::{
 };
 pub use after_commit_redrive::turn_crash_after_commit_redrive_replays_the_committed_receipt;
 pub use cancel_closure::turn_cancel_closure_recovers_from_a_crash_at_every_cut;
-use cold_process::ColdProcessTurnAction;
-pub use cold_process::{
-    cold_process_durable_recovery_expectation, cold_process_real_turn_driver,
-    cold_process_turn_cancel_actions, cold_process_turn_expectations, cold_process_turn_scope,
-};
 pub use direct_acceptance::direct_turn_acceptance_crash_after_store_commit_admits_one_row;
 use error_return::{ErrorReturnPlacement, ErrorReturnRuling, ErrorReturnRulingEntry};
 pub use error_return::{
@@ -103,28 +88,23 @@ pub use error_return::{
     turn_crash_matrix_error_return_fail_stop,
 };
 use expectations::{
-    durable_recovery_rulings, error_return_rulings, turn_crash_matrix_outcomes,
-    validate_durable_recovery_rulings, validate_error_return_rulings, validate_outcome_table,
+    error_return_rulings, turn_crash_matrix_outcomes, validate_error_return_rulings,
+    validate_outcome_table,
 };
 pub use held_turn_input::admitted_turn_input_visibility_survives_worker_crash;
-use invocation_effect_host::InvocationEffectHost;
 pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
 use pretty_assertions::assert_eq;
 pub use root_end_crash_cells::{
     root_end_commit_crash_after_write_replays_once, root_end_commit_crash_before_write_replays_once,
 };
-pub(crate) use seam_controllers::{
-    CrashAfterCheckpointExecutionController, LawSeamHost, SeamLayer,
-};
+pub(crate) use seam_controllers::{LawSeamHost, SeamLayer};
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
-const RECOVERY_TTL: Duration = Duration::from_secs(3);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
 const CRASHED_TURN_TTL: Duration = Duration::from_secs(60);
 const HIT_TIMEOUT: Duration = Duration::from_secs(60);
-const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug)]
 struct ReferenceIdentity {
@@ -270,95 +250,19 @@ struct TurnCrashPoint {
     placement: CrashPlacement,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct Level2EffectExecutions {
-    at_crash: usize,
-    after_recovery: usize,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct DurableEndState {
-    terminal: usize,
-    pending_inputs: usize,
-    queued_work: usize,
-}
-
-/// An ordinary level-2 ruling: the recovered durable end state is exactly
-/// [`DurableEndState::CORRECT`], so the triple is not restated per row.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct Level2ExactExpectation {
-    effect_executions: Level2EffectExecutions,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct KnownDefectExpectation {
-    effect_executions: Level2EffectExecutions,
-    ticket: String,
-    expected_defective: DurableEndState,
-}
-
-/// Exactly one of the two level-2 end-state rulings; the externally tagged
-/// representation rejects rows carrying both or neither.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-enum Level2Expectation {
-    Exact(Level2ExactExpectation),
-    KnownDefect(KnownDefectExpectation),
-}
-
-impl Level2Expectation {
-    fn effect_executions(&self) -> &Level2EffectExecutions {
-        match self {
-            Self::Exact(exact) => &exact.effect_executions,
-            Self::KnownDefect(defect) => &defect.effect_executions,
-        }
-    }
-}
-
-/// Reviewable recovery ruling for one generated point.
+/// Reviewable recovery ruling for one generated, executed point.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct TurnCrashOutcome {
     point: TurnCrashPoint,
     outcome: String,
-    #[serde(default)]
-    level_2: Option<Level2Expectation>,
-}
-
-/// Reviewable durable end-state ruling for a composed level-2 trajectory.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-struct DurableRecoveryRuling {
-    scenario: String,
-    outcome: String,
-    exact: DurableEndState,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(untagged)]
 enum ReviewedTurnCrashRuling {
     CrashPoint(TurnCrashOutcome),
-    DurableRecovery(DurableRecoveryRuling),
     ErrorReturn(ErrorReturnRulingEntry),
-}
-
-impl DurableEndState {
-    const CORRECT: Self = Self {
-        terminal: 1,
-        pending_inputs: 0,
-        queued_work: 0,
-    };
-
-    fn summary(self) -> String {
-        format!(
-            "terminal={} pending_inputs={} queued_work={}",
-            self.terminal, self.pending_inputs, self.queued_work
-        )
-    }
 }
 
 #[derive(Debug, Default)]
@@ -855,7 +759,6 @@ impl Provider for ScriptedProvider {
 
 #[derive(Clone, Debug, Default)]
 struct TraceTool {
-    marker: Option<std::path::PathBuf>,
     control: SeamControl,
     /// How many times the tool body ran: the external effect every tier runs
     /// in process, wherever its engine dispatches the tool child.
@@ -880,23 +783,9 @@ impl crate::ToolProvider for TraceTool {
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         (name == "trace_effect").then(|| Arc::new(trace_tool_definition().contract()))
     }
-    #[expect(
-        clippy::expect_used,
-        reason = "conformance-law fixture: each result is established by the setup above"
-    )]
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if let Some(marker) = &self.marker {
-            use std::io::Write as _;
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(marker)
-                .expect("open level-2 external-effect marker");
-            writeln!(file, "executed").expect("append level-2 external-effect marker");
-            file.flush().expect("flush level-2 external-effect marker");
-        }
         let operation = TurnSeamOperation::Effect(EffectOperation::ToolAttempt {
             name: "trace_effect".to_string(),
         });
@@ -908,15 +797,6 @@ impl crate::ToolProvider for TraceTool {
         }
         crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"})).into()
     }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-fn recovery_timings() -> crate::LeaseTimings {
-    crate::LeaseTimings::new(RECOVERY_TTL, RECOVERY_RENEW)
-        .expect("3s TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
 /// Configuration shared with the runtime fixture for a turn about to crash.
@@ -972,106 +852,6 @@ fn provider_handle(control: SeamControl) -> ProviderHandle {
         inner: scripted,
         control,
     })))
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-fn scoped_controller(
-    controller: Arc<dyn RuntimeEffectController>,
-    identity: &ReferenceIdentity,
-) -> crate::ScopedEffectController<'static> {
-    crate::ScopedEffectController::shared(
-        controller,
-        crate::AdmittedScope::turn(&identity.session_id, identity.turn_id.as_str()),
-    )
-    .expect("valid reference turn scope")
-}
-
-/// The execution scope the reference turn runs under: the scope a
-/// journaled invocation for that turn must be opened on.
-fn reference_turn_scope(identity: &ReferenceIdentity) -> crate::ExecutionScope {
-    crate::ExecutionScope::turn(&identity.session_id, identity.turn_id.as_str())
-}
-
-async fn build_runtime(
-    stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimeStore>,
-    control: SeamControl,
-    effect_controller: Arc<dyn RuntimeEffectController>,
-    identity: &ReferenceIdentity,
-    trace_tool: TraceTool,
-) -> crate::LashRuntime {
-    build_runtime_with_lease_timings(
-        stores,
-        store,
-        control,
-        effect_controller,
-        identity,
-        trace_tool,
-        crashed_turn_timings(),
-    )
-    .await
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn build_runtime_with_lease_timings(
-    stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimeStore>,
-    control: SeamControl,
-    effect_controller: Arc<dyn RuntimeEffectController>,
-    identity: &ReferenceIdentity,
-    trace_tool: TraceTool,
-    lease_timings: crate::LeaseTimings,
-) -> crate::LashRuntime {
-    Box::pin(try_build_runtime_with_lease_timings(
-        stores,
-        store,
-        control,
-        effect_controller,
-        identity,
-        trace_tool,
-        lease_timings,
-    ))
-    .await
-    .expect("build reference runtime")
-}
-
-/// Build the reference runtime, returning the builder's refusal instead of
-/// panicking on it: session admission runs inside `build`.
-async fn try_build_runtime_with_lease_timings(
-    stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimeStore>,
-    control: SeamControl,
-    effect_controller: Arc<dyn RuntimeEffectController>,
-    identity: &ReferenceIdentity,
-    trace_tool: TraceTool,
-    lease_timings: crate::LeaseTimings,
-) -> Result<crate::LashRuntime, crate::SessionError> {
-    assert!(
-        effect_controller
-            .await_event_authority_binding_id()
-            .is_some(),
-        "durable crash fixture identifies its promise authority"
-    );
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
-        inner: Arc::clone(&effect_controller),
-        usage_accounting: stores.usage_accounting(),
-    });
-    Box::pin(try_build_runtime_over_host(
-        stores,
-        store,
-        control,
-        effect_host,
-        identity,
-        trace_tool,
-        lease_timings,
-    ))
-    .await
 }
 
 /// The reference runtime on the tier's own `host`, behind `seam`: the runtime
@@ -1269,21 +1049,6 @@ async fn seed_reference_ingress_as(
         .expect("seed queued work");
 }
 
-async fn drive_turn(
-    mut runtime: crate::LashRuntime,
-    effect_controller: Arc<dyn RuntimeEffectController>,
-    identity: &ReferenceIdentity,
-) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
-    Box::pin(
-        runtime.drive_one_admitted_queued_root(crate::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            scoped_controller(effect_controller, identity),
-        )),
-    )
-    .await
-    .map(crate::facade_support::QueuedTurnDrain::ran)
-}
-
 /// Drain the reference turn through the session drive on the controller a
 /// tier's runner lent it.
 async fn drive_root_on(
@@ -1430,8 +1195,6 @@ pub async fn turn_crash_trace_drift_check<F, S>(
     let table = turn_crash_matrix_outcomes();
     validate_outcome_table(&generated, &table)
         .unwrap_or_else(|error| panic!("invalid turn crash outcome table: {error}"));
-    validate_durable_recovery_rulings(&durable_recovery_rulings())
-        .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
     validate_error_return_rulings(&error_return_rulings())
         .unwrap_or_else(|error| panic!("invalid error-return rulings: {error}"));
 }

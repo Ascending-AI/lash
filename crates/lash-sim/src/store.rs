@@ -31,37 +31,20 @@ pub fn backend_fault_observation(
     session: Value,
     operation: String,
     attempt: usize,
-    retryable: bool,
+    error: &StoreError,
 ) -> Value {
-    let store_error = backend_fault_store_error(&operation, attempt, retryable);
-    let store_error_variant = store_error.variant_name().to_string();
     json!({
         "session": session,
         "backend_failure": true,
         "operation": operation,
         "attempt": attempt,
-        "retryable": retryable,
-        "store_error_class": if retryable { "retryable_conflict" } else { "terminal_backend_error" },
+        "transient": error.is_transient(),
         "production_store_error": {
             "type": "lash_core::StoreError",
-            "variant": store_error_variant,
-            "message": store_error.to_string(),
-            "retryable_class": retryable,
+            "variant": error.variant_name(),
+            "message": error.to_string(),
         },
     })
-}
-
-fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -> StoreError {
-    if retryable {
-        StoreError::HeadRevisionConflict {
-            expected: attempt.saturating_sub(1) as u64,
-            actual: attempt as u64,
-        }
-    } else {
-        StoreError::Backend(format!(
-            "simulated terminal backend failure during {operation}"
-        ))
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -840,16 +823,14 @@ impl ModelStore {
                     .entry(operation.clone())
                     .or_insert(0);
                 *attempts += 1;
-                let retryable = event
-                    .payload
-                    .get("retryable")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
                 backend_fault_observation(
                     json!(boundary_session_alias(event)),
                     operation,
                     *attempts,
-                    retryable,
+                    &StoreError::StorageFailure {
+                        backend: "sqlite",
+                        message: "simulated transaction fault".to_string(),
+                    },
                 )
             }
             BoundaryKind::ProviderMutation => {

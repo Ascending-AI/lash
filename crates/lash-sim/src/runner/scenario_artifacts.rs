@@ -287,11 +287,11 @@ pub(super) fn write_generated_backend_regression_fixtures(
             predicate: trace_has_durable_effect_replay,
         },
         BackendRegressionSpec {
-            fixture_id: "backend-retry-terminalization",
+            fixture_id: "backend-fault-classification",
             required_boundary_kinds: &["backend_failure"],
             semantic_oracles: &["sim.oracle.state-machine-semantic-invariants.v1"],
-            regression_contract: "retryable backend conflicts advance attempts and terminate on a non-retryable production StoreError class",
-            predicate: trace_has_backend_retry_terminalization,
+            regression_contract: "transaction faults advance attempts and retain their production StoreError class",
+            predicate: trace_has_backend_fault_classification,
         },
         BackendRegressionSpec {
             fixture_id: "provider-protocol-terminalization",

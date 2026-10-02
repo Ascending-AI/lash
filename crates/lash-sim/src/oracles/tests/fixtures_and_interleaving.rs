@@ -320,6 +320,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::BackendFailure,
             json!({
                 "operation": "commit_runtime_state:001",
+                "fault_point": "after_begin",
                 "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 15),
             }),
             json!({
@@ -327,13 +328,11 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
                 "backend_failure": true,
                 "operation": "commit_runtime_state:001",
                 "production_store_error": {
-                    "retryable_class": true,
-                    "type": "lash_core::StoreError",
-                    "variant": "HeadRevisionConflict"
+                                        "type": "lash_core::StoreError",
+                    "variant": "StorageFailure"
                 },
-                "fault_injector": {"point": "after_begin"},
-                "retryable": true,
-                "store_error_class": "retryable_conflict"
+                "fault_injector": {"point": "after_begin", "exercised": true},
+                "transient": true
             }),
         ),
         delivered_with_payload(
@@ -343,6 +342,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::BackendFailure,
             json!({
                 "operation": "commit_runtime_state:001",
+                "fault_point": "commit_io",
                 "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 16),
             }),
             json!({
@@ -350,13 +350,11 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
                 "backend_failure": true,
                 "operation": "commit_runtime_state:001",
                 "production_store_error": {
-                    "retryable_class": false,
-                    "type": "lash_core::StoreError",
-                    "variant": "SessionExecutionLeaseExpired"
+                                        "type": "lash_core::StoreError",
+                    "variant": "StorageFailure"
                 },
-                "fault_injector": {"point": "commit_io"},
-                "retryable": false,
-                "store_error_class": "terminal_backend_error"
+                "fault_injector": {"point": "commit_io", "exercised": true},
+                "transient": true
             }),
         ),
         delivered_with_payload(

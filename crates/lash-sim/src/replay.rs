@@ -454,7 +454,10 @@ mod tests {
             Default::default(),
             vec![delivered],
             Vec::new(),
-            OracleVerdict::passed("sim.oracle.replay-determinism.v1", "captured release"),
+            OracleVerdict::passed(
+                crate::oracles::REPLAY_DETERMINISM_ORACLE,
+                "captured release",
+            ),
             Vec::new(),
             summary.clone(),
         );

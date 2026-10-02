@@ -22,77 +22,109 @@ use crate::scheduler::{PENDING_RUNTIME_BOUNDARY_SCHEMA, RuntimeCompletionUnit};
 use crate::store::CheckpointWriteEvent;
 use crate::trace::{AbstractWorldView, OracleVerdict, WorkloadExpectations};
 
-pub const CROSS_SESSION_ISOLATION_ORACLE: &str = "sim.oracle.cross-session-isolation.v1";
-pub const BACKEND_FAILURE_ORACLE: &str = "sim.oracle.backend-failure-observed.v1";
-pub const CANCELLATION_ORACLE: &str = "sim.oracle.cancellation-observed.v1";
-pub const DURABLE_EFFECT_EXACTLY_ONCE_ORACLE: &str = "sim.oracle.durable-effect-exactly-once.v1";
-pub const EXEC_CODE_ORACLE: &str = "sim.oracle.exec-code-observed.v1";
-pub const INGRESS_SESSION_OPENED_ORACLE: &str = "sim.oracle.ingress-session-opened.v1";
-pub const OBSERVER_CONVERGENCE_ORACLE: &str = "sim.oracle.observer-convergence.v1";
-pub const OBSERVER_RECONNECT_ORACLE: &str = "sim.oracle.observer-reconnect.v1";
-pub const OPERATIONAL_COVERAGE_ORACLE: &str = "sim.oracle.operational-coverage.v1";
-pub const PROVIDER_MUTATION_ORACLE: &str = "sim.oracle.provider-mutation-rejected.v1";
-pub const QUEUED_INGRESS_ORACLE: &str = "sim.oracle.queued-ingress-observed.v1";
-pub const REPLAY_DETERMINISM_ORACLE: &str = "sim.oracle.replay-determinism.v1";
-pub const RUNTIME_PROVIDER_TURN_ORACLE: &str = "sim.oracle.runtime-provider-turn.v1";
-pub const PENDING_TOOL_COMPLETION_ORACLE: &str =
-    "sim.oracle.pending-tool-completion-through-turn.v1";
-pub const RUNTIME_GRAPH_ACYCLIC_ORACLE: &str = "sim.oracle.runtime-graph-acyclic.v1";
-pub const RUNTIME_SINGLE_ACTIVE_AGENT_FRAME_ORACLE: &str =
-    "sim.oracle.runtime-single-active-agent-frame.v1";
-pub const RUNTIME_USAGE_MONOTONIC_ORACLE: &str = "sim.oracle.runtime-usage-monotonic.v1";
-pub const RUNTIME_FINAL_VALUE_SEMANTIC_ORACLE: &str =
-    "sim.oracle.runtime-final-value-semantic-channel.v1";
-pub const GENERATED_PROVIDER_MATRIX_ORACLE: &str =
-    "sim.oracle.generated-runtime-provider-matrix.v1";
-pub const PROVIDER_TURN_INTERLEAVING_ORACLE: &str =
-    "sim.oracle.provider-turn-interleaving-depth.v1";
-pub const PROVIDER_TRANSPORT_MUTATION_ORACLE: &str =
-    "sim.oracle.provider-transport-mutation-classified.v1";
-pub const RUNTIME_SESSION_GRAPH_ORACLE: &str = "sim.oracle.runtime-session-graph.v1";
-pub const SCHEDULER_CONTROLLED_DELIVERY_ORACLE: &str =
-    "sim.oracle.scheduler-controlled-delivery.v1";
-pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE: &str =
-    "sim.oracle.scheduler-owned-runtime-completions.v1";
-pub const STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE: &str =
-    "sim.oracle.state-machine-semantic-invariants.v1";
-pub const SCENARIO_AGENT_CONTRACT_ORACLE: &str = "sim.oracle.scenario.agent-contract.v1";
-pub const SCENARIO_RLM_CONTRACT_ORACLE: &str = "sim.oracle.scenario.rlm-contract.v1";
-pub const SCENARIO_RUNTIME_CONTRACT_ORACLE: &str = "sim.oracle.scenario.runtime-contract.v1";
-pub const SCENARIO_STANDARD_CONTRACT_ORACLE: &str = "sim.oracle.scenario.standard-contract.v1";
-pub const SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE: &str =
-    "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1";
-pub const SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE: &str =
-    "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1";
-pub const SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE: &str =
-    "sim.oracle.scenario-mini.standard.streamed-text-finalizes-once.v1";
-pub const SCENARIO_MINI_STANDARD_PROVIDER_ERROR_ORACLE: &str =
-    "sim.oracle.scenario-mini.standard.provider-error-without-checkpoint.v1";
-pub const SCENARIO_MINI_STANDARD_TOOL_REENTRY_ORACLE: &str =
-    "sim.oracle.scenario-mini.standard.tool-loop-reenters-after-checkpoint.v1";
-pub const SCENARIO_MINI_RLM_FINISH_REPAIR_ORACLE: &str =
-    "sim.oracle.scenario-mini.rlm.finish-required-prose-repair.v1";
-pub const SCENARIO_MINI_RLM_SCHEMA_REPAIR_ORACLE: &str =
-    "sim.oracle.scenario-mini.rlm.schema-mismatch-repair.v1";
-pub const SCENARIO_MINI_RLM_CELL_EXEC_ORACLE: &str =
-    "sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1";
-pub const SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE: &str =
-    "sim.oracle.scenario-mini.agent.durable-input-resolution.v1";
-pub const SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE: &str =
-    "sim.oracle.scenario-mini.agent.child-failure-graph.v1";
-pub const SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE: &str =
-    "sim.oracle.scenario-mini.agent.parallel-spawn-join-determinism.v1";
-pub const TOOL_BOUNDARY_ORACLE: &str = "sim.oracle.tool-boundary-observed.v1";
-pub const TRIGGER_ORACLE: &str = "sim.oracle.trigger-delivery-observed.v1";
-pub const GENERATED_SUSPEND_RESUME_ORACLE: &str = "sim.oracle.generated-suspend-resume.v1";
-pub const GENERATED_FINAL_VALUE_ORACLE: &str =
-    "sim.oracle.generated-final-value-semantic-channel.v1";
-pub const FRAME_SWITCH_SEED_ORACLE: &str = "sim.oracle.frame-switch-seed.v1";
-pub const LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE: &str =
-    "sim.oracle.logical-turn-admission-exactly-once.v1";
-pub const FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE: &str =
-    "sim.oracle.frame-switch-follow-on-atomicity.v1";
-pub const FRAME_SWITCH_ORDERING_ORACLE: &str = "sim.oracle.frame-switch-ordering.v1";
+pub const CROSS_SESSION_ISOLATION_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.cross-session-isolation.v1");
+pub const BACKEND_FAILURE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.backend-failure-observed.v1");
+pub const CANCELLATION_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.cancellation-observed.v1");
+pub const DURABLE_EFFECT_EXACTLY_ONCE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.durable-effect-exactly-once.v1");
+pub const EXEC_CODE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.exec-code-observed.v1");
+pub const INGRESS_SESSION_OPENED_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.ingress-session-opened.v1");
+pub const OBSERVER_CONVERGENCE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.observer-convergence.v1");
+pub const OBSERVER_RECONNECT_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.observer-reconnect.v1");
+pub const OPERATIONAL_COVERAGE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.operational-coverage.v1");
+pub const PROVIDER_MUTATION_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.provider-mutation-rejected.v1");
+pub const QUEUED_INGRESS_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.queued-ingress-observed.v1");
+pub const REPLAY_DETERMINISM_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.replay-determinism.v1");
+pub const RUNTIME_PROVIDER_TURN_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.runtime-provider-turn.v1");
+pub const PENDING_TOOL_COMPLETION_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.pending-tool-completion-through-turn.v1");
+pub const RUNTIME_GRAPH_ACYCLIC_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.runtime-graph-acyclic.v1");
+pub const RUNTIME_SINGLE_ACTIVE_AGENT_FRAME_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.runtime-single-active-agent-frame.v1");
+pub const RUNTIME_USAGE_MONOTONIC_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.runtime-usage-monotonic.v1");
+pub const RUNTIME_FINAL_VALUE_SEMANTIC_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.runtime-final-value-semantic-channel.v1");
+pub const GENERATED_PROVIDER_MATRIX_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.generated-runtime-provider-matrix.v1");
+pub const PROVIDER_TURN_INTERLEAVING_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.provider-turn-interleaving-depth.v1");
+pub const PROVIDER_TRANSPORT_MUTATION_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.provider-transport-mutation-classified.v1");
+pub const RUNTIME_SESSION_GRAPH_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.runtime-session-graph.v1");
+pub const SCHEDULER_CONTROLLED_DELIVERY_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scheduler-controlled-delivery.v1");
+pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scheduler-owned-runtime-completions.v1");
+pub const STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.state-machine-semantic-invariants.v1");
+/// Scenario contracts supply their names; this family declares their evidence class.
+pub const SCENARIO_CONTRACT_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scenario.");
+pub const SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model(
+        "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1",
+    );
+pub const SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model(
+        "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-admission.v1",
+    );
+pub const SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model(
+        "sim.oracle.scenario-mini.standard.streamed-text-finalizes-once.v1",
+    );
+pub const SCENARIO_MINI_STANDARD_PROVIDER_ERROR_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model(
+        "sim.oracle.scenario-mini.standard.provider-error-without-checkpoint.v1",
+    );
+pub const SCENARIO_MINI_STANDARD_TOOL_REENTRY_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model(
+        "sim.oracle.scenario-mini.standard.tool-loop-reenters-after-checkpoint.v1",
+    );
+pub const SCENARIO_MINI_RLM_FINISH_REPAIR_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scenario-mini.rlm.finish-required-prose-repair.v1");
+pub const SCENARIO_MINI_RLM_SCHEMA_REPAIR_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scenario-mini.rlm.schema-mismatch-repair.v1");
+pub const SCENARIO_MINI_RLM_CELL_EXEC_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1");
+pub const SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scenario-mini.agent.durable-input-resolution.v1");
+pub const SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.scenario-mini.agent.child-failure-graph.v1");
+pub const SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model(
+        "sim.oracle.scenario-mini.agent.parallel-spawn-join-determinism.v1",
+    );
+pub const TOOL_BOUNDARY_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.tool-boundary-observed.v1");
+pub const TRIGGER_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.trigger-delivery-observed.v1");
+pub const GENERATED_SUSPEND_RESUME_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.generated-suspend-resume.v1");
+pub const GENERATED_FINAL_VALUE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.generated-final-value-semantic-channel.v1");
+pub const FRAME_SWITCH_SEED_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.frame-switch-seed.v1");
+pub const LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.logical-turn-admission-exactly-once.v1");
+pub const FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.frame-switch-follow-on-atomicity.v1");
+pub const FRAME_SWITCH_ORDERING_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.frame-switch-ordering.v1");
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameSwitchSeedObservation {
@@ -161,6 +193,7 @@ pub use runtime_observation::{
     runtime_single_active_agent_frame, runtime_usage_monotonic, tool_boundary_observed,
     trigger_delivery_observed,
 };
+pub(crate) use semantic_laws::backend_fault_classification_semantics;
 use semantic_laws::*;
 pub use semantic_laws::{
     pending_tool_completion, replay_determinism, runtime_final_value_semantic,
@@ -174,7 +207,7 @@ use standard_contracts::*;
 /// (wire content read from the provider scripts and sessions read back through
 /// fresh store handles). Minimization carries their recorded verdicts forward
 /// but cannot re-evaluate them after a shrink.
-pub const RUN_ONLY_ORACLES: &[&str] = &[
+pub const RUN_ONLY_ORACLES: &[crate::trace::OracleId<'static>] = &[
     LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
     crate::content_oracle::DURABLE_CONTENT_ORACLE,
     crate::content_oracle::FAILED_ATTEMPT_USAGE_ORACLE,
@@ -206,7 +239,7 @@ pub fn generated_trace_oracles(
 /// a caller hunting one named verdict can decline to evaluate the rest; every
 /// other oracle only becomes identifiable once it has been evaluated.
 pub enum OracleSlot<'a> {
-    Battery(&'static str),
+    Battery(crate::trace::OracleId<'static>),
     ScenarioContract(&'a ScenarioContractSpec),
 }
 
@@ -218,7 +251,7 @@ impl OracleSlot<'_> {
     /// — the minimizer — from allocating the id.
     pub fn declares_oracle_id(&self, oracle_id: &str) -> bool {
         match self {
-            Self::Battery(declared) => *declared == oracle_id,
+            Self::Battery(declared) => declared.id == oracle_id,
             Self::ScenarioContract(contract) => oracle_id
                 .strip_prefix(contract.oracle_id)
                 .and_then(|rest| rest.strip_prefix(':'))

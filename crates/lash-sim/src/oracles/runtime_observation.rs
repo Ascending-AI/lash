@@ -136,7 +136,7 @@ pub(super) fn observer_convergence_law(
 /// AND the runtime invariant its reason claims must actually hold in the events.
 /// A present-but-broken boundary fails loudly instead of passing on presence.
 pub(super) fn coverage_invariant_verdict(
-    oracle_id: &'static str,
+    oracle_id: crate::trace::OracleId<'static>,
     present: bool,
     missing_reason: &'static str,
     invariant_holds: bool,
@@ -231,9 +231,9 @@ pub fn backend_failure_observed(
             .iter()
             .any(|session| session.backend_failure_count > 0),
         "no backend failure boundary was observed",
-        backend_retry_terminalization_semantics(events),
-        "backend failure boundary was observed but it did not terminalize through the retry/terminalization path",
-        "generated workload injected a backend failure boundary that terminalized through the retry path",
+        backend_fault_classification_semantics(events),
+        "backend fault evidence lost the production error class or transaction point",
+        "generated transaction faults retain the production error class across retries",
     )
 }
 

@@ -68,7 +68,8 @@ pub use snapshot::{
 };
 
 /// The oracle a generated run reports its global-invariant verdict under.
-pub const GLOBAL_INVARIANTS_ORACLE: &str = "sim.oracle.global-invariants.v1";
+pub const GLOBAL_INVARIANTS_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::real("sim.oracle.global-invariants.v1");
 
 /// How many of its session's last records a violation that names none shows.
 const EXCERPT_RECORDS: usize = 12;
