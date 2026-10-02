@@ -80,7 +80,7 @@ use lash_vm_protocol::{
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::authority::{self, AdmittedContext, AuthorityRefusal, RequestFingerprint};
+use crate::authority::{AdmittedContext, AuthorityRefusal, HandleGrant, RequestFingerprint};
 use crate::effects::{ParentEffects, ParentFault, Performed};
 use crate::ledger::{
     AdmittedKind, AdmittedOperation, Checkpoint, CheckpointRefusal, CheckpointStore, ParentLedger,
@@ -734,7 +734,10 @@ impl Session<'_, '_> {
             Err(fault) => return Some(SessionEnd::Lost(BrokerFailure::Parent { fault })),
         }
         if request.kind.parkable() && broker.effects.needs_worker(&operation) {
-            match self.park(request.id, &operation, stop, frames).await {
+            match self
+                .park(request.id, &operation, ledger.grants(), stop, frames)
+                .await
+            {
                 ParkAnswer::Parked(state) => {
                     return Some(SessionEnd::ParkedForEffect { state, operation });
                 }
@@ -855,6 +858,7 @@ impl Session<'_, '_> {
         &mut self,
         id: EffectRequestId,
         operation: &AdmittedOperation,
+        grants: &BTreeMap<String, HandleGrant>,
         stop: &CancellationToken,
         frames: &mut watch::Receiver<FrameEpoch>,
     ) -> ParkAnswer {
@@ -902,7 +906,7 @@ impl Session<'_, '_> {
                 }
                 match self.next_message(stop, frames).await {
                     Ok(WorkerMessage::EffectRequest(again))
-                        if again.id > declined.id && self.reissues(&again, operation) =>
+                        if again.id > declined.id && self.reissues(&again, operation, grants) =>
                     {
                         ParkAnswer::Declined(again.id)
                     }
@@ -936,17 +940,19 @@ impl Session<'_, '_> {
     }
 
     /// Whether `again` is the request `operation` was admitted from, issued
-    /// again by a run whose park was declined.
-    fn reissues(&self, again: &EffectRequest, operation: &AdmittedOperation) -> bool {
-        authority::resolve(
-            self.broker.context,
-            &Default::default(),
-            self.frame_epoch,
-            again.kind,
-            &again.payload,
-        )
-        .ok()
-        .is_some_and(|resolved| RequestFingerprint::of(&resolved) == operation.fingerprint)
+    /// again by a run whose park was declined: resolved as admission
+    /// resolved it, by the parent's resolver over the ledger's grants.
+    fn reissues(
+        &self,
+        again: &EffectRequest,
+        operation: &AdmittedOperation,
+        grants: &BTreeMap<String, HandleGrant>,
+    ) -> bool {
+        self.broker
+            .effects
+            .resolve(self.broker.context, grants, self.frame_epoch, again)
+            .ok()
+            .is_some_and(|resolved| RequestFingerprint::of(&resolved) == operation.fingerprint)
     }
 
     /// A read stopped with an admitted operation nothing has dispatched yet:

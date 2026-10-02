@@ -14,8 +14,8 @@ use lash_vm_protocol::{
 
 use super::*;
 use crate::authority::{
-    ArgumentContract, BoundOperation, FrozenBindings, Invocation, ToolRoute, decode_value,
-    encode_value,
+    self, ArgumentContract, BoundOperation, FrozenBindings, Invocation, OperationRequest,
+    OperationRequestCodec, ToolRoute, decode_value, encode_value,
 };
 use crate::identity::CodeCallIdentities;
 use crate::testing::{
@@ -35,6 +35,9 @@ struct Journal {
     /// Operations whose dispatch never ends.
     stuck: BTreeSet<String>,
     needs_worker: BTreeSet<String>,
+    /// Resolves as the runtime adapter does: every decodable request is the
+    /// control envelope of its own bytes, whatever its family.
+    envelopes: bool,
     context: Option<AdmittedContext>,
 }
 
@@ -53,12 +56,46 @@ fn operation_name(operation: &AdmittedOperation) -> String {
         AdmittedKind::Aggregate(_) => "aggregate".into(),
         AdmittedKind::Await { .. } => "await".into(),
         AdmittedKind::Sleep { .. } => "sleep".into(),
-        AdmittedKind::Control { .. } => "control".into(),
+        // An envelope is named as the family it carries.
+        AdmittedKind::Control { kind, payload } => match OperationRequest::decode(payload) {
+            Ok(OperationRequest::ResourceOperation(op))
+                if *kind == EffectKind::ResourceOperation =>
+            {
+                op.operation
+            }
+            Ok(OperationRequest::ResourceOperationBatch(_)) => "aggregate".into(),
+            Ok(OperationRequest::Await(_)) => "await".into(),
+            Ok(OperationRequest::Sleep(_)) => "sleep".into(),
+            _ => "control".into(),
+        },
     }
 }
 
 #[async_trait::async_trait]
 impl ParentEffects for Journal {
+    fn resolve(
+        &self,
+        context: &AdmittedContext,
+        grants: &BTreeMap<String, crate::HandleGrant>,
+        frame: FrameEpoch,
+        request: &EffectRequest,
+    ) -> Result<authority::ResolvedRequest, AuthorityRefusal> {
+        if !self.envelopes {
+            return authority::resolve(context, grants, frame, request.kind, &request.payload);
+        }
+        let decoded = OperationRequest::decode(&request.payload)?;
+        if decoded.kind() != request.kind {
+            return Err(AuthorityRefusal::KindMismatch {
+                kind: request.kind,
+                payload: decoded.kind(),
+            });
+        }
+        Ok(authority::ResolvedRequest::Control {
+            kind: request.kind,
+            payload: request.payload.clone(),
+        })
+    }
+
     async fn retain(
         &self,
         operation: &AdmittedOperation,
@@ -93,11 +130,16 @@ impl ParentEffects for Journal {
             std::future::pending::<()>().await;
         }
         let _ = &self.context;
-        let performed =
-            Performed::outcome(EffectOutcome::Value(encode_value(&serde_json::json!({
+        // A spawn grants the handle its value names.
+        let granted = (name == "spawn").then(|| format!("handle-{}", operation.ordinal));
+        let performed = Performed {
+            outcome: EffectOutcome::Value(encode_value(&serde_json::json!({
                 "ordinal": operation.ordinal,
                 "calls": operation.call_ids().iter().map(ToString::to_string).collect::<Vec<_>>(),
-            }))));
+                "handle": granted,
+            }))),
+            granted,
+        };
         self.outcomes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -139,6 +181,7 @@ fn context() -> AdmittedContext {
         bindings: Arc::new(
             FrozenBindings::new()
                 .bind("tools", "echo", echo.clone())
+                .bind("tools", "spawn", echo.clone())
                 .bind("tools", "compile", echo),
         ),
     }
@@ -441,6 +484,86 @@ async fn a_declined_park_performs_the_reissued_request_in_place_once() {
         3,
         "the reissued operation ran once"
     );
+}
+
+/// A declined park reissues and completes whatever the request's family and
+/// however the parent resolves it (FIG-4706): the reissued request is
+/// resolved as admission resolved it, by the configured resolver over the
+/// ledger's grants, so a granted await and the runtime adapter's envelopes
+/// are recognised as the requests they were admitted from.
+#[tokio::test]
+async fn a_declined_park_reissues_and_completes_for_every_operation_family() {
+    let compile = || Invocation {
+        binding: "tools".into(),
+        operation: "compile".into(),
+        arguments: serde_json::json!({ "source": "x" }),
+    };
+    let spawn = Step::Invoke(Invocation {
+        binding: "tools".into(),
+        operation: "spawn".into(),
+        arguments: serde_json::json!({ "value": 0 }),
+    });
+    let wait_signal = Step::Raw {
+        kind: EffectKind::WaitSignal,
+        payload: OperationRequest::WaitSignal {
+            name: "go".into(),
+            call_site: None,
+        }
+        .encode()
+        .0,
+    };
+    // Each family's program: the spawn that grants the awaited handle is
+    // never parked on, and the family's own request always is.
+    let families = [
+        ("resource operation", vec![Step::Invoke(compile())]),
+        (
+            "resource operation batch",
+            vec![Step::Aggregate(vec![compile(), compile()])],
+        ),
+        ("await", vec![spawn, Step::AwaitHandleOf { from: 0 }]),
+        ("sleep", vec![Step::Sleep(5)]),
+        ("signal wait", vec![wait_signal]),
+    ];
+    let mut lost = Vec::new();
+    for envelopes in [false, true] {
+        for (family, steps) in &families {
+            let case = format!("{family}, envelopes: {envelopes}");
+            let mut fixture = Fixture::new(2);
+            fixture.journal.envelopes = envelopes;
+            fixture.journal.needs_worker = ["compile", "aggregate", "await", "sleep", "control"]
+                .map(str::to_string)
+                .into();
+            fixture.pool.plan(Some(Fault::DeclinePark));
+            let mut steps = steps.clone();
+            steps.push(echo(9));
+            let program = ScriptedProgram::new(steps);
+            let end = match fixture.run(&program).await {
+                Ok(end) => end,
+                Err(failure) => {
+                    lost.push(format!("{case}: {failure}"));
+                    continue;
+                }
+            };
+            let results = results(&end);
+            assert_eq!(results.len(), program.steps.len(), "{case}");
+            assert!(
+                results.iter().all(|result| result.get("failed").is_none()),
+                "{case}: no request was refused: {results:?}"
+            );
+            let stats = fixture.pool.stats();
+            assert_eq!(
+                stats.checkouts, 1,
+                "{case}: a declined park keeps its worker"
+            );
+            assert_eq!(stats.discards, 0, "{case}");
+            // The reissued request took no ordinal of its own: each step was
+            // answered by the one operation admitted for it.
+            for (ordinal, result) in results.iter().enumerate() {
+                assert_eq!(result["ordinal"], ordinal, "{case}: {results:?}");
+            }
+        }
+    }
+    assert!(lost.is_empty(), "every run completes: {lost:#?}");
 }
 
 #[tokio::test]
