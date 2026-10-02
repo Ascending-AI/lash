@@ -235,12 +235,12 @@ impl ToolIntentMetrics {
             .add(1, &[KeyValue::new(TOOL_INTENT_KIND_ATTRIBUTE, kind)]);
     }
 
-    pub fn record_refused(&self, kind: &'static str, reason: &'static str) {
+    pub fn record_refused(&self, kind: &'static str, reason: &str) {
         self.refused.add(
             1,
             &[
                 KeyValue::new(TOOL_INTENT_KIND_ATTRIBUTE, kind),
-                KeyValue::new(TOOL_INTENT_REFUSAL_ATTRIBUTE, reason),
+                KeyValue::new(TOOL_INTENT_REFUSAL_ATTRIBUTE, reason.to_owned()),
             ],
         );
     }
