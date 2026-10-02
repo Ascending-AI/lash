@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use lash::StoreSet;
-use lash_core::provider::{ProviderHandle, ProviderOptions, ProviderReliability};
+use lash::provider::{ProviderHandle, ProviderOptions, ProviderReliability};
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_provider_anthropic::AnthropicProvider;
 use lash_restate_postgres_workers_e2e::local_restate::LocalRestate;
@@ -21,7 +21,7 @@ impl LlmHttpTransport for FixtureTransport {
         &self,
         _request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
-    ) -> Result<LlmHttpResponse, lash_core::facade_support::LlmTransportError> {
+    ) -> Result<LlmHttpResponse, lash::provider::LlmTransportError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         let last_index = if call == 0 { 2 } else { 1 };
         let body = format!(
@@ -49,14 +49,14 @@ impl LlmHttpTransport for FixtureTransport {
 async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let restate = LocalRestate::from_env()?;
     let identity = format!("bounds{}", uuid::Uuid::new_v4().simple());
-    let engine = Arc::new(lash_restate::RestateEngine::new(
+    let engine = Arc::new(lash::restate::RestateEngine::new(
         stores,
         lash::restate::RestateConfig::new(
             restate.ingress_url.clone(),
             restate.admin_url.clone(),
             restate.authority.clone(),
         )
-        .with_namespace(lash_restate::RestateNamespace::new(&identity)?),
+        .with_namespace(lash::restate::RestateNamespace::new(&identity)?),
     ));
     let calls = Arc::new(AtomicUsize::new(0));
     let provider = AnthropicProvider::new("fixture-key")
@@ -88,7 +88,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     let deployment = restate
         .serve(&engine, engine.endpoint_builder(worker)?.build())
         .await?;
-    core.session(lash_core::SessionId::fixture(&identity))
+    core.session(lash::SessionId::fixture(&identity))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "fixture-model",
             lash::TurnBudget::Unbounded,
@@ -96,7 +96,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
         )))
         .await?;
     let session = core
-        .session(lash_core::SessionId::fixture(&identity))
+        .session(lash::SessionId::fixture(&identity))
         .open()
         .await?;
     let failed = session
@@ -106,14 +106,14 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
         .await?;
     assert_eq!(
         failed.result.outcome,
-        lash::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError),
+        lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError),
         "{label}: sparse provider starts must settle as a failed turn",
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1, "{label}: no retry");
     assert!(
         failed.result.errors.iter().any(|issue| {
-            issue.kind == lash_core::TurnFailureKind::LlmProvider
-                && issue.provider_failure_kind == Some(lash_core::ProviderFailureKind::Stream)
+            issue.kind == lash::turn::TurnFailureKind::LlmProvider
+                && issue.provider_failure_kind == Some(lash::provider::ProviderFailureKind::Stream)
                 && issue.retryable == Some(false)
         }),
         "{label}: classified terminal stream failure",
@@ -121,7 +121,7 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     session.close().await?;
     let session = core
-        .session(lash_core::SessionId::fixture(&identity))
+        .session(lash::SessionId::fixture(&identity))
         .open()
         .await?;
     let history_text: String = session
@@ -166,13 +166,13 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
 #[ignore = "requires native Restate from scripts/ci/with-service.sh restate"]
 async fn native_restate_sqlite_memory_and_file_refuse_sparse_streams() -> Result<()> {
     witness(
-        Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await?),
+        Arc::new(lash::sqlite::SqliteStoreSet::memory().await?),
         "sqlite-memory",
     )
     .await?;
     let scratch = tempfile::tempdir()?;
     witness(
-        Arc::new(lash_sqlite_store::SqliteStoreSet::open(scratch.path().join("sessions")).await?),
+        Arc::new(lash::sqlite::SqliteStoreSet::open(scratch.path().join("sessions")).await?),
         "sqlite-file",
     )
     .await
@@ -183,13 +183,10 @@ async fn native_restate_sqlite_memory_and_file_refuse_sparse_streams() -> Result
 async fn native_restate_postgres_refuses_sparse_streams() -> Result<()> {
     let scratch = tempfile::tempdir()?;
     let url = std::env::var("LASH_POSTGRES_DATABASE_URL").context("PostgreSQL service URL")?;
-    let storage = lash_postgres_store::PostgresStorage::connect(&url).await?;
+    let storage = lash::postgres::PostgresStorage::connect(&url).await?;
     let attachments = Arc::new(lash::persistence::FileAttachmentStore::new(scratch.path()));
     witness(
-        Arc::new(lash_postgres_store::PostgresStoreSet::new(
-            &storage,
-            attachments,
-        )),
+        Arc::new(lash::postgres::PostgresStoreSet::new(&storage, attachments)),
         "postgres",
     )
     .await

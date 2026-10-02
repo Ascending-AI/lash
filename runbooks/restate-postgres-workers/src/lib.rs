@@ -16,24 +16,24 @@ use session_support::process_incarnation_id;
 pub use session_support::{journaled_session, turn_handler_error};
 pub mod witness;
 use anyhow::{Context, Result, bail};
+use lash::openai::OpenAiCompatibleProvider;
 use lash::persistence::{AttachmentStore, LeaseOwnerIdentity};
 use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
 };
+use lash::restate::RestateEffectHost;
 use lash::rlm::{
     InstructionBound, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
     LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, RlmChannel,
     RlmProtocolPluginConfig, TypeExpr,
 };
+use lash::runtime::AwaitEventResolver as _;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
     ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
 };
-use lash_core::AwaitEventResolver as _;
-use lash_provider_openai::OpenAiCompatibleProvider;
-use lash_restate::RestateEffectHost;
-use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
+use lash::{s3::S3AttachmentStore, s3::S3AttachmentStoreConfig};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::BTreeMap;
@@ -74,25 +74,25 @@ pub const EXPECTED_PARENT_DURABLE_INPUT_TEXT: &str = "parent-durable-input-compl
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct DirectDurableWaitResolveRequest {
-    pub key: lash_core::AwaitEventKey,
-    pub resolution: lash_core::Resolution,
+    pub key: lash::AwaitEventKey,
+    pub resolution: lash::Resolution,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct DirectDurableWaitAwaitRequest {
-    pub key: lash_core::AwaitEventKey,
+    pub key: lash::AwaitEventKey,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct DirectDurableWaitAwaitResponse {
     pub worker_id: String,
-    pub resolution: lash_core::Resolution,
+    pub resolution: lash::Resolution,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct DirectDurableWaitResolveResponse {
     pub worker_id: String,
-    pub outcome: lash_core::ResolveOutcome,
+    pub outcome: lash::ResolveOutcome,
 }
 pub const EXPECTED_TOOL_BATCH_TEXT: &str = "tool-batch-complete";
 pub const EXPECTED_SEGMENT_LOOP_TEXT: &str = "segment-loop-complete";
@@ -231,6 +231,10 @@ pub struct TurnRequest {
     pub scenario: TurnScenario,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal: Option<ProcessSignalRequest>,
+    /// The executed queued run a `DrainQueued` workflow claims: the run the
+    /// runner observed commit under the session's queued work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_run: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -436,20 +440,20 @@ pub async fn record_turn_activity(
 /// The harness's Restate backend: the Restate engine host over the
 /// PostgreSQL store set, which also keeps the RLM factory's Lashlang
 /// artifacts.
-pub type E2eBackend = lash_restate::RestateEngine;
+pub type E2eBackend = lash::restate::RestateEngine;
 
 /// The Restate backend every worker and runner core of the harness runs on:
 /// the Restate engine host over the PostgreSQL store set, whose attachment
 /// bytes live in `attachment_store`.
 pub fn e2e_backend(
-    storage: &lash_postgres_store::PostgresStorage,
+    storage: &lash::postgres::PostgresStorage,
     attachment_store: Arc<dyn AttachmentStore>,
-    restate_ingress_url: impl Into<lash_restate::RestateConnection>,
-    restate_admin_url: impl Into<lash_restate::RestateConnection>,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_ingress_url: impl Into<lash::restate::RestateConnection>,
+    restate_admin_url: impl Into<lash::restate::RestateConnection>,
+    restate_authority_id: lash::restate::RestateAuthorityId,
 ) -> Arc<E2eBackend> {
-    Arc::new(lash_restate::RestateEngine::new(
-        Arc::new(lash_postgres_store::PostgresStoreSet::new(
+    Arc::new(lash::restate::RestateEngine::new(
+        Arc::new(lash::postgres::PostgresStoreSet::new(
             storage,
             attachment_store,
         )),
@@ -471,10 +475,10 @@ pub fn restate_admin_url() -> String {
 pub struct E2eCoreConfig {
     pub workers: lash::rlm::WorkerService,
     pub worker_id: String,
-    pub storage: lash_postgres_store::PostgresStorage,
+    pub storage: lash::postgres::PostgresStorage,
     pub backend: Arc<E2eBackend>,
     pub restate_ingress_url: String,
-    pub restate_authority_id: lash_restate::RestateAuthorityId,
+    pub restate_authority_id: lash::restate::RestateAuthorityId,
     pub mock_provider_base_url: String,
     pub trace_dir: Option<PathBuf>,
     pub fail_once: bool,
@@ -489,7 +493,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         config.worker_id.clone(),
         format!("{}:{}", config.worker_id, process_incarnation_id()),
     );
-    let provider = lash_core::facade_support::ProviderHandle::new(
+    let provider = lash::provider::ProviderHandle::new(
         OpenAiCompatibleProvider::new(
             "e2e-key",
             format!("{}/v1", config.mock_provider_base_url.trim_end_matches('/')),
@@ -498,14 +502,14 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
     );
     let host_backend = lash::Backend::new(config.backend.clone());
     let mut tracing = lash::runtime::TraceRuntime::new(host_backend.clock());
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         RlmProtocolPluginConfig::builder()
             .channel(RlmChannel::Cell)
             .instruction_limit(InstructionBound::instructions(1_000_000))
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &host_backend,
     )
     .with_worker_service(config.workers);
@@ -527,7 +531,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         // (ADR 0095): the scripted programs this harness serves author
         // `processes.start`, `processes.await` and `processes.emit`.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
+            lash::process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
         ))
         .plugin(Arc::new(E2ePluginFactory {
             pool: config.storage.pool().clone(),
@@ -552,7 +556,7 @@ struct E2ePluginFactory {
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_authority_id: lash::restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
     load: Option<load::LoadContext>,
@@ -619,7 +623,7 @@ struct E2eSessionPlugin {
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_authority_id: lash::restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
     load: Option<load::LoadContext>,
@@ -660,7 +664,7 @@ fn e2e_tool_provider(
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_authority_id: lash::restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
     load: Option<load::LoadContext>,
@@ -878,7 +882,7 @@ struct E2eTools {
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_authority_id: lash::restate::RestateAuthorityId,
     fail_once: bool,
     witness: PgPool,
     load_tools: Option<load::tools::LoadTools>,
@@ -894,13 +898,13 @@ const DEFERRING_TOOL_IDS: &[&str] = &["tool:async_lookup", "tool:durable_input_r
 
 #[async_trait::async_trait]
 impl StaticToolExecute for E2eTools {
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         self.execute_selected_tool(call).await.into()
     }
 
     /// Both parking tools resolve out of band, so the runtime pre-derives the
     /// completion key their attempt bodies read.
-    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+    fn attempt_may_defer(&self, tool_id: &lash::tools::ToolId) -> bool {
         DEFERRING_TOOL_IDS.contains(&tool_id.as_str())
     }
 }
@@ -993,7 +997,7 @@ impl E2eTools {
             tokio::time::sleep(Duration::from_millis(50)).await;
             let host =
                 RestateEffectHost::outside_deployment(restate_ingress_url, restate_authority_id);
-            let resolution = lash_core::Resolution::Ok(result.clone());
+            let resolution = lash::Resolution::Ok(result.clone());
             let outcome = host
                 .resolve_await_event(&completion_key, resolution)
                 .await
@@ -1015,7 +1019,7 @@ impl E2eTools {
             .await;
         });
 
-        ToolOutcome::pending(lash_core::PendingCompletion::new())
+        ToolOutcome::pending(lash::tools::PendingCompletion::new())
     }
 
     async fn batch_side_effect(&self, call: ToolCall<'_>) -> ToolOutcome {
@@ -1157,10 +1161,13 @@ impl E2eTools {
             .attachments()
             .put(
                 bytes,
-                lash_core::AttachmentCreateMeta::new(
-                    lash_core::MediaType::parse("image/png")
+                lash::attachments::AttachmentCreateMeta::new(
+                    lash::attachments::MediaType::parse("image/png")
                         .expect("literal image/png is a valid MediaType"),
-                    Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+                    Some(lash::attachments::AttachmentTypeMetadata::image(
+                        Some(1),
+                        Some(1),
+                    )),
                     Some(filename.to_string()),
                 ),
             )
@@ -1172,27 +1179,27 @@ impl E2eTools {
         let mut result = BTreeMap::new();
         result.insert(
             "id".to_string(),
-            lash_core::ToolValue::String(reference.id.to_string()),
+            lash::tools::ToolValue::String(reference.id.to_string()),
         );
         result.insert(
             "mime".to_string(),
-            lash_core::ToolValue::String(ATTACHMENT_MIME.to_string()),
+            lash::tools::ToolValue::String(ATTACHMENT_MIME.to_string()),
         );
         result.insert(
             "filename".to_string(),
-            lash_core::ToolValue::String(filename.to_string()),
+            lash::tools::ToolValue::String(filename.to_string()),
         );
         result.insert(
             "byte_len".to_string(),
-            lash_core::ToolValue::Number(serde_json::Number::from(reference.byte_len)),
+            lash::tools::ToolValue::Number(serde_json::Number::from(reference.byte_len)),
         );
         result.insert(
             "attachment".to_string(),
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
+            lash::tools::ToolValue::Attachment(lash::direct::AttachmentSource::stored(
                 reference.clone(),
             )),
         );
-        let result = lash_core::ToolValue::Object(result);
+        let result = lash::tools::ToolValue::Object(result);
         let result_json = result.to_json_value();
         let _ = record_tool_event(
             &self.pool,
@@ -1204,7 +1211,7 @@ impl E2eTools {
             result_json,
         )
         .await;
-        ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(result))
+        ToolOutcome::from_output(lash::tools::ToolCallOutput::success_tool_value(result))
     }
 
     async fn crash_once(&self, call: ToolCall<'_>) -> ToolOutcome {
@@ -1347,7 +1354,7 @@ impl E2eTools {
         // settled, so it carries no wake: the session it would reach is the one
         // parked on this very call. That is the runtime's rule, not this tool's
         // (FIG-3123) — the declaration below asks for no such thing.
-        let announcement = lash_core::PendingAnnouncement::new(
+        let announcement = lash::tools::PendingAnnouncement::new(
             "process.yield",
             serde_json::json!({
                 "type": "work.input_request.opened",
@@ -1387,7 +1394,7 @@ impl E2eTools {
                 }
             }
         }
-        ToolOutcome::pending(lash_core::PendingCompletion::new().announcing(announcement))
+        ToolOutcome::pending(lash::tools::PendingCompletion::new().announcing(announcement))
     }
 }
 

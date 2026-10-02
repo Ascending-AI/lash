@@ -62,12 +62,7 @@ doctest = false
 # `synthetic-next` blocks sit beside them, so it has its own drain
 # generation. `just multi-node-load` builds the worker both ways. No
 # production build enables it.
-synthetic-next = [
-    "lash/synthetic-next",
-    "lash-restate/synthetic-next",
-    "lash-postgres-store/synthetic-next",
-    "lashlang/synthetic-next",
-]
+synthetic-next = ["lash/synthetic-next"]
 
 [lints]
 workspace = true
@@ -77,19 +72,19 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = "0.8"
 chrono = { workspace = true }
-lash-core = { workspace = true }
-lash = { workspace = true, features = ["rlm", "restate", "typescript", "postgres"] }
+lash = { workspace = true, features = [
+    "rlm",
+    "restate",
+    "typescript",
+    "postgres",
+    "sqlite",
+    "s3",
+    "openai",
+    "testing",
+] }
 lash-llm-tools = { workspace = true }
 lash-perf = { path = "../../crates/lash-perf" }
-lashlang = { workspace = true }
-lash-plugin-process-controls = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
-lash-postgres-store = { workspace = true }
-lash-protocol-rlm = { workspace = true }
-lash-provider-openai = { workspace = true }
-lash-restate = { workspace = true }
-lash-sqlite-store = { workspace = true }
-lash-s3-store = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -105,6 +100,5 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 lash-restate-test = { workspace = true }
-lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true }
 lash-llm-transport = { workspace = true }

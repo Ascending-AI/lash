@@ -36,7 +36,7 @@ pub(crate) async fn await_batch_siblings_journaled(
     let own_attempt = format!("{call_id}:attempt:");
     let siblings =
         usize::try_from(batch_width.saturating_sub(1)).context("a batch width fits in usize")?;
-    let admin = lash_restate::RestateAdminClient::new(restate_admin_url());
+    let admin = lash::restate::RestateAdminClient::new(restate_admin_url());
     let query = format!(
         "SELECT id, index, entry_type, name FROM sys_journal WHERE id IN \
          (SELECT id FROM sys_invocation WHERE target_handler_name = 'child' \

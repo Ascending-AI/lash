@@ -75,7 +75,7 @@ pub(super) async fn drive_durable_wait_index_scenarios(
         .await
         .context("resolve re-registered durable wait")?;
     anyhow::ensure!(
-        matches!(reregister_resolve, lash_core::ResolveOutcome::Accepted),
+        matches!(reregister_resolve, lash::ResolveOutcome::Accepted),
         "re-registered durable wait resolve was not accepted: {reregister_resolve:?}"
     );
     let reregistered = host
@@ -136,15 +136,20 @@ pub(super) async fn drive_durable_wait_index_scenarios(
 }
 
 /// Wait until the engine has executed `expected` queued runs on the E2E
-/// session. A process wake is executed the moment it is enqueued, under its
-/// queued run's `shift-run:` run, so it never waits queued for a host.
-pub(super) async fn wait_for_driven_wakes(pool: &sqlx::PgPool, expected: usize) -> Result<()> {
+/// session, and answer their runs. A process wake is executed the moment it
+/// is enqueued, under its queued run's `shift-run:` run, so it never waits
+/// queued for a host. The returned runs name the executions a `DrainQueued`
+/// request claims.
+pub(super) async fn wait_for_driven_wakes(
+    pool: &sqlx::PgPool,
+    expected: usize,
+) -> Result<Vec<String>> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut executed = Vec::new();
     while Instant::now() < deadline {
         executed = executed_queued_runs(pool, DEFAULT_SESSION_ID).await?;
         if executed.len() >= expected {
-            return Ok(());
+            return Ok(executed);
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -206,6 +211,7 @@ pub(super) async fn emit_button_event(
         fail_once: false,
         scenario: TurnScenario::TriggerEmit,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &request).await?;
     let response = wait_for_terminal_result(storage.pool(), &request.workflow_id).await?;
@@ -218,7 +224,7 @@ pub(super) async fn emit_button_event(
 }
 
 pub(super) fn signal_process_output_value(await_output: Value) -> Result<Value> {
-    let await_output: lash_core::ProcessAwaitOutput =
+    let await_output: lash::process::ProcessAwaitOutput =
         serde_json::from_value(await_output).context("decode typed signal process await output")?;
     let output = await_output.into_tool_output();
     anyhow::ensure!(
@@ -339,7 +345,7 @@ pub(super) async fn assert_processes_terminal(pool: &sqlx::PgPool) -> Result<()>
         .collect::<Vec<_>>()
         .join("\n");
     // A process literal is lifted under a content digest (`__process_<digest>`,
-    // `lashlang::LIFTED_PROCESS_NAME_PREFIX`), never under the name it was bound
+    // `lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX`), never under the name it was bound
     // to in the cell, so a record is pinned on what it carries — the arguments
     // it was started with and the value it settled — rather than on the binders
     // `async_child` and `on_button`.
@@ -755,12 +761,13 @@ pub(super) async fn assert_attachments_round_trip(
         .iter()
         .filter(|response| !response.attachment_id.is_empty())
     {
-        let id = lash_core::AttachmentId::parse(&response.attachment_id).with_context(|| {
-            format!(
-                "workbench returned an unusable attachment id `{}`",
-                response.attachment_id
-            )
-        })?;
+        let id =
+            lash::attachments::AttachmentId::parse(&response.attachment_id).with_context(|| {
+                format!(
+                    "workbench returned an unusable attachment id `{}`",
+                    response.attachment_id
+                )
+            })?;
         let held_by_session: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
              WHERE attachment_id = $1 AND referrer_kind = 'session' AND referrer_id = $2)",

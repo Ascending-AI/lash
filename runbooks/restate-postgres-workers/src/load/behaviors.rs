@@ -4,7 +4,7 @@ use crate::load::behavior::{
     self, AuxiliaryEvidence, BehaviorReport, EditEvidence, FrameEvidence, HistoryEvidence,
     OccurrenceEvidence, PromotionEvidence,
 };
-use lash_restate::RestateControllerContext as _;
+use lash::restate::RestateControllerContext as _;
 
 fn texts(session: &lash::LashSession) -> Vec<String> {
     session
@@ -65,10 +65,7 @@ pub(super) async fn external_event(
         .emit(
             lash::triggers::TriggerOccurrenceRequest::new(
                 behavior::EXTERNAL_SOURCE,
-                lash_core::facade_support::default_trigger_source_key(
-                    behavior::EXTERNAL_SOURCE,
-                    &source,
-                ),
+                lash::triggers::default_trigger_source_key(behavior::EXTERNAL_SOURCE, &source),
                 json!({"schedule":format!("{run}/behaviors"),"tick":key}),
                 key.clone(),
             )
@@ -114,14 +111,14 @@ pub(super) async fn promotion_evidence(
         .ok_or_else(|| terminal("external occurrence started no process"))?
         .clone();
     journal_read(controller, "load.promotion", async move {
-        let id = match process_id.parse::<lash_core::ProcessId>() {
+        let id = match process_id.parse::<lash::ProcessId>() {
             Ok(id) => id,
             Err(error) => return Ok(Err(error.to_string())),
         };
         let Some(record) = core.process_registry().get_process(&id).await? else {
             return Ok(Err("promotion process record missing".into()));
         };
-        let lash_core::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
+        let lash::process::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
             return Ok(Err("promotion input is not Engine".into()));
         };
         let input: lash::process::LashlangProcessInput =
@@ -129,16 +126,16 @@ pub(super) async fn promotion_evidence(
                 Ok(input) => input,
                 Err(error) => return Ok(Err(error.to_string())),
             };
-        let Some(artifact) = lashlang::LashlangArtifacts::of_backend(core.backend())
+        let Some(artifact) = lash::rlm::lang::LashlangArtifacts::of_backend(core.backend())
             .get_module_artifact(&input.module_ref)
             .await
-            .map_err(lash_core::PluginError::from)?
+            .map_err(lash::plugins::PluginError::from)?
         else {
             return Ok(Err("promotion module missing".into()));
         };
         Ok(Ok(behavior::promotion(
             process_id,
-            matches!(&record.provenance.originator,lash_core::ProcessOriginator::Session {session_id:origin,..} if origin.as_str()==session_id),
+            matches!(&record.provenance.originator,lash::process::ProcessOriginator::Session {session_id:origin,..} if origin.as_str()==session_id),
             kind.clone(),
             &record.identity,
             &input,
@@ -224,11 +221,11 @@ impl LoadWorker {
                     .iter()
                     .enumerate()
                     .map(|(i, text)| {
-                        lash_core::PluginMessage::text(
+                        lash::plugins::PluginMessage::text(
                             if i % 2 == 0 {
-                                lash_core::MessageRole::User
+                                lash::messages::MessageRole::User
                             } else {
-                                lash_core::MessageRole::Assistant
+                                lash::messages::MessageRole::Assistant
                             },
                             text,
                         )

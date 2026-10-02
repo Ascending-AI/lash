@@ -375,6 +375,11 @@ pub mod triggers {
 
     /// Trigger catalog state exposed to protocol and engine integrators.
     pub use lash_core::TriggerEventCatalog;
+    /// The deterministic source key a sourced occurrence is emitted under
+    /// ([`TriggerOccurrenceRequest::with_source`]): the host that emits
+    /// against a subscription carrying `source` params derives the same key
+    /// the router derives (ADR 0021).
+    pub use lash_core::facade_support::default_trigger_source_key;
     pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
         JsonSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
@@ -631,6 +636,11 @@ pub mod persistence {
             select_turn_work_prefix,
         };
     }
+    /// The canonical queued-work draft for a delivered process wake under a
+    /// chosen delivery boundary, so a host replaying a wake through
+    /// [`QueuedWorkStore::enqueue_queued_work_with_outcome`] submits the
+    /// draft the runtime itself would build (ADR 0101).
+    pub use lash_core::runtime::process_wake_batch_draft_with_delivery_policy;
     pub use lash_core::session_graph::WindowAnchor;
     pub use lash_core::store::PluginWriterRangesFuture;
     pub use lash_core::store::plugin_writers::{
@@ -692,6 +702,10 @@ pub mod persistence {
         ConformanceDeployment, ConformanceStore, DecodedRowCounts, GraphRowCorruption,
         StoreTestSupport,
     };
+    /// The typed tombstone a stored ingress row's `terminal_cause` and
+    /// `terminal_at_ms` columns spell: the decode the first-party backends
+    /// run, exposed so a host auditing stored rows reads the same verdict.
+    pub use lash_core::store_backend_support::decode_ingress_terminal;
     pub use lash_core::{
         AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
         AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
@@ -1390,6 +1404,11 @@ pub mod runtime {
     pub use lash_core::TurnFailureCause;
     /// Assistant-output state exposed by assembled runtime turns.
     pub use lash_core::facade_support::OutputState;
+    /// The process-scoped panic-containment flag (ADR 0054): production
+    /// leaves it disabled so host panics become typed failures; harnesses,
+    /// simulators and confidence binaries call [`set_loud`] at startup so the
+    /// same defect stays loud.
+    pub use lash_core::panic_containment::{is_loud, set_loud};
     /// Wall-clock milliseconds since the Unix epoch, as the runtime stamps its
     /// own process records. A host that mints a record the runtime will compare
     /// against uses the same reading rather than its own.

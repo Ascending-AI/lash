@@ -19,7 +19,7 @@ fn empty_provider_config() -> serde_json::Value {
 pub struct ScriptedProvider {
     kind: &'static str,
     requires_streaming: bool,
-    generation_retry_guarantee: lash_core::provider::GenerationRetryGuarantee,
+    generation_retry_guarantee: lash::provider::GenerationRetryGuarantee,
     options: ProviderOptions,
     serialize_config: Arc<SerializeConfigFn>,
     complete: Arc<CompletionFn>,
@@ -64,7 +64,7 @@ impl ScriptedProviderBuilder {
             provider: ScriptedProvider {
                 kind: "test",
                 requires_streaming: false,
-                generation_retry_guarantee: lash_core::provider::GenerationRetryGuarantee::None,
+                generation_retry_guarantee: lash::provider::GenerationRetryGuarantee::None,
                 options: ProviderOptions::default(),
                 serialize_config: Arc::new(empty_provider_config),
                 complete: Arc::new(|_request| {
@@ -145,8 +145,8 @@ impl Provider for ScriptedProvider {
         self.kind
     }
 
-    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
-        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    fn route_identity(&self, model: &str) -> lash::direct::ProviderRouteIdentity {
+        lash::direct::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -168,7 +168,7 @@ impl Provider for ScriptedProvider {
     fn generation_retry_guarantee(
         &self,
         _request: &LlmRequest,
-    ) -> lash_core::provider::GenerationRetryGuarantee {
+    ) -> lash::provider::GenerationRetryGuarantee {
         self.generation_retry_guarantee
     }
 

@@ -836,6 +836,14 @@ impl SendHandle {
         self.id.as_ref()
     }
 
+    /// The live-replay cursor taken before this handle's acceptance: the
+    /// position its [`events`](Self::events) and [`outcome`](Self::outcome)
+    /// follow from. A reader that journaled the acceptance replays from it
+    /// deterministically rather than minting a fresh cursor on replay.
+    pub fn cursor(&self) -> &lash_core::SessionCursor {
+        &self.cursor
+    }
+
     /// Live activity of the run that applies this input, from the cursor
     /// taken before acceptance. Each call subscribes afresh from that cursor.
     /// It ends once the input's run settles or parks; draining it alone

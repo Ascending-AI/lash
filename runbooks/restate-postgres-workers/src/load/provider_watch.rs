@@ -3,9 +3,9 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use lash_core::runtime::TurnInputAcceptanceReceipt;
-use lash_core::{DeploymentStore, TurnId};
-use lash_restate::{RestateAdminClient, RestateHttpErrorClass};
+use lash::TurnInputAcceptanceReceipt;
+use lash::{TurnId, persistence::DeploymentStore};
+use lash::{restate::RestateAdminClient, restate::RestateHttpErrorClass};
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,7 +48,7 @@ impl LoadProviderProbe<'_> {
         let Some(run) = &self.run else {
             return Ok(None);
         };
-        let key = lash_restate::turn_workflow_key(&self.receipt.session_id, run);
+        let key = lash::restate::turn_workflow_key(&self.receipt.session_id, run);
         let literal = |value: &str| format!("'{}'", value.replace('\'', "''"));
         #[derive(serde::Deserialize)]
         struct Invocation {

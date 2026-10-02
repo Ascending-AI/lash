@@ -1,15 +1,15 @@
 use async_trait::async_trait;
+use lash::provider::LlmTransportError;
+use lash::provider::ProviderHandle;
+use lash::schema::ProviderSchemaCapabilities;
 use lash::sync::MutexExt;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
     ToolOutcome,
 };
 use lash::{LashCore, TurnInput};
-use lash_core::facade_support::ProviderSchemaCapabilities;
-use lash_core::llm::transport::LlmTransportError;
-use lash_core::provider::ProviderHandle;
+use lash::{openai::OpenAiCompat, openai::OpenAiCompatibleProvider};
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpTransport};
-use lash_provider_openai::{OpenAiCompat, OpenAiCompatibleProvider};
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -160,7 +160,7 @@ fn core_with_backend(
     provider: ProviderHandle,
     seen: Arc<Mutex<Vec<CapturedCall>>>,
     label: &str,
-    backend: lash_core::Backend,
+    backend: lash::Backend,
 ) -> LashCore {
     LashCore::standard_builder(backend)
         .llm_profiles(std::sync::Arc::new(
@@ -267,7 +267,7 @@ fn dialect_only_provider(
     }
 }
 
-async fn dialect_store_law(backend: lash_core::Backend, label: &str) -> LashCore {
+async fn dialect_store_law(backend: lash::Backend, label: &str) -> LashCore {
     let endpoint = Endpoint::Chat;
     let transport = Arc::new(CapturingScriptedTransport::new([
         tool_response(endpoint, &strict_arguments()),
@@ -282,7 +282,7 @@ async fn dialect_store_law(backend: lash_core::Backend, label: &str) -> LashCore
     );
     let session_id = format!("{label}-{}", endpoint.label());
     runtime
-        .session(lash_core::SessionId::fixture(&session_id))
+        .session(lash::SessionId::fixture(&session_id))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "gpt-5.4",
             lash::TurnBudget::Unbounded,
@@ -291,7 +291,7 @@ async fn dialect_store_law(backend: lash_core::Backend, label: &str) -> LashCore
         .await
         .expect("create matrix session");
     let session = runtime
-        .session(lash_core::SessionId::fixture(session_id))
+        .session(lash::SessionId::fixture(session_id))
         .open()
         .await
         .expect("open matrix session");
@@ -322,7 +322,7 @@ async fn dialect_store_law(backend: lash_core::Backend, label: &str) -> LashCore
     runtime
 }
 
-async fn schema_store_law(backend: lash_core::Backend, label: &str) -> LashCore {
+async fn schema_store_law(backend: lash::Backend, label: &str) -> LashCore {
     let admitted = serde_json::to_value(tool_definition().contract())
         .expect("encode admitted catalog contract");
     for field in ["input_schema", "output_schema"] {
@@ -338,7 +338,7 @@ async fn schema_store_law(backend: lash_core::Backend, label: &str) -> LashCore 
             let mut invalid = admitted.clone();
             invalid[field]["canonical"] = schema.clone();
             assert!(
-                serde_json::from_value::<lash_core::ToolContract>(invalid).is_err(),
+                serde_json::from_value::<lash::tools::ToolContract>(invalid).is_err(),
                 "{field} admitted a schema defect: {schema}"
             );
         }
@@ -364,25 +364,24 @@ async fn resolved_tool_dialect_store_law_sqlite() {
 }
 
 async fn postgres_schema_backend() -> (
-    lash_postgres_store::testing::IsolatedDatabase,
+    lash::postgres::testing::IsolatedDatabase,
     tempfile::TempDir,
     lash_restate_test::RestateTestBackend,
 ) {
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(
-        &lash_postgres_store::testing::required_database_url(),
+    let database = lash::postgres::testing::IsolatedDatabase::create(
+        &lash::postgres::testing::required_database_url(),
     )
     .await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+    let storage = lash::postgres::PostgresStorage::connect(database.url())
         .await
         .expect("open PostgreSQL stores");
     let attachments = tempfile::tempdir().expect("attachment bytes");
-    let stores: Arc<dyn lash_core::StoreSet> =
-        Arc::new(lash_postgres_store::PostgresStoreSet::new(
-            &storage,
-            Arc::new(lash_core::facade_support::FileAttachmentStore::new(
-                attachments.path(),
-            )),
-        ));
+    let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
     let backend = lash_restate_test::backend_with(SEED, Default::default(), move |_| stores)
         .await
         .expect("PostgreSQL double");
@@ -405,7 +404,7 @@ async fn resolved_tool_dialect_store_law_postgres() {
 
 async fn sqlite_file_schema_backend() -> (
     tempfile::TempDir,
-    lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
+    lash_restate_test::RestateTestBackend<dyn lash::StoreSet>,
 ) {
     let directory = tempfile::tempdir().expect("SQLite file stores");
     let root = directory.path().to_path_buf();
@@ -414,10 +413,10 @@ async fn sqlite_file_schema_backend() -> (
         Default::default(),
         Default::default(),
         move |clock| async move {
-            let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(root, clock)
+            let stores = lash::sqlite::SqliteStoreSet::open_with_clock(root, clock)
                 .await
                 .expect("open SQLite file stores");
-            Ok(Arc::new(stores) as Arc<dyn lash_core::StoreSet>)
+            Ok(Arc::new(stores) as Arc<dyn lash::StoreSet>)
         },
     )
     .await
@@ -439,8 +438,8 @@ async fn resolved_tool_dialect_store_law_sqlite_file() {
 
 async fn live_schema_backend(
     label: &str,
-    stores: Arc<dyn lash_core::StoreSet>,
-) -> lash_restate_test::live::LiveRestateBackend<dyn lash_core::StoreSet> {
+    stores: Arc<dyn lash::StoreSet>,
+) -> lash_restate_test::live::LiveRestateBackend<dyn lash::StoreSet> {
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").expect("private endpoint port");
     let endpoint_bind = reservation.local_addr().expect("endpoint address");
     let tag = format!(
@@ -457,7 +456,7 @@ async fn live_schema_backend(
         endpoint_bind,
         endpoint_url: format!("http://{endpoint_bind}"),
         run_tag: format!("{tag}-{label}"),
-        namespace: lash_restate::RestateNamespace::new(tag).expect("private schema namespace"),
+        namespace: lash::restate::RestateNamespace::new(tag).expect("private schema namespace"),
     };
     drop(reservation);
     lash_restate_test::live::LiveRestateBackend::start_with_store_set(config, |_| async {
@@ -471,7 +470,7 @@ async fn live_schema_backend(
 #[ignore = "requires private live Restate"]
 async fn schema_admission_store_law_live_restate_sqlite_file() {
     let directory = tempfile::tempdir().expect("SQLite file stores");
-    let stores = lash_sqlite_store::SqliteStoreSet::open(directory.path())
+    let stores = lash::sqlite::SqliteStoreSet::open(directory.path())
         .await
         .expect("open SQLite file stores");
     let backend = live_schema_backend("admission-sqlite", Arc::new(stores)).await;
@@ -483,7 +482,7 @@ async fn schema_admission_store_law_live_restate_sqlite_file() {
 #[ignore = "requires private live Restate"]
 async fn resolved_tool_dialect_store_law_live_restate_sqlite_file() {
     let directory = tempfile::tempdir().expect("SQLite file stores");
-    let stores = lash_sqlite_store::SqliteStoreSet::open(directory.path())
+    let stores = lash::sqlite::SqliteStoreSet::open(directory.path())
         .await
         .expect("open SQLite file stores");
     let backend = live_schema_backend("dialect-sqlite", Arc::new(stores)).await;
@@ -494,21 +493,21 @@ async fn resolved_tool_dialect_store_law_live_restate_sqlite_file() {
 async fn live_postgres_schema_backend(
     label: &str,
 ) -> (
-    lash_postgres_store::testing::IsolatedDatabase,
+    lash::postgres::testing::IsolatedDatabase,
     tempfile::TempDir,
-    lash_restate_test::live::LiveRestateBackend<dyn lash_core::StoreSet>,
+    lash_restate_test::live::LiveRestateBackend<dyn lash::StoreSet>,
 ) {
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(
-        &lash_postgres_store::testing::required_database_url(),
+    let database = lash::postgres::testing::IsolatedDatabase::create(
+        &lash::postgres::testing::required_database_url(),
     )
     .await;
-    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+    let storage = lash::postgres::PostgresStorage::connect(database.url())
         .await
         .expect("open PostgreSQL stores");
     let attachments = tempfile::tempdir().expect("attachment bytes");
-    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+    let stores = Arc::new(lash::postgres::PostgresStoreSet::new(
         &storage,
-        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+        Arc::new(lash::persistence::FileAttachmentStore::new(
             attachments.path(),
         )),
     ));
@@ -534,56 +533,58 @@ async fn resolved_tool_dialect_store_law_live_restate_postgres() {
 
 #[test]
 fn schema_admission_causes_survive_plugin_host_and_remote_shapes() {
-    let source = lash_core::JsonSchema::admit(Value::Null).expect_err("null is not a schema");
-    let plugin = lash_core::PluginError::UnusableSchema {
+    let source = lash::triggers::JsonSchema::admit(Value::Null).expect_err("null is not a schema");
+    let plugin = lash::plugins::PluginError::UnusableSchema {
         source: Box::new(source.clone()),
     };
-    let plugin: lash_core::PluginError =
+    let plugin: lash::plugins::PluginError =
         serde_json::from_value(serde_json::to_value(plugin).expect("encode plugin error"))
             .expect("decode plugin error");
-    let runtime = plugin.into_turn_failure(lash_core::RuntimeErrorCode::PluginSessionManager);
+    let runtime = plugin.into_turn_failure(lash::runtime::RuntimeErrorCode::PluginSessionManager);
     assert!(runtime.is_terminal());
-    let runtime: lash_core::RuntimeError =
+    let runtime: lash::runtime::RuntimeError =
         serde_json::from_value(serde_json::to_value(runtime).expect("encode runtime error"))
             .expect("decode runtime error");
     assert!(
-        matches!(runtime.cause, Some(lash_core::RuntimeErrorCause::SchemaRefused { source: retained }) if *retained == source)
+        matches!(runtime.cause, Some(lash::runtime::RuntimeErrorCause::SchemaRefused { source: retained }) if *retained == source)
     );
-    let host = lashlang::ExecutionHostError::from_schema_admission(source.clone());
-    let host: lashlang::ExecutionHostError =
+    let host = lash::rlm::lang::ExecutionHostError::from_schema_admission(source.clone());
+    let host: lash::rlm::lang::ExecutionHostError =
         serde_json::from_value(serde_json::to_value(host).expect("encode host error"))
             .expect("decode host error");
     assert_eq!(host.schema_admission(), Some(&source));
     let catalog = ToolDefinition::raw("bad", "bad", "bad", Value::Null, json!({}))
         .expect_err("unusable catalog member");
     for cause in [
-        lash_core::ToolFailureCause::SchemaAdmission {
+        lash::tools::ToolFailureCause::SchemaAdmission {
             source: source.clone(),
         },
-        lash_core::ToolFailureCause::ToolSchemaAdmission {
+        lash::tools::ToolFailureCause::ToolSchemaAdmission {
             source: Box::new(catalog.clone()),
         },
-        lash_core::ToolFailureCause::ValueMismatch {
-            source: lash_core::ValueMismatch {
+        lash::tools::ToolFailureCause::ValueMismatch {
+            source: lash::schema::ValueMismatch {
                 instance_path: "/count".into(),
                 message: "integer required".into(),
             },
         },
     ] {
-        let failure = lash_core::ToolFailure::tool(
-            lash_core::ToolFailureClass::Internal,
+        let failure = lash::tools::ToolFailure::tool(
+            lash::tools::ToolFailureClass::Internal,
             "schema",
             "schema refusal",
         )
         .with_cause(cause.clone());
-        let host = lashlang::ExecutionHostError::from_tool_failure(&failure, "schema-call");
-        let host: lashlang::ExecutionHostError =
+        let host = lash::rlm::lang::ExecutionHostError::from_tool_failure(&failure, "schema-call");
+        let host: lash::rlm::lang::ExecutionHostError =
             serde_json::from_value(serde_json::to_value(host).expect("encode tool host error"))
                 .expect("decode tool host error");
         let mut conflicting = serde_json::to_value(&host).expect("encode tool host error");
         conflicting["schema_admission"] =
             serde_json::to_value(&source).expect("encode schema cause");
-        assert!(serde_json::from_value::<lashlang::ExecutionHostError>(conflicting).is_err());
+        assert!(
+            serde_json::from_value::<lash::rlm::lang::ExecutionHostError>(conflicting).is_err()
+        );
         assert_eq!(
             host.tool_failure()
                 .expect("typed tool failure")
@@ -597,52 +598,53 @@ fn schema_admission_causes_survive_plugin_host_and_remote_shapes() {
         )
         .expect("decode shared remote failure");
         assert_eq!(remote.cause.as_deref(), Some(&cause));
-        let output = lash_core::ToolCallOutput::failure(failure);
+        let output = lash::tools::ToolCallOutput::failure(failure);
         let remote = lash::remote::processes::RemoteProcessToolCallOutput::try_from(output)
             .expect("encode remote output");
         let remote: lash::remote::processes::RemoteProcessToolCallOutput =
             serde_json::from_value(serde_json::to_value(remote).expect("encode wire output"))
                 .expect("decode wire output");
-        let output = lash_core::ToolCallOutput::try_from(remote).expect("restore output");
-        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+        let output = lash::tools::ToolCallOutput::try_from(remote).expect("restore output");
+        let lash::tools::ToolCallOutcome::Failure(failure) = output.outcome else {
             panic!("failure remains a failure")
         };
         assert_eq!(failure.cause.as_deref(), Some(&cause));
     }
-    let mismatch = lash_core::ValueMismatch {
+    let mismatch = lash::schema::ValueMismatch {
         instance_path: "/count".into(),
         message: "integer required".into(),
     };
     for (plugin, expected) in [
         (
-            lash_core::PluginError::UnusableSchema {
+            lash::plugins::PluginError::UnusableSchema {
                 source: Box::new(source.clone()),
             },
-            lash_core::RuntimeErrorCause::SchemaRefused {
+            lash::runtime::RuntimeErrorCause::SchemaRefused {
                 source: Box::new(source.clone()),
             },
         ),
         (
-            lash_core::PluginError::UnusableToolSchema {
+            lash::plugins::PluginError::UnusableToolSchema {
                 source: Box::new(catalog.clone()),
             },
-            lash_core::RuntimeErrorCause::ToolSchemaRefused {
+            lash::runtime::RuntimeErrorCause::ToolSchemaRefused {
                 source: Box::new(catalog),
             },
         ),
         (
-            lash_core::PluginError::ValueMismatch {
+            lash::plugins::PluginError::ValueMismatch {
                 context: "payload".into(),
                 source: Box::new(mismatch.clone()),
             },
-            lash_core::RuntimeErrorCause::ValueMismatch {
+            lash::runtime::RuntimeErrorCause::ValueMismatch {
                 context: "payload".into(),
                 source: Box::new(mismatch.clone()),
             },
         ),
     ] {
-        let runtime = lash_core::RuntimeEffectControllerError::from(plugin).into_runtime_error();
-        let runtime: lash_core::RuntimeError = serde_json::from_value(
+        let runtime =
+            lash::runtime::RuntimeEffectControllerError::from(plugin).into_runtime_error();
+        let runtime: lash::runtime::RuntimeError = serde_json::from_value(
             serde_json::to_value(runtime).expect("encode controller refusal"),
         )
         .expect("decode controller refusal");
@@ -651,7 +653,7 @@ fn schema_admission_causes_survive_plugin_host_and_remote_shapes() {
         assert_eq!(runtime.cause, Some(expected));
     }
     let delivery = lash::triggers::TriggerDeliveryEmitOutcome::Failed {
-        code: lash_core::RuntimeErrorCode::PluginSessionManager,
+        code: lash::runtime::RuntimeErrorCode::PluginSessionManager,
         reason: "value mismatch".into(),
         value_mismatch: Some(Box::new(mismatch.clone())),
     };
@@ -664,9 +666,9 @@ fn schema_admission_causes_survive_plugin_host_and_remote_shapes() {
         delivery
     );
     for cell in [
-        lash_core::CellFailure::new(lash_core::CellFailureKind::Host, "schema refusal")
+        lash::plugins::CellFailure::new(lash::plugins::CellFailureKind::Host, "schema refusal")
             .with_schema_admission(source.clone()),
-        lash_core::CellFailure::new(lash_core::CellFailureKind::Program, "value mismatch")
+        lash::plugins::CellFailure::new(lash::plugins::CellFailureKind::Program, "value mismatch")
             .with_value_mismatch(mismatch.clone()),
     ] {
         let remote = lash::remote::usage::RemoteTurnEvent::CodeBlockCompleted {

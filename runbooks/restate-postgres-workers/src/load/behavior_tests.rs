@@ -210,9 +210,9 @@ fn a_batched_turn_keeps_full_tool_coverage_and_zero_violations() {
 fn persisted_start(
     source: &str,
 ) -> (
-    lash_core::ProcessIdentity,
+    lash::process::ProcessIdentity,
     lash::process::LashlangProcessInput,
-    lashlang::ModuleArtifact,
+    lash::rlm::lang::ModuleArtifact,
 ) {
     let environment = lash::rlm::LashlangHostEnvironment::new(
         lash::rlm::LashlangHostCatalog::new(),
@@ -226,7 +226,7 @@ fn persisted_start(
         .declarations
         .iter()
         .find_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) => Some(process.name.to_string()),
+            lash::rlm::lang::Declaration::Process(process) => Some(process.name.to_string()),
             _ => None,
         })
         .unwrap();
@@ -237,7 +237,7 @@ fn persisted_start(
         process_name,
         args: serde_json::Map::new(),
     };
-    let lash_core::ProcessInput::Engine { payload, .. } = started.to_process_input().unwrap()
+    let lash::process::ProcessInput::Engine { payload, .. } = started.to_process_input().unwrap()
     else {
         panic!("a lashlang start persists an engine payload");
     };

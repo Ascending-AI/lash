@@ -9,11 +9,11 @@ use super::{
 };
 use crate::{journaled_session, turn_handler_error};
 use anyhow::Result;
+use lash::restate::RestateRuntimeEffectController;
 use lash::restate::RestateWait;
 use lash::runtime::AwaitEventResolver as _;
 use lash::{SessionId, TurnInput};
 use lash_perf::workload::{Generator, ProcessPlan, QueuedInputPlan, TurnPlan};
-use lash_restate::RestateRuntimeEffectController;
 use restate_sdk::context::{ContextSideEffects, RunFuture};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::WorkflowContext;
@@ -51,9 +51,9 @@ trait WorkloadProcessCleanup: Sync {
         u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0)
     }
 
-    async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>>;
-    async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()>;
-    async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()>;
+    async fn owned(&self, session: &str) -> Result<Vec<lash::ProcessId>>;
+    async fn cancel(&self, process: &lash::ProcessId) -> Result<()>;
+    async fn await_terminal(&self, process: &lash::ProcessId) -> Result<()>;
 }
 
 /// The deadline is recorded once. Every clock check and timed read runs
@@ -129,15 +129,15 @@ struct SessionProcessCleanup<'a, 'ctx> {
 
 #[async_trait::async_trait]
 impl WorkloadProcessCleanup for SessionProcessCleanup<'_, '_> {
-    async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>> {
+    async fn owned(&self, session: &str) -> Result<Vec<lash::ProcessId>> {
         Ok(self
             .processes
             .list_originated_by(
-                &lash_core::SessionScope::new(SessionId::parse(session)?),
-                &lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::any_of([
-                        lash_core::ProcessStatus::Running,
-                        lash_core::ProcessStatus::Waiting,
+                &lash::process::SessionScope::new(SessionId::parse(session)?),
+                &lash::process::ProcessListFilter {
+                    status: lash::process::ProcessStatusFilter::any_of([
+                        lash::process::ProcessStatus::Running,
+                        lash::process::ProcessStatus::Waiting,
                     ]),
                     ..Default::default()
                 },
@@ -148,14 +148,14 @@ impl WorkloadProcessCleanup for SessionProcessCleanup<'_, '_> {
             .collect())
     }
 
-    async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()> {
+    async fn cancel(&self, process: &lash::ProcessId) -> Result<()> {
         let scope = scoped(self.controller, process.as_ref(), "model-child-cleanup")
             .map_err(|error| anyhow::anyhow!("{error:?}"))?;
         self.processes.cancel(process, scope).await?;
         Ok(())
     }
 
-    async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()> {
+    async fn await_terminal(&self, process: &lash::ProcessId) -> Result<()> {
         self.processes.await_output(process).await?;
         Ok(())
     }
@@ -177,10 +177,10 @@ pub struct LoadWorker {
     witness: PgPool,
     load: LoadContext,
     restate_ingress_url: String,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_authority_id: lash::restate::RestateAuthorityId,
     model: lash::LlmProfileConfig,
     active: ActiveOperations,
-    administration: Arc<tokio::sync::OnceCell<lash_restate::RestateSessionAdministration>>,
+    administration: Arc<tokio::sync::OnceCell<lash::restate::RestateSessionAdministration>>,
 }
 
 pub struct LoadWorkerConfig {
@@ -189,7 +189,7 @@ pub struct LoadWorkerConfig {
     pub witness: PgPool,
     pub load: LoadContext,
     pub restate_ingress_url: String,
-    pub restate_authority_id: lash_restate::RestateAuthorityId,
+    pub restate_authority_id: lash::restate::RestateAuthorityId,
     pub model: lash::LlmProfileConfig,
     /// Where each handler counts itself while it runs.
     pub active: ActiveOperations,
@@ -463,7 +463,7 @@ impl LoadWorker {
             .declarations
             .iter()
             .find_map(|declaration| match declaration {
-                lashlang::Declaration::Process(process) => Some(process),
+                lash::rlm::lang::Declaration::Process(process) => Some(process),
                 _ => None,
             })
             .ok_or_else(|| terminal(format!("the body of `{key}` declares no process")))?;
@@ -490,11 +490,11 @@ impl LoadWorker {
         }
         .into_process_input()
         .map_err(terminal)?;
-        let environment = lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::AdmittedPluginConfig::default(),
-            lash_core::SessionPolicy {
+        let environment = lash::process::ProcessExecutionEnvSpec::new(
+            lash::plugins::AdmittedPluginConfig::default(),
+            lash::runtime::SessionPolicy {
                 model: Some(self.model.clone()),
-                ..lash_core::SessionPolicy::new(
+                ..lash::runtime::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(1024),
                 )
@@ -506,10 +506,10 @@ impl LoadWorker {
             .publish_process_env(&pin, &environment)
             .await
             .map_err(turn_handler_error)?;
-        let request = lash_core::ProcessStartRequest::new(
+        let request = lash::process::ProcessStartRequest::new(
             input,
-            lash_core::ProcessOriginator::host(),
-            lash_core::Lifetime::Detached,
+            lash::process::ProcessOriginator::host(),
+            lash::process::Lifetime::Detached,
         )
         .with_host_start_key(key.as_bytes())
         .with_env_ref(env_ref)
@@ -520,11 +520,11 @@ impl LoadWorker {
                     lash::process::lashlang_process_signal_event_types(declaration).map_err(
                         |source| {
                             turn_handler_error(
-                                lash_core::PluginError::UnusableSchema {
+                                lash::plugins::PluginError::UnusableSchema {
                                     source: Box::new(source),
                                 }
                                 .into_turn_failure(
-                                    lash_core::RuntimeErrorCode::PluginSessionManager,
+                                    lash::runtime::RuntimeErrorCode::PluginSessionManager,
                                 )
                                 .into(),
                             )
@@ -546,9 +546,13 @@ impl LoadWorker {
                 .map_err(turn_handler_error)?;
         } else if process.waits_for_signal() {
             tokio::time::sleep(Duration::from_millis(u64::from(process.wake_delay_ms))).await;
-            let signal = lash_core::ProcessSignal::new(
-                lash_core::ProcessSignalIdentity::new(process_id.clone(), "resume", key.clone())
-                    .map_err(terminal)?,
+            let signal = lash::process::ProcessSignal::new(
+                lash::process::ProcessSignalIdentity::new(
+                    process_id.clone(),
+                    "resume",
+                    key.clone(),
+                )
+                .map_err(terminal)?,
                 json!({ "key": key, "signal": "resume" }),
             );
             processes
@@ -571,7 +575,7 @@ impl LoadWorker {
         Ok(HostProcessReport {
             key: key.clone(),
             process_id: process_id.to_string(),
-            created: receipt.disposition == lash_core::ProcessRegistrationOutcome::Created,
+            created: receipt.disposition == lash::process::ProcessRegistrationOutcome::Created,
             signalled,
             cancel_requested: process.cancel,
             output,
@@ -620,8 +624,7 @@ impl LoadWorker {
         let schedule = generator.cron_schedule(subscription);
         let key = generator.cron_tick_key(subscription, tick);
         let source = json!({ "schedule": schedule });
-        let source_key =
-            lash_core::facade_support::default_trigger_source_key(CRON_SOURCE_TYPE, &source);
+        let source_key = lash::triggers::default_trigger_source_key(CRON_SOURCE_TYPE, &source);
         let report = self
             .core
             .triggers()
@@ -669,7 +672,7 @@ impl LoadWorker {
         let administration = self
             .administration
             .get_or_init(|| async {
-                lash_restate::RestateSessionAdministration::new(
+                lash::restate::RestateSessionAdministration::new(
                     self.core.session_administration().await,
                     self.restate_ingress_url.clone(),
                     self.restate_authority_id.clone(),
@@ -749,9 +752,9 @@ fn scoped<'a>(
     controller: &'a Controller<'_>,
     key: &str,
     step: &str,
-) -> HandlerResult<lash_core::ScopedEffectController<'a>> {
+) -> HandlerResult<lash::runtime::ScopedEffectController<'a>> {
     controller
-        .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(format!(
+        .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "load:{key}:{step}"
         )))
         .map_err(terminal)

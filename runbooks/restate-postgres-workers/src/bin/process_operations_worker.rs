@@ -1,27 +1,20 @@
 use anyhow::{Context, Result, bail};
 use lash::ProcessId;
 use lash::SessionId;
-use lash::durability::EffectHost as _;
 use lash::persistence::{
-    DeliveryPolicy, DeploymentStore, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft,
-    QueuedWorkStore as _, SessionCatalogStore as _, SessionCreationHead, SessionRelation,
-    SessionStoreCreateRequest,
+    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft, QueuedWorkStore as _,
 };
-use lash::postgres::{PostgresStorage, PostgresStoreSet};
-use lash::process::{
-    AdmittedProcessIdentity, Lifetime, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessIdentity, ProcessInput, ProcessListFilter,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
-    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, WakeDeliveryConfig,
-    WakeDeliveryDriver, WakeDeliveryState, WakeDiscardReason, process_wake_source_key,
+use lash::postgres::PostgresStorage;
+use lash::process::{WakeDeliveryDriver, process_wake_source_key};
+use lash::{
+    persistence::SessionCatalogStore as _, persistence::SessionCreationHead,
+    persistence::SessionRelation, persistence::SessionStoreCreateRequest,
+    process::ProcessEventAppendRequest, process::ProcessEventSemanticsSpec,
+    process::ProcessEventType, process::ProcessIdentity, process::ProcessInput,
+    process::ProcessProvenance, process::ProcessRegistration, process::ProcessValueSelector,
+    process::ProcessWakeDelivery, process::ProcessWakeSpec, process::WakeDeliveryConfig,
+    process::WakeDeliveryState, process::WakeDiscardReason,
 };
-use lash::runtime::{AdmittedScope, SessionPolicy, SystemClock};
-use lash_restate_postgres_workers_e2e::process_operations::{
-    self, ReplacementBaseline, StatePlugin,
-};
-use restate_sdk::prelude::{HandlerResult, Json, WorkflowContext};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,139 +23,12 @@ const PROCESS_ID: &str = "process-operations-crash-recovery";
 const SESSION_ID: &str = "process-operations-crash-target";
 const EVENT_TYPE: &str = "runbook.wake";
 
-#[derive(Serialize, Deserialize)]
-enum ReplacementRequest {
-    Prepare,
-    Recover(Box<ReplacementBaseline>),
-}
-
-#[derive(Clone)]
-struct ProcessOperationsReplacement {
-    core: lash::LashCore,
-    plugin: StatePlugin,
-    authority: lash::restate::RestateAuthorityId,
-}
-
-struct ReplacementEndpoint(tokio::task::JoinHandle<()>);
-
-impl Drop for ReplacementEndpoint {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-fn replacement_handler_error(error: anyhow::Error) -> restate_sdk::errors::HandlerError {
-    if error
-        .downcast_ref::<lash::EmbedError>()
-        .is_some_and(lash::EmbedError::is_retryable)
-    {
-        error.into()
-    } else {
-        restate_sdk::errors::TerminalError::new(error.to_string()).into()
-    }
-}
-
-#[restate_sdk::workflow]
-impl ProcessOperationsReplacement {
-    #[restate_sdk::handler]
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(request): Json<ReplacementRequest>,
-    ) -> HandlerResult<Json<Option<ReplacementBaseline>>> {
-        let controller = lash::restate::RestateRuntimeEffectController::new(
-            ctx,
-            self.authority.clone(),
-            self.core.build_generation().clone(),
-        );
-        let scoped = controller
-            .scoped(AdmittedScope::runtime_operation(controller.context().key()))
-            .map_err(|error| replacement_handler_error(error.into()))?;
-        let outcome = match request {
-            ReplacementRequest::Prepare => {
-                process_operations::prepare(&self.core, &self.plugin, scoped)
-                    .await
-                    .map(Some)
-            }
-            ReplacementRequest::Recover(before) => {
-                process_operations::recover(&self.core, &self.plugin, &before, scoped)
-                    .await
-                    .map(|()| None)
-            }
-        };
-        outcome.map(Json).map_err(replacement_handler_error)
-    }
-}
-
-async fn replacement(storage: &PostgresStorage, mode: &str) -> Result<()> {
-    use lash_restate_postgres_workers_e2e::local_restate::LocalRestate;
-
-    let restate = LocalRestate::from_env()?;
-    let artifacts = std::path::PathBuf::from(
-        std::env::var("LASH_PROCESS_OPERATIONS_ARTIFACT_DIR").context("replacement artifacts")?,
-    );
-    let attachments =
-        lash::sqlite::SqliteStoreSet::open(artifacts.join("replacement-attachments")).await?;
-    let stores = Arc::new(PostgresStoreSet::new(
-        storage,
-        attachments.attachment_store(),
-    ));
-    let engine = restate.engine(stores);
-    let plugin = StatePlugin::default();
-    let core = process_operations::core(lash::Backend::new(engine.clone()), plugin.clone())?;
-    let worker =
-        lash::durability::DurableProcessWorker::new(core.durable_process_worker_config()?)?;
-    let endpoint = engine
-        .endpoint_builder(worker)?
-        .bind(ProcessOperationsReplacement {
-            core: core.clone(),
-            plugin,
-            authority: restate.authority.clone(),
-        })
-        .build();
-    let listener =
-        tokio::net::TcpListener::bind(std::env::var("LASH_PROCESS_OPERATIONS_ENDPOINT")?).await?;
-    let deployment = ReplacementEndpoint(tokio::spawn(async move {
-        lash::restate::serve_endpoint(
-            listener,
-            endpoint,
-            lash::restate::RestateEndpointLimits::new(32 * 1024 * 1024, 32 * 1024 * 1024 + 8),
-            std::future::pending::<()>(),
-        )
-        .await;
-    }));
-    engine
-        .register_deployment(&std::env::var(
-            "LASH_PROCESS_OPERATIONS_ADVERTISED_ENDPOINT",
-        )?)
-        .await?;
-    let evidence_file = artifacts.join("08-replacement-baseline.json");
-    let request = if mode == "replacement-prepare" {
-        ReplacementRequest::Prepare
-    } else {
-        ReplacementRequest::Recover(serde_json::from_slice(&std::fs::read(&evidence_file)?)?)
-    };
-    let ingress = lash::restate::RestateIngressClient::new(restate.ingress_url);
-    let before: Option<ReplacementBaseline> = tokio::time::timeout(
-        Duration::from_secs(120),
-        ingress.call_workflow_json("ProcessOperationsReplacement", mode, "run", &request),
-    )
-    .await
-    .context("replacement phase timed out")??;
-    if let Some(before) = before {
-        std::fs::write(evidence_file, serde_json::to_vec_pretty(&before)?)?;
-    }
-    core.shutdown().await?;
-    drop(deployment);
-    Ok(())
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the runbook's fixed wake-expiry and stale-claim ages satisfy WakeDeliveryConfig's \
              validation bounds"
 )]
-fn registry(storage: &PostgresStorage) -> Arc<dyn ProcessRegistry> {
+fn registry(storage: &PostgresStorage) -> Arc<dyn lash::process::ProcessRegistry> {
     Arc::new(
         storage.process_registry_with_wake_delivery_config(
             WakeDeliveryConfig::new(60_000)
@@ -176,11 +42,13 @@ fn registry(storage: &PostgresStorage) -> Arc<dyn ProcessRegistry> {
 /// The crash-recovery process, found by its label: the registrar mints its
 /// id, and the runbook's later invocations run in fresh processes that were
 /// never handed it.
-async fn crash_recovery_process(registry: &dyn ProcessRegistry) -> Result<ProcessId> {
+async fn crash_recovery_process(
+    registry: &dyn lash::process::ProcessRegistry,
+) -> Result<ProcessId> {
     registry
-        .list_processes(&ProcessListFilter {
-            status: ProcessStatusFilter::Any,
-            ..ProcessListFilter::default()
+        .list_processes(&lash::process::ProcessListFilter {
+            status: lash::process::ProcessStatusFilter::Any,
+            ..lash::process::ProcessListFilter::default()
         })
         .await
         .context("list runbook processes")?
@@ -196,9 +64,9 @@ fn registration() -> ProcessRegistration {
             metadata: json!({"runbook": "process-operations"}),
         },
         ProcessProvenance::host(),
-        Lifetime::Detached,
+        lash::process::Lifetime::Detached,
     )
-    .with_admitted_identity(AdmittedProcessIdentity::pinned(
+    .with_admitted_identity(lash::process::AdmittedProcessIdentity::pinned(
         ProcessIdentity::for_definition(
             lash::process::ProcessDefinitionRef::unclaimed(
                 "runbook",
@@ -222,9 +90,9 @@ fn registration() -> ProcessRegistration {
 }
 
 async fn process_events(
-    registry: &dyn ProcessRegistry,
+    registry: &dyn lash::process::ProcessRegistry,
     process_id: &ProcessId,
-) -> Result<Vec<ProcessEvent>> {
+) -> Result<Vec<lash::process::ProcessEvent>> {
     let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
     let mut after_sequence = 0;
     let mut events = Vec::new();
@@ -234,20 +102,20 @@ async fn process_events(
                 process_id,
                 after_sequence,
                 limit,
-                ProcessEventQueryMode::Full,
+                lash::process::ProcessEventQueryMode::Full,
             )
             .await
             .context("read process event page")?;
-        let ProcessEventReadOutcome::Retained(page) = outcome else {
+        let lash::process::ProcessEventReadOutcome::Retained(page) = outcome else {
             bail!("process event history was no longer retained")
         };
-        let ProcessEventPageEvents::Full(page_events) = page.events else {
+        let lash::process::ProcessEventPageEvents::Full(page_events) = page.events else {
             unreachable!("full process event query returned a lite page");
         };
         events.extend(page_events);
         after_sequence = match page.more {
-            ProcessEventPageMore::Complete => return Ok(events),
-            ProcessEventPageMore::More { after_sequence } => after_sequence,
+            lash::process::ProcessEventPageMore::Complete => return Ok(events),
+            lash::process::ProcessEventPageMore::More { after_sequence } => after_sequence,
         };
     }
 }
@@ -269,7 +137,7 @@ fn wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
 async fn main() -> Result<()> {
     let mode = std::env::args()
         .nth(1)
-        .context("usage: lash-e2e-process-operations-worker retarget|prepare|crash|recover|replacement-prepare|replacement-recover")?;
+        .context("usage: lash-e2e-process-operations-worker retarget|prepare|crash|recover")?;
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
     let storage = PostgresStorage::connect(&database_url)
         .await
@@ -280,7 +148,6 @@ async fn main() -> Result<()> {
         "prepare" => prepare(&storage).await,
         "crash" => crash_between_enqueue_and_mark(&storage).await,
         "recover" => recover_after_worker_restart(&storage).await,
-        "replacement-prepare" | "replacement-recover" => replacement(&storage, &mode).await,
         other => bail!("unknown process-operations worker mode `{other}`"),
     }
 }
@@ -297,7 +164,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::parse(session_id.to_string())?,
                 relation: SessionRelation::Root,
-                config: SessionPolicy::new(
+                config: lash::runtime::SessionPolicy::new(
                     lash::TurnBudget::Unbounded,
                     lash::MaxToolCalls::new(1024),
                 )
@@ -315,11 +182,11 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                     metadata: json!({"runbook": "process-operations"}),
                 },
                 ProcessProvenance::host(),
-                Lifetime::Detached,
+                lash::process::Lifetime::Detached,
             )
-            .with_admitted_identity(AdmittedProcessIdentity::pinned(ProcessIdentity::new(
-                "runbook-retarget",
-            )))
+            .with_admitted_identity(lash::process::AdmittedProcessIdentity::pinned(
+                ProcessIdentity::new("runbook-retarget"),
+            ))
             .with_extra_event_types([ProcessEventType {
                 name: EVENT_TYPE.to_string(),
                 payload_schema: lash::triggers::JsonSchema::any(),
@@ -381,9 +248,9 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     );
     let shift = WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
-        Arc::new(factory) as Arc<dyn DeploymentStore>,
+        Arc::new(factory) as Arc<dyn lash::persistence::DeploymentStore>,
         Arc::new(lash::runtime::NoSessionWork::new()),
-        Arc::new(SystemClock),
+        Arc::new(lash::runtime::SystemClock),
         32,
     )
     .await
@@ -440,8 +307,11 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::parse(SESSION_ID.to_string())?,
             relation: SessionRelation::Root,
-            config: SessionPolicy::new(lash::TurnBudget::Unbounded, lash::MaxToolCalls::new(1024))
-                .into(),
+            config: lash::runtime::SessionPolicy::new(
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .into(),
             head: SessionCreationHead::Config,
         })
         .await
@@ -523,14 +393,14 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
 async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
     let registry = registry(storage);
     let process_id = crash_recovery_process(registry.as_ref()).await?;
-    let factory = Arc::new(storage.store()) as Arc<dyn DeploymentStore>;
+    let factory = Arc::new(storage.store()) as Arc<dyn lash::persistence::DeploymentStore>;
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let report = WakeDeliveryDriver::drive_pending_once(
                 Arc::clone(&registry),
                 Arc::clone(&factory),
                 Arc::new(lash::runtime::NoSessionWork::new()),
-                Arc::new(SystemClock),
+                Arc::new(lash::runtime::SystemClock),
                 32,
             )
             .await

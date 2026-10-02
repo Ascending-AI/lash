@@ -3,7 +3,7 @@
 #![allow(deprecated, reason = "the pinned SDK retains the trait workflow API")]
 
 use super::*;
-use lash_core::testing::wait_until;
+use lash::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{RestateTestBackend, ServerConfig};
 use restate_sdk::context::{ContextPromises, ContextWriteState, SharedWorkflowContext};
@@ -25,7 +25,7 @@ trait WorkloadDeleteProbe {
 
 struct Services {
     core: lash::LashCore,
-    authority: lash_restate::RestateAuthorityId,
+    authority: lash::restate::RestateAuthorityId,
 }
 
 struct Probe {
@@ -72,12 +72,10 @@ impl WorkloadDeleteProbe for Probe {
     }
 }
 
-fn services(backend: lash_core::Backend, authority: lash_restate::RestateAuthorityId) -> Services {
-    let provider = lash_core::testing::TestProvider::builder()
+fn services(backend: lash::Backend, authority: lash::restate::RestateAuthorityId) -> Services {
+    let provider = lash::testing::TestProvider::builder()
         .kind("workload-delete")
-        .complete(|_| async {
-            Ok::<_, lash_core::llm::transport::LlmTransportError>(Default::default())
-        })
+        .complete(|_| async { Ok::<_, lash::provider::LlmTransportError>(Default::default()) })
         .build()
         .into_handle();
     let core = lash::LashCore::standard_builder(backend)
@@ -85,12 +83,12 @@ fn services(backend: lash_core::Backend, authority: lash_restate::RestateAuthori
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .serve_test_llm_profile(
             provider,
-            lash_core::LlmProfileMetadata::builder("mock-model")
+            lash::LlmProfileMetadata::builder("mock-model")
                 .context_window_tokens(200_000)
                 .build()
                 .unwrap(),
         )
-        .build(lash_core::LeaseOwnerIdentity::opaque(
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "workload-delete",
             "law",
         ))
@@ -98,24 +96,24 @@ fn services(backend: lash_core::Backend, authority: lash_restate::RestateAuthori
     Services { core, authority }
 }
 
-async fn child(backend: lash_core::Backend, session: &str) -> lash_core::ProcessId {
+async fn child(backend: lash::Backend, session: &str) -> lash::ProcessId {
     backend
         .process_registry()
-        .register_process(lash_core::ProcessRegistration::new(
-            lash_core::ProcessInput::External {
+        .register_process(lash::process::ProcessRegistration::new(
+            lash::process::ProcessInput::External {
                 metadata: Value::Null,
             },
-            lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
+            lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                 SessionId::fixture(session),
             )),
-            lash_core::Lifetime::Detached,
+            lash::process::Lifetime::Detached,
         ))
         .await
         .unwrap()
         .id
 }
 
-async fn witness(double: RestateTestBackend<dyn lash_core::StoreSet>, storage: &str) {
+async fn witness(double: RestateTestBackend<dyn lash::StoreSet>, storage: &str) {
     let cell = Arc::new(OnceLock::from(services(
         double.lash_backend(),
         double
@@ -276,10 +274,10 @@ async fn law(storage: Storage, replay: bool) {
                 Default::default(),
                 |clock| async {
                     Ok(Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::open_with_clock(root.path(), clock)
+                        lash::sqlite::SqliteStoreSet::open_with_clock(root.path(), clock)
                             .await
                             .unwrap(),
-                    ) as Arc<dyn lash_core::StoreSet>)
+                    ) as Arc<dyn lash::StoreSet>)
                 },
             )
             .await
@@ -289,8 +287,8 @@ async fn law(storage: Storage, replay: bool) {
         Storage::Postgres => {
             let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
                 .expect("the PostgreSQL gate supplies its URL");
-            let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+            let database = lash::postgres::testing::IsolatedDatabase::create(&url).await;
+            let storage = lash::postgres::PostgresStorage::connect(database.url())
                 .await
                 .unwrap();
             let double = lash_restate_test::backend_with_store_set(
@@ -298,12 +296,12 @@ async fn law(storage: Storage, replay: bool) {
                 config,
                 Default::default(),
                 |clock| async {
-                    Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                    Ok(Arc::new(lash::postgres::PostgresStoreSet::with_clock(
                         &storage,
                         Arc::new(lash::persistence::FileAttachmentStore::new(root.path())),
                         Default::default(),
                         clock,
-                    )) as Arc<dyn lash_core::StoreSet>)
+                    )) as Arc<dyn lash::StoreSet>)
                 },
             )
             .await
@@ -382,7 +380,7 @@ async fn live_restate_a_workload_delete_replayed_after_a_child_appeared_matches_
     assert!(
         cell.set(services(
             backend.lash_backend(),
-            lash_restate::RestateAuthorityId::new(format!("lash-live-{key}")).unwrap()
+            lash::restate::RestateAuthorityId::new(format!("lash-live-{key}")).unwrap()
         ))
         .is_ok()
     );
@@ -539,11 +537,11 @@ impl WorkloadProcessCleanup for ProbeCleanup<'_, '_> {
         }
     }
 
-    async fn owned(&self, session: &str) -> Result<Vec<lash_core::ProcessId>> {
+    async fn owned(&self, session: &str) -> Result<Vec<lash::ProcessId>> {
         self.inner.owned(session).await
     }
 
-    async fn cancel(&self, process: &lash_core::ProcessId) -> Result<()> {
+    async fn cancel(&self, process: &lash::ProcessId) -> Result<()> {
         if self.stalled.is_some() {
             Ok(())
         } else {
@@ -551,7 +549,7 @@ impl WorkloadProcessCleanup for ProbeCleanup<'_, '_> {
         }
     }
 
-    async fn await_terminal(&self, process: &lash_core::ProcessId) -> Result<()> {
+    async fn await_terminal(&self, process: &lash::ProcessId) -> Result<()> {
         if let Some(stalled) = self.stalled {
             stalled.fetch_add(1, Ordering::SeqCst);
             std::future::pending().await
@@ -712,8 +710,8 @@ async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sess
             })
             .await
             .unwrap();
-            let output = lash_core::ProcessAwaitOutput::from_tool_output(
-                lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+            let output = lash::process::ProcessAwaitOutput::from_tool_output(
+                lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
                     "the cleanup cancelled this child",
                 )),
             );
@@ -721,7 +719,7 @@ async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sess
                 .complete_process(
                     &cancelled,
                     output.clone(),
-                    lash_core::ProcessCompletionAuthority::external_owner(),
+                    lash::process::ProcessCompletionAuthority::external_owner(),
                 )
                 .await
                 .unwrap();
@@ -790,7 +788,7 @@ async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sess
     let rows = cell.get().unwrap().core.processes();
     assert_eq!(
         rows.get(&cancelled).await.unwrap().unwrap().lifecycle,
-        lash_core::ProcessStatus::Cancelled
+        lash::process::ProcessStatus::Cancelled
     );
     assert!(
         rows.get(&sibling)

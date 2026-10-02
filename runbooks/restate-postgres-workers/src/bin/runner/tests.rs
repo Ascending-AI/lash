@@ -42,8 +42,8 @@ fn captured_settled_shape_is_success() {
 
 #[test]
 fn constructed_success_is_unwrapped_and_classified() {
-    let await_output = lash_core::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::success(json!({
+    let await_output = lash::process::ProcessAwaitOutput::from_tool_output(
+        lash::tools::ToolCallOutput::success(json!({
             "first": {"phase": "first"},
             "second": {"phase": "second"}
         })),
@@ -60,16 +60,16 @@ fn constructed_success_is_unwrapped_and_classified() {
 
 #[test]
 fn failure_and_abandoned_outputs_are_rejected() {
-    let failure = lash_core::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
-            lash_core::ToolFailureClass::External,
+    let failure = lash::process::ProcessAwaitOutput::from_tool_output(
+        lash::tools::ToolCallOutput::failure(lash::tools::ToolFailure::runtime(
+            lash::tools::ToolFailureClass::External,
             "signal_failed",
             "signal failed",
         )),
     );
-    let abandoned = lash_core::ProcessAwaitOutput::Abandoned {
-        evidence: Box::new(lash_core::AbandonEvidence {
-            writer: lash_core::AbandonWriter::Producer,
+    let abandoned = lash::process::ProcessAwaitOutput::Abandoned {
+        evidence: Box::new(lash::process::AbandonEvidence {
+            writer: lash::process::AbandonWriter::Producer,
             owner: None,
             epoch_ms: 1,
         }),

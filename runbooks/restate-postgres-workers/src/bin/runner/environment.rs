@@ -56,7 +56,7 @@ pub(super) async fn run_cold_process_await_event_vectors(
                     .resolve_await_event(&key, terminal.clone())
                     .await
                     .with_context(|| format!("resolve killed-helper {identity} key"))?,
-                lash_core::ResolveOutcome::Accepted
+                lash::ResolveOutcome::Accepted
             ),
             "killed-helper {identity} resolution did not win"
         );
@@ -253,7 +253,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
         )
     }));
     for key in &recorded_wait_keys {
-        let address = lash_restate::RestateDurableWaitAddress::for_key(key);
+        let address = lash::restate::RestateDurableWaitAddress::for_key(key);
         invocation_predicates.push(format!(
             "(target_service_name = 'LashDurableWaitWorkflow' AND target_service_key = {})",
             sql_string_literal(&address.workflow_key)
@@ -284,7 +284,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
         sql_string_literal(session_id)
     )];
     for key in &recorded_wait_keys {
-        let address = lash_restate::RestateDurableWaitAddress::for_key(key);
+        let address = lash::restate::RestateDurableWaitAddress::for_key(key);
         state_predicates.push(format!(
             "(service_name = 'LashDurableWaitWorkflow' AND service_key = {})",
             sql_string_literal(&address.workflow_key)
@@ -315,7 +315,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
     let wait_host = RestateEffectHost::outside_deployment(ingress_url, authority_id);
     let mut completed_promise_keys = BTreeSet::new();
     for key in &recorded_wait_keys {
-        let workflow_key = lash_restate::RestateDurableWaitAddress::for_key(key).workflow_key;
+        let workflow_key = lash::restate::RestateDurableWaitAddress::for_key(key).workflow_key;
         match wait_host.peek_await_event(key).await {
             Ok(Some(resolution)) => {
                 completed_promise_keys.insert(workflow_key.clone());
@@ -343,7 +343,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
                         .as_ref()
                         .is_some_and(|key| {
                             recorded_wait_keys.iter().any(|recorded| {
-                                lash_restate::RestateDurableWaitAddress::for_key(recorded)
+                                lash::restate::RestateDurableWaitAddress::for_key(recorded)
                                     .workflow_key
                                     == *key
                             })
@@ -359,15 +359,15 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
                         .any(|process_id| row.target_service_key.as_deref() == Some(process_id)))
                 && matches!(
                     row.status,
-                    lash_restate::RestateInvocationLifecycle::Ready
-                        | lash_restate::RestateInvocationLifecycle::Running
-                        | lash_restate::RestateInvocationLifecycle::BackingOff
+                    lash::restate::RestateInvocationLifecycle::Ready
+                        | lash::restate::RestateInvocationLifecycle::Running
+                        | lash::restate::RestateInvocationLifecycle::BackingOff
                 )
         });
         let callees_completed = !wait_rows.is_empty()
             && wait_rows.iter().all(|row| row.completed_successfully());
         let suspended_on_completed_promise = wait_rows.iter().any(|row| {
-            row.status == lash_restate::RestateInvocationLifecycle::Suspended
+            row.status == lash::restate::RestateInvocationLifecycle::Suspended
                 && row
                     .target_service_key
                     .as_ref()
@@ -382,7 +382,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
         let terminal_handler_failure = rows.iter().find(|row| {
             row.target_service_name == TURN_WORKFLOW_NAME
                 && row.target_service_key.as_deref() == Some(workflow_id)
-                && row.status == lash_restate::RestateInvocationLifecycle::Completed
+                && row.status == lash::restate::RestateInvocationLifecycle::Completed
                 && row.completion_result.as_deref() == Some("failure")
         });
 
@@ -454,9 +454,13 @@ pub(super) async fn wait_for_postgres(database_url: &str) -> Result<PostgresStor
 )]
 pub(super) async fn wait_for_s3(store: &impl lash::persistence::AttachmentStore) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
-    let meta = lash_core::AttachmentCreateMeta::new(
-        lash_core::MediaType::parse("image/png").expect("literal image/png is a valid MediaType"),
-        Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+    let meta = lash::attachments::AttachmentCreateMeta::new(
+        lash::attachments::MediaType::parse("image/png")
+            .expect("literal image/png is a valid MediaType"),
+        Some(lash::attachments::AttachmentTypeMetadata::image(
+            Some(1),
+            Some(1),
+        )),
         Some("runner-health.png".to_string()),
     );
     let mut last_error = None;
@@ -666,6 +670,7 @@ pub(super) async fn submit_signal_workflow(
             signal_id: signal_id.to_string(),
             payload,
         }),
+        queued_run: None,
     };
     submit_workflow(ingress_url, &request).await?;
     let response = wait_for_terminal_result(pool, workflow_id).await?;
@@ -733,8 +738,8 @@ pub(super) async fn assert_no_problem_lash_restate_invocations(admin_url: &str) 
                AND COALESCE(target_service_key, '') <> 'e2e-turn-break-glass' \
                AND (status IN ({}, {}) OR completion_result = 'failure' OR completion_failure IS NOT NULL) \
              ORDER BY modified_at DESC",
-            lash_restate::RestateInvocationLifecycle::BackingOff.sql_literal(),
-            lash_restate::RestateInvocationLifecycle::Failed.sql_literal(),
+            lash::restate::RestateInvocationLifecycle::BackingOff.sql_literal(),
+            lash::restate::RestateInvocationLifecycle::Failed.sql_literal(),
         ))
         .await
         .context("query Restate problem Lash invocations")?;

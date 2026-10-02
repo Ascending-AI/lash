@@ -395,12 +395,15 @@ mod tests {
 
     #[tokio::test]
     async fn admitted_load_inputs_survive_an_unfinished_cell() {
-        use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmResponse, LlmRole};
+        use lash::{
+            direct::LlmOutputPart, provider::LlmContentBlock, provider::LlmResponse,
+            provider::LlmRole,
+        };
         use std::sync::Mutex;
 
         let seen = Arc::new(Mutex::new(Vec::new()));
         let calls = Arc::clone(&seen);
-        let provider = lash_core::testing::TestProvider::builder()
+        let provider = lash::testing::TestProvider::builder()
             .kind("load-admission")
             .complete(move |request| {
                 let messages: Vec<_> = request
@@ -460,13 +463,13 @@ mod tests {
             .await
             .unwrap();
         let backend = restate.lash_backend();
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+        let factory = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash_protocol_rlm::TypescriptDialect),
+            Arc::new(lash::rlm::TypescriptDialect),
             &backend,
         );
         let core = lash::LashCore::rlm_builder(backend, factory)
@@ -479,7 +482,7 @@ mod tests {
                     .unwrap(),
             )
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .build(lash_core::LeaseOwnerIdentity::opaque(
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "load-admission",
                 "law",
             ))

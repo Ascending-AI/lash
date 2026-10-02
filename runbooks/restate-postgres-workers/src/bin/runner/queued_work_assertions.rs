@@ -1,8 +1,8 @@
 use super::*;
-use lash_core::runtime::{
+use lash::persistence::{
     QueuedWorkEnqueueOutcome, QueuedWorkPayload, process_wake_batch_draft_with_delivery_policy,
 };
-use lash_core::store::{IngressTerminal, IngressTerminalCause, QueuedWorkStore as _};
+use lash::{IngressTerminal, IngressTerminalCause, persistence::QueuedWorkStore as _};
 
 pub(super) async fn assert_no_live_queued_work(storage: &PostgresStorage) -> Result<()> {
     let live = storage
@@ -32,7 +32,7 @@ struct RetainedWake {
 
 impl RetainedWake {
     fn terminal(&self) -> Result<IngressTerminal> {
-        let terminal = lash_core::store_backend_support::decode_ingress_terminal(
+        let terminal = lash::persistence::decode_ingress_terminal(
             "QueuedWorkBatch",
             self.terminal_cause.as_deref(),
             self.terminal_at_ms.map(u64::try_from).transpose()?,
@@ -75,7 +75,7 @@ pub(super) async fn assert_retained_wake_tombstones(storage: &PostgresStorage) -
         else {
             anyhow::bail!("expected retained process-wake payload: {row:?}");
         };
-        let policy = lash_core::DeliveryPolicy::from_wire_str(&row.delivery_policy)
+        let policy = lash::persistence::DeliveryPolicy::from_wire_str(&row.delivery_policy)
             .context("invalid retained wake delivery policy")?;
         let draft = process_wake_batch_draft_with_delivery_policy(*wake, policy);
         anyhow::ensure!(

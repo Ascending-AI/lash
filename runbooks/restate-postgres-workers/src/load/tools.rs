@@ -57,7 +57,7 @@ impl LoadTools {
     pub async fn attach(&self, call: ToolCall<'_>) -> ToolOutcome {
         match self.try_attach(&call).await {
             Ok(result) => {
-                ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(result))
+                ToolOutcome::from_output(lash::tools::ToolCallOutput::success_tool_value(result))
             }
             Err(error) => ToolOutcome::err_fmt(format_args!("{error:#}")),
         }
@@ -140,7 +140,7 @@ impl LoadTools {
         Ok(committed)
     }
 
-    async fn try_attach(&self, call: &ToolCall<'_>) -> Result<lash_core::ToolValue> {
+    async fn try_attach(&self, call: &ToolCall<'_>) -> Result<lash::tools::ToolValue> {
         let operation_key = call
             .args
             .get("operation")
@@ -197,22 +197,22 @@ impl LoadTools {
         let mut result = BTreeMap::new();
         result.insert(
             "id".to_owned(),
-            lash_core::ToolValue::String(reference.id.to_string()),
+            lash::tools::ToolValue::String(reference.id.to_string()),
         );
         result.insert(
             "blob_key".to_owned(),
-            lash_core::ToolValue::String(blob.blob_key.clone()),
+            lash::tools::ToolValue::String(blob.blob_key.clone()),
         );
         result.insert(
             "byte_len".to_owned(),
-            lash_core::ToolValue::Number(serde_json::Number::from(reference.byte_len)),
+            lash::tools::ToolValue::Number(serde_json::Number::from(reference.byte_len)),
         );
         // Returning the stored attachment keeps it referenced by the turn.
         result.insert(
             "attachment".to_owned(),
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
+            lash::tools::ToolValue::Attachment(lash::direct::AttachmentSource::stored(reference)),
         );
-        Ok(lash_core::ToolValue::Object(result))
+        Ok(lash::tools::ToolValue::Object(result))
     }
 }
 

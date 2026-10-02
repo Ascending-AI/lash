@@ -18,7 +18,7 @@ pub(super) async fn run_engine_promise_conformance(
         resolve_durable_wait_from_peer_worker("worker-a", &attached_key, attached_expected.clone())
             .await?;
     anyhow::ensure!(
-        matches!(attached_outcome, lash_core::ResolveOutcome::Accepted),
+        matches!(attached_outcome, lash::ResolveOutcome::Accepted),
         "engine conformance attached resolution was not accepted: {attached_outcome:?}"
     );
     let attached_response = tokio::time::timeout(Duration::from_secs(30), attached_waiter)
@@ -40,7 +40,7 @@ pub(super) async fn run_engine_promise_conformance(
     )
     .await?;
     anyhow::ensure!(
-        matches!(pre_resolved_outcome, lash_core::ResolveOutcome::Accepted),
+        matches!(pre_resolved_outcome, lash::ResolveOutcome::Accepted),
         "engine conformance pre-resolution was not accepted: {pre_resolved_outcome:?}"
     );
     let pre_resolved_response = tokio::time::timeout(
@@ -64,7 +64,7 @@ pub(super) async fn resolve_durable_wait_from_peer_worker(
     waiter_worker_id: &str,
     key: &AwaitEventKey,
     resolution: Resolution,
-) -> Result<lash_core::ResolveOutcome> {
+) -> Result<lash::ResolveOutcome> {
     let resolver_worker_id = match waiter_worker_id {
         "worker-a" => "worker-b",
         "worker-b" => "worker-a",
@@ -135,6 +135,7 @@ pub(super) async fn drive_turn_control_scenarios(
         fail_once: false,
         scenario: TurnScenario::TurnControlComplete,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &completed).await?;
     let _ = wait_for_terminal_result(storage.pool(), &completed.workflow_id).await?;
@@ -221,6 +222,7 @@ pub(super) async fn drive_turn_control_scenarios(
         fail_once: false,
         scenario: TurnScenario::TurnControlComplete,
         signal: None,
+        queued_run: None,
     };
     let race_evidence_id = "e2e-cancel-seal-race";
     let race_cancel = cancel_request(turn_address(&race).await?, race_evidence_id);
@@ -459,6 +461,7 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
         fail_once: false,
         scenario: TurnScenario::TurnControlSleep,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &request).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
@@ -524,6 +527,7 @@ pub(super) async fn drive_engine_restart_scenario(
         fail_once: false,
         scenario: TurnScenario::TurnControlSleep,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &sleeping).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
@@ -614,6 +618,7 @@ pub(super) async fn drive_engine_restart_scenario(
         fail_once: false,
         scenario: TurnScenario::TurnControlComplete,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &complete).await?;
     let complete_terminal = driver
@@ -786,6 +791,7 @@ pub(super) fn turn_control_request(workflow_id: &str, fail_once: bool) -> TurnRe
         fail_once,
         scenario: TurnScenario::TurnControlHold,
         signal: None,
+        queued_run: None,
     }
 }
 
@@ -1065,7 +1071,7 @@ pub(super) async fn lash_turn_invocation(
     request: &TurnRequest,
 ) -> Result<RestateInvocationId> {
     let address = turn_address(request).await?;
-    let key = lash_restate::turn_workflow_key(&address.session_id, &address.turn_id);
+    let key = lash::restate::turn_workflow_key(&address.session_id, &address.turn_id);
     let deadline = Instant::now() + Duration::from_secs(90);
     loop {
         if let Some(status) = admin
@@ -1094,7 +1100,7 @@ pub(super) async fn wait_for_invocation_suspended(
             .await
             .context("read Restate invocation suspension status")?;
         if last_status.as_ref().is_some_and(|status| {
-            status.status == lash_restate::RestateInvocationLifecycle::Suspended
+            status.status == lash::restate::RestateInvocationLifecycle::Suspended
         }) {
             return Ok(());
         }

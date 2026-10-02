@@ -11,7 +11,7 @@ use lash::tools::{
     ToolDefinition, ToolDefinitionBindingExt, ToolOutcome,
 };
 use lash::{CancelTarget, SessionId, TurnId, TurnInput, TurnStatus};
-use lash_postgres_store::{PostgresStorage, PostgresStoreSet};
+use lash::{postgres::PostgresStorage, postgres::PostgresStoreSet};
 use lash_restate_postgres_workers_e2e::local_restate::{LocalDeployment, LocalRestate};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
@@ -20,7 +20,7 @@ const WAIT: Duration = Duration::from_secs(120);
 
 struct Harness {
     core: lash::LashCore,
-    engine: Arc<lash_restate::RestateEngine>,
+    engine: Arc<lash::restate::RestateEngine>,
     restate: LocalRestate,
     pool: PgPool,
     repaired: Arc<AtomicBool>,
@@ -32,7 +32,7 @@ impl Harness {
         let restate = LocalRestate::from_env()?;
         let storage = PostgresStorage::connect_with(
             &std::env::var("LASH_POSTGRES_DATABASE_URL")?,
-            lash_postgres_store::PostgresStoreConfig {
+            lash::postgres::PostgresStoreConfig {
                 max_connections: 16,
                 ..Default::default()
             },
@@ -40,7 +40,7 @@ impl Harness {
         .await?;
         let pool = storage.pool().clone();
         let scratch = std::env::var("LASH_OPERATOR_ARTIFACT_DIR")?;
-        let attachments = lash_sqlite_store::SqliteStoreSet::open(
+        let attachments = lash::sqlite::SqliteStoreSet::open(
             std::path::Path::new(&scratch).join("attachment-bytes"),
         )
         .await?;
@@ -81,7 +81,7 @@ impl Harness {
                         format!("const child = async () => {{ await waitSignal(\"never\"); return \"child\"; }};\nconst handle = await processes.start({{ definition: child }});\n{}", if marker.contains("running") { "await tools.hold({ running: true });\nfinish(\"real answer\");" } else { "" })
                     };
                     Ok(lash::provider::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
+                        parts: vec![lash::direct::LlmOutputPart::Text {
                             text: format!("<typescript>\n{body}\n</typescript>"),
                             response_meta: None,
                         }],
@@ -90,13 +90,13 @@ impl Harness {
                 }
             }).build().into_handle();
         let backend = lash::Backend::new(engine.clone());
-        let protocol = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+        let protocol = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash_protocol_rlm::TypescriptDialect),
+            Arc::new(lash::rlm::TypescriptDialect),
             &backend,
         )
         .with_worker_service(lash::rlm::WorkerService::subprocess(
@@ -119,8 +119,8 @@ impl Harness {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .trace_jsonl_path(std::path::Path::new(&scratch).join("worker.trace.jsonl"))
             .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                    lash_core::lifetime::starter,
+                lash::process_controls::SessionProcessAdminPluginFactory::new(
+                    lash::process::lifetime::starter,
                 ),
             ))
             .plugin(Arc::new(FaultPlugin {
@@ -186,9 +186,9 @@ impl Harness {
         &self,
         session: &SessionId,
         run: &TurnId,
-        park: lash_core::store::ParkId,
+        park: lash::persistence::ParkId,
         verb: &str,
-    ) -> Result<lash_core::store::ControlIntent> {
+    ) -> Result<lash::persistence::ControlIntent> {
         let page = self
             .core
             .parked_work()
@@ -206,16 +206,16 @@ impl Harness {
                     return false;
                 }
                 match &intent.kind {
-                    lash_core::store::ControlIntentKind::Redrive {
+                    lash::persistence::ControlIntentKind::Redrive {
                         run: saved,
                         park: token,
                         ..
                     }
-                    | lash_core::store::ControlIntentKind::Cancel {
+                    | lash::persistence::ControlIntentKind::Cancel {
                         run: saved,
                         park: token,
                     }
-                    | lash_core::store::ControlIntentKind::Fork {
+                    | lash::persistence::ControlIntentKind::Fork {
                         run: saved,
                         park: token,
                         ..
@@ -242,15 +242,15 @@ impl Harness {
         &self,
         session: &SessionId,
         run: &TurnId,
-        park: lash_core::store::ParkId,
+        park: lash::persistence::ParkId,
         verb: &str,
-    ) -> Result<lash_core::store::ControlIntent> {
+    ) -> Result<lash::persistence::ControlIntent> {
         tokio::time::timeout(WAIT, async {
             loop {
                 let intent = self.receipt(session, run, park, verb).await?;
                 if matches!(
                     intent.state,
-                    lash_core::store::ControlIntentState::Acknowledged { .. }
+                    lash::persistence::ControlIntentState::Acknowledged { .. }
                 ) {
                     return Ok(intent);
                 }
@@ -268,7 +268,7 @@ impl Harness {
             .no_proxy()
             .timeout(WAIT)
             .build()?;
-        let key = lash_restate::turn_workflow_key(session, run).replace('\'', "''");
+        let key = lash::restate::turn_workflow_key(session, run).replace('\'', "''");
         let invocations: Value = client.post(format!("{}/query", self.restate.admin_url))
             .header("accept", "application/json")
             .json(&json!({"query":format!("SELECT id FROM sys_invocation WHERE target_service_key = '{key}' AND target_handler_name = 'run'")}))
@@ -305,7 +305,7 @@ impl Harness {
     }
 
     async fn child(&self, session: &SessionId, run: &TurnId) -> Result<(String, String)> {
-        let scope = lash_core::ScopeId::Opener(lash_core::EffectOpener::Turn {
+        let scope = lash::process::ScopeId::Opener(lash::durability::EffectOpener::Turn {
             session_id: session.clone(),
             turn_id: run.clone(),
         })
@@ -338,22 +338,22 @@ impl Harness {
                     .bind(session.as_str()).bind(run.as_str()).fetch_one(&self.pool).await?;
                 let record: String = sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
                     .bind(&child.0).fetch_one(&self.pool).await?;
-                let record: lash_core::ProcessRecord = serde_json::from_str(&record)?;
+                let record: lash::process::ProcessRecord = serde_json::from_str(&record)?;
                 let substrate_lost = matches!(&record.outcome(),
-                    Some(lash_core::ProcessAwaitOutput::Abandoned { evidence, .. })
-                    if evidence.writer == lash_core::AbandonWriter::ResumeRefused {
-                        reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+                    Some(lash::process::ProcessAwaitOutput::Abandoned { evidence, .. })
+                    if evidence.writer == lash::process::AbandonWriter::ResumeRefused {
+                        reason: lash::process::ProcessResumeRefusal::SubstrateLost,
                     });
-                let child_ended = record.status() == lash_core::ProcessStatus::Cancelled
-                    || (allow_substrate_loss && record.status() == lash_core::ProcessStatus::Abandoned && substrate_lost);
+                let child_ended = record.status() == lash::process::ProcessStatus::Cancelled
+                    || (allow_substrate_loss && record.status() == lash::process::ProcessStatus::Abandoned && substrate_lost);
                 let closes: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_parent_end_plans WHERE parent_kind = 'turn' AND parent_id = $1 AND settled_at_ms IS NOT NULL")
                     .bind(&child.1).fetch_one(&self.pool).await?;
-                let child_scope = lash_core::ScopeId::process(record.id.clone()).storage_id();
+                let child_scope = lash::process::ScopeId::process(record.id.clone()).storage_id();
                 let child_closes: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_parent_end_plans WHERE parent_kind = 'process' AND parent_id = $1 AND settled_at_ms IS NOT NULL")
                     .bind(child_scope).fetch_one(&self.pool).await?;
                 if row.get::<Option<String>, _>("terminal_kind").as_deref() == Some(kind) && child_ended && closes == 1 && child_closes == 1 {
                     let request = record.cancel_request.as_ref().context("child cancel request")?;
-                    ensure!(request.origin == lash_core::CancelOrigin::ParentEnded && request.requester == child.1,
+                    ensure!(request.origin == lash::process::CancelOrigin::ParentEnded && request.requester == child.1,
                         "child cancellation must name its closed turn scope");
                     let writes: i64 = sqlx::query_scalar("SELECT count(*) FROM operator_terminal_writes WHERE session_id = $1 AND run = $2")
                         .bind(session.as_str()).bind(run.as_str()).fetch_one(&self.pool).await?;
@@ -376,7 +376,7 @@ impl Harness {
     ) -> Result<(
         lash::LashSession,
         TurnId,
-        lash_core::store::ParkId,
+        lash::persistence::ParkId,
         (String, String),
     )> {
         let session = self.open(tag).await?;
@@ -491,11 +491,11 @@ impl SessionPlugin for FaultPlugin {
                 {
                     let has_child: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM lash_processes p JOIN lash_session_runs r ON p.lifetime_scope_id = 'turn:' || octet_length(r.session_id)::text || ':' || r.session_id || ':' || octet_length(r.run)::text || ':' || r.run WHERE r.session_id = $1 AND r.terminal_kind IS NULL)")
                         .bind(ctx.session_id.as_str()).fetch_one(&pool).await
-                        .map_err(|error| lash::plugins::PluginError::Runtime(lash_core::RuntimeError::new(lash_core::RuntimeErrorCode::StoreCommitFailed, error.to_string())))?;
+                        .map_err(|error| lash::plugins::PluginError::Runtime(lash::runtime::RuntimeError::new(lash::runtime::RuntimeErrorCode::StoreCommitFailed, error.to_string())))?;
                     if has_child {
                         return Err(lash::plugins::PluginError::Runtime(
-                            lash_core::RuntimeError::new(
-                                lash_core::RuntimeErrorCode::StoreCommitFailed,
+                            lash::runtime::RuntimeError::new(
+                                lash::runtime::RuntimeErrorCode::StoreCommitFailed,
                                 "operator runbook repairable environment-store fault",
                             ),
                         ));
@@ -703,7 +703,7 @@ async fn main() -> Result<()> {
     let repeated_fork = h
         .acknowledged_receipt(&fork_sid, &fork_run, fork_park, "fork")
         .await?;
-    let lash_core::store::ControlIntentKind::Fork {
+    let lash::persistence::ControlIntentKind::Fork {
         new_run: Some(successor),
         ..
     } = repeated_fork.kind.clone()

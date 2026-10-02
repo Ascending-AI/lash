@@ -9,13 +9,15 @@ use axum::{
 };
 use lash::ProcessId;
 use lash::durability::DurableProcessWorker;
-use lash::observe::SessionResume;
+use lash::postgres::PostgresStorage;
 use lash::restate::RestateWait;
+use lash::runtime::AwaitEventResolver as _;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
-use lash_core::AwaitEventResolver as _;
-use lash_core::{facade_support::TurnOutcome, facade_support::TurnStop};
-use lash_postgres_store::PostgresStorage;
-use lash_restate::{RestateEffectHost, RestateProcessServing, RestateRuntimeEffectController};
+use lash::{TurnOutcome, TurnStop};
+use lash::{
+    restate::RestateEffectHost, restate::RestateProcessServing,
+    restate::RestateRuntimeEffectController,
+};
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::prelude::WorkflowContext;
 use restate_sdk::serde::Json;
@@ -41,8 +43,8 @@ use lash_restate_postgres_workers_e2e::{
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, FRAME_CRASH_SESSION_ID,
     HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, crash_exit_taken,
     default_session_originator_id, e2e_tokio_thread_stack_bytes, ensure_e2e_schema, env,
-    executed_queued_runs, journaled_session, record_terminal_result, record_turn_activity,
-    record_worker_event, required_env, s3_store_from_env, turn_handler_error, turn_session_id,
+    journaled_session, record_terminal_result, record_turn_activity, record_worker_event,
+    required_env, s3_store_from_env, turn_handler_error, turn_session_id,
 };
 
 fn terminal_error(err: impl Display) -> TerminalError {
@@ -79,7 +81,7 @@ struct AppState {
     storage: PostgresStorage,
     backend: Arc<lash_restate_postgres_workers_e2e::E2eBackend>,
     restate_ingress_url: String,
-    restate_authority_id: lash_restate::RestateAuthorityId,
+    restate_authority_id: lash::restate::RestateAuthorityId,
     mock_provider_base_url: String,
     trace_dir: Option<PathBuf>,
     fail_once: bool,
@@ -94,7 +96,7 @@ impl AppState {
         let database_url = required_env("DATABASE_URL")?;
         let storage = PostgresStorage::connect_with(
             &database_url,
-            lash_postgres_store::PostgresStoreConfig {
+            lash::postgres::PostgresStoreConfig {
                 max_connections: required_env("POSTGRES_CONNECTIONS_PER_WORKER")?
                     .parse::<std::num::NonZeroU32>()
                     .context("parse worker PostgreSQL connection limit")?
@@ -107,7 +109,7 @@ impl AppState {
         ensure_e2e_schema(storage.pool()).await?;
         let restate_ingress_url = env("RESTATE_INGRESS_URL", "http://restate:8080");
         let restate_authority_id =
-            lash_restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?;
+            lash::restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?;
         let backend = lash_restate_postgres_workers_e2e::e2e_backend(
             &storage,
             Arc::new(s3_store_from_env()?),
@@ -221,11 +223,11 @@ impl AppState {
     }
 
     /// The kitchen-sink process's deferred wake. The engine executes a wake
-    /// the moment it is enqueued, under the queued run's own run, so this
-    /// awaits the engine's shift of it and reads the queued turn's result from
-    /// the session: the oldest executed queued run no other wake workflow
-    /// claimed whose turn consumed the wake. A redelivered invocation finds
-    /// the run it claimed.
+    /// the moment it is enqueued, under the queued run's own run; the runner
+    /// names the run it observed commit (`TurnRequest::queued_run`), and this
+    /// follows the run's journaled outcome through the session: each wake
+    /// workflow claims a distinct executed run, and a redelivered invocation
+    /// re-follows the run it was given.
     async fn await_driven_wake(
         &self,
         ctx: &WorkflowContext<'_>,
@@ -233,50 +235,41 @@ impl AppState {
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
         let session = journaled_session(ctx, core, DEFAULT_SESSION_ID).await?;
-        let pool = self.storage.pool();
-        let deadline = Instant::now() + Duration::from_secs(120);
-        while Instant::now() < deadline {
-            let claimed: Vec<String> = sqlx::query_scalar(
-                "SELECT detail_json::jsonb ->> 'root' FROM lash_e2e_worker_events
-                 WHERE event_type = 'wake_run' AND workflow_id <> $1",
-            )
-            .bind(&request.workflow_id)
-            .fetch_all(pool)
-            .await
-            .map_err(terminal_error)?;
-            let runs = executed_queued_runs(pool, DEFAULT_SESSION_ID)
-                .await
-                .map_err(terminal_error)?;
-            for run in runs.into_iter().filter(|run| !claimed.contains(run)) {
-                let turn = settled_output(
-                    session
-                        .run(lash::TurnId::parse(run.as_str()).map_err(terminal_error)?)
-                        .outcome_restate(ctx, RestateWait::new())
-                        .await?,
-                )?;
-                let Some(final_value) = turn.result.final_value().cloned() else {
-                    continue;
-                };
-                if final_value
-                    .get("wake_consumed")
-                    .and_then(serde_json::Value::as_bool)
-                    != Some(true)
-                {
-                    continue;
-                }
-                self.record(&request.workflow_id, "wake_run", json!({ "run": run }))
-                    .await?;
-                return self
-                    .finish_response(&request, final_value, turn.activities.len(), None, true)
-                    .await;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
+        let run = request.queued_run.as_deref().ok_or_else(|| {
+            terminal_error("DrainQueued requires `queued_run`: the executed queued run to claim")
+        })?;
+        let turn = settled_output(
+            session
+                .run(lash::TurnId::parse(run).map_err(terminal_error)?)
+                .outcome_restate(ctx, RestateWait::new())
+                .await?,
+        )?;
+        let Some(final_value) = turn.result.final_value().cloned() else {
+            return Err(terminal_error(format!(
+                "queued run `{run}` settled without a final value"
+            ))
+            .into());
+        };
+        if final_value
+            .get("wake_consumed")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        {
+            return Err(
+                terminal_error(format!("queued run `{run}` did not consume a wake")).into(),
+            );
         }
-        Err(terminal_error(format!(
-            "timed out waiting for the engine to execute the wake for `{}`",
-            request.workflow_id
-        ))
-        .into())
+        self.record(&request.workflow_id, "wake_run", json!({ "run": run }))
+            .await?;
+        self.finish_response(
+            core,
+            &request,
+            final_value,
+            turn.activities.len(),
+            None,
+            true,
+        )
+        .await
     }
 
     async fn main_turn(
@@ -286,15 +279,21 @@ impl AppState {
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
         let session_id = turn_session_id(&request.workflow_id);
+        // One handle drives the turn: the journaled durable session. The
+        // acceptance journals its replay cursor with the receipt, so a
+        // replayed invocation reconciles from exactly the position the
+        // acceptance recorded rather than minting a fresh one.
         let session = journaled_session(ctx, core, session_id).await?;
-        // The live session only reads the replay cursor the recording sink
-        // starts from; the turn goes through the journaled durable session.
-        let live = core
-            .session(session_id)
-            .open()
-            .await
-            .map_err(turn_handler_error)?;
-        let cursor = live.observe().current_observation().cursor;
+        let input = TurnInput::text(prompt_for_request(&request));
+        // The engine executes the turn under the workflow id; this handler
+        // only journals the acceptance and waits in journaled probes, so a
+        // replayed invocation neither submits twice nor runs the turn.
+        let handle = session
+            .send(input)
+            .id(lash::TurnId::parse(request.workflow_id.clone()).map_err(terminal_error)?)
+            .accept_restate(ctx)
+            .await?;
+        let cursor = handle.cursor().clone();
         let cursor_text = cursor.as_str().to_string();
 
         let sink = RecordingTurnSink::new(
@@ -304,16 +303,8 @@ impl AppState {
             "main",
             Some(cursor_text.clone()),
         );
-        let input = TurnInput::text(prompt_for_request(&request));
-        // The engine executes the turn under the workflow id; this handler
-        // only journals the acceptance and waits in journaled probes, so a
-        // replayed invocation neither submits twice nor runs the turn.
         let turn = settled_output(
-            session
-                .send(input)
-                .id(lash::TurnId::parse(request.workflow_id.clone()).map_err(terminal_error)?)
-                .accept_restate(ctx)
-                .await?
+            handle
                 .outcome_restate(ctx, RestateWait::new().sink(&sink))
                 .await?,
         )?
@@ -353,9 +344,9 @@ impl AppState {
         )
         .await?;
 
-        let replay_count = match live.observe().resume_from_cursor(&cursor) {
-            Ok(SessionResume::Replayed { events }) => events.len(),
-            Ok(SessionResume::Gap { .. }) => 0,
+        let replay_count = match session.replay_after_cursor(&cursor) {
+            Ok(lash::persistence::LiveReplayOutcome::Replayed(events)) => events.len(),
+            Ok(lash::persistence::LiveReplayOutcome::Gap(_)) => 0,
             Err(err) => {
                 self.record(
                     &request.workflow_id,
@@ -374,6 +365,7 @@ impl AppState {
         .await?;
 
         self.finish_response(
+            core,
             &request,
             final_value,
             sink.count().await,
@@ -463,6 +455,7 @@ impl AppState {
             .map_err(turn_handler_error)?
             .is_empty();
         self.finish_response(
+            core,
             &request,
             json!({
                 "final": EXPECTED_FRAME_SWITCH_TEXT,
@@ -528,6 +521,7 @@ impl AppState {
                 .await
                 .map_err(terminal_error)?;
         self.finish_response(
+            core,
             &request,
             json!({
                 "final": EXPECTED_FRAME_SWITCH_TEXT,
@@ -554,7 +548,7 @@ impl AppState {
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
         let scoped = controller
-            .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(
+            .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(
                 request.workflow_id.clone(),
             ))
             .map_err(terminal_error)?;
@@ -584,6 +578,7 @@ impl AppState {
             .cloned()
             .ok_or_else(|| terminal_error("trigger occurrence did not start a process"))?;
         self.finish_response(
+            core,
             &request,
             json!({
                 "final": "trigger-emitted",
@@ -664,6 +659,7 @@ impl AppState {
             .cloned()
             .ok_or_else(|| terminal_error("post-cancel turn produced no final value"))?;
         self.finish_response(
+            core,
             &request,
             json!({
                 "final": EXPECTED_FRAME_SWITCH_CANCEL_TEXT,
@@ -681,13 +677,14 @@ impl AppState {
 
     async fn finish_response(
         &self,
+        core: &lash::LashCore,
         request: &TurnRequest,
         final_value: serde_json::Value,
         streamed_event_count: usize,
         replay_cursor: Option<String>,
         queued_turn_ran: bool,
     ) -> HandlerResult<TurnResponse> {
-        let process_ids = self.load_session_process_ids().await?;
+        let process_ids = self.load_session_process_ids(core).await?;
         let attachment_id = final_value
             .get("attachment_id")
             .and_then(serde_json::Value::as_str)
@@ -761,8 +758,8 @@ impl AppState {
             .signal
             .as_ref()
             .ok_or_else(|| terminal_error("signal_process scenario requires a signal payload"))?;
-        let delivered = lash_core::ProcessSignal::new(
-            lash_core::ProcessSignalIdentity::new(
+        let delivered = lash::process::ProcessSignal::new(
+            lash::process::ProcessSignalIdentity::new(
                 signal.process_id.clone(),
                 signal.signal_name.clone(),
                 signal.signal_id.clone(),
@@ -771,7 +768,7 @@ impl AppState {
             signal.payload.clone(),
         );
         let scoped = controller
-            .scoped_effect_controller(lash_core::AdmittedScope::runtime_operation(format!(
+            .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
                 "e2e:{}:{}",
                 request.workflow_id, signal.signal_id
             )))
@@ -782,6 +779,7 @@ impl AppState {
             .await
             .map_err(terminal_error)?;
         self.finish_response(
+            core,
             request,
             json!({
                 "signalled": true,
@@ -797,20 +795,29 @@ impl AppState {
         .await
     }
 
-    async fn load_session_process_ids(&self) -> HandlerResult<Vec<ProcessId>> {
-        Ok(sqlx::query_scalar::<_, String>(
-            "SELECT process_id
-             FROM lash_processes
-             WHERE originator_id = $1
-             ORDER BY created_at_ms, process_id",
-        )
-        .bind(default_session_originator_id())
-        .fetch_all(self.storage.pool())
-        .await
-        .map_err(terminal_error)?
-        .into_iter()
-        .map(|process_id| ProcessId::parse(&process_id).map_err(terminal_error))
-        .collect::<Result<_, _>>()?)
+    /// The processes the default session originated, oldest first: the
+    /// provenance lens the response's `process_ids` evidence reports.
+    async fn load_session_process_ids(
+        &self,
+        core: &lash::LashCore,
+    ) -> HandlerResult<Vec<ProcessId>> {
+        let mut processes = core
+            .processes()
+            .list_originated_by(
+                &lash::process::SessionScope {
+                    session_id: lash::SessionId::parse(default_session_originator_id())
+                        .map_err(terminal_error)?,
+                    agent_frame_id: None,
+                },
+                &lash::process::ProcessListFilter::default(),
+            )
+            .await
+            .map_err(terminal_error)?;
+        processes.sort_by_key(|process| (process.created_at_ms, process.process_id.clone()));
+        Ok(processes
+            .into_iter()
+            .map(|process| process.process_id)
+            .collect())
     }
 
     async fn record(
@@ -885,14 +892,19 @@ async fn topology_attachment(
             lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
         )
         .await?;
-        let committed: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
-             WHERE referrer_kind = 'session' AND referrer_id = $1 AND attachment_id = $2)",
-        )
-        .bind(&session_id)
-        .bind(&attachment_id)
-        .fetch_one(state.storage.pool())
-        .await?;
+        let committed = core
+            .backend()
+            .attachment_referrers()
+            .attachment_referrers(&id)
+            .await?
+            .iter()
+            .any(|referrer| {
+                matches!(
+                    referrer,
+                    lash::persistence::ArtifactReferrer::Session(session)
+                        if session.as_str() == session_id
+                )
+            });
         anyhow::ensure!(
             committed,
             "attachment is not held by its committing session"
@@ -933,14 +945,20 @@ async fn load_attachment(
             lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
         )
         .await?;
-        let committed: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM lash_attachment_referrer_edges
-             WHERE referrer_kind = 'session' AND referrer_id = $1 AND attachment_id = $2)",
-        )
-        .bind(&session_id)
-        .bind(&attachment_id)
-        .fetch_one(state.storage.pool())
-        .await?;
+        let committed = state
+            .backend
+            .store_set()
+            .attachment_referrers()
+            .attachment_referrers(&id)
+            .await?
+            .iter()
+            .any(|referrer| {
+                matches!(
+                    referrer,
+                    lash::persistence::ArtifactReferrer::Session(session)
+                        if session.as_str() == session_id
+                )
+            });
         record_load_event(
             &state.witness,
             LoadEvent {
@@ -1246,7 +1264,7 @@ impl E2eTurnWorkflow for E2eTurnWorkflowImpl {
 }
 
 fn main() -> Result<()> {
-    lash_core::panic_containment::set_loud(true);
+    lash::runtime::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -1323,7 +1341,7 @@ async fn async_main() -> Result<()> {
     let process_worker = DurableProcessWorker::new(core.durable_process_worker_config()?)?;
     let processes = RestateProcessServing::new(process_worker).with_segment_effect_budget_selector(
         |registration| match &*registration.input {
-            lash_core::ProcessInput::Engine { payload, .. }
+            lash::process::ProcessInput::Engine { payload, .. }
                 if payload
                     .pointer("/args/force_segmentation")
                     .and_then(serde_json::Value::as_bool)

@@ -47,15 +47,15 @@ mod tests {
             ));
         }
         let prose = SessionNodePayload::Event {
-            event: SessionHistoryRecord::Conversation(lash_core::facade_support::ConversationRecord {
+            event: SessionHistoryRecord::Conversation(lash::persistence::ConversationRecord {
                 id: "marker".to_string(),
-                role: lash_core::MessageRole::System,
-                parts: std::sync::Arc::new(vec![lash_core::Part::text(
+                role: lash::messages::MessageRole::System,
+                parts: std::sync::Arc::new(vec![lash::messages::Part::text(
                     "marker-part".to_string(),
                     "Standard-compaction context-overflow recovery marker (pending):\n{\"kind\":\"pending\"}".to_string(),
                     None,
                 )]),
-                origin: Some(lash_core::MessageOrigin::Plugin {
+                origin: Some(lash::messages::MessageOrigin::Plugin {
                     plugin_id: "standard_compaction".to_string(),
                     transient: false,
                 }),

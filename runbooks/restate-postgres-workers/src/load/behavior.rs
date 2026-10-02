@@ -80,14 +80,14 @@ pub(crate) fn promotion(
     process_id: String,
     session_origin: bool,
     engine: String,
-    record: &lash_core::ProcessIdentity,
+    record: &lash::process::ProcessIdentity,
     input: &lash::process::LashlangProcessInput,
-    artifact: &lashlang::ModuleArtifact,
+    artifact: &lash::rlm::lang::ModuleArtifact,
 ) -> PromotionEvidence {
     let artifact_definition = artifact
         .process_name_for_ref(&input.process_ref)
         .and_then(|_| {
-            lashlang::ProcessDefinitionIdentity::new(
+            lash::rlm::lang::ProcessDefinitionIdentity::new(
                 artifact.module_ref().clone(),
                 artifact.host_requirements_ref().clone(),
                 input.process_ref.clone(),
@@ -111,60 +111,52 @@ pub(crate) fn promotion(
     }
 }
 
-fn seed(text: &str) -> Vec<lash_core::SessionAppendNode> {
-    vec![lash_core::SessionAppendNode::message(
-        lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, text),
+fn seed(text: &str) -> Vec<lash::plugins::SessionAppendNode> {
+    vec![lash::plugins::SessionAppendNode::message(
+        lash::plugins::PluginMessage::text(lash::messages::MessageRole::Assistant, text),
     )]
 }
 
 /// Host policy for the smoke only. Core owns both durable frame writes.
 pub struct LoadCompaction;
 #[async_trait::async_trait]
-impl lash_core::facade_support::ContextCompactor for LoadCompaction {
+impl lash::plugins::ContextCompactor for LoadCompaction {
     fn id(&self) -> &'static str {
         "load.compaction"
     }
     async fn compact(
         &self,
-        ctx: &lash_core::facade_support::CompactionContext<'_>,
-    ) -> Result<
-        Option<lash_core::facade_support::ContextCompaction>,
-        lash_core::facade_support::ContextError,
-    > {
+        ctx: &lash::plugins::CompactionContext<'_>,
+    ) -> Result<Option<lash::plugins::ContextCompaction>, lash::plugins::ContextError> {
         Ok(ctx
             .session_id
             .as_str()
             .ends_with("-behaviors")
-            .then(|| lash_core::facade_support::ContextCompaction::new(seed(ADMIN_SUMMARY))))
+            .then(|| lash::plugins::ContextCompaction::new(seed(ADMIN_SUMMARY))))
     }
 }
 #[async_trait::async_trait]
-impl lash_core::facade_support::ContextPressureHook for LoadCompaction {
+impl lash::plugins::ContextPressureHook for LoadCompaction {
     fn id(&self) -> &'static str {
         "load.pressure"
     }
     async fn decide(
         &self,
-        ctx: &lash_core::facade_support::ContextPressureContext<'_>,
-    ) -> Result<
-        lash_core::facade_support::ContextPressureDecision,
-        lash_core::facade_support::ContextError,
-    > {
+        ctx: &lash::plugins::ContextPressureContext<'_>,
+    ) -> Result<lash::plugins::ContextPressureDecision, lash::plugins::ContextError> {
         if ctx.session_id.as_str().ends_with("-behaviors")
             && ctx
                 .prompt_usage
                 .as_ref()
                 .is_some_and(|usage| usage.input_tokens >= 100_000)
         {
-            Ok(
-                lash_core::facade_support::ContextPressureDecision::OpenFrame {
-                    records: vec![],
-                    task: "load context pressure".into(),
-                    seed: seed(PRESSURE_SUMMARY),
-                },
-            )
+            Ok(lash::plugins::ContextPressureDecision::OpenFrame {
+                records: vec![],
+                task: "load context pressure".into(),
+                seed: seed(PRESSURE_SUMMARY),
+            })
         } else {
-            Ok(lash_core::facade_support::ContextPressureDecision::Continue)
+            Ok(lash::plugins::ContextPressureDecision::Continue)
         }
     }
 }
@@ -174,9 +166,9 @@ impl lash_core::facade_support::ContextPressureHook for LoadCompaction {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub(crate) fn register(
-    reg: &mut lash_core::plugin::PluginRegistrar,
-) -> Result<(), lash_core::PluginError> {
-    reg.turn().after(Arc::new(|ctx:lash_core::plugin::TurnResultHookContext| Box::pin(async move {
+    reg: &mut lash::plugins::PluginRegistrar,
+) -> Result<(), lash::plugins::PluginError> {
+    reg.turn().after(Arc::new(|ctx:lash::plugins::TurnResultHookContext| Box::pin(async move {
         if !ctx.turn.errors.is_empty() {
             tracing::error!(session_id=%ctx.session_id, errors=?ctx.turn.errors, outcome=?ctx.turn.outcome,"load turn failed");
         }

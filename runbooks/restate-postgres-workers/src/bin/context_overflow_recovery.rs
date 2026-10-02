@@ -284,7 +284,7 @@ async fn provider_error_control(run_id: &str) -> Result<Value> {
     }))
 }
 
-fn stop_tag(outcome: &lash_core::facade_support::TurnOutcome) -> Result<Option<String>> {
+fn stop_tag(outcome: &lash::TurnOutcome) -> Result<Option<String>> {
     let value = serde_json::to_value(outcome).context("serialize a turn outcome")?;
     Ok(value.get("stopped").and_then(stop_name))
 }
@@ -336,17 +336,17 @@ impl Harness {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool_bytes = Arc::new(AtomicUsize::new(0));
 
-        let sqlite = lash_sqlite_store::SqliteStoreSet::open(scratch.path().join("sessions"))
+        let sqlite = lash::sqlite::SqliteStoreSet::open(scratch.path().join("sessions"))
             .await
             .context("open the SQLite store set")?;
         let (store, stores): (_, Arc<dyn lash::StoreSet>) =
             match std::env::var("LASH_CONTEXT_OVERFLOW_STORE").as_deref() {
                 Err(std::env::VarError::NotPresent) | Ok("sqlite") => ("sqlite", Arc::new(sqlite)),
                 Ok("postgres") => {
-                    let storage = lash_postgres_store::PostgresStorage::connect_with(
+                    let storage = lash::postgres::PostgresStorage::connect_with(
                         &std::env::var("LASH_POSTGRES_DATABASE_URL")
                             .context("PostgreSQL recovery requires LASH_POSTGRES_DATABASE_URL")?,
-                        lash_postgres_store::PostgresStoreConfig {
+                        lash::postgres::PostgresStoreConfig {
                             max_connections: 16,
                             ..Default::default()
                         },
@@ -355,7 +355,7 @@ impl Harness {
                     .context("open the PostgreSQL store set")?;
                     (
                         "postgres",
-                        Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                        Arc::new(lash::postgres::PostgresStoreSet::new(
                             &storage,
                             sqlite.attachment_store(),
                         )),
@@ -367,15 +367,13 @@ impl Harness {
         let backend = lash::Backend::new(engine.clone());
         let builder = match protocol {
             Protocol::Rlm => {
-                let rlm = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                    lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash_protocol_rlm::RlmChannel::Cell)
-                        .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
-                            1_000_000,
-                        ))
-                        .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                let rlm = lash::rlm::RlmProtocolPluginFactory::new(
+                    lash::rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash::rlm::RlmChannel::Cell)
+                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),
-                    std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+                    std::sync::Arc::new(lash::rlm::TypescriptDialect),
                     &backend,
                 )
                 .with_worker_service(lash::rlm::WorkerService::subprocess(
@@ -532,7 +530,7 @@ fn scripted_provider(
                     // Turn 1, call 2: the request now carries the oversized
                     // result and the model refuses it as too large.
                     (Script::Overflow, 1) => terminal_response(
-                        lash_core::LlmTerminalReason::ContextOverflow,
+                        lash::direct::LlmTerminalReason::ContextOverflow,
                         "prompt is too long: 512000 tokens > 200000 maximum",
                     ),
                     // The classifier arm: no structured terminal reason at all,
@@ -547,7 +545,7 @@ fn scripted_provider(
                     // The control arm: the same shape of failure, classified
                     // as an ordinary provider error.
                     (Script::ProviderError, 1) => terminal_response(
-                        lash_core::LlmTerminalReason::ProviderError,
+                        lash::direct::LlmTerminalReason::ProviderError,
                         "upstream returned 500",
                     ),
                     // Turn 2: the session continues.
@@ -566,7 +564,7 @@ fn scripted_provider(
 
 fn tool_call_response() -> lash::provider::LlmResponse {
     lash::provider::LlmResponse {
-        parts: vec![lash_core::LlmOutputPart::ToolCall {
+        parts: vec![lash::direct::LlmOutputPart::ToolCall {
             call_id: "oversized-report-call".to_string(),
             tool_name: OVERSIZED_TOOL.to_string(),
             input_json: "{}".to_string(),
@@ -579,7 +577,7 @@ fn tool_call_response() -> lash::provider::LlmResponse {
 
 fn text_response(text: String) -> lash::provider::LlmResponse {
     lash::provider::LlmResponse {
-        parts: vec![lash_core::LlmOutputPart::Text {
+        parts: vec![lash::direct::LlmOutputPart::Text {
             text,
             response_meta: None,
         }],
@@ -589,7 +587,7 @@ fn text_response(text: String) -> lash::provider::LlmResponse {
 }
 
 fn terminal_response(
-    reason: lash_core::LlmTerminalReason,
+    reason: lash::direct::LlmTerminalReason,
     diagnostic: &str,
 ) -> lash::provider::LlmResponse {
     lash::provider::LlmResponse {
@@ -651,30 +649,28 @@ impl SessionPlugin for OverflowPlugin {
 struct ReportCompactor;
 
 #[async_trait]
-impl lash_core::facade_support::ContextCompactor for ReportCompactor {
+impl lash::plugins::ContextCompactor for ReportCompactor {
     fn id(&self) -> &'static str {
         "context_overflow_recovery.compactor"
     }
 
     async fn compact(
         &self,
-        _ctx: &lash_core::facade_support::CompactionContext<'_>,
-    ) -> std::result::Result<
-        Option<lash_core::facade_support::ContextCompaction>,
-        lash_core::facade_support::ContextError,
-    > {
-        Ok(Some(lash_core::facade_support::ContextCompaction::new(
-            vec![lash_core::SessionAppendNode::message(
-                lash_core::PluginMessage::text(
-                    lash_core::MessageRole::Assistant,
+        _ctx: &lash::plugins::CompactionContext<'_>,
+    ) -> std::result::Result<Option<lash::plugins::ContextCompaction>, lash::plugins::ContextError>
+    {
+        Ok(Some(lash::plugins::ContextCompaction::new(vec![
+            lash::plugins::SessionAppendNode::message(
+                lash::plugins::PluginMessage::text(
+                    lash::messages::MessageRole::Assistant,
                     "Compaction summary: the oversized report was requested and its body dropped.",
                 )
-                .with_origin(lash_core::MessageOrigin::Plugin {
+                .with_origin(lash::messages::MessageOrigin::Plugin {
                     plugin_id: "context_overflow_recovery".to_string(),
                     transient: false,
                 }),
-            )],
-        )))
+            ),
+        ])))
     }
 }
 

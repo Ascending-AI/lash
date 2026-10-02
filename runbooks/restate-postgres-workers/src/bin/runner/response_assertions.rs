@@ -469,7 +469,7 @@ pub(super) async fn wait_for_durable_wait_suspended(
     admin_url: &str,
     key: &AwaitEventKey,
 ) -> Result<()> {
-    let workflow_key = lash_restate::RestateDurableWaitAddress::for_key(key).workflow_key;
+    let workflow_key = lash::restate::RestateDurableWaitAddress::for_key(key).workflow_key;
     let admin = RestateAdminClient::new(admin_url.to_string());
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut last_status = None;
@@ -483,7 +483,7 @@ pub(super) async fn wait_for_durable_wait_suspended(
             .await
             .context("query durable wait invocation before peer resolution")?;
         if last_status.as_ref().is_some_and(|status| {
-            status.status == lash_restate::RestateInvocationLifecycle::Suspended
+            status.status == lash::restate::RestateInvocationLifecycle::Suspended
         }) {
             return Ok(());
         }
@@ -498,7 +498,7 @@ pub(super) async fn wait_for_durable_wait_attached(
     admin_url: &str,
     key: &AwaitEventKey,
 ) -> Result<()> {
-    let workflow_key = lash_restate::RestateDurableWaitAddress::for_key(key).workflow_key;
+    let workflow_key = lash::restate::RestateDurableWaitAddress::for_key(key).workflow_key;
     let admin = RestateAdminClient::new(admin_url.to_string());
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut last_status = None;

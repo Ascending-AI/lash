@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 pub struct LocalRestate {
     pub ingress_url: String,
     pub admin_url: String,
-    pub authority: lash_restate::RestateAuthorityId,
+    pub authority: lash::restate::RestateAuthorityId,
 }
 
 impl LocalRestate {
@@ -32,14 +32,14 @@ impl LocalRestate {
         Ok(Self {
             ingress_url: read("RESTATE_INGRESS_URL")?,
             admin_url: read("RESTATE_ADMIN_URL")?,
-            authority: lash_restate::RestateAuthorityId::new(read("RESTATE_AUTHORITY_ID")?)
+            authority: lash::restate::RestateAuthorityId::new(read("RESTATE_AUTHORITY_ID")?)
                 .map_err(|error| anyhow::anyhow!("RESTATE_AUTHORITY_ID: {error}"))?,
         })
     }
 
     /// The engine over `stores`, reaching this server.
-    pub fn engine(&self, stores: Arc<dyn lash::StoreSet>) -> Arc<lash_restate::RestateEngine> {
-        Arc::new(lash_restate::RestateEngine::new(
+    pub fn engine(&self, stores: Arc<dyn lash::StoreSet>) -> Arc<lash::restate::RestateEngine> {
+        Arc::new(lash::restate::RestateEngine::new(
             stores,
             lash::restate::RestateConfig::new(
                 self.ingress_url.clone(),
@@ -53,7 +53,7 @@ impl LocalRestate {
     /// server. The deployment serves until the returned handle drops.
     pub async fn serve(
         &self,
-        engine: &lash_restate::RestateEngine,
+        engine: &lash::restate::RestateEngine,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {
         self.serve_at(
@@ -69,7 +69,7 @@ impl LocalRestate {
     /// names. The deployment serves until the returned handle drops.
     pub async fn serve_at(
         &self,
-        engine: &lash_restate::RestateEngine,
+        engine: &lash::restate::RestateEngine,
         addr: std::net::SocketAddr,
         endpoint: restate_sdk::endpoint::Endpoint,
     ) -> Result<LocalDeployment> {

@@ -8,7 +8,7 @@ use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
 };
-use lash_core::testing::wait_until;
+use lash::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{RestateTestBackend, ServerConfig};
 use restate_sdk::context::{ContextPromises, SharedWorkflowContext};
@@ -39,14 +39,14 @@ struct Evidence {
 
 struct Services {
     core: lash::LashCore,
-    authority: lash_restate::RestateAuthorityId,
+    authority: lash::restate::RestateAuthorityId,
 }
 
 /// Bind the production load dispatcher beside the evidence probe. The
 /// witness pool is lazy: deleting a session never queries load metrics.
 struct DeleteProbe {
     services: Arc<OnceLock<Services>>,
-    connection: lash_restate::RestateConnection,
+    connection: lash::restate::RestateConnection,
 }
 
 impl E2eLoadWorkflow for DeleteProbe {
@@ -75,7 +75,7 @@ impl E2eLoadWorkflow for DeleteProbe {
         assert!(
             worker
                 .administration
-                .set(lash_restate::RestateSessionAdministration::new(
+                .set(lash::restate::RestateSessionAdministration::new(
                     services.core.session_administration().await,
                     self.connection.clone(),
                     services.authority.clone(),
@@ -209,15 +209,15 @@ impl SessionPlugin for LoadSurface {
 }
 
 fn services(
-    backend: lash_core::Backend,
-    authority: lash_restate::RestateAuthorityId,
+    backend: lash::Backend,
+    authority: lash::restate::RestateAuthorityId,
     run: &str,
 ) -> Services {
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
         register_script(run),
         edit_script(run),
     ])));
-    let provider = lash_core::testing::TestProvider::builder()
+    let provider = lash::testing::TestProvider::builder()
         .kind("load-behavior-replay")
         .complete(move |_| {
             let responses = Arc::clone(&responses);
@@ -227,8 +227,8 @@ fn services(
                     .await
                     .pop_front()
                     .expect("a queued program");
-                Ok::<_, lash_core::llm::transport::LlmTransportError>(lash_core::LlmResponse {
-                    parts: vec![lash_core::LlmOutputPart::Text {
+                Ok::<_, lash::provider::LlmTransportError>(lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::Text {
                         text,
                         response_meta: None,
                     }],
@@ -238,13 +238,13 @@ fn services(
         })
         .build()
         .into_handle();
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash_protocol_rlm::TypescriptDialect),
+        Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
@@ -252,7 +252,7 @@ fn services(
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .serve_test_llm_profile(provider, mock_llm_profile_metadata())
         .plugin(Arc::new(LoadSurfaceFactory))
-        .build(lash_core::LeaseOwnerIdentity::opaque(
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "load-behavior-replay",
             "law",
         ))
@@ -263,7 +263,7 @@ fn services(
 /// One turn of `session` that must finish with `revision`.
 async fn turn(core: &lash::LashCore, session: &str, phase: &str, revision: u64) {
     let output = core
-        .session(lash_core::SessionId::fixture(session.to_string()))
+        .session(lash::SessionId::fixture(session.to_string()))
         .open()
         .await
         .unwrap()
@@ -294,7 +294,7 @@ enum Advance {
 }
 
 async fn prune_promotion(core: &lash::LashCore, process: &str) {
-    let id = process.parse::<lash_core::ProcessId>().unwrap();
+    let id = process.parse::<lash::ProcessId>().unwrap();
     // The production retention pass: it releases the bound delivery's pin,
     // then prunes the retired process.
     let pruned = core
@@ -302,7 +302,7 @@ async fn prune_promotion(core: &lash::LashCore, process: &str) {
         .prune(
             u64::MAX / 2,
             None,
-            lash_core::ProjectionWatermark::NoProjector,
+            lash::process::ProjectionWatermark::NoProjector,
         )
         .await
         .unwrap();
@@ -310,7 +310,7 @@ async fn prune_promotion(core: &lash::LashCore, process: &str) {
     assert!(
         matches!(
             core.process_registry().get_process(&id).await,
-            Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
+            Err(lash::plugins::PluginError::ProcessNoLongerRetained { .. })
         ),
         "the promotion process is pruned"
     );
@@ -318,7 +318,7 @@ async fn prune_promotion(core: &lash::LashCore, process: &str) {
 
 async fn advance(
     core: &lash::LashCore,
-    ingress: &lash_restate::RestateIngressClient,
+    ingress: &lash::restate::RestateIngressClient,
     run: &str,
     advance: Advance,
     recorded: &Evidence,
@@ -349,7 +349,7 @@ async fn advance(
             assert_eq!(report.deletion, DeletionOutcome::Deleted, "{report:?}");
             assert!(report.reopen_refusal.is_some(), "{report:?}");
             assert!(
-                core.session(lash_core::SessionId::fixture(session.clone()))
+                core.session(lash::SessionId::fixture(session.clone()))
                     .open()
                     .await
                     .is_err()
@@ -357,8 +357,8 @@ async fn advance(
             assert!(
                 core.backend()
                     .trigger_store()
-                    .list_subscriptions(lash_core::TriggerSubscriptionFilter::for_session(
-                        lash_core::SessionId::fixture(session)
+                    .list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session(
+                        lash::SessionId::fixture(session)
                     ))
                     .await
                     .unwrap()
@@ -384,8 +384,8 @@ struct Starts {
 async fn starts(core: &lash::LashCore) -> Starts {
     let processes = core
         .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
+        .list_processes(&lash::process::ProcessListFilter {
+            status: lash::process::ProcessStatusFilter::Any,
             ..Default::default()
         })
         .await
@@ -395,7 +395,7 @@ async fn starts(core: &lash::LashCore) -> Starts {
         .collect();
     let store = core.backend().trigger_store();
     let occurrences = store
-        .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+        .list_occurrences(lash::triggers::TriggerOccurrenceFilter::default())
         .await
         .unwrap()
         .into_iter()
@@ -483,11 +483,7 @@ fn assert_original(storage: &str, case: Advance, passes: &[Evidence]) -> Evidenc
     original
 }
 
-async fn witness(
-    double: RestateTestBackend<dyn lash_core::StoreSet>,
-    storage: &str,
-    case: Advance,
-) {
+async fn witness(double: RestateTestBackend<dyn lash::StoreSet>, storage: &str, case: Advance) {
     let run = format!("replay-{case:?}").to_lowercase();
     let cell = Arc::new(OnceLock::from(services(
         double.lash_backend(),
@@ -527,7 +523,7 @@ async fn witness(
             .unwrap(),
     );
     let session = session_of(&run);
-    core.session(lash_core::SessionId::fixture(session.clone()))
+    core.session(lash::SessionId::fixture(session.clone()))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             mock_llm_profile_metadata().wire_model,
             lash::TurnBudget::Unbounded,
@@ -664,10 +660,10 @@ async fn law(storage: Storage, replay: bool, case: Advance) {
                 Default::default(),
                 |clock| async {
                     Ok(Arc::new(
-                        lash_sqlite_store::SqliteStoreSet::open_with_clock(root.path(), clock)
+                        lash::sqlite::SqliteStoreSet::open_with_clock(root.path(), clock)
                             .await
                             .unwrap(),
-                    ) as Arc<dyn lash_core::StoreSet>)
+                    ) as Arc<dyn lash::StoreSet>)
                 },
             )
             .await
@@ -677,8 +673,8 @@ async fn law(storage: Storage, replay: bool, case: Advance) {
         Storage::Postgres => {
             let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
                 .expect("the PostgreSQL gate supplies its URL");
-            let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+            let database = lash::postgres::testing::IsolatedDatabase::create(&url).await;
+            let storage = lash::postgres::PostgresStorage::connect(database.url())
                 .await
                 .unwrap();
             let double = lash_restate_test::backend_with_store_set(
@@ -686,12 +682,12 @@ async fn law(storage: Storage, replay: bool, case: Advance) {
                 config,
                 Default::default(),
                 |clock| async {
-                    Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                    Ok(Arc::new(lash::postgres::PostgresStoreSet::with_clock(
                         &storage,
                         Arc::new(lash::persistence::FileAttachmentStore::new(root.path())),
                         Default::default(),
                         clock,
-                    )) as Arc<dyn lash_core::StoreSet>)
+                    )) as Arc<dyn lash::StoreSet>)
                 },
             )
             .await
@@ -778,7 +774,7 @@ async fn live_witness(case: Advance) {
                     .bind(
                         DeleteProbe {
                             services: cell,
-                            connection: lash_restate::RestateConnection::new(env(
+                            connection: lash::restate::RestateConnection::new(env(
                                 "RESTATE_INGRESS_URL",
                             )),
                         }
@@ -792,7 +788,7 @@ async fn live_witness(case: Advance) {
     assert!(
         cell.set(services(
             backend.lash_backend(),
-            lash_restate::RestateAuthorityId::new(format!("lash-live-{run}")).unwrap(),
+            lash::restate::RestateAuthorityId::new(format!("lash-live-{run}")).unwrap(),
             &run,
         ))
         .is_ok()
@@ -803,7 +799,7 @@ async fn live_witness(case: Advance) {
             .unwrap(),
     );
     let session = session_of(&run);
-    core.session(lash_core::SessionId::fixture(session.clone()))
+    core.session(lash::SessionId::fixture(session.clone()))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             mock_llm_profile_metadata().wire_model,
             lash::TurnBudget::Unbounded,

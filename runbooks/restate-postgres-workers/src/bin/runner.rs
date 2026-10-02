@@ -2,19 +2,19 @@ use anyhow::{Context, Result};
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
+use lash::postgres::PostgresStorage;
+use lash::runtime::AwaitEventResolver as _;
 use lash::sync::MutexExt;
-use lash_core::AwaitEventResolver as _;
-use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, SessionHistoryStore,
-    TurnCancelUndeliveredInputPolicy, TurnInputStore, facade_support::TurnAddress,
-    facade_support::TurnCancelOutcome, facade_support::TurnCancelRequest,
-    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
-    facade_support::TurnWorkDriver,
+use lash::{
+    AwaitEventKey, AwaitEventWaitIdentity, Resolution, TurnAddress, TurnCancelOutcome,
+    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnOutcome, TurnStop, TurnTerminal,
+    TurnWorkDriver, persistence::SessionHistoryStore, persistence::TurnInputStore,
+    runtime::ExecutionScope,
 };
-use lash_postgres_store::PostgresStorage;
-use lash_restate::{
-    RestateAdminClient, RestateAuthorityId, RestateConnection, RestateEffectHost,
-    RestateIngressClient, RestateInvocationId, RestateInvocationStatus,
+use lash::{
+    restate::RestateAdminClient, restate::RestateAuthorityId, restate::RestateConnection,
+    restate::RestateEffectHost, restate::RestateIngressClient, restate::RestateInvocationId,
+    restate::RestateInvocationStatus,
 };
 use lash_restate_postgres_workers_e2e::{
     ATTACHMENT_MIME, BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
@@ -367,7 +367,7 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    lash_core::panic_containment::set_loud(true);
+    lash::runtime::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

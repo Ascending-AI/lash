@@ -310,6 +310,30 @@ impl DurableSession {
             .collect())
     }
 
+    /// The session's live replay after `cursor`, as this core's Live Replay
+    /// store answers it: the in-window counterpart of
+    /// [`turn_input_applications`](Self::turn_input_applications), which is
+    /// the reconciliation read for a cursor that fell outside the window.
+    ///
+    /// This needs no live session: it asks the store the same question an
+    /// `ObservableSession`'s `resume_from_cursor` asks. A session another
+    /// process runs replays only what this process's store buffered — with
+    /// the default in-memory store, cross-process visibility is exactly what
+    /// the module documentation describes.
+    pub fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> Result<lash_core::runtime::LiveReplayOutcome> {
+        self.live_replay_store
+            .replay_after_cursor(cursor)
+            .map_err(|error| {
+                EmbedError::Runtime(lash_core::RuntimeError::new(
+                    crate::support::RuntimeErrorCode::LiveReplay,
+                    error.to_string(),
+                ))
+            })
+    }
+
     /// Return all pending durable queued-work batches for this session.
     ///
     /// This is an admin/introspection view for non-user queued work such as

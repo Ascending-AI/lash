@@ -17,16 +17,18 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: false,
         scenario: TurnScenario::KitchenSink,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &main_request).await?;
     let main_response = wait_for_terminal_result(storage.pool(), &main_request.workflow_id).await?;
     assert_kitchen_sink_response(&main_response, true)?;
-    wait_for_driven_wakes(storage.pool(), 1).await?;
+    let main_driven = wait_for_driven_wakes(storage.pool(), 1).await?;
     let main_wake_request = TurnRequest {
         workflow_id: "e2e-main-wake".to_string(),
         fail_once: false,
         scenario: TurnScenario::DrainQueued,
         signal: None,
+        queued_run: main_driven.first().cloned(),
     };
     submit_workflow(ingress_url, &main_wake_request).await?;
     let main_wake_response =
@@ -38,6 +40,7 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: false,
         scenario: TurnScenario::TriggerSetup,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &trigger_request).await?;
     let trigger_setup_response =
@@ -51,6 +54,7 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: false,
         scenario: TurnScenario::SignalSuspend,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &signal_setup_request).await?;
     let signal_setup_response =
@@ -63,18 +67,20 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: true,
         scenario: TurnScenario::KitchenSink,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &failover_request).await?;
     let failover_response =
         wait_for_terminal_result(storage.pool(), &failover_request.workflow_id).await?;
     assert_kitchen_sink_response(&failover_response, true)?;
     wait_for_process_signal_wait(storage.pool(), &signal_process_id, "first", 1).await?;
-    wait_for_driven_wakes(storage.pool(), 2).await?;
+    let failover_driven = wait_for_driven_wakes(storage.pool(), 2).await?;
     let failover_wake_request = TurnRequest {
         workflow_id: "e2e-failover-wake".to_string(),
         fail_once: false,
         scenario: TurnScenario::DrainQueued,
         signal: None,
+        queued_run: failover_driven.get(1).cloned(),
     };
     submit_workflow(ingress_url, &failover_wake_request).await?;
     let failover_wake_response =
@@ -110,6 +116,7 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: false,
         scenario: TurnScenario::AsyncCompletion,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &async_request).await?;
     let async_response =
@@ -125,6 +132,7 @@ pub(super) async fn run_workflow_segment_one(
             fail_once,
             scenario: TurnScenario::ProcessLlmQuery,
             signal: None,
+            queued_run: None,
         };
         submit_workflow(ingress_url, &request).await?;
         let response = wait_for_terminal_result(storage.pool(), workflow_id).await?;
@@ -136,6 +144,7 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: false,
         scenario: TurnScenario::DurableInputRequest,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &durable_input_request).await?;
     let (durable_key, durable_waiter_worker) =
@@ -144,7 +153,7 @@ pub(super) async fn run_workflow_segment_one(
     let durable_resolve = resolve_durable_wait_from_peer_worker(
         &durable_waiter_worker,
         &durable_key,
-        lash_core::Resolution::Ok(json!({
+        lash::Resolution::Ok(json!({
             "request_id": "e2e-durable-input:request-1",
             "answer": "durable-approved",
             "worker_id": "peer-worker"
@@ -153,7 +162,7 @@ pub(super) async fn run_workflow_segment_one(
     .await
     .context("resolve attached durable input await key from peer worker")?;
     anyhow::ensure!(
-        matches!(durable_resolve, lash_core::ResolveOutcome::Accepted),
+        matches!(durable_resolve, lash::ResolveOutcome::Accepted),
         "durable input resolve was not accepted: {durable_resolve:?}"
     );
     let durable_response =
@@ -165,6 +174,7 @@ pub(super) async fn run_workflow_segment_one(
         fail_once: false,
         scenario: TurnScenario::ParentDurableInputAfterChild,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &parent_durable_input_request).await?;
     let (parent_durable_key, parent_waiter_worker) =
@@ -173,7 +183,7 @@ pub(super) async fn run_workflow_segment_one(
     let parent_durable_resolve = resolve_durable_wait_from_peer_worker(
         &parent_waiter_worker,
         &parent_durable_key,
-        lash_core::Resolution::Ok(json!({
+        lash::Resolution::Ok(json!({
             "request_id": "e2e-parent-durable-input-after-child:request-1",
             "answer": "parent-approved",
             "worker_id": "peer-worker"
@@ -182,7 +192,7 @@ pub(super) async fn run_workflow_segment_one(
     .await
     .context("resolve parent durable input before waiter attachment from peer worker")?;
     anyhow::ensure!(
-        matches!(parent_durable_resolve, lash_core::ResolveOutcome::Accepted),
+        matches!(parent_durable_resolve, lash::ResolveOutcome::Accepted),
         "parent durable input resolve was not accepted: {parent_durable_resolve:?}"
     );
     record_harness_signal(
@@ -216,6 +226,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: false,
         scenario: TurnScenario::ToolBatch,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &tool_batch_request).await?;
     let tool_batch_response =
@@ -227,6 +238,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: true,
         scenario: TurnScenario::ToolBatch,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &tool_batch_failover_request).await?;
     let tool_batch_failover_response =
@@ -238,6 +250,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: false,
         scenario: TurnScenario::SegmentLoop,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &segment_loop_request).await?;
     let segment_loop_response =
@@ -249,6 +262,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: false,
         scenario: TurnScenario::FrameSwitchQueued,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &frame_queued_request).await?;
     let frame_queued_response =
@@ -260,6 +274,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: false,
         scenario: TurnScenario::FrameSwitchPrepared,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &frame_prepared_request).await?;
     let frame_prepared_response =
@@ -272,6 +287,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: true,
         scenario: TurnScenario::FrameSwitchCrash,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &frame_crash_request).await?;
     let frame_crash_response =
@@ -284,6 +300,7 @@ pub(super) async fn run_workflow_segment_two(
         fail_once: false,
         scenario: TurnScenario::FrameSwitchCancel,
         signal: None,
+        queued_run: None,
     };
     submit_workflow(ingress_url, &frame_cancel_request).await?;
     let frame_cancel_response =

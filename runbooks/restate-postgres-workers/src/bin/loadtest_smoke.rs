@@ -35,6 +35,7 @@ async fn main() -> Result<()> {
         fail_once: false,
         scenario: TurnScenario::KitchenSink,
         signal: None,
+        queued_run: None,
     };
     witness::record_submission(&witness, &workflow_id, &serde_json::to_vec(&request)?).await?;
     let output = client

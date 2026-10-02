@@ -9,7 +9,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash_core::engine::BuildGeneration;
+use lash::BuildGeneration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -91,7 +91,7 @@ async fn register(
         .register_deployment(&registration.uri)
         .await
         .map_err(|error| match error {
-            lash_restate::RestateRegistrationError::NameTaken { .. } => {
+            lash::restate::RestateRegistrationError::NameTaken { .. } => {
                 (StatusCode::CONFLICT, error.to_string())
             }
             error => failed(error),
