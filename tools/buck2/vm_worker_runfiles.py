@@ -85,7 +85,10 @@ class Graph:
             dependencies = set()
             package_id = by_directory[target.directory]
             swaps = target.value("variant_deps", {})
+            pruned = set(target.value("pruned_deps", []))
             for dependency in self.resolved.get(package_id, {}).get("deps", []):
+                if dependency.get("name") in pruned:
+                    continue
                 if not any(kind["kind"] in allowed for kind in dependency["dep_kinds"]):
                     continue
                 directory = self.directories.get(dependency["pkg"])
@@ -153,18 +156,19 @@ class Graph:
 
 
 def add(metadata: dict, outputs: dict[pathlib.Path, str], root: pathlib.Path) -> None:
-    """Attach support to every emitted test that links the spawner."""
+    """Attach support to every emitted test or binary that links the spawner."""
     graph = Graph(metadata, outputs, root)
     edits = {}
     for label, target in graph.targets.items():
-        if target.macro not in TEST_MACROS or not graph.requires(label):
+        if target.macro not in TEST_MACROS | BINARY_MACROS or not graph.requires(label):
             continue
         worker = graph.worker(label)
         data = target.value("extra_data", [])
         if worker not in target.runfiles():
             data.append(worker)
-        env = target.value("test_env", {}) | {"LASH_VM_WORKER": f"$(location {worker})"}
-        for name, value in (("extra_data", data), ("test_env", env)):
+        env_name = "test_env" if target.macro in TEST_MACROS else "run_env"
+        env = target.value(env_name, {}) | {"LASH_VM_WORKER": f"$(location {worker})"}
+        for name, value in (("extra_data", data), (env_name, env)):
             if name == "extra_data" and not value:
                 continue
             replacement = (
@@ -181,7 +185,7 @@ def add(metadata: dict, outputs: dict[pathlib.Path, str], root: pathlib.Path) ->
                 line = target.call.end_lineno - 1
                 if name == "extra_data" and "extra_compile_data" in target.args:
                     line = target.args["extra_compile_data"].end_lineno
-                elif name == "test_env":
+                elif name == env_name:
                     anchor = (
                         "tags" if "srcs_patterns" in target.args
                         else "library" if "library" in target.args
@@ -207,10 +211,11 @@ def check(metadata: dict, outputs: dict[pathlib.Path, str], root: pathlib.Path) 
             continue
         if target.macro == "lash_batch_test":
             failures.append(f"{label}: worker-dependent tests cannot be batch members because their environment would be lost")
-        elif target.macro in TEST_MACROS:
+        elif target.macro in TEST_MACROS | BINARY_MACROS:
             worker = graph.worker(label)
             if worker not in target.runfiles():
                 failures.append(f"{label}: missing VM worker runfile {worker}")
-            if target.value("test_env", {}).get("LASH_VM_WORKER") != f"$(location {worker})":
+            env_name = "test_env" if target.macro in TEST_MACROS else "run_env"
+            if target.value(env_name, {}).get("LASH_VM_WORKER") != f"$(location {worker})":
                 failures.append(f"{label}: LASH_VM_WORKER must resolve the VM worker runfile")
     return failures

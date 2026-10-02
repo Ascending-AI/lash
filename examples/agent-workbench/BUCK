@@ -34,7 +34,11 @@ lash_rust_binary(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
@@ -128,7 +132,11 @@ lash_rust_feature_binary(
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
@@ -161,7 +169,11 @@ lash_rust_feature_binary(
         "//examples:shared_rust_sources",
         "//crates/lash-sim:package_files",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",

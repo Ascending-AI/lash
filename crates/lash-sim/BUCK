@@ -73,7 +73,11 @@ lash_rust_binary(
     ],
     exec_properties = sized_exec_properties("lash-sim", "lash_sim"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
     manifest_dir = "crates/lash-sim",

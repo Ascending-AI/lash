@@ -45,13 +45,11 @@ Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 shards covers the configured seed space exactly once. The summary records
 `mode`, `shard`, and `configured_seeds`.
 
-A generated run executes RLM cells in the `lash-vm-worker` helper. A Buck2
-build does not place the helper beside `lash-sim`, so build it and export its
-path first; `run` refuses to start without it.
+A generated run executes RLM cells in the `lash-vm-worker` helper. `kiln run`
+builds and materializes the matching worker and supplies its path at runtime.
+An explicit `LASH_VM_WORKER` in the caller's environment takes precedence.
 
 ```sh
-export LASH_VM_WORKER="$(python3 scripts/ci/restate_suite.py build \
-  //crates/lash-vm-worker:lash-vm-worker__bin)"
 kiln run //crates/lash-sim:lash-sim__bin -- run --out "$PWD/target/lash-sim/search" \
   --profile full-random --seeds 5000 --max-boundaries 2000 \
   --shard 1/9 --mode search

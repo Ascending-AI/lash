@@ -120,6 +120,16 @@ output path. The driver translates `final` to the stock client's `all` mode
 for requested outputs. `run` preserves the invocation's `BUILD_WORKING_DIRECTORY` and the
 repository's `BUILD_WORKSPACE_DIRECTORY`.
 
+Every generated binary whose dependency closure reaches `lash-internal-vm-client`
+declares a matching VM worker runfile. `kiln run` materializes that worker and
+sets `LASH_VM_WORKER` only when the caller has not set it. The launcher changes
+`RunInfo` alone; worker paths and runtime files do not enter Rust compile actions.
+The binary keeps its build outputs and diagnostic subtargets. The pinned prelude's
+`rust/rust_binary.bzl:807-818` supplies the original providers and command, and
+`rules.bzl:169-172` supplies `clone_rule`. Its binary attributes have no `run_env`
+at `decls/rust_rules.bzl:161-183`; the test environment at
+`rust/rust_binary.bzl:848` applies only to tests.
+
 Run focused tooling checks with:
 
 ```sh

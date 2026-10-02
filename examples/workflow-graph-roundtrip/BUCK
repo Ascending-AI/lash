@@ -63,7 +63,11 @@ lash_rust_binary(
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph_roundtrip"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":workflow-graph-roundtrip",
     library_crate_name = "workflow_graph_roundtrip",
     manifest_dir = "examples/workflow-graph-roundtrip",
@@ -100,7 +104,11 @@ lash_rust_binary(
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_contract_schema"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":workflow-graph-roundtrip",
     library_crate_name = "workflow_graph_roundtrip",
     manifest_dir = "examples/workflow-graph-roundtrip",

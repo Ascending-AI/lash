@@ -24,7 +24,11 @@ lash_rust_binary(
     declared_features = [],
     exec_properties = sized_exec_properties("rlm-smoke-host", "rlm_smoke_host"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "runbooks/rlm-smoke",

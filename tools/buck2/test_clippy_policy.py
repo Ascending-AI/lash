@@ -146,7 +146,7 @@ class ClippyPolicyTests(unittest.TestCase):
         # Every Rust target is declared through `_rust_rule`, which declares
         # its Clippy twin with the same attributes.
         native_rules = re.findall(
-            r"_rust_rule\(\n        native\.rust_(?:binary|library|test),\n(?P<body>.*?)(?=^    \))",
+            r"_rust_rule\(\n        (?:native\.rust_(?:binary|library|test)|lash_run_binary if run_attrs else native\.rust_binary),\n(?P<body>.*?)(?=^    \))",
             source,
             re.MULTILINE | re.DOTALL,
         )

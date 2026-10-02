@@ -7,6 +7,7 @@ load(":deps.bzl", "PACKAGE_DEPS")
 load(":exec_sizes.bzl", "HELPER_BUDGET")
 load(":platforms.bzl", "MEMORY_SCALE", "pool_constraint")
 load(":profile.bzl", "FIRST_PARTY_OPT_LEVELS")
+load(":run_binary.bzl", "binary_run_attrs", "lash_run_binary")
 load(":source_tree.bzl", "lash_rust_source_tree")
 load(":test_rules.bzl", "lash_test_wrapper")
 load(":ui_fixtures.bzl", "ui_fixture_harness")
@@ -327,6 +328,8 @@ def lash_rust_binary(
         compile_data_patterns = [],
         data_exclude = [],
         extra_compile_data = [],
+        extra_data = [],
+        run_env = {},
         rustc_env = {},
         tags = []):
     deps = _named_deps(package_name, include_dev = include_dev_deps)
@@ -340,8 +343,9 @@ def lash_rust_binary(
         _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + package_compile_data,
         extra_compile_data,
     )
+    run_attrs = binary_run_attrs(name, extra_data, run_env)
     _rust_rule(
-        native.rust_binary,
+        lash_run_binary if run_attrs else native.rust_binary,
         name,
         name + "__clippy",
         exec_properties,
@@ -355,7 +359,7 @@ def lash_rust_binary(
         rustc_flags = _rustc_flags(package_name, declared_features),
         labels = tags,
         visibility = ["PUBLIC"],
-        **source_attrs
+        **(source_attrs | run_attrs)
     )
 
 def _rust_test(
@@ -590,6 +594,8 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
     rustc_env = kwargs.pop("rustc_env", {})
     tags = kwargs.pop("tags", [])
     extra_compile_data = kwargs.pop("extra_compile_data", [])
+    extra_data = kwargs.pop("extra_data", [])
+    run_env = kwargs.pop("run_env", {})
     compile_data_patterns = kwargs.pop("compile_data_patterns", [])
     data_exclude = kwargs.pop("data_exclude", [])
     package_compile_data = _data(compile_data_patterns, data_exclude)
@@ -600,8 +606,9 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
         _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + package_compile_data,
         extra_compile_data,
     )
+    run_attrs = binary_run_attrs(name, extra_data, run_env)
     _rust_rule(
-        native.rust_binary,
+        lash_run_binary if run_attrs else native.rust_binary,
         name,
         name + "__clippy",
         exec_properties,
@@ -615,7 +622,7 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
         rustc_flags = _rustc_flags(package_name, declared_features),
         labels = tags,
         visibility = ["PUBLIC"],
-        **source_attrs
+        **(source_attrs | run_attrs)
     )
 
 def lash_rust_feature_test(

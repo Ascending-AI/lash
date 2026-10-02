@@ -1619,6 +1619,22 @@ def check_facade_completeness() -> None:
     assert 'targets["doc-json"] = rustdoc_json' in overlay
 
 
+def check_vm_worker_runfiles() -> None:
+    """Every linked spawner consumer declares its matching runtime helper."""
+    import sync
+    import vm_worker_runfiles
+
+    metadata = sync.metadata()
+    members = set(metadata["workspace_members"])
+    outputs = {}
+    for package in metadata["packages"]:
+        if package["id"] in members:
+            path = pathlib.Path(package["manifest_path"]).parent / "BUCK"
+            outputs[path] = path.read_text(encoding="utf-8")
+    failures = vm_worker_runfiles.check(metadata, outputs, ROOT)
+    assert not failures, "\n".join(failures)
+
+
 def main() -> int:
     checks = [
         check_inventory,
@@ -1647,6 +1663,7 @@ def main() -> int:
         check_shard_weights,
         check_no_first_party_build_dependency,
         check_facade_completeness,
+        check_vm_worker_runfiles,
     ]
     for check in checks:
         check()
