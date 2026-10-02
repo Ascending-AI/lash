@@ -1,1282 +1,525 @@
-#[path = "otel/attribute_keys.rs"]
-mod attribute_keys;
-use attribute_keys as attr;
-
-#[cfg(feature = "otel")]
-use lash_sansio::sync::MutexExt;
-use std::collections::HashMap;
-use std::sync::Mutex;
+//! Host-owned providers project permitted domain observations under retained anchors.
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use opentelemetry::global::{BoxedSpan, BoxedTracer};
+use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{
-    Span, SpanContext, SpanKind, Status, TraceContextExt, Tracer, TracerProvider,
+    Link, Span, SpanContext, SpanId, Status, TraceContextExt, TraceFlags, TraceId, TraceState,
+    Tracer, TracerProvider,
 };
-use opentelemetry::{Context, InstrumentationScope, KeyValue, Value as OtelValue, global};
-use serde_json::Value;
+use opentelemetry::{Context, KeyValue};
 
+use crate::telemetry::{
+    AttemptObservation, DurableTraceScope, EmissionSource, TraceAdmissionCandidate, TraceAnchor,
+    TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceScopeFactory,
+    TraceScopeId, TraceScopeKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState,
+};
 use crate::{
-    TraceContext, TraceEvent, TraceRecord, TraceSink, TraceSinkError, TraceTokenUsage, llm_node_id,
-    tool_node_id, turn_node_id,
+    TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceLlmAttemptOutcome, TraceRecord,
+    TraceTokenUsage, TraceTurnOutcome,
 };
 
-mod language_execution;
-use crate::telemetry::metrics;
-use language_execution::language_execution_attributes;
-pub use metrics::registry;
-pub use metrics::{
+/// Exact API namespace supported by this adapter.
+pub use opentelemetry as api;
+
+mod payload;
+pub use crate::telemetry::metrics::registry;
+pub use crate::telemetry::metrics::{
     GenerationDrainMetrics, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
-    ToolIntentMetrics,
+    TelemetryMetrics, ToolIntentMetrics,
 };
+use registry::{AttributeKey as A, DomainSpan, Ownership};
+pub use registry::{GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT};
 
-const INSTRUMENTATION_NAME: &str = "lash-trace";
+/// Payload and extended-event export is explicit and bounded per record.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OtelPayloadExport {
+    #[default]
+    Off,
+    Bounded {
+        max_record_bytes: usize,
+        max_events: usize,
+    },
+}
 
-/// Controls which structured Lash trace data is attached to OpenTelemetry
-/// spans.
-#[derive(Clone, Debug)]
-pub struct OtelTraceOptions {
-    /// Attach the full Lash trace event as a JSON attribute. This is useful for
-    /// local collectors and debugging, but it can exceed backend attribute
-    /// limits in production.
-    pub include_event_json: bool,
-    /// Attach `TraceContext.metadata` as `lash.metadata.*` attributes.
+/// Host naming and attribute customization over the typed domain record.
+pub trait OtelSpanEnricher: Send + Sync {
+    fn span_name(&self, _default: &'static str, _record: &TraceRecord) -> Option<String> {
+        None
+    }
+    fn attributes(&self, _record: &TraceRecord, _out: &mut Vec<KeyValue>) {}
+}
+
+#[derive(Clone, Default)]
+pub struct OtelOptions {
     pub include_context_metadata: bool,
-    /// Attach event payload fields that can be large, such as tool args/results
-    /// and custom payloads, as compact JSON attributes.
-    pub include_payload_json: bool,
+    pub payloads: OtelPayloadExport,
+    pub enrich: Option<Arc<dyn OtelSpanEnricher>>,
 }
 
-impl Default for OtelTraceOptions {
-    fn default() -> Self {
+/// One identity-producing adapter per runtime. The host owns flush and shutdown.
+#[derive(Clone)]
+pub struct OtelTelemetry {
+    tracer: Arc<BoxedTracer>,
+    metrics: TelemetryMetrics,
+    options: OtelOptions,
+}
+
+impl OtelTelemetry {
+    pub fn new<P: TracerProvider, M: MeterProvider>(
+        tracer_provider: &P,
+        meter_provider: &M,
+        options: OtelOptions,
+    ) -> Self
+    where
+        P::Tracer: Send + Sync + 'static,
+        <P::Tracer as Tracer>::Span: Send + Sync + 'static,
+    {
+        let tracer = tracer_provider.tracer_with_scope(instrumentation_scope());
         Self {
-            include_event_json: false,
-            include_context_metadata: true,
-            include_payload_json: false,
-        }
-    }
-}
-
-pub struct OtelTraceSink<T = global::BoxedTracer>
-where
-    T: Tracer + Send + Sync,
-    T::Span: Send + Sync + 'static,
-{
-    tracer: T,
-    options: OtelTraceOptions,
-    active: Mutex<HashMap<String, ActiveSpan<T::Span>>>,
-}
-
-struct ActiveSpan<S: Span> {
-    span: S,
-    context: SpanContext,
-}
-
-impl OtelTraceSink<global::BoxedTracer> {
-    /// This keeps exporter/provider setup with the embedding host while giving
-    /// Lash a ready-to-install `TraceSink`.
-    pub fn from_global_provider() -> Self {
-        let scope = InstrumentationScope::builder(INSTRUMENTATION_NAME)
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .build();
-        Self::new(global::tracer_provider().tracer_with_scope(scope))
-    }
-}
-
-impl<T> OtelTraceSink<T>
-where
-    T: Tracer + Send + Sync,
-    T::Span: Send + Sync + 'static,
-{
-    pub fn new(tracer: T) -> Self {
-        Self::with_options(tracer, OtelTraceOptions::default())
-    }
-
-    pub fn with_options(tracer: T, options: OtelTraceOptions) -> Self {
-        Self {
-            tracer,
+            tracer: Arc::new(BoxedTracer::new(Box::new(tracer))),
+            metrics: TelemetryMetrics::new(
+                meter_provider.meter_with_scope(instrumentation_scope()),
+            ),
             options,
-            active: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn options(&self) -> &OtelTraceOptions {
+    pub fn metrics(&self) -> &TelemetryMetrics {
+        &self.metrics
+    }
+    pub fn options(&self) -> &OtelOptions {
         &self.options
     }
 
-    fn start_active(
+    fn completion(
         &self,
-        key: String,
+        scope: &DurableTraceScope,
+        attempt: Option<&AttemptObservation>,
+        source: &EmissionSource,
         record: &TraceRecord,
-        name: impl Into<std::borrow::Cow<'static, str>>,
     ) {
-        let parent = if matches!(&record.event, TraceEvent::TurnStarted { .. }) {
-            None
-        } else {
-            parent_for(record, &self.active)
+        let TraceAnchor::Context(anchor) = &scope.anchor else {
+            return;
         };
-        let mut span = self.build_span(record, name, parent, record_time(record), None);
-        span.set_attributes(self.attributes_for(record));
-        let context = span.span_context().clone();
-        let mut active = self.active.lock_recover();
-        if let Some(mut existing) = active.remove(&key) {
-            existing.span.end_with_timestamp(record_time(record));
-        }
-        active.insert(key, ActiveSpan { span, context });
-    }
-
-    fn end_active(&self, key: &str, record: &TraceRecord, success: bool) -> bool {
-        let mut active = self.active.lock_recover();
-        let Some(mut active_span) = active.remove(key) else {
-            return false;
+        let Some(projection) = Projection::for_record(record) else {
+            return;
         };
-        let mut attrs = lifecycle_end_attributes(record, &self.options);
-        attrs.extend(self.attributes_for(record));
-        active_span.span.set_attributes(attrs);
-        if !success {
-            active_span.span.set_status(error_status(record));
+        let definition = projection.span.definition();
+        if !matches!(
+            (definition.ownership, source),
+            (Ownership::Live, EmissionSource::LiveExecution { .. })
+                | (Ownership::Transition, EmissionSource::NewTransition)
+        ) {
+            return;
         }
-        active_span.span.end_with_timestamp(record_time(record));
-        true
-    }
-
-    fn emit_instant(
-        &self,
-        record: &TraceRecord,
-        name: impl Into<std::borrow::Cow<'static, str>>,
-        duration_ms: Option<u64>,
-    ) {
-        let end = record_time(record);
-        let start = duration_ms
-            .and_then(|ms| end.checked_sub(Duration::from_millis(ms)))
-            .unwrap_or(end);
-        let mut span = self.build_span(
-            record,
-            name,
-            parent_for(record, &self.active),
-            start,
-            Some(end),
-        );
-        span.set_attributes(self.attributes_for(record));
-        if record.event.is_failed() {
-            span.set_status(error_status(record));
+        let end: SystemTime = projection
+            .ended_at_ms
+            .map(epoch_ms)
+            .unwrap_or_else(|| record.timestamp.into());
+        let start = projection.started_at_ms.map(epoch_ms).unwrap_or_else(|| {
+            projection
+                .duration_ms
+                .map(|duration| {
+                    end.checked_sub(Duration::from_millis(duration))
+                        .unwrap_or(end)
+                })
+                .unwrap_or_else(|| epoch_ms(scope.started_at_ms))
+        });
+        let mut attributes = vec![A::ScopeKind.value(scope.scope.kind().as_str())];
+        if let Some(operation) = projection.operation {
+            attributes.push(A::OperationName.value(operation));
+        }
+        if let Some(provider) = projection.provider {
+            attributes.push(A::ProviderName.value(provider.to_owned()));
+        }
+        if let Some(model) = projection.model {
+            attributes.push(A::RequestModel.value(model.to_owned()));
+        }
+        if let Some(tool) = projection.tool {
+            attributes.push(A::ToolName.value(tool.to_owned()));
+        }
+        let mut links = Vec::new();
+        if let Some(observation) = attempt {
+            if let Some(context) = &observation.context
+                && let Some(context) = span_context(context)
+            {
+                links.push(Link::new(context, Vec::new(), 0));
+            }
+            if let Some(id) = &observation.invocation_id {
+                attributes.push(A::AttemptInvocationId.value(id.clone()));
+            }
+        }
+        let Some(anchor_context) = span_context(anchor) else {
+            return;
+        };
+        let parent = Context::new().with_remote_span_context(anchor_context);
+        let mut span = self
+            .tracer
+            .span_builder(projection.name())
+            .with_kind(definition.kind)
+            .with_start_time(start)
+            .with_attributes(attributes)
+            .with_links(links)
+            .start_with_context(self.tracer.as_ref(), &parent);
+        // Sampling is decided for this child, independently of its parent's recording.
+        if span.is_recording() {
+            let mut attrs = vec![
+                A::RecordId.value(record.id.clone()),
+                A::EventType.value(record.event.kind()),
+                A::ScopeBoundary.value(i64::try_from(scope.scope.boundary).unwrap_or(i64::MAX)),
+            ];
+            if let Some(session) = &record.context.session_id {
+                attrs.push(A::SessionId.value(session.to_string()));
+            }
+            if let Some(turn) = &record.context.turn_id {
+                attrs.push(A::TurnId.value(turn.to_string()));
+            }
+            projection.attributes(record, &mut attrs);
+            let mut name = projection.name();
+            if let Some(enrich) = &self.options.enrich {
+                if let Some(custom) = enrich.span_name(definition.name, record) {
+                    name = custom;
+                }
+                enrich.attributes(record, &mut attrs);
+            }
+            span.update_name(name);
+            payload::attributes(record, &self.options, &mut attrs);
+            span.set_attributes(attrs);
+            if projection.failed(record) {
+                span.set_status(Status::error("domain operation failed"));
+            }
         }
         span.end_with_timestamp(end);
     }
+}
 
-    fn build_span(
+impl TraceScopeFactory for OtelTelemetry {
+    fn capture_current(&self) -> Option<TraceCarrier> {
+        carrier(Context::current().span().span_context())
+    }
+
+    fn propose(
         &self,
-        record: &TraceRecord,
-        name: impl Into<std::borrow::Cow<'static, str>>,
-        parent: Option<SpanContext>,
-        start: SystemTime,
-        end: Option<SystemTime>,
-    ) -> T::Span {
-        let mut builder = self
+        scope: &TraceScopeId,
+        cause: &TraceCause,
+    ) -> Box<dyn TraceAdmissionCandidate> {
+        let definition = if scope.kind() == TraceScopeKind::TriggerOccurrence {
+            DomainSpan::TriggerAdmissionAttempt
+        } else {
+            DomainSpan::AdmissionAttempt
+        }
+        .definition();
+        let parent = match cause {
+            TraceCause::Parent(context) => {
+                let Some(context) = span_context(context) else {
+                    return UntracedScopes.propose(scope, cause);
+                };
+                Context::new().with_remote_span_context(context)
+            }
+            _ => Context::new(),
+        };
+        let mut links = Vec::new();
+        if let TraceCause::Linked(causes) = cause {
+            for context in causes.contexts() {
+                let Some(context) = span_context(context) else {
+                    return UntracedScopes.propose(scope, cause);
+                };
+                links.push(Link::new(context, Vec::new(), 0));
+            }
+        }
+        let mut attributes = vec![A::ScopeKind.value(scope.kind().as_str())];
+        if let TraceCause::Linked(links) = cause {
+            attributes.push(A::LinksOmitted.value(i64::from(links.omitted())));
+        }
+        let span = self
             .tracer
-            .span_builder(name)
-            .with_kind(SpanKind::Internal)
-            .with_start_time(start)
-            .with_attributes(common_attributes(record, &self.options));
-        if let Some(end) = end {
-            builder = builder.with_end_time(end);
-        }
-        match parent {
-            Some(parent) => {
-                let parent_cx = Context::new().with_remote_span_context(parent);
-                builder.start_with_context(&self.tracer, &parent_cx)
-            }
-            None => builder.start(&self.tracer),
-        }
+            .span_builder(definition.name)
+            .with_kind(definition.kind)
+            .with_attributes(attributes)
+            .with_links(links)
+            .start_with_context(self.tracer.as_ref(), &parent);
+        let anchor = carrier(span.span_context())
+            .map(TraceAnchor::Context)
+            .unwrap_or(TraceAnchor::Untraced);
+        Box::new(AdmissionCandidate {
+            span: Some(span),
+            anchor,
+            kind: scope.kind(),
+        })
     }
+}
 
-    fn attributes_for(&self, record: &TraceRecord) -> Vec<KeyValue> {
-        event_attributes(record, &self.options)
-    }
-
-    fn add_llm_event(
+impl TraceDomainProjector for OtelTelemetry {
+    fn project(
         &self,
+        scope: &DurableTraceScope,
+        attempt: Option<&AttemptObservation>,
+        source: &EmissionSource,
         record: &TraceRecord,
-        name: impl Into<std::borrow::Cow<'static, str>>,
-    ) -> bool {
-        let Some(key) = llm_key(&record.context) else {
-            return false;
-        };
-        let mut active = self.active.lock_recover();
-        let Some(active_span) = active.get_mut(&key) else {
-            return false;
-        };
-        let mut attrs = common_attributes(record, &self.options);
-        attrs.extend(self.attributes_for(record));
-        active_span.span.add_event(name, attrs);
-        true
+    ) {
+        self.completion(scope, attempt, source, record);
     }
 }
 
-impl<T> TraceSink for OtelTraceSink<T>
-where
-    T: Tracer + Send + Sync,
-    T::Span: Send + Sync + 'static,
-{
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+struct AdmissionCandidate {
+    span: Option<BoxedSpan>,
+    anchor: TraceAnchor,
+    kind: TraceScopeKind,
+}
+impl AdmissionCandidate {
+    fn finish(&mut self, outcome: TraceCandidateOutcome) {
+        if let Some(mut span) = self.span.take() {
+            if span.is_recording() {
+                span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
+                if outcome == TraceCandidateOutcome::Selected {
+                    span.update_name(admitted(self.kind).definition().name);
+                }
+            }
+            span.end();
+        }
+    }
+}
+impl TraceAdmissionCandidate for AdmissionCandidate {
+    fn anchor(&self) -> TraceAnchor {
+        self.anchor.clone()
+    }
+    fn settle(mut self: Box<Self>, outcome: TraceCandidateOutcome) {
+        self.finish(outcome);
+    }
+}
+impl Drop for AdmissionCandidate {
+    fn drop(&mut self) {
+        self.finish(TraceCandidateOutcome::Refused);
+    }
+}
+
+fn admitted(kind: TraceScopeKind) -> DomainSpan {
+    match kind {
+        TraceScopeKind::Run => DomainSpan::RunAdmitted,
+        TraceScopeKind::Turn => DomainSpan::TurnAdmitted,
+        TraceScopeKind::Tool => DomainSpan::ToolAdmitted,
+        TraceScopeKind::ToolIntent => DomainSpan::IntentAdmitted,
+        TraceScopeKind::Process => DomainSpan::ProcessAdmitted,
+        TraceScopeKind::TriggerOccurrence => DomainSpan::TriggerFire,
+    }
+}
+
+pub use registry::instrumentation_scope;
+
+/// A retained or transported context always has remote provenance.
+pub fn span_context(context: &TraceCarrier) -> Option<SpanContext> {
+    let state = TraceState::from_key_value(context.tracestate().members()).ok()?;
+    Some(SpanContext::new(
+        TraceId::from_bytes(context.trace_id().to_bytes()),
+        SpanId::from_bytes(context.span_id().to_bytes()),
+        TraceFlags::new(context.flags().to_byte()),
+        true,
+        state,
+    ))
+}
+
+/// Includes valid unsampled contexts; an invalid no-op context has no carrier.
+pub fn carrier(context: &SpanContext) -> Option<TraceCarrier> {
+    Some(TraceCarrier::new(
+        W3cTraceId::from_bytes(context.trace_id().to_bytes()).ok()?,
+        W3cSpanId::from_bytes(context.span_id().to_bytes()).ok()?,
+        W3cTraceFlags::from_byte(context.trace_flags().to_u8()),
+        W3cTraceState::parse(&context.trace_state().header()).ok()?,
+    ))
+}
+
+fn epoch_ms(ms: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+}
+
+struct Projection<'a> {
+    span: DomainSpan,
+    operation: Option<&'static str>,
+    provider: Option<&'a str>,
+    model: Option<&'a str>,
+    tool: Option<&'a str>,
+    duration_ms: Option<u64>,
+    started_at_ms: Option<u64>,
+    ended_at_ms: Option<u64>,
+}
+impl<'a> Projection<'a> {
+    fn for_record(record: &'a TraceRecord) -> Option<Self> {
+        let mut projection = Self {
+            span: DomainSpan::Turn,
+            operation: None,
+            provider: None,
+            model: None,
+            tool: None,
+            duration_ms: None,
+            started_at_ms: None,
+            ended_at_ms: None,
+        };
         match &record.event {
-            TraceEvent::TurnStarted { .. } => {
-                if let Some(key) = turn_key(&record.context) {
-                    self.start_active(key, record, "lash.turn");
-                } else {
-                    self.emit_instant(record, "lash.turn.started", None);
-                }
-            }
             TraceEvent::TurnCompleted { .. } => {
-                let ended = turn_key(&record.context)
-                    .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
-                if !ended {
-                    self.emit_instant(record, "lash.turn.completed", None);
-                }
+                projection.operation = Some("invoke_agent");
             }
-            TraceEvent::LlmCallStarted { .. } => {
-                if let Some(key) = llm_key(&record.context) {
-                    self.start_active(key, record, "lash.llm");
-                } else {
-                    self.emit_instant(record, "lash.llm.started", None);
-                }
+            TraceEvent::LlmAttemptCompleted { attempt } => {
+                projection.span = DomainSpan::Model;
+                projection.operation = Some("chat");
+                projection.provider = attempt.provider.as_deref();
+                projection.model = Some(&attempt.request_model);
+                // Missing provider timings describe an instantaneous observation,
+                // never the duration of the enclosing turn.
+                projection.started_at_ms = Some(attempt.started_at_ms.unwrap_or_else(|| {
+                    attempt.ended_at_ms.unwrap_or_else(|| {
+                        u64::try_from(record.timestamp.timestamp_millis()).unwrap_or(0)
+                    })
+                }));
+                projection.ended_at_ms = attempt.ended_at_ms;
             }
-            TraceEvent::LlmCallCompleted { response, .. } => {
-                let ended = llm_key(&record.context)
-                    .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
-                if !ended {
-                    self.emit_instant(record, "lash.llm", Some(response.duration_ms));
-                }
+            TraceEvent::DomainCompleted { completion } => {
+                projection.span = match completion.operation {
+                    TraceDomainOperation::Run => DomainSpan::Run,
+                    TraceDomainOperation::Process => DomainSpan::Process,
+                    TraceDomainOperation::ProcessSegment => DomainSpan::ProcessSegment,
+                    TraceDomainOperation::Send => DomainSpan::Send,
+                    TraceDomainOperation::ToolIntent => DomainSpan::Intent,
+                };
+                projection.started_at_ms = Some(completion.started_at_ms);
+                projection.provider = completion.provider.as_deref();
+                projection.model = completion.model.as_deref();
+                projection.tool = completion.tool_name.as_deref();
             }
-            TraceEvent::LlmCallFailed { .. } => {
-                let ended = llm_key(&record.context)
-                    .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
-                if !ended {
-                    self.emit_instant(record, "lash.llm", None);
-                }
+            TraceEvent::ToolCallCompleted { name, .. } => {
+                projection.span = DomainSpan::Tool;
+                projection.operation = Some("execute_tool");
+                projection.tool = Some(name);
             }
-            TraceEvent::ProviderRequest { .. } => {
-                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
-                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
-                }
+            TraceEvent::ExecCodeCompleted { duration_ms, .. } => {
+                projection.span = DomainSpan::ExecCode;
+                projection.duration_ms = Some(*duration_ms);
             }
-            TraceEvent::ProviderReplayDropped { .. } => {
-                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
-                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
-                }
-            }
-            TraceEvent::EffectEnvelopeDiff { .. } => {
-                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
-            }
-            TraceEvent::ProviderStreamEvent { .. } => {
-                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
-                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
-                }
-            }
-            TraceEvent::RuntimeStreamEvent { .. } => {
-                if !self.add_llm_event(record, format!("lash.{}", record.event.kind())) {
-                    self.emit_instant(record, format!("lash.{}", record.event.kind()), None);
-                }
-            }
-            TraceEvent::ToolCallStarted { .. } => {
-                if let Some(key) = tool_key(&record.event) {
-                    self.start_active(key, record, "lash.tool");
-                } else {
-                    self.emit_instant(record, "lash.tool.started", None);
-                }
-            }
-            TraceEvent::ToolCallCompleted { duration_ms, .. } => {
-                let ended = tool_key(&record.event)
-                    .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
-                if !ended {
-                    self.emit_instant(record, "lash.tool", Some(*duration_ms));
-                }
-            }
-            TraceEvent::JournaledEffectStarted { .. } => {
-                self.emit_instant(record, "lash.durable.journaled_effect.started", None)
-            }
-            TraceEvent::JournaledEffectSettled { .. } => {
-                self.emit_instant(record, "lash.durable.journaled_effect.settled", None)
-            }
-            TraceEvent::DurableWaitParked { .. } => {
-                self.emit_instant(record, "lash.durable.wait.parked", None)
-            }
-            TraceEvent::DurableWaitResolved { .. } => {
-                self.emit_instant(record, "lash.durable.wait.resolved", None)
-            }
-            TraceEvent::DurableTimerStarted { .. } => {
-                self.emit_instant(record, "lash.durable.timer.started", None)
-            }
+            TraceEvent::ExecCodeFailed { .. } => projection.span = DomainSpan::ExecCode,
+            TraceEvent::DurableWaitResolved { .. } => projection.span = DomainSpan::Wait,
             TraceEvent::DurableTimerResolved { duration_ms, .. } => {
-                self.emit_instant(record, "lash.durable.timer.resolved", Some(*duration_ms))
+                projection.span = DomainSpan::Wait;
+                projection.duration_ms = Some(*duration_ms);
             }
-            TraceEvent::DurableSegmentBoundary { .. } => {
-                self.emit_instant(record, "lash.durable.segment_boundary", None)
-            }
-            TraceEvent::StoreErrorObserved { .. } => {
-                self.emit_instant(record, "lash.store.error", None)
-            }
-            TraceEvent::PromptBuilt { .. } => self.emit_instant(record, "lash.prompt", None),
-            TraceEvent::AttachmentDegraded { .. } => {
-                self.emit_instant(record, "lash.attachment.degraded", None)
-            }
-            TraceEvent::CompositionChanged { .. } => {
-                self.emit_instant(record, "lash.composition.changed", None)
-            }
-            TraceEvent::CompactionNeeded { .. } => {
-                self.emit_instant(record, "lash.compaction.needed", None)
-            }
-            TraceEvent::PromptViewAttachmentsPruned { .. } => {
-                self.emit_instant(record, "lash.prompt_view.attachments_pruned", None)
-            }
-            TraceEvent::CompactionStarted { .. } => {
-                self.emit_instant(record, "lash.compaction.started", None)
-            }
-            TraceEvent::CompactionCompleted { .. } => {
-                self.emit_instant(record, "lash.compaction.completed", None)
-            }
-            TraceEvent::ExecCodeStarted { .. }
-            | TraceEvent::ExecCodeCompleted { .. }
-            | TraceEvent::ExecCodeFailed { .. } => {
-                self.emit_instant(record, "lash.exec_code", None)
-            }
-            TraceEvent::ObservationProjection { .. } => {
-                self.emit_instant(record, "lash.observation_projection", None)
-            }
-            TraceEvent::RlmStep { .. } => self.emit_instant(record, "lash.rlm.step", None),
-            TraceEvent::ProtocolStep { .. } => {
-                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
-            }
-            TraceEvent::LanguageExecution { .. } => {
-                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
-            }
-            TraceEvent::Custom { .. } => {
-                self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
-            }
+            _ => return None,
         }
-        Ok(())
+        Some(projection)
     }
-
-    /// No-op: span export durability is host-owned.
-    ///
-    /// This sink only starts and ends spans on the host's OpenTelemetry tracer;
-    /// the buffering that risks span loss on exit lives in the host's
-    /// `BatchSpanProcessor` / exporter, not here. Flushing that buffer is the
-    /// host's duty — call `force_flush()` (or `shutdown()`) on your
-    /// `TracerProvider` before the process exits. Lash cannot do it for you
-    /// because it never owns the provider. See `docs/tracing.html`.
-    fn flush(&self) -> Result<(), TraceSinkError> {
-        Ok(())
-    }
-}
-
-fn common_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<KeyValue> {
-    let mut attrs = vec![
-        KeyValue::new(
-            attr::LASH_TRACE_SCHEMA_VERSION,
-            record.schema_version as i64,
-        ),
-        KeyValue::new(attr::LASH_TRACE_RECORD_ID, record.id.clone()),
-        KeyValue::new(attr::LASH_TRACE_EVENT_TYPE, event_type(&record.event)),
-    ];
-    context_attributes(&mut attrs, &record.context, options);
-    if options.include_event_json
-        && let Ok(json) = serde_json::to_string(record)
-    {
-        attrs.push(KeyValue::new(attr::LASH_TRACE_RECORD_JSON, json));
-    }
-    attrs
-}
-
-fn lifecycle_end_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<KeyValue> {
-    let mut attrs = vec![
-        KeyValue::new(
-            attr::LASH_TRACE_END_SCHEMA_VERSION,
-            record.schema_version as i64,
-        ),
-        KeyValue::new(attr::LASH_TRACE_END_RECORD_ID, record.id.clone()),
-        KeyValue::new(attr::LASH_TRACE_END_EVENT_TYPE, event_type(&record.event)),
-    ];
-    if options.include_event_json
-        && let Ok(json) = serde_json::to_string(record)
-    {
-        attrs.push(KeyValue::new(attr::LASH_TRACE_END_RECORD_JSON, json));
-    }
-    attrs
-}
-
-fn context_attributes(
-    attrs: &mut Vec<KeyValue>,
-    context: &TraceContext,
-    options: &OtelTraceOptions,
-) {
-    push_opt(attrs, attr::LASH_CONTEXT_RUN_ID, &context.run_id);
-    push_opt(
-        attrs,
-        attr::LASH_CONTEXT_EXPERIMENT_ID,
-        &context.experiment_id,
-    );
-    push_opt(
-        attrs,
-        attr::LASH_CONTEXT_CANDIDATE_ID,
-        &context.candidate_id,
-    );
-    push_opt(
-        attrs,
-        attr::LASH_CONTEXT_CANDIDATE_PARENT_ID,
-        &context.candidate_parent_id,
-    );
-    push_opt(attrs, attr::LASH_CONTEXT_EXAMPLE_ID, &context.example_id);
-    push_opt(attrs, attr::LASH_CONTEXT_SPLIT, &context.split);
-    push_opt(attrs, attr::LASH_CONTEXT_SESSION_ID, &context.session_id);
-    push_opt(attrs, attr::LASH_CONTEXT_TURN_ID, &context.turn_id);
-    push_opt(
-        attrs,
-        attr::LASH_CONTEXT_GRAPH_NODE_ID,
-        &context.graph_node_id,
-    );
-    push_opt(
-        attrs,
-        attr::LASH_CONTEXT_PARENT_GRAPH_NODE_ID,
-        &context.parent_graph_node_id,
-    );
-    if let Some(turn_index) = context.turn_index {
-        attrs.push(KeyValue::new(
-            attr::LASH_CONTEXT_TURN_INDEX,
-            turn_index as i64,
-        ));
-    }
-    if let Some(protocol_iteration) = context.protocol_iteration {
-        attrs.push(KeyValue::new(
-            attr::LASH_CONTEXT_PROTOCOL_ITERATION,
-            protocol_iteration as i64,
-        ));
-    }
-    push_opt(attrs, attr::LASH_CONTEXT_EFFECT_ID, &context.effect_id);
-    push_opt(attrs, attr::LASH_CONTEXT_LLM_CALL_ID, &context.llm_call_id);
-
-    if options.include_context_metadata {
-        for (key, value) in &context.metadata {
-            attrs.push(KeyValue::new(
-                format!("lash.metadata.{key}"),
-                otel_value(value),
-            ));
+    fn name(&self) -> String {
+        let default = self.span.definition().name;
+        let suffix = match self.span {
+            DomainSpan::Model => self.model,
+            DomainSpan::Tool => self.tool,
+            _ => None,
+        };
+        match suffix {
+            Some(suffix) => format!("{default} {suffix}"),
+            None => default.to_owned(),
         }
     }
-}
-
-fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<KeyValue> {
-    let mut attrs = Vec::new();
-    match &record.event {
-        TraceEvent::TurnStarted { metadata } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_METADATA_COUNT,
-                metadata.len() as i64,
-            ));
-            push_payload_json(&mut attrs, options, attr::LASH_METADATA_JSON, metadata);
-        }
-        TraceEvent::PromptBuilt {
-            prompt_hash,
-            prompt_chars,
-            components,
-        } => {
-            attrs.push(KeyValue::new(attr::LASH_PROMPT_HASH, prompt_hash.clone()));
-            attrs.push(KeyValue::new(attr::LASH_PROMPT_CHARS, *prompt_chars as i64));
-            attrs.push(KeyValue::new(
-                attr::LASH_PROMPT_COMPONENT_COUNT,
-                components.len() as i64,
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_PROMPT_COMPONENTS_JSON,
-                components,
-            );
-        }
-        TraceEvent::AttachmentDegraded {
-            attachment_id,
-            label,
-            media_type,
-            source,
-            reason,
-        } => {
-            push_opt(&mut attrs, attr::LASH_ATTACHMENT_ID, attachment_id);
-            push_opt(&mut attrs, attr::LASH_ATTACHMENT_LABEL, label);
-            push_opt(&mut attrs, attr::LASH_ATTACHMENT_MEDIA_TYPE, media_type);
-            attrs.push(KeyValue::new(
-                attr::LASH_ATTACHMENT_SOURCE,
-                serde_json::to_value(source)
-                    .ok()
-                    .and_then(|value| value.as_str().map(ToOwned::to_owned))
-                    .unwrap_or_else(|| "unknown".to_string()),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_ATTACHMENT_DEGRADATION_REASON,
-                serde_json::to_value(reason)
-                    .ok()
-                    .and_then(|value| value.as_str().map(ToOwned::to_owned))
-                    .unwrap_or_else(|| "unknown".to_string()),
-            ));
-        }
-        TraceEvent::CompositionChanged {
-            fingerprint,
-            rendered_system_prompt,
-            tool_schemas,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPOSITION_FINGERPRINT,
-                fingerprint.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPOSITION_PROMPT_CHARS,
-                rendered_system_prompt.chars().count() as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPOSITION_TOOL_COUNT,
-                tool_schemas.len() as i64,
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_COMPOSITION_RENDERED_SYSTEM_PROMPT_JSON,
-                rendered_system_prompt,
-            );
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_COMPOSITION_TOOL_SCHEMAS_JSON,
-                tool_schemas,
-            );
-        }
-        TraceEvent::CompactionNeeded {
-            used_tokens,
-            max_context_tokens,
-            threshold_tokens,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_USED_TOKENS,
-                *used_tokens as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,
-                *max_context_tokens as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_THRESHOLD_TOKENS,
-                *threshold_tokens as i64,
-            ));
-        }
-        TraceEvent::PromptViewAttachmentsPruned {
-            used_tokens,
-            max_context_tokens,
-            pruned_attachments,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_USED_TOKENS,
-                *used_tokens as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,
-                *max_context_tokens as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_PRUNED_ATTACHMENTS,
-                *pruned_attachments as i64,
-            ));
-        }
-        TraceEvent::CompactionStarted {
-            source_messages,
-            instructions_present,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_SOURCE_MESSAGES,
-                *source_messages as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_INSTRUCTIONS_PRESENT,
-                *instructions_present,
-            ));
-        }
-        TraceEvent::CompactionCompleted { summary_nodes } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_SUMMARY_NODES,
-                *summary_nodes as i64,
-            ));
-        }
-        TraceEvent::LlmCallStarted { request } => {
-            attrs.push(KeyValue::new(
-                attr::GEN_AI_REQUEST_MODEL,
-                request.model.clone(),
-            ));
-            push_opt(
-                &mut attrs,
-                attr::GEN_AI_REQUEST_MODEL_VARIANT,
-                &request.model_variant,
-            );
-            attrs.push(KeyValue::new(attr::LASH_LLM_STREAM, request.stream));
-            attrs.push(KeyValue::new(
-                attr::LASH_LLM_TOOL_CHOICE,
-                request.tool_choice.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_LLM_MESSAGE_COUNT,
-                request.messages.len() as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_LLM_TOOL_COUNT,
-                request.tools.len() as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_LLM_ATTACHMENT_COUNT,
-                request.attachments().len() as i64,
-            ));
-            push_payload_json(&mut attrs, options, attr::LASH_LLM_REQUEST_JSON, request);
-        }
-        TraceEvent::LlmCallCompleted {
-            response,
-            usage,
-            provider_usage,
-            stream_summary,
-            attempts,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_LLM_DURATION_MS,
-                response.duration_ms as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::GEN_AI_RESPONSE_TEXT_CHARS,
-                response.text.len() as i64,
-            ));
-            if let Some(usage) = usage {
-                usage_attributes(&mut attrs, attr::GEN_AI_USAGE, usage);
+    fn failed(&self, record: &TraceRecord) -> bool {
+        match &record.event {
+            TraceEvent::LlmAttemptCompleted { attempt } => {
+                matches!(attempt.outcome, TraceLlmAttemptOutcome::Failed)
             }
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_LLM_PROVIDER_USAGE_JSON,
-                provider_usage,
-            );
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_LLM_STREAM_SUMMARY_JSON,
-                stream_summary,
-            );
-            push_payload_json(&mut attrs, options, attr::LASH_LLM_RESPONSE_JSON, response);
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_RETRY_ATTEMPTS_JSON,
-                attempts,
-            );
-        }
-        TraceEvent::LlmCallFailed {
-            error,
-            stream_summary,
-            attempts,
-        } => {
-            let error_type = if error.failure_kind == crate::TraceProviderFailureKind::Unknown {
-                "_OTHER"
-            } else {
-                error.failure_kind.wire_tag()
-            };
-            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_type));
-            if let Some(code) = &error.code {
-                attrs.push(KeyValue::new(
-                    attr::LASH_ERROR_CODE,
-                    code.spelling().to_string(),
-                ));
+            TraceEvent::DomainCompleted { completion } => {
+                completion.status == TraceDomainStatus::Failed
             }
-            attrs.push(KeyValue::new(attr::LASH_ERROR_RETRYABLE, error.retryable));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_LLM_STREAM_SUMMARY_JSON,
-                stream_summary,
-            );
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_RETRY_ATTEMPTS_JSON,
-                attempts,
-            );
+            _ => record.event.is_failed(),
         }
-        TraceEvent::ProviderRequest { event } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_PROVIDER_NAME,
-                event.provider.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_PROVIDER_ENDPOINT,
-                event.endpoint.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_SEQUENCE,
-                event.sequence as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_ELAPSED_MS,
-                event.elapsed_ms as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_REQUEST_BODY_LEN,
-                event.body_len as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_REQUEST_BODY_SHA256,
-                event.body_sha256.clone(),
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_REQUEST_BODY_JSON,
-                &event.body_json,
-            );
-            push_opt(
-                &mut attrs,
-                attr::LASH_REQUEST_BODY_JSON_OMITTED_REASON,
-                &event.body_json_omitted_reason,
-            );
-        }
-        TraceEvent::ProviderReplayDropped { event } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_REPLAY_KIND,
-                event.replay_kind.code(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_REPLAY_DROP_REASON,
-                event.reason.code(),
-            ));
-            if let Some(route) = &event.minting_route {
-                attrs.push(KeyValue::new(
-                    attr::LASH_REPLAY_MINTING_PROVIDER,
-                    route.provider.clone(),
-                ));
-                attrs.push(KeyValue::new(
-                    attr::LASH_REPLAY_MINTING_ENDPOINT,
-                    route.endpoint.clone(),
-                ));
-                attrs.push(KeyValue::new(
-                    attr::LASH_REPLAY_MINTING_MODEL,
-                    route.model.clone(),
-                ));
-            }
-            attrs.push(KeyValue::new(
-                attr::LASH_REPLAY_SERVING_PROVIDER,
-                event.serving_route.provider.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_REPLAY_SERVING_ENDPOINT,
-                event.serving_route.endpoint.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_REPLAY_SERVING_MODEL,
-                event.serving_route.model.clone(),
-            ));
-        }
-        TraceEvent::EffectEnvelopeDiff { event } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_EFFECT_ENVELOPE_RECORDED_HASH,
-                event.recorded_envelope_hash.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_EFFECT_ENVELOPE_RECONSTRUCTED_HASH,
-                event.reconstructed_envelope_hash.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_EFFECT_ENVELOPE_DIVERGENT_PATH_COUNT,
-                event.divergent_paths.len() as i64,
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_EFFECT_ENVELOPE_DIVERGENT_PATHS_JSON,
-                &event.divergent_paths,
-            );
-        }
-        TraceEvent::ProviderStreamEvent { event } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_PROVIDER_NAME,
-                event.provider.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_SEQUENCE,
-                event.sequence as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_ELAPSED_MS,
-                event.elapsed_ms as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_EVENT_NAME,
-                event.event_name.clone(),
-            ));
-            push_opt(&mut attrs, attr::LASH_STREAM_ITEM_ID, &event.item_id);
-            if let Some(output_index) = event.output_index {
-                attrs.push(KeyValue::new(attr::LASH_STREAM_OUTPUT_INDEX, output_index));
-            }
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_RAW_LEN,
-                event.raw_len as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_RAW_SHA256,
-                event.raw_sha256.clone(),
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_STREAM_RAW_JSON,
-                &event.raw_json,
-            );
-        }
-        TraceEvent::RuntimeStreamEvent { event } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_SEQUENCE,
-                event.sequence as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_ELAPSED_MS,
-                event.elapsed_ms as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_STREAM_EVENT_NAME,
-                event.event_name.clone(),
-            ));
-            if let Some(text) = &event.visible_text {
-                attrs.push(KeyValue::new(
-                    attr::LASH_STREAM_VISIBLE_CHARS,
-                    text.len() as i64,
-                ));
-            }
-            if let Some(text) = &event.raw_text {
-                attrs.push(KeyValue::new(
-                    attr::LASH_STREAM_RAW_CHARS,
-                    text.len() as i64,
-                ));
-            }
-            push_opt(&mut attrs, attr::LASH_STREAM_ITEM_ID, &event.item_id);
-            push_opt(&mut attrs, attr::LASH_STREAM_BLOCK_ID, &event.block_id);
-            if let Some(output_index) = event.output_index {
-                attrs.push(KeyValue::new(attr::LASH_STREAM_OUTPUT_INDEX, output_index));
-            }
-            push_opt(&mut attrs, attr::LASH_TOOL_CALL_ID, &event.call_id);
-            push_opt(&mut attrs, attr::LASH_TOOL_NAME, &event.tool_name);
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_TOOL_INPUT_JSON,
-                &event.input_json,
-            );
-            if let Some(usage) = &event.usage {
-                usage_attributes(&mut attrs, attr::GEN_AI_USAGE, usage);
-            }
-        }
-        TraceEvent::ToolCallStarted {
-            call_id,
-            provider_call_id,
-            name,
-            args,
-            issuing_node_id,
-        } => {
-            attrs.push(KeyValue::new(attr::LASH_TOOL_CALL_ID, call_id.to_string()));
-            push_opt(
-                &mut attrs,
-                attr::LASH_TOOL_PROVIDER_CALL_ID,
-                provider_call_id,
-            );
-            push_opt(&mut attrs, attr::LASH_TOOL_ISSUING_NODE_ID, issuing_node_id);
-            attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
-            push_payload_json(&mut attrs, options, attr::LASH_TOOL_ARGS_JSON, args);
-        }
-        TraceEvent::ToolCallCompleted {
-            call_id,
-            provider_call_id,
-            name,
-            args,
-            output,
-            duration_ms,
-            issuing_node_id,
-            attempts,
-        } => {
-            attrs.push(KeyValue::new(attr::LASH_TOOL_CALL_ID, call_id.to_string()));
-            push_opt(
-                &mut attrs,
-                attr::LASH_TOOL_PROVIDER_CALL_ID,
-                provider_call_id,
-            );
-            push_opt(&mut attrs, attr::LASH_TOOL_ISSUING_NODE_ID, issuing_node_id);
-            attrs.push(KeyValue::new(attr::LASH_TOOL_NAME, name.clone()));
-            attrs.push(KeyValue::new(attr::LASH_TOOL_SUCCESS, output.is_success()));
-            attrs.push(KeyValue::new(
-                attr::LASH_TOOL_STATUS,
-                format!("{:?}", output.status()).to_ascii_lowercase(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_TOOL_DURATION_MS,
-                *duration_ms as i64,
-            ));
-            push_payload_json(&mut attrs, options, attr::LASH_TOOL_ARGS_JSON, args);
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_TOOL_RESULT_JSON,
-                &output.value_for_projection(),
-            );
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_RETRY_ATTEMPTS_JSON,
-                attempts,
-            );
-        }
-        TraceEvent::JournaledEffectStarted {
-            effect_name,
-            effect_kind,
-        }
-        | TraceEvent::JournaledEffectSettled {
-            effect_name,
-            effect_kind,
-            ..
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_EFFECT_NAME,
-                effect_name.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_EFFECT_KIND,
-                effect_kind.clone(),
-            ));
-            if let TraceEvent::JournaledEffectSettled { status, .. } = &record.event {
-                attrs.push(KeyValue::new(attr::LASH_DURABLE_STATUS, status.wire_tag()));
-            }
-        }
-        TraceEvent::DurableWaitParked { wait_kind } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_WAIT_KIND,
-                wait_kind.clone(),
-            ));
-        }
-        TraceEvent::DurableWaitResolved {
-            wait_kind,
-            resolution,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_WAIT_KIND,
-                wait_kind.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_RESOLUTION,
-                resolution.wire_tag(),
-            ));
-        }
-        TraceEvent::DurableTimerStarted { duration_ms }
-        | TraceEvent::DurableTimerResolved { duration_ms, .. } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_TIMER_DURATION_MS,
-                *duration_ms as i64,
-            ));
-            if let TraceEvent::DurableTimerResolved { status, .. } = &record.event {
-                attrs.push(KeyValue::new(attr::LASH_DURABLE_STATUS, status.wire_tag()));
-            }
-        }
-        TraceEvent::DurableSegmentBoundary {
-            reason,
-            effects_executed,
-            journaled_bytes_estimate,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_BOUNDARY_REASON,
-                reason.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_DURABLE_EFFECTS_EXECUTED,
-                *effects_executed as i64,
-            ));
-            if let Some(bytes) = journaled_bytes_estimate {
-                attrs.push(KeyValue::new(
-                    attr::LASH_DURABLE_JOURNALED_BYTES_ESTIMATE,
-                    *bytes as i64,
-                ));
-            }
-        }
-        TraceEvent::StoreErrorObserved {
-            operation,
-            error_class,
-            message,
-        } => {
-            attrs.push(KeyValue::new(attr::LASH_STORE_OPERATION, operation.clone()));
-            attrs.push(KeyValue::new(attr::ERROR_TYPE, error_class.wire_tag()));
-            attrs.push(KeyValue::new(attr::ERROR_MESSAGE, message.clone()));
-        }
-        TraceEvent::RlmStep {
-            step_index,
-            outcome,
-        } => {
-            attrs.push(KeyValue::new(attr::LASH_RLM_STEP_INDEX, *step_index as i64));
-            match outcome {
-                crate::TraceRlmStepOutcome::Ok => {
-                    attrs.push(KeyValue::new(attr::LASH_RLM_STEP_OUTCOME, "ok"));
+    }
+    fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
+        match &record.event {
+            TraceEvent::LlmAttemptCompleted { attempt } => {
+                out.push(A::ModelAttemptOrdinal.value(i64::from(attempt.ordinal)));
+                out.push(A::Outcome.value(match attempt.outcome {
+                    TraceLlmAttemptOutcome::Completed => "completed",
+                    TraceLlmAttemptOutcome::Failed => "failed",
+                    TraceLlmAttemptOutcome::Aborted => "aborted",
+                    TraceLlmAttemptOutcome::Interrupted => "interrupted",
+                }));
+                if let Some(model) = &attempt.response_model {
+                    out.push(A::ResponseModel.value(model.clone()));
                 }
-                crate::TraceRlmStepOutcome::Failure { diagnostic } => {
-                    attrs.push(KeyValue::new(attr::LASH_RLM_STEP_OUTCOME, "failure"));
-                    attrs.push(KeyValue::new(attr::ERROR_MESSAGE, diagnostic.clone()));
+                if let Some(usage) = &attempt.usage {
+                    usage_attributes(usage, out);
+                }
+                if let Some(error) = &attempt.error {
+                    out.push(
+                        A::ErrorType.value(
+                            error
+                                .code
+                                .as_ref()
+                                .map(ToString::to_string)
+                                .unwrap_or_else(|| error.class.code().to_owned()),
+                        ),
+                    );
+                } else if self.failed(record) {
+                    out.push(A::ErrorType.value("provider_failure"));
                 }
             }
-        }
-        TraceEvent::ProtocolStep { plugin_id, payload } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_PROTOCOL_PLUGIN_ID,
-                plugin_id.clone(),
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_PROTOCOL_PAYLOAD_JSON,
-                payload,
-            );
-        }
-        TraceEvent::ExecCodeStarted { .. }
-        | TraceEvent::ExecCodeCompleted { .. }
-        | TraceEvent::ExecCodeFailed { .. }
-        | TraceEvent::ObservationProjection { .. } => {
-            attrs.push(KeyValue::new(attr::LASH_PROTOCOL_PLUGIN_ID, "runtime"));
-            attrs.push(KeyValue::new(
-                attr::LASH_PROTOCOL_DIAGNOSTIC_PHASE,
-                record.event.kind(),
-            ));
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_PROTOCOL_PAYLOAD_JSON,
-                &typed_diagnostic_protocol_payload(&record.event),
-            );
-        }
-        TraceEvent::LanguageExecution { language, event } => {
-            language_execution_attributes(&mut attrs, language, event);
-            push_payload_json(
-                &mut attrs,
-                options,
-                attr::LASH_LANGUAGE_EXECUTION_EVENT_JSON,
-                event,
-            );
-        }
-        TraceEvent::TurnCompleted { outcome } => {
-            attrs.push(KeyValue::new(attr::LASH_TURN_STATUS, outcome.status_tag()));
-            match outcome {
-                crate::TraceTurnOutcome::Completed { done_reason } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_TURN_DONE_REASON,
-                        done_reason.wire_tag(),
-                    ));
+            TraceEvent::DomainCompleted { completion } => {
+                out.push(A::Outcome.value(match completion.status {
+                    TraceDomainStatus::Completed => "completed",
+                    TraceDomainStatus::Failed => "failed",
+                    TraceDomainStatus::Cancelled => "cancelled",
+                    TraceDomainStatus::Yielded => "yielded",
+                }));
+                if let Some(kind) = &completion.intent_kind {
+                    out.push(A::ToolIntentKind.value(kind.clone()));
                 }
-                crate::TraceTurnOutcome::Failed { done_reason } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_TURN_DONE_REASON,
-                        done_reason.wire_tag(),
-                    ));
+                if let Some(id) = &completion.tool_call_id {
+                    out.push(A::ToolCallId.value(id.clone()));
                 }
-                crate::TraceTurnOutcome::SegmentBoundary { done_reason } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_TURN_DONE_REASON,
-                        done_reason.clone(),
-                    ));
+                if let Some(usage) = &completion.usage {
+                    usage_attributes(usage, out);
                 }
-                crate::TraceTurnOutcome::AgentFrameSwitch { frame_switch } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_TURN_AGENT_FRAME_SWITCH_FRAME_KEY,
-                        frame_switch.frame_key.clone(),
-                    ));
-                }
-                crate::TraceTurnOutcome::Cancelled { evidence } => {
-                    attrs.push(KeyValue::new(
-                        attr::LASH_TURN_CANCELLATION_REQUEST_ID,
-                        evidence.request_id.clone(),
-                    ));
-                    if let Some(origin) = &evidence.origin {
-                        attrs.push(KeyValue::new(
-                            attr::LASH_TURN_CANCELLATION_ORIGIN,
-                            origin.clone(),
-                        ));
-                    }
-                    if let Some(reason) = &evidence.reason {
-                        attrs.push(KeyValue::new(
-                            attr::LASH_TURN_CANCELLATION_REASON,
-                            reason.clone(),
-                        ));
-                    }
+                if let Some(code) = &completion.error_code {
+                    out.push(A::ErrorType.value(code.to_string()));
+                } else if self.failed(record) {
+                    out.push(A::ErrorType.value("domain_failure"));
                 }
             }
-        }
-        TraceEvent::Custom { name, payload } => {
-            attrs.push(KeyValue::new(attr::LASH_CUSTOM_NAME, name.clone()));
-            push_payload_json(&mut attrs, options, attr::LASH_CUSTOM_PAYLOAD_JSON, payload);
-        }
-    }
-    attrs
-}
-
-fn usage_attributes(attrs: &mut Vec<KeyValue>, prefix: &str, usage: &TraceTokenUsage) {
-    attrs.push(KeyValue::new(
-        format!("{prefix}.input_tokens"),
-        usage.input_tokens,
-    ));
-    attrs.push(KeyValue::new(
-        format!("{prefix}.output_tokens"),
-        usage.output_tokens,
-    ));
-    attrs.push(KeyValue::new(
-        format!("{prefix}.cache_read_input_tokens"),
-        usage.cache_read_input_tokens,
-    ));
-    attrs.push(KeyValue::new(
-        format!("{prefix}.cache_write_input_tokens"),
-        usage.cache_write_input_tokens,
-    ));
-    attrs.push(KeyValue::new(
-        format!("{prefix}.reasoning_output_tokens"),
-        usage.reasoning_output_tokens,
-    ));
-}
-
-fn push_opt<T: AsRef<str>>(attrs: &mut Vec<KeyValue>, key: &'static str, value: &Option<T>) {
-    if let Some(value) = value {
-        attrs.push(KeyValue::new(key, value.as_ref().to_string()));
-    }
-}
-
-fn push_payload_json<T: serde::Serialize>(
-    attrs: &mut Vec<KeyValue>,
-    options: &OtelTraceOptions,
-    key: &'static str,
-    value: &T,
-) {
-    if options.include_payload_json
-        && let Ok(json) = serde_json::to_string(value)
-    {
-        attrs.push(KeyValue::new(key, json));
-    }
-}
-
-fn otel_value(value: &Value) -> OtelValue {
-    match value {
-        Value::Bool(value) => OtelValue::Bool(*value),
-        Value::Number(value) => {
-            if let Some(value) = value.as_i64() {
-                OtelValue::I64(value)
-            } else if let Some(value) = value.as_u64() {
-                OtelValue::I64(value.min(i64::MAX as u64) as i64)
-            } else if let Some(value) = value.as_f64() {
-                OtelValue::F64(value)
-            } else {
-                OtelValue::String(value.to_string().into())
+            TraceEvent::ToolCallCompleted { call_id, .. } => {
+                out.push(A::ToolCallId.value(call_id.to_string()));
+                if self.failed(record) {
+                    out.push(A::ErrorType.value("tool_failure"));
+                }
             }
-        }
-        Value::String(value) => OtelValue::String(value.clone().into()),
-        Value::Null => OtelValue::String("null".into()),
-        Value::Array(_) | Value::Object(_) => {
-            OtelValue::String(serde_json::to_string(value).unwrap_or_default().into())
-        }
-    }
-}
-
-fn parent_for<T>(
-    record: &TraceRecord,
-    active: &Mutex<HashMap<String, ActiveSpan<T>>>,
-) -> Option<SpanContext>
-where
-    T: Span,
-{
-    let key = turn_key(&record.context)?;
-    let active = active.lock_recover();
-    active.get(&key).map(|span| span.context.clone())
-}
-
-/// Active-span key for the turn this context belongs to, in the shared
-/// `graph_node_id` key space ([`crate::turn_node_id`]). A context the emitter
-/// already stamped but that carries no derivable turn identity falls back to
-/// its `graph_node_id` as-is.
-fn turn_key(context: &TraceContext) -> Option<String> {
-    turn_node_id(context).or_else(|| context.graph_node_id.clone())
-}
-
-fn llm_key(context: &TraceContext) -> Option<String> {
-    context.llm_call_id.as_deref().map(llm_node_id)
-}
-
-fn tool_key(event: &TraceEvent) -> Option<String> {
-    match event {
-        TraceEvent::ToolCallStarted { call_id, .. }
-        | TraceEvent::ToolCallCompleted { call_id, .. } => Some(tool_node_id(call_id.as_str())),
-        _ => None,
-    }
-}
-
-fn typed_diagnostic_protocol_payload(event: &TraceEvent) -> Value {
-    let mut payload = serde_json::to_value(event).unwrap_or(Value::Null);
-    if let Value::Object(object) = &mut payload {
-        object.remove("type");
-    }
-    serde_json::json!({
-        "diagnostic": {
-            "phase": event.kind(),
-            "payload": payload,
-        }
-    })
-}
-
-fn record_time(record: &TraceRecord) -> SystemTime {
-    record.timestamp.into()
-}
-
-fn event_type(event: &TraceEvent) -> &'static str {
-    event.kind()
-}
-
-fn error_status(record: &TraceRecord) -> Status {
-    match &record.event {
-        TraceEvent::RlmStep {
-            outcome: crate::TraceRlmStepOutcome::Failure { diagnostic },
-            ..
-        } => Status::error(diagnostic.clone()),
-        TraceEvent::LlmCallFailed { .. } => Status::error("provider call failed"),
-        TraceEvent::ToolCallCompleted { name, .. } => {
-            Status::error(format!("tool call failed: {name}"))
-        }
-        TraceEvent::TurnCompleted { outcome } => match outcome {
-            crate::TraceTurnOutcome::Failed { done_reason } => {
-                Status::error(format!("turn failed: {}", done_reason.wire_tag()))
+            TraceEvent::TurnCompleted { outcome } => {
+                out.push(A::Outcome.value(match outcome {
+                    TraceTurnOutcome::Completed { .. } => "completed",
+                    TraceTurnOutcome::AgentFrameSwitch { .. } => "agent_frame_switch",
+                    TraceTurnOutcome::SegmentBoundary { .. } => "segment_boundary",
+                    TraceTurnOutcome::Cancelled { .. } => "cancelled",
+                    TraceTurnOutcome::Failed { .. } => "failed",
+                }));
+                if self.failed(record) {
+                    out.push(A::ErrorType.value("turn_failure"));
+                }
             }
-            _ => Status::error(outcome.status_tag()),
-        },
-        TraceEvent::EffectEnvelopeDiff { event } => Status::error(format!(
-            "effect envelope hash mismatch at {} paths",
-            event.divergent_paths.len()
-        )),
-        TraceEvent::JournaledEffectSettled { effect_name, .. } => {
-            Status::error(format!("journaled effect failed: {effect_name}"))
-        }
-        TraceEvent::DurableWaitResolved { wait_kind, .. } => {
-            Status::error(format!("durable wait failed: {wait_kind}"))
-        }
-        TraceEvent::DurableTimerResolved { .. } => Status::error("durable timer failed"),
-        TraceEvent::StoreErrorObserved { message, .. } => Status::error(message.clone()),
-        TraceEvent::LanguageExecution { event, .. } => match &event.payload {
-            crate::TraceLanguageExecutionPayload::NodeFailed { failure, .. } => {
-                Status::error(failure.message().to_owned())
+            TraceEvent::DurableWaitResolved { wait_kind, .. } => {
+                out.push(A::WaitKind.value(wait_kind.clone()));
+                if self.failed(record) {
+                    out.push(A::ErrorType.value("wait_failure"));
+                }
             }
-            crate::TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => Status::error(
-                error
-                    .as_deref()
-                    .unwrap_or("language execution failed")
-                    .to_string(),
-            ),
-            _ => Status::error("language execution failed"),
-        },
-        _ => Status::error("lash trace event failed"),
+            TraceEvent::DurableTimerResolved { .. } => out.push(A::WaitKind.value("timer")),
+            _ if self.failed(record) => out.push(A::ErrorType.value("domain_failure")),
+            _ => {}
+        }
     }
+}
+fn usage_attributes(usage: &TraceTokenUsage, out: &mut Vec<KeyValue>) {
+    out.extend([
+        A::InputTokens.value(usage.input_tokens),
+        A::OutputTokens.value(usage.output_tokens),
+        A::CacheReadTokens.value(usage.cache_read_input_tokens),
+        A::CacheWriteTokens.value(usage.cache_write_input_tokens),
+        A::ReasoningTokens.value(usage.reasoning_output_tokens),
+    ]);
 }
 
 #[cfg(test)]

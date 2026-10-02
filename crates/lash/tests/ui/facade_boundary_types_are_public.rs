@@ -413,3 +413,17 @@ fn main() {
     let _ = pending_turn_input_cancel_facade_is_nameable;
     let _ = leaked_signature_types_are_homed;
 }
+
+#[cfg(feature = "otel-trace")]
+fn telemetry_types_are_nameable(
+    telemetry: lash::tracing::OtelTelemetry,
+    builder: lash::LashCoreBuilder,
+) -> lash::LashCoreBuilder {
+    use lash::tracing::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, TelemetryMetrics, otel};
+    let _: &OtelOptions = telemetry.options();
+    let _: &TelemetryMetrics = telemetry.metrics();
+    let _: OtelPayloadExport = OtelPayloadExport::Off;
+    let _: Option<Arc<dyn OtelSpanEnricher>> = None;
+    let _: Option<otel::trace::SpanContext> = None;
+    builder.telemetry(telemetry)
+}

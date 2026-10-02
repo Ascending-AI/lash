@@ -519,3 +519,361 @@ async fn attempt_context_is_scoped_to_each_response_body_poll() {
     }
     assert_eq!(super::current_attempt_context(), None);
 }
+
+type AttemptScopeSample = (
+    lash_trace::AttemptObservation,
+    lash_trace::DurableTraceScope,
+);
+
+#[derive(Clone)]
+struct ServerAttemptProbe {
+    seen: Arc<std::sync::Mutex<Vec<AttemptScopeSample>>>,
+    tracing: lash_core::trace::TraceRuntime,
+}
+
+#[restate_sdk::service]
+impl ServerAttemptProbe {
+    #[handler]
+    async fn run(&self, ctx: Context<'_>, input: Bytes) -> HandlerResult<Bytes> {
+        let controller = crate::RestateRuntimeEffectController::new_for_test(ctx);
+        let attempt = controller.attempt_observation().expect("delivery metadata");
+        assert_eq!(
+            attempt.invocation_id.as_deref(),
+            Some(controller.context().invocation_id())
+        );
+        let tracing = self.tracing.clone();
+        let Json(scope) = controller
+            .context()
+            .run(move || async move {
+                let scope_id =
+                    lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Run {
+                        session_id: "attempt-law".into(),
+                        root: "root".into(),
+                    });
+                let candidate = tracing
+                    .scopes()
+                    .propose(&scope_id, &lash_trace::TraceCause::Root);
+                let scope = lash_trace::DurableTraceScope {
+                    scope: scope_id,
+                    cause: lash_trace::TraceCause::Root,
+                    anchor: candidate.anchor(),
+                    started_at_ms: 1_700_000_000_000,
+                };
+                candidate.settle(lash_trace::TraceCandidateOutcome::Selected);
+                Ok::<_, HandlerError>(Json(scope))
+            })
+            .name("retained-root-anchor")
+            .await?;
+        for ordinal in 0..2 {
+            let seen = self.seen.clone();
+            let attempt = attempt.clone();
+            let scope = scope.clone();
+            let tracing = self.tracing.clone();
+            controller
+                .context()
+                .run(move || async move {
+                    let attempt_id = lash_trace::TraceAttemptId::new(format!(
+                        "{}-{ordinal}",
+                        attempt.context.as_ref().expect("server tracing").span_id(),
+                    ));
+                    let permit = lash_trace::EmissionPermit::live_execution(attempt_id.clone());
+                    tracing.emitter().emit(
+                        Some(&permit),
+                        &scope,
+                        Some(&attempt),
+                        || lash_trace::TraceRecordIdentity::Live {
+                            scope: scope.scope.clone(),
+                            attempt: attempt_id,
+                            ordinal: 0,
+                        },
+                        scope.started_at_ms + ordinal + 1,
+                        || {
+                            (
+                                lash_trace::TraceContext::default(),
+                                lash_trace::TraceEvent::ExecCodeCompleted {
+                                    duration_ms: 1,
+                                    output: String::new(),
+                                    output_chars: 0,
+                                    observation_count: 0,
+                                    observation_projections: Vec::new(),
+                                    error: None,
+                                    terminal_finish: None,
+                                    tool_calls: Vec::new(),
+                                },
+                            )
+                        },
+                    );
+                    seen.lock()
+                        .expect("live observations")
+                        .push((attempt, scope));
+                    Ok::<_, HandlerError>(Json(ordinal))
+                })
+                .name(format!("otel-live-{ordinal}"))
+                .await?;
+            if ordinal == 0 {
+                controller
+                    .context()
+                    .sleep(Duration::from_millis(200))
+                    .await?;
+            }
+        }
+        Ok(input)
+    }
+}
+
+async fn capture_otlp_request(stream: &mut tokio::net::TcpStream) -> serde_json::Value {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let (head_end, length) = loop {
+        let read = stream.read(&mut chunk).await.expect("OTLP request head");
+        assert_ne!(read, 0, "incomplete OTLP head");
+        bytes.extend_from_slice(&chunk[..read]);
+        assert!(bytes.len() <= 1024 * 1024, "OTLP fixture budget");
+        if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+            let head = std::str::from_utf8(&bytes[..end]).expect("OTLP HTTP headers");
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().expect("OTLP length"))
+                })
+                .expect("OTLP content length");
+            assert!(length <= 1024 * 1024, "OTLP fixture budget");
+            break (end + 4, length);
+        }
+    };
+    while bytes.len() < head_end + length {
+        let read = stream.read(&mut chunk).await.expect("OTLP request body");
+        assert_ne!(read, 0, "incomplete OTLP body");
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    let request = serde_json::from_slice(&bytes[head_end..head_end + length]).expect("OTLP JSON");
+    stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}").await.expect("OTLP acknowledgement");
+    request
+}
+
+fn exported_attempt_matches(
+    exported: &[serde_json::Value],
+    attempt: &lash_trace::AttemptObservation,
+) -> bool {
+    let carrier = attempt.context.as_ref().expect("server tracing enabled");
+    let trace_id = carrier.trace_id().to_string();
+    let span_id = carrier.span_id().to_string();
+    exported.iter().any(|batch| {
+        batch["resourceSpans"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|resource| {
+                resource["scopeSpans"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|scope| {
+                        scope["spans"].as_array().into_iter().flatten().any(|span| {
+                            span["name"]
+                                .as_str()
+                                .is_some_and(|name| name.starts_with("invocation-attempt "))
+                                && span["traceId"].as_str() == Some(trace_id.as_str())
+                                && span["spanId"].as_str() == Some(span_id.as_str())
+                                && span["attributes"].as_array().into_iter().flatten().any(
+                                    |attribute| {
+                                        attribute["key"].as_str() == Some("restate.invocation.id")
+                                            && attribute["value"]["stringValue"].as_str()
+                                                == attempt.invocation_id.as_deref()
+                                    },
+                                )
+                        })
+                    })
+            })
+    })
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the private gate supplies the server and collector addresses"
+)]
+#[tokio::test]
+#[ignore = "requires the pinned Restate server with service tracing and replay enabled"]
+async fn server_attempt_headers_link_to_lash_domain_spans() {
+    let admin = std::env::var("RESTATE_ADMIN_URL").expect("live admin URL");
+    let ingress = std::env::var("RESTATE_INGRESS_URL").expect("live ingress URL");
+    let gate = std::env::var("KILN_GATE_ID").expect("private gate identity");
+    let collector_address =
+        std::env::var("LASH_OTEL_COLLECTOR_BIND").expect("private collector address");
+    let collector = tokio::net::TcpListener::bind(collector_address)
+        .await
+        .expect("collector bind");
+    let exported = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let batches = exported.clone();
+    let (stop_collector, collector_stopped) = tokio::sync::oneshot::channel();
+    let collector_task = tokio::spawn(async move {
+        let mut stopped = collector_stopped;
+        loop {
+            tokio::select! {
+                connection = collector.accept() => {
+                    let (mut stream, _) = connection.expect("collector connection");
+                    let batch = capture_otlp_request(&mut stream).await;
+                    batches.lock().expect("exported batches").push(batch);
+                }
+                _ = &mut stopped => break,
+            }
+        }
+    });
+    let exporter = opentelemetry_sdk::trace::InMemorySpanExporter::default();
+    let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
+    let telemetry = Arc::new(lash_trace::otel::OtelTelemetry::new(
+        &tracer_provider,
+        &meter_provider,
+        lash_trace::otel::OtelOptions::default(),
+    ));
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let endpoint = Endpoint::builder()
+        .bind(ServerAttemptProbe {
+            seen: seen.clone(),
+            tracing: lash_core::trace::TraceRuntime::default()
+                .with_scopes(telemetry.clone())
+                .with_projector(telemetry.clone())
+                .with_metrics(telemetry.metrics().clone()),
+        })
+        .build();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("endpoint bind");
+    let address = listener.local_addr().expect("endpoint address");
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(super::serve_endpoint(
+        listener,
+        endpoint,
+        super::RestateEndpointLimits::new(1024, 1032),
+        async {
+            let _ = stopped.await;
+        },
+    ));
+    let result = tokio::time::timeout(Duration::from_secs(30), async {
+        let client = reqwest::Client::new();
+        let registration = client
+            .post(format!("{admin}/deployments"))
+            .json(&serde_json::json!({"uri":format!("http://{address}")}))
+            .send()
+            .await
+            .expect("register endpoint");
+        assert!(
+            registration.status().is_success(),
+            "{}",
+            registration.text().await.expect("registration error")
+        );
+        let output = client
+            .post(format!("{ingress}/ServerAttemptProbe/run"))
+            .header("content-type", "application/octet-stream")
+            .header("idempotency-key", format!("{gate}-attempt-law"))
+            .body("probe")
+            .send()
+            .await
+            .expect("native invocation");
+        assert!(
+            output.status().is_success(),
+            "{}",
+            output.text().await.expect("invocation error")
+        );
+        assert_eq!(output.bytes().await.expect("result").as_ref(), b"probe");
+        let attempts = seen.lock().expect("live attempts").clone();
+        assert_eq!(
+            attempts.len(),
+            2,
+            "only the two fresh bodies observe attempts"
+        );
+        assert_eq!(attempts[0].1, attempts[1].1, "root anchor survives replay");
+        let scope = &attempts[0].1;
+        let attempts = attempts
+            .iter()
+            .map(|(attempt, _)| attempt)
+            .collect::<Vec<_>>();
+        assert_eq!(attempts[0].invocation_id, attempts[1].invocation_id);
+        assert!(
+            !attempts[0]
+                .context
+                .as_ref()
+                .expect("first context")
+                .same_span(attempts[1].context.as_ref().expect("resumed context")),
+            "resume must deliver a fresh server attempt"
+        );
+        loop {
+            let matched = {
+                let exported = exported.lock().expect("exported batches");
+                attempts
+                    .iter()
+                    .all(|attempt| exported_attempt_matches(&exported, attempt))
+            };
+            if matched {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tracer_provider.force_flush().expect("domain export flush");
+        let spans = exporter.get_finished_spans().expect("Lash domain spans");
+        assert_eq!(
+            spans.len(),
+            3,
+            "one admission and two fresh domain spans, no infrastructure hierarchy"
+        );
+        let root = scope.anchor.context().expect("retained root anchor");
+        let admission = spans
+            .iter()
+            .find(|span| span.name == "lash.run.admitted")
+            .expect("root admission");
+        assert_eq!(
+            admission.span_context.trace_id().to_bytes(),
+            root.trace_id().to_bytes()
+        );
+        assert_eq!(
+            admission.span_context.span_id().to_bytes(),
+            root.span_id().to_bytes()
+        );
+        assert_eq!(admission.parent_span_id.to_bytes(), [0; 8]);
+        let domain = spans
+            .iter()
+            .filter(|span| span.name == "lash.exec_code")
+            .collect::<Vec<_>>();
+        assert_eq!(domain.len(), 2);
+        for (span, attempt) in domain.iter().zip(&attempts) {
+            assert_eq!(
+                span.span_context.trace_id().to_bytes(),
+                root.trace_id().to_bytes()
+            );
+            assert_eq!(span.parent_span_id.to_bytes(), root.span_id().to_bytes());
+            let carrier = attempt.context.as_ref().expect("server attempt context");
+            assert_eq!(
+                span.links.len(),
+                1,
+                "only the current server attempt is linked"
+            );
+            assert_eq!(
+                span.links[0].span_context.trace_id().to_bytes(),
+                carrier.trace_id().to_bytes()
+            );
+            assert_eq!(
+                span.links[0].span_context.span_id().to_bytes(),
+                carrier.span_id().to_bytes()
+            );
+            assert!(span.links[0].span_context.is_remote());
+            assert!(span.attributes.iter().any(|attribute| {
+                attribute.key.as_str() == "lash.attempt.invocation_id"
+                    && Some(attribute.value.to_string().as_str())
+                        == attempt.invocation_id.as_deref()
+            }));
+            assert_eq!(span.instrumentation_scope.name(), "lash");
+        }
+    })
+    .await;
+    let _ = stop.send(());
+    server.await.expect("endpoint shutdown");
+    let _ = stop_collector.send(());
+    collector_task.await.expect("collector shutdown");
+    result.expect("exported server attempt witness timed out");
+}

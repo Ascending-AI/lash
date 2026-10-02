@@ -710,8 +710,10 @@ PACKAGE_DEPS = {
             "lash_restate_test": "//crates/lash-restate-test:lash-restate-test",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_subagents": "//crates/lash-subagents:lash-subagents",
+            "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_typescript": "//crates/lash-typescript:lash-typescript",
             "lashlang": "//crates/lashlang:lashlang",
+            "opentelemetry_sdk": "//third-party/rust:p0236",
             "reqwest": "//third-party/rust:p0296",
             "rusqlite": "//third-party/rust:p0305",
             "sqlx": "//third-party/rust:p0361",
@@ -900,6 +902,7 @@ PACKAGE_DEPS = {
         "normal": {
             "chrono": "//third-party/rust:p0047",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "opentelemetry": "//third-party/rust:p0235",
             "schemars": "//third-party/rust:p0322",
             "serde": "//third-party/rust:p0331",
             "serde_json": "//third-party/rust:p0338",

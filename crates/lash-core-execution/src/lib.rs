@@ -697,7 +697,7 @@ pub use lash_sansio::{
 };
 
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
+pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,

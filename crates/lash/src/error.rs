@@ -5,6 +5,9 @@ use lash_sansio::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    /// A core may install only one identity-producing telemetry adapter.
+    #[error("telemetry was installed more than once; configure one adapter per core")]
+    DuplicateTelemetry,
     #[error(
         "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend)/LashCore::rlm_builder(backend, ...)"
     )]
@@ -335,6 +338,7 @@ impl EmbedError {
             // deployment that serves the recorded key repairs it.
             Self::Session(SessionError::LlmProfileUnavailable { .. }) => true,
             Self::MissingProtocolPlugin
+            | Self::DuplicateTelemetry
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
@@ -395,6 +399,7 @@ impl EmbedError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
+            | Self::DuplicateTelemetry
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
             | Self::BuildGenerationRebound(_)

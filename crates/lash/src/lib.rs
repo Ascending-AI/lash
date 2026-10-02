@@ -1451,8 +1451,6 @@ pub mod tracing {
         TraceLashlangNodeRetention,
     };
 
-    #[cfg(feature = "otel-trace")]
-    pub use lash_core::{OtelTraceOptions, OtelTraceSink};
     pub use lash_core::{
         TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry,
         TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
@@ -1467,6 +1465,10 @@ pub mod tracing {
         facade_support::parse_jsonl_records,
     };
     pub use lash_sansio::ExecutionNodeKind;
+    #[cfg(feature = "otel-trace")]
+    pub use lash_trace::otel::api as otel;
+    #[cfg(feature = "otel-trace")]
+    pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a
     /// `TurnCompleted` or tool-call variant carries. The `LanguageExecution`

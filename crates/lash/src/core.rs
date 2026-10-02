@@ -833,7 +833,11 @@ pub struct LashCoreBuilder {
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     // Core fields applied over the config the backend's ports assemble.
     trace_runtime: Option<lash_core::runtime::TraceRuntime>,
-    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+    trace_sinks: Vec<Arc<dyn lash_trace::TraceSink>>,
+    #[cfg(feature = "otel-trace")]
+    telemetry: Option<lash_trace::otel::OtelTelemetry>,
+    #[cfg(feature = "otel-trace")]
+    duplicate_telemetry: bool,
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
     termination: Option<TerminationPolicy>,
@@ -864,7 +868,11 @@ impl LashCoreBuilder {
             output_retention: None,
             process_wake_delivery_policy: None,
             trace_runtime: None,
-            trace_sink: None,
+            trace_sinks: Vec::new(),
+            #[cfg(feature = "otel-trace")]
+            telemetry: None,
+            #[cfg(feature = "otel-trace")]
+            duplicate_telemetry: false,
             trace_level: None,
             trace_context: None,
             termination: None,
@@ -1027,13 +1035,24 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Installs the runtime's single admission, projection and metrics adapter.
+    /// A second installation is refused when the core is built.
+    #[cfg(feature = "otel-trace")]
+    pub fn telemetry(mut self, telemetry: lash_trace::otel::OtelTelemetry) -> Self {
+        if self.telemetry.replace(telemetry).is_some() {
+            self.duplicate_telemetry = true;
+        }
+        self
+    }
+
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
-        self.trace_sink = Some(trace_sink);
+        self.trace_sinks.push(trace_sink);
         self
     }
 
     pub fn trace_jsonl_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
+        self.trace_sinks
+            .push(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
         self
     }
 
@@ -1121,6 +1140,10 @@ impl LashCoreBuilder {
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.
     pub fn build(mut self, drive_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
+        #[cfg(feature = "otel-trace")]
+        if self.duplicate_telemetry {
+            return Err(EmbedError::DuplicateTelemetry);
+        }
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);

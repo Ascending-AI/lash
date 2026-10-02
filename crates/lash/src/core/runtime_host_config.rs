@@ -60,8 +60,18 @@ impl LashCoreBuilder {
         if let Some(runtime) = self.trace_runtime.take() {
             core.tracing = runtime;
         }
-        if let Some(sink) = self.trace_sink.take() {
-            core.tracing = core.tracing.clone().with_trace_sink(sink);
+        #[cfg(feature = "otel-trace")]
+        if let Some(telemetry) = self.telemetry.take() {
+            let metrics = telemetry.metrics().clone();
+            let adapter = Arc::new(telemetry);
+            core.tracing = core
+                .tracing
+                .with_scopes(adapter.clone())
+                .with_projector(adapter)
+                .with_metrics(metrics);
+        }
+        for sink in self.trace_sinks.drain(..) {
+            core.tracing = core.tracing.with_trace_sink(sink);
         }
         if let Some(level) = self.trace_level.take() {
             core.tracing = core.tracing.clone().with_level(level);
@@ -91,5 +101,137 @@ impl LashCoreBuilder {
             core.control.process_tool_visibility_filter = Some(filter);
         }
         core
+    }
+}
+
+#[cfg(all(test, feature = "otel-trace"))]
+mod tests {
+    use super::*;
+    use lash_trace::otel::{OtelOptions, OtelTelemetry, api};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct MeterProvider(Arc<AtomicUsize>);
+    struct CounterSpy(Arc<AtomicUsize>);
+    impl api::metrics::SyncInstrument<u64> for CounterSpy {
+        fn measure(&self, _: u64, _: &[api::KeyValue]) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    impl api::metrics::MeterProvider for MeterProvider {
+        fn meter_with_scope(&self, _: api::InstrumentationScope) -> api::metrics::Meter {
+            struct Instruments(Arc<AtomicUsize>);
+            impl api::metrics::InstrumentProvider for Instruments {
+                fn u64_counter(
+                    &self,
+                    _: api::metrics::InstrumentBuilder<'_, api::metrics::Counter<u64>>,
+                ) -> api::metrics::Counter<u64> {
+                    api::metrics::Counter::new(Arc::new(CounterSpy(self.0.clone())))
+                }
+            }
+            api::metrics::Meter::new(Arc::new(Instruments(self.0.clone())))
+        }
+    }
+    fn telemetry(measurements: Arc<AtomicUsize>) -> OtelTelemetry {
+        OtelTelemetry::new(
+            &api::trace::noop::NoopTracerProvider::new(),
+            &MeterProvider(measurements),
+            OtelOptions::default(),
+        )
+    }
+    struct Sink(AtomicUsize);
+    impl lash_trace::TraceSink for Sink {
+        fn append(
+            &self,
+            _: &lash_trace::TraceRecord,
+        ) -> std::result::Result<(), lash_trace::TraceSinkError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn telemetry_installation_preserves_passive_sinks_and_refuses_a_second_adapter() {
+        let backend = crate::tests::double_backend().await;
+        let measurements = Arc::new(AtomicUsize::new(0));
+        let duplicate = LashCore::builder(backend.clone())
+            .telemetry(telemetry(measurements.clone()))
+            .telemetry(telemetry(measurements.clone()))
+            .build(crate::testing::runtime_lease_owner());
+        let error = match duplicate {
+            Err(error) => error,
+            Ok(_) => panic!("a second telemetry adapter was accepted"),
+        };
+        assert!(matches!(error, EmbedError::DuplicateTelemetry));
+        assert!(error.is_terminal());
+        assert!(!error.is_retryable());
+        let first = Arc::new(Sink(AtomicUsize::new(0)));
+        let second = Arc::new(Sink(AtomicUsize::new(0)));
+        let retained = Arc::new(Sink(AtomicUsize::new(0)));
+        let mut builder = crate::tests::explicit_ephemeral_facets(LashCore::builder(backend))
+            .trace_runtime(
+                lash_core::trace::TraceRuntime::default().with_trace_sink(retained.clone()),
+            )
+            .trace_sink(first.clone())
+            .telemetry(telemetry(measurements.clone()))
+            .trace_sink(second.clone());
+        let config = builder
+            .resolve_runtime_host_config()
+            .expect("telemetry config");
+        config
+            .tracing
+            .metrics()
+            .tool_intent
+            .record_executed("start_process");
+        assert_eq!(measurements.load(Ordering::Relaxed), 1);
+        let scope = lash_trace::DurableTraceScope {
+            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
+                session_id: "s".into(),
+                turn_id: "t".into(),
+            }),
+            cause: lash_trace::TraceCause::Root,
+            anchor: lash_trace::TraceAnchor::Untraced,
+            started_at_ms: 1,
+        };
+        for runtime in [&config.tracing, &lash_core::trace::TraceRuntime::default()] {
+            runtime.emitter().emit(
+                None,
+                &scope,
+                None,
+                || panic!("denied emission built an identity"),
+                2,
+                || panic!("denied emission built a record"),
+            );
+        }
+        lash_core::trace::TraceRuntime::default().emitter().emit(
+            Some(&lash_trace::EmissionPermit::new_transition()),
+            &scope,
+            None,
+            || panic!("unobserved emission built an identity"),
+            2,
+            || panic!("unobserved emission built a record"),
+        );
+        let permit = lash_trace::EmissionPermit::new_transition();
+        config.tracing.emitter().emit(
+            Some(&permit),
+            &scope,
+            None,
+            || lash_trace::TraceRecordIdentity::Transition {
+                scope: scope.scope.clone(),
+                transition: lash_trace::TraceTransitionKind::Terminal,
+                ordinal: 0,
+            },
+            2,
+            || {
+                (
+                    Default::default(),
+                    lash_trace::TraceEvent::TurnStarted {
+                        metadata: Default::default(),
+                    },
+                )
+            },
+        );
+        assert_eq!(retained.0.load(Ordering::Relaxed), 1);
+        assert_eq!(first.0.load(Ordering::Relaxed), 1);
+        assert_eq!(second.0.load(Ordering::Relaxed), 1);
     }
 }
