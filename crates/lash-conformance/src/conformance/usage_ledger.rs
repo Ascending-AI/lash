@@ -8,7 +8,8 @@ use super::deployment_view::DeploymentViewExt;
 use lash_core::store::{AdmissionId, RetentionBound, RootStartNonce};
 use lash_core::usage_accounting::*;
 use lash_core::{
-    DeploymentStore, LlmCallId, ModelKey, RuntimeOwner, SessionId, TokenUsage, UsageAccountingStore,
+    DeploymentStore, LlmCallId, LlmProfileKey, RuntimeOwner, SessionId, TokenUsage,
+    UsageAccountingStore,
 };
 use std::future::Future;
 use std::num::NonZeroU32;
@@ -47,7 +48,7 @@ fn admission(
         execution_scope_key: "scope".into(),
         run,
         source: "turn".into(),
-        model_key: ModelKey::new("model-key"),
+        profile_key: LlmProfileKey::new("model-key"),
         requested_model: "model".into(),
         admitted_at_ms,
     }
@@ -60,7 +61,7 @@ fn facts() -> Vec<UsageAttemptFact> {
                 provider_attempt: attempt,
                 llm_call_id: LlmCallId("deliberately-colliding-direct-id".into()),
                 source: "turn".into(),
-                model_key: ModelKey::new("model-key"),
+                profile_key: LlmProfileKey::new("model-key"),
                 requested_model: "model".into(),
                 served_model: None,
                 outcome: if call == 1 && attempt == 0 {
@@ -414,7 +415,7 @@ pub async fn each_fact_counts_once_under_any_grouping_order_and_repeat(
                                 provider_attempt: 0,
                                 llm_call_id: LlmCallId("same-call".into()),
                                 source: "turn".into(),
-                                model_key: ModelKey::new("model-key"),
+                                profile_key: LlmProfileKey::new("model-key"),
                                 requested_model: "model".into(),
                                 served_model: None,
                                 outcome: AttemptFactOutcome::Reported {
@@ -840,7 +841,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
         provider_attempt: 0,
         llm_call_id: LlmCallId(format!("call-{key}")),
         source: "turn".into(),
-        model_key: ModelKey::new(key),
+        profile_key: LlmProfileKey::new(key),
         requested_model: "shared-wire".into(),
         served_model: served.map(str::to_owned),
         outcome,
@@ -882,7 +883,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
                 execution_scope_key: "scope".into(),
                 run: s.run.clone(),
                 source: fact.source.clone(),
-                model_key: fact.model_key.clone(),
+                profile_key: fact.profile_key.clone(),
                 requested_model: fact.requested_model.clone(),
                 admitted_at_ms: 10 + index as u64,
             })
@@ -905,7 +906,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
             .iter()
             .map(|row| (
                 row.source.as_str(),
-                row.model_key.as_str(),
+                row.profile_key.as_str(),
                 row.requested_model.as_str(),
                 row.usage.input_tokens,
                 row.reported_attempts,
@@ -923,14 +924,14 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
         usage
             .outstanding
             .iter()
-            .map(|hole| (hole.model_key.as_str(), hole.requested_model.as_str()))
+            .map(|hole| (hole.profile_key.as_str(), hole.requested_model.as_str()))
             .collect::<Vec<_>>(),
         vec![("key-c", "shared-wire")],
         "the reconciliation hole names its key"
     );
     let report = usage.report();
     assert_eq!(report.by_attribution.len(), 3);
-    assert_eq!(report.by_model_key.len(), 3);
+    assert_eq!(report.by_profile_key.len(), 3);
     assert_eq!(report.by_requested_model.len(), 1);
     assert_eq!(
         report.by_requested_model["shared-wire"].usage.input_tokens,
@@ -942,7 +943,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
             .await
             .iter()
             .map(|fact| (
-                fact.model_key.as_str(),
+                fact.profile_key.as_str(),
                 fact.requested_model.as_str(),
                 fact.served_model.as_deref()
             ))
@@ -964,7 +965,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
         .map(|run| {
             let admission = run.admission.expect("dispatch admission");
             (
-                admission.model_key.as_str().to_owned(),
+                admission.profile_key.as_str().to_owned(),
                 admission.requested_model,
             )
         })
@@ -979,7 +980,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
     // The key is part of a fact's payload: the same identity offered under
     // another key is a conflict, never a silent re-attribution.
     let mut moved = settlements[0].clone();
-    moved.facts[0].model_key = ModelKey::new("key-b");
+    moved.facts[0].profile_key = LlmProfileKey::new("key-b");
     assert!(matches!(
         f.accounting.settle_usage(&moved, 30).await,
         Err(UsageAppendError::Conflict(_))
@@ -1008,7 +1009,7 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
     let row = corrected
         .rows
         .iter()
-        .find(|row| row.model_key.as_str() == "key-c")
+        .find(|row| row.profile_key.as_str() == "key-c")
         .expect("the corrected key's row");
     assert_eq!(
         (

@@ -17,7 +17,7 @@ struct GoogleCredentialCallContext<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct ResponseReading {
     pub(crate) stream_termination: StreamTermination,
-    pub(crate) defaults: lash_core::provider::ModelRequestDefaults,
+    pub(crate) defaults: lash_core::provider::LlmProfileRequestDefaults,
 }
 
 impl GoogleOAuthProvider {
@@ -420,7 +420,7 @@ impl GoogleOAuthProvider {
         let provider_trace = req.provider_trace.clone();
         let reading = ResponseReading {
             stream_termination: req
-                .model_capability
+                .llm_profile_capability
                 .stream_termination
                 .unwrap_or(self.stream_termination),
             defaults: req.request_defaults.clone(),
@@ -714,7 +714,7 @@ mod error_detail_tests {
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
             model_variant: Default::default(),
-            model_capability: Default::default(),
+            llm_profile_capability: Default::default(),
             extra_body: Default::default(),
             request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
@@ -749,7 +749,7 @@ mod error_detail_tests {
                 None,
                 ResponseReading {
                     stream_termination: StreamTermination::EofTolerated,
-                    defaults: lash_core::provider::ModelRequestDefaults {
+                    defaults: lash_core::provider::LlmProfileRequestDefaults {
                         expose_thinking: false,
                         ..Default::default()
                     },
@@ -817,18 +817,19 @@ mod error_detail_tests {
         let mut pinned = completion_request();
         pinned.generation.temperature =
             Some(lash_core::NonNegativeFiniteF64::new(0.5).expect("finite"));
-        pinned.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        pinned.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
         let mut parallel = completion_request();
         parallel.generation.parallel_tool_calls = Some(true);
         let mut effort = completion_request();
         effort.model_variant = lash_core::provider::ReasoningSelection::Effort("high".into());
         let mut gemini3_off = completion_request();
-        gemini3_off.model_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
-        gemini3_off.model_capability.reasoning = Some(lash_core::provider::ReasoningCapability {
-            efforts: vec!["high".to_string()],
-            disable: true,
-            ..lash_core::provider::ReasoningCapability::default()
-        });
+        gemini3_off.llm_profile_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
+        gemini3_off.llm_profile_capability.reasoning =
+            Some(lash_core::provider::ReasoningCapability {
+                efforts: vec!["high".to_string()],
+                disable: true,
+                ..lash_core::provider::ReasoningCapability::default()
+            });
         gemini3_off.model_variant = lash_core::provider::ReasoningSelection::Disabled;
         for (label, req, code) in [
             ("pinned", pinned, "lash:unsupported_generation_option"),
@@ -915,7 +916,7 @@ mod error_detail_tests {
         )
         .with_transport(transport.clone());
         let mut request = completion_request();
-        *request.model_capability.reasoning_retention = lash_core::ReasoningRetentionPolicy {
+        *request.llm_profile_capability.reasoning_retention = lash_core::ReasoningRetentionPolicy {
             capability: Some(lash_core::ReasoningRetentionCapability::OpenAiContext {
                 supported: vec![lash_core::OpenAiReasoningContext::CurrentTurn],
             }),

@@ -44,7 +44,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         no_progress_budget: lash_core::NoProgressBudget::bounded(3),
         model_variant: Default::default(),
         attachment_acceptance: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: Default::default(),

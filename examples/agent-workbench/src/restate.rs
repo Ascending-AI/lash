@@ -31,8 +31,9 @@ use serde_json::{Value, json};
 
 use crate::{
     AppError, AppErrorVerdict, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE,
-    ChannelTurnEvents, ModelSelection, TurnStreamState, apply_model_selection_to_session,
-    assistant_text_for_display, commit_assistant_transcript, enqueue_button_trigger_command,
+    ChannelTurnEvents, LlmProfileSelection, TurnStreamState,
+    apply_llm_profile_selection_to_session, assistant_text_for_display,
+    commit_assistant_transcript, enqueue_button_trigger_command,
     enqueue_mail_received_trigger_command,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
     workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
@@ -51,7 +52,7 @@ pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
     pub operation_id: String,
     pub session_id: SessionId,
     pub button: ButtonChoice,
-    pub model: ModelSelection,
+    pub model: LlmProfileSelection,
     pub pressed_at: String,
 }
 
@@ -73,7 +74,7 @@ pub(crate) struct WorkbenchProcessCancelWorkflowRequest {
 pub(crate) struct WorkbenchMailReceivedWorkflowRequest {
     pub operation_id: String,
     pub session_id: SessionId,
-    pub model: ModelSelection,
+    pub model: LlmProfileSelection,
     pub delivery: crate::mail::MailDelivery,
 }
 
@@ -657,7 +658,7 @@ async fn run_button_trigger(
     .await?;
     // The wake it delivers is a root the engine starts on its own.
     watch_session_roots(&state, &request.session_id).await;
-    state.set_selected_model(request.model.clone());
+    state.set_selected_llm_profile(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "button-trigger:{}",
@@ -712,7 +713,7 @@ async fn run_mail_received(
     .await?;
     // The wake it delivers is a root the engine starts on its own.
     watch_session_roots(&state, &request.session_id).await;
-    state.set_selected_model(request.model.clone());
+    state.set_selected_llm_profile(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
             "mail-received:{}",
@@ -1045,8 +1046,8 @@ pub(crate) async fn record_turn_output(
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
 ) -> Result<(), AppError> {
-    let selected_model = state.selected_model();
-    record_turn_output_for_model(
+    let selected_llm_profile = state.selected_llm_profile();
+    record_turn_output_for_profile(
         state,
         session,
         TurnOutputIdentity {
@@ -1056,7 +1057,7 @@ pub(crate) async fn record_turn_output(
         output,
         turn_state,
         trace_name,
-        Some(&selected_model.model),
+        Some(&selected_llm_profile.model),
     )
     .await
 }
@@ -1066,7 +1067,7 @@ pub(crate) struct TurnOutputIdentity<'a> {
     pub(crate) durable_turn_id: &'a TurnId,
 }
 
-pub(crate) async fn record_turn_output_for_model(
+pub(crate) async fn record_turn_output_for_profile(
     state: &AppState,
     session: &lash::LashSession,
     identity: TurnOutputIdentity<'_>,

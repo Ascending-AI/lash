@@ -95,7 +95,7 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
         },
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("retire-delete-session")

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// Capability metadata for a single model on a route, supplied by the host.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ModelCapability {
+pub struct LlmProfileCapability {
     /// Native instruction role on Responses, Codex, and Chat Completions.
     #[serde(default, skip_serializing_if = "InstructionRole::is_system")]
     pub instruction_role: InstructionRole,
@@ -316,7 +316,7 @@ impl CacheRetention {
 /// keeps only live concerns: its client, credentials, endpoint and limits.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ModelRequestDefaults {
+pub struct LlmProfileRequestDefaults {
     /// Surface the reasoning the provider streams in responses.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expose_thinking: bool,
@@ -343,7 +343,7 @@ pub struct ModelRequestDefaults {
     pub response_metadata_body_paths: Vec<String>,
 }
 
-impl ModelRequestDefaults {
+impl LlmProfileRequestDefaults {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -353,14 +353,14 @@ impl ModelRequestDefaults {
 /// codes are a stable contract: downstream consumers match on them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ModelEffortValidationCategory {
+pub enum LlmProfileEffortValidationCategory {
     UnsupportedEffort,
     EffortNotConfigurable,
     EffortRequired,
     MalformedCapability,
 }
 
-impl ModelEffortValidationCategory {
+impl LlmProfileEffortValidationCategory {
     /// The typed turn-failure code the turn driver surfaces for this
     /// validation category. Its wire spelling matches the serde
     /// representation of this enum.
@@ -376,20 +376,20 @@ impl ModelEffortValidationCategory {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelEffortValidationError {
-    pub category: ModelEffortValidationCategory,
+pub struct LlmProfileEffortValidationError {
+    pub category: LlmProfileEffortValidationCategory,
     pub message: String,
 }
 
-impl std::fmt::Display for ModelEffortValidationError {
+impl std::fmt::Display for LlmProfileEffortValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-impl std::error::Error for ModelEffortValidationError {}
+impl std::error::Error for LlmProfileEffortValidationError {}
 
-impl ModelCapability {
+impl LlmProfileCapability {
     pub fn is_empty(&self) -> bool {
         self.instruction_role.is_system()
             && !self.native_mid_conversation_system
@@ -491,7 +491,7 @@ impl ModelCapability {
         model: &str,
         provider_kind: &str,
         requested: &ReasoningSelection,
-    ) -> Result<Option<ReasoningIntent>, ModelEffortValidationError> {
+    ) -> Result<Option<ReasoningIntent>, LlmProfileEffortValidationError> {
         if let Some(ReasoningCapability {
             efforts,
             encoding: ReasoningEncoding::Budget(budgets),
@@ -499,8 +499,8 @@ impl ModelCapability {
         }) = self.reasoning.as_ref()
             && let Some(missing) = efforts.iter().find(|effort| !budgets.contains_key(*effort))
         {
-            return Err(ModelEffortValidationError {
-                category: ModelEffortValidationCategory::MalformedCapability,
+            return Err(LlmProfileEffortValidationError {
+                category: LlmProfileEffortValidationCategory::MalformedCapability,
                 message: format!(
                     "Malformed capability for model `{model}` on {provider_kind}: budget encoding is missing advertised effort `{missing}`."
                 ),
@@ -508,14 +508,14 @@ impl ModelCapability {
         }
 
         match (self.reasoning.as_ref(), requested) {
-            (None, ReasoningSelection::Effort(effort)) => Err(ModelEffortValidationError {
-                category: ModelEffortValidationCategory::EffortNotConfigurable,
+            (None, ReasoningSelection::Effort(effort)) => Err(LlmProfileEffortValidationError {
+                category: LlmProfileEffortValidationCategory::EffortNotConfigurable,
                 message: format!(
                     "Model `{model}` on {provider_kind} does not expose configurable effort (requested `{effort}`)."
                 ),
             }),
-            (None, ReasoningSelection::Disabled) => Err(ModelEffortValidationError {
-                category: ModelEffortValidationCategory::EffortNotConfigurable,
+            (None, ReasoningSelection::Disabled) => Err(LlmProfileEffortValidationError {
+                category: LlmProfileEffortValidationCategory::EffortNotConfigurable,
                 message: format!(
                     "Model `{model}` on {provider_kind} does not expose configurable effort (requested disabled)."
                 ),
@@ -523,8 +523,8 @@ impl ModelCapability {
             (None, ReasoningSelection::ProviderDefault) => Ok(None),
             (Some(reasoning), ReasoningSelection::ProviderDefault) => {
                 if reasoning.mandatory {
-                    Err(ModelEffortValidationError {
-                        category: ModelEffortValidationCategory::EffortRequired,
+                    Err(LlmProfileEffortValidationError {
+                        category: LlmProfileEffortValidationCategory::EffortRequired,
                         message: format!(
                             "Model `{model}` on {provider_kind} requires an explicit effort. Available: {}",
                             reasoning.efforts.join(", ")
@@ -538,8 +538,8 @@ impl ModelCapability {
                 if reasoning.disable {
                     Ok(Some(ReasoningIntent::Off))
                 } else {
-                    Err(ModelEffortValidationError {
-                        category: ModelEffortValidationCategory::UnsupportedEffort,
+                    Err(LlmProfileEffortValidationError {
+                        category: LlmProfileEffortValidationCategory::UnsupportedEffort,
                         message: format!(
                             "Model `{model}` on {provider_kind} does not support disabling reasoning."
                         ),
@@ -548,16 +548,16 @@ impl ModelCapability {
             }
             (Some(reasoning), ReasoningSelection::Effort(effort)) => {
                 if reasoning.efforts.is_empty() {
-                    return Err(ModelEffortValidationError {
-                        category: ModelEffortValidationCategory::EffortNotConfigurable,
+                    return Err(LlmProfileEffortValidationError {
+                        category: LlmProfileEffortValidationCategory::EffortNotConfigurable,
                         message: format!(
                             "Model `{model}` on {provider_kind} does not expose configurable effort (requested `{effort}`)."
                         ),
                     });
                 }
                 if !reasoning.efforts.contains(effort) {
-                    return Err(ModelEffortValidationError {
-                        category: ModelEffortValidationCategory::UnsupportedEffort,
+                    return Err(LlmProfileEffortValidationError {
+                        category: LlmProfileEffortValidationCategory::UnsupportedEffort,
                         message: format!(
                             "Unsupported effort `{effort}` for `{model}` on {provider_kind}. Available: {}",
                             reasoning.efforts.join(", ")
@@ -571,8 +571,8 @@ impl ModelCapability {
                     ReasoningEncoding::Budget(budgets) => budgets
                         .get(effort)
                         .map(|budget| Some(ReasoningIntent::Budget(*budget)))
-                        .ok_or_else(|| ModelEffortValidationError {
-                            category: ModelEffortValidationCategory::MalformedCapability,
+                        .ok_or_else(|| LlmProfileEffortValidationError {
+                            category: LlmProfileEffortValidationCategory::MalformedCapability,
                             message: format!(
                                 "Malformed capability for model `{model}` on {provider_kind}: budget encoding is missing advertised effort `{effort}`."
                             ),
@@ -589,7 +589,7 @@ impl ModelCapability {
         model: &str,
         provider_kind: &str,
         requested: &ReasoningSelection,
-    ) -> Result<(), ModelEffortValidationError> {
+    ) -> Result<(), LlmProfileEffortValidationError> {
         self.reasoning_intent(model, provider_kind, requested)
             .map(|_| ())
     }
@@ -615,8 +615,8 @@ mod tests {
         }
     }
 
-    fn capability(reasoning: Option<ReasoningCapability>) -> ModelCapability {
-        ModelCapability {
+    fn capability(reasoning: Option<ReasoningCapability>) -> LlmProfileCapability {
+        LlmProfileCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
             google_dialect: Default::default(),
@@ -633,28 +633,28 @@ mod tests {
         assert!(capability(None).is_empty());
         assert!(!capability(Some(reasoning())).is_empty());
         assert!(
-            !ModelCapability {
+            !LlmProfileCapability {
                 cache_control: Some(CacheControlDialect::Anthropic),
-                ..ModelCapability::default()
+                ..LlmProfileCapability::default()
             }
             .is_empty()
         );
         assert!(
-            !ModelCapability {
+            !LlmProfileCapability {
                 stream_termination: Some(StreamTermination::RequireTerminalEvidence),
-                ..ModelCapability::default()
+                ..LlmProfileCapability::default()
             }
             .is_empty()
         );
         // A capability whose only statement is "this model pins its own
         // sampling" must still reach the wire.
-        let pinned = ModelCapability {
+        let pinned = LlmProfileCapability {
             sampling: SamplingCapability::Pinned,
-            ..ModelCapability::default()
+            ..LlmProfileCapability::default()
         };
         assert!(!pinned.is_empty());
         assert!(!pinned.allows_caller_temperature());
-        assert!(ModelCapability::default().allows_caller_temperature());
+        assert!(LlmProfileCapability::default().allows_caller_temperature());
     }
 
     #[test]
@@ -674,7 +674,7 @@ mod tests {
                 .expect_err(near_miss);
             assert_eq!(
                 error.category,
-                ModelEffortValidationCategory::UnsupportedEffort,
+                LlmProfileEffortValidationCategory::UnsupportedEffort,
                 "{near_miss}"
             );
         }
@@ -684,9 +684,9 @@ mod tests {
     fn reasoning_intent_classifier_covers_ratified_table() {
         struct Case {
             name: &'static str,
-            capability: ModelCapability,
+            capability: LlmProfileCapability,
             selection: ReasoningSelection,
-            expected: Result<Option<ReasoningIntent>, ModelEffortValidationCategory>,
+            expected: Result<Option<ReasoningIntent>, LlmProfileEffortValidationCategory>,
         }
 
         let mut cannot_disable = reasoning();
@@ -732,13 +732,13 @@ mod tests {
                 name: "disabled_unsupported",
                 capability: capability(Some(cannot_disable)),
                 selection: ReasoningSelection::Disabled,
-                expected: Err(ModelEffortValidationCategory::UnsupportedEffort),
+                expected: Err(LlmProfileEffortValidationCategory::UnsupportedEffort),
             },
             Case {
                 name: "no_reasoning",
                 capability: capability(None),
                 selection: ReasoningSelection::Effort("low".to_string()),
-                expected: Err(ModelEffortValidationCategory::EffortNotConfigurable),
+                expected: Err(LlmProfileEffortValidationCategory::EffortNotConfigurable),
             },
             Case {
                 name: "no_reasoning_default",
@@ -750,13 +750,13 @@ mod tests {
                 name: "no_efforts",
                 capability: capability(Some(no_efforts)),
                 selection: ReasoningSelection::Effort("low".to_string()),
-                expected: Err(ModelEffortValidationCategory::EffortNotConfigurable),
+                expected: Err(LlmProfileEffortValidationCategory::EffortNotConfigurable),
             },
             Case {
                 name: "mandatory_without_selection",
                 capability: capability(Some(mandatory)),
                 selection: ReasoningSelection::ProviderDefault,
-                expected: Err(ModelEffortValidationCategory::EffortRequired),
+                expected: Err(LlmProfileEffortValidationCategory::EffortRequired),
             },
         ];
 
@@ -780,25 +780,25 @@ mod tests {
     #[test]
     fn category_codes_are_stable_snake_case() {
         assert_eq!(
-            ModelEffortValidationCategory::UnsupportedEffort
+            LlmProfileEffortValidationCategory::UnsupportedEffort
                 .failure_code()
                 .as_str(),
             "unsupported_effort"
         );
         assert_eq!(
-            ModelEffortValidationCategory::EffortNotConfigurable
+            LlmProfileEffortValidationCategory::EffortNotConfigurable
                 .failure_code()
                 .as_str(),
             "effort_not_configurable"
         );
         assert_eq!(
-            ModelEffortValidationCategory::EffortRequired
+            LlmProfileEffortValidationCategory::EffortRequired
                 .failure_code()
                 .as_str(),
             "effort_required"
         );
         assert_eq!(
-            ModelEffortValidationCategory::MalformedCapability
+            LlmProfileEffortValidationCategory::MalformedCapability
                 .failure_code()
                 .as_str(),
             "malformed_capability"
@@ -838,7 +838,7 @@ mod tests {
                 .expect_err(case.name);
             assert_eq!(
                 error.category,
-                ModelEffortValidationCategory::MalformedCapability,
+                LlmProfileEffortValidationCategory::MalformedCapability,
                 "{}",
                 case.name
             );
@@ -872,20 +872,20 @@ mod tests {
     }
 
     #[test]
-    fn model_capability_serde_roundtrips_and_skips_empties() {
+    fn llm_profile_capability_serde_roundtrips_and_skips_empties() {
         let cap = capability(None);
         let json = serde_json::to_value(&cap).expect("serialize");
         assert_eq!(json, serde_json::json!({}));
-        let back: ModelCapability = serde_json::from_value(json).expect("deserialize");
+        let back: LlmProfileCapability = serde_json::from_value(json).expect("deserialize");
         assert_eq!(back, cap);
 
-        let cap = ModelCapability {
+        let cap = LlmProfileCapability {
             cache_control: Some(CacheControlDialect::Gemini),
-            ..ModelCapability::default()
+            ..LlmProfileCapability::default()
         };
         let json = serde_json::to_value(&cap).expect("serialize");
         assert_eq!(json, serde_json::json!({ "cache_control": "gemini" }));
-        let back: ModelCapability = serde_json::from_value(json).expect("deserialize");
+        let back: LlmProfileCapability = serde_json::from_value(json).expect("deserialize");
         assert_eq!(back, cap);
 
         let mut r = reasoning();
@@ -897,7 +897,7 @@ mod tests {
         ]));
         let cap = capability(Some(r));
         let json = serde_json::to_value(&cap).expect("serialize");
-        let back: ModelCapability = serde_json::from_value(json).expect("deserialize");
+        let back: LlmProfileCapability = serde_json::from_value(json).expect("deserialize");
         assert_eq!(back, cap);
     }
 
@@ -1032,16 +1032,16 @@ mod instruction_tests {
     use super::*;
     #[test]
     fn host_instruction_capabilities_serialize_when_nondefault() {
-        let default: ModelCapability = serde_json::from_str("{}").unwrap();
+        let default: LlmProfileCapability = serde_json::from_str("{}").unwrap();
         assert_eq!(default.instruction_role, InstructionRole::System);
         assert!(!default.native_mid_conversation_system);
         assert!(default.is_empty());
         for capability in [
-            ModelCapability {
+            LlmProfileCapability {
                 instruction_role: InstructionRole::Developer,
                 ..Default::default()
             },
-            ModelCapability {
+            LlmProfileCapability {
                 native_mid_conversation_system: true,
                 ..Default::default()
             },
@@ -1049,7 +1049,7 @@ mod instruction_tests {
             assert!(!capability.is_empty());
             let json = serde_json::to_value(&capability).unwrap();
             assert_eq!(
-                serde_json::from_value::<ModelCapability>(json).unwrap(),
+                serde_json::from_value::<LlmProfileCapability>(json).unwrap(),
                 capability
             );
         }

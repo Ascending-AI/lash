@@ -21,7 +21,7 @@ fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
         tools: Arc::new(vec![]),
         tool_choice: LlmToolChoice::None,
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         attachment_acceptance: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
@@ -159,7 +159,7 @@ pub async fn attachment_materialization_turn_witnesses(
                 max_blob_bytes: 4,
                 max_request_bytes,
             });
-        host.providers.models = crate::testing::standard_test_models(provider);
+        host.providers.models = crate::testing::standard_test_llm_profiles(provider);
         let store = law_session_store(stores.as_ref(), &session_id).await;
         let mut policy = crate::testing::mock_session_policy();
         policy.session_id = Some(session_id.clone());

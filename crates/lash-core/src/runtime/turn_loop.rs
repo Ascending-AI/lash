@@ -346,9 +346,11 @@ impl LashRuntime {
             .effective_policy()
             .context_window_tokens()
             .ok_or_else(|| {
-                crate::runtime::drive::model_unconfigured(crate::SessionError::ModelUnconfigured {
-                    session_id: self.state.session_id.clone(),
-                })
+                crate::runtime::drive::llm_profile_unconfigured(
+                    crate::SessionError::LlmProfileUnconfigured {
+                        session_id: self.state.session_id.clone(),
+                    },
+                )
             })
     }
 

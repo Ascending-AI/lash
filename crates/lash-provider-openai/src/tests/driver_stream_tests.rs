@@ -81,12 +81,12 @@ async fn reasoning_visibility_core(
         .expect("build the Restate server double");
     let backend = double.lash_backend();
     let core = lash::LashCore::standard_builder(backend)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "provider/model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("provider/model")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("provider/model")
                             .context_window_tokens(16_000)
                             .expose_thinking(expose_thinking)
                             .build()
@@ -155,12 +155,12 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
         .await
         .expect("build the Restate server double");
     let core = lash::LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("gpt-5.4")
                             .context_window_tokens(16_000)
                             .expose_thinking(true)
                             .build()

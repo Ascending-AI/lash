@@ -43,7 +43,7 @@ fn protocol53_legacy_tool_schema_uses_projection() {
 #[test]
 fn protocol53_vertex_tool_schema_uses_projection() {
     let mut req = tool_request("aliased-model");
-    req.model_capability.google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
+    req.llm_profile_capability.google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
     let body = request_body(&req);
     assert!(
         body["request"]["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]
@@ -90,7 +90,7 @@ fn protocol53_lookalike_name_does_not_supply_dialect() {
 #[test]
 fn protocol53_gemini3_tool_schema_uses_projection() {
     let mut req = tool_request("host-catalog-alias");
-    req.model_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
+    req.llm_profile_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
     let body = request_body(&req);
     assert!(body["request"]["tools"][0]["functionDeclarations"][0]["parametersJsonSchema"]["properties"].get("projected").is_some());
 }
@@ -111,7 +111,7 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
             ] {
                 let mut req = request(None);
                 req.model = "host-catalog-alias".into();
-                req.model_capability.google_dialect = dialect;
+                req.llm_profile_capability.google_dialect = dialect;
                 let mut contract = SchemaContract::new(
                     json!({"type":"object","properties":{"value":{"type":"string"}}}),
                 );
@@ -156,7 +156,7 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
             // Both strict modes accept the host's explicit Google projection.
             for mode in [ProjectionMode::ExplicitOnly, ProjectionMode::Exact] {
                 let mut req = tool_request("host-catalog-alias");
-                req.model_capability.google_dialect = dialect;
+                req.llm_profile_capability.google_dialect = dialect;
                 let mut contract = projected_contract();
                 contract.projection.mode = mode;
                 if output {
@@ -200,7 +200,7 @@ fn protocol53_only_explicit_gemini_dialect_supplies_missing_signature() {
     ] {
         let mut req = request(None);
         req.model = "unrelated-host-alias".into();
-        req.model_capability.google_dialect = dialect;
+        req.llm_profile_capability.google_dialect = dialect;
         req.messages = vec![LlmMessage::new(
             LlmRole::Assistant,
             vec![LlmContentBlock::ToolCall {

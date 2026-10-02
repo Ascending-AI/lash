@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_core::provider::ModelRequestDefaults;
+use lash_core::provider::LlmProfileRequestDefaults;
 use serde_json::Value;
 
 /// Accumulates wire observations for one provider request.
@@ -23,7 +23,7 @@ impl ResponseMetadataCapture {
     /// The capture the request's recorded model defaults ask for, with the
     /// allowlisted response headers already taken.
     pub fn from_response(
-        defaults: &ModelRequestDefaults,
+        defaults: &LlmProfileRequestDefaults,
         response_headers: &[(String, String)],
     ) -> Self {
         let mut capture = Self {
@@ -112,10 +112,10 @@ mod tests {
 
     #[test]
     fn allowlists_headers_and_last_sse_body_value() {
-        let options = ModelRequestDefaults {
+        let options = LlmProfileRequestDefaults {
             response_metadata_headers: vec!["X-Request-Cost".to_string()],
             response_metadata_body_paths: vec!["/usage/cost".to_string()],
-            ..ModelRequestDefaults::default()
+            ..LlmProfileRequestDefaults::default()
         };
         let mut capture = ResponseMetadataCapture::from_response(
             &options,
@@ -138,9 +138,9 @@ mod tests {
 
     #[test]
     fn allowlisted_body_paths_capture_a_gateway_meta_block() {
-        let options = ModelRequestDefaults {
+        let options = LlmProfileRequestDefaults {
             response_metadata_body_paths: vec!["/meta".to_string(), "/meta/routing".to_string()],
-            ..ModelRequestDefaults::default()
+            ..LlmProfileRequestDefaults::default()
         };
         let mut capture = ResponseMetadataCapture::from_response(&options, &[]);
         capture.capture_body_text(
@@ -160,9 +160,9 @@ mod tests {
 
     #[test]
     fn allowlisted_body_paths_are_last_wins_across_sse_events() {
-        let options = ModelRequestDefaults {
+        let options = LlmProfileRequestDefaults {
             response_metadata_body_paths: vec!["/meta".to_string()],
-            ..ModelRequestDefaults::default()
+            ..LlmProfileRequestDefaults::default()
         };
         let mut capture = ResponseMetadataCapture::from_response(&options, &[]);
         capture.capture_body_text(concat!(

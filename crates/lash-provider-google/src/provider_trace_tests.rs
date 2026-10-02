@@ -97,7 +97,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
             })),
             crate::provider::ResponseReading {
                 stream_termination: StreamTermination::EofTolerated,
-                defaults: lash_core::provider::ModelRequestDefaults {
+                defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
                     ..Default::default()
                 },
@@ -150,7 +150,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
             })),
             crate::provider::ResponseReading {
                 stream_termination: StreamTermination::EofTolerated,
-                defaults: lash_core::provider::ModelRequestDefaults {
+                defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
                     ..Default::default()
                 },

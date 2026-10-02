@@ -23,7 +23,7 @@ bytes, and the provider adapter materializes the resulting stored source. Generi
 support is available in Lash but is not enabled by this workbench surface.
 
 This PNG boundary belongs to the **WORKBENCH upload surface**. Attachment
-acceptance is host-owned `ModelCapability::attachment_acceptance` data, including
+acceptance is host-owned `LlmProfileCapability::attachment_acceptance` data, including
 source modes and MIME rules. The workbench supplies its PNG policy explicitly.
 Provider adapters validate against that retained snapshot; core contains no MIME
 tables or fallback acceptance rules.

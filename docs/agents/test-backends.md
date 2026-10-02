@@ -39,7 +39,7 @@ An explicitly selected PostgreSQL variant must fail without a non-empty
 `lash_postgres_store::testing::required_database_url()` before opening the
 service. Mark service variants `#[ignore]` so ordinary runs report them as
 ignored, and select them with `--include-ignored` inside the service gate.
-`pg-store` also executes the facade's `model_keys` laws, including their
+`pg-store` also executes the facade's `llm_profiles` laws, including their
 PostgreSQL and always-replay variants. Use `pg-model-keys` for that focused
 suite with the same wrapper.
 

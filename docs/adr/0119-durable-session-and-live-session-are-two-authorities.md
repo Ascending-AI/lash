@@ -31,7 +31,7 @@ The store admission answer decides which racing create succeeds. Hosts that
 want create-or-open state that sequence explicitly. Open-time options are
 physical only: tool-source policy and enqueue-only mode. The recorded model
 key binds against the core's registry when a request runs; a key it cannot
-serve is `ModelUnavailable`. An open installs
+serve is `LlmProfileUnavailable`. An open installs
 no plugins: the session runs its core's one plugin set under the plugin config
 it recorded at creation (ADR 0088). Config changes are typed config commands
 (ADR 0126).

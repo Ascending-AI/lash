@@ -294,7 +294,7 @@ Accounting writes take no session lock, head row or drive fence (I4).
 - `LashSession::usage()`, `DurableSession::usage()` and `LashRuntime::usage()`
   are async durable reads of `OwnerUsage` for their session.
   `OwnerUsage::report()` renders the `SessionUsageReport`, keyed per
-  `(source, model_key, requested_model)`: the recorded model key the call
+  `(source, profile_key, requested_model)`: the recorded model key the call
   ran under and the wire model its request named, so two keys that share a
   wire model stay two rows (FIG-4405). A fact also keeps the served model
   the provider reported, and none where it reported none.

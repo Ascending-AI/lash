@@ -1,8 +1,8 @@
 use super::*;
-use crate::{ModelConfig, RecordedModel};
+use crate::{LlmProfileConfig, RecordedLlmProfile};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::provider::{ModelUnavailable, ModelUnavailableReason, RuntimeModels};
+use crate::provider::{LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles};
 
 /// A catalog the resolver reads through `snapshot` only: it mints each listed
 /// key with a 200k window and counts the mints.
@@ -24,23 +24,23 @@ impl Catalog {
     }
 }
 
-impl RuntimeModels for Catalog {
-    fn snapshot(&self, key: &ModelKey) -> Result<RecordedModel, ModelUnavailable> {
+impl LlmProfiles for Catalog {
+    fn snapshot(&self, key: &LlmProfileKey) -> Result<RecordedLlmProfile, LlmProfileUnavailable> {
         self.snapshots.fetch_add(1, Ordering::SeqCst);
         if self.keys.contains(&key.as_str()) {
             Ok(recorded(key.as_str()))
         } else {
-            Err(ModelUnavailable::new(
+            Err(LlmProfileUnavailable::new(
                 key.clone(),
-                ModelUnavailableReason::UnknownKey,
+                LlmProfileUnavailableReason::UnknownKey,
             ))
         }
     }
 
     fn bind(
         &self,
-        recorded: &RecordedModel,
-    ) -> Result<crate::provider::ProviderHandle, ModelUnavailable> {
+        recorded: &RecordedLlmProfile,
+    ) -> Result<crate::provider::ProviderHandle, LlmProfileUnavailable> {
         panic!(
             "resolving a spec never binds a transport: {}",
             recorded.key()
@@ -82,25 +82,25 @@ impl RunOptionsOwner for MapOwner {
     }
 }
 
-fn recorded(key: &str) -> RecordedModel {
-    let metadata = lash_core_llm::model::ModelMetadata::new(
+fn recorded(key: &str) -> RecordedLlmProfile {
+    let metadata = lash_core_llm::llm_profile::LlmProfileMetadata::new(
         format!("{key}-wire"),
         std::num::NonZeroUsize::new(200_000).expect("non-zero window"),
     );
     let metadata = if key == "plain-model" {
         metadata
     } else {
-        metadata.with_capability(crate::provider::ModelCapability {
+        metadata.with_capability(crate::provider::LlmProfileCapability {
             reasoning: Some(crate::provider::ReasoningCapability {
                 efforts: vec!["low".to_string(), "high".to_string()],
                 encoding: crate::provider::ReasoningEncoding::Effort,
                 disable: false,
                 mandatory: false,
             }),
-            ..crate::provider::ModelCapability::default()
+            ..crate::provider::LlmProfileCapability::default()
         })
     };
-    RecordedModel::mint(ModelKey::new(key), metadata)
+    RecordedLlmProfile::mint(LlmProfileKey::new(key), metadata)
 }
 
 fn catalog() -> Catalog {
@@ -116,7 +116,7 @@ fn snapshot() -> PersistedSessionConfig {
     let mut config =
         PersistedSessionConfig::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
     config.model = Some(
-        ModelConfig::new(recorded("session-model"))
+        LlmProfileConfig::new(recorded("session-model"))
             .with_reasoning(ReasoningSelection::Effort("low".to_string())),
     );
     config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
@@ -272,7 +272,7 @@ fn a_spec_hash_is_canonical_over_option_key_order() {
         spec(forward).canonical_json().expect("json")
     );
     let other = RunSpec::overrides(RunOverrides {
-        model: Some(ModelKey::new("other")),
+        model: Some(LlmProfileKey::new("other")),
         ..RunOverrides::default()
     });
     assert_ne!(Some(hash), other.hash().expect("hash"));
@@ -284,7 +284,7 @@ fn a_canonical_spec_decodes_back_to_itself() {
         definition: Some(DefinitionRef::new("review", 3)),
         context: serde_json::json!({ "repo": "lash" }),
         overrides: Box::new(RunOverrides {
-            model: Some(ModelKey::new("route")),
+            model: Some(LlmProfileKey::new("route")),
             reasoning: Some(ReasoningSelection::Effort("high".to_string())),
             ..RunOverrides::default()
         }),
@@ -370,7 +370,7 @@ fn capabilities_are_durable_refs_recorded_on_the_resolution() {
 #[test]
 fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
     let spec = RunSpec::overrides(RunOverrides {
-        model: Some(ModelKey::new("root-model")),
+        model: Some(LlmProfileKey::new("root-model")),
         ..RunOverrides::default()
     });
     let catalog = catalog();
@@ -425,7 +425,7 @@ fn a_reasoning_only_override_keeps_the_snapshot_model_without_minting() {
 #[test]
 fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
     let spec = RunSpec::overrides(RunOverrides {
-        model: Some(ModelKey::new("retired-model")),
+        model: Some(LlmProfileKey::new("retired-model")),
         ..RunOverrides::default()
     });
     match spec.resolve(
@@ -437,8 +437,8 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
         &MapOwner,
     ) {
         Err(RunResolveError::Model(unavailable)) => {
-            assert_eq!(unavailable.key, ModelKey::new("retired-model"));
-            assert_eq!(unavailable.reason, ModelUnavailableReason::UnknownKey);
+            assert_eq!(unavailable.key, LlmProfileKey::new("retired-model"));
+            assert_eq!(unavailable.reason, LlmProfileUnavailableReason::UnknownKey);
         }
         other => panic!("an unserved key must fail typed, got {other:?}"),
     }
@@ -452,7 +452,7 @@ fn an_override_naming_an_unserved_key_fails_typed_and_never_falls_back() {
 #[test]
 fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
     let onto_plain = RunSpec::overrides(RunOverrides {
-        model: Some(ModelKey::new("plain-model")),
+        model: Some(LlmProfileKey::new("plain-model")),
         ..RunOverrides::default()
     });
     match onto_plain.resolve(
@@ -464,7 +464,7 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         &MapOwner,
     ) {
         Err(RunResolveError::Refused(RunShapeRefusal::Reasoning { refusal: refused })) => {
-            assert_eq!(refused.key, ModelKey::new("plain-model"));
+            assert_eq!(refused.key, LlmProfileKey::new("plain-model"));
             assert_eq!(
                 refused.reasoning,
                 ReasoningSelection::Effort("low".to_string())
@@ -486,14 +486,14 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
         &MapOwner,
     ) {
         Err(RunResolveError::Refused(RunShapeRefusal::Reasoning { refusal: refused })) => {
-            assert_eq!(refused.key, ModelKey::new("session-model"));
+            assert_eq!(refused.key, LlmProfileKey::new("session-model"));
         }
         other => panic!("an unadvertised effort is refused, got {other:?}"),
     }
 
     // The same key with a selection it accepts resolves.
     let accepted = RunSpec::overrides(RunOverrides {
-        model: Some(ModelKey::new("plain-model")),
+        model: Some(LlmProfileKey::new("plain-model")),
         reasoning: Some(ReasoningSelection::ProviderDefault),
         ..RunOverrides::default()
     });
@@ -510,7 +510,7 @@ fn an_override_whose_reasoning_the_model_refuses_is_refused_typed() {
 }
 
 #[test]
-fn a_reasoning_override_for_a_session_without_a_model_is_refused() {
+fn a_reasoning_override_for_a_session_without_a_profile_is_refused() {
     let spec = RunSpec::overrides(RunOverrides {
         reasoning: Some(ReasoningSelection::Effort("high".to_string())),
         ..RunOverrides::default()
@@ -527,7 +527,7 @@ fn a_reasoning_override_for_a_session_without_a_model_is_refused() {
             &MapOwner
         ),
         Err(RunResolveError::Refused(
-            RunShapeRefusal::ReasoningWithoutModel
+            RunShapeRefusal::ReasoningWithoutLlmProfile
         ))
     ));
 }
@@ -546,7 +546,7 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
         ..RunSpec::default()
     };
     let definition = RunOverrides {
-        model: Some(ModelKey::new("definition-model")),
+        model: Some(LlmProfileKey::new("definition-model")),
         protocol_turn_options: Some(ProtocolTurnOptions::from_payload(
             serde_json::json!({ "replace": "definition", "added": true }),
         )),

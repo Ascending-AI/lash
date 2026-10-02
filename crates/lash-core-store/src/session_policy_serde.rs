@@ -10,7 +10,7 @@
 //! runtime-only field by construction.
 
 use crate::SessionId;
-use crate::{MaxToolCalls, ModelConfig, NoProgressBudget, SessionPolicy, TurnBudget};
+use crate::{LlmProfileConfig, MaxToolCalls, NoProgressBudget, SessionPolicy, TurnBudget};
 
 impl serde::Serialize for SessionPolicy {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -68,7 +68,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
         #[serde(deny_unknown_fields)]
         struct Wire {
             #[serde(default)]
-            model: Option<ModelConfig>,
+            model: Option<LlmProfileConfig>,
             #[serde(default)]
             attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
             #[serde(default)]

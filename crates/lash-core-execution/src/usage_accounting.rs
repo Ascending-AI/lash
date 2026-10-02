@@ -122,13 +122,13 @@ impl UsageRun {
 
     /// A call slot: its `call_ordinal` is the next one, and `owner` must
     /// equal every other call's owner in this run. The call is attributed to
-    /// `model_key`, the recorded key it runs under, and `requested_model`,
+    /// `profile_key`, the recorded key it runs under, and `requested_model`,
     /// the wire model its request names.
     pub fn call(
         &self,
         owner: RuntimeOwner,
         source: impl Into<String>,
-        model_key: crate::ModelKey,
+        profile_key: crate::LlmProfileKey,
         requested_model: impl Into<String>,
     ) -> Result<UsageCall, UsageRunError> {
         let mut progress = self.inner.progress.lock_recover();
@@ -150,7 +150,7 @@ impl UsageRun {
                 run: self.clone(),
                 owner,
                 source: source.into(),
-                model_key,
+                profile_key,
                 requested_model: requested_model.into(),
                 call_ordinal,
             }),
@@ -240,7 +240,7 @@ impl UsageRun {
             execution_scope_key: self.inner.execution_scope_key.clone(),
             run: self.inner.run.clone(),
             source: call.source.clone(),
-            model_key: call.model_key.clone(),
+            profile_key: call.profile_key.clone(),
             requested_model: call.requested_model.clone(),
             admitted_at_ms: self.inner.clock.timestamp_ms(),
         };
@@ -295,7 +295,7 @@ struct UsageCallInner {
     run: UsageRun,
     owner: RuntimeOwner,
     source: String,
-    model_key: crate::ModelKey,
+    profile_key: crate::LlmProfileKey,
     requested_model: String,
     call_ordinal: u32,
 }
@@ -393,7 +393,7 @@ impl UsageCall {
             provider_attempt: attempt_ordinal,
             llm_call_id: record.call_id.clone(),
             source: self.inner.source.clone(),
-            model_key: self.inner.model_key.clone(),
+            profile_key: self.inner.profile_key.clone(),
             requested_model: self.inner.requested_model.clone(),
             served_model,
             outcome,
@@ -686,8 +686,8 @@ mod tests {
         RuntimeOwner::Session(crate::SessionId::from("usage-owner"))
     }
 
-    fn key() -> crate::ModelKey {
-        crate::ModelKey::new("model-key")
+    fn key() -> crate::LlmProfileKey {
+        crate::LlmProfileKey::new("model-key")
     }
 
     fn run(store: Arc<AdmissionStore>) -> UsageRun {
@@ -868,8 +868,8 @@ mod tests {
             Some(5),
         )]));
         let unbound = |name: &str| {
-            RuntimeEffectControllerError::model_unavailable(
-                &crate::ModelKey::new(name),
+            RuntimeEffectControllerError::llm_profile_unavailable(
+                &crate::LlmProfileKey::new(name),
                 "the recorded model cannot be bound on this worker",
             )
         };
@@ -877,10 +877,10 @@ mod tests {
         run.fault_attempt(unbound("first@host"));
         run.fault_attempt(unbound("second@host"));
         let fault = run.attempt_faulted().await;
-        assert_eq!(fault.code, crate::RuntimeErrorCode::ModelUnavailable);
+        assert_eq!(fault.code, crate::RuntimeErrorCode::LlmProfileUnavailable);
         assert_eq!(
-            fault.model_key(),
-            Some(&crate::ModelKey::new("first@host")),
+            fault.profile_key(),
+            Some(&crate::LlmProfileKey::new("first@host")),
             "the first fault is kept, with its typed cause"
         );
         assert!(fault.is_attempt_fault());
@@ -995,14 +995,14 @@ mod tests {
     /// that share a wire model stay apart; the served model is what the
     /// provider reported and nothing else.
     #[tokio::test]
-    async fn facts_carry_the_model_key_and_only_a_provider_reported_served_model() {
+    async fn facts_carry_the_profile_key_and_only_a_provider_reported_served_model() {
         let store = Arc::new(AdmissionStore::default());
         let run = run(Arc::clone(&store));
         let first = run
             .call(
                 owner(),
                 "turn",
-                crate::ModelKey::new("key-a"),
+                crate::LlmProfileKey::new("key-a"),
                 "shared-wire",
             )
             .expect("a call slot");
@@ -1022,7 +1022,7 @@ mod tests {
             .call(
                 owner(),
                 "turn",
-                crate::ModelKey::new("key-b"),
+                crate::LlmProfileKey::new("key-b"),
                 "shared-wire",
             )
             .expect("a second call slot");
@@ -1039,7 +1039,7 @@ mod tests {
                 .facts
                 .iter()
                 .map(|fact| (
-                    fact.model_key.as_str(),
+                    fact.profile_key.as_str(),
                     fact.requested_model.as_str(),
                     fact.served_model.as_deref()
                 ))
@@ -1050,7 +1050,7 @@ mod tests {
             ]
         );
         let admissions = store.admissions.lock_recover();
-        assert_eq!(admissions[0].model_key.as_str(), "key-a");
+        assert_eq!(admissions[0].profile_key.as_str(), "key-a");
         assert_eq!(admissions[0].requested_model, "shared-wire");
     }
 }

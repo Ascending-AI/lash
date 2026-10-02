@@ -8,7 +8,7 @@ inference cannot express the endpoint's contract reliably.
 
 ## Decision
 
-Cache-control dialect is model capability data. `ModelCapability.cache_control`
+Cache-control dialect is model capability data. `LlmProfileCapability.cache_control`
 is `Option<CacheControlDialect>`. `None` emits no Chat Completions
 `cache_control`. `Anthropic` places cache control on initial instructions,
 tools, and explicit conversation breakpoints, and supports the one-hour TTL.

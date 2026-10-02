@@ -57,8 +57,8 @@ const BENCHMARK_MAIL_EVENT: &str = "received";
     clippy::expect_used,
     reason = "the mock model spec is built from fixed constants with no validation to fail"
 )]
-fn benchmark_model_spec() -> lash::ModelMetadata {
-    lash::ModelMetadata::builder("mock-model")
+fn benchmark_llm_profile_spec() -> lash::LlmProfileMetadata {
+    lash::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid benchmark model spec")
@@ -103,7 +103,7 @@ impl BenchmarkCore {
             Self::Rlm(_) => lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS),
         };
         lash::SessionSpec::new(
-            benchmark_model_spec().wire_model,
+            benchmark_llm_profile_spec().wire_model,
             turn_budget,
             lash::MaxToolCalls::new(1024),
         )
@@ -784,7 +784,8 @@ fn benchmark_standard_builder(
     backend: lash::Backend,
     provider: ProviderHandle,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::standard_builder(backend).serve_test_model(provider, benchmark_model_spec())
+    lash::LashCore::standard_builder(backend)
+        .serve_test_llm_profile(provider, benchmark_llm_profile_spec())
 }
 
 fn benchmark_rlm_builder(
@@ -792,7 +793,8 @@ fn benchmark_rlm_builder(
     provider: ProviderHandle,
     factory: lash_protocol_rlm::RlmProtocolPluginFactory,
 ) -> lash::LashCoreBuilder {
-    lash::LashCore::rlm_builder(backend, factory).serve_test_model(provider, benchmark_model_spec())
+    lash::LashCore::rlm_builder(backend, factory)
+        .serve_test_llm_profile(provider, benchmark_llm_profile_spec())
 }
 
 // The benchmark plugin list, in push order. Every conditional reads the

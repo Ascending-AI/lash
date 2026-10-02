@@ -177,7 +177,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
 #[tokio::test]
 async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("test-compactor"),
             lash_core::facade_support::PluginSpec::new()
@@ -362,7 +362,7 @@ impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
 #[tokio::test]
 async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("test-prompt-compactor"),
@@ -401,7 +401,7 @@ async fn compact_context_system_prompt_is_the_protocols_compaction_render() -> R
 #[tokio::test]
 async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("command-idempotency")
@@ -442,7 +442,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
 #[tokio::test]
 async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("queue-observation-events")
@@ -496,7 +496,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
 #[tokio::test]
 async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("pending-input-facade-cancel")
@@ -590,7 +590,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
     ))
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let registry = core.process_registry();
@@ -900,7 +900,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     );
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("button-triggers"),
             lash_core::facade_support::PluginSpec::new().with_trigger_event(trigger),
@@ -958,9 +958,9 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             checkpoint_gated_provider(entered_tx, release_rx),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .tools(Arc::new(AppTools))
         .plugin(Arc::new(StaticPluginFactory::new(
@@ -1024,7 +1024,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let provider = mock_provider();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core.session("host-cancel").created().await.open().await?;
@@ -1080,7 +1080,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
 async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
     let provider = mock_provider();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1192,7 +1192,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
     ))
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core
@@ -1272,7 +1272,7 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 #[tokio::test]
 async fn config_and_tool_mutations_publish_observation_immediately() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1315,7 +1315,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
     let backend = double_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1370,7 +1370,7 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
     let backend = double_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let _parent = core
         .session("parent-control")
@@ -1389,7 +1389,10 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
 
     assert_eq!(child.parent_session_id(), Some("parent-control"));
     assert_eq!(
-        child.policy_snapshot().model_key().map(ToString::to_string),
+        child
+            .policy_snapshot()
+            .profile_key()
+            .map(ToString::to_string),
         Some("mock-model".to_string()),
         "the child copies its parent's recorded model"
     );
@@ -1438,7 +1441,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         });
         let store_factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let registry = core.process_registry();
         let _parent = core
@@ -1474,7 +1477,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                     caused_by: None,
                 },
                 config: lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
@@ -1526,7 +1529,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
 #[tokio::test]
 async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("direct-turn-acceptance")
@@ -1582,7 +1585,7 @@ async fn host_start_core() -> Result<LashCore> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         noop_process_work_backend().await.into(),
     ))
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     Ok(core)

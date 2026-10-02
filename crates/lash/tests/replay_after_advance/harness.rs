@@ -328,12 +328,12 @@ impl World {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .plugin(lash_core::testing::process_engine_plugin_fixture())
-            .models(std::sync::Arc::new(
-                lash::ModelRegistry::new()
+            .llm_profiles(std::sync::Arc::new(
+                lash::LlmProfileRegistry::new()
                     .register(
                         "mock-model",
-                        lash::RegisteredModel::new(
-                            lash::ModelMetadata::builder("mock-model")
+                        lash::RegisteredLlmProfile::new(
+                            lash::LlmProfileMetadata::builder("mock-model")
                                 .context_window_tokens(200_000)
                                 .build()
                                 .expect("model metadata"),

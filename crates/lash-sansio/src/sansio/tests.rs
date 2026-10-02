@@ -34,7 +34,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         turn_budget: crate::TurnBudget::Unbounded,
         no_progress_budget: Default::default(),
         model_variant: crate::ReasoningSelection::ProviderDefault,
-        model_capability: crate::llm::capability::ModelCapability::default(),
+        llm_profile_capability: crate::llm::capability::LlmProfileCapability::default(),
         attachment_acceptance: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),

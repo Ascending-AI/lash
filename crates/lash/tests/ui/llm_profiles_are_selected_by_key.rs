@@ -10,7 +10,7 @@ fn core_builder_takes_no_transport(
         .provider(provider);
 }
 
-fn a_spec_selects_a_key_not_metadata(model: lash::ModelMetadata) {
+fn a_spec_selects_a_key_not_metadata(model: lash::LlmProfileMetadata) {
     let _ = lash::SessionSpec::new(
         model,
         lash::TurnBudget::Unbounded,

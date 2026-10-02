@@ -112,7 +112,7 @@ impl OpenAiCompatibleProvider {
     fn build_chat_messages(req: &LlmRequest) -> Vec<Value> {
         let mut messages = Vec::new();
         if let Some(instructions) = &req.instructions {
-            messages.push(json!({"role": req.model_capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
+            messages.push(json!({"role": req.llm_profile_capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}));
         }
         let mut feedback_start = None;
         for msg in &req.messages {
@@ -120,7 +120,7 @@ impl OpenAiCompatibleProvider {
             let fallback = shared::attachment_feedback(msg);
             let msg = fallback.as_ref().unwrap_or(msg);
             let role = if matches!(msg.role, LlmRole::System) {
-                req.model_capability.instruction_role.as_str()
+                req.llm_profile_capability.instruction_role.as_str()
             } else {
                 role_name(&msg.role)
             };
@@ -330,7 +330,7 @@ impl OpenAiCompatibleProvider {
                 )
             })
             .count();
-        let Some(dialect) = req.model_capability.cache_control else {
+        let Some(dialect) = req.llm_profile_capability.cache_control else {
             Self::strip_internal_cache_markers(messages);
             return CacheBreakpointDiagnostics {
                 requested,
@@ -464,7 +464,7 @@ impl OpenAiCompatibleProvider {
             resolve_generation_policy(req, self.kind(), &Self::chat_generation_wire(&compat, req))?;
         let mut emission = GenerationEmission {
             reasoning_retention: matches!(
-                req.model_capability.reasoning_retention.selection,
+                req.llm_profile_capability.reasoning_retention.selection,
                 ReasoningRetentionSelection::ClientSideUserSegments { .. }
             ),
             ..GenerationEmission::default()

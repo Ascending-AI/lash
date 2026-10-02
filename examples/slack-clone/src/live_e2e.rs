@@ -37,7 +37,8 @@ mod host_shutdown_tests;
 mod shutdown_marker;
 
 use core_builders::{
-    StandardCoreSpec, create_or_open, echo_tools, model_spec, provider, rlm_core, standard_core,
+    StandardCoreSpec, create_or_open, echo_tools, llm_profile_spec, provider, rlm_core,
+    standard_core,
 };
 
 pub const DEFAULT_RLM_MODEL: &str = "anthropic/claude-sonnet-5";
@@ -700,7 +701,8 @@ async fn run_smoke_probes(
     std::fs::create_dir_all(&smoke_dir).map_err(FailureReason::harness)?;
     let stream_core = standard_core(
         provider(config, ledger),
-        model_spec(&config.rlm_model, config.output_token_cap).map_err(FailureReason::harness)?,
+        llm_profile_spec(&config.rlm_model, config.output_token_cap)
+            .map_err(FailureReason::harness)?,
         StandardCoreSpec {
             output_cap: config.output_token_cap,
             turn_budget: SMOKE_RLM_CALL_BUDGET,
@@ -730,7 +732,7 @@ async fn run_smoke_probes(
 
     let tool_core = standard_core(
         provider(config, ledger),
-        model_spec(&config.standard_model, config.output_token_cap)
+        llm_profile_spec(&config.standard_model, config.output_token_cap)
             .map_err(FailureReason::harness)?,
         StandardCoreSpec {
             output_cap: config.output_token_cap,
@@ -1074,11 +1076,11 @@ async fn run_attempt(
         Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
     };
     let state = Arc::new(Mutex::new(SwapState::default()));
-    let rlm_model = match model_spec(&config.rlm_model, config.output_token_cap) {
+    let rlm_model = match llm_profile_spec(&config.rlm_model, config.output_token_cap) {
         Ok(model) => model,
         Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
     };
-    let standard_model = match model_spec(&config.standard_model, config.output_token_cap) {
+    let standard_model = match llm_profile_spec(&config.standard_model, config.output_token_cap) {
         Ok(model) => model,
         Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
     };

@@ -43,7 +43,7 @@ fn core() -> CoreBuild {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .recovery_lease(super::recovery_lease())
-            .serve_test_model(provider, super::process::model_spec()?)
+            .serve_test_llm_profile(provider, super::process::llm_profile_spec()?)
             .build(owner)
             .map_err(|error| error.to_string())
     })

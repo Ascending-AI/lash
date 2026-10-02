@@ -356,7 +356,7 @@ async fn summarize(
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&policy.attachment_acceptance),
         model_variant: model.reasoning.clone(),
-        model_capability: model.metadata().capability.clone(),
+        llm_profile_capability: model.metadata().capability.clone(),
         extra_body: model.metadata().extra_body.clone(),
         request_defaults: model.metadata().request_defaults.clone(),
         generation: policy.generation.clone(),
@@ -1095,7 +1095,7 @@ impl LawSession {
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
                 );
-        host.providers.models = crate::testing::standard_test_models(provider);
+        host.providers.models = crate::testing::standard_test_llm_profiles(provider);
         // The created head records what a creator on this plugin set resolves:
         // the canonical test policy and every installed owner's namespace —
         // the protocol's among them — so a later open's rematerialization

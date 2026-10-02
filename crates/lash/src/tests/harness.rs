@@ -3,33 +3,33 @@ use std::future::Future;
 
 pub(super) const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
-pub(crate) fn model_spec(
+pub(crate) fn llm_profile_spec(
     model: impl Into<String>,
     variant: Option<String>,
     context_window_tokens: usize,
-) -> lash_core::ModelMetadata {
+) -> lash_core::LlmProfileMetadata {
     let capability = capability_for_variant(variant.as_deref());
-    lash_core::ModelMetadata::builder(model)
+    lash_core::LlmProfileMetadata::builder(model)
         .context_window_tokens(context_window_tokens)
         .build()
         .expect("valid model spec")
         .with_capability(capability)
 }
 
-pub(crate) fn mock_model_spec() -> lash_core::ModelMetadata {
-    model_spec("mock-model", None, 200_000)
+pub(crate) fn mock_llm_profile_spec() -> lash_core::LlmProfileMetadata {
+    llm_profile_spec("mock-model", None, 200_000)
 }
 
 /// The spec these laws create a session from when they state nothing of
 /// their own: the test host's own default value, the mock model with an
 /// unbounded turn budget. A core keeps none (FIG-4594).
 pub(crate) fn mock_session_spec() -> crate::SessionSpec {
-    session_spec_for(&mock_model_spec())
+    session_spec_for(&mock_llm_profile_spec())
 }
 
-/// An unbounded spec running `metadata`, by the key `serve_test_model` and
+/// An unbounded spec running `metadata`, by the key `serve_test_llm_profile` and
 /// [`test_catalog`] register it under: its wire model.
-pub(crate) fn session_spec_for(metadata: &lash_core::ModelMetadata) -> crate::SessionSpec {
+pub(crate) fn session_spec_for(metadata: &lash_core::LlmProfileMetadata) -> crate::SessionSpec {
     crate::SessionSpec::new(
         metadata.wire_model.clone(),
         crate::TurnBudget::Unbounded,
@@ -41,24 +41,29 @@ pub(crate) fn session_spec_for(metadata: &lash_core::ModelMetadata) -> crate::Se
 /// its wire model.
 pub(crate) fn test_catalog(
     provider: lash_core::facade_support::ProviderHandle,
-    models: impl IntoIterator<Item = lash_core::ModelMetadata>,
-) -> Arc<lash_core::ModelRegistry> {
+    models: impl IntoIterator<Item = lash_core::LlmProfileMetadata>,
+) -> Arc<lash_core::LlmProfileRegistry> {
     let registry = models
         .into_iter()
-        .try_fold(lash_core::ModelRegistry::new(), |registry, metadata| {
-            registry.register(
-                metadata.wire_model.clone(),
-                lash_core::RegisteredModel::new(metadata, provider.clone()),
-            )
-        })
+        .try_fold(
+            lash_core::LlmProfileRegistry::new(),
+            |registry, metadata| {
+                registry.register(
+                    metadata.wire_model.clone(),
+                    lash_core::RegisteredLlmProfile::new(metadata, provider.clone()),
+                )
+            },
+        )
         .expect("a test catalog registers each wire model once");
     Arc::new(registry)
 }
 
 /// `metadata` as [`test_catalog`] records it, run with the provider's default
 /// reasoning.
-pub(crate) fn recorded_model(metadata: lash_core::ModelMetadata) -> lash_core::ModelConfig {
-    lash_core::testing::test_model_config(metadata.wire_model.clone(), metadata)
+pub(crate) fn recorded_llm_profile(
+    metadata: lash_core::LlmProfileMetadata,
+) -> lash_core::LlmProfileConfig {
+    lash_core::testing::test_llm_profile_config(metadata.wire_model.clone(), metadata)
 }
 
 std::thread_local! {
@@ -436,11 +441,11 @@ pub(crate) fn explicit_ephemeral_facets_with_budget(
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
 }
 
-fn capability_for_variant(variant: Option<&str>) -> lash_core::ModelCapability {
+fn capability_for_variant(variant: Option<&str>) -> lash_core::LlmProfileCapability {
     let Some(variant) = variant else {
-        return lash_core::ModelCapability::default();
+        return lash_core::LlmProfileCapability::default();
     };
-    lash_core::ModelCapability {
+    lash_core::LlmProfileCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
         google_dialect: Default::default(),

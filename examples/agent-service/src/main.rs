@@ -33,8 +33,8 @@ mod shutdown_marker;
 mod state;
 mod ui;
 
-fn default_openrouter_model_capability() -> lash::provider::ModelCapability {
-    lash::provider::ModelCapability {
+fn default_openrouter_llm_profile_capability() -> lash::provider::LlmProfileCapability {
+    lash::provider::LlmProfileCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
         google_dialect: Default::default(),
@@ -61,47 +61,55 @@ const OPENROUTER_CONTEXT_WINDOW_TOKENS: usize = 200_000;
 /// service keys each model by its OpenRouter id, so a chat's recorded key is
 /// the id it asked for, and a recorded model always binds back to the one
 /// transport.
-struct OpenRouterModels {
+struct OpenRouterLlmProfiles {
     provider: lash::provider::ProviderHandle,
 }
 
-impl OpenRouterModels {
-    fn metadata(key: &lash::ModelKey) -> Result<lash::ModelMetadata, lash::ModelUnavailable> {
-        lash::ModelMetadata::builder(key.as_str())
+impl OpenRouterLlmProfiles {
+    fn metadata(
+        key: &lash::LlmProfileKey,
+    ) -> Result<lash::LlmProfileMetadata, lash::LlmProfileUnavailable> {
+        lash::LlmProfileMetadata::builder(key.as_str())
             .context_window_tokens(OPENROUTER_CONTEXT_WINDOW_TOKENS)
             .expose_thinking(true)
-            .capability(default_openrouter_model_capability())
+            .capability(default_openrouter_llm_profile_capability())
             .build()
             .map_err(|_| {
-                lash::ModelUnavailable::new(key.clone(), lash::ModelUnavailableReason::UnknownKey)
+                lash::LlmProfileUnavailable::new(
+                    key.clone(),
+                    lash::LlmProfileUnavailableReason::UnknownKey,
+                )
             })
     }
 }
 
-impl lash::RuntimeModels for OpenRouterModels {
+impl lash::LlmProfiles for OpenRouterLlmProfiles {
     fn snapshot(
         &self,
-        key: &lash::ModelKey,
-    ) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+        key: &lash::LlmProfileKey,
+    ) -> Result<lash::RecordedLlmProfile, lash::LlmProfileUnavailable> {
         if key.as_str().trim().is_empty() {
-            return Err(lash::ModelUnavailable::new(
+            return Err(lash::LlmProfileUnavailable::new(
                 key.clone(),
-                lash::ModelUnavailableReason::UnknownKey,
+                lash::LlmProfileUnavailableReason::UnknownKey,
             ));
         }
-        Ok(lash::RecordedModel::mint(key.clone(), Self::metadata(key)?))
+        Ok(lash::RecordedLlmProfile::mint(
+            key.clone(),
+            Self::metadata(key)?,
+        ))
     }
 
     fn bind(
         &self,
-        recorded: &lash::RecordedModel,
-    ) -> Result<lash::provider::ProviderHandle, lash::ModelUnavailable> {
+        recorded: &lash::RecordedLlmProfile,
+    ) -> Result<lash::provider::ProviderHandle, lash::LlmProfileUnavailable> {
         // The service serves each id as its own wire model; a recording that
         // names another wire model under the id was never this catalog's.
         if recorded.wire_model() != recorded.key().as_str() {
-            return Err(lash::ModelUnavailable::new(
+            return Err(lash::LlmProfileUnavailable::new(
                 recorded.key().clone(),
-                lash::ModelUnavailableReason::WireModelChanged {
+                lash::LlmProfileUnavailableReason::WireModelChanged {
                     recorded: recorded.wire_model().to_string(),
                     served: recorded.key().to_string(),
                 },
@@ -121,7 +129,7 @@ use crate::effect_groups::{
 use crate::raw_activities::stream_raw_activities;
 use crate::routes::{
     cancel_turn, chat_board, create_chat, fork_chat, index, list_chat_branch_points, list_chats,
-    list_messages, pin_chat_branch_point, send_message, settings, update_chat_model,
+    list_messages, pin_chat_branch_point, send_message, settings, update_chat_llm_profile,
 };
 use crate::state::{AppStateData, anyhow_like};
 use lash::durability::DurableProcessWorker;
@@ -324,7 +332,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         backend,
         factory,
     )
-    .models(Arc::new(OpenRouterModels { provider }))
+    .llm_profiles(Arc::new(OpenRouterLlmProfiles { provider }))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(Arc::new(TeeTraceSink::new([
@@ -400,7 +408,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             .route("/api/chats", get(list_chats).post(create_chat))
             .route(
                 "/api/chats/{chat_id}/model",
-                axum::routing::post(update_chat_model),
+                axum::routing::post(update_chat_llm_profile),
             )
             .route(
                 "/api/chats/{chat_id}/messages",

@@ -120,14 +120,14 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
     .with_session_work(Arc::new(lash_core::NoSessionWork::new()))
     .into_backend();
     let core = crate::tests::explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .models(crate::tests::test_catalog(
+        .llm_profiles(crate::tests::test_catalog(
             crate::testing::TestProvider::builder()
                 .kind("admin-cancel-test")
                 .build()
                 .into_handle(),
             [
-                crate::tests::mock_model_spec(),
-                crate::tests::model_spec("cancelled-next-model", None, 64_000),
+                crate::tests::mock_llm_profile_spec(),
+                crate::tests::llm_profile_spec("cancelled-next-model", None, 64_000),
             ],
         ))
         .build(crate::testing::runtime_lease_owner())?;
@@ -142,8 +142,8 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
         admin
             .config()
             .configure(crate::config::ConfigTransaction::of(
-                crate::config::SetModel {
-                    model: lash_core::ModelKey::new("cancelled-next-model"),
+                crate::config::SetLlmProfile {
+                    model: lash_core::LlmProfileKey::new("cancelled-next-model"),
                 },
             ))
             .await

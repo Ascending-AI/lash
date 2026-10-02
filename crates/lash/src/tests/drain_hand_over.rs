@@ -282,7 +282,7 @@ fn core_with_protocol(
         .queued_work_batching(
             crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
         )
-        .serve_test_model(provider(model), mock_model_spec())
+        .serve_test_llm_profile(provider(model), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
         .expect("build the core")
 }

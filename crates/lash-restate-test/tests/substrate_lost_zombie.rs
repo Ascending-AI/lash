@@ -32,8 +32,8 @@ use serde_json::json;
 const PROCESS: &str = "main";
 const SIGNAL: &str = "go";
 
-fn model_spec() -> lash_core::ModelMetadata {
-    lash_core::ModelMetadata::builder("mock-model")
+fn llm_profile_spec() -> lash_core::LlmProfileMetadata {
+    lash_core::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("model spec")
@@ -62,7 +62,7 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
     lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, model_spec())
+        .serve_test_llm_profile(provider, llm_profile_spec())
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-test",
             "substrate-lost-zombie",
@@ -133,9 +133,9 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
             &(lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(lash_core::testing::test_model_config(
-                        model_spec().wire_model,
-                        model_spec(),
+                    model: Some(lash_core::testing::test_llm_profile_config(
+                        llm_profile_spec().wire_model,
+                        llm_profile_spec(),
                     )),
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,

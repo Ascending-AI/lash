@@ -100,22 +100,26 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let source_host = backend.effect_host();
     let source_catalog = backend.session_store_factory();
     let source = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             text_provider("resume-provider", "resume-model", "source-provider"),
-            model_spec("resume-model", None, 200_000),
+            llm_profile_spec("resume-model", None, 200_000),
         )
         .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             text_provider("resume-provider", "resume-model", "receiving-provider"),
-            model_spec("resume-model", None, 200_000),
+            llm_profile_spec("resume-model", None, 200_000),
         )
         .build(owner)?;
 
     let parked = Box::pin(
         source
             .session("owner-preserved")
-            .created_with(session_spec_for(&model_spec("resume-model", None, 200_000)))
+            .created_with(session_spec_for(&llm_profile_spec(
+                "resume-model",
+                None,
+                200_000,
+            )))
             .await
             .open()
             .await?
@@ -182,7 +186,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
     let backend = DecoratedBackend::over(double_backend_explicit_reconcile().await)
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("delete-retry").created().await.open().await?);
     let first = delete_bound_session_outcome(&core, "delete-retry").await?;
@@ -248,7 +252,7 @@ async fn a_failed_journal_retirement_is_retried_by_the_delete_obligation() -> Re
 #[tokio::test]
 async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     core.session("relation-child")
@@ -319,30 +323,30 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let receiving_registry = receiving_backend.process_registry();
 
     let source = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             text_provider(
                 "owner-services-provider",
                 "owner-services-model",
                 "source-provider",
             ),
-            model_spec("owner-services-model", None, 200_000),
+            llm_profile_spec("owner-services-model", None, 200_000),
         )
         .build(owner.clone())?;
     let receiving =
         explicit_ephemeral_facets(LashCore::standard_builder(receiving_backend.clone()))
-            .serve_test_model(
+            .serve_test_llm_profile(
                 text_provider(
                     "owner-services-provider",
                     "owner-services-model",
                     "receiving-provider",
                 ),
-                model_spec("owner-services-model", None, 200_000),
+                llm_profile_spec("owner-services-model", None, 200_000),
             )
             .build(owner)?;
 
     let session = source
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "owner-services-model",
             None,
             200_000,

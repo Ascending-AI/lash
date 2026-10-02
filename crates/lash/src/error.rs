@@ -50,11 +50,11 @@ pub enum EmbedError {
     /// Returned when a creation's spec states no model: an overlay
     /// ([`SessionSpec::inherit`](crate::SessionSpec::inherit)) passed where a
     /// root is created. Nothing is created.
-    MissingModel,
+    MissingLlmProfile,
     #[error(transparent)]
     /// Returned when a creation's model key has no binding in the host's
     /// models. Nothing is created.
-    ModelUnknown(lash_core::ModelUnavailable),
+    LlmProfileUnknown(lash_core::LlmProfileUnavailable),
     #[error(transparent)]
     /// Returned when a creation spec records reasoning its model's recorded
     /// capability refuses. Nothing is created.
@@ -324,9 +324,9 @@ impl EmbedError {
             Self::Store(source) | Self::Session(SessionError::Store { source, .. }) => {
                 source.is_transient()
             }
-            // The runtime's `model_unavailable`, as a session error: a
+            // The runtime's `llm_profile_unavailable`, as a session error: a
             // deployment that serves the recorded key repairs it.
-            Self::Session(SessionError::ModelUnavailable { .. }) => true,
+            Self::Session(SessionError::LlmProfileUnavailable { .. }) => true,
             Self::MissingProtocolPlugin
             | Self::ConfigSubmit(_)
             | Self::PluginBackendMismatch { .. }
@@ -336,8 +336,8 @@ impl EmbedError {
             | Self::ObligationRelayUnavailable(_)
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }
-            | Self::MissingModel
-            | Self::ModelUnknown(_)
+            | Self::MissingLlmProfile
+            | Self::LlmProfileUnknown(_)
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
@@ -372,10 +372,10 @@ impl EmbedError {
     ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
-    /// - session model errors (`ModelUnconfigured`, `ModelUnknown`,
+    /// - session model errors (`LlmProfileUnconfigured`, `LlmProfileUnknown`,
     ///   `CodeExecutionUnavailable`); a recorded model this deployment
-    ///   cannot bind (`ModelUnavailable`) is retryable instead, as the
-    ///   runtime's `model_unavailable` is;
+    ///   cannot bind (`LlmProfileUnavailable`) is retryable instead, as the
+    ///   runtime's `llm_profile_unavailable` is;
     /// - a direct or session-wrapped store error the engine carries under a
     ///   terminal code: every typed store refusal (compatibility, writer
     ///   fence, session identity, session-state generation, cancellation
@@ -393,8 +393,8 @@ impl EmbedError {
             | Self::BuildGenerationRebound(_)
             | Self::BuildGenerationUnbound(_)
             | Self::ObligationRelayUnavailable(_)
-            | Self::MissingModel
-            | Self::ModelUnknown(_)
+            | Self::MissingLlmProfile
+            | Self::LlmProfileUnknown(_)
             | Self::ReasoningRefused(_)
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
@@ -418,9 +418,9 @@ impl EmbedError {
                 lash_core::facade_support::ReconfigureError::GenerationMismatch { .. },
             ) => false,
             Self::Reconfigure(_) => false,
-            Self::Session(SessionError::ModelUnavailable { .. }) => false,
-            Self::Session(SessionError::ModelUnconfigured { .. })
-            | Self::Session(SessionError::ModelUnknown { .. })
+            Self::Session(SessionError::LlmProfileUnavailable { .. }) => false,
+            Self::Session(SessionError::LlmProfileUnconfigured { .. })
+            | Self::Session(SessionError::LlmProfileUnknown { .. })
             | Self::Session(SessionError::CodeExecutionUnavailable) => true,
             Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
             Self::SessionStillInUse
@@ -496,28 +496,28 @@ mod tests {
     }
 
     /// FIG-4531: a recorded model this deployment cannot bind is classified
-    /// at the facade as the runtime classifies `model_unavailable`:
+    /// at the facade as the runtime classifies `llm_profile_unavailable`:
     /// retryable, never terminal. A key that was never registered stays
     /// terminal.
     #[test]
-    fn an_unbindable_recorded_model_is_retryable_as_the_runtime_code_is() {
+    fn an_unbindable_recorded_llm_profile_is_retryable_as_the_runtime_code_is() {
         let unavailable = || {
-            lash_core::ModelUnavailable::new(
-                lash_core::ModelKey::new("recorded-key"),
-                lash_core::ModelUnavailableReason::UnknownKey,
+            lash_core::LlmProfileUnavailable::new(
+                lash_core::LlmProfileKey::new("recorded-key"),
+                lash_core::LlmProfileUnavailableReason::UnknownKey,
             )
         };
         let session_id = SessionId::from("unbindable");
-        let session = EmbedError::Session(SessionError::ModelUnavailable {
+        let session = EmbedError::Session(SessionError::LlmProfileUnavailable {
             session_id: session_id.clone(),
             source: unavailable(),
         });
-        let runtime = runtime_error(RuntimeErrorCode::ModelUnavailable);
+        let runtime = runtime_error(RuntimeErrorCode::LlmProfileUnavailable);
         for error in [session, runtime] {
             assert!(error.is_retryable(), "{error}");
             assert!(!error.is_terminal(), "{error}");
         }
-        let unknown = EmbedError::Session(SessionError::ModelUnknown {
+        let unknown = EmbedError::Session(SessionError::LlmProfileUnknown {
             session_id,
             source: unavailable(),
         });

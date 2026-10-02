@@ -101,7 +101,7 @@ pub(crate) fn standard_core() -> CoreBuild {
 /// [`standard_core`], counting the model calls it holds open in `held`.
 pub(crate) fn held_core(held: Arc<AtomicUsize>) -> CoreBuild {
     Arc::new(move |backend, owner| {
-        let model = lash_core::ModelMetadata::builder(MODEL)
+        let model = lash_core::LlmProfileMetadata::builder(MODEL)
             .context_window_tokens(200_000)
             .build()
             .map_err(|error| format!("model spec: {error}"))?;
@@ -109,7 +109,7 @@ pub(crate) fn held_core(held: Arc<AtomicUsize>) -> CoreBuild {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .recovery_lease(recovery_lease())
-            .serve_test_model(scripted_provider(Arc::clone(&held)), model)
+            .serve_test_llm_profile(scripted_provider(Arc::clone(&held)), model)
             .build(owner)
             .map_err(|error| format!("build the lash core: {error}"))
     })

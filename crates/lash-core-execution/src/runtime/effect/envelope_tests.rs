@@ -10,13 +10,15 @@ fn a_recorded_turn_config_round_trips_whole() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     );
-    config.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-        crate::ModelKey::from("recorded-model"),
-        crate::ModelMetadata::builder("recorded-model")
-            .context_window_tokens(32_000)
-            .build()
-            .expect("a literal model spec builds"),
-    )));
+    config.model = Some(crate::LlmProfileConfig::new(
+        crate::RecordedLlmProfile::mint(
+            crate::LlmProfileKey::from("recorded-model"),
+            crate::LlmProfileMetadata::builder("recorded-model")
+                .context_window_tokens(32_000)
+                .build()
+                .expect("a literal model spec builds"),
+        ),
+    ));
     config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
     config
         .plugin_config

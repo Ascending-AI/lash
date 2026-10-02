@@ -30,7 +30,7 @@ pub(crate) struct BoundSession {
     /// configured attempt budget (FIG-4246).
     relay_policy: lash_core::drive::relay::RelayPolicy,
     clock: Arc<dyn lash_core::Clock>,
-    models: Arc<dyn lash_core::RuntimeModels>,
+    models: Arc<dyn lash_core::LlmProfiles>,
     /// The core's tool-child context source (FIG-3712), held for as long as
     /// the session is: the backend's host holds it weakly, and a session
     /// whose core was dropped still has children to rebuild.
@@ -142,7 +142,7 @@ impl BoundSession {
         Arc::clone(&self.catalog)
     }
 
-    pub(crate) fn models(&self) -> Arc<dyn lash_core::RuntimeModels> {
+    pub(crate) fn llm_profiles(&self) -> Arc<dyn lash_core::LlmProfiles> {
         Arc::clone(&self.models)
     }
 

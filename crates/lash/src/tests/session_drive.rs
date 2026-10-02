@@ -47,7 +47,10 @@ async fn fixture_with_batching(batching: crate::QueuedWorkBatchingConfig) -> Res
     let core = LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(batching)
-        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
+        .serve_test_llm_profile(
+            counting_provider(Arc::clone(&calls)),
+            mock_llm_profile_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
         core,
@@ -197,7 +200,10 @@ impl HeldDriveFixture {
             .queued_work_batching(
                 crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
             )
-            .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
+            .serve_test_llm_profile(
+                counting_provider(Arc::clone(&calls)),
+                mock_llm_profile_spec(),
+            )
             .build(crate::testing::runtime_lease_owner())?;
         let session_id = lash_core::SessionId::from(session);
         drop(core.session(session).created().await.open().await?);
@@ -407,7 +413,7 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
             // The session's creation recorded its config with the row; a
             // row with no head is never driven (FIG-4553).
             config: lash_core::SessionPolicy {
-                model: Some(recorded_model(mock_model_spec())),
+                model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                 ..lash_core::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
@@ -431,7 +437,10 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
     let _core = LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(counting_provider(Arc::clone(&calls)), mock_model_spec())
+        .serve_test_llm_profile(
+            counting_provider(Arc::clone(&calls)),
+            mock_llm_profile_spec(),
+        )
         .build(crate::testing::runtime_lease_owner())?;
 
     tokio::time::timeout(std::time::Duration::from_secs(60), async {

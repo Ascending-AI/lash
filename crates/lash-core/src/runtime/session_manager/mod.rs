@@ -368,7 +368,7 @@ impl CurrentOwnerCapability {
 
     /// This runtime's recorded policy bound to the transport that executes
     /// it. A recorded model this worker cannot bind is the typed, retryable
-    /// `ModelUnavailable`.
+    /// `LlmProfileUnavailable`.
     fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
         self.host
             .resolve_owner_policy(&self.runtime_owner(), self.policy.clone())

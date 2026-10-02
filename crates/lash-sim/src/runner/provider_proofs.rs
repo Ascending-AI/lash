@@ -107,7 +107,7 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -858,7 +858,7 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -892,7 +892,7 @@ fn openai_responses_request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -917,10 +917,10 @@ fn anthropic_messages_request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         // Messages requires a cap, and lash invents none.
-        request_defaults: lash_core::provider::ModelRequestDefaults {
+        request_defaults: lash_core::provider::LlmProfileRequestDefaults {
             max_output_tokens: Some(4_096),
             ..Default::default()
         },
@@ -946,7 +946,7 @@ fn google_request(stream: bool) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),

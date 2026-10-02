@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::provider::AttachmentCapabilitySnapshot;
 use crate::{
-    ChargeSafetyPolicy, MaxToolCalls, ModelConfig, NoProgressBudget, SessionId, TurnBudget,
+    ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, NoProgressBudget, SessionId, TurnBudget,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,7 +12,7 @@ pub struct SessionPolicy {
     /// The session's model selection: the binding the host's registry minted
     /// when the session adopted its key, and the reasoning it runs with.
     /// `None` until a model is selected; such a session cannot run a turn.
-    pub model: Option<ModelConfig>,
+    pub model: Option<LlmProfileConfig>,
     /// The attachment-acceptance rules the session renders attachments
     /// against (ADR 0026). Session config of its own: a model change keeps
     /// them, and only an explicit change replaces them.
@@ -69,8 +69,8 @@ impl SessionPolicy {
     }
 
     /// The recorded model key, when the session has selected a model.
-    pub fn model_key(&self) -> Option<&crate::ModelKey> {
-        self.model.as_ref().map(ModelConfig::key)
+    pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
+        self.model.as_ref().map(LlmProfileConfig::key)
     }
 
     /// The recorded wire model, when the session has selected a model.
@@ -80,7 +80,9 @@ impl SessionPolicy {
 
     /// The recorded prompt budget, when the session has selected a model.
     pub fn context_window_tokens(&self) -> Option<usize> {
-        self.model.as_ref().map(ModelConfig::context_window_tokens)
+        self.model
+            .as_ref()
+            .map(LlmProfileConfig::context_window_tokens)
     }
 }
 

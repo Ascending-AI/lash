@@ -27,10 +27,10 @@ async fn admit_store(
     Ok(Arc::clone(catalog))
 }
 
-fn recorded_model(id: &str) -> Option<lash_core::ModelConfig> {
-    Some(lash_core::testing::test_model_config(
+fn recorded_llm_profile(id: &str) -> Option<lash_core::LlmProfileConfig> {
+    Some(lash_core::testing::test_llm_profile_config(
         id,
-        lash_core::testing::test_model_metadata(id),
+        lash_core::testing::test_llm_profile_metadata(id),
     ))
 }
 
@@ -202,7 +202,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             caused_by: None,
         },
         config: SessionPolicy {
-            model: recorded_model("first-model"),
+            model: recorded_llm_profile("first-model"),
             ..SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
@@ -228,7 +228,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             pending_observer_intents: Vec::new(),
             relation: lash_core_execution::SessionRelation::Root,
             config: SessionPolicy {
-                model: recorded_model("second-model"),
+                model: recorded_llm_profile("second-model"),
                 ..SessionPolicy::new(
                     lash_core_execution::TurnBudget::Unbounded,
                     lash_core_execution::MaxToolCalls::new(1024),
@@ -258,7 +258,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         session_id: SessionId::from(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,
         config: SessionPolicy {
-            model: recorded_model("model"),
+            model: recorded_llm_profile("model"),
             ..SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),

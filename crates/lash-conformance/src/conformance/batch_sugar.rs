@@ -402,7 +402,7 @@ impl SugarTurn {
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 );
-        config.providers.models = crate::testing::standard_test_models(
+        config.providers.models = crate::testing::standard_test_llm_profiles(
             scripted_model(self.script.clone(), Arc::clone(&self.on_call)).into_handle(),
         );
         let mut policy = crate::testing::mock_session_policy();

@@ -41,7 +41,7 @@ use crate::support::{
     TurnOutcome,
 };
 use crate::turn::{TurnOutput, TurnReport};
-use lash_core::{GenerationOptions, ModelKey, ReasoningSelection, RunSpec};
+use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
 
 use lash_core::facade_support::{
     TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
@@ -76,7 +76,7 @@ pub(crate) struct SendParts {
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// The models a spec's model key is judged against before the input is
     /// accepted.
-    pub(crate) models: Arc<dyn lash_core::RuntimeModels>,
+    pub(crate) models: Arc<dyn lash_core::LlmProfiles>,
 }
 
 /// A target's parts, with the open session's runtime when there is one.
@@ -221,18 +221,18 @@ async fn refuse_unservable_selection(context: &SendContext, spec: &RunSpec) -> R
         .transpose()
         .map_err(|error| {
             EmbedError::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::ModelUnknown,
+                lash_core::RuntimeErrorCode::LlmProfileUnknown,
                 format!("send refused: {error}"),
             ))
         })?;
     let selected = match (minted, overrides.reasoning.clone()) {
         (Some(model), Some(reasoning)) => {
-            Some(lash_core::ModelConfig::new(model).with_reasoning(reasoning))
+            Some(lash_core::LlmProfileConfig::new(model).with_reasoning(reasoning))
         }
         (minted, reasoning) => {
             let recorded = context.session_snapshot().await?.policy.model;
             match (minted, recorded) {
-                (Some(model), recorded) => Some(lash_core::ModelConfig {
+                (Some(model), recorded) => Some(lash_core::LlmProfileConfig {
                     model,
                     reasoning: recorded.map(|model| model.reasoning).unwrap_or_default(),
                 }),
@@ -344,7 +344,7 @@ impl SendBuilder {
     /// session's reasoning unless [`reasoning`](Self::reasoning) is set too.
     /// A key the host's models do not register is refused before the input
     /// is accepted.
-    pub fn model(mut self, key: impl Into<ModelKey>) -> Self {
+    pub fn model(mut self, key: impl Into<LlmProfileKey>) -> Self {
         self.run_spec.overrides.model = Some(key.into());
         self
     }

@@ -79,7 +79,7 @@ async fn seed_session_with_a_persisted_tool(
 ) -> Result<Arc<dyn DeploymentStore>> {
     let factory: Arc<dyn DeploymentStore> = backend.session_store_factory();
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core
@@ -118,7 +118,7 @@ async fn open_delivers_the_tool_restore_report_to_the_host() -> Result<()> {
     let _factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
 
     let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let opened = grantless_core
         .session(session_id.clone())
@@ -154,7 +154,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
 
     let counters = Arc::new(OpenLifecycleCounters::default());
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .plugin(Arc::new(OpenLifecycleProbeFactory {
             counters: Arc::clone(&counters),
         }))
@@ -199,7 +199,7 @@ async fn require_refuses_the_open_and_keeps_its_named_promises() -> Result<()> {
     // The lease the refused open claimed was released: a following open takes
     // it. Tolerate here, because the point is the lease, not the policy.
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let reopened = tolerant_core
         .session(session_id.clone())
@@ -221,7 +221,7 @@ async fn a_per_open_override_states_the_policy_for_one_session() -> Result<()> {
     let _factory = seed_session_with_a_persisted_tool(&backend, &session_id).await?;
 
     let tolerant_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let refusal = match tolerant_core
@@ -273,7 +273,7 @@ async fn require_refuses_a_drive_rebuild_that_lost_a_tool_source() -> Result<()>
     // engine drives with the strict core's driver.
     let strict = redeploy(seeding).await;
     let strict_core = explicit_ephemeral_facets(LashCore::standard_builder(strict.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tool_source_policy(lash_core::ToolSourcePolicy::Require)
         .build(crate::testing::runtime_lease_owner())?;
 

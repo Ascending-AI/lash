@@ -818,7 +818,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let policy = SessionPolicy {
-        model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
+        model: Some(lash_core::testing::runtime_helpers::standard_test_llm_profile_config()),
         ..SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -882,7 +882,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
     let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let policy = SessionPolicy {
-        model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
+        model: Some(lash_core::testing::runtime_helpers::standard_test_llm_profile_config()),
         ..SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -965,7 +965,7 @@ async fn a_recorded_sync_failure_fails_the_turn_under_its_causes_code() {
     let backend = double.lash_backend();
     let recorder = RecordingEffectController::default();
     let policy = SessionPolicy {
-        model: Some(lash_core::testing::runtime_helpers::standard_test_model_config()),
+        model: Some(lash_core::testing::runtime_helpers::standard_test_llm_profile_config()),
         ..SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -1444,7 +1444,7 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         tool_choice: LlmToolChoice::None,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(

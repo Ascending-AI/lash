@@ -493,12 +493,12 @@ async fn main() -> Result<()> {
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
     let core = LashCore::rlm_builder(backend, protocol)
         // The smoke run serves one model, keyed by its wire model.
-        .models(Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     args.model.as_str(),
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder(&args.model)
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder(&args.model)
                             .context_window_tokens(200_000)
                             .expose_thinking(true)
                             .build()

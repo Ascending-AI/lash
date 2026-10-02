@@ -104,14 +104,14 @@ async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenance
         double.stores().session_store_factory();
     let attachment_store: Arc<dyn lash::persistence::AttachmentStore> =
         double.stores().attachment_store();
-    let model = with_workbench_model_capability(
-        lash::ModelMetadata::builder("test-model")
+    let model = with_workbench_llm_profile_capability(
+        lash::LlmProfileMetadata::builder("test-model")
             .context_window_tokens(4096)
             .build()
             .expect("store-maintenance model spec"),
     );
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build store-maintenance core");
     let process_observer = core
@@ -128,7 +128,7 @@ async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenance
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -379,7 +379,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
         text: "Describe the attached PNG briefly.".to_string(),
-        model: ModelSelection {
+        model: LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: None,
         },

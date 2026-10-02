@@ -517,11 +517,11 @@ impl Processes {
                         }
                     };
                     let model =
-                        lash_core::ModelConfig {
+                        lash_core::LlmProfileConfig {
                             model: core.env.core.providers.models.snapshot(key).map_err(
                                 |error| {
                                     lash_core::RuntimeEffectControllerError::new(
-                                        lash_core::RuntimeErrorCode::ModelUnknown,
+                                        lash_core::RuntimeErrorCode::LlmProfileUnknown,
                                         error.to_string(),
                                     )
                                 },
@@ -1345,7 +1345,7 @@ mod host_start_refusal_tests {
             RuntimeErrorCode::SessionHeadOwned,
             RuntimeErrorCode::RuntimeStore,
             RuntimeErrorCode::ReasoningRefused,
-            RuntimeErrorCode::ModelUnknown,
+            RuntimeErrorCode::LlmProfileUnknown,
         ] {
             errors.push(RuntimeEffectControllerError::new(code, "start refused"));
         }

@@ -9,10 +9,10 @@
 //! column combinations a record may hold.
 
 use crate::{
-    ModelKey, OutstandingUsageAttempt, OwnerUsageRow, RuntimeOwner, StoreError, UsageCompleteness,
-    UsageEffectKey, UsageFactBody, UsageFactConflict, UsageFactIdentity, UsageFactKind,
-    UsageFactRecord, UsageRunDispatch, UsageRunId, UsageRunRecord, UsageRunResolution,
-    UsageRunState,
+    LlmProfileKey, OutstandingUsageAttempt, OwnerUsageRow, RuntimeOwner, StoreError,
+    UsageCompleteness, UsageEffectKey, UsageFactBody, UsageFactConflict, UsageFactIdentity,
+    UsageFactKind, UsageFactRecord, UsageRunDispatch, UsageRunId, UsageRunRecord,
+    UsageRunResolution, UsageRunState,
 };
 use lash_sansio::llm::types::LlmCallId;
 use lash_sansio::{ProcessId, SessionId, TokenUsage};
@@ -31,7 +31,7 @@ pub struct StoredUsageFact {
     pub run_id: Option<String>,
     pub llm_call_id: String,
     pub source: String,
-    pub model_key: String,
+    pub profile_key: String,
     pub requested_model: String,
     pub served_model: Option<String>,
     pub usage: TokenUsage,
@@ -45,7 +45,7 @@ pub struct StoredUsageRun {
     pub run_id: String,
     pub execution_scope_key: Option<String>,
     pub source: Option<String>,
-    pub model_key: Option<String>,
+    pub profile_key: Option<String>,
     pub requested_model: Option<String>,
     pub admitted_at_ms: Option<i64>,
     pub state: String,
@@ -58,10 +58,10 @@ pub struct StoredUsageRun {
     pub resolved_at_ms: Option<i64>,
 }
 
-/// One `(source, model_key, requested_model)` aggregate row of `usage_facts`.
+/// One `(source, profile_key, requested_model)` aggregate row of `usage_facts`.
 pub struct StoredUsageAggregate {
     pub source: String,
-    pub model_key: String,
+    pub profile_key: String,
     pub requested_model: String,
     pub usage: TokenUsage,
     pub reported_attempts: i64,
@@ -76,7 +76,7 @@ pub struct StoredOutstandingAttempt {
     pub provider_attempt: i64,
     pub llm_call_id: String,
     pub source: String,
-    pub model_key: String,
+    pub profile_key: String,
     pub requested_model: String,
     pub generation_id: Option<String>,
 }
@@ -97,7 +97,7 @@ impl StoredUsageFact {
             run_id,
             llm_call_id,
             source,
-            model_key,
+            profile_key,
             requested_model,
             served_model,
             usage,
@@ -112,7 +112,7 @@ impl StoredUsageFact {
             provider_attempt: usage_ordinal(provider_attempt)?,
             llm_call_id: LlmCallId(llm_call_id),
             source,
-            model_key: ModelKey::new(model_key),
+            profile_key: LlmProfileKey::new(profile_key),
             requested_model,
             served_model,
             body: UsageFactBody::from_stored(
@@ -138,7 +138,7 @@ impl StoredUsageRun {
             run_id,
             execution_scope_key,
             source,
-            model_key,
+            profile_key,
             requested_model,
             admitted_at_ms,
             state,
@@ -154,7 +154,7 @@ impl StoredUsageRun {
         let admission = match (
             execution_scope_key,
             source,
-            model_key,
+            profile_key,
             requested_model,
             admitted_at_ms,
         ) {
@@ -168,7 +168,7 @@ impl StoredUsageRun {
             ) => Some(UsageRunDispatch {
                 execution_scope_key,
                 source,
-                model_key: ModelKey::new(model),
+                profile_key: LlmProfileKey::new(model),
                 requested_model,
                 admitted_at_ms: usage_unsigned(at_ms)?,
             }),
@@ -227,7 +227,7 @@ impl StoredUsageAggregate {
     pub fn decode(self) -> Result<OwnerUsageRow, StoreError> {
         let StoredUsageAggregate {
             source,
-            model_key,
+            profile_key,
             requested_model,
             usage,
             reported_attempts,
@@ -236,7 +236,7 @@ impl StoredUsageAggregate {
         } = self;
         Ok(OwnerUsageRow {
             source,
-            model_key: ModelKey::new(model_key),
+            profile_key: LlmProfileKey::new(profile_key),
             requested_model,
             usage,
             reported_attempts: usage_unsigned(reported_attempts)?,
@@ -254,7 +254,7 @@ impl StoredOutstandingAttempt {
             provider_attempt,
             llm_call_id,
             source,
-            model_key,
+            profile_key,
             requested_model,
             generation_id,
         } = self;
@@ -264,7 +264,7 @@ impl StoredOutstandingAttempt {
             provider_attempt: usage_ordinal(provider_attempt)?,
             llm_call_id: LlmCallId(llm_call_id),
             source,
-            model_key: ModelKey::new(model_key),
+            profile_key: LlmProfileKey::new(profile_key),
             requested_model,
             generation_id,
         })
@@ -358,7 +358,7 @@ mod tests {
             run_id: Some("run:00000000000040008000000000000001".into()),
             llm_call_id: "call".into(),
             source: "turn".into(),
-            model_key: "key".into(),
+            profile_key: "key".into(),
             requested_model: "model".into(),
             served_model: None,
             usage: TokenUsage::default(),
@@ -418,7 +418,7 @@ mod tests {
             run_id: "run:00000000000040008000000000000001".into(),
             execution_scope_key: Some("scope".into()),
             source: Some("turn".into()),
-            model_key: Some("key".into()),
+            profile_key: Some("key".into()),
             requested_model: Some("model".into()),
             admitted_at_ms: Some(10),
             state: "open".into(),
@@ -450,7 +450,7 @@ mod tests {
         run(|run| {
             run.execution_scope_key = None;
             run.source = None;
-            run.model_key = None;
+            run.profile_key = None;
             run.requested_model = None;
             run.admitted_at_ms = None;
         })
@@ -520,7 +520,7 @@ mod tests {
     fn aggregate_and_outstanding_rows_share_the_scalar_rules() {
         let aggregate = StoredUsageAggregate {
             source: "turn".into(),
-            model_key: "key".into(),
+            profile_key: "key".into(),
             requested_model: "model".into(),
             usage: TokenUsage::default(),
             reported_attempts: 2,
@@ -543,7 +543,7 @@ mod tests {
             provider_attempt: 2,
             llm_call_id: "call".into(),
             source: "turn".into(),
-            model_key: "key".into(),
+            profile_key: "key".into(),
             requested_model: "model".into(),
             generation_id: None,
         }
@@ -555,7 +555,7 @@ mod tests {
     fn row_fields() -> StoredUsageAggregate {
         StoredUsageAggregate {
             source: "turn".into(),
-            model_key: "key".into(),
+            profile_key: "key".into(),
             requested_model: "model".into(),
             usage: TokenUsage::default(),
             reported_attempts: 0,

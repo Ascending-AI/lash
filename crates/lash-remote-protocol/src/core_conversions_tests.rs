@@ -246,7 +246,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         tool_choice: core_llm::LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: core_llm::ReasoningSelection::Effort("fast".to_string()),
-        model_capability: core_llm::ModelCapability {
+        llm_profile_capability: core_llm::LlmProfileCapability {
             instruction_role: core_llm::InstructionRole::Developer,
             native_mid_conversation_system: true,
             google_dialect: Default::default(),
@@ -315,10 +315,10 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     let core = core_llm::LlmRequest::try_from(remote).expect("core request");
     assert_eq!(core.instructions.as_deref(), Some("I"));
     assert_eq!(
-        core.model_capability.instruction_role,
+        core.llm_profile_capability.instruction_role,
         core_llm::InstructionRole::Developer
     );
-    assert!(core.model_capability.native_mid_conversation_system);
+    assert!(core.llm_profile_capability.native_mid_conversation_system);
     assert_eq!(core.model, "gpt-test");
     assert_eq!(
         core.extra_body["host_option"],
@@ -329,14 +329,14 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         core_llm::ReasoningSelection::Effort("fast".to_string())
     );
     let reasoning = core
-        .model_capability
+        .llm_profile_capability
         .reasoning
         .as_ref()
         .expect("capability must round-trip");
     assert_eq!(reasoning.efforts, vec!["fast", "slow"]);
     assert!(reasoning.disable);
     assert_eq!(
-        core.model_capability.cache_control,
+        core.llm_profile_capability.cache_control,
         Some(core_llm::CacheControlDialect::Anthropic)
     );
     assert_eq!(
@@ -420,8 +420,8 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     assert_eq!(core.response_metadata, response_metadata);
 }
 
-#[path = "core_conversions_tests/model_passthrough.rs"]
-mod model_passthrough;
+#[path = "core_conversions_tests/llm_profile_passthrough.rs"]
+mod llm_profile_passthrough;
 
 #[path = "core_conversions_tests/trigger_route_refusals.rs"]
 mod trigger_route_refusals;
@@ -690,14 +690,16 @@ fn process_start_requests_round_trip_core_values() {
                 lash_core::AdmittedPluginConfig::new(config, 3)
             },
             lash_core::SessionPolicy {
-                model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                    lash_core::ModelKey::from("process-model"),
-                    lash_core::ModelMetadata::builder("process-model")
-                        .context_window_tokens(4096)
-                        .output_token_capacity(512)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(lash_core::LlmProfileConfig::new(
+                    lash_core::RecordedLlmProfile::mint(
+                        lash_core::LlmProfileKey::from("process-model"),
+                        lash_core::LlmProfileMetadata::builder("process-model")
+                            .context_window_tokens(4096)
+                            .output_token_capacity(512)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 generation: lash_core::GenerationOptions {
                     output_token_cap: std::num::NonZeroUsize::new(256),
                     temperature: Some(

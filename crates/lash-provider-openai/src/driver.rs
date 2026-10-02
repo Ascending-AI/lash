@@ -269,7 +269,7 @@ pub(crate) async fn complete(
     let stream = stream_events.is_some();
     let compat = provider.resolved_compat(endpoint);
     let stream_termination = req
-        .model_capability
+        .llm_profile_capability
         .stream_termination
         .unwrap_or(compat.stream_termination);
     let request_id = req.scope.request_id.clone();

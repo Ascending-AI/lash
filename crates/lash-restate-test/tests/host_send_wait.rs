@@ -115,9 +115,9 @@ fn core(backend: lash_core::Backend, barrier: &Arc<Barrier>) -> lash::LashCore {
     lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::ModelMetadata::builder("mock-model")
+            lash_core::LlmProfileMetadata::builder("mock-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("model spec"),
@@ -1925,12 +1925,12 @@ fn follow_on_core(
     lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .models(Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "mock-model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("mock-model")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("mock-model")
                             .context_window_tokens(200_000)
                             .build()
                             .expect("model metadata"),

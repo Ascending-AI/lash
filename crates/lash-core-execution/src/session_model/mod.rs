@@ -4,7 +4,7 @@ pub use lash_sansio::session_model::message;
 
 use crate::llm::types::{LlmEventSender, LlmStreamEvent};
 use crate::provider::{AttachmentCapabilitySnapshot, ProviderHandle, ReasoningSelection};
-use crate::{ModelConfig, ModelKey, ModelUnavailable, RuntimeModels};
+use crate::{LlmProfileConfig, LlmProfileKey, LlmProfileUnavailable, LlmProfiles};
 
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
@@ -58,17 +58,17 @@ pub(crate) use lash_core_store::message_projection::plugin_message_to_message;
 /// already recorded. The first bound transport is kept for the rest of the
 /// attempt; clones share it.
 #[derive(Clone)]
-pub struct ModelBinding {
-    recorded: crate::RecordedModel,
-    models: std::sync::Arc<dyn RuntimeModels>,
+pub struct LlmProfileBinding {
+    recorded: crate::RecordedLlmProfile,
+    models: std::sync::Arc<dyn LlmProfiles>,
     clock: std::sync::Arc<dyn crate::Clock>,
     bound: std::sync::Arc<std::sync::OnceLock<ProviderHandle>>,
 }
 
-impl ModelBinding {
+impl LlmProfileBinding {
     pub fn new(
-        recorded: crate::RecordedModel,
-        models: std::sync::Arc<dyn RuntimeModels>,
+        recorded: crate::RecordedLlmProfile,
+        models: std::sync::Arc<dyn LlmProfiles>,
         clock: std::sync::Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
@@ -80,7 +80,7 @@ impl ModelBinding {
     }
 
     /// The recorded model this binding executes.
-    pub fn recorded(&self) -> &crate::RecordedModel {
+    pub fn recorded(&self) -> &crate::RecordedLlmProfile {
         &self.recorded
     }
 
@@ -88,7 +88,7 @@ impl ModelBinding {
     /// unjournaled model call, or an observation nothing records, calls
     /// this. A refusal is this deployment's fault and is never cached: the
     /// next attempt asks again.
-    pub fn bind(&self) -> Result<ProviderHandle, ModelUnavailable> {
+    pub fn bind(&self) -> Result<ProviderHandle, LlmProfileUnavailable> {
         if let Some(provider) = self.bound.get() {
             return Ok(provider.clone());
         }
@@ -106,7 +106,7 @@ impl ModelBinding {
         &self,
     ) -> Result<ProviderHandle, crate::RuntimeEffectControllerError> {
         self.bind().map_err(|error| {
-            crate::RuntimeEffectControllerError::model_unavailable(
+            crate::RuntimeEffectControllerError::llm_profile_unavailable(
                 &error.key,
                 format!("the recorded model cannot be bound on this worker: {error}"),
             )
@@ -114,9 +114,9 @@ impl ModelBinding {
     }
 }
 
-impl std::fmt::Debug for ModelBinding {
+impl std::fmt::Debug for LlmProfileBinding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModelBinding")
+        f.debug_struct("LlmProfileBinding")
             .field("key", self.recorded.key())
             .field("bound", &self.bound.get().is_some())
             .finish_non_exhaustive()
@@ -128,8 +128,8 @@ impl std::fmt::Debug for ModelBinding {
 #[derive(Clone, Debug)]
 pub struct RuntimeSessionPolicy {
     pub policy: SessionPolicy,
-    model: ModelConfig,
-    binding: ModelBinding,
+    model: LlmProfileConfig,
+    binding: LlmProfileBinding,
 }
 
 impl RuntimeSessionPolicy {
@@ -138,11 +138,11 @@ impl RuntimeSessionPolicy {
     /// bind.
     pub fn new(
         policy: SessionPolicy,
-        models: std::sync::Arc<dyn RuntimeModels>,
+        models: std::sync::Arc<dyn LlmProfiles>,
         clock: std::sync::Arc<dyn crate::Clock>,
     ) -> Option<Self> {
         let model = policy.model.clone()?;
-        let binding = ModelBinding::new(model.model.clone(), models, clock);
+        let binding = LlmProfileBinding::new(model.model.clone(), models, clock);
         Some(Self {
             policy,
             model,
@@ -151,12 +151,12 @@ impl RuntimeSessionPolicy {
     }
 
     /// The recorded model selection this policy runs.
-    pub fn model_config(&self) -> &ModelConfig {
+    pub fn llm_profile_config(&self) -> &LlmProfileConfig {
         &self.model
     }
 
     /// The lazy binding of the recorded model.
-    pub fn binding(&self) -> &ModelBinding {
+    pub fn binding(&self) -> &LlmProfileBinding {
         &self.binding
     }
 }
@@ -191,7 +191,7 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionSpec {
     inherit: bool,
-    pub model: Option<ModelKey>,
+    pub model: Option<LlmProfileKey>,
     /// The reasoning the session runs its model with. `None` keeps the base
     /// policy's selection.
     pub reasoning: Option<ReasoningSelection>,
@@ -235,7 +235,7 @@ impl SessionSpec {
     /// defaults. Every other field starts at the neutral value
     /// [`SessionPolicy::new`] states; state it with the setters.
     pub fn new(
-        model: impl Into<ModelKey>,
+        model: impl Into<LlmProfileKey>,
         turn_budget: TurnBudget,
         max_tool_calls: MaxToolCalls,
     ) -> Self {
@@ -278,10 +278,10 @@ impl SessionSpec {
     /// take them from.
     pub fn resolve_root(
         &self,
-        models: &dyn RuntimeModels,
+        models: &dyn LlmProfiles,
     ) -> Result<SessionPolicy, SpecResolveError> {
         if self.model.is_none() {
-            return Err(SpecResolveError::RootWithoutModel);
+            return Err(SpecResolveError::RootWithoutLlmProfile);
         }
         self.resolve_against(&self.root_base()?, models)
     }
@@ -293,7 +293,7 @@ impl SessionSpec {
         let mut unminted = self.clone();
         unminted.model = None;
         unminted.reasoning = None;
-        unminted.resolve_against(&self.root_base()?, &crate::EmptyModels)
+        unminted.resolve_against(&self.root_base()?, &crate::EmptyLlmProfiles)
     }
 
     fn root_base(&self) -> Result<SessionPolicy, SpecResolveError> {
@@ -307,7 +307,7 @@ impl SessionSpec {
     }
 
     /// The model the session runs, by the host's key.
-    pub fn model(mut self, key: impl Into<ModelKey>) -> Self {
+    pub fn model(mut self, key: impl Into<LlmProfileKey>) -> Self {
         self.model = Some(key.into());
         self
     }
@@ -414,7 +414,7 @@ impl SessionSpec {
     pub fn resolve_against(
         &self,
         base: &SessionPolicy,
-        models: &dyn RuntimeModels,
+        models: &dyn LlmProfiles,
     ) -> Result<SessionPolicy, SpecResolveError> {
         let mut policy = base.clone();
         if let Some(key) = self.model.as_ref() {
@@ -424,7 +424,7 @@ impl SessionSpec {
                 .as_ref()
                 .map(|model| model.reasoning.clone())
                 .unwrap_or_default();
-            policy.model = Some(ModelConfig {
+            policy.model = Some(LlmProfileConfig {
                 model: recorded,
                 reasoning,
             });
@@ -433,7 +433,7 @@ impl SessionSpec {
             policy
                 .model
                 .as_mut()
-                .ok_or(SpecResolveError::ReasoningWithoutModel)?
+                .ok_or(SpecResolveError::ReasoningWithoutLlmProfile)?
                 .reasoning = reasoning.clone();
         }
         if (self.model.is_some() || self.reasoning.is_some())
@@ -473,11 +473,11 @@ impl SessionSpec {
 pub enum SpecResolveError {
     /// The spec's model key has no binding on this deployment.
     #[error(transparent)]
-    Model(ModelUnavailable),
+    Model(LlmProfileUnavailable),
     /// The spec selects reasoning, but neither it nor its base selects a
     /// model.
     #[error("a reasoning selection needs a model, and none is selected")]
-    ReasoningWithoutModel,
+    ReasoningWithoutLlmProfile,
     /// The reasoning the spec records is one its model's recorded capability
     /// refuses.
     #[error(transparent)]
@@ -485,7 +485,7 @@ pub enum SpecResolveError {
     /// A root's spec states no model: nothing stands beneath it to supply
     /// one.
     #[error("a root session's spec states no model")]
-    RootWithoutModel,
+    RootWithoutLlmProfile,
     /// A root's spec states no turn budget: nothing stands beneath it to
     /// supply one.
     #[error("a root session's spec states no turn budget")]
@@ -709,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn session_policy_serializes_the_recorded_model_and_no_transport() {
+    fn session_policy_serializes_the_recorded_llm_profile_and_no_transport() {
         let policy = SessionPolicy {
             model: Some(recorded("mock-model")),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
@@ -730,12 +730,12 @@ mod tests {
 
     /// A catalog serving the listed keys, counting its mints; it is never
     /// asked to bind.
-    struct CountingModels {
+    struct CountingLlmProfiles {
         keys: &'static [&'static str],
         snapshots: std::sync::atomic::AtomicUsize,
     }
 
-    impl CountingModels {
+    impl CountingLlmProfiles {
         fn serving(keys: &'static [&'static str]) -> Self {
             Self {
                 keys,
@@ -748,24 +748,27 @@ mod tests {
         }
     }
 
-    impl RuntimeModels for CountingModels {
-        fn snapshot(&self, key: &ModelKey) -> Result<crate::RecordedModel, ModelUnavailable> {
+    impl LlmProfiles for CountingLlmProfiles {
+        fn snapshot(
+            &self,
+            key: &LlmProfileKey,
+        ) -> Result<crate::RecordedLlmProfile, LlmProfileUnavailable> {
             self.snapshots
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if self.keys.contains(&key.as_str()) {
                 Ok(recorded(key.as_str()).model)
             } else {
-                Err(ModelUnavailable::new(
+                Err(LlmProfileUnavailable::new(
                     key.clone(),
-                    crate::ModelUnavailableReason::UnknownKey,
+                    crate::LlmProfileUnavailableReason::UnknownKey,
                 ))
             }
         }
 
         fn bind(
             &self,
-            recorded: &crate::RecordedModel,
-        ) -> Result<ProviderHandle, ModelUnavailable> {
+            recorded: &crate::RecordedLlmProfile,
+        ) -> Result<ProviderHandle, LlmProfileUnavailable> {
             panic!(
                 "resolving a spec never binds a transport: {}",
                 recorded.key()
@@ -775,33 +778,33 @@ mod tests {
 
     /// `key`'s binding with the `low`/`high` efforts, except `plain-model`,
     /// whose capability has no reasoning controls.
-    fn recorded(key: &str) -> ModelConfig {
-        let mut builder =
-            crate::ModelMetadata::builder(format!("{key}-wire")).context_window_tokens(200_000);
+    fn recorded(key: &str) -> LlmProfileConfig {
+        let mut builder = crate::LlmProfileMetadata::builder(format!("{key}-wire"))
+            .context_window_tokens(200_000);
         if key != "plain-model" {
-            builder = builder.capability(crate::ModelCapability {
+            builder = builder.capability(crate::LlmProfileCapability {
                 reasoning: Some(crate::ReasoningCapability {
                     efforts: vec!["low".to_string(), "high".to_string()],
                     encoding: crate::ReasoningEncoding::Effort,
                     disable: false,
                     mandatory: false,
                 }),
-                ..crate::ModelCapability::default()
+                ..crate::LlmProfileCapability::default()
             });
         }
-        ModelConfig::new(crate::RecordedModel::mint(
-            ModelKey::new(key),
+        LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+            LlmProfileKey::new(key),
             builder.build().expect("valid test model"),
         ))
     }
 
     fn resolve(spec: &SessionSpec, base: &SessionPolicy) -> SessionPolicy {
-        spec.resolve_against(base, &crate::EmptyModels)
+        spec.resolve_against(base, &crate::EmptyLlmProfiles)
             .expect("a spec naming no model resolves without a catalog")
     }
 
     #[test]
-    fn an_inheriting_spec_copies_the_recorded_model_without_minting() {
+    fn an_inheriting_spec_copies_the_recorded_llm_profile_without_minting() {
         let base = SessionPolicy {
             model: Some(
                 recorded("parent-model")
@@ -809,7 +812,7 @@ mod tests {
             ),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
-        let models = CountingModels::serving(&["parent-model"]);
+        let models = CountingLlmProfiles::serving(&["parent-model"]);
         let child = SessionSpec::inherit()
             .resolve_against(&base, &models)
             .expect("inherit");
@@ -833,7 +836,7 @@ mod tests {
             ),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
-        let models = CountingModels::serving(&["parent-model", "child-model"]);
+        let models = CountingLlmProfiles::serving(&["parent-model", "child-model"]);
         let child = SessionSpec::inherit()
             .model("child-model")
             .resolve_against(&base, &models)
@@ -859,15 +862,15 @@ mod tests {
     }
 
     #[test]
-    fn a_spec_naming_an_unserved_key_or_reasoning_without_a_model_is_refused() {
+    fn a_spec_naming_an_unserved_key_or_reasoning_without_a_profile_is_refused() {
         let base = SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        let models = CountingModels::serving(&["served"]);
+        let models = CountingLlmProfiles::serving(&["served"]);
         assert!(matches!(
             SessionSpec::inherit()
                 .model("retired")
                 .resolve_against(&base, &models),
-            Err(SpecResolveError::Model(ModelUnavailable {
-                reason: crate::ModelUnavailableReason::UnknownKey,
+            Err(SpecResolveError::Model(LlmProfileUnavailable {
+                reason: crate::LlmProfileUnavailableReason::UnknownKey,
                 ..
             }))
         ));
@@ -875,7 +878,7 @@ mod tests {
             SessionSpec::inherit()
                 .reasoning(ReasoningSelection::Effort("high".to_string()))
                 .resolve_against(&base, &models),
-            Err(SpecResolveError::ReasoningWithoutModel)
+            Err(SpecResolveError::ReasoningWithoutLlmProfile)
         ));
     }
 
@@ -892,13 +895,13 @@ mod tests {
             ),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
-        let models = CountingModels::serving(&["parent-model", "plain-model"]);
+        let models = CountingLlmProfiles::serving(&["parent-model", "plain-model"]);
         match SessionSpec::inherit()
             .reasoning(ReasoningSelection::Effort("extreme".to_string()))
             .resolve_against(&base, &models)
         {
             Err(SpecResolveError::Reasoning(refused)) => {
-                assert_eq!(refused.key, ModelKey::new("parent-model"));
+                assert_eq!(refused.key, LlmProfileKey::new("parent-model"));
                 assert_eq!(
                     refused.reasoning,
                     ReasoningSelection::Effort("extreme".to_string())
@@ -911,7 +914,7 @@ mod tests {
             .resolve_against(&base, &models)
         {
             Err(SpecResolveError::Reasoning(refused)) => {
-                assert_eq!(refused.key, ModelKey::new("plain-model"));
+                assert_eq!(refused.key, LlmProfileKey::new("plain-model"));
             }
             other => panic!("an inherited effort the key cannot take is refused, got {other:?}"),
         }

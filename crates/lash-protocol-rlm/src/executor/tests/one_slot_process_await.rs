@@ -51,9 +51,9 @@ async fn run_one_slot_process_await() {
         lashlang::LashlangHostCatalog::new(),
     );
     let session_policy = lash_core::SessionPolicy {
-        model: Some(lash_core::testing::test_model_config(
+        model: Some(lash_core::testing::test_llm_profile_config(
             "mock-model",
-            lash_core::ModelMetadata::builder("mock-model")
+            lash_core::LlmProfileMetadata::builder("mock-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("one-slot process await test model"),

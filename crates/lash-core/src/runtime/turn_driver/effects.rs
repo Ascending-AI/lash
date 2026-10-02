@@ -426,7 +426,7 @@ impl RuntimeTurnDriver<'_> {
             .core
             .durability
             .queued_work_batching
-            .admission_policy(self.policy.model_config().context_window_tokens());
+            .admission_policy(self.policy.llm_profile_config().context_window_tokens());
         store
             .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
                 fence: fence.clone(),

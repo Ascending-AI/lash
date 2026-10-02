@@ -28,8 +28,8 @@ struct Statements {
 }
 lash_store_sql::statements! {
     pub(crate) struct UsageInsertStatements @ "usage_sqlite" {
-        fact = "INSERT OR IGNORE INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
-        run = "INSERT OR IGNORE INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, model_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
+        fact = "INSERT OR IGNORE INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, profile_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
+        run = "INSERT OR IGNORE INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, profile_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
         owner = "INSERT OR IGNORE INTO usage_owner_retirements (owner_kind, owner_id, retired_at_ms) VALUES (?1, ?2, ?3)";
     }
 }
@@ -64,7 +64,7 @@ fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
         run_id: get!(8),
         llm_call_id: get!(9),
         source: get!(10),
-        model_key: get!(11),
+        profile_key: get!(11),
         requested_model: get!(12),
         served_model: get!(13),
         usage: TokenUsage {
@@ -92,7 +92,7 @@ fn decode_run(row: &Row<'_>, owner: &RuntimeOwner) -> Result<UsageRunRecord, Sto
         run_id: get!(1),
         execution_scope_key: get!(2),
         source: get!(3),
-        model_key: get!(4),
+        profile_key: get!(4),
         requested_model: get!(5),
         admitted_at_ms: get!(6),
         state: get!(7),
@@ -128,7 +128,7 @@ fn insert_fact(
                 record.run().map(UsageRunId::as_str),
                 record.llm_call_id.0.as_str(),
                 record.source,
-                record.model_key.as_str(),
+                record.profile_key.as_str(),
                 record.requested_model,
                 record.served_model,
                 usage.input_tokens,
@@ -216,7 +216,7 @@ impl UsageAccountingStore for SqliteStore {
                         a.run.as_str(),
                         a.execution_scope_key,
                         a.source,
-                        a.model_key.as_str(),
+                        a.profile_key.as_str(),
                         a.requested_model,
                         usage_integer(a.admitted_at_ms)?,
                         "open",
@@ -495,7 +495,7 @@ impl UsageAccountingStore for SqliteStore {
                         .map(|row| {
                             let (
                                 source,
-                                model_key,
+                                profile_key,
                                 requested_model,
                                 usage,
                                 reported,
@@ -504,7 +504,7 @@ impl UsageAccountingStore for SqliteStore {
                             ) = row.map_err(sqlite_error)?;
                             StoredUsageAggregate {
                                 source,
-                                model_key,
+                                profile_key,
                                 requested_model,
                                 usage,
                                 reported_attempts: reported,
@@ -537,7 +537,7 @@ impl UsageAccountingStore for SqliteStore {
                                 attempt,
                                 llm_call,
                                 source,
-                                model_key,
+                                profile_key,
                                 requested_model,
                                 generation_id,
                             ) = row.map_err(sqlite_error)?;
@@ -547,7 +547,7 @@ impl UsageAccountingStore for SqliteStore {
                                 provider_attempt: attempt,
                                 llm_call_id: llm_call,
                                 source,
-                                model_key,
+                                profile_key,
                                 requested_model,
                                 generation_id,
                             }

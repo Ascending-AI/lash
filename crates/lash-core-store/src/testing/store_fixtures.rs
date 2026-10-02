@@ -118,13 +118,15 @@ pub fn session_store_request(
         session_id,
         relation,
         crate::SessionPolicy {
-            model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                crate::ModelKey::new(model_id),
-                lash_core_llm::model::ModelMetadata::builder(model_id)
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("valid conformance model"),
-            ))),
+            model: Some(crate::LlmProfileConfig::new(
+                crate::RecordedLlmProfile::mint(
+                    crate::LlmProfileKey::new(model_id),
+                    lash_core_llm::llm_profile::LlmProfileMetadata::builder(model_id)
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("valid conformance model"),
+                ),
+            )),
             attachment_acceptance: Default::default(),
             session_id: Some(SessionId::from(session_id.to_string())),
             autonomous: false,

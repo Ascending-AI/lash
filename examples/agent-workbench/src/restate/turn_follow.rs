@@ -25,7 +25,7 @@ pub(crate) struct UserTurnRequest {
     pub(crate) turn_id: TurnId,
     pub(crate) session_id: SessionId,
     pub(crate) text: String,
-    pub(crate) model: ModelSelection,
+    pub(crate) model: LlmProfileSelection,
     pub(crate) attachment_id: Option<String>,
 }
 
@@ -105,12 +105,12 @@ pub(crate) async fn start_user_turn(
     request: UserTurnRequest,
 ) -> Result<tokio::task::JoinHandle<TurnSettlement>, AppError> {
     let input = workbench_turn_input(state, &request).await?;
-    let turn_model = request.model.clone();
+    let turn_profile = request.model.clone();
     let session = state
         .create_or_open_session(&request.session_id, "api.turn")
         .await
         .map_err(AppError::session_open)?;
-    apply_model_selection_to_session(state, &session, turn_model, "user_turn").await?;
+    apply_llm_profile_selection_to_session(state, &session, turn_profile, "user_turn").await?;
     watch_session_roots(state, &request.session_id).await;
     // Claimed before the send, so the session's watch leaves this root to
     // the follower below.
@@ -384,15 +384,15 @@ async fn follow_once(
         lash::SendOutcome::Settled { output, .. } => output.result,
         outcome => return Err(unsettled_turn(&outcome.status())),
     };
-    let selected_model;
+    let selected_llm_profile;
     let model = match model {
         Some(model) => Some(model),
         None => {
-            selected_model = state.selected_model().model;
-            Some(selected_model.as_str())
+            selected_llm_profile = state.selected_llm_profile().model;
+            Some(selected_llm_profile.as_str())
         }
     };
-    record_turn_output_for_model(
+    record_turn_output_for_profile(
         state,
         session,
         TurnOutputIdentity {

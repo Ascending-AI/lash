@@ -6,19 +6,19 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// The request defaults the root records: the crashing execution's binding.
-fn recorded_defaults() -> lash_core::provider::ModelRequestDefaults {
-    lash_core::provider::ModelRequestDefaults {
+fn recorded_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
+    lash_core::provider::LlmProfileRequestDefaults {
         max_output_tokens: Some(3_333),
         response_metadata_headers: vec!["x-recorded-cost".to_string()],
         response_metadata_body_paths: vec!["/recorded/cost".to_string()],
-        ..lash_core::provider::ModelRequestDefaults::default()
+        ..lash_core::provider::LlmProfileRequestDefaults::default()
     }
 }
 
 /// The request defaults the redeployed worker states for the same model key:
 /// no field agrees with [`recorded_defaults`].
-fn redeployed_defaults() -> lash_core::provider::ModelRequestDefaults {
-    lash_core::provider::ModelRequestDefaults {
+fn redeployed_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
+    lash_core::provider::LlmProfileRequestDefaults {
         expose_thinking: true,
         max_output_tokens: Some(7_777),
         cache_retention: lash_sansio::llm::capability::CacheRetention::Long,
@@ -51,14 +51,15 @@ fn capturing_model(
         .into_handle()
 }
 
-/// A policy whose creation default binds [`FIRST_MODEL`] with `defaults`.
+/// A policy whose creation default binds [`FIRST_PROFILE`] with `defaults`.
 fn policy_with_request_defaults(
-    defaults: lash_core::provider::ModelRequestDefaults,
+    defaults: lash_core::provider::LlmProfileRequestDefaults,
 ) -> crate::SessionPolicy {
     crate::SessionPolicy {
-        model: Some(crate::testing::test_model_config(
-            FIRST_MODEL,
-            crate::testing::test_model_metadata(FIRST_MODEL).with_request_defaults(defaults),
+        model: Some(crate::testing::test_llm_profile_config(
+            FIRST_PROFILE,
+            crate::testing::test_llm_profile_metadata(FIRST_PROFILE)
+                .with_request_defaults(defaults),
         )),
         ..crate::testing::mock_session_policy()
     }
@@ -90,7 +91,7 @@ pub async fn a_redrive_calls_the_model_with_the_request_defaults_its_root_record
         "recorded-request-defaults-redrive",
         &effect_host,
         &stores,
-        turn_config_models(capturing_model(&requests)),
+        turn_config_llm_profiles(capturing_model(&requests)),
         policy_with_request_defaults(recorded_defaults()),
         Vec::new(),
     )

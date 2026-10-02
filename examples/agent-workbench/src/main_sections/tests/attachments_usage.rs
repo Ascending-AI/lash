@@ -201,7 +201,7 @@ async fn run_attachment_usage_gate(
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
         text: "Describe the attached PNG briefly.".to_string(),
-        model: ModelSelection {
+        model: LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: None,
         },
@@ -342,14 +342,14 @@ fn attachment_usage_gate_core(
     provider: ProviderHandle,
     trace_sink: Option<Arc<dyn TraceSink>>,
 ) -> LashCore {
-    let model = with_workbench_model_capability(
-        lash::ModelMetadata::builder("test-model")
+    let model = with_workbench_llm_profile_capability(
+        lash::LlmProfileMetadata::builder("test-model")
             .context_window_tokens(4096)
             .build()
             .expect("gate model spec"),
     );
-    let mut builder =
-        explicit_durable_test_facets_on(backend.backend).serve_workbench_model(provider, model);
+    let mut builder = explicit_durable_test_facets_on(backend.backend)
+        .serve_workbench_llm_profile(provider, model);
     if let Some(trace_sink) = trace_sink {
         builder = builder
             .trace_sink(trace_sink)
@@ -380,7 +380,7 @@ fn attachment_usage_gate_state(
         // Process work is resolved through the core.
         sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: None,
         })),

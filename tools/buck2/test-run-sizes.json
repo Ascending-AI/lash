@@ -1583,7 +1583,7 @@
     "peak_bytes": 2381041664,
     "samples": 1
   },
-  "//crates/lash:model_keys__test": {
+  "//crates/lash:llm_profiles__test": {
     "cpu_count": 2,
     "memory_kb": 1048576,
     "p95_cores": 1.65,
@@ -1591,7 +1591,7 @@
     "peak_bytes": 720896000,
     "samples": 20
   },
-  "//crates/lash:model_keys__test__fv_5b9f21e0": {
+  "//crates/lash:llm_profiles__test__fv_5b9f21e0": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 1.04,

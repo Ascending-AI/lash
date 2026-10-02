@@ -237,7 +237,7 @@ impl CodexProvider {
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
         let stream_termination = req
-            .model_capability
+            .llm_profile_capability
             .stream_termination
             .unwrap_or(StreamTermination::RequireTerminalEvidence);
         let websocket_body = Self::websocket_create_request(&plan.body);
@@ -679,7 +679,7 @@ impl Provider for CodexProvider {
                     let result: Result<LlmResponse, LlmTransportError> = async {
             let credential = &credential_lease.value;
             let stream_termination = req
-                .model_capability
+                .llm_profile_capability
                 .stream_termination
                 .unwrap_or(StreamTermination::RequireTerminalEvidence);
             if !matches!(provider.transport, CodexTransport::Sse) {

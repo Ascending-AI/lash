@@ -297,12 +297,12 @@ async fn law(kind: StorageKind, method: Method, live: bool) {
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .models(std::sync::Arc::new(
-            lash_core::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash_core::LlmProfileRegistry::new()
                 .register(
                     "mock-model",
-                    lash_core::RegisteredModel::new(
-                        lash_core::ModelMetadata::builder("mock-model")
+                    lash_core::RegisteredLlmProfile::new(
+                        lash_core::LlmProfileMetadata::builder("mock-model")
                             .context_window_tokens(200_000)
                             .build()
                             .unwrap(),

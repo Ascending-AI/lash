@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetModel, SetTurnBudget};
+use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetLlmProfile, SetTurnBudget};
 use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f420;
@@ -62,10 +62,10 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
         standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
             .await;
     assert_eq!(runtime.config_revision(), 0);
-    let transaction_model = serve_model_beside(
+    let transaction_model = serve_llm_profile_beside(
         &mut runtime,
         "transaction-model",
-        lash_core::ModelMetadata::builder("transaction-model")
+        lash_core::LlmProfileMetadata::builder("transaction-model")
             .context_window_tokens(32_000)
             .build()
             .expect("model"),
@@ -74,7 +74,7 @@ pub(super) async fn a_transaction_publishes_every_command_with_one_commit_and_on
         store.as_ref(),
         &runtime,
         "one-step",
-        lash_core::ConfigTransaction::of(SetModel {
+        lash_core::ConfigTransaction::of(SetLlmProfile {
             model: transaction_model,
         })
         .then(SetTurnBudget {
@@ -216,23 +216,23 @@ pub(super) async fn a_resubmitted_transaction_reuses_its_receipt_and_refuses_cha
 pub(super) async fn config_submission_refuses_what_no_owner_registers() {
     let backend = sqlite_memory_store_backend().await;
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    let original_model = runtime.session_policy().model.clone();
-    let admitted_model = serve_model_beside(
+    let original_profile = runtime.session_policy().model.clone();
+    let admitted_model = serve_llm_profile_beside(
         &mut runtime,
         "admitted-model",
-        lash_core::ModelMetadata::builder("admitted-model")
+        lash_core::LlmProfileMetadata::builder("admitted-model")
             .context_window_tokens(32_000)
             .build()
             .expect("model"),
     );
-    let set_model = || {
-        lash_core::ConfigTransaction::of(SetModel {
+    let set_llm_profile = || {
+        lash_core::ConfigTransaction::of(SetLlmProfile {
             model: admitted_model.clone(),
         })
     };
 
     let unnamed = runtime
-        .apply_storeless_config_transaction("", 0, &set_model())
+        .apply_storeless_config_transaction("", 0, &set_llm_profile())
         .await;
     assert!(
         matches!(
@@ -296,10 +296,11 @@ pub(super) async fn config_submission_refuses_what_no_owner_registers() {
         ),
         "{malformed:?}"
     );
-    assert_eq!(runtime.session_policy().model, original_model);
+    assert_eq!(runtime.session_policy().model, original_profile);
     assert_eq!(runtime.config_revision(), 0);
 
-    let applied = crate::runtime_support::apply_storeless_config(&mut runtime, set_model()).await;
+    let applied =
+        crate::runtime_support::apply_storeless_config(&mut runtime, set_llm_profile()).await;
     assert_eq!(
         applied,
         lash_core::ConfigTransactionOutcome::Applied {
@@ -426,7 +427,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
         .complete_error("alt provider not wired")
         .build()
         .into_handle();
-    let alt_model = lash_core::ModelMetadata::builder("alt-model")
+    let alt_model = lash_core::LlmProfileMetadata::builder("alt-model")
         .context_window_tokens(123_456)
         .build()
         .expect("valid model metadata");
@@ -435,43 +436,46 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
         .complete_error("combined provider not wired")
         .build()
         .into_handle();
-    let combined_model = lash_core::ModelMetadata::builder("combined-model")
+    let combined_model = lash_core::LlmProfileMetadata::builder("combined-model")
         .context_window_tokens(234_567)
         .build()
         .expect("valid combined model metadata");
     // Two keys share one wire model on different transports: a model change
     // moves the transport only through the key the registry minted.
-    serve_runtime_models(
+    serve_runtime_llm_profiles(
         &mut runtime,
         [
             (
-                lash_core::ModelKey::new("alt-model"),
-                lash_core::RegisteredModel::new(
+                lash_core::LlmProfileKey::new("alt-model"),
+                lash_core::RegisteredLlmProfile::new(
                     alt_model.clone(),
                     mock_provider(Vec::new()).into_handle(),
                 ),
             ),
             (
-                lash_core::ModelKey::new("alt-model-on-alt"),
-                lash_core::RegisteredModel::new(alt_model.clone(), alt_provider.clone()),
+                lash_core::LlmProfileKey::new("alt-model-on-alt"),
+                lash_core::RegisteredLlmProfile::new(alt_model.clone(), alt_provider.clone()),
             ),
             (
-                lash_core::ModelKey::new("combined-model"),
-                lash_core::RegisteredModel::new(combined_model.clone(), combined_provider.clone()),
+                lash_core::LlmProfileKey::new("combined-model"),
+                lash_core::RegisteredLlmProfile::new(
+                    combined_model.clone(),
+                    combined_provider.clone(),
+                ),
             ),
         ],
     );
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetModel {
-            model: lash_core::ModelKey::new("alt-model"),
+        lash_core::ConfigTransaction::of(SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("alt-model"),
         }),
     )
     .await;
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetModel {
-            model: lash_core::ModelKey::new("alt-model-on-alt"),
+        lash_core::ConfigTransaction::of(SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("alt-model-on-alt"),
         }),
     )
     .await;
@@ -480,8 +484,8 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
 
     apply(
         &mut runtime,
-        lash_core::ConfigTransaction::of(SetModel {
-            model: lash_core::ModelKey::new("combined-model"),
+        lash_core::ConfigTransaction::of(SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("combined-model"),
         }),
     )
     .await;
@@ -522,7 +526,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     assert_eq!(changes.len(), 6);
     let key = |policy: &lash_core::SessionPolicy| {
         policy
-            .model_key()
+            .profile_key()
             .map(ToString::to_string)
             .unwrap_or_default()
     };
@@ -541,7 +545,7 @@ pub(super) async fn every_applied_config_transaction_emits_a_lifecycle_event() {
     assert_eq!(key(previous), "alt-model-on-alt");
     assert_eq!(
         current.model,
-        Some(lash_core::testing::test_model_config(
+        Some(lash_core::testing::test_llm_profile_config(
             "combined-model",
             combined_model
         ))

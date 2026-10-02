@@ -610,7 +610,7 @@ pub fn suspend_roundtrip_scripts(
 pub fn runtime_provider_components<T>(
     provider_kind: &str,
     transport: &Arc<T>,
-) -> Result<(ProviderHandle, lash::ModelMetadata, String), RuntimeProviderError>
+) -> Result<(ProviderHandle, lash::LlmProfileMetadata, String), RuntimeProviderError>
 where
     T: LlmHttpTransport + 'static,
 {
@@ -660,7 +660,7 @@ where
             )));
         }
     };
-    let mut model = lash::ModelMetadata::builder(model_name).context_window_tokens(200_000);
+    let mut model = lash::LlmProfileMetadata::builder(model_name).context_window_tokens(200_000);
     if provider_kind == ANTHROPIC {
         // Messages requires a cap, and lash invents none.
         model = model.max_output_tokens(4_096);

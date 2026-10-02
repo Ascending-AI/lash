@@ -47,7 +47,7 @@ fn request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
@@ -72,7 +72,7 @@ fn fig1123_google_fallback_evicts_whole_genuine_user_segments() {
         LlmMessage::text(LlmRole::User, "new input").with_user_segment_start(),
         LlmMessage::text(LlmRole::Assistant, "new answer"),
     ];
-    *req.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+    *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
         selection: ReasoningRetentionSelection::ClientSideUserSegments {
             max_segments: std::num::NonZeroUsize::new(1).expect("non-zero segment count"),

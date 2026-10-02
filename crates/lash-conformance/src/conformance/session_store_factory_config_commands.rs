@@ -370,7 +370,7 @@ fn config_transaction_command(model: &str) -> crate::SessionCommand {
             expected_revision: 0,
             entries: vec![crate::ConfigCommandEntry {
                 owner: crate::CORE_CONFIG_OWNER.to_string(),
-                command: "set_model".to_string(),
+                command: "set_llm_profile".to_string(),
                 args: serde_json::json!({ "model": model }),
             }],
             implementations: std::collections::BTreeMap::from([(
@@ -627,13 +627,13 @@ async fn runtime_for_config_settlement(
         .kind("conformance-provider")
         .build()
         .into_handle();
-    let mut models = crate::ModelRegistry::new();
-    for key in CONFIG_SETTLEMENT_MODEL_KEYS {
+    let mut models = crate::LlmProfileRegistry::new();
+    for key in CONFIG_SETTLEMENT_PROFILE_KEYS {
         models = models
             .register(
                 key,
-                crate::RegisteredModel::new(
-                    crate::testing::test_model_metadata(key),
+                crate::RegisteredLlmProfile::new(
+                    crate::testing::test_llm_profile_metadata(key),
                     provider.clone(),
                 ),
             )
@@ -674,12 +674,12 @@ async fn hold_config_settlement_lease(store: &dyn crate::RuntimeStore, session_i
 
 /// The keys the config-settlement laws move the session to; the host's
 /// models serve each.
-const CONFIG_SETTLEMENT_MODEL_KEYS: [&str; 3] =
+const CONFIG_SETTLEMENT_PROFILE_KEYS: [&str; 3] =
     ["must-remain-pending", "must-be-cancelled", "first-settled"];
 
 /// A recorded model as a host's models mint it for `key`.
-fn config_command_model(key: &str) -> crate::ModelConfig {
-    crate::testing::test_model_config(key, crate::testing::test_model_metadata(key))
+fn config_command_model(key: &str) -> crate::LlmProfileConfig {
+    crate::testing::test_llm_profile_config(key, crate::testing::test_llm_profile_metadata(key))
 }
 
 /// Submit a config transaction moving the session to the model `key` and
@@ -698,8 +698,8 @@ async fn submit_config_settlement(
         .submit_config_transaction(
             format!("config-settlement:{key}"),
             revision,
-            &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-                model: crate::ModelKey::new(key),
+            &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+                model: crate::LlmProfileKey::new(key),
             }),
         )
         .await
@@ -730,7 +730,7 @@ where
         Arc::clone(&clock),
     )
     .await;
-    let original_model = runtime.export_persistence_state().policy.model.clone();
+    let original_profile = runtime.export_persistence_state().policy.model.clone();
     let started = clock.now();
     let settlement = ConfigSettlementClock::driving(Box::pin(submit_config_settlement(
         &mut runtime,
@@ -751,7 +751,7 @@ where
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
-        original_model
+        original_profile
     );
 }
 
@@ -785,7 +785,7 @@ where
         Arc::clone(&clock),
     )
     .await;
-    let original_model = runtime.export_persistence_state().policy.model.clone();
+    let original_profile = runtime.export_persistence_state().policy.model.clone();
     let setter = crate::task::spawn(ConfigSettlementClock::driving(async move {
         let mut runtime = runtime;
         let result = submit_config_settlement(&mut runtime, "must-be-cancelled").await;
@@ -830,7 +830,7 @@ where
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
-        original_model
+        original_profile
     );
 }
 

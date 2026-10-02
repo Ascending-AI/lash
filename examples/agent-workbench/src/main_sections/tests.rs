@@ -7,57 +7,57 @@ use lash::TurnId;
 /// Workbench test cores serve the workbench's own open catalog, with the
 /// test's model pinned under its wire model so its window and capability
 /// hold; any other id a route selects mints through the open catalog.
-pub(crate) trait ServeWorkbenchTestModel {
-    fn serve_workbench_model(
+pub(crate) trait ServeWorkbenchTestLlmProfile {
+    fn serve_workbench_llm_profile(
         self,
         provider: lash::provider::ProviderHandle,
-        model: lash::ModelMetadata,
+        model: lash::LlmProfileMetadata,
     ) -> Self;
 }
 
-impl ServeWorkbenchTestModel for lash::LashCoreBuilder {
-    fn serve_workbench_model(
+impl ServeWorkbenchTestLlmProfile for lash::LashCoreBuilder {
+    fn serve_workbench_llm_profile(
         self,
         provider: lash::provider::ProviderHandle,
-        model: lash::ModelMetadata,
+        model: lash::LlmProfileMetadata,
     ) -> Self {
-        let key = lash::ModelKey::new(model.wire_model.clone());
-        let pinned = lash::ModelRegistry::new()
+        let key = lash::LlmProfileKey::new(model.wire_model.clone());
+        let pinned = lash::LlmProfileRegistry::new()
             .register(
                 key.clone(),
-                lash::RegisteredModel::new(model, provider.clone()),
+                lash::RegisteredLlmProfile::new(model, provider.clone()),
             )
             .expect("a test model registers under its wire model");
-        self.models(Arc::new(WorkbenchTestModels {
+        self.llm_profiles(Arc::new(WorkbenchTestLlmProfiles {
             pinned,
-            open: WorkbenchModels { provider },
+            open: WorkbenchLlmProfiles { provider },
         }))
     }
 }
 
-struct WorkbenchTestModels {
-    pinned: lash::ModelRegistry,
-    open: WorkbenchModels,
+struct WorkbenchTestLlmProfiles {
+    pinned: lash::LlmProfileRegistry,
+    open: WorkbenchLlmProfiles,
 }
 
-impl lash::RuntimeModels for WorkbenchTestModels {
+impl lash::LlmProfiles for WorkbenchTestLlmProfiles {
     fn snapshot(
         &self,
-        key: &lash::ModelKey,
-    ) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
-        lash::RuntimeModels::snapshot(&self.pinned, key)
-            .or_else(|_| lash::RuntimeModels::snapshot(&self.open, key))
+        key: &lash::LlmProfileKey,
+    ) -> Result<lash::RecordedLlmProfile, lash::LlmProfileUnavailable> {
+        lash::LlmProfiles::snapshot(&self.pinned, key)
+            .or_else(|_| lash::LlmProfiles::snapshot(&self.open, key))
     }
 
     fn bind(
         &self,
-        recorded: &lash::RecordedModel,
-    ) -> Result<lash::provider::ProviderHandle, lash::ModelUnavailable> {
-        match lash::RuntimeModels::bind(&self.pinned, recorded) {
-            Err(lash::ModelUnavailable {
-                reason: lash::ModelUnavailableReason::UnknownKey,
+        recorded: &lash::RecordedLlmProfile,
+    ) -> Result<lash::provider::ProviderHandle, lash::LlmProfileUnavailable> {
+        match lash::LlmProfiles::bind(&self.pinned, recorded) {
+            Err(lash::LlmProfileUnavailable {
+                reason: lash::LlmProfileUnavailableReason::UnknownKey,
                 ..
-            }) => lash::RuntimeModels::bind(&self.open, recorded),
+            }) => lash::LlmProfiles::bind(&self.open, recorded),
             other => other,
         }
     }
@@ -94,7 +94,7 @@ where
     .join()
     .expect("runtime thread")
 }
-/// The default session spec a test workbench keeps: [`test_model`]'s key
+/// The default session spec a test workbench keeps: [`test_llm_profile`]'s key
 /// under an unbounded turn budget, with the attachment acceptance production
 /// bootstrap states for every session it creates.
 pub(crate) fn test_session_defaults() -> lash::SessionSpec {
@@ -106,8 +106,8 @@ pub(crate) fn test_session_defaults() -> lash::SessionSpec {
     .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
 }
 
-fn test_model() -> lash::ModelMetadata {
-    lash::ModelMetadata::builder("test-model")
+fn test_llm_profile() -> lash::LlmProfileMetadata {
+    lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec")
@@ -475,22 +475,25 @@ mod facade_homes_tests;
 
 #[test]
 fn empty_model_variant_request_clears_selected_variant() {
-    let selected_model = ModelSelection {
+    let selected_llm_profile = LlmProfileSelection {
         model: "x-ai/grok-build-0.1".to_string(),
         model_variant: Some("medium".to_string()),
     };
 
     assert_eq!(
-        model_variant_for_request(&selected_model, None),
+        model_variant_for_request(&selected_llm_profile, None),
         Some("medium".to_string())
     );
     assert_eq!(
-        model_variant_for_request(&selected_model, Some(" high ")),
+        model_variant_for_request(&selected_llm_profile, Some(" high ")),
         Some("high".to_string())
     );
-    assert_eq!(model_variant_for_request(&selected_model, Some("")), None);
     assert_eq!(
-        model_variant_for_request(&selected_model, Some("   ")),
+        model_variant_for_request(&selected_llm_profile, Some("")),
+        None
+    );
+    assert_eq!(
+        model_variant_for_request(&selected_llm_profile, Some("   ")),
         None
     );
 }
@@ -508,7 +511,7 @@ async fn event_stream_forwards_session_observation_live_replay_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let model = test_model();
+    let model = test_llm_profile();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-observation-stream-test")
         .complete(|_request| async {
@@ -522,7 +525,7 @@ finish("observed through live replay");
         .into_handle();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model.clone())
+        .serve_workbench_llm_profile(provider, model.clone())
         .build(crate::test_core_owner())
         .expect("build core");
     let session = crate::created_session(&core, "workbench-observation-stream")
@@ -596,7 +599,7 @@ async fn event_stream_forwards_session_observation_replay_gap_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let model = test_model();
+    let model = test_llm_profile();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-observation-gap-test")
         .complete(|_request| async {
@@ -610,7 +613,7 @@ finish("gap source");
         .into_handle();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model.clone())
+        .serve_workbench_llm_profile(provider, model.clone())
         .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
@@ -703,7 +706,7 @@ finish("snapshot cursor");
         .build()
         .into_handle();
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_test_model(provider, test_model())
+        .serve_test_llm_profile(provider, test_llm_profile())
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -720,7 +723,7 @@ finish("snapshot cursor");
         process_observer,
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -845,10 +848,10 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .complete_error("cancel route test should not call the provider")
         .build()
         .into_handle();
-    let model = test_model();
+    let model = test_llm_profile();
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -866,7 +869,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -972,11 +975,11 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
     let mail_world = mail::MailWorld::new();
     mail_world.add_account("test").expect("add test");
     let provider = catalog_lifecycle_provider();
-    let model = test_model();
+    let model = test_llm_profile();
     let session_id = WorkbenchSessions::fresh().current();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
@@ -1045,11 +1048,11 @@ finish({ test: boxes[0], test2: boxes[1] });
         })
         .build()
         .into_handle();
-    let model = test_model();
+    let model = test_llm_profile();
     let session_id = WorkbenchSessions::fresh().current();
     let double = crate::tests::test_double_backend(0).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
@@ -1105,10 +1108,10 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .complete_error("dynamic inbox surface test should not call the provider")
         .build()
         .into_handle();
-    let model = test_model();
+    let model = test_llm_profile();
     let sessions = WorkbenchSessions::fresh();
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
@@ -1129,7 +1132,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         // Process work is resolved through the core.
         sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -1261,8 +1264,8 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .complete(|_| async { Ok(trigger_registration_response()) })
         .build()
         .into_handle();
-    let model = test_model();
-    let model = with_workbench_model_capability(model);
+    let model = test_llm_profile();
+    let model = with_workbench_llm_profile_capability(model);
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
         .expect("open durable product events");
@@ -1280,7 +1283,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
@@ -1303,7 +1306,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -1338,9 +1341,9 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
     )
     .await
     .expect("button command");
-    let selected_model = state.selected_model();
-    assert_eq!(selected_model.model, "button-model");
-    assert_eq!(selected_model.model_variant.as_deref(), Some("high"));
+    let selected_llm_profile = state.selected_llm_profile();
+    assert_eq!(selected_llm_profile.model, "button-model");
+    assert_eq!(selected_llm_profile.model_variant.as_deref(), Some("high"));
     assert!(
         state.messages_snapshot().iter().any(|message| {
             message.role == "event" && message.text == "blue button trigger occurrence"
@@ -1629,7 +1632,7 @@ async fn run_workbench_turn_via_restate(state: &AppState, text: &str) -> Workben
                 turn_id: turn_id.clone(),
                 session_id: session_id.clone(),
                 text: text.to_string(),
-                model: state.selected_model(),
+                model: state.selected_llm_profile(),
                 attachment_id: None,
             },
         ),
@@ -1896,11 +1899,11 @@ async fn live_workbench_restate_state_over_stores(
         Arc::clone(&lashlang_execution) as Arc<dyn TraceSink>,
         Arc::new(JsonlTraceSink::new(lashlang_execution_path)) as Arc<dyn TraceSink>,
     ])) as Arc<dyn TraceSink>;
-    let model = lash::ModelMetadata::builder("mock-model")
+    let model = lash::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
-    let model = with_workbench_model_capability(model);
+    let model = with_workbench_llm_profile_capability(model);
     let restate_http = reqwest::Client::new();
     let restate_admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
@@ -1933,7 +1936,7 @@ async fn live_workbench_restate_state_over_stores(
         lash::Backend::new(backend.clone()),
         factory,
     )
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_sink(Arc::clone(&trace_sink))
@@ -1968,7 +1971,7 @@ async fn live_workbench_restate_state_over_stores(
         // Process work is resolved through the core.
         sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "mock-model".to_string(),
             model_variant: Some("high".to_string()),
         })),
@@ -2156,7 +2159,7 @@ mod queued_work_tests;
 mod session_isolation_tests;
 fn test_workbench_core(backend: lash::Backend) -> LashCore {
     let provider = trigger_registration_provider();
-    let model = test_model();
+    let model = test_llm_profile();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -2171,7 +2174,7 @@ fn test_workbench_core(backend: lash::Backend) -> LashCore {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.

@@ -181,7 +181,7 @@ async fn a_redelivered_emission_writes_no_reclaimed_row_back(
         Some(redelivery_host),
         None,
     )))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     let _session = redelivery.session(SESSION).created().await.open().await?;

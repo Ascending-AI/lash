@@ -56,12 +56,12 @@ async fn websocket_core(
         .await
         .expect("build the Restate server double");
     let core = LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("gpt-5.4")
                             .context_window_tokens(16_000)
                             .build()
                             .expect("valid model spec"),
@@ -188,12 +188,12 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         .await
         .expect("build the Restate server double");
     let core = LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("gpt-5.4")
                             .context_window_tokens(16_000)
                             .build()
                             .expect("valid model spec"),

@@ -10,10 +10,10 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> = session_store_factory;
     let process_registry = double.engine_stores().process_registry();
     let provider = trigger_registration_provider();
-    let model = test_model();
+    let model = test_llm_profile();
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -39,7 +39,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
             attachments: Vec::new(),
             provenance: None,
         }])),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

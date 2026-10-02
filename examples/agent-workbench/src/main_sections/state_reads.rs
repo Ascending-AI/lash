@@ -88,10 +88,10 @@ pub(crate) fn state_store_request(
         lash::MaxToolCalls::new(1024),
     );
     policy.session_id = Some(SessionId::from(session_id.to_string()));
-    let selection = state.selected_model();
-    policy.model = workbench_recorded_model(&selection.key())
+    let selection = state.selected_llm_profile();
+    policy.model = workbench_recorded_llm_profile(&selection.key())
         .ok()
-        .map(|model| lash::ModelConfig::new(model).with_reasoning(selection.reasoning()));
+        .map(|model| lash::LlmProfileConfig::new(model).with_reasoning(selection.reasoning()));
     lash::persistence::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),

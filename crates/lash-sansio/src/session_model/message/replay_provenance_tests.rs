@@ -64,7 +64,7 @@ fn replay_request_from_reopened_message(
         tool_choice: crate::llm::types::LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: Default::default(),

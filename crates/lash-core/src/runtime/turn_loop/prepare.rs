@@ -183,7 +183,7 @@ impl LashRuntime {
             // root's recorded config, adopted on resident state at the
             // funnel's `ResolveTurnConfig` step.
             trace_metadata.insert(
-                "model_key".to_string(),
+                "profile_key".to_string(),
                 serde_json::json!(
                     self.state
                         .policy

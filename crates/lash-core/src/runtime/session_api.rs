@@ -316,7 +316,7 @@ impl LashRuntime {
             .resolve_session_policy(&session_id, policy)?
             .binding()
             .bind()
-            .map_err(|source| SessionError::ModelUnavailable {
+            .map_err(|source| SessionError::LlmProfileUnavailable {
                 session_id: session_id.clone(),
                 source,
             })?;

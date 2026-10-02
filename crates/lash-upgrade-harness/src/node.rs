@@ -503,11 +503,11 @@ fn restate_args(restate: &RestateArgs) -> Vec<String> {
 }
 
 /// The key every node registers its one model under.
-const MODEL_KEY: &str = "upgrade-harness-model";
+const PROFILE_KEY: &str = "upgrade-harness-model";
 
-/// The metadata every node registers under [`MODEL_KEY`].
-fn model() -> Result<lash::ModelMetadata> {
-    lash::ModelMetadata::builder("upgrade-harness-model")
+/// The metadata every node registers under [`PROFILE_KEY`].
+fn model() -> Result<lash::LlmProfileMetadata> {
+    lash::LlmProfileMetadata::builder("upgrade-harness-model")
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| anyhow!("model metadata: {error}"))
@@ -517,17 +517,17 @@ fn model() -> Result<lash::ModelMetadata> {
 /// default, since a core keeps none.
 fn session_spec() -> lash::SessionSpec {
     lash::SessionSpec::new(
-        MODEL_KEY,
+        PROFILE_KEY,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
     )
 }
 
-/// The binding every node's registry mints for [`MODEL_KEY`], as a process
+/// The binding every node's registry mints for [`PROFILE_KEY`], as a process
 /// environment records it.
-fn model_config() -> Result<lash::ModelConfig> {
-    Ok(lash::ModelConfig::new(lash::RecordedModel::mint(
-        lash::ModelKey::new(MODEL_KEY),
+fn llm_profile_config() -> Result<lash::LlmProfileConfig> {
+    Ok(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+        lash::LlmProfileKey::new(PROFILE_KEY),
         model()?,
     )))
 }
@@ -595,11 +595,11 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
     let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
     let worker_recovery = backend.worker_recovery();
     lash::LashCore::standard_builder(backend)
-        .models(Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
-                    MODEL_KEY,
-                    lash::RegisteredModel::new(model()?, provider.into_handle()),
+                    PROFILE_KEY,
+                    lash::RegisteredLlmProfile::new(model()?, provider.into_handle()),
                 )
                 .map_err(|error| anyhow!("register the model: {error}"))?,
         ))
@@ -683,7 +683,7 @@ impl Serving {
                     .map_err(|error| anyhow!("authority id: {error}"))?,
                 namespace: lash::restate::RestateNamespace::new(&restate.namespace)
                     .map_err(|error| anyhow!("namespace: {error}"))?,
-                model: model_config()?,
+                model: llm_profile_config()?,
             },
         )?
         .build();

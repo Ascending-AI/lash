@@ -277,21 +277,21 @@ pub enum SessionError {
     /// The session has selected no model, so it has nothing to run a turn
     /// with.
     #[error("session `{session_id}` has selected no model")]
-    ModelUnconfigured { session_id: SessionId },
+    LlmProfileUnconfigured { session_id: SessionId },
     /// The session's recorded model has no binding on this deployment.
     #[error("session `{session_id}` cannot run its model: {source}")]
-    ModelUnavailable {
+    LlmProfileUnavailable {
         session_id: SessionId,
         #[source]
-        source: crate::ModelUnavailable,
+        source: crate::LlmProfileUnavailable,
     },
     /// A model change named a key the host's registry does not register. It
     /// is refused before anything is written.
     #[error("model change refused for session `{session_id}`: {source}")]
-    ModelUnknown {
+    LlmProfileUnknown {
         session_id: SessionId,
         #[source]
-        source: crate::ModelUnavailable,
+        source: crate::LlmProfileUnavailable,
     },
     #[error("{context}: {source}")]
     Store {
@@ -374,9 +374,9 @@ impl SessionError {
             Self::CodeExecutionRuntimeStopped => crate::ExecCodeFailureReason::RuntimeStopped,
             Self::Io(_)
             | Self::Json(_)
-            | Self::ModelUnconfigured { .. }
-            | Self::ModelUnavailable { .. }
-            | Self::ModelUnknown { .. }
+            | Self::LlmProfileUnconfigured { .. }
+            | Self::LlmProfileUnavailable { .. }
+            | Self::LlmProfileUnknown { .. }
             | Self::Store { .. }
             | Self::SessionCommandPending(_)
             | Self::SessionCommandCancelled(_)
@@ -442,9 +442,9 @@ impl ExecutionEnvironmentSyncError {
             | SessionError::Json(_)
             | SessionError::CodeExecutionUnavailable
             | SessionError::CodeExecutionRuntimeStopped
-            | SessionError::ModelUnconfigured { .. }
-            | SessionError::ModelUnavailable { .. }
-            | SessionError::ModelUnknown { .. }
+            | SessionError::LlmProfileUnconfigured { .. }
+            | SessionError::LlmProfileUnavailable { .. }
+            | SessionError::LlmProfileUnknown { .. }
             | SessionError::SessionCommandPending(_)
             | SessionError::SessionCommandCancelled(_)
             | SessionError::ToolSourcesUnavailable { .. }

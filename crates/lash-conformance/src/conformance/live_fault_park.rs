@@ -143,7 +143,7 @@ impl World {
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             );
-        host.providers.models = crate::testing::standard_test_models(model.into_handle());
+        host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
         let session_id = SessionId::from(format!("{name}-session"));
         let admission_faults = Arc::new(AtomicUsize::new(0));
         let admissions = Arc::new(AtomicUsize::new(0));

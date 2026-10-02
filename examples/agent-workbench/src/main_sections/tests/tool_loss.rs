@@ -50,13 +50,13 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
 
     // Seed a checkpoint that records the tool, on a core that has its source.
     let seeding_core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(
+        .serve_workbench_llm_profile(
             lash::testing::TestProvider::builder()
                 .kind("workbench-test")
                 .complete_error("the seed never calls the provider")
                 .build()
                 .into_handle(),
-            test_model(),
+            test_llm_profile(),
         )
         .tools(Arc::new(SeedTools))
         .build(crate::test_core_owner())
@@ -79,13 +79,13 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
 
     // The workbench's own core has no such source.
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(
+        .serve_workbench_llm_profile(
             lash::testing::TestProvider::builder()
                 .kind("workbench-test")
                 .complete_error("this test never calls the provider")
                 .build()
                 .into_handle(),
-            test_model(),
+            test_llm_profile(),
         )
         .build(crate::test_core_owner())
         .expect("build core");
@@ -103,7 +103,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         process_observer,
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

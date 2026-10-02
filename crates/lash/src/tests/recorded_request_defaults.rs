@@ -29,19 +29,19 @@ const ON_KEY_ONE: &str = "recorded-defaults-session-one";
 const ON_KEY_TWO: &str = "recorded-defaults-session-two";
 
 /// What the creating deployment registers under [`KEY_ONE`].
-fn key_one_defaults() -> lash_core::provider::ModelRequestDefaults {
-    lash_core::provider::ModelRequestDefaults {
+fn key_one_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
+    lash_core::provider::LlmProfileRequestDefaults {
         max_output_tokens: Some(1_111),
         response_metadata_headers: vec!["x-key-one-cost".to_string()],
         response_metadata_body_paths: vec!["/key-one/cost".to_string()],
-        ..lash_core::provider::ModelRequestDefaults::default()
+        ..lash_core::provider::LlmProfileRequestDefaults::default()
     }
 }
 
 /// What the creating deployment registers under [`KEY_TWO`]: no field agrees
 /// with [`key_one_defaults`].
-fn key_two_defaults() -> lash_core::provider::ModelRequestDefaults {
-    lash_core::provider::ModelRequestDefaults {
+fn key_two_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
+    lash_core::provider::LlmProfileRequestDefaults {
         expose_thinking: true,
         max_output_tokens: Some(2_222),
         cache_retention: crate::provider::CacheRetention::Long,
@@ -54,18 +54,18 @@ fn key_two_defaults() -> lash_core::provider::ModelRequestDefaults {
 /// under a wire model of its own and the request defaults given for it.
 fn two_key_registry(
     provider: &ProviderHandle,
-    one: lash_core::provider::ModelRequestDefaults,
-    two: lash_core::provider::ModelRequestDefaults,
-) -> Arc<lash_core::ModelRegistry> {
+    one: lash_core::provider::LlmProfileRequestDefaults,
+    two: lash_core::provider::LlmProfileRequestDefaults,
+) -> Arc<lash_core::LlmProfileRegistry> {
     let registry = [(KEY_ONE, one), (KEY_TWO, two)]
         .into_iter()
         .try_fold(
-            lash_core::ModelRegistry::new(),
+            lash_core::LlmProfileRegistry::new(),
             |registry, (key, defaults)| {
                 registry.register(
                     key,
-                    lash_core::RegisteredModel::new(
-                        model_spec(format!("{key}-wire"), None, 200_000)
+                    lash_core::RegisteredLlmProfile::new(
+                        llm_profile_spec(format!("{key}-wire"), None, 200_000)
                             .with_request_defaults(defaults),
                         provider.clone(),
                     ),
@@ -81,18 +81,18 @@ fn two_key_registry(
 /// one's after. A crash listener redeploys between a root's dead attempt and
 /// its redrive, as a restarted worker comes back with the new build's
 /// registry.
-struct RedeployableModels {
-    creating: Arc<lash_core::ModelRegistry>,
-    redeployed: Arc<lash_core::ModelRegistry>,
+struct RedeployableLlmProfiles {
+    creating: Arc<lash_core::LlmProfileRegistry>,
+    redeployed: Arc<lash_core::LlmProfileRegistry>,
     is_redeployed: std::sync::atomic::AtomicBool,
 }
 
-impl RedeployableModels {
+impl RedeployableLlmProfiles {
     fn redeploy(&self) {
         self.is_redeployed.store(true, Ordering::SeqCst);
     }
 
-    fn current(&self) -> &lash_core::ModelRegistry {
+    fn current(&self) -> &lash_core::LlmProfileRegistry {
         if self.is_redeployed.load(Ordering::SeqCst) {
             &self.redeployed
         } else {
@@ -101,18 +101,18 @@ impl RedeployableModels {
     }
 }
 
-impl lash_core::RuntimeModels for RedeployableModels {
+impl lash_core::LlmProfiles for RedeployableLlmProfiles {
     fn snapshot(
         &self,
-        key: &lash_core::ModelKey,
-    ) -> std::result::Result<lash_core::RecordedModel, lash_core::ModelUnavailable> {
+        key: &lash_core::LlmProfileKey,
+    ) -> std::result::Result<lash_core::RecordedLlmProfile, lash_core::LlmProfileUnavailable> {
         self.current().snapshot(key)
     }
 
     fn bind(
         &self,
-        recorded: &lash_core::RecordedModel,
-    ) -> std::result::Result<ProviderHandle, lash_core::ModelUnavailable> {
+        recorded: &lash_core::RecordedLlmProfile,
+    ) -> std::result::Result<ProviderHandle, lash_core::LlmProfileUnavailable> {
         self.current().bind(recorded)
     }
 }
@@ -126,7 +126,7 @@ impl lash_core::RuntimeModels for RedeployableModels {
 /// call again with the defaults its session recorded. So does every root the
 /// session runs afterwards.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn two_sessions_under_two_model_keys_each_keep_their_request_defaults_across_a_redrive()
+async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_across_a_redrive()
 -> Result<()> {
     let double = restate_double(0x4567_0001).await;
     let served: Served = Arc::default();
@@ -155,7 +155,7 @@ async fn two_sessions_under_two_model_keys_each_keep_their_request_defaults_acro
             .build()
             .into_handle()
     };
-    let models = Arc::new(RedeployableModels {
+    let models = Arc::new(RedeployableLlmProfiles {
         creating: two_key_registry(&provider, key_one_defaults(), key_two_defaults()),
         // The redeployed build serves each key with the other key's defaults.
         redeployed: two_key_registry(&provider, key_two_defaults(), key_one_defaults()),
@@ -169,7 +169,7 @@ async fn two_sessions_under_two_model_keys_each_keep_their_request_defaults_acro
         "the double takes the law's crash listener"
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .models(Arc::clone(&models) as Arc<dyn lash_core::RuntimeModels>)
+        .llm_profiles(Arc::clone(&models) as Arc<dyn lash_core::LlmProfiles>)
         .build(crate::testing::runtime_lease_owner())?;
     let recorded = [
         (ON_KEY_ONE, KEY_ONE, key_one_defaults()),

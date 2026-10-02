@@ -91,10 +91,10 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         // Messages requires a cap, and lash invents none.
-        request_defaults: lash_core::provider::ModelRequestDefaults {
+        request_defaults: lash_core::provider::LlmProfileRequestDefaults {
             max_output_tokens: model.starts_with("claude").then_some(4_096),
             ..Default::default()
         },

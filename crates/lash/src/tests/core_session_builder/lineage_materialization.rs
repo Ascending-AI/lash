@@ -125,7 +125,7 @@ async fn ordinary_child_is_not_root_under_facade_and_engine_opens() -> Result<()
     let owner = Arc::new(LineageRoots::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
         .plugin(owner.clone())
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let id = SessionId::from("ordinary-lineage-child");
     let durable = core
@@ -166,7 +166,7 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
 
     let double = restate_double(0x4252).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             crate::testing::TestProvider::builder()
                 .kind("lineage-defaults")
                 .complete(|_| async {
@@ -176,7 +176,7 @@ async fn rlm_creation_defaults_from_lineage_and_opens_preserve_recorded_formats(
                 })
                 .build()
                 .into_handle(),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     for engine in [false, true] {

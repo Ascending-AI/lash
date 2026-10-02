@@ -15,7 +15,7 @@ impl RuntimeErrorCause {
             Self::VmWorker { outcome } => {
                 !outcome.is_retryable() && outcome.deployment_fault().is_none()
             }
-            Self::ModelUnavailable { .. } => false,
+            Self::LlmProfileUnavailable { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::IngressReservedSourceKey { .. }
             | Self::Compat { .. }
@@ -37,9 +37,9 @@ impl RuntimeErrorCause {
 
     /// The recorded model key `cause` names, if it is an unbound model.
     #[must_use]
-    pub fn model_key(cause: Option<&Self>) -> Option<&crate::ModelKey> {
+    pub fn profile_key(cause: Option<&Self>) -> Option<&crate::LlmProfileKey> {
         match cause {
-            Some(Self::ModelUnavailable { model_key }) => Some(model_key),
+            Some(Self::LlmProfileUnavailable { profile_key }) => Some(profile_key),
             _ => None,
         }
     }
@@ -55,8 +55,8 @@ impl RuntimeError {
     /// The recorded model key this error could not bind, when it is the
     /// typed fault of an unbound model (FIG-4404).
     #[must_use]
-    pub fn model_key(&self) -> Option<&crate::ModelKey> {
-        RuntimeErrorCause::model_key(self.cause.as_ref())
+    pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
+        RuntimeErrorCause::profile_key(self.cause.as_ref())
     }
 
     /// [`RuntimeEffectControllerError::attempt_failure_text`], for a fault
@@ -76,8 +76,8 @@ impl RuntimeEffectControllerError {
 
     /// Whether this is an unbound model met by one of the two effects whose
     /// body binds it: the one fault of theirs that is never a recorded result.
-    pub(super) fn is_unbound_model_call(&self, kind: RuntimeEffectKind) -> bool {
-        self.code == RuntimeErrorCode::ModelUnavailable
+    pub(super) fn is_unbound_llm_profile_call(&self, kind: RuntimeEffectKind) -> bool {
+        self.code == RuntimeErrorCode::LlmProfileUnavailable
             && matches!(kind, RuntimeEffectKind::LlmCall | RuntimeEffectKind::Direct)
     }
 
@@ -88,10 +88,13 @@ impl RuntimeEffectControllerError {
     /// recorded work: the engine ends the attempt, records nothing, and runs
     /// it again until a deployment serves the key.
     #[must_use]
-    pub fn model_unavailable(model_key: &crate::ModelKey, message: impl Into<String>) -> Self {
-        let mut error = Self::new(RuntimeErrorCode::ModelUnavailable, message);
-        error.cause = Some(RuntimeErrorCause::ModelUnavailable {
-            model_key: Box::new(model_key.clone()),
+    pub fn llm_profile_unavailable(
+        profile_key: &crate::LlmProfileKey,
+        message: impl Into<String>,
+    ) -> Self {
+        let mut error = Self::new(RuntimeErrorCode::LlmProfileUnavailable, message);
+        error.cause = Some(RuntimeErrorCause::LlmProfileUnavailable {
+            profile_key: Box::new(profile_key.clone()),
         });
         error.retryable_uncommitted_derivation()
     }
@@ -136,8 +139,8 @@ impl RuntimeEffectControllerError {
     /// The recorded model key this error could not bind, when it is the
     /// typed fault of an unbound model (FIG-4404).
     #[must_use]
-    pub fn model_key(&self) -> Option<&crate::ModelKey> {
-        RuntimeErrorCause::model_key(self.cause.as_ref())
+    pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
+        RuntimeErrorCause::profile_key(self.cause.as_ref())
     }
 }
 

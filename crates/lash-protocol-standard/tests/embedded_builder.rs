@@ -11,10 +11,10 @@ use lash_sqlite_store::SqliteStoreSet;
     clippy::expect_used,
     reason = "test support: a fixed, always-valid model spec; any builder refusal is a broken test fixture"
 )]
-fn test_model() -> Option<lash_core::ModelConfig> {
-    Some(lash_core::testing::test_model_config(
+fn test_llm_profile() -> Option<lash_core::LlmProfileConfig> {
+    Some(lash_core::testing::test_llm_profile_config(
         "gpt-5.4-mini",
-        lash_core::ModelMetadata::builder("gpt-5.4-mini")
+        lash_core::LlmProfileMetadata::builder("gpt-5.4-mini")
             .context_window_tokens(200_000)
             .build()
             .expect("valid test model"),
@@ -39,7 +39,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
-            model: test_model(),
+            model: test_llm_profile(),
             ..SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -98,7 +98,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     );
     assert_eq!(state.turn_index, 3);
     assert_eq!(state.token_usage.input_tokens, 20);
-    assert_eq!(state.policy.model, test_model());
+    assert_eq!(state.policy.model, test_llm_profile());
     assert_eq!(state.session_id, "stored-session");
 }
 
@@ -111,7 +111,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
     let state = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
-            model: test_model(),
+            model: test_llm_profile(),
             ..SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),

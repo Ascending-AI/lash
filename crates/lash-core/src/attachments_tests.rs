@@ -1838,7 +1838,7 @@ fn attachment_request(
         tool_choice: crate::llm::types::LlmToolChoice::None,
         attachment_acceptance: lash_core_store::attachments::attachment_test_acceptance(),
         model_variant: crate::ReasoningSelection::ProviderDefault,
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
@@ -2034,7 +2034,7 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let source =
         crate::AttachmentSource::inline(MediaType::parse("image/png").unwrap(), vec![1, 2, 3]);
     let recorded = |key: &str| {
-        crate::testing::test_model_config(key, crate::testing::test_model_metadata(key))
+        crate::testing::test_llm_profile_config(key, crate::testing::test_llm_profile_metadata(key))
     };
     let mut policy =
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
@@ -2047,9 +2047,9 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     // A model command moves the session to another model; its acceptance is
     // its own recorded field and stays.
     let registry = crate::ConfigRegistry::build(&[]).expect("the core owner registers");
-    let models = crate::testing::single_model_registry(
-        crate::ModelKey::new("upgraded-attachment-model"),
-        crate::testing::test_model_metadata("upgraded-attachment-model"),
+    let models = crate::testing::single_llm_profile_registry(
+        crate::LlmProfileKey::new("upgraded-attachment-model"),
+        crate::testing::test_llm_profile_metadata("upgraded-attachment-model"),
         crate::testing::TestProvider::builder()
             .kind("attachment-catalogue")
             .build()
@@ -2057,8 +2057,8 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     );
     let entries = registry
         .entries(&crate::ConfigTransaction::of(
-            crate::plugin::config::core::SetModel {
-                model: crate::ModelKey::new("upgraded-attachment-model"),
+            crate::plugin::config::core::SetLlmProfile {
+                model: crate::LlmProfileKey::new("upgraded-attachment-model"),
             },
         ))
         .expect("the core owner registers the model command");

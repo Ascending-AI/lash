@@ -41,7 +41,7 @@ async fn backend(postgres: bool) -> (lash_core::Backend, Option<Box<dyn std::any
 
 fn core(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
         .expect("core")
 }
@@ -271,7 +271,7 @@ async fn state_law(postgres: bool) -> Result<()> {
             let id = format!("typed-state-{mode}-{rematerialize}");
             let mode_control = Arc::new(AtomicUsize::new(if rematerialize { 0 } else { mode }));
             let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-                .serve_test_model(mock_provider(), mock_model_spec())
+                .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
                 .plugin(Arc::new(StateHook {
                     mode: Arc::clone(&mode_control),
                     handle: Arc::default(),

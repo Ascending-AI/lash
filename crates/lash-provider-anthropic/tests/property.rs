@@ -108,7 +108,7 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(

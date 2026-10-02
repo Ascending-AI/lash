@@ -22,7 +22,7 @@ fn remote_turn_status_names_a_parked_root_and_refuses_the_retired_queued_tag() {
         reason: RemoteTurnParkReason {
             code: "binding_drift".to_string(),
             message: "tool `search` changed".to_string(),
-            model_key: None,
+            profile_key: None,
         },
         since_ms: 1_000,
         attempts: 2,
@@ -364,7 +364,7 @@ fn a_remote_send_outcome_carries_only_its_variants_data() {
             reason: RemoteTurnParkReason {
                 code: "binding_drift".into(),
                 message: "tool changed".into(),
-                model_key: None,
+                profile_key: None,
             },
             since_ms: 1000,
             attempts: 2,

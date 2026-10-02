@@ -17,10 +17,11 @@ use serde_json::Value;
 use crate::append_vec::AppendVec;
 use crate::llm::types::LlmToolSpec;
 use crate::{
-    AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord, MediaType, Message,
-    MessageSequence, ModelEffortValidationCategory, ModelToolReturn, ModelToolReturnPart,
-    ProtocolEvent, SessionAppendNode, ToolCancellation, ToolCatalog, ToolContract, ToolDefinition,
-    ToolFailure, ToolFailureClass, ToolId, ToolManifest, ToolRetryPolicy, ToolValue,
+    AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord,
+    LlmProfileEffortValidationCategory, MediaType, Message, MessageSequence, ModelToolReturn,
+    ModelToolReturnPart, ProtocolEvent, SessionAppendNode, ToolCancellation, ToolCatalog,
+    ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest,
+    ToolRetryPolicy, ToolValue,
 };
 
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
@@ -182,9 +183,9 @@ pub trait ModelEffortValidationCategoryCoreSupport {
 }
 
 #[doc(hidden)]
-impl ModelEffortValidationCategoryCoreSupport for ModelEffortValidationCategory {
+impl ModelEffortValidationCategoryCoreSupport for LlmProfileEffortValidationCategory {
     fn failure_code(&self) -> crate::session_model::TurnFailureCode {
-        ModelEffortValidationCategory::failure_code(self)
+        LlmProfileEffortValidationCategory::failure_code(self)
     }
 }
 

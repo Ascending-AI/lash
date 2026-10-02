@@ -65,9 +65,9 @@ impl E2eLoadWorkflow for DeleteProbe {
             load: LoadContext::named("smoke-v1").unwrap(),
             restate_ingress_url: self.connection.ingress_url().to_owned(),
             restate_authority_id: services.authority.clone(),
-            model: lash::ModelConfig::new(lash::RecordedModel::mint(
-                lash::ModelKey::new("mock-model"),
-                mock_model_metadata(),
+            model: lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+                lash::LlmProfileKey::new("mock-model"),
+                mock_llm_profile_metadata(),
             )),
             active: ActiveOperations::default(),
         });
@@ -131,8 +131,8 @@ impl LoadBehaviorReplayProbe for Probe {
 }
 
 /// The one model the probe's core serves and its load worker records.
-fn mock_model_metadata() -> lash::ModelMetadata {
-    lash::ModelMetadata::builder("mock-model")
+fn mock_llm_profile_metadata() -> lash::LlmProfileMetadata {
+    lash::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .unwrap()
@@ -250,7 +250,7 @@ fn services(
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, mock_model_metadata())
+        .serve_test_llm_profile(provider, mock_llm_profile_metadata())
         .plugin(Arc::new(LoadSurfaceFactory))
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "load-behavior-replay",
@@ -522,7 +522,7 @@ async fn witness(
     let session = session_of(&run);
     core.session(session.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            mock_model_metadata().wire_model,
+            mock_llm_profile_metadata().wire_model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )))
@@ -798,7 +798,7 @@ async fn live_witness(case: Advance) {
     let session = session_of(&run);
     core.session(session.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            mock_model_metadata().wire_model,
+            mock_llm_profile_metadata().wire_model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )))

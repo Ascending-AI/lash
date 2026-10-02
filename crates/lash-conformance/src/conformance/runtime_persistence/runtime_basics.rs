@@ -9,9 +9,9 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         policy: SessionPolicy {
-            model: Some(crate::testing::test_model_config(
+            model: Some(crate::testing::test_llm_profile_config(
                 "gpt-5.4-mini",
-                crate::testing::test_model_metadata("gpt-5.4-mini"),
+                crate::testing::test_llm_profile_metadata("gpt-5.4-mini"),
             )),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         },

@@ -75,7 +75,7 @@ fn builder(
         .queued_work_batching(
             crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
         )
-        .serve_test_model(provider, mock_model_spec());
+        .serve_test_llm_profile(provider, mock_llm_profile_spec());
     for plugin in plugins {
         builder = builder.plugin(plugin);
     }

@@ -103,9 +103,9 @@ async fn counting_core(
     .await
     .into();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .models(test_catalog(
+        .llm_profiles(test_catalog(
             capturing_provider(captures),
-            SERVED_MODELS.map(|key| model_spec(key, None, 64_000)),
+            SERVED_MODELS.map(|key| llm_profile_spec(key, None, 64_000)),
         ))
         .build(crate::testing::runtime_lease_owner())?;
     Ok((core, backend, ledger.expect("the catalog is decorated")))
@@ -192,8 +192,8 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
         .admin()
         .config()
         .configure(
-            crate::config::ConfigTransaction::of(crate::config::SetModel {
-                model: lash_core::ModelKey::new("patched-model"),
+            crate::config::ConfigTransaction::of(crate::config::SetLlmProfile {
+                model: lash_core::LlmProfileKey::new("patched-model"),
             })
             .then(crate::config::SetAttachmentAcceptance {
                 acceptance: (*snapshot("patched-attachments")).clone(),
@@ -238,7 +238,7 @@ async fn update_changes_each_config_field_durably() -> Result<()> {
 /// ADR 0026: a model change retains the session's attachment snapshot; only
 /// `SetAttachmentAcceptance` replaces it.
 #[tokio::test]
-async fn a_model_change_keeps_the_attachment_snapshot() -> Result<()> {
+async fn a_profile_change_keeps_the_attachment_snapshot() -> Result<()> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (core, backend, _writes) = counting_core(captures).await?;
     create_with_creation_spec(&core, "patch-keeps-attachments").await?;
@@ -246,8 +246,8 @@ async fn a_model_change_keeps_the_attachment_snapshot() -> Result<()> {
     let config = session.admin().config();
     config
         .configure(crate::config::ConfigTransaction::of(
-            crate::config::SetModel {
-                model: lash_core::ModelKey::new("upgraded-model"),
+            crate::config::SetLlmProfile {
+                model: lash_core::LlmProfileKey::new("upgraded-model"),
             },
         ))
         .await?;

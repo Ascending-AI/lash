@@ -471,9 +471,9 @@ mod tests {
         );
         let core = lash::LashCore::rlm_builder(backend, factory)
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(
+            .serve_test_llm_profile(
                 provider.into_handle(),
-                lash::ModelMetadata::builder("mock-model")
+                lash::LlmProfileMetadata::builder("mock-model")
                     .context_window_tokens(200_000)
                     .build()
                     .unwrap(),

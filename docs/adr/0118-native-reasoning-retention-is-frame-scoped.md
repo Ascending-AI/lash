@@ -20,7 +20,7 @@ frame. Opening a frame record is not a reset; only a committed frame switch
 changes the active projection. Provider replay state is additionally accepted
 only for the exact provider, endpoint, and model route that minted it.
 
-`ModelCapability.reasoning_retention` is the host-visible policy snapshot. Its
+`LlmProfileCapability.reasoning_retention` is the host-visible policy snapshot. Its
 capability and selection are independent of reasoning effort and persist with
 the session model. Providers validate the exact pair before network I/O. They
 must not infer support from a model name or convert between provider units.

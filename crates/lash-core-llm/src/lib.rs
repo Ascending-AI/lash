@@ -8,7 +8,7 @@
 //! item below at its original path.
 
 pub mod llm;
-pub mod model;
+pub mod llm_profile;
 pub mod provider;
 pub mod session_model;
 pub mod trace;
@@ -47,4 +47,4 @@ pub(crate) use lash_sansio::llm::types::{
     ProviderReplayDropReason,
 };
 #[cfg(test)]
-pub(crate) use provider::ModelCapability;
+pub(crate) use provider::LlmProfileCapability;

@@ -2393,7 +2393,7 @@ run_lash_core_direct_model_mutation_evidence() {
     cargo mutants \
     -p lash-internal-core-llm \
     --file crates/lash-core-llm/src/model.rs \
-    --re 'ModelMetadata::new|ModelMetadata::with_limits|ModelMetadataBuilder::build|ModelLimits::validated|ModelMetadata::context_window_tokens|RecordedModel::context_window_tokens|ModelConfig::context_window_tokens' \
+    --re 'LlmProfileMetadata::new|LlmProfileMetadata::with_limits|LlmProfileMetadataBuilder::build|LlmProfileLimits::validated|LlmProfileMetadata::context_window_tokens|RecordedLlmProfile::context_window_tokens|LlmProfileConfig::context_window_tokens' \
     --baseline skip \
     --jobs "$mutation_jobs" \
     --timeout "$timeout" \

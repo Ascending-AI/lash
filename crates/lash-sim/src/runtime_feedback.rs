@@ -14,7 +14,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: Default::default(),
@@ -38,7 +38,8 @@ enum Wire {
 impl Wire {
     fn body(self, req: &LlmRequest) -> Value {
         let mut req = req.clone();
-        req.model_capability.native_mid_conversation_system = matches!(self, Self::AnthropicNative);
+        req.llm_profile_capability.native_mid_conversation_system =
+            matches!(self, Self::AnthropicNative);
         match self {
             Self::Responses => lash_provider_openai::testing::serialize_responses_request(
                 &req,
@@ -285,7 +286,7 @@ fn runtime_feedback_anthropic_per_message_legality_and_coalescing() {
 fn runtime_feedback_host_instruction_role_controls_all_openai_wires() {
     for wire in [Wire::Responses, Wire::Codex, Wire::Chat] {
         let mut req = request(vec![text(LlmRole::User, "U"), text(LlmRole::System, "F")]);
-        req.model_capability.instruction_role = lash::provider::InstructionRole::Developer;
+        req.llm_profile_capability.instruction_role = lash::provider::InstructionRole::Developer;
         let body = wire.body(&req);
         let messages = flattened(wire.messages(&body));
         assert_eq!(messages.last().unwrap(), &("developer".into(), "F".into()));
@@ -354,9 +355,9 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::ModelMetadata::builder("cache-regression-model")
+            lash_core::LlmProfileMetadata::builder("cache-regression-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("cache regression model"),
@@ -514,9 +515,9 @@ async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
     let core = builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::ModelMetadata::builder("cache-regression-model")
+            lash_core::LlmProfileMetadata::builder("cache-regression-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("cache regression model"),
@@ -734,7 +735,7 @@ fn feedback_image(wire: Wire) {
                 text(LlmRole::System, "NATIVE"),
                 text(LlmRole::Assistant, "AFTER"),
             ]);
-            req.model_capability.instruction_role = role;
+            req.llm_profile_capability.instruction_role = role;
             req.attachment_acceptance = Arc::new(AttachmentCapabilitySnapshot {
                 revision: "feedback-image".into(),
                 acceptors: [
@@ -886,7 +887,7 @@ fn runtime_feedback_unresolved_attachment_errors_retain_message_index() {
         .collect(),
     });
     for native in [false, true] {
-        req.model_capability.native_mid_conversation_system = native;
+        req.llm_profile_capability.native_mid_conversation_system = native;
         for error in [
             lash_provider_openai::testing::serialize_responses_request(&req, CacheRetention::None)
                 .unwrap_err(),

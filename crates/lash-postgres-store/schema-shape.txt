@@ -639,7 +639,7 @@ table lash_usage_facts
   column generation_id text nullable
   column input_tokens bigint not-null
   column llm_call_id text not-null
-  column model_key text not-null
+  column profile_key text not-null
   column output_tokens bigint not-null
   column owner_id text not-null
   column owner_kind text not-null
@@ -668,7 +668,7 @@ table lash_usage_runs
   column conflict_stored_payload_hash text nullable
   column effect_key text not-null
   column execution_scope_key text nullable
-  column model_key text nullable
+  column profile_key text nullable
   column owner_id text not-null
   column owner_kind text not-null
   column requested_model text nullable

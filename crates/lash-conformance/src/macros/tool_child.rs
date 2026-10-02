@@ -89,25 +89,25 @@ macro_rules! admitted_head_redrive_tests {
 macro_rules! turn_config_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+            (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+            (an_older_admission_redriven_after_a_profile_change_is_fenced_out, "turn-config-stale-fenced-out"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (an_input_sent_after_a_config_command_runs_on_the_new_model, "turn-config-after-command"));
+            (an_input_sent_after_a_config_command_runs_on_the_new_profile, "turn-config-after-command"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_config_transaction_waits_while_a_root_owns_the_head, "turn-config-pending-while-root"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (one_config_resolution_per_root, "turn-config-one-resolution"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (an_unbindable_model_retries_and_never_fails_the_turn, "turn-config-unbindable-retries"));
+            (an_unbindable_llm_profile_retries_and_never_fails_the_turn, "turn-config-unbindable-retries"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (an_unknown_model_key_is_refused_typed_and_publishes_nothing, "turn-config-unknown-key"));
+            (an_unknown_profile_key_is_refused_typed_and_publishes_nothing, "turn-config-unknown-key"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_refusal, "turn-config-corrupt-namespace"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_model_change_records_the_binding_minted_where_it_resolves, "turn-config-minted-at-resolution"));
+            (a_profile_change_records_the_binding_minted_where_it_resolves, "turn-config-minted-at-resolution"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
-            (a_reasoning_change_is_judged_against_the_final_recorded_model, "turn-config-reasoning"));
+            (a_reasoning_change_is_judged_against_the_final_recorded_llm_profile, "turn-config-reasoning"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
             (run_specs_split_roots_in_admission_order, "run-spec-selector"));
         $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;

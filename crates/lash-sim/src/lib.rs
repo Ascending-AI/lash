@@ -87,7 +87,7 @@ fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
 /// the key its core serves, under an unbounded turn budget. A world that
 /// states more uses [`open_created_session_from`].
 pub(crate) async fn open_created_session(
-    model: impl Into<lash::ModelKey>,
+    model: impl Into<lash::LlmProfileKey>,
     core: &lash::LashCore,
     session_id: impl Into<lash::SessionId>,
 ) -> lash::Result<lash::LashSession> {

@@ -208,12 +208,12 @@ async fn core(
         .await
         .expect("Restate server double");
     let core = LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "gpt-5.4",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gpt-5.4")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("gpt-5.4")
                             .context_window_tokens(16_000)
                             .build()
                             .expect("valid model spec"),
@@ -636,7 +636,7 @@ fn effect_request_spec(request: &LlmRequest) -> LlmRequestSpec {
         tool_choice: request.tool_choice.clone(),
         attachment_acceptance: Arc::clone(&request.attachment_acceptance),
         model_variant: request.model_variant.clone(),
-        model_capability: request.model_capability.clone(),
+        llm_profile_capability: request.llm_profile_capability.clone(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: request.generation.clone(),
@@ -689,7 +689,7 @@ async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
             "strict-tool-call",
         ),
         RuntimeEffectCommand::LlmCall {
-            model_key: lash_core::ModelKey::new("strict-tool-model"),
+            profile_key: lash_core::LlmProfileKey::new("strict-tool-model"),
             request: Box::new(effect_request_spec(&request)),
         },
     );

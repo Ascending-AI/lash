@@ -53,7 +53,10 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 }
                 Ok(RuntimeEffectOutcome::BeforeLlmCall { decision })
             }
-            RuntimeEffectCommand::LlmCall { model_key, request } => {
+            RuntimeEffectCommand::LlmCall {
+                profile_key,
+                request,
+            } => {
                 // This body runs only for an unjournaled call, so this is
                 // where the recorded model is bound (FIG-4404). A refusal is
                 // this deployment's fault: it leaves the step unsealed and
@@ -82,7 +85,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .call(
                         crate::RuntimeOwner::Session(runner.driver.session_id.clone()),
                         "turn",
-                        model_key,
+                        profile_key,
                         request.model.clone(),
                     )
                     .map_err(|error| {

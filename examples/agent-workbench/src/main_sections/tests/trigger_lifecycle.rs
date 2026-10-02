@@ -23,14 +23,14 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     let process_registry = double.engine_stores().process_registry();
     let trigger_store = double.stores().trigger_store();
     let provider = trigger_registration_provider();
-    let model = lash::ModelMetadata::builder("test-model")
+    let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let sessions = WorkbenchSessions::fresh();
     let session_id = sessions.current();
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -212,7 +212,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         // Process work is resolved through the core.
         sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

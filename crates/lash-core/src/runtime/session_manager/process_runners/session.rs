@@ -41,7 +41,7 @@ impl RuntimeSessionServices {
         // `create_request` policy that selects no model runs that
         // environment's recorded one, copied as recorded rather than
         // re-resolved.
-        self.inherit_session_turn_model(&mut create_request);
+        self.inherit_session_turn_llm_profile(&mut create_request);
         // The child session's first turn is deliberately scoped by the
         // process identity that started it, so the crossing is spelled out.
         // The process worker admitted this controller under the process id.
@@ -135,7 +135,7 @@ impl RuntimeSessionServices {
         }
     }
 
-    fn inherit_session_turn_model(&self, create_request: &mut crate::SessionCreateRequest) {
+    fn inherit_session_turn_llm_profile(&self, create_request: &mut crate::SessionCreateRequest) {
         let Some(policy) = create_request.policy.as_mut() else {
             return;
         };

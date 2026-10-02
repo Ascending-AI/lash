@@ -32,7 +32,7 @@ empty instruction string. Tagged fallback wraps the complete text in one
 Attachments remain separate user blocks. An unencodable attachment produces
 a typed validation error naming its original message index.
 
-The host supplies `ModelCapability.instruction_role`, System by default or
+The host supplies `LlmProfileCapability.instruction_role`, System by default or
 Developer explicitly, and `native_mid_conversation_system`, false by default.
 No model-name heuristic selects either setting.
 

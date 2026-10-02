@@ -151,10 +151,10 @@ fn realistic_commit(
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         policy: SessionPolicy {
-            model: Some(lash_core_execution::ModelConfig::new(
-                lash_core_execution::RecordedModel::mint(
-                    lash_core_execution::ModelKey::from("benchmark-model"),
-                    lash_core_execution::ModelMetadata::builder("benchmark-model")
+            model: Some(lash_core_execution::LlmProfileConfig::new(
+                lash_core_execution::RecordedLlmProfile::mint(
+                    lash_core_execution::LlmProfileKey::from("benchmark-model"),
+                    lash_core_execution::LlmProfileMetadata::builder("benchmark-model")
                         .context_window_tokens(200_000)
                         .build()
                         .expect("benchmark model"),

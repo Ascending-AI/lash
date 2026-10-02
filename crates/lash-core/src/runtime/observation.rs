@@ -917,13 +917,15 @@ mod tests {
             .with_session_id("session-a")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                    crate::ModelKey::from("test-model"),
-                    crate::ModelMetadata::builder("test-model")
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
@@ -982,13 +984,15 @@ mod tests {
             .with_session_id("future-revision-cursor")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                    crate::ModelKey::from("test-model"),
-                    crate::ModelMetadata::builder("test-model")
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
@@ -1048,13 +1052,15 @@ mod tests {
             .with_session_id("revision-equivalence")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                    crate::ModelKey::from("test-model"),
-                    crate::ModelMetadata::builder("test-model")
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
@@ -1093,13 +1099,15 @@ mod tests {
             .with_session_id("publish-order")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                    crate::ModelKey::from("test-model"),
-                    crate::ModelMetadata::builder("test-model")
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
@@ -1149,13 +1157,15 @@ mod tests {
             .with_session_id("graph-pin")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                    crate::ModelKey::from("test-model"),
-                    crate::ModelMetadata::builder("test-model")
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
@@ -1210,13 +1220,15 @@ mod tests {
             .with_session_id("auxiliary-reconciliation")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-                    crate::ModelKey::from("test-model"),
-                    crate::ModelMetadata::builder("test-model")
-                        .context_window_tokens(1024)
-                        .build()
-                        .expect("model"),
-                ))),
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
                 ..crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),

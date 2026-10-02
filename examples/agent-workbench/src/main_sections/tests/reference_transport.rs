@@ -461,14 +461,14 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
         .with_catalog(Arc::clone(&store_factory))
         .with_trigger_store(Arc::clone(&trigger_store));
     let backend: lash::Backend = decorated.into();
-    let model = with_workbench_model_capability(
-        lash::ModelMetadata::builder("test-model")
+    let model = with_workbench_llm_profile_capability(
+        lash::LlmProfileMetadata::builder("test-model")
             .context_window_tokens(context_window_tokens)
             .build()
             .expect("model spec"),
     );
     let mut core_builder =
-        explicit_durable_test_facets_on(backend).serve_workbench_model(provider, model);
+        explicit_durable_test_facets_on(backend).serve_workbench_llm_profile(provider, model);
     if let Some(live_replay_store) = live_replay_store {
         core_builder = core_builder.live_replay_store(live_replay_store);
     }
@@ -490,7 +490,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

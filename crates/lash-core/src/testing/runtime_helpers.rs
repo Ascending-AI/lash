@@ -469,8 +469,8 @@ pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::Provider
         .policy
         .model
         .clone()
-        .unwrap_or_else(standard_test_model_config);
-    runtime.host.core.providers.models = crate::testing::single_model_registry(
+        .unwrap_or_else(standard_test_llm_profile_config);
+    runtime.host.core.providers.models = crate::testing::single_llm_profile_registry(
         config.key().clone(),
         config.metadata().clone(),
         provider,
@@ -483,24 +483,24 @@ pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::Provider
 }
 
 /// The model selection [`standard_test_policy`] records.
-pub fn standard_test_model_config() -> crate::ModelConfig {
-    crate::testing::test_model_config(
+pub fn standard_test_llm_profile_config() -> crate::LlmProfileConfig {
+    crate::testing::test_llm_profile_config(
         "mock-model",
-        crate::testing::test_model_metadata("mock-model"),
+        crate::testing::test_llm_profile_metadata("mock-model"),
     )
 }
 
 /// A catalog serving `extra` first and everything `base` serves after it.
-struct LayeredModels {
-    extra: crate::ModelRegistry,
-    base: Arc<dyn crate::RuntimeModels>,
+struct LayeredLlmProfiles {
+    extra: crate::LlmProfileRegistry,
+    base: Arc<dyn crate::LlmProfiles>,
 }
 
-impl crate::RuntimeModels for LayeredModels {
+impl crate::LlmProfiles for LayeredLlmProfiles {
     fn snapshot(
         &self,
-        key: &crate::ModelKey,
-    ) -> Result<crate::RecordedModel, crate::ModelUnavailable> {
+        key: &crate::LlmProfileKey,
+    ) -> Result<crate::RecordedLlmProfile, crate::LlmProfileUnavailable> {
         self.extra
             .snapshot(key)
             .or_else(|_| self.base.snapshot(key))
@@ -508,12 +508,12 @@ impl crate::RuntimeModels for LayeredModels {
 
     fn bind(
         &self,
-        recorded: &crate::RecordedModel,
-    ) -> Result<crate::ProviderHandle, crate::ModelUnavailable> {
+        recorded: &crate::RecordedLlmProfile,
+    ) -> Result<crate::ProviderHandle, crate::LlmProfileUnavailable> {
         match self.extra.bind(recorded) {
             Ok(provider) => Ok(provider),
-            Err(crate::ModelUnavailable {
-                reason: crate::ModelUnavailableReason::UnknownKey,
+            Err(crate::LlmProfileUnavailable {
+                reason: crate::LlmProfileUnavailableReason::UnknownKey,
                 ..
             }) => self.base.bind(recorded),
             Err(other) => Err(other),
@@ -528,26 +528,26 @@ impl crate::RuntimeModels for LayeredModels {
     clippy::expect_used,
     reason = "test helper: the session's own model always binds in a fixture"
 )]
-pub fn serve_model_beside(
+pub fn serve_llm_profile_beside(
     runtime: &mut LashRuntime,
     key: &str,
-    metadata: crate::ModelMetadata,
-) -> crate::ModelKey {
+    metadata: crate::LlmProfileMetadata,
+) -> crate::LlmProfileKey {
     let current = runtime
         .state()
         .policy
         .model
         .clone()
-        .unwrap_or_else(standard_test_model_config);
+        .unwrap_or_else(standard_test_llm_profile_config);
     let base = Arc::clone(&runtime.host.core.providers.models);
     let provider = base
         .bind(&current.model)
         .expect("the session's recorded model binds");
-    let extra = crate::ModelRegistry::new()
-        .register(key, crate::RegisteredModel::new(metadata, provider))
+    let extra = crate::LlmProfileRegistry::new()
+        .register(key, crate::RegisteredLlmProfile::new(metadata, provider))
         .expect("a non-empty key registers");
-    runtime.host.core.providers.models = Arc::new(LayeredModels { extra, base });
-    crate::ModelKey::new(key)
+    runtime.host.core.providers.models = Arc::new(LayeredLlmProfiles { extra, base });
+    crate::LlmProfileKey::new(key)
 }
 
 /// Register `models` beside the runtime session's recorded model, so a
@@ -557,11 +557,11 @@ pub fn serve_model_beside(
     clippy::expect_used,
     reason = "test helper: a duplicate model key is a fixture defect"
 )]
-pub fn serve_runtime_models(
+pub fn serve_runtime_llm_profiles(
     runtime: &mut LashRuntime,
-    models: impl IntoIterator<Item = (crate::ModelKey, crate::RegisteredModel)>,
+    models: impl IntoIterator<Item = (crate::LlmProfileKey, crate::RegisteredLlmProfile)>,
 ) {
-    let mut registry = crate::ModelRegistry::new();
+    let mut registry = crate::LlmProfileRegistry::new();
     let mut served = std::collections::BTreeSet::new();
     for (key, entry) in models {
         served.insert(key.clone());
@@ -576,7 +576,7 @@ pub fn serve_runtime_models(
         registry = registry
             .register(
                 current.key().clone(),
-                crate::RegisteredModel::new(current.metadata().clone(), provider),
+                crate::RegisteredLlmProfile::new(current.metadata().clone(), provider),
             )
             .expect("the session's model registers once");
     }
@@ -825,8 +825,8 @@ pub fn test_runtime_host_config_with_provider(
     provider: crate::ProviderHandle,
 ) -> RuntimeHostConfig {
     let mut config = test_runtime_host_config(backend);
-    let model = standard_test_model_config();
-    config.providers.models = crate::testing::single_model_registry(
+    let model = standard_test_llm_profile_config();
+    config.providers.models = crate::testing::single_llm_profile_registry(
         model.key().clone(),
         model.metadata().clone(),
         provider,

@@ -269,12 +269,12 @@ async fn core_with_responses(
         .into_handle();
     let double = crate::support::restate_double(SEED).await;
     let core = LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "mock-model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("mock-model")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("mock-model")
                             .context_window_tokens(16_000)
                             .build()
                             .expect("valid model spec"),

@@ -20,7 +20,7 @@ impl DirectUsage {
         &self,
         usage_run: Option<&crate::UsageRun>,
         source: String,
-        model_key: crate::ModelKey,
+        profile_key: crate::LlmProfileKey,
         requested_model: &str,
     ) -> Result<crate::UsageCall, RuntimeEffectControllerError> {
         usage_run
@@ -33,7 +33,7 @@ impl DirectUsage {
             .call(
                 self.owner.clone(),
                 source,
-                model_key,
+                profile_key,
                 requested_model.to_string(),
             )
             .map_err(|error| {
@@ -47,19 +47,19 @@ impl DirectUsage {
 
 impl super::LocalDirectEffectRunner {
     /// Runs the direct request as its run's one call, attributed to the
-    /// envelope's `usage_source` and `model_key`, and records the sealed call
+    /// envelope's `usage_source` and `profile_key`, and records the sealed call
     /// record, failed attempts included, as that call's facts.
     pub(super) async fn run_direct_in_usage_run(
         &mut self,
         provider: crate::ProviderHandle,
         request: crate::LlmRequest,
         usage_source: String,
-        model_key: crate::ModelKey,
+        profile_key: crate::LlmProfileKey,
         usage_run: Option<&crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let call = self
             .usage
-            .call(usage_run, usage_source, model_key, &request.model)?;
+            .call(usage_run, usage_source, profile_key, &request.model)?;
         let (result, call_record) = self.run_direct_llm_request(provider, request, &call).await;
         if let Some(call_record) = &call_record {
             call.record(call_record);
@@ -185,7 +185,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
         let outcome = Box::pin(self.run_body(envelope, usage_run.clone())).await;
         if let (Err(fault), Some(usage_run)) = (&outcome, &usage_run)
-            && fault.code == crate::RuntimeErrorCode::ModelUnavailable
+            && fault.code == crate::RuntimeErrorCode::LlmProfileUnavailable
             && fault.is_attempt_fault()
         {
             usage_run.fault_attempt(fault.clone());

@@ -42,7 +42,7 @@ mod tests {
         ProviderRouteIdentity, ResponseTextMeta,
     };
     use lash_core::provider::{
-        ModelCapability, Provider, ReasoningCapability, ReasoningEncoding, StreamTermination,
+        LlmProfileCapability, Provider, ReasoningCapability, ReasoningEncoding, StreamTermination,
     };
     use lash_core::{Message, MessageRole, Part};
     use serde_json::{Value, json};
@@ -87,7 +87,7 @@ mod tests {
 
     fn request_with_capability(
         model_variant: Option<&str>,
-        model_capability: ModelCapability,
+        llm_profile_capability: LlmProfileCapability,
     ) -> LlmRequest {
         LlmRequest {
             instructions: None,
@@ -100,7 +100,7 @@ mod tests {
             model_variant: model_variant
                 .map(|effort| lash_core::provider::ReasoningSelection::Effort(effort.to_string()))
                 .unwrap_or_default(),
-            model_capability,
+            llm_profile_capability,
             extra_body: Default::default(),
             request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
@@ -119,7 +119,7 @@ mod tests {
     fn hidden_thinking(stream_termination: StreamTermination) -> crate::provider::ResponseReading {
         crate::provider::ResponseReading {
             stream_termination,
-            defaults: lash_core::provider::ModelRequestDefaults {
+            defaults: lash_core::provider::LlmProfileRequestDefaults {
                 expose_thinking: false,
                 ..Default::default()
             },
@@ -127,7 +127,7 @@ mod tests {
     }
 
     fn request(model_variant: Option<&str>) -> LlmRequest {
-        request_with_capability(model_variant, ModelCapability::default())
+        request_with_capability(model_variant, LlmProfileCapability::default())
     }
 
     mod passthrough_tests;
@@ -538,7 +538,7 @@ mod tests {
                 None,
                 crate::provider::ResponseReading {
                     stream_termination: StreamTermination::RequireTerminalEvidence,
-                    defaults: lash_core::provider::ModelRequestDefaults {
+                    defaults: lash_core::provider::LlmProfileRequestDefaults {
                         expose_thinking,
                         ..Default::default()
                     },
@@ -788,8 +788,8 @@ mod tests {
         );
     }
 
-    fn effort_capability(efforts: &[&str]) -> ModelCapability {
-        ModelCapability {
+    fn effort_capability(efforts: &[&str]) -> LlmProfileCapability {
+        LlmProfileCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
             google_dialect: Default::default(),
@@ -806,8 +806,8 @@ mod tests {
         }
     }
 
-    fn budget_capability(entries: &[(&str, u32)]) -> ModelCapability {
-        ModelCapability {
+    fn budget_capability(entries: &[(&str, u32)]) -> LlmProfileCapability {
+        LlmProfileCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
             google_dialect: Default::default(),
@@ -1323,7 +1323,7 @@ mod tests {
         );
 
         // A pinned model refuses the temperature instead of dropping it.
-        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
         let error = GoogleOAuthProvider::build_request(&provider, &req, vec![], None)
             .expect_err("pinned sampling");
         assert_eq!(
@@ -1542,7 +1542,8 @@ mod tests {
         );
         let mut claude_on_vertex = request(None);
         claude_on_vertex.model = "claude-sonnet-4-6".to_string();
-        claude_on_vertex.model_capability.google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
+        claude_on_vertex.llm_profile_capability.google_dialect =
+            lash_core::GoogleDialect::ClaudeOnVertex;
         claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
@@ -1581,7 +1582,7 @@ mod tests {
 
         let mut gemini = claude_on_vertex;
         gemini.model = "gemini-3.1-pro-preview".to_string();
-        gemini.model_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
+        gemini.llm_profile_capability.google_dialect = lash_core::GoogleDialect::Gemini3;
         let gemini_body = GoogleOAuthProvider::build_request(&provider, &gemini, Vec::new(), None)
             .expect("schema projection");
         assert!(

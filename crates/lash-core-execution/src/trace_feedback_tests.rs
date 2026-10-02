@@ -29,7 +29,7 @@ fn runtime_feedback_composition_identity_includes_instruction_authority() {
     direct.instructions = Some(Arc::from("I"));
     let mut request = crate::direct::build_llm_request(direct, "model".into()).unwrap();
     let before = trace_composition_key(&request, &[]);
-    request.model_capability.instruction_role = crate::InstructionRole::Developer;
+    request.llm_profile_capability.instruction_role = crate::InstructionRole::Developer;
     assert_ne!(trace_composition_key(&request, &[]), before);
     request.instructions = None;
     let absent = trace_composition_key(&request, &[]);

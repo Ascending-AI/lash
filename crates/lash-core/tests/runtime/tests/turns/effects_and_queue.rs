@@ -1148,7 +1148,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         queued_started, 1,
         "admission facts must follow turn identity"
     );
-    let model_started = events
+    let profile_started = events
         .iter()
         .position(|activity| {
             matches!(
@@ -1158,7 +1158,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         })
         .expect("model request started event");
     assert!(
-        queued_started < model_started,
+        queued_started < profile_started,
         "queued work should be announced before model output starts"
     );
     let lash_core::TurnEvent::QueuedWorkStarted {

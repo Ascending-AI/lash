@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn absent_retention_and_user_segment_marker_decode_to_safe_defaults() {
-    let capability: RemoteModelCapability =
+    let capability: RemoteLlmProfileCapability =
         serde_json::from_value(serde_json::json!({})).expect("absent retention policy decodes");
     assert!(capability.reasoning_retention.is_default());
     assert_eq!(

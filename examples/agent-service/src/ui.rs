@@ -127,7 +127,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         </div>
         <div class="model-controls">
           <label class="field">Model
-            <input id="modelInput" autocomplete="off" spellcheck="false" />
+            <input id="profileInput" autocomplete="off" spellcheck="false" />
           </label>
           <label class="field">Variant
             <select id="variantInput">
@@ -169,7 +169,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     const messagesEl = document.querySelector('#messages');
     const titleEl = document.querySelector('#activeTitle');
     const form = document.querySelector('#composer');
-    const modelInput = document.querySelector('#modelInput');
+    const profileInput = document.querySelector('#profileInput');
     const variantInput = document.querySelector('#variantInput');
     const boardEl = document.querySelector('#board');
     const gameStatusEl = document.querySelector('#gameStatus');
@@ -182,7 +182,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     const branchStatusEl = document.querySelector('#branchStatus');
     let chats = [];
     let activeChat = null;
-    let settings = { default_model:'anthropic/claude-sonnet-4.6', default_model_variant:'high', model_variants:['low','medium','high'] };
+    let settings = { default_profile:'anthropic/claude-sonnet-4.6', default_profile_variant:'high', model_variants:['low','medium','high'] };
     let viewGeneration = 0;
     let messageReadGeneration = 0;
     let branchReadGeneration = 0;
@@ -274,14 +274,14 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     }
     function selectedModel() {
       return {
-        model: modelInput.value.trim() || settings.default_model,
+        model: profileInput.value.trim() || settings.default_profile,
         model_variant: variantInput.value || null
       };
     }
     function setModelControls(chat) {
-      const model = chat?.model || settings.default_model;
-      const variant = chat?.model_variant ?? settings.default_model_variant ?? '';
-      modelInput.value = model;
+      const model = chat?.model || settings.default_profile;
+      const variant = chat?.model_variant ?? settings.default_profile_variant ?? '';
+      profileInput.value = model;
       variantInput.value = variant || '';
     }
     async function loadSettings() {
@@ -764,7 +764,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     document.querySelector('#resetBoard').onclick = resetBoard;
     pinBranchBtn.onclick = pinCurrentTurn;
     forkBranchBtn.onclick = forkPinnedTurn;
-    modelInput.addEventListener('change', saveActiveModel);
+    profileInput.addEventListener('change', saveActiveModel);
     variantInput.addEventListener('change', saveActiveModel);
     document.querySelector('#text').addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {

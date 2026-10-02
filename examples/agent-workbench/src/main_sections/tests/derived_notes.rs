@@ -41,9 +41,9 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     let notes = plugin.derived_notes();
     let double = test_double_backend(SEED).await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash::ModelMetadata::builder("test-model")
+            lash::LlmProfileMetadata::builder("test-model")
                 .context_window_tokens(4096)
                 .build()
                 .expect("model spec"),

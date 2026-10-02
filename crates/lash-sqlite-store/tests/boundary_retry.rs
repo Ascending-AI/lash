@@ -115,9 +115,9 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     // A non-retry with differing canonical content is refused, never silently
     // deduplicated into the stored receipt.
     let mut changed = commit_state(boundary, key, &loaded);
-    changed.config.model = Some(lash_core::testing::test_model_config(
+    changed.config.model = Some(lash_core::testing::test_llm_profile_config(
         "changed-model",
-        lash_core::testing::test_model_metadata("changed-model"),
+        lash_core::testing::test_llm_profile_metadata("changed-model"),
     ));
     changed
         .stamp_semantic_boundary()

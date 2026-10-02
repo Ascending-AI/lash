@@ -1,15 +1,15 @@
 use std::num::NonZeroUsize;
 
 use crate::provider::{
-    CacheRetention, ModelCapability, ModelEffortValidationCategory, ModelRequestDefaults,
-    ReasoningSelection,
+    CacheRetention, LlmProfileCapability, LlmProfileEffortValidationCategory,
+    LlmProfileRequestDefaults, ReasoningSelection,
 };
 
 /// The host's opaque name for one registered model.
 ///
 /// Lash never parses it: `glm-5.3-flash@tensorx` names a registration, not a
 /// provider and a model. A session records the key with the metadata the
-/// host's registry minted for it ([`RecordedModel`]), so the key alone never
+/// host's registry minted for it ([`RecordedLlmProfile`]), so the key alone never
 /// decides how a recorded root runs.
 #[derive(
     Clone,
@@ -24,9 +24,9 @@ use crate::provider::{
     schemars::JsonSchema,
 )]
 #[serde(transparent)]
-pub struct ModelKey(String);
+pub struct LlmProfileKey(String);
 
-impl ModelKey {
+impl LlmProfileKey {
     /// A key as the host spells it. A registry refuses an empty key when the
     /// model is registered, so a lookup of one simply finds nothing.
     pub fn new(key: impl Into<String>) -> Self {
@@ -38,19 +38,19 @@ impl ModelKey {
     }
 }
 
-impl std::fmt::Display for ModelKey {
+impl std::fmt::Display for LlmProfileKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl From<&str> for ModelKey {
+impl From<&str> for LlmProfileKey {
     fn from(key: &str) -> Self {
         Self::new(key)
     }
 }
 
-impl From<String> for ModelKey {
+impl From<String> for LlmProfileKey {
     fn from(key: String) -> Self {
         Self::new(key)
     }
@@ -61,55 +61,55 @@ impl From<String> for ModelKey {
 /// request extensions it records.
 ///
 /// It carries no reasoning selection and no attachment-acceptance rules: both
-/// are session config ([`ModelConfig::reasoning`] and the session policy's
+/// are session config ([`LlmProfileConfig::reasoning`] and the session policy's
 /// attachment acceptance), chosen separately from the model.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct ModelMetadata {
+pub struct LlmProfileMetadata {
     /// The model id the provider's wire names.
     pub wire_model: String,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
-    pub limits: ModelLimits,
+    pub limits: LlmProfileLimits,
     /// Host-supplied capability metadata: reasoning controls and cache-control
     /// dialect accepted by this model. Lash validates the session's reasoning
     /// selection against it and threads it onto every provider request.
-    #[serde(default, skip_serializing_if = "ModelCapability::is_empty")]
-    pub capability: ModelCapability,
+    #[serde(default, skip_serializing_if = "LlmProfileCapability::is_empty")]
+    pub capability: LlmProfileCapability,
     /// What this model's requests do where a request states nothing:
     /// recorded with the binding, so a transport change never alters it.
-    #[serde(default, skip_serializing_if = "ModelRequestDefaults::is_default")]
-    pub request_defaults: ModelRequestDefaults,
+    #[serde(default, skip_serializing_if = "LlmProfileRequestDefaults::is_default")]
+    pub request_defaults: LlmProfileRequestDefaults,
 }
 
-impl ModelMetadata {
-    pub fn builder(wire_model: impl Into<String>) -> ModelMetadataBuilder {
-        ModelMetadataBuilder::new(wire_model)
+impl LlmProfileMetadata {
+    pub fn builder(wire_model: impl Into<String>) -> LlmProfileMetadataBuilder {
+        LlmProfileMetadataBuilder::new(wire_model)
     }
 
     pub fn new(wire_model: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
         Self::with_limits(
             wire_model,
-            ModelLimits {
+            LlmProfileLimits {
                 context_window_tokens,
                 output_token_capacity: None,
             },
         )
     }
 
-    pub fn with_limits(wire_model: impl Into<String>, limits: ModelLimits) -> Self {
+    pub fn with_limits(wire_model: impl Into<String>, limits: LlmProfileLimits) -> Self {
         Self {
             wire_model: wire_model.into(),
             extra_body: serde_json::Map::new(),
             limits,
-            capability: ModelCapability::default(),
-            request_defaults: ModelRequestDefaults::default(),
+            capability: LlmProfileCapability::default(),
+            request_defaults: LlmProfileRequestDefaults::default(),
         }
     }
 
-    pub fn with_capability(mut self, capability: ModelCapability) -> Self {
+    pub fn with_capability(mut self, capability: LlmProfileCapability) -> Self {
         self.capability = capability;
         self
     }
@@ -122,7 +122,7 @@ impl ModelMetadata {
         self
     }
 
-    pub fn with_request_defaults(mut self, request_defaults: ModelRequestDefaults) -> Self {
+    pub fn with_request_defaults(mut self, request_defaults: LlmProfileRequestDefaults) -> Self {
         self.request_defaults = request_defaults;
         self
     }
@@ -134,30 +134,30 @@ impl ModelMetadata {
     }
 }
 
-/// Builder for host-supplied [`ModelMetadata`].
+/// Builder for host-supplied [`LlmProfileMetadata`].
 ///
 /// The context-window token budget is required; output capacity and
 /// capability metadata are absent when omitted. Setters follow the builder
 /// convention and therefore have no `with_` prefix.
 #[derive(Clone, Debug)]
-pub struct ModelMetadataBuilder {
+pub struct LlmProfileMetadataBuilder {
     wire_model: String,
     context_window_tokens: Option<usize>,
     output_token_capacity: Option<usize>,
-    capability: ModelCapability,
+    capability: LlmProfileCapability,
     extra_body: serde_json::Map<String, serde_json::Value>,
-    request_defaults: ModelRequestDefaults,
+    request_defaults: LlmProfileRequestDefaults,
 }
 
-impl ModelMetadataBuilder {
+impl LlmProfileMetadataBuilder {
     fn new(wire_model: impl Into<String>) -> Self {
         Self {
             wire_model: wire_model.into(),
             context_window_tokens: None,
             output_token_capacity: None,
-            capability: ModelCapability::default(),
+            capability: LlmProfileCapability::default(),
             extra_body: serde_json::Map::new(),
-            request_defaults: ModelRequestDefaults::default(),
+            request_defaults: LlmProfileRequestDefaults::default(),
         }
     }
 
@@ -172,7 +172,7 @@ impl ModelMetadataBuilder {
     }
 
     /// Attach host-supplied reasoning and cache-control capability metadata.
-    pub fn capability(mut self, capability: ModelCapability) -> Self {
+    pub fn capability(mut self, capability: LlmProfileCapability) -> Self {
         self.capability = capability;
         self
     }
@@ -214,13 +214,13 @@ impl ModelMetadataBuilder {
         self
     }
 
-    pub fn build(self) -> Result<ModelMetadata, ModelLimitsError> {
+    pub fn build(self) -> Result<LlmProfileMetadata, LlmProfileLimitsError> {
         let context_window_tokens = self
             .context_window_tokens
-            .ok_or(ModelLimitsError::MissingContextWindowTokens)?;
-        Ok(ModelMetadata::with_limits(
+            .ok_or(LlmProfileLimitsError::MissingContextWindowTokens)?;
+        Ok(LlmProfileMetadata::with_limits(
             self.wire_model,
-            ModelLimits::validated(context_window_tokens, self.output_token_capacity)?,
+            LlmProfileLimits::validated(context_window_tokens, self.output_token_capacity)?,
         )
         .with_capability(self.capability)
         .with_extra_body(self.extra_body)
@@ -228,7 +228,7 @@ impl ModelMetadataBuilder {
     }
 }
 
-/// A model binding a host's [`RuntimeModels`](crate::provider::RuntimeModels)
+/// A model binding a host's [`LlmProfiles`](crate::provider::LlmProfiles)
 /// minted for one key: the key and the metadata it served at that moment.
 ///
 /// A session records it at creation and at every model change, and a root
@@ -239,24 +239,24 @@ impl ModelMetadataBuilder {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct RecordedModel {
-    key: ModelKey,
-    metadata: ModelMetadata,
+pub struct RecordedLlmProfile {
+    key: LlmProfileKey,
+    metadata: LlmProfileMetadata,
 }
 
-impl RecordedModel {
+impl RecordedLlmProfile {
     /// Mint the binding a registry serves `key` with. Only a
-    /// [`RuntimeModels`](crate::provider::RuntimeModels) implementation
+    /// [`LlmProfiles`](crate::provider::LlmProfiles) implementation
     /// calls this: everything else copies a recorded value.
-    pub fn mint(key: ModelKey, metadata: ModelMetadata) -> Self {
+    pub fn mint(key: LlmProfileKey, metadata: LlmProfileMetadata) -> Self {
         Self { key, metadata }
     }
 
-    pub fn key(&self) -> &ModelKey {
+    pub fn key(&self) -> &LlmProfileKey {
         &self.key
     }
 
-    pub fn metadata(&self) -> &ModelMetadata {
+    pub fn metadata(&self) -> &LlmProfileMetadata {
         &self.metadata
     }
 
@@ -278,15 +278,15 @@ impl RecordedModel {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct ModelConfig {
-    pub model: RecordedModel,
+pub struct LlmProfileConfig {
+    pub model: RecordedLlmProfile,
     #[serde(default)]
     pub reasoning: ReasoningSelection,
 }
 
-impl ModelConfig {
+impl LlmProfileConfig {
     /// `model` with the provider's default reasoning.
-    pub fn new(model: RecordedModel) -> Self {
+    pub fn new(model: RecordedLlmProfile) -> Self {
         Self {
             model,
             reasoning: ReasoningSelection::ProviderDefault,
@@ -298,11 +298,11 @@ impl ModelConfig {
         self
     }
 
-    pub fn key(&self) -> &ModelKey {
+    pub fn key(&self) -> &LlmProfileKey {
         self.model.key()
     }
 
-    pub fn metadata(&self) -> &ModelMetadata {
+    pub fn metadata(&self) -> &LlmProfileMetadata {
         self.model.metadata()
     }
 
@@ -353,9 +353,9 @@ impl ModelConfig {
 )]
 #[error("reasoning selection refused for model key `{key}`: {message}")]
 pub struct ReasoningRefused {
-    pub key: ModelKey,
+    pub key: LlmProfileKey,
     pub reasoning: ReasoningSelection,
-    pub category: ModelEffortValidationCategory,
+    pub category: LlmProfileEffortValidationCategory,
     pub message: String,
 }
 
@@ -363,7 +363,7 @@ pub struct ReasoningRefused {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct ModelLimits {
+pub struct LlmProfileLimits {
     /// The prompt budget: the maximum input tokens the provider accepts for
     /// this model on this route. History pruning measures against this — not
     /// the model's total context (input + output), which would over-budget by
@@ -376,7 +376,7 @@ pub struct ModelLimits {
 /// Invalid or incomplete token-limit metadata supplied for a model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum ModelLimitsError {
+pub enum LlmProfileLimitsError {
     #[error("a context-window token budget is required")]
     MissingContextWindowTokens,
     #[error("context_window_tokens must be greater than zero")]
@@ -385,17 +385,17 @@ pub enum ModelLimitsError {
     ZeroOutputTokenCapacity,
 }
 
-impl ModelLimits {
+impl LlmProfileLimits {
     fn validated(
         context_window_tokens: usize,
         output_token_capacity: Option<usize>,
-    ) -> Result<Self, ModelLimitsError> {
+    ) -> Result<Self, LlmProfileLimitsError> {
         Ok(Self {
             context_window_tokens: NonZeroUsize::new(context_window_tokens)
-                .ok_or(ModelLimitsError::ZeroContextWindowTokens)?,
+                .ok_or(LlmProfileLimitsError::ZeroContextWindowTokens)?,
             output_token_capacity: output_token_capacity
                 .map(|value| {
-                    NonZeroUsize::new(value).ok_or(ModelLimitsError::ZeroOutputTokenCapacity)
+                    NonZeroUsize::new(value).ok_or(LlmProfileLimitsError::ZeroOutputTokenCapacity)
                 })
                 .transpose()?,
         })
@@ -406,8 +406,8 @@ impl ModelLimits {
 mod tests {
     use super::*;
 
-    fn metadata() -> ModelMetadata {
-        ModelMetadata::builder("provider/model")
+    fn metadata() -> LlmProfileMetadata {
+        LlmProfileMetadata::builder("provider/model")
             .context_window_tokens(8_192)
             .output_token_capacity(1_024)
             .build()
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn model_config_reasoning_selection_serde_is_explicit() {
+    fn llm_profile_config_reasoning_selection_serde_is_explicit() {
         for (selection, expected) in [
             (
                 ReasoningSelection::ProviderDefault,
@@ -427,12 +427,15 @@ mod tests {
                 serde_json::json!({ "effort": "high" }),
             ),
         ] {
-            let config = ModelConfig::new(RecordedModel::mint(ModelKey::new("key"), metadata()))
-                .with_reasoning(selection.clone());
+            let config = LlmProfileConfig::new(RecordedLlmProfile::mint(
+                LlmProfileKey::new("key"),
+                metadata(),
+            ))
+            .with_reasoning(selection.clone());
             let json = serde_json::to_value(&config).expect("serialize model config");
             assert_eq!(json["reasoning"], expected);
             assert_eq!(json["model"]["key"], "key");
-            let round_trip: ModelConfig =
+            let round_trip: LlmProfileConfig =
                 serde_json::from_value(json).expect("deserialize model config");
             assert_eq!(round_trip.reasoning, selection);
             assert_eq!(round_trip, config);
@@ -445,15 +448,16 @@ mod tests {
     fn model_metadata_refuses_a_reasoning_variant() {
         let mut json = serde_json::to_value(metadata()).expect("serialize metadata");
         json["variant"] = serde_json::json!("disabled");
-        serde_json::from_value::<ModelMetadata>(json).expect_err("a variant is not model metadata");
+        serde_json::from_value::<LlmProfileMetadata>(json)
+            .expect_err("a variant is not model metadata");
     }
 
     #[test]
     fn model_metadata_builder_covers_limits_capability_and_requires_context_window() {
-        let spec = ModelMetadata::builder("provider/model")
+        let spec = LlmProfileMetadata::builder("provider/model")
             .context_window_tokens(200_000)
             .output_token_capacity(8_192)
-            .capability(ModelCapability {
+            .capability(LlmProfileCapability {
                 reasoning: Some(crate::provider::ReasoningCapability {
                     efforts: vec!["high".to_string()],
                     ..Default::default()
@@ -472,22 +476,25 @@ mod tests {
         assert!(!spec.capability.is_empty());
 
         assert_eq!(
-            ModelMetadata::builder("missing-context")
+            LlmProfileMetadata::builder("missing-context")
                 .build()
                 .expect_err("context budget is required"),
-            ModelLimitsError::MissingContextWindowTokens
+            LlmProfileLimitsError::MissingContextWindowTokens
         );
-        let context_error = ModelMetadata::builder("bad-context")
+        let context_error = LlmProfileMetadata::builder("bad-context")
             .context_window_tokens(0)
             .output_token_capacity(1)
             .build()
             .expect_err("zero context");
-        assert_eq!(context_error, ModelLimitsError::ZeroContextWindowTokens);
-        let output_error = ModelMetadata::builder("bad-output")
+        assert_eq!(
+            context_error,
+            LlmProfileLimitsError::ZeroContextWindowTokens
+        );
+        let output_error = LlmProfileMetadata::builder("bad-output")
             .context_window_tokens(1)
             .output_token_capacity(0)
             .build()
             .expect_err("zero output cap");
-        assert_eq!(output_error, ModelLimitsError::ZeroOutputTokenCapacity);
+        assert_eq!(output_error, LlmProfileLimitsError::ZeroOutputTokenCapacity);
     }
 }

@@ -138,13 +138,13 @@ pub(super) async fn read_parked_usage_from_second_core(
     let core = lash::LashCore::standard_builder(reader.lash_backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
+        .serve_test_llm_profile(
             lash_core::testing::TestProvider::builder()
                 .kind("read-only-usage")
                 .complete(|_| async { panic!("the second core reads without driving") })
                 .build()
                 .into_handle(),
-            lash_core::testing::test_model_metadata("mock-model"),
+            lash_core::testing::test_llm_profile_metadata("mock-model"),
         )
         .build(lash_core::testing::runtime_lease_owner())
         .expect("second core");

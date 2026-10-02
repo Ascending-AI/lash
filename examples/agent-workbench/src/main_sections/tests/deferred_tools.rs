@@ -23,7 +23,7 @@ fn deferred_tools_test_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .serve_workbench_model(provider, test_model())
+        .serve_workbench_llm_profile(provider, test_llm_profile())
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.

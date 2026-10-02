@@ -165,13 +165,15 @@ fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
-            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                lash_core::ModelKey::from("mock-model"),
-                lash_core::ModelMetadata::builder("mock-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model spec"),
-            ))),
+            model: Some(lash_core::LlmProfileConfig::new(
+                lash_core::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::from("mock-model"),
+                    lash_core::LlmProfileMetadata::builder("mock-model")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("model spec"),
+                ),
+            )),
             ..lash_core::SessionPolicy::new(
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
@@ -308,9 +310,9 @@ async fn a_same_start_key_successor_after_prune_runs_its_own_workflow() {
     let core = lash::LashCore::standard_builder(backend.lash_backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::ModelMetadata::builder("mock-model")
+            lash_core::LlmProfileMetadata::builder("mock-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("model spec"),

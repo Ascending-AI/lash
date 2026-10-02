@@ -9,7 +9,7 @@ use lash_core::llm::types::{
     LlmRole, LlmTerminalReason, LlmToolChoice, LlmToolSpec, ResponsePhase, ResponseTextMeta,
 };
 use lash_core::provider::{
-    CacheRetention, ModelCapability, Provider, ProviderHandle, ProviderOptions,
+    CacheRetention, LlmProfileCapability, Provider, ProviderHandle, ProviderOptions,
     ReasoningCapability, RequestTimeout, StreamTermination,
 };
 use lash_llm_transport::openai_terminal_reason_from_response_value;
@@ -45,8 +45,8 @@ fn process_event_with_parts(
 fn response_from_state(state: CodexStreamState) -> LlmResponse {
     shared::response_from_stream_state(state, None, "test".to_string())
 }
-fn reasoning_capability() -> ModelCapability {
-    ModelCapability {
+fn reasoning_capability() -> LlmProfileCapability {
+    LlmProfileCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
         google_dialect: Default::default(),
@@ -72,7 +72,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: LlmRequestScope::new(
@@ -313,7 +313,7 @@ fn codex_request_body_emits_reasoning_from_capability_variant() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model = "custom-codex-model".to_string();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model_capability = reasoning_capability();
+    req.llm_profile_capability = reasoning_capability();
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
@@ -324,7 +324,7 @@ fn codex_request_body_emits_reasoning_from_capability_variant() {
 fn codex_request_body_emits_none_effort_for_disabled_selection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-    req.model_capability = reasoning_capability();
+    req.llm_profile_capability = reasoning_capability();
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
@@ -483,7 +483,7 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
 fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-    req.model_capability = reasoning_capability();
+    req.llm_profile_capability = reasoning_capability();
     let hidden = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
@@ -1970,7 +1970,8 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
         tolerant_ws.url.clone(),
     );
     let mut tolerant_request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    tolerant_request.model_capability.stream_termination = Some(StreamTermination::EofTolerated);
+    tolerant_request.llm_profile_capability.stream_termination =
+        Some(StreamTermination::EofTolerated);
     let response = tolerant
         .complete(tolerant_request)
         .await

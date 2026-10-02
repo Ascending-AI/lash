@@ -79,7 +79,7 @@ pub(crate) use lash_core_ids::clock::{Clock, ClockWallTime, SystemClock};
 pub(crate) use lash_core_ids::perf_witness;
 pub(crate) use lash_core_ids::{identity_json, operational_metrics, stable_hash, stable_identity};
 pub(crate) use lash_core_llm::llm;
-pub(crate) use lash_core_llm::model::{ModelConfig, ModelKey, RecordedModel};
+pub(crate) use lash_core_llm::llm_profile::{LlmProfileConfig, LlmProfileKey, RecordedLlmProfile};
 pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 pub(crate) use lash_sansio::AcceptedInjectedTurnInput;
@@ -219,7 +219,7 @@ pub(crate) use lash_core_ids::test_watchdog;
 #[allow(unused_imports)]
 pub(crate) use lash_sansio::attachment::MediaType;
 #[allow(unused_imports)]
-pub(crate) use lash_sansio::llm::capability::{ModelCapability, ReasoningRetentionPolicy};
+pub(crate) use lash_sansio::llm::capability::{LlmProfileCapability, ReasoningRetentionPolicy};
 #[allow(unused_imports)]
 pub(crate) use lash_sansio::llm::capability::{
     OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionSelection,

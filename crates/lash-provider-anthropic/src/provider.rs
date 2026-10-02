@@ -215,7 +215,7 @@ impl Provider for AnthropicProvider {
         .await;
 
         let stream_termination = req
-            .model_capability
+            .llm_profile_capability
             .stream_termination
             .unwrap_or(self.stream_termination);
         if let Err(error) = stream_result {

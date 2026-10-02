@@ -30,19 +30,19 @@ const OWN: &str = "INTRO THE SESSION'S OWN SPEC STATED";
 
 /// The request defaults the first deployment registers for the model: every
 /// session it creates records them with its model binding.
-fn creating_core_defaults() -> lash_core::provider::ModelRequestDefaults {
-    lash_core::provider::ModelRequestDefaults {
+fn creating_core_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
+    lash_core::provider::LlmProfileRequestDefaults {
         max_output_tokens: Some(3_333),
         response_metadata_headers: vec!["x-creator-cost".to_string()],
         response_metadata_body_paths: vec!["/creator/cost".to_string()],
-        ..lash_core::provider::ModelRequestDefaults::default()
+        ..lash_core::provider::LlmProfileRequestDefaults::default()
     }
 }
 
 /// The request defaults the redeployed core registers for the same model
 /// key: no session created before it may be served with them.
-fn redeployed_core_defaults() -> lash_core::provider::ModelRequestDefaults {
-    lash_core::provider::ModelRequestDefaults {
+fn redeployed_core_defaults() -> lash_core::provider::LlmProfileRequestDefaults {
+    lash_core::provider::LlmProfileRequestDefaults {
         expose_thinking: true,
         max_output_tokens: Some(7_777),
         cache_retention: crate::provider::CacheRetention::Long,
@@ -136,13 +136,13 @@ fn spec_stating(intro: &str) -> Result<lash_core::facade_support::SessionSpec> {
 fn core_with_defaults(
     backend: lash_core::Backend,
     provider: ProviderHandle,
-    request_defaults: lash_core::provider::ModelRequestDefaults,
+    request_defaults: lash_core::provider::LlmProfileRequestDefaults,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .tools(Arc::new(AppTools))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            mock_model_spec().with_request_defaults(request_defaults),
+            mock_llm_profile_spec().with_request_defaults(request_defaults),
         )
         .build(crate::testing::runtime_lease_owner())
 }
@@ -771,9 +771,9 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
     const ID: &str = "recorded-prompt-rlm-run-options";
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(
+        .serve_test_llm_profile(
             recording_request_provider(Arc::clone(&seen)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     core.session(ID)

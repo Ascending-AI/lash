@@ -218,16 +218,16 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     };
     assert!(opened.opened, "the second frame must be newly opened");
 
-    let changed_model = lash_core::ModelMetadata::builder("changed-frame-model")
+    let changed_model = lash_core::LlmProfileMetadata::builder("changed-frame-model")
         .context_window_tokens(123_456)
         .build()
         .expect("changed model");
     let changed_key =
-        serve_model_beside(&mut runtime, "changed-frame-model", changed_model.clone());
+        serve_llm_profile_beside(&mut runtime, "changed-frame-model", changed_model.clone());
     crate::runtime_support::configure(
         &mut runtime,
         &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
             model: changed_key,
         }),
         "changed-frame-model",
@@ -235,7 +235,7 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     .await;
     assert_eq!(
         runtime.state().effective_policy().model,
-        Some(lash_core::testing::test_model_config(
+        Some(lash_core::testing::test_llm_profile_config(
             "changed-frame-model",
             changed_model
         ))
@@ -465,27 +465,28 @@ async fn resident_refresh_adopts_the_durable_head_model() {
     let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let settled_model = lash_core::ModelMetadata::builder("settled-live-model")
+    let settled_model = lash_core::LlmProfileMetadata::builder("settled-live-model")
         .context_window_tokens(123_456)
         .build()
         .expect("settled model");
-    let settled_key = serve_model_beside(&mut runtime, "settled-live-model", settled_model.clone());
+    let settled_key =
+        serve_llm_profile_beside(&mut runtime, "settled-live-model", settled_model.clone());
     crate::runtime_support::configure(
         &mut runtime,
         &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
             model: settled_key,
         }),
         "settled-model",
     )
     .await;
 
-    let head_model = lash_core::ModelMetadata::builder("advanced-durable-model")
+    let head_model = lash_core::LlmProfileMetadata::builder("advanced-durable-model")
         .context_window_tokens(65_536)
         .build()
         .expect("advanced durable model");
     advance_session_head(store.as_ref(), |state| {
-        state.policy.model = Some(lash_core::testing::test_model_config(
+        state.policy.model = Some(lash_core::testing::test_llm_profile_config(
             head_model.wire_model.clone(),
             head_model.clone(),
         ));
@@ -499,7 +500,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
 
     assert_eq!(
         runtime.state().effective_policy().model,
-        Some(lash_core::testing::test_model_config(
+        Some(lash_core::testing::test_llm_profile_config(
             head_model.wire_model.clone(),
             head_model
         )),
@@ -730,15 +731,16 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = Box::pin(freshness_runtime(&double)).await;
     Box::pin(append_history(&mut runtime, &double, 2)).await;
-    let overridden_model = lash_core::ModelMetadata::builder("live-override-model")
+    let overridden_model = lash_core::LlmProfileMetadata::builder("live-override-model")
         .context_window_tokens(123_456)
         .build()
         .expect("override model");
-    let overridden_key = serve_model_beside(&mut runtime, "live-override-model", overridden_model);
+    let overridden_key =
+        serve_llm_profile_beside(&mut runtime, "live-override-model", overridden_model);
     crate::runtime_support::configure(
         &mut runtime,
         &double,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
             model: overridden_key,
         }),
         "model-override",
@@ -754,13 +756,13 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
     )
     .await;
 
-    let head_model = lash_core::ModelMetadata::builder("advanced-head-model")
+    let head_model = lash_core::LlmProfileMetadata::builder("advanced-head-model")
         .context_window_tokens(65_536)
         .build()
         .expect("advanced head model");
     let head_generation = seeded(2);
     advance_session_head(store.as_ref(), |state| {
-        state.policy.model = Some(lash_core::testing::test_model_config(
+        state.policy.model = Some(lash_core::testing::test_llm_profile_config(
             head_model.wire_model.clone(),
             head_model.clone(),
         ));
@@ -776,7 +778,7 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
 
     assert_eq!(
         runtime.state().effective_policy().model,
-        Some(lash_core::testing::test_model_config(
+        Some(lash_core::testing::test_llm_profile_config(
             head_model.wire_model.clone(),
             head_model
         )),

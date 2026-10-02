@@ -2208,7 +2208,7 @@ async fn live_restate_recovery_child() {
                         turn_id,
                         session_id,
                         text: "hold until durable cancellation".to_string(),
-                        model: ModelSelection {
+                        model: LlmProfileSelection {
                             model: "mock-model".to_string(),
                             model_variant: Some("high".to_string()),
                         },

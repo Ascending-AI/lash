@@ -75,8 +75,8 @@ pub enum RuntimeErrorCause {
     },
     /// The recorded model key this worker could not bind (FIG-4404).
     /// A deployment serving the key repairs this retryable cause.
-    ModelUnavailable {
-        model_key: Box<crate::ModelKey>,
+    LlmProfileUnavailable {
+        profile_key: Box<crate::LlmProfileKey>,
     },
     /// A tool call passed the session's recorded `max_tool_calls`
     /// (FIG-4546): the typed half of

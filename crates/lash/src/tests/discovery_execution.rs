@@ -122,7 +122,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             ))
         };
         let core = explicit_ephemeral_facets(builder)
-            .serve_test_model(provider, mock_model_spec())
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .tools(Arc::new(DiscoveryTools {
                 calls: calls.clone(),
             }))

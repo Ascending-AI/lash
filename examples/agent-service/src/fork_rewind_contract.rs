@@ -23,7 +23,7 @@ async fn admitted_view(
 use lash::process::{ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration};
 use lash::provider::LlmResponse;
 use lash::runtime::SessionPolicy;
-use lash::{CommitBudget, LashCore, ModelMetadata, QueuedWorkBatchingConfig, TurnBudget};
+use lash::{CommitBudget, LashCore, LlmProfileMetadata, QueuedWorkBatchingConfig, TurnBudget};
 
 #[tokio::test]
 async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
@@ -38,7 +38,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
         .complete(|_request| async { Ok(LlmResponse::default()) })
         .build()
         .into_handle();
-    let model = ModelMetadata::builder("fork-contract-model")
+    let model = LlmProfileMetadata::builder("fork-contract-model")
         .context_window_tokens(8_192)
         .build()
         .expect("valid test model");
@@ -46,7 +46,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
     let stores = double.engine_stores().session_store_factory();
     let processes = double.engine_stores().process_registry();
     let core = LashCore::standard_builder(double.lash_backend())
-        .serve_test_model(provider, model.clone())
+        .serve_test_llm_profile(provider, model.clone())
         .commit_budget(CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(QueuedWorkBatchingConfig::new(1024))
         .build(LeaseOwnerIdentity::opaque(
@@ -59,7 +59,7 @@ async fn host_can_rewind_from_a_surviving_branch_after_deleting_the_source() {
     crate::state::test_support::serve_chat_discard(&double, &core).await;
 
     let source_policy = SessionPolicy {
-        model: Some(lash::testing::test_model_config(
+        model: Some(lash::testing::test_llm_profile_config(
             model.wire_model.clone(),
             model.clone(),
         )),

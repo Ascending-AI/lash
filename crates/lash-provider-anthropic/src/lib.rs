@@ -37,7 +37,7 @@ mod tests {
         ReasoningRetentionPolicy, ReasoningRetentionSelection,
     };
     use lash_core::provider::{
-        CacheRetention, ModelCapability, Provider, ReasoningCapability, ReasoningEncoding,
+        CacheRetention, LlmProfileCapability, Provider, ReasoningCapability, ReasoningEncoding,
         StreamTermination,
     };
     use serde_json::{Value, json};
@@ -91,8 +91,8 @@ mod tests {
     // Effort encoding sends the resolved variant verbatim (adaptive thinking); budget encoding
     // maps each variant to a token budget and omits the wire thinking block for any variant
     // absent from the map (e.g.
-    fn effort_capability(efforts: &[&str]) -> ModelCapability {
-        ModelCapability {
+    fn effort_capability(efforts: &[&str]) -> LlmProfileCapability {
+        LlmProfileCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
             google_dialect: Default::default(),
@@ -109,13 +109,13 @@ mod tests {
         }
     }
 
-    fn budget_capability() -> ModelCapability {
+    fn budget_capability() -> LlmProfileCapability {
         let budgets = BTreeMap::from([
             ("low".to_string(), 1_024u32),
             ("medium".to_string(), 4_096u32),
             ("high".to_string(), 12_288u32),
         ]);
-        ModelCapability {
+        LlmProfileCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
             google_dialect: Default::default(),
@@ -149,7 +149,7 @@ mod tests {
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: crate::attachment_test_acceptance(),
             model_variant: Default::default(),
-            model_capability: Default::default(),
+            llm_profile_capability: Default::default(),
             extra_body: Default::default(),
             request_defaults: Default::default(),
             scope: lash_core::LlmRequestScope::new(
@@ -212,7 +212,7 @@ mod tests {
                 .contains("/stop_sequences")
         );
         let mut req = base.clone();
-        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
         req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
         assert!(
             provider
@@ -614,7 +614,8 @@ mod tests {
         );
         let mut tolerant_req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
         tolerant_req.stream_events = Some(LlmEventSender::new(|_| {}));
-        tolerant_req.model_capability.stream_termination = Some(StreamTermination::EofTolerated);
+        tolerant_req.llm_profile_capability.stream_termination =
+            Some(StreamTermination::EofTolerated);
         let mut tolerant =
             AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(eof_body)));
         assert_eq!(
@@ -772,7 +773,7 @@ mod tests {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
         req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        req.model_capability = effort_capability(&["low", "medium", "high"]);
+        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
         req.output_spec = Some(LlmOutputSpec::JsonObject);
 
         let body = provider.build_request_body(&req).expect("body");
@@ -941,7 +942,7 @@ mod tests {
     fn thinking_display_is_omitted_unless_the_model_exposes_thinking() {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "extract")]);
         req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        req.model_capability = effort_capability(&["low", "medium", "high"]);
+        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
 
         let hidden = AnthropicProvider::new("key")
             .build_request_body(&req)
@@ -966,7 +967,7 @@ mod tests {
         let mut thinking_req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         thinking_req.model_variant =
             lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        thinking_req.model_capability = effort_capability(&["low", "medium", "high"]);
+        thinking_req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
         let thinking = provider
             .build_request_body(&thinking_req)
             .expect("thinking body");
@@ -987,7 +988,7 @@ mod tests {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         req.model = "claude-opus-4-7".to_string();
         req.model_variant = lash_core::provider::ReasoningSelection::Effort("xhigh".to_string());
-        req.model_capability = effort_capability(&["low", "medium", "high", "xhigh"]);
+        req.llm_profile_capability = effort_capability(&["low", "medium", "high", "xhigh"]);
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1004,7 +1005,7 @@ mod tests {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         req.model = "claude-haiku-4".to_string();
         req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        req.model_capability = budget_capability();
+        req.llm_profile_capability = budget_capability();
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1019,7 +1020,7 @@ mod tests {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         req.model = "claude-haiku-4".to_string();
         req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-        req.model_capability = budget_capability();
+        req.llm_profile_capability = budget_capability();
 
         let error = provider
             .build_request_body(&req)
@@ -1036,7 +1037,7 @@ mod tests {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
         req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
-        req.model_capability = effort_capability(&["low", "medium", "high"]);
+        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1064,7 +1065,7 @@ mod tests {
     fn no_variant_emits_no_thinking_even_with_capability() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        req.model_capability = effort_capability(&["low", "medium", "high"]);
+        req.llm_profile_capability = effort_capability(&["low", "medium", "high"]);
 
         let body = provider.build_request_body(&req).expect("body");
 
@@ -1075,7 +1076,7 @@ mod tests {
     fn fig1123_native_clear_thinking_maps_exact_thinking_turn_units() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        *req.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+        *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
             capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
             selection: ReasoningRetentionSelection::AnthropicClearThinking {
                 keep: AnthropicThinkingRetention::Turns(std::num::NonZeroU32::new(2).unwrap()),
@@ -1179,7 +1180,7 @@ mod tests {
         budget.model = "claude-haiku-4".to_string();
         budget.model_variant =
             lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-        budget.model_capability = budget_capability();
+        budget.llm_profile_capability = budget_capability();
         assert!(
             captured_beta_for(budget).contains(crate::policy::INTERLEAVED_THINKING_BETA),
             "budget thinking must request the interleaved beta"
@@ -1189,7 +1190,7 @@ mod tests {
         adaptive.model = "claude-opus-4-7".to_string();
         adaptive.model_variant =
             lash_core::provider::ReasoningSelection::Effort("high".to_string());
-        adaptive.model_capability = effort_capability(&["low", "medium", "high", "xhigh"]);
+        adaptive.llm_profile_capability = effort_capability(&["low", "medium", "high", "xhigh"]);
         assert!(
             !captured_beta_for(adaptive).contains(crate::policy::INTERLEAVED_THINKING_BETA),
             "adaptive thinking must not request the interleaved beta"
@@ -1205,7 +1206,7 @@ mod tests {
     #[test]
     fn fig1123_context_management_beta_gates_on_native_retention_body() {
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
-        *req.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+        *req.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
             capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
             selection: ReasoningRetentionSelection::AnthropicClearThinking {
                 keep: AnthropicThinkingRetention::All,

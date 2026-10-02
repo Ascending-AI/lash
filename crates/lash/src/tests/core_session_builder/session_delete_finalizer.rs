@@ -52,7 +52,7 @@ async fn closing_fixture_under(
     )
     .await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     session
@@ -428,7 +428,7 @@ async fn an_immediate_delivery_runs_under_the_configured_attempt_budget() -> Res
             attempt: std::time::Duration::from_millis(BUDGET_MS),
             tick_wait: std::time::Duration::from_secs(1),
         })
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;
     session
@@ -547,7 +547,7 @@ async fn delete_delivery_exhausts_its_budget(
             attempt: std::time::Duration::from_millis(BUDGET_MS),
             tick_wait: std::time::Duration::from_secs(1),
         })
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     create_catalog_session(&core, SESSION).await?;
     let ledger = double

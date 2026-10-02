@@ -16,14 +16,14 @@ fn process_execution_env_identity_golden_corpus() {
     let policy = crate::SessionPolicy {
         charge_safety: Default::default(),
         model: Some(
-            crate::ModelConfig::new(crate::RecordedModel::mint(
-                crate::ModelKey::new("rich-key"),
-                crate::ModelMetadata::builder("model:rich")
+            crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+                crate::LlmProfileKey::new("rich-key"),
+                crate::LlmProfileMetadata::builder("model:rich")
                     .context_window_tokens(8192)
                     .output_token_capacity(2048)
                     .build()
                     .expect("valid rich model limits")
-                    .with_capability(crate::ModelCapability {
+                    .with_capability(crate::LlmProfileCapability {
                         instruction_role: crate::InstructionRole::Developer,
                         native_mid_conversation_system: true,
                         google_dialect: Default::default(),

@@ -134,7 +134,7 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
     let (core, session_spec) = core_builders::standard_core_over(
         double.lash_backend(),
         provider,
-        model_spec(DEFAULT_STANDARD_MODEL, 128).expect("model metadata"),
+        llm_profile_spec(DEFAULT_STANDARD_MODEL, 128).expect("model metadata"),
         StandardCoreSpec {
             output_cap: 128,
             turn_budget: 2,

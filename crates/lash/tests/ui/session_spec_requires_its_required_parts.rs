@@ -7,11 +7,11 @@ fn a_spec_names_its_required_parts() {
     let _ = lash::SessionSpec::new();
 }
 
-fn a_spec_names_its_turn_budget(model: lash::ModelKey) {
+fn a_spec_names_its_turn_budget(model: lash::LlmProfileKey) {
     let _ = lash::SessionSpec::new(model);
 }
 
-fn a_spec_names_its_tool_call_limit(model: lash::ModelKey) {
+fn a_spec_names_its_tool_call_limit(model: lash::LlmProfileKey) {
     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded);
 }
 

@@ -118,7 +118,7 @@ pub use identity::{
     SessionId, TurnId, session_owner_namespace,
 };
 pub use llm::capability::{
-    ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
+    LlmProfileCapability, LlmProfileEffortValidationCategory, LlmProfileEffortValidationError,
     ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningSelection,
 };
 pub use llm::types::{LlmTerminalReason, ProviderFailureKind};

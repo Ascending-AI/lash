@@ -71,9 +71,9 @@ async fn witness(stores: Arc<dyn StoreSet>, label: &str) -> Result<()> {
             calls: Arc::clone(&calls),
         }));
     let core = lash::LashCore::standard_builder(lash::Backend::new(engine.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             ProviderHandle::new(provider.into_components()),
-            lash::ModelMetadata::builder("fixture-model")
+            lash::LlmProfileMetadata::builder("fixture-model")
                 .context_window_tokens(200_000)
                 .max_output_tokens(4096)
                 .build()?,

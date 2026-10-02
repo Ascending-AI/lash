@@ -339,8 +339,8 @@ impl From<RemoteProcessPluginConfig> for lash_core::AdmittedPluginConfig {
     }
 }
 
-impl From<lash_core::ModelLimits> for RemoteProcessModelLimits {
-    fn from(value: lash_core::ModelLimits) -> Self {
+impl From<lash_core::LlmProfileLimits> for RemoteProcessModelLimits {
+    fn from(value: lash_core::LlmProfileLimits) -> Self {
         Self {
             context_window_tokens: value.context_window_tokens.get(),
             output_token_capacity: value.output_token_capacity.map(|value| value.get()),
@@ -348,9 +348,9 @@ impl From<lash_core::ModelLimits> for RemoteProcessModelLimits {
     }
 }
 
-impl From<lash_core::ModelMetadata> for RemoteModelMetadata {
-    fn from(value: lash_core::ModelMetadata) -> Self {
-        let lash_core::ModelMetadata {
+impl From<lash_core::LlmProfileMetadata> for RemoteLlmProfileMetadata {
+    fn from(value: lash_core::LlmProfileMetadata) -> Self {
+        let lash_core::LlmProfileMetadata {
             wire_model,
             extra_body,
             capability,
@@ -367,18 +367,18 @@ impl From<lash_core::ModelMetadata> for RemoteModelMetadata {
     }
 }
 
-impl TryFrom<RemoteModelMetadata> for lash_core::ModelMetadata {
+impl TryFrom<RemoteLlmProfileMetadata> for lash_core::LlmProfileMetadata {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteModelMetadata) -> Result<Self, Self::Error> {
-        let RemoteModelMetadata {
+    fn try_from(value: RemoteLlmProfileMetadata) -> Result<Self, Self::Error> {
+        let RemoteLlmProfileMetadata {
             wire_model,
             extra_body,
             capability,
             limits,
             request_defaults,
         } = value;
-        let model = lash_core::ModelMetadata::builder(wire_model)
+        let model = lash_core::LlmProfileMetadata::builder(wire_model)
             .context_window_tokens(limits.context_window_tokens);
         let model = match limits.output_token_capacity {
             Some(capacity) => model.output_token_capacity(capacity),
@@ -397,9 +397,9 @@ impl TryFrom<RemoteModelMetadata> for lash_core::ModelMetadata {
     }
 }
 
-impl From<lash_core::ModelConfig> for RemoteModelConfig {
-    fn from(value: lash_core::ModelConfig) -> Self {
-        let lash_core::ModelConfig { model, reasoning } = value;
+impl From<lash_core::LlmProfileConfig> for RemoteLlmProfileConfig {
+    fn from(value: lash_core::LlmProfileConfig) -> Self {
+        let lash_core::LlmProfileConfig { model, reasoning } = value;
         Self {
             key: model.key().as_str().to_string(),
             metadata: model.metadata().clone().into(),
@@ -408,20 +408,20 @@ impl From<lash_core::ModelConfig> for RemoteModelConfig {
     }
 }
 
-impl TryFrom<RemoteModelConfig> for lash_core::ModelConfig {
+impl TryFrom<RemoteLlmProfileConfig> for lash_core::LlmProfileConfig {
     type Error = RemoteProtocolError;
 
     /// The remote carrier conveys a binding the session already recorded;
     /// decoding it restores that recorded value, never a fresh lookup.
-    fn try_from(value: RemoteModelConfig) -> Result<Self, Self::Error> {
-        let RemoteModelConfig {
+    fn try_from(value: RemoteLlmProfileConfig) -> Result<Self, Self::Error> {
+        let RemoteLlmProfileConfig {
             key,
             metadata,
             reasoning,
         } = value;
         Ok(Self {
-            model: lash_core::RecordedModel::mint(
-                lash_core::ModelKey::new(key),
+            model: lash_core::RecordedLlmProfile::mint(
+                lash_core::LlmProfileKey::new(key),
                 metadata.try_into()?,
             ),
             reasoning: reasoning.into(),

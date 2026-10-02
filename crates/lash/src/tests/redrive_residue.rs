@@ -51,7 +51,7 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
     .expect("build the always-replay Restate double");
     let calls = Arc::new(AtomicUsize::new(0));
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             {
                 let calls = Arc::clone(&calls);
                 crate::testing::TestProvider::builder()
@@ -67,7 +67,7 @@ async fn a_cancelled_cell_replays_its_timer_on_a_resident_runtime() -> Result<()
                     .build()
                     .into_handle()
             },
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;

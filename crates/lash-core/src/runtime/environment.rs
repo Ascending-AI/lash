@@ -220,7 +220,7 @@ impl RuntimeEnvironmentBuilder {
 
     /// The host's models: the registry that mints model bindings and binds
     /// recorded ones to their transports.
-    pub fn with_models(mut self, models: Arc<dyn crate::RuntimeModels>) -> Self {
+    pub fn with_llm_profiles(mut self, models: Arc<dyn crate::LlmProfiles>) -> Self {
         self.env.core.providers.models = models;
         self
     }

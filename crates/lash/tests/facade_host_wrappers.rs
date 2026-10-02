@@ -222,9 +222,9 @@ fn core(
     };
     LashCore::builder(backend)
         .protocol_plugin(Arc::new(protocol))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash::ModelMetadata::builder("facade-host-wrappers")
+            lash::LlmProfileMetadata::builder("facade-host-wrappers")
                 .context_window_tokens(64_000)
                 .build()
                 .expect("model spec"),

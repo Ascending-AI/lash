@@ -509,27 +509,27 @@ pub struct RemoteModelIntent {
     #[serde(default)]
     pub variant: RemoteReasoningSelection,
     /// Host-supplied capability metadata for the model (mirrors the core
-    /// `ModelCapability` contract).
-    #[serde(default, skip_serializing_if = "RemoteModelCapability::is_empty")]
-    pub capability: RemoteModelCapability,
+    /// `LlmProfileCapability` contract).
+    #[serde(default, skip_serializing_if = "RemoteLlmProfileCapability::is_empty")]
+    pub capability: RemoteLlmProfileCapability,
     /// The recorded model's request defaults (mirrors the core
     /// `LlmRequest::request_defaults`).
     #[serde(
         default,
-        skip_serializing_if = "RemoteModelRequestDefaults::is_default"
+        skip_serializing_if = "RemoteLlmProfileRequestDefaults::is_default"
     )]
-    pub request_defaults: RemoteModelRequestDefaults,
+    pub request_defaults: RemoteLlmProfileRequestDefaults,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, String>,
 }
 
-/// Mirror of the core `ModelRequestDefaults`: what a model's requests do
+/// Mirror of the core `LlmProfileRequestDefaults`: what a model's requests do
 /// where a request states nothing, recorded with the model.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteModelRequestDefaults {
+pub struct RemoteLlmProfileRequestDefaults {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expose_thinking: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,7 +542,7 @@ pub struct RemoteModelRequestDefaults {
     pub response_metadata_body_paths: Vec<String>,
 }
 
-impl RemoteModelRequestDefaults {
+impl RemoteLlmProfileRequestDefaults {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -564,11 +564,11 @@ impl RemoteCacheRetention {
     }
 }
 
-/// Mirror of the core `ModelCapability`: host-supplied model capability
+/// Mirror of the core `LlmProfileCapability`: host-supplied model capability
 /// metadata carried with the model intent so remote workers validate and
 /// encode effort exactly like a local runtime.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteModelCapability {
+pub struct RemoteLlmProfileCapability {
     #[serde(default, skip_serializing_if = "RemoteInstructionRole::is_system")]
     pub instruction_role: RemoteInstructionRole,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -591,7 +591,7 @@ pub struct RemoteModelCapability {
     pub reasoning_retention: RemoteReasoningRetentionPolicy,
 }
 
-impl RemoteModelCapability {
+impl RemoteLlmProfileCapability {
     pub fn is_empty(&self) -> bool {
         self.instruction_role.is_system()
             && !self.native_mid_conversation_system
@@ -759,7 +759,7 @@ impl RemoteModelIntent {
             extra_body: serde_json::Map::new(),
             request_defaults: Default::default(),
             variant: RemoteReasoningSelection::ProviderDefault,
-            capability: RemoteModelCapability::default(),
+            capability: RemoteLlmProfileCapability::default(),
             provider: None,
             metadata: HashMap::new(),
         }

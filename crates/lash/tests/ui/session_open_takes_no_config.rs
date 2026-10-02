@@ -3,7 +3,7 @@
 // in the `SessionCreation` passed to `create`; the open builder cannot carry
 // them.
 
-fn open_takes_no_model(core: lash::LashCore, model: lash::ModelKey) {
+fn open_takes_no_llm_profile(core: lash::LashCore, model: lash::LlmProfileKey) {
     let _ = core
         .session("stated-at-open")
         .session_spec(lash::SessionSpec::new(

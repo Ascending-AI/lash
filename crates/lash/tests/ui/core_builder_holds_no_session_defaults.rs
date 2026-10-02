@@ -8,7 +8,7 @@ fn the_builder_takes_no_turn_budget(backend: lash::Backend) {
     let _ = lash::LashCore::builder(backend, lash::TurnBudget::Unbounded);
 }
 
-fn the_builder_selects_no_model(backend: lash::Backend, key: lash::ModelKey) {
+fn the_builder_selects_no_model(backend: lash::Backend, key: lash::LlmProfileKey) {
     let _ = lash::LashCore::standard_builder(backend).model(key);
 }
 

@@ -72,9 +72,9 @@ pub(super) fn redeploying_config() -> RlmProtocolPluginConfig {
 
 pub(super) fn policy() -> SessionPolicy {
     SessionPolicy {
-        model: Some(lash_core::testing::test_model_config(
+        model: Some(lash_core::testing::test_llm_profile_config(
             "rlm-recorded-behaviour-model",
-            lash_core::testing::test_model_metadata("rlm-recorded-behaviour-model"),
+            lash_core::testing::test_llm_profile_metadata("rlm-recorded-behaviour-model"),
         )),
         ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
     }
@@ -165,7 +165,8 @@ pub(super) async fn open_runtime(
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
-    host_config.providers.models = lash_core::testing::models_serving(&policy(), model.provider());
+    host_config.providers.models =
+        lash_core::testing::llm_profiles_serving(&policy(), model.provider());
     let runtime_host = EmbeddedRuntimeHost::new(host_config);
     let services = PersistentRuntimeServices::new(
         plugins,

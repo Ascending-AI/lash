@@ -946,14 +946,14 @@ fn text_provider(kind: &'static str, _model: &'static str, text: &'static str) -
         .into_handle()
 }
 
-type SeenModels = Arc<std::sync::Mutex<Vec<(String, lash_core::ReasoningSelection)>>>;
+type SeenLlmProfiles = Arc<std::sync::Mutex<Vec<(String, lash_core::ReasoningSelection)>>>;
 
 fn recording_text_provider(
     kind: &'static str,
     _model: &'static str,
     _variant: Option<&'static str>,
     text: &'static str,
-    seen: SeenModels,
+    seen: SeenLlmProfiles,
 ) -> ProviderHandle {
     crate::testing::TestProvider::builder()
         .kind(kind)
@@ -1129,7 +1129,7 @@ pub(crate) async fn standard_core() -> LashCore {
 /// A standard core over `backend`.
 pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
         .expect("standard core")
 }
@@ -1177,11 +1177,11 @@ pub(crate) use harness::{
     AcceptedSend as _, DecoratedBackend, core_now_ms, double_backend,
     double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile,
     explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget, held_double, invocations,
-    latest_double, mock_model_spec, mock_session_spec, model_spec, output_into_cancelled_by,
-    postgres_store_set, recorded_model, redeploy, restate_double, retry_when_claim_frees,
-    run_async_test_on_stack_budget, serve_processes, session_spec_for, settle_session_drive,
-    sqlite_memory_store_backend, sqlite_memory_store_set, store_backend_with_clock, test_catalog,
-    turn_input_states,
+    latest_double, llm_profile_spec, mock_llm_profile_spec, mock_session_spec,
+    output_into_cancelled_by, postgres_store_set, recorded_llm_profile, redeploy, restate_double,
+    retry_when_claim_frees, run_async_test_on_stack_budget, serve_processes, session_spec_for,
+    settle_session_drive, sqlite_memory_store_backend, sqlite_memory_store_set,
+    store_backend_with_clock, test_catalog, turn_input_states,
 };
 mod absent_session_delete;
 #[cfg(feature = "rlm")]

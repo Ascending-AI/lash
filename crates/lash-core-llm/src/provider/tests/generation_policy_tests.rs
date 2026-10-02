@@ -1,7 +1,7 @@
 //! `resolve_generation_policy`: every host setting is sent or refused before
 //! any I/O, and the receipt joins resolution with adapter emission (ADR 0121).
 use super::*;
-use crate::provider::{CacheRetention, ModelRequestDefaults};
+use crate::provider::{CacheRetention, LlmProfileRequestDefaults};
 
 fn open_wire() -> GenerationWire {
     GenerationWire {
@@ -24,7 +24,7 @@ fn generation_request(generation: GenerationOptions) -> LlmRequest {
 }
 
 /// `request` carrying the recorded model request `defaults`.
-fn with_defaults(request: LlmRequest, defaults: ModelRequestDefaults) -> LlmRequest {
+fn with_defaults(request: LlmRequest, defaults: LlmProfileRequestDefaults) -> LlmRequest {
     LlmRequest {
         request_defaults: defaults,
         ..request
@@ -37,11 +37,11 @@ fn refusal_code(error: &LlmTransportError) -> Option<TurnFailureCode> {
 
 #[test]
 fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
-    let model_defaults = ModelRequestDefaults {
+    let model_defaults = LlmProfileRequestDefaults {
         max_output_tokens: Some(8_192),
         cache_retention: CacheRetention::Long,
         expose_thinking: true,
-        ..ModelRequestDefaults::default()
+        ..LlmProfileRequestDefaults::default()
     };
     let unset = resolve_generation_policy(&empty_request(), "test", &open_wire())
         .expect("nothing to refuse");
@@ -92,7 +92,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
     struct Case {
         name: &'static str,
         generation: GenerationOptions,
-        options: ModelRequestDefaults,
+        options: LlmProfileRequestDefaults,
         wire: GenerationWire,
         code: TurnFailureCode,
     }
@@ -104,7 +104,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 output_token_cap: NonZeroUsize::new(1_024),
                 ..GenerationOptions::default()
             },
-            options: ModelRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
                 ..open_wire()
@@ -114,9 +114,9 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         Case {
             name: "default cap on a wire without one",
             generation: GenerationOptions::default(),
-            options: ModelRequestDefaults {
+            options: LlmProfileRequestDefaults {
                 max_output_tokens: Some(1_024),
-                ..ModelRequestDefaults::default()
+                ..LlmProfileRequestDefaults::default()
             },
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
@@ -127,7 +127,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         Case {
             name: "no cap on a wire that requires one",
             generation: GenerationOptions::default(),
-            options: ModelRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Required,
                 ..open_wire()
@@ -140,7 +140,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 temperature: temperature(),
                 ..GenerationOptions::default()
             },
-            options: ModelRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 temperature: false,
                 ..open_wire()
@@ -153,7 +153,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 seed: Some(1),
                 ..GenerationOptions::default()
             },
-            options: ModelRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 seed: false,
                 ..open_wire()
@@ -166,7 +166,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 stop_sequences: vec!["END".to_string()],
                 ..GenerationOptions::default()
             },
-            options: ModelRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 stop_sequences: false,
                 ..open_wire()
@@ -179,7 +179,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 parallel_tool_calls: Some(true),
                 ..GenerationOptions::default()
             },
-            options: ModelRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::default(),
             wire: GenerationWire {
                 parallel_tool_calls: false,
                 ..open_wire()
@@ -210,7 +210,7 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
         temperature: Some(NonNegativeFiniteF64::new(0.2).expect("finite")),
         ..GenerationOptions::default()
     });
-    pinned.model_capability.sampling = crate::provider::SamplingCapability::Pinned;
+    pinned.llm_profile_capability.sampling = crate::provider::SamplingCapability::Pinned;
     for pins in [false, true] {
         let wire = GenerationWire {
             active_thinking_pins_sampling: pins,
@@ -229,7 +229,7 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
         temperature: Some(NonNegativeFiniteF64::new(0.2).expect("finite")),
         ..GenerationOptions::default()
     });
-    thinking.model_capability.reasoning = Some(crate::provider::ReasoningCapability {
+    thinking.llm_profile_capability.reasoning = Some(crate::provider::ReasoningCapability {
         efforts: vec!["high".to_string()],
         disable: true,
         ..crate::provider::ReasoningCapability::default()
@@ -255,9 +255,9 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
 
 #[test]
 fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
-    let options = ModelRequestDefaults {
+    let options = LlmProfileRequestDefaults {
         expose_thinking: true,
-        ..ModelRequestDefaults::default()
+        ..LlmProfileRequestDefaults::default()
     };
     for (summary, expected) in [
         (ThinkingSummaryWire::NoField, false),
@@ -318,19 +318,19 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
         parallel_tool_calls: Some(true),
         ..GenerationOptions::default()
     });
-    request.model_capability.reasoning = Some(crate::provider::ReasoningCapability {
+    request.llm_profile_capability.reasoning = Some(crate::provider::ReasoningCapability {
         efforts: vec!["high".to_string()],
         ..crate::provider::ReasoningCapability::default()
     });
     request.model_variant = ReasoningSelection::Effort("high".to_string());
-    request.model_capability.reasoning_retention.selection =
+    request.llm_profile_capability.reasoning_retention.selection =
         crate::provider::ReasoningRetentionSelection::ClientSideUserSegments {
             max_segments: NonZeroUsize::new(1).expect("positive"),
         };
-    let options = ModelRequestDefaults {
+    let options = LlmProfileRequestDefaults {
         max_output_tokens: Some(4_096),
         expose_thinking: true,
-        ..ModelRequestDefaults::default()
+        ..LlmProfileRequestDefaults::default()
     };
     let policy = resolve_generation_policy(
         &with_defaults(request.clone(), options),

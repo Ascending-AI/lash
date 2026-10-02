@@ -261,7 +261,7 @@ async fn the_zero_move_policy_is_one_shared_bounded_loop() {
         state
             .open_session(
                 &chat.id,
-                ModelChoice {
+                LlmProfileChoice {
                     key: "mock-model".into(),
                     reasoning: Default::default(),
                 },

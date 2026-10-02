@@ -37,7 +37,8 @@ pub use lash_core::testing::{
 /// Model catalogs for host tests: a registry serving one model through a
 /// test provider, and the metadata and recorded selection it mints.
 pub use lash_core::testing::{
-    single_model_registry, standard_test_models, test_model_config, test_model_metadata,
+    single_llm_profile_registry, standard_test_llm_profiles, test_llm_profile_config,
+    test_llm_profile_metadata,
 };
 
 /// [`RuntimeExecutionContext`](crate::tools::RuntimeExecutionContext)

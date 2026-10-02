@@ -98,10 +98,10 @@ first_party_codes! {
         Self::InvalidTurnCancelRequest,
         Self::LiveReplay,
         Self::LlmProvider,
-        Self::ModelUnknown,
+        Self::LlmProfileUnknown,
         Self::ReasoningRefused,
-        Self::ModelUnavailable,
-        Self::ModelUnconfigured,
+        Self::LlmProfileUnavailable,
+        Self::LlmProfileUnconfigured,
         Self::RunDefinitionUnavailable,
         Self::RecordedRendererUnavailable,
         Self::OutputRetentionFailed,
@@ -926,7 +926,7 @@ fn terminal_causes_override_retry_authority_granted_before_the_cause() {
         for code in [
             RuntimeErrorCode::StoreCommitFailed,
             RuntimeErrorCode::TransientCancelWatch,
-            RuntimeErrorCode::ModelUnavailable,
+            RuntimeErrorCode::LlmProfileUnavailable,
         ] {
             let mut fault = crate::runtime_error::RuntimeEffectControllerError::new(
                 code,
@@ -943,19 +943,19 @@ fn terminal_causes_override_retry_authority_granted_before_the_cause() {
 /// on the two effects whose body binds it, and nowhere else; no other
 /// failure of a model call gains the retry authority.
 #[test]
-fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
+fn an_unbound_llm_profile_is_the_attempts_fault_on_model_calls_alone() {
     use crate::runtime_error::{EffectErrorJournalPolicy, RuntimeEffectControllerError};
-    let key = crate::ModelKey::new("kimi-k3@tensorx");
-    let unavailable = crate::provider::ModelUnavailable::new(
+    let key = crate::LlmProfileKey::new("kimi-k3@tensorx");
+    let unavailable = crate::provider::LlmProfileUnavailable::new(
         key.clone(),
-        crate::provider::ModelUnavailableReason::UnknownKey,
+        crate::provider::LlmProfileUnavailableReason::UnknownKey,
     );
-    let fault = RuntimeEffectControllerError::model_unavailable(
+    let fault = RuntimeEffectControllerError::llm_profile_unavailable(
         &key,
         format!("the recorded model cannot be bound on this worker: {unavailable}"),
     );
-    assert_eq!(fault.code, RuntimeErrorCode::ModelUnavailable);
-    assert_eq!(fault.model_key(), Some(&key));
+    assert_eq!(fault.code, RuntimeErrorCode::LlmProfileUnavailable);
+    assert_eq!(fault.profile_key(), Some(&key));
     assert!(fault.is_attempt_fault());
     assert!(!fault.is_terminal(), "the fault is retried, never settled");
     for kind in [
@@ -987,7 +987,7 @@ fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
 
     // The typed key survives both conversions and the wire.
     let runtime = fault.clone().into_runtime_error();
-    assert_eq!(runtime.model_key(), Some(&key));
+    assert_eq!(runtime.profile_key(), Some(&key));
     assert_eq!(
         runtime.attempt_failure_text(),
         fault.attempt_failure_text(),
@@ -998,12 +998,12 @@ fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
     let json = serde_json::to_value(&runtime).expect("serialize runtime error");
     assert_eq!(
         json["cause"],
-        serde_json::json!({"kind": "model_unavailable", "model_key": "kimi-k3@tensorx"})
+        serde_json::json!({"kind": "llm_profile_unavailable", "profile_key": "kimi-k3@tensorx"})
     );
     let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
-    assert_eq!(decoded.model_key(), Some(&key));
+    assert_eq!(decoded.profile_key(), Some(&key));
     assert_eq!(
-        RuntimeEffectControllerError::from(decoded).model_key(),
+        RuntimeEffectControllerError::from(decoded).profile_key(),
         Some(&key)
     );
     // An engine keeps only a failed attempt's text. The fault's typed record
@@ -1016,9 +1016,9 @@ fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
         Some("500".to_string()),
         format!("[500] Handler failed with retryable error: {failure}"),
     );
-    assert_eq!(park.model_key(), Some(&key));
+    assert_eq!(park.profile_key(), Some(&key));
     let stored = serde_json::to_value(&park).expect("serialize the park reason");
-    assert_eq!(stored["model_key"], "kimi-k3@tensorx");
+    assert_eq!(stored["profile_key"], "kimi-k3@tensorx");
     assert_eq!(
         serde_json::from_value::<crate::store::ParkReason>(stored).expect("decode the park"),
         park
@@ -1029,18 +1029,18 @@ fn an_unbound_model_is_the_attempts_fault_on_model_calls_alone() {
         None,
         "model `kimi-k3@tensorx` is unavailable".to_string(),
     );
-    assert_eq!(prose.model_key(), None);
+    assert_eq!(prose.profile_key(), None);
     assert!(
         serde_json::to_value(&prose)
             .expect("serialize the park reason")
-            .get("model_key")
+            .get("profile_key")
             .is_none()
     );
     let unmarked = RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeStore, "store");
     assert_eq!(unmarked.attempt_failure_text(), unmarked.to_string());
 
     let plain = serde_json::to_value(RuntimeError::new(
-        RuntimeErrorCode::ModelUnavailable,
+        RuntimeErrorCode::LlmProfileUnavailable,
         "no key",
     ))
     .expect("serialize runtime error");
@@ -1180,11 +1180,11 @@ mod typed_refusal_causes {
 
     #[test]
     fn every_run_shape_refusal_is_a_typed_terminal_cause() {
-        let reasoning = lash_core_llm::model::ReasoningRefused {
-            key: crate::ModelKey::new("model"),
+        let reasoning = lash_core_llm::llm_profile::ReasoningRefused {
+            key: crate::LlmProfileKey::new("model"),
             reasoning: crate::ReasoningSelection::Effort("deep".to_string()),
             category:
-                lash_sansio::llm::capability::ModelEffortValidationCategory::UnsupportedEffort,
+                lash_sansio::llm::capability::LlmProfileEffortValidationCategory::UnsupportedEffort,
             message: "deep is not declared".to_string(),
         };
         for (refusal, code) in [
@@ -1208,7 +1208,7 @@ mod typed_refusal_causes {
                 RuntimeErrorCode::ReasoningRefused,
             ),
             (
-                RunShapeRefusal::ReasoningWithoutModel,
+                RunShapeRefusal::ReasoningWithoutLlmProfile,
                 RuntimeErrorCode::RunShapeRefused,
             ),
             (

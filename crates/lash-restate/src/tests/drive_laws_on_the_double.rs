@@ -255,31 +255,31 @@ mod stale_fence_boundary {
     mod sqlite_memory_always_replay {
         lash_conformance::turn_config_tests!(@law [] {
             super::memory_harness(true).await
-        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [] {
             super::memory_harness(true).await
-        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+        }; (an_older_admission_redriven_after_a_profile_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 
     mod sqlite_file {
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(false).await
-        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(false).await
-        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+        }; (an_older_admission_redriven_after_a_profile_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 
     mod sqlite_file_always_replay {
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(true).await
-        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [] {
             super::file_harness(true).await
-        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+        }; (an_older_admission_redriven_after_a_profile_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 }
 

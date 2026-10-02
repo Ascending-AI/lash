@@ -21,7 +21,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::remote_protocol::negotiate_remote;
 use crate::routes::{
     ChannelTurnEvents, TurnPersistenceState, TurnRefusal, answered_output,
-    assistant_text_for_persistence, model_choice_for_chat_selection,
+    assistant_text_for_persistence, llm_profile_choice_for_chat_selection,
 };
 use crate::state::{AppError, AppResult, AppStateData};
 
@@ -47,13 +47,13 @@ pub(crate) async fn stream_raw_activities(
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
     }
-    let model_selection = state
+    let llm_profile_selection = state
         .with_db({
             let chat_id = chat_id.clone();
             let text = text.clone();
             move |db| {
                 db.require_chat(&chat_id)?;
-                let model_selection = db.chat_model_selection(&chat_id)?;
+                let llm_profile_selection = db.chat_llm_profile_selection(&chat_id)?;
                 let board = db.chat_board(&chat_id)?;
                 db.maybe_title_from_first_message(&chat_id, &text)?;
                 db.insert_message_with_payload(
@@ -62,13 +62,13 @@ pub(crate) async fn stream_raw_activities(
                     &text,
                     Some(json!({ "board": board })),
                 )?;
-                Ok(model_selection)
+                Ok(llm_profile_selection)
             }
         })
         .await?;
 
-    let turn_model = model_choice_for_chat_selection(&model_selection);
-    let session = state.open_session(&chat_id, turn_model).await?;
+    let turn_profile = llm_profile_choice_for_chat_selection(&llm_profile_selection);
+    let session = state.open_session(&chat_id, turn_profile).await?;
     let turn_id = TurnId::from(format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4()));
     // Accepted before the response starts, so a refused acceptance is the
     // response's status: a retryable refusal answers 503.
@@ -297,9 +297,9 @@ finish("done through raw activities");
             &backend,
         );
         let core = LashCore::rlm_builder(backend, factory)
-            .serve_test_model(
+            .serve_test_llm_profile(
                 provider,
-                lash::ModelMetadata::builder("scripted-model")
+                lash::LlmProfileMetadata::builder("scripted-model")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),

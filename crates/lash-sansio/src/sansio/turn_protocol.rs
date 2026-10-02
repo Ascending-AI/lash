@@ -773,7 +773,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             },
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
             model_variant: ctx.config.model_variant.clone(),
-            model_capability: ctx.config.model_capability.clone(),
+            llm_profile_capability: ctx.config.llm_profile_capability.clone(),
             extra_body: ctx.config.extra_body.clone(),
             request_defaults: ctx.config.request_defaults.clone(),
             generation: ctx.config.generation.clone(),
@@ -978,13 +978,13 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// that can tell a productive attempt from a stalled one.
     pub no_progress_budget: crate::NoProgressBudget,
     pub model_variant: crate::ReasoningSelection,
-    pub model_capability: crate::llm::capability::ModelCapability,
+    pub llm_profile_capability: crate::llm::capability::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules.
     pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
     pub extra_body: serde_json::Map<String, serde_json::Value>,
     /// The recorded model's request defaults every request of the turn
     /// carries.
-    pub request_defaults: crate::llm::capability::ModelRequestDefaults,
+    pub request_defaults: crate::llm::capability::LlmProfileRequestDefaults,
     pub generation: crate::llm::types::GenerationOptions,
     pub autonomous: bool,
     pub session_id: SessionId,

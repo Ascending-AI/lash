@@ -298,9 +298,9 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
         config: crate::SessionPolicy {
-            model: Some(crate::testing::test_model_config(
+            model: Some(crate::testing::test_llm_profile_config(
                 "wake-crash-model",
-                crate::testing::test_model_metadata("wake-crash-model"),
+                crate::testing::test_llm_profile_metadata("wake-crash-model"),
             )),
             attachment_acceptance: Default::default(),
             session_id: Some(SessionId::from(target_session_id.to_string())),

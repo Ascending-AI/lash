@@ -427,8 +427,8 @@ through its backend constructor. Restate cancellation and process crash
 matrices exercise the production handlers. Upgrade proofs use synthetic-next.
 
 The stale-fence boundary in §9 has two turn-config laws:
-`a_committed_root_redriven_after_a_model_change_answers_from_its_receipt`
-and `an_older_admission_redriven_after_a_model_change_is_fenced_out`.
+`a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt`
+and `an_older_admission_redriven_after_a_profile_change_is_fenced_out`.
 Together they replace
 `a_committed_root_redriven_after_a_model_change_refuses_its_stale_epoch`,
 whose refusal of an exact stored commit contradicted §9. The refusal law

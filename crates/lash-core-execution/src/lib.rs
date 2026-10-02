@@ -61,7 +61,7 @@ pub mod direct_completion_client;
 pub mod engine;
 pub(crate) use lash_core_ids::identity_json;
 pub use lash_core_llm::llm;
-pub(crate) use lash_core_llm::model;
+pub(crate) use lash_core_llm::llm_profile;
 pub mod model_clamp;
 pub(crate) use lash_core_ids::operational_metrics;
 pub(crate) use model_clamp::ModelGenerationClamp;
@@ -250,8 +250,8 @@ pub mod facade_support {
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::GenerationRetryGuarantee;
+    pub use crate::provider::LlmProfileEffortValidationCategory;
     pub use crate::provider::LlmTimeouts;
-    pub use crate::provider::ModelEffortValidationCategory;
     pub use crate::provider::Provider;
     pub use crate::provider::ProviderComponents;
     pub use crate::provider::ProviderHandle;
@@ -531,7 +531,7 @@ pub use lash_sansio::{
     ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock,
     ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
 };
-pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
+pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// Project a successful tool control into its terminal turn outcome.
 ///
 /// Agent-frame seeds are typed at their serde boundary, so a terminal outcome
@@ -712,9 +712,9 @@ pub use lash_trace::{
     TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
-pub use model::{
-    ModelConfig, ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
-    ReasoningRefused, RecordedModel,
+pub use llm_profile::{
+    LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata,
+    LlmProfileMetadataBuilder, ReasoningRefused, RecordedLlmProfile,
 };
 pub use plugin::{
     AdmittedPluginConfig, CORE_CONFIG_IMPLEMENTATION, CandidateFacts, ConfigCommand,
@@ -740,14 +740,14 @@ pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-    InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+    InstructionRole, LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability,
     ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
     ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub use provider::{
-    EmptyModels, ModelRegistry, ModelUnavailable, ModelUnavailableReason, RegisteredModel,
-    RegistrationError, RuntimeModels,
+    EmptyLlmProfiles, LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason,
+    LlmProfiles, RegisteredLlmProfile, RegistrationError,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
@@ -879,7 +879,7 @@ pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
     SessionNodePayload, SessionNodeRecord,
 };
-pub use session_model::ModelBinding;
+pub use session_model::LlmProfileBinding;
 pub(crate) use session_model::RuntimeSessionPolicy;
 
 pub use session_model::{

@@ -28,9 +28,9 @@ use lash::tools::{ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::TokenUsage;
 use lash::{
-    EmptyModels, ModelConfig, ModelKey, ModelLimits, ModelMetadata, ModelRegistry,
-    ModelUnavailable, ModelUnavailableReason, RecordedModel, RegisteredModel, RegistrationError,
-    RunResolveError, RuntimeModels, SpecResolveError,
+    EmptyLlmProfiles, LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileMetadata,
+    LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles,
+    RecordedLlmProfile, RegisteredLlmProfile, RegistrationError, RunResolveError, SpecResolveError,
 };
 
 fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
@@ -194,22 +194,22 @@ fn provider_reliability_types_are_nameable(
 }
 
 fn model_types_are_nameable(
-    metadata: ModelMetadata,
-    limits: ModelLimits,
-    key: ModelKey,
-    recorded: RecordedModel,
-    config: ModelConfig,
-    registry: ModelRegistry,
-    entry: RegisteredModel,
+    metadata: LlmProfileMetadata,
+    limits: LlmProfileLimits,
+    key: LlmProfileKey,
+    recorded: RecordedLlmProfile,
+    config: LlmProfileConfig,
+    registry: LlmProfileRegistry,
+    entry: RegisteredLlmProfile,
 ) {
-    let _: &dyn RuntimeModels = &registry;
-    let _: &dyn RuntimeModels = &EmptyModels;
+    let _: &dyn LlmProfiles = &registry;
+    let _: &dyn LlmProfiles = &EmptyLlmProfiles;
     let _ = (metadata, limits, key, recorded, config, entry);
 }
 
 fn model_errors_are_nameable(
-    unavailable: ModelUnavailable,
-    reason: ModelUnavailableReason,
+    unavailable: LlmProfileUnavailable,
+    reason: LlmProfileUnavailableReason,
     registration: RegistrationError,
     spec_error: SpecResolveError,
     run_error: RunResolveError,

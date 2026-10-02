@@ -389,7 +389,7 @@ struct ResolveConfigTransactionRunner {
     /// admitted under, when one is not.
     mismatch: Option<crate::ConfigImplementationMismatch>,
     /// The host's models a model command mints its key's binding through.
-    models: Arc<dyn crate::RuntimeModels>,
+    models: Arc<dyn crate::LlmProfiles>,
 }
 
 #[async_trait::async_trait]

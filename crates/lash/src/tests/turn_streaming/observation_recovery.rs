@@ -20,7 +20,7 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
     use lash_core::LiveReplayStore as _;
     let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .live_replay_store(replay.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("invalidated-live-observation");

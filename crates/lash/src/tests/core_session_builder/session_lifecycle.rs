@@ -115,14 +115,18 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
 
 fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     let historical_policy = lash_core::SessionPolicy {
-        model: Some(recorded_model(model_spec("historical-model", None, 11_111))),
+        model: Some(recorded_llm_profile(llm_profile_spec(
+            "historical-model",
+            None,
+            11_111,
+        ))),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
         )
     };
     let current_policy = lash_core::SessionPolicy {
-        model: Some(recorded_model(model_spec(
+        model: Some(recorded_llm_profile(llm_profile_spec(
             "current-frame-model",
             None,
             22_222,
@@ -164,7 +168,11 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {
-        model: Some(recorded_model(model_spec("top-level-model", None, 33_333))),
+        model: Some(recorded_llm_profile(llm_profile_spec(
+            "top-level-model",
+            None,
+            33_333,
+        ))),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -327,7 +335,7 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
 async fn typed_core_builders_require_explicit_runtime_settings() {
     let err = match LashCore::standard_builder(double_backend().await)
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("the standard preset must not default a commit budget"),
@@ -339,7 +347,7 @@ async fn typed_core_builders_require_explicit_runtime_settings() {
 #[tokio::test]
 async fn generic_lash_core_builder_requires_protocol_plugin() {
     let err = match explicit_ephemeral_facets(LashCore::builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("generic LashCore must require an explicit protocol plugin"),
@@ -357,9 +365,9 @@ async fn generic_lash_core_builder_requires_protocol_plugin() {
 async fn the_standard_prompt_comes_from_the_session_spec_and_its_command() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             recording_prompt_provider(Arc::clone(&seen)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let host_default = mock_session_spec()
@@ -449,19 +457,22 @@ async fn the_standard_prompt_comes_from_the_session_spec_and_its_command() -> Re
 async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_typed() -> Result<()> {
     let core_provider = text_provider("core-provider", "core-model", "core");
     let session_provider = text_provider("session-provider", "session-model", "session");
-    let models = test_catalog(core_provider, [model_spec("core-model", None, 200_000)]);
+    let models = test_catalog(
+        core_provider,
+        [llm_profile_spec("core-model", None, 200_000)],
+    );
     let registry = Arc::try_unwrap(models)
         .unwrap_or_else(|_| unreachable!("a fresh catalog has one owner"))
         .register(
             "session-model",
-            lash_core::RegisteredModel::new(
-                model_spec("session-model", None, 200_000),
+            lash_core::RegisteredLlmProfile::new(
+                llm_profile_spec("session-model", None, 200_000),
                 session_provider,
             ),
         )
         .expect("a second key registers");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .models(Arc::new(registry))
+        .llm_profiles(Arc::new(registry))
         .build(crate::testing::runtime_lease_owner())
         .expect("standard core");
     core.session("main")
@@ -484,8 +495,8 @@ async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_type
     let refused = config
         .apply(
             crate::config::ConfigWrite::new("unserved-key", revision),
-            crate::config::ConfigTransaction::of(crate::config::SetModel {
-                model: lash_core::ModelKey::new("updated-model"),
+            crate::config::ConfigTransaction::of(crate::config::SetLlmProfile {
+                model: lash_core::LlmProfileKey::new("updated-model"),
             }),
         )
         .await?;
@@ -495,8 +506,8 @@ async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_type
     assert_eq!(refusal.owner, crate::config::CORE_CONFIG_OWNER);
     assert_eq!(
         refusal.owner_refusal::<crate::config::CoreConfigRefusal>(),
-        Some(crate::config::CoreConfigRefusal::UnknownModel {
-            key: lash_core::ModelKey::new("updated-model"),
+        Some(crate::config::CoreConfigRefusal::UnknownLlmProfile {
+            key: lash_core::LlmProfileKey::new("updated-model"),
         }),
         "the refusal is the core owner's typed unknown-model refusal: {refusal:?}"
     );
@@ -512,7 +523,7 @@ async fn a_session_key_selects_its_transport_and_an_unserved_key_is_refused_type
 async fn the_spec_reasoning_is_recorded_and_reaches_the_request() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             recording_text_provider(
                 "core-provider",
                 "core-model",
@@ -520,11 +531,11 @@ async fn the_spec_reasoning_is_recorded_and_reaches_the_request() -> Result<()> 
                 "core",
                 Arc::clone(&seen),
             ),
-            model_spec("core-model", Some("core-variant".to_string()), 200_000),
+            llm_profile_spec("core-model", Some("core-variant".to_string()), 200_000),
         )
         .build(crate::testing::runtime_lease_owner())
         .expect("standard core");
-    let spec = session_spec_for(&model_spec(
+    let spec = session_spec_for(&llm_profile_spec(
         "core-model",
         Some("core-variant".to_string()),
         200_000,
@@ -555,7 +566,7 @@ async fn the_spec_reasoning_is_recorded_and_reaches_the_request() -> Result<()> 
 #[tokio::test]
 async fn rlm_core_opens_rlm_session() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     core.session("rlm").created().await.open().await?;
@@ -594,7 +605,7 @@ async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()>
         &backend.clone(),
     );
     let core = LashCore::rlm_builder(backend, factory)
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .build(crate::testing::runtime_lease_owner())?;
@@ -666,7 +677,7 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .trace_jsonl_path(trace_path.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -771,7 +782,7 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("rlm-multi-turn-history-shape")
@@ -909,9 +920,9 @@ finish(value);
 async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(
+        .serve_test_llm_profile(
             recording_request_provider(Arc::clone(&seen)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
 
@@ -959,9 +970,9 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
 async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(
+        .serve_test_llm_profile(
             recording_request_provider(Arc::clone(&seen)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
 
@@ -1011,7 +1022,7 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
 #[tokio::test]
 async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder().await)
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let _parent = core.session("rlm-root").created().await.open().await?;
     let mut plugin_options = lash_core::PluginOptions {
@@ -1088,7 +1099,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
     .concat();
     let session_id = "rlm-v5-cold-open";
     let policy = lash_core::SessionPolicy {
-        model: Some(recorded_model(mock_model_spec())),
+        model: Some(recorded_llm_profile(mock_llm_profile_spec())),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -1105,7 +1116,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
     state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
     let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let error = match core.session(session_id).created().await.open().await {
@@ -1131,7 +1142,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("persisted"),
         policy: lash_core::SessionPolicy {
-            model: Some(recorded_model(mock_model_spec())),
+            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -1148,7 +1159,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
     )]);
     let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core.session("persisted").created().await.open().await?;
@@ -1168,7 +1179,7 @@ async fn cold_reopen_restores_its_committed_generation() -> Result<()> {
         lash_core::TurnBudget::Unbounded,
         lash_core::MaxToolCalls::new(1024),
     );
-    persisted_policy.model = Some(recorded_model(mock_model_spec()));
+    persisted_policy.model = Some(recorded_llm_profile(mock_llm_profile_spec()));
     persisted_policy.generation = expected.clone();
     let persisted = RuntimeSessionState {
         session_id: SessionId::from("committed-session"),
@@ -1180,7 +1191,7 @@ async fn cold_reopen_restores_its_committed_generation() -> Result<()> {
     };
     let (backend, _) = backend_seeded(persisted).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = core
@@ -1197,7 +1208,7 @@ async fn cold_reopen_restores_its_committed_generation() -> Result<()> {
 #[tokio::test]
 async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked").created().await.open().await?;
@@ -1251,7 +1262,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend_explicit_reconcile().await,
     ))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -1295,7 +1306,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
 #[tokio::test]
 async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("busy").created().await.open().await?;
@@ -1320,7 +1331,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
 async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()> {
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let first = core
@@ -1344,7 +1355,7 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
     assert_eq!(
         reopened
             .policy_snapshot()
-            .model_key()
+            .profile_key()
             .map(ToString::to_string),
         Some("mock-model".to_string())
     );
@@ -1356,7 +1367,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         double_backend_explicit_reconcile().await,
     ))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("delete-session")
@@ -1419,7 +1430,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     for (session_id, append_plugin_body) in [
@@ -1484,7 +1495,7 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("manual-state"),
         policy: lash_core::SessionPolicy {
-            model: Some(recorded_model(mock_model_spec())),
+            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -1501,7 +1512,7 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
     )]);
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
 
@@ -1566,7 +1577,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     use lash_subagents::Capability as _;
 
     let session_id = "reconcile-open";
-    let builder_model = model_spec("builder-model", None, 77_777);
+    let builder_model = llm_profile_spec("builder-model", None, 77_777);
     let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let (backend, _) = backend_seeded(persisted).await;
@@ -1602,20 +1613,20 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     });
     let probe_factory = Arc::new(ReconciliationProbeFactory { transform });
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .models(test_catalog(
+        .llm_profiles(test_catalog(
             provider,
             [
                 builder_model.clone(),
-                model_spec("top-level-model", None, 33_333),
-                model_spec("current-frame-model", None, 22_222),
-                model_spec("historical-model", None, 11_111),
+                llm_profile_spec("top-level-model", None, 33_333),
+                llm_profile_spec("current-frame-model", None, 22_222),
+                llm_profile_spec("historical-model", None, 11_111),
             ],
         ))
         .plugin(probe_factory)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "top-level-model",
             None,
             33_333,
@@ -1632,14 +1643,17 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
         .admin()
         .config()
         .configure(crate::config::ConfigTransaction::of(
-            crate::config::SetModel {
-                model: lash_core::ModelKey::new("builder-model"),
+            crate::config::SetLlmProfile {
+                model: lash_core::LlmProfileKey::new("builder-model"),
             },
         ))
         .await?;
 
     let policy = session.policy_snapshot();
-    assert_eq!(policy.model, Some(recorded_model(builder_model.clone())));
+    assert_eq!(
+        policy.model,
+        Some(recorded_llm_profile(builder_model.clone()))
+    );
     println!(
         "consumer 1 policy_snapshot: model={} context_window_tokens={}",
         policy.wire_model().unwrap_or_default(),
@@ -1695,7 +1709,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     let current = state.current_agent_frame().expect("current follow frame");
     assert_eq!(
         current.assignment.policy.model,
-        Some(recorded_model(builder_model.clone()))
+        Some(recorded_llm_profile(builder_model.clone()))
     );
 
     let tier = lash_subagents::TierCapability::new(
@@ -1722,7 +1736,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     let child_policy = child.policy.expect("child policy");
     assert_eq!(
         child_policy.model,
-        Some(recorded_model(builder_model.clone()))
+        Some(recorded_llm_profile(builder_model.clone()))
     );
     println!(
         "consumer 5 child tier inheritance: model={} context_window_tokens={}",
@@ -1733,7 +1747,7 @@ async fn a_patched_model_reaches_all_runtime_consumers() -> Result<()> {
     let execution_env = state.process_execution_env_spec(&policy);
     assert_eq!(
         execution_env.policy.model,
-        Some(recorded_model(builder_model.clone()))
+        Some(recorded_llm_profile(builder_model.clone()))
     );
     println!(
         "consumer 6 ProcessExecutionEnvSpec.policy: model={} context_window_tokens={}",
@@ -1766,9 +1780,9 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
     let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let supplied_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
-    let builder_model = model_spec("builder-model", None, 77_777);
+    let builder_model = llm_profile_spec("builder-model", None, 77_777);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), builder_model.clone())
+        .serve_test_llm_profile(mock_provider(), builder_model.clone())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -1855,7 +1869,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
 #[tokio::test]
 async fn core_store_factory_is_used_for_sessions_created_from_a_running_session() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let _session = core
         .session("root-with-child-store")

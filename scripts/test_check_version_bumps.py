@@ -1023,7 +1023,7 @@ AUDITED_GUARDS = {
         "ToolAttemptLineage", "ToolCallId", "Serialize for ToolCallId",
     ),
     "crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "ModelConfig", "RecordedModel", "ModelKey", "ModelMetadata", "PluginConfig",
+        "LlmProfileConfig", "RecordedLlmProfile", "LlmProfileKey", "LlmProfileMetadata", "PluginConfig",
     ),
     "crates/lash-core-store/src/store/mod.rs:SESSION_HEAD_META_SCHEMA_VERSION": ("PluginConfig",),
     "crates/lashctl/src/main.rs:LASHCTL_JSON_SCHEMA_VERSION": (
@@ -1059,7 +1059,7 @@ AUDITED_GUARDS = {
         "SealVerdict", "DriveFence", "AdmissionId", "TurnOutcome", "TurnStop", "FailureCode",
     ),
     "crates/lash-restate/src/usage_accounting.rs:USAGE_ACCOUNTING_WIRE_VERSION": (
-        "UsageSettlement", "UsageAttemptFact", "RunAccounting", "ModelKey", "TokenUsage",
+        "UsageSettlement", "UsageAttemptFact", "RunAccounting", "LlmProfileKey", "TokenUsage",
     ),
     "crates/lash-vm-protocol/src/version.rs:WORKER_PROTOCOL_VERSION": (
         "StateDigest", "Serialize for StateDigest", "FRAME_MAGIC", "encode_parent", "WorkerLimit",

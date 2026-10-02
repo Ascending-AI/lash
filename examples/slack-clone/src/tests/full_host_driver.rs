@@ -134,7 +134,7 @@ async fn the_driver_reads_usage_with_separate_model_identities_from_the_bot_stor
             .execute(
                 "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, \
                  provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, \
-                 model_key, requested_model, served_model, input_tokens, output_tokens, \
+                 profile_key, requested_model, served_model, input_tokens, output_tokens, \
                  cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, \
                  payload_hash, recorded_at_ms) VALUES (?1, 'owner', ?2, 0, 0, 'attempt', \
                  'reported', 'run', 'call', 'turn', ?2, 'requested-wire', ?3, 7, 3, 0, 0, 0, \
@@ -147,9 +147,9 @@ async fn the_driver_reads_usage_with_separate_model_identities_from_the_bot_stor
     assert_eq!(
         driver_snapshot(&catalog)["usage"],
         serde_json::json!([
-            {"owner_id": "owner", "model_key": "key-a", "requested_model": "requested-wire",
+            {"owner_id": "owner", "profile_key": "key-a", "requested_model": "requested-wire",
              "served_model": "served-wire", "input_tokens": 7, "output_tokens": 3},
-            {"owner_id": "owner", "model_key": "key-b", "requested_model": "requested-wire",
+            {"owner_id": "owner", "profile_key": "key-b", "requested_model": "requested-wire",
              "served_model": null, "input_tokens": 7, "output_tokens": 3},
         ])
     );

@@ -15,7 +15,7 @@ use lash::tools::{
     ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
     ToolProvider,
 };
-use lash::{ModelMetadata, TurnInput};
+use lash::{LlmProfileMetadata, TurnInput};
 use lash_plugin_mcp::{McpServerConfig, McpStdioTransport, McpTransport, TimeoutDisconnectPolicy};
 use serde_json::{Value, json};
 use slack_clone::bot::mcp_admin;
@@ -432,7 +432,7 @@ async fn build_runtime(
             .insert(mcp_server::SERVER_NAME.to_string(), server);
     }
     let api = Arc::new(SlackApi::new(api_base_url, TEST_TOKEN).expect("build API client"));
-    let model = ModelMetadata::builder("mock/model")
+    let model = LlmProfileMetadata::builder("mock/model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid model");

@@ -692,7 +692,7 @@ mod tests {
                 )
                 .expect("admitted");
             let outcome = registry
-                .resolve(config, &record, &lash_core::EmptyModels)
+                .resolve(config, &record, &lash_core::EmptyLlmProfiles)
                 .expect("the recorded config reads")
                 .publish(config);
             assert!(
@@ -973,7 +973,7 @@ mod tests {
                 )
                 .expect("admitted");
             let outcome = registry
-                .resolve(config, &record, &lash_core::EmptyModels)
+                .resolve(config, &record, &lash_core::EmptyLlmProfiles)
                 .expect("the recorded config reads")
                 .publish(config);
             assert!(

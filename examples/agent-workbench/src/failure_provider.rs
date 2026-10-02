@@ -89,7 +89,7 @@ impl DevProviderScenario {
         }
     }
 
-    pub(crate) fn initial_model(self) -> &'static str {
+    pub(crate) fn initial_profile(self) -> &'static str {
         match self {
             Self::ReplayRouteChange => "dev/replay-route-a",
             #[cfg(feature = "provider-wire-fixtures")]
@@ -504,11 +504,11 @@ mod tests {
     #[test]
     fn replay_route_change_starts_on_route_a() {
         assert_eq!(
-            DevProviderScenario::ReplayRouteChange.initial_model(),
+            DevProviderScenario::ReplayRouteChange.initial_profile(),
             "dev/replay-route-a"
         );
         assert_eq!(
-            DevProviderScenario::PartialOutputFailure.initial_model(),
+            DevProviderScenario::PartialOutputFailure.initial_profile(),
             "dev/failure-paths"
         );
     }

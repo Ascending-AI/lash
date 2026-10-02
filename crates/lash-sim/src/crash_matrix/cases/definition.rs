@@ -135,7 +135,7 @@ async fn start_request(
             &(lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(super::process::recorded_model()?),
+                    model: Some(super::process::recorded_llm_profile()?),
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),

@@ -2067,13 +2067,7 @@
         }
       ]
     },
-    "MaxToolCalls": {
-      "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
-      "format": "uint",
-      "minimum": 1,
-      "type": "integer"
-    },
-    "ModelEffortValidationCategory": {
+    "LlmProfileEffortValidationCategory": {
       "description": "Deterministic taxonomy of effort-validation failures. The serde snake_case\ncodes are a stable contract: downstream consumers match on them.",
       "enum": [
         "unsupported_effort",
@@ -2083,9 +2077,15 @@
       ],
       "type": "string"
     },
-    "ModelKey": {
-      "description": "The host's opaque name for one registered model.\n\nLash never parses it: `glm-5.3-flash@tensorx` names a registration, not a\nprovider and a model. A session records the key with the metadata the\nhost's registry minted for it ([`RecordedModel`]), so the key alone never\ndecides how a recorded root runs.",
+    "LlmProfileKey": {
+      "description": "The host's opaque name for one registered model.\n\nLash never parses it: `glm-5.3-flash@tensorx` names a registration, not a\nprovider and a model. A session records the key with the metadata the\nhost's registry minted for it ([`RecordedLlmProfile`]), so the key alone never\ndecides how a recorded root runs.",
       "type": "string"
+    },
+    "MaxToolCalls": {
+      "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
+      "format": "uint",
+      "minimum": 1,
+      "type": "integer"
     },
     "ModuleArtifactAstRefusal": {
       "description": "Owned validation evidence suitable for a worker response or a durable journal.",
@@ -3180,10 +3180,10 @@
       "description": "A reasoning selection the recorded capability of the model under `key`\nrefuses.",
       "properties": {
         "category": {
-          "$ref": "#/$defs/ModelEffortValidationCategory"
+          "$ref": "#/$defs/LlmProfileEffortValidationCategory"
         },
         "key": {
-          "$ref": "#/$defs/ModelKey"
+          "$ref": "#/$defs/LlmProfileKey"
         },
         "message": {
           "type": "string"
@@ -4423,7 +4423,7 @@
             "message": {
               "type": "string"
             },
-            "model_key": {
+            "profile_key": {
               "description": "The recorded model key the failing attempts could not bind.",
               "type": [
                 "string",
@@ -8858,7 +8858,7 @@
           "description": "The operator-facing refusal message.",
           "type": "string"
         },
-        "model_key": {
+        "profile_key": {
           "description": "The recorded model key the parked root could not bind, when that is\nwhy its engine retries ran out.",
           "type": [
             "string",
@@ -9607,7 +9607,7 @@
           "description": "The spec sets a reasoning selection for a session with no model.",
           "properties": {
             "kind": {
-              "const": "reasoning_without_model",
+              "const": "reasoning_without_llm_profile",
               "type": "string"
             }
           },
@@ -9869,6 +9869,23 @@
           "type": "object"
         },
         {
+          "description": "A Lash object's compatibility record, or its absence, refuses this\nbuild (ADR 0115 \u00a73.2): the typed half of\n[`RuntimeErrorCode::EngineObjectStateFormatUnsupported`] when the\nrefusal is the object's, not one stored value's.",
+          "properties": {
+            "kind": {
+              "const": "compat",
+              "type": "string"
+            },
+            "refusal": {
+              "$ref": "#/$defs/CompatRefusal"
+            }
+          },
+          "required": [
+            "kind",
+            "refusal"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "kind": {
               "const": "session_deleted",
@@ -9922,16 +9939,16 @@
           "description": "The recorded model key this worker could not bind (FIG-4404).\nA deployment serving the key repairs this retryable cause.",
           "properties": {
             "kind": {
-              "const": "model_unavailable",
+              "const": "llm_profile_unavailable",
               "type": "string"
             },
-            "model_key": {
-              "$ref": "#/$defs/ModelKey"
+            "profile_key": {
+              "$ref": "#/$defs/LlmProfileKey"
             }
           },
           "required": [
             "kind",
-            "model_key"
+            "profile_key"
           ],
           "type": "object"
         },
@@ -10147,6 +10164,83 @@
     "StartKey": {
       "description": "The idempotency key of one process start (ADR 0107).\n\nA start key is never a reference: nothing resolves a key to a process. The\nregistrar maps a key to the process it minted for it while that process is\nretained, so a retried start returns the retained process instead of\nstarting a second one, and after the process is pruned the same key starts\na new process with a new id.\n\nA key lash derives from an admitted operation (a tool intent, a trigger\ndelivery) is trusted: a retry under it returns the retained process\nwhatever it submitted. A host's key (one it supplied, or its keyless\nstart's derived key) fences its start: a retry under it returns the\nretained process only if it presents the same start, and is otherwise a\n[`StartKeyConflict`](crate::runtime_error::RuntimeErrorCode::ProcessStartKeyConflict)\nthat names nothing but the key.\n\nEvery key is a framed digest in one family, with each start path in its own\nnamespace, so a host-supplied key can never collide with one lash derives\nfor a tool intent or trigger start. The digest is over admitted\noperation identity only \u2014 never over submitted content, source or compiler\nidentity, or the minted result. Only [`StartKey::for_host`] is open to a\nhost; every other family is derived under a [`StartKeyDerivation`].",
       "type": "string"
+    },
+    "StoreFault": {
+      "description": "A fault of the storage substrate that stays typed past the store, with\nthe same fields as its store error. A plugin error is cloned and\njournaled, so it carries this rather than the store error: the identical\noperation may succeed when it is made again, and nothing about it is the\noperation's answer.",
+      "oneOf": [
+        {
+          "description": "Another writer holds the backend's write authority.",
+          "properties": {
+            "type": {
+              "const": "contended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Another connection holds a database a whole-store migration needs.",
+          "properties": {
+            "database": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "type": {
+              "const": "migration_open_elsewhere",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "database",
+            "location"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The substrate failed the operation before it returned a value.",
+          "properties": {
+            "backend": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "storage_failure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "backend",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A backend failure with no typed cause.",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "backend",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "StoreRefusal": {
       "description": "A store refusal that stays typed past the store, with the same fields as\nits store error: a compatibility, session identity or cancellation\nauthority refusal. Plugin errors are cloned and journaled, so\nthis representation carries only the terminal refusals rather than backend\nfailures and sources.",
@@ -11136,6 +11230,33 @@
             },
             "type": {
               "const": "store_refusal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The storage substrate faulted under a plugin-facing port: the identical\noperation may succeed when it is made again, and nothing about the\nfault is the operation's answer.",
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "fault": {
+                  "$ref": "#/$defs/StoreFault"
+                }
+              },
+              "required": [
+                "fault"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "store_unavailable",
               "type": "string"
             }
           },

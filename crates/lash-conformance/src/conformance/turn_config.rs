@@ -17,9 +17,9 @@ use pretty_assertions::assert_eq;
 use crate::admit;
 
 /// The model the session starts on.
-const FIRST_MODEL: &str = "mock-model";
+const FIRST_PROFILE: &str = "mock-model";
 /// The model a config command moves the session to.
-const SECOND_MODEL: &str = "turn-config-second-model";
+const SECOND_PROFILE: &str = "turn-config-second-model";
 
 /// Everything a runtime for these laws is built from, shared by every
 /// attempt so each is the same session on the same store.
@@ -66,27 +66,27 @@ async fn build_runtime_under(
     .expect("build the turn-config conformance runtime")
 }
 
-/// The host's models for these laws: [`FIRST_MODEL`] and [`SECOND_MODEL`],
+/// The host's models for these laws: [`FIRST_PROFILE`] and [`SECOND_PROFILE`],
 /// both served by `provider`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: two distinct literal keys always register"
 )]
-fn turn_config_models(provider: crate::ProviderHandle) -> Arc<crate::ModelRegistry> {
+fn turn_config_llm_profiles(provider: crate::ProviderHandle) -> Arc<crate::LlmProfileRegistry> {
     Arc::new(
-        crate::ModelRegistry::new()
+        crate::LlmProfileRegistry::new()
             .register(
-                FIRST_MODEL,
-                crate::RegisteredModel::new(
-                    crate::testing::test_model_metadata(FIRST_MODEL),
+                FIRST_PROFILE,
+                crate::RegisteredLlmProfile::new(
+                    crate::testing::test_llm_profile_metadata(FIRST_PROFILE),
                     provider.clone(),
                 ),
             )
             .and_then(|registry| {
                 registry.register(
-                    SECOND_MODEL,
-                    crate::RegisteredModel::new(
-                        crate::testing::test_model_metadata(SECOND_MODEL),
+                    SECOND_PROFILE,
+                    crate::RegisteredLlmProfile::new(
+                        crate::testing::test_llm_profile_metadata(SECOND_PROFILE),
                         provider,
                     ),
                 )
@@ -95,9 +95,12 @@ fn turn_config_models(provider: crate::ProviderHandle) -> Arc<crate::ModelRegist
     )
 }
 
-/// Move the session to [`SECOND_MODEL`] through the command lane.
-async fn command_second_model(runner: &Arc<dyn crate::ConformanceTurnRunner>, parts: &ConfigParts) {
-    let receipt = submit_second_model(parts, "turn-config-command").await;
+/// Move the session to [`SECOND_PROFILE`] through the command lane.
+async fn command_second_profile(
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    parts: &ConfigParts,
+) {
+    let receipt = submit_second_profile(parts, "turn-config-command").await;
     let outcome = drive_config_command(runner, parts, receipt, "turn-config-command").await;
     assert!(
         matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }),
@@ -105,14 +108,14 @@ async fn command_second_model(runner: &Arc<dyn crate::ConformanceTurnRunner>, pa
     );
 }
 
-/// Submit a config transaction moving the session to [`SECOND_MODEL`] under
+/// Submit a config transaction moving the session to [`SECOND_PROFILE`] under
 /// `id`, from a runtime of its own, and return once it is durable.
-async fn submit_second_model(parts: &ConfigParts, id: &str) -> crate::SessionCommandReceipt {
+async fn submit_second_profile(parts: &ConfigParts, id: &str) -> crate::SessionCommandReceipt {
     submit_transaction(
         parts,
         id,
-        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-            model: crate::ModelKey::new(SECOND_MODEL),
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+            model: crate::LlmProfileKey::new(SECOND_PROFILE),
         }),
     )
     .await
@@ -275,7 +278,7 @@ type TurnResultTx =
 
 /// Root A committed on the first model with its reply lost, and the model
 /// change that landed after it: where both stale-fence laws start.
-struct CommittedRootUnderAModelChange {
+struct CommittedRootUnderALlmProfileChange {
     parts: ConfigParts,
     root: TurnId,
     /// The scope root A was admitted under, which its redrive runs on.
@@ -289,7 +292,7 @@ struct CommittedRootUnderAModelChange {
     revision_after_change: u64,
 }
 
-impl CommittedRootUnderAModelChange {
+impl CommittedRootUnderALlmProfileChange {
     /// Root A commits on the first model and its execution dies before its
     /// reply leaves it. The session's next boundary then applies the model
     /// change, whose seal raises the drive epoch past A's fence.
@@ -311,7 +314,7 @@ impl CommittedRootUnderAModelChange {
             name,
             effect_host,
             stores,
-            turn_config_models(recording_model(&calls, &models)),
+            turn_config_llm_profiles(recording_model(&calls, &models)),
         )
         .await;
         let root = TurnId::from(format!("{prefix}-turn-config-{name}-root"));
@@ -376,7 +379,7 @@ impl CommittedRootUnderAModelChange {
             panic!("root A's seal answers its stored fence: {seal:?}");
         };
 
-        command_second_model(runner, &parts).await;
+        command_second_profile(runner, &parts).await;
         let committed = parts
             .store
             .load_session_head_meta(&parts.session_id)
@@ -384,8 +387,8 @@ impl CommittedRootUnderAModelChange {
             .expect("read the head after the model change")
             .expect("root A's commit and the model change are durable");
         assert_eq!(
-            crate::conformance::helpers::recorded_model_key(&committed.config.model),
-            SECOND_MODEL,
+            crate::conformance::helpers::recorded_profile_key(&committed.config.model),
+            SECOND_PROFILE,
             "precondition: the model change landed on the durable head"
         );
         let epoch = parts
@@ -443,14 +446,14 @@ impl CommittedRootUnderAModelChange {
             "{what} writes no head"
         );
         assert_eq!(
-            crate::conformance::helpers::recorded_model_key(&head.config.model),
-            SECOND_MODEL,
+            crate::conformance::helpers::recorded_profile_key(&head.config.model),
+            SECOND_PROFILE,
             "{what} leaves the model change on the durable head"
         );
     }
 
     /// A root that follows runs on the model the change moved the session to.
-    async fn assert_the_next_root_runs_on_the_second_model(
+    async fn assert_the_next_root_runs_on_the_second_profile(
         &self,
         prefix: &str,
         name: &str,
@@ -473,7 +476,7 @@ impl CommittedRootUnderAModelChange {
         );
         assert_eq!(
             recorded_models(&self.models),
-            vec![FIRST_MODEL.to_string(), SECOND_MODEL.to_string()],
+            vec![FIRST_PROFILE.to_string(), SECOND_PROFILE.to_string()],
             "root A's one model call named the first model, and the next root's the second"
         );
     }
@@ -491,12 +494,12 @@ impl CommittedRootUnderAModelChange {
 /// park. A root that follows runs on the second model.
 ///
 /// The other side of the boundary is
-/// [`an_older_admission_redriven_after_a_model_change_is_fenced_out`].
+/// [`an_older_admission_redriven_after_a_profile_change_is_fenced_out`].
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_committed_root_redriven_after_a_model_change_answers_from_its_receipt(
+pub async fn a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -504,7 +507,8 @@ pub async fn a_committed_root_redriven_after_a_model_change_answers_from_its_rec
 ) {
     let name = "replay";
     let law =
-        CommittedRootUnderAModelChange::new(prefix, name, &effect_host, &stores, &runner).await;
+        CommittedRootUnderALlmProfileChange::new(prefix, name, &effect_host, &stores, &runner)
+            .await;
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(
@@ -530,13 +534,13 @@ pub async fn a_committed_root_redriven_after_a_model_change_answers_from_its_rec
         "the redrive answers with what root A committed"
     );
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&turn.state.policy.model),
-        FIRST_MODEL,
+        crate::conformance::helpers::recorded_profile_key(&turn.state.policy.model),
+        FIRST_PROFILE,
         "the redrive answers under the config root A recorded"
     );
     law.assert_nothing_moved("the redrive of a committed root")
         .await;
-    law.assert_the_next_root_runs_on_the_second_model(prefix, name, &runner)
+    law.assert_the_next_root_runs_on_the_second_profile(prefix, name, &runner)
         .await;
 }
 
@@ -551,8 +555,8 @@ pub async fn a_committed_root_redriven_after_a_model_change_answers_from_its_rec
 /// the runtime classifies as a superseded commit, and the model change stands. A root that follows runs on the second model.
 ///
 /// The other side of the boundary is
-/// [`a_committed_root_redriven_after_a_model_change_answers_from_its_receipt`].
-pub async fn an_older_admission_redriven_after_a_model_change_is_fenced_out(
+/// [`a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt`].
+pub async fn an_older_admission_redriven_after_a_profile_change_is_fenced_out(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -560,7 +564,8 @@ pub async fn an_older_admission_redriven_after_a_model_change_is_fenced_out(
 ) {
     let name = "fenced-out";
     let law =
-        CommittedRootUnderAModelChange::new(prefix, name, &effect_host, &stores, &runner).await;
+        CommittedRootUnderALlmProfileChange::new(prefix, name, &effect_host, &stores, &runner)
+            .await;
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(law.parts.session_id.clone());
     let rerun = crate::RuntimeSessionState {
@@ -605,7 +610,7 @@ pub async fn an_older_admission_redriven_after_a_model_change_is_fenced_out(
         );
         law.assert_nothing_moved(what).await;
     }
-    law.assert_the_next_root_runs_on_the_second_model(prefix, name, &runner)
+    law.assert_the_next_root_runs_on_the_second_profile(prefix, name, &runner)
         .await;
 }
 
@@ -616,7 +621,7 @@ async fn law_session(
     name: &str,
     effect_host: &Arc<dyn crate::EffectHost>,
     stores: &Arc<dyn crate::StoreSet>,
-    models: Arc<dyn crate::RuntimeModels>,
+    models: Arc<dyn crate::LlmProfiles>,
 ) -> ConfigParts {
     law_session_created_with(prefix, name, effect_host, stores, models, Vec::new()).await
 }
@@ -631,7 +636,7 @@ async fn law_session_created_with(
     name: &str,
     effect_host: &Arc<dyn crate::EffectHost>,
     stores: &Arc<dyn crate::StoreSet>,
-    models: Arc<dyn crate::RuntimeModels>,
+    models: Arc<dyn crate::LlmProfiles>,
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 ) -> ConfigParts {
     law_session_recording(
@@ -660,7 +665,7 @@ async fn law_session_recording(
     name: &str,
     effect_host: &Arc<dyn crate::EffectHost>,
     stores: &Arc<dyn crate::StoreSet>,
-    models: Arc<dyn crate::RuntimeModels>,
+    models: Arc<dyn crate::LlmProfiles>,
     policy: crate::SessionPolicy,
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 ) -> ConfigParts {
@@ -708,7 +713,7 @@ async fn law_session_recording(
 #[derive(Clone, Copy)]
 enum BeforeSend {
     Nothing,
-    /// Move the session to [`SECOND_MODEL`] through the command lane first.
+    /// Move the session to [`SECOND_PROFILE`] through the command lane first.
     CommandSecondModel,
 }
 
@@ -722,7 +727,7 @@ async fn run_text_turn(
     before: BeforeSend,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
     if matches!(before, BeforeSend::CommandSecondModel) {
-        command_second_model(runner, parts).await;
+        command_second_profile(runner, parts).await;
     }
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     runner
@@ -778,7 +783,7 @@ fn recorded_models(models: &Arc<std::sync::Mutex<Vec<String>>>) -> Vec<String> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
+pub async fn an_input_sent_after_a_config_command_runs_on_the_new_profile(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -791,7 +796,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
         "after-command",
         &effect_host,
         &stores,
-        turn_config_models(recording_model(&calls, &models)),
+        turn_config_llm_profiles(recording_model(&calls, &models)),
     )
     .await;
     let first = TurnId::from(format!("{prefix}-turn-config-after-command-first"));
@@ -820,7 +825,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
     );
     assert_eq!(
         recorded_models(&models),
-        vec![FIRST_MODEL.to_string(), SECOND_MODEL.to_string()],
+        vec![FIRST_PROFILE.to_string(), SECOND_PROFILE.to_string()],
         "the root before the command ran on the first model, the one after it on the second"
     );
     let head = parts
@@ -830,8 +835,8 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
         .expect("read the head")
         .expect("the session committed");
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&head.config.model),
-        SECOND_MODEL
+        crate::conformance::helpers::recorded_profile_key(&head.config.model),
+        SECOND_PROFILE
     );
 }
 
@@ -860,14 +865,14 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         "pending-while-root",
         &effect_host,
         &stores,
-        turn_config_models(gated_recording_model(&calls, &models, &entered, &release)),
+        turn_config_llm_profiles(gated_recording_model(&calls, &models, &entered, &release)),
     )
     .await;
     let root = TurnId::from(format!("{prefix}-turn-config-pending-while-root"));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
     let submitting = async {
         entered.notified().await;
-        let receipt = submit_second_model(&parts, "pending-while-root").await;
+        let receipt = submit_second_profile(&parts, "pending-while-root").await;
         // The session's first root commits its head, so while it runs the
         // head is either still unwritten or the creation config.
         let head = parts
@@ -878,7 +883,7 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         if let Some(head) = head {
             assert_eq!(
                 (head.config.wire_model(), head.config.config_revision),
-                (Some(FIRST_MODEL), 0),
+                (Some(FIRST_PROFILE), 0),
                 "nothing is published while the root owns the head"
             );
         }
@@ -920,7 +925,7 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
         .expect("the root committed");
     assert_eq!(
         (head.config.wire_model(), head.config.config_revision),
-        (Some(FIRST_MODEL), 0),
+        (Some(FIRST_PROFILE), 0),
         "the root's commit does not publish the pending transaction"
     );
 
@@ -946,7 +951,7 @@ pub async fn a_config_transaction_waits_while_a_root_owns_the_head(
     );
     assert_eq!(
         recorded_models(&models),
-        vec![FIRST_MODEL.to_string(), SECOND_MODEL.to_string()],
+        vec![FIRST_PROFILE.to_string(), SECOND_PROFILE.to_string()],
         "the root that owned the head ran on its admitted model, the next root on the new one"
     );
 }
@@ -1046,7 +1051,7 @@ pub async fn one_config_resolution_per_root(
         "one-resolution",
         &effect_host,
         &stores,
-        turn_config_models(model),
+        turn_config_llm_profiles(model),
         vec![Arc::new(crate::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("conformance-turn-config-switch-probe"),
             crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(SwitchTool)),
@@ -1076,7 +1081,7 @@ pub async fn one_config_resolution_per_root(
     );
     assert_eq!(
         recorded_models(&models),
-        vec![FIRST_MODEL.to_string(), FIRST_MODEL.to_string()],
+        vec![FIRST_PROFILE.to_string(), FIRST_PROFILE.to_string()],
         "every physical turn of the root names the one recorded model"
     );
     if let Some(keys) = runner
@@ -1102,7 +1107,7 @@ pub async fn one_config_resolution_per_root(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
+pub async fn an_unbindable_llm_profile_retries_and_never_fails_the_turn(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1115,12 +1120,12 @@ pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
         "unbindable",
         &effect_host,
         &stores,
-        turn_config_models(recording_model(&calls, &models)),
+        turn_config_llm_profiles(recording_model(&calls, &models)),
     )
     .await;
     // The same session on a worker whose models lack the recorded key.
     let mut unserved = served.clone();
-    unserved.host.providers.models = Arc::new(crate::ModelRegistry::new());
+    unserved.host.providers.models = Arc::new(crate::LlmProfileRegistry::new());
     let root = TurnId::from(format!("{prefix}-turn-config-unbindable-root"));
     let attempts = Arc::new(AtomicUsize::new(0));
     let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1179,12 +1184,12 @@ pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
     for aborted in turns.iter().filter_map(|turn| turn.as_ref().err()) {
         assert_eq!(
             aborted.code,
-            crate::RuntimeErrorCode::ModelUnavailable,
+            crate::RuntimeErrorCode::LlmProfileUnavailable,
             "the abort names the unbindable model: {aborted:?}"
         );
         assert_eq!(
-            aborted.model_key(),
-            Some(&crate::ModelKey::new(FIRST_MODEL)),
+            aborted.profile_key(),
+            Some(&crate::LlmProfileKey::new(FIRST_PROFILE)),
             "the abort carries the recorded key typed: {aborted:?}"
         );
         assert!(
@@ -1234,7 +1239,7 @@ pub async fn an_unbindable_model_retries_and_never_fails_the_turn(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
+pub async fn an_unknown_profile_key_is_refused_typed_and_publishes_nothing(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1247,7 +1252,7 @@ pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
         "unknown-key",
         &effect_host,
         &stores,
-        turn_config_models(recording_model(&calls, &models)),
+        turn_config_llm_profiles(recording_model(&calls, &models)),
     )
     .await;
     let store = Arc::clone(&parts.store);
@@ -1255,8 +1260,8 @@ pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
     let receipt = submit_transaction(
         &parts,
         "turn-config-unknown-key",
-        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-            model: crate::ModelKey::new("turn-config-unknown-model"),
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+            model: crate::LlmProfileKey::new("turn-config-unknown-model"),
         }),
     )
     .await;
@@ -1269,8 +1274,8 @@ pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
         refusal
             .owner_refusal::<crate::CoreConfigRefusal>()
             .expect("the core owner's typed refusal"),
-        crate::CoreConfigRefusal::UnknownModel {
-            key: crate::ModelKey::new("turn-config-unknown-model"),
+        crate::CoreConfigRefusal::UnknownLlmProfile {
+            key: crate::LlmProfileKey::new("turn-config-unknown-model"),
         }
     );
     let head = store
@@ -1279,8 +1284,8 @@ pub async fn an_unknown_model_key_is_refused_typed_and_publishes_nothing(
         .expect("read the head")
         .expect("the drain committed the session's head");
     assert_eq!(
-        head.config.model_key().map(crate::ModelKey::as_str),
-        Some(FIRST_MODEL),
+        head.config.profile_key().map(crate::LlmProfileKey::as_str),
+        Some(FIRST_PROFILE),
         "nothing was published"
     );
     assert_eq!(head.config.config_revision, 0, "the revision did not move");
@@ -1437,13 +1442,13 @@ pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_ref
         "corrupt-namespace",
         &effect_host,
         &stores,
-        turn_config_models(recording_model(&calls, &models)),
+        turn_config_llm_profiles(recording_model(&calls, &models)),
         ShapedFactory::<RecordedShape>::installed(),
     )
     .await;
     // The session recorded its namespace as one shape at creation, and a
     // first command commits the head that carries it.
-    command_second_model(&runner, &parts).await;
+    command_second_profile(&runner, &parts).await;
     let recorded_head = parts
         .store
         .load_session_head_meta(&parts.session_id)
@@ -1462,8 +1467,8 @@ pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_ref
     let receipt = submit_transaction(
         &reading,
         REQUEST,
-        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-            model: crate::ModelKey::new(FIRST_MODEL),
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+            model: crate::LlmProfileKey::new(FIRST_PROFILE),
         }),
     )
     .await;
@@ -1526,8 +1531,8 @@ pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_ref
         .expect("read the head")
         .expect("the session's head");
     assert_eq!(
-        head.config.model_key().map(crate::ModelKey::as_str),
-        Some(SECOND_MODEL),
+        head.config.profile_key().map(crate::LlmProfileKey::as_str),
+        Some(SECOND_PROFILE),
         "nothing was published"
     );
     assert_eq!(
@@ -1544,7 +1549,7 @@ pub async fn a_corrupt_recorded_namespace_is_corruption_and_never_a_recorded_ref
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_model_change_records_the_binding_minted_where_it_resolves(
+pub async fn a_profile_change_records_the_binding_minted_where_it_resolves(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1559,29 +1564,29 @@ pub async fn a_model_change_records_the_binding_minted_where_it_resolves(
         "minted-at-resolution",
         &effect_host,
         &stores,
-        crate::testing::standard_test_models(session.clone()),
+        crate::testing::standard_test_llm_profiles(session.clone()),
     )
     .await;
     // The worker that resolves it serves the second model, with metadata of
     // its own.
-    let resolving_metadata = crate::ModelMetadata::builder(SECOND_MODEL)
+    let resolving_metadata = crate::LlmProfileMetadata::builder(SECOND_PROFILE)
         .context_window_tokens(77_777)
         .build()
         .expect("the resolving worker's metadata");
     let mut applier = sender.clone();
     applier.host.providers.models = Arc::new(
-        crate::ModelRegistry::new()
+        crate::LlmProfileRegistry::new()
             .register(
-                FIRST_MODEL,
-                crate::RegisteredModel::new(
-                    crate::testing::test_model_metadata(FIRST_MODEL),
+                FIRST_PROFILE,
+                crate::RegisteredLlmProfile::new(
+                    crate::testing::test_llm_profile_metadata(FIRST_PROFILE),
                     session.clone(),
                 ),
             )
             .and_then(|registry| {
                 registry.register(
-                    SECOND_MODEL,
-                    crate::RegisteredModel::new(resolving_metadata.clone(), session),
+                    SECOND_PROFILE,
+                    crate::RegisteredLlmProfile::new(resolving_metadata.clone(), session),
                 )
             })
             .expect("two distinct keys register"),
@@ -1589,8 +1594,8 @@ pub async fn a_model_change_records_the_binding_minted_where_it_resolves(
     let receipt = submit_transaction(
         &sender,
         "turn-config-minted-at-resolution",
-        &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-            model: crate::ModelKey::new(SECOND_MODEL),
+        &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+            model: crate::LlmProfileKey::new(SECOND_PROFILE),
         }),
     )
     .await;
@@ -1613,10 +1618,12 @@ pub async fn a_model_change_records_the_binding_minted_where_it_resolves(
         .expect("the drain committed the session's head");
     assert_eq!(
         head.config.model,
-        Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-            crate::ModelKey::new(SECOND_MODEL),
-            resolving_metadata,
-        ))),
+        Some(crate::LlmProfileConfig::new(
+            crate::RecordedLlmProfile::mint(
+                crate::LlmProfileKey::new(SECOND_PROFILE),
+                resolving_metadata,
+            )
+        )),
         "the session records the binding the resolving worker minted"
     );
     assert_eq!(head.config.config_revision, 1);
@@ -1635,7 +1642,7 @@ const REASONING_MODEL: &str = "turn-config-reasoning-model";
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
+pub async fn a_reasoning_change_is_judged_against_the_final_recorded_llm_profile(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1644,27 +1651,26 @@ pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
     let calls = Arc::new(AtomicUsize::new(0));
     let models = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider = recording_model(&calls, &models);
-    let reasoning_metadata = crate::testing::test_model_metadata(REASONING_MODEL).with_capability(
-        crate::ModelCapability {
+    let reasoning_metadata = crate::testing::test_llm_profile_metadata(REASONING_MODEL)
+        .with_capability(crate::LlmProfileCapability {
             reasoning: Some(crate::ReasoningCapability {
                 efforts: vec!["deep".to_string()],
                 ..Default::default()
             }),
             ..Default::default()
-        },
-    );
-    let registry = crate::ModelRegistry::new()
+        });
+    let registry = crate::LlmProfileRegistry::new()
         .register(
-            FIRST_MODEL,
-            crate::RegisteredModel::new(
-                crate::testing::test_model_metadata(FIRST_MODEL),
+            FIRST_PROFILE,
+            crate::RegisteredLlmProfile::new(
+                crate::testing::test_llm_profile_metadata(FIRST_PROFILE),
                 provider.clone(),
             ),
         )
         .and_then(|registry| {
             registry.register(
                 REASONING_MODEL,
-                crate::RegisteredModel::new(reasoning_metadata.clone(), provider),
+                crate::RegisteredLlmProfile::new(reasoning_metadata.clone(), provider),
             )
         })
         .expect("two distinct keys register");
@@ -1699,7 +1705,7 @@ pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
         matches!(
             &refusal,
             crate::CoreConfigRefusal::ReasoningRefused { key, reasoning, .. }
-                if key.as_str() == FIRST_MODEL && *reasoning == deep
+                if key.as_str() == FIRST_PROFILE && *reasoning == deep
         ),
         "the refusal names the recorded model and the effort: {refusal:?}"
     );
@@ -1720,8 +1726,8 @@ pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
         &crate::ConfigTransaction::of(crate::plugin::config::core::SetReasoning {
             reasoning: deep.clone(),
         })
-        .then(crate::plugin::config::core::SetModel {
-            model: crate::ModelKey::new(REASONING_MODEL),
+        .then(crate::plugin::config::core::SetLlmProfile {
+            model: crate::LlmProfileKey::new(REASONING_MODEL),
         }),
     )
     .await;
@@ -1740,8 +1746,8 @@ pub async fn a_reasoning_change_is_judged_against_the_final_recorded_model(
     assert_eq!(
         head.config.model,
         Some(
-            crate::ModelConfig::new(crate::RecordedModel::mint(
-                crate::ModelKey::new(REASONING_MODEL),
+            crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+                crate::LlmProfileKey::new(REASONING_MODEL),
                 reasoning_metadata,
             ))
             .with_reasoning(deep)
@@ -1828,7 +1834,7 @@ async fn looping_session(
         name,
         effect_host,
         stores,
-        turn_config_models(looping_model(calls)),
+        turn_config_llm_profiles(looping_model(calls)),
         recorded,
         vec![Arc::new(crate::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("conformance-turn-config-lookup-probe"),
@@ -1998,7 +2004,7 @@ pub async fn a_missing_recorded_termination_is_a_typed_terminal_refusal(
         "missing-recorded-termination",
         &effect_host,
         &stores,
-        turn_config_models(recording_model(&calls, &models)),
+        turn_config_llm_profiles(recording_model(&calls, &models)),
     )
     .await;
     let root = TurnId::from(format!("{prefix}-missing-recorded-termination-root"));
@@ -2142,7 +2148,7 @@ pub async fn a_redrive_assembles_the_terminal_its_root_recorded_termination_deci
             name,
             &effect_host,
             &stores,
-            turn_config_models(recording_model(&calls, &models)),
+            turn_config_llm_profiles(recording_model(&calls, &models)),
         )
         .await;
         parts.protocol = crate::testing::test_protocol_factories_ending_without_done();

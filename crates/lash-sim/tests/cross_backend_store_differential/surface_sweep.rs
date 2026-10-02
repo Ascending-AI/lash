@@ -360,7 +360,7 @@ const SURFACE_INGRESS_CLAIM_TTL_MS: u64 = 60_000;
 /// The run spec the sweep's spec input carries (FIG-3838).
 fn surface_run_spec() -> lash_core::RunSpec {
     lash_core::RunSpec::overrides(lash_core::RunOverrides {
-        model: Some(lash_core::ModelKey::new("surface-run-spec-model")),
+        model: Some(lash_core::LlmProfileKey::new("surface-run-spec-model")),
         ..lash_core::RunOverrides::default()
     })
 }
@@ -1835,7 +1835,7 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
         run: run.clone(),
         execution_scope_key: "sweep".into(),
         source: "turn".into(),
-        model_key: lash_core::ModelKey::new("model-key"),
+        profile_key: lash_core::LlmProfileKey::new("model-key"),
         requested_model: "model".into(),
         admitted_at_ms: 10,
     };
@@ -1856,7 +1856,7 @@ async fn usage_transcript(stores: &dyn lash_core::StoreSet, nonce: &str) -> Vec<
             provider_attempt: 0,
             llm_call_id: lash_core::LlmCallId("call".into()),
             source: "turn".into(),
-            model_key: lash_core::ModelKey::new("model-key"),
+            profile_key: lash_core::LlmProfileKey::new("model-key"),
             requested_model: "model".into(),
             served_model: None,
             outcome: AttemptFactOutcome::Unreported {

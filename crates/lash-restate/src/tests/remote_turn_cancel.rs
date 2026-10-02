@@ -86,7 +86,7 @@ impl TurnFixture {
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
         config.providers.models =
-            lash_core::testing::standard_test_models(self.provider.clone().into_handle());
+            lash_core::testing::standard_test_llm_profiles(self.provider.clone().into_handle());
         let mut policy = lash_core::testing::mock_session_policy();
         policy.session_id = Some(self.view.session_id().clone());
         let state = lash_core::RuntimeSessionState {

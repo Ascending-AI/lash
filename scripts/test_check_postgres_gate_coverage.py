@@ -21,7 +21,7 @@ import check_postgres_gate_coverage as checker  # noqa: E402
 STORE_TESTS = """#!/usr/bin/env bash
 declare -A uniform_store_suites=(
   [pg-facade-laws]="%s|postgres|lash-runtime|--lib|cargo-test|ignored-only,%s"
-  [pg-model-keys]="//crates/lash:model_keys__test||lash-runtime|--test model_keys|cargo-test|include-ignored"
+  [pg-model-keys]="//crates/lash:llm_profiles__test||lash-runtime|--test llm_profiles|cargo-test|include-ignored"
 )
 """
 
@@ -140,7 +140,7 @@ class PassingShapes(Fixture):
 
     def test_binary_wide_selection_covers_any_name(self) -> None:
         self.write_source(
-            "tests/model_keys.rs",
+            "tests/llm_profiles.rs",
             '#[test]\n#[ignore = "requires PostgreSQL"]\nfn any_name() {}',
         )
         self.assert_clean()

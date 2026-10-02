@@ -344,7 +344,7 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
         .admit("t", 3, vec![increment("first", 1, 10)])
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyModels)
+        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
         .expect("the recorded config reads");
     assert_eq!(
         resolution.result,
@@ -381,7 +381,7 @@ fn ordered_commands_of_two_owners_publish_together_with_one_revision_step() {
         )
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyModels)
+        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
         .expect("the recorded config reads");
     let mut published = base.clone();
     assert_eq!(
@@ -419,7 +419,7 @@ fn a_refused_member_refuses_the_whole_transaction() {
         )
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyModels)
+        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
         .expect("the recorded config reads");
     let mut published = base.clone();
     let ConfigTransactionOutcome::Refused { refusal } = resolution.publish(&mut published) else {
@@ -460,7 +460,7 @@ fn the_final_candidate_is_validated_by_every_touched_owner() {
         )
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyModels)
+        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
         .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the final candidate is refused");
@@ -485,7 +485,7 @@ fn refused_over(
         implementations: BTreeMap::new(),
     };
     let resolution = registry
-        .resolve(base, &transaction, &crate::EmptyModels)
+        .resolve(base, &transaction, &crate::EmptyLlmProfiles)
         .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the transaction is refused: {resolution:?}");
@@ -615,7 +615,7 @@ fn an_unreadable_recorded_namespace_is_corruption_and_refuses_nothing() {
         let transaction = registry.admit("t", 0, vec![entry]).expect("admitted");
         corrupt(
             registry
-                .resolve(&base, &transaction, &crate::EmptyModels)
+                .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
                 .expect_err(what),
         );
     }
@@ -786,7 +786,7 @@ fn typed_commands_address_the_owner_that_registered_their_type() {
 
 /// A catalog serving each `(key, context window, efforts)` entry under its
 /// key, with the key as its wire model.
-fn catalog(entries: &[(&str, usize, &[&str])]) -> crate::ModelRegistry {
+fn catalog(entries: &[(&str, usize, &[&str])]) -> crate::LlmProfileRegistry {
     let provider = crate::testing::TestProvider::builder()
         .kind("config-tests")
         .build()
@@ -794,11 +794,11 @@ fn catalog(entries: &[(&str, usize, &[&str])]) -> crate::ModelRegistry {
     entries
         .iter()
         .try_fold(
-            crate::ModelRegistry::new(),
+            crate::LlmProfileRegistry::new(),
             |registry, (key, context_window_tokens, efforts)| {
                 registry.register(
                     *key,
-                    crate::RegisteredModel::new(
+                    crate::RegisteredLlmProfile::new(
                         metadata(key, *context_window_tokens, efforts),
                         provider.clone(),
                     ),
@@ -808,15 +808,19 @@ fn catalog(entries: &[(&str, usize, &[&str])]) -> crate::ModelRegistry {
         .expect("every key registers once")
 }
 
-fn metadata(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate::ModelMetadata {
-    let metadata = crate::ModelMetadata::builder(key)
+fn metadata(
+    key: &str,
+    context_window_tokens: usize,
+    efforts: &[&str],
+) -> crate::LlmProfileMetadata {
+    let metadata = crate::LlmProfileMetadata::builder(key)
         .context_window_tokens(context_window_tokens)
         .build()
         .expect("model metadata");
     if efforts.is_empty() {
         return metadata;
     }
-    metadata.with_capability(crate::ModelCapability {
+    metadata.with_capability(crate::LlmProfileCapability {
         reasoning: Some(crate::ReasoningCapability {
             efforts: efforts.iter().map(|effort| (*effort).to_string()).collect(),
             ..Default::default()
@@ -825,9 +829,9 @@ fn metadata(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate:
     })
 }
 
-fn recorded(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate::ModelConfig {
-    crate::ModelConfig::new(crate::RecordedModel::mint(
-        crate::ModelKey::new(key),
+fn recorded(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate::LlmProfileConfig {
+    crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+        crate::LlmProfileKey::new(key),
         metadata(key, context_window_tokens, efforts),
     ))
 }
@@ -835,7 +839,7 @@ fn recorded(key: &str, context_window_tokens: usize, efforts: &[&str]) -> crate:
 fn resolve_core(
     registry: &ConfigRegistry,
     base: &crate::PersistedSessionConfig,
-    models: &dyn crate::RuntimeModels,
+    models: &dyn crate::LlmProfiles,
     transaction: ConfigTransaction,
 ) -> ConfigResolution {
     let entries = registry.entries(&transaction).expect("entries");
@@ -886,8 +890,8 @@ fn core_commands_keep_what_they_do_not_name() {
         &base,
         &models,
         ConfigTransaction::new()
-            .then(core::SetModel {
-                model: crate::ModelKey::new("next-model"),
+            .then(core::SetLlmProfile {
+                model: crate::LlmProfileKey::new("next-model"),
             })
             .then(core::SetAutonomy { autonomous: true }),
     );
@@ -916,7 +920,7 @@ fn core_commands_keep_what_they_do_not_name() {
 /// transaction resolves against: the one way a catalog edit reaches a
 /// session.
 #[test]
-fn a_model_command_naming_the_recorded_key_mints_it_again() {
+fn a_profile_command_naming_the_recorded_key_mints_it_again() {
     let (registry, _, _) = counters();
     let mut base = head(&registry, 0);
     base.model = Some(recorded("model", 1000, &[]));
@@ -925,8 +929,8 @@ fn a_model_command_naming_the_recorded_key_mints_it_again() {
         &registry,
         &base,
         &models,
-        ConfigTransaction::of(core::SetModel {
-            model: crate::ModelKey::new("model"),
+        ConfigTransaction::of(core::SetLlmProfile {
+            model: crate::LlmProfileKey::new("model"),
         }),
     );
     let mut published = base.clone();
@@ -938,7 +942,7 @@ fn a_model_command_naming_the_recorded_key_mints_it_again() {
 }
 
 #[test]
-fn a_model_command_naming_an_unregistered_key_is_refused_typed() {
+fn a_profile_command_naming_an_unregistered_key_is_refused_typed() {
     let (registry, _, _) = counters();
     let mut base = head(&registry, 0);
     base.model = Some(recorded("model", 1000, &[]));
@@ -946,16 +950,16 @@ fn a_model_command_naming_an_unregistered_key_is_refused_typed() {
         &registry,
         &base,
         &catalog(&[("model", 1000, &[])]),
-        ConfigTransaction::of(core::SetModel {
-            model: crate::ModelKey::new("missing"),
+        ConfigTransaction::of(core::SetLlmProfile {
+            model: crate::LlmProfileKey::new("missing"),
         }),
     );
     assert_eq!(
         core_refusal(&resolution),
         (
             Some(0),
-            core::CoreConfigRefusal::UnknownModel {
-                key: crate::ModelKey::new("missing"),
+            core::CoreConfigRefusal::UnknownLlmProfile {
+                key: crate::LlmProfileKey::new("missing"),
             }
         )
     );
@@ -966,7 +970,7 @@ fn a_model_command_naming_an_unregistered_key_is_refused_typed() {
 /// applies beside a model change to one that declares it, whatever the
 /// order, and a session with no model takes no reasoning.
 #[test]
-fn a_reasoning_command_is_judged_against_the_final_recorded_model() {
+fn a_reasoning_command_is_judged_against_the_final_recorded_llm_profile() {
     let (registry, _, _) = counters();
     let deep = crate::ReasoningSelection::Effort("deep".to_string());
     let models = catalog(&[("plain", 1000, &[]), ("deep-model", 1000, &["deep"])]);
@@ -996,11 +1000,11 @@ fn a_reasoning_command_is_judged_against_the_final_recorded_model() {
         ConfigTransaction::of(core::SetReasoning {
             reasoning: deep.clone(),
         })
-        .then(core::SetModel {
-            model: crate::ModelKey::new("deep-model"),
+        .then(core::SetLlmProfile {
+            model: crate::LlmProfileKey::new("deep-model"),
         }),
-        ConfigTransaction::of(core::SetModel {
-            model: crate::ModelKey::new("deep-model"),
+        ConfigTransaction::of(core::SetLlmProfile {
+            model: crate::LlmProfileKey::new("deep-model"),
         })
         .then(core::SetReasoning {
             reasoning: deep.clone(),
@@ -1020,7 +1024,7 @@ fn a_reasoning_command_is_judged_against_the_final_recorded_model() {
 
     let mut unselected = head(&registry, 0);
     unselected.model = None;
-    let without_model = resolve_core(
+    let without_llm_profile = resolve_core(
         &registry,
         &unselected,
         &models,
@@ -1029,10 +1033,10 @@ fn a_reasoning_command_is_judged_against_the_final_recorded_model() {
         }),
     );
     assert_eq!(
-        core_refusal(&without_model),
+        core_refusal(&without_llm_profile),
         (
             Some(0),
-            core::CoreConfigRefusal::ReasoningWithoutModel { reasoning: deep }
+            core::CoreConfigRefusal::ReasoningWithoutLlmProfile { reasoning: deep }
         )
     );
 }
@@ -1049,9 +1053,13 @@ fn the_catalog_lists_every_registered_command_with_its_schemas() {
         .expect("the counter's command is listed");
     assert!(increment.input_schema.to_string().contains("limit"));
     assert!(increment.refusal_schema.to_string().contains("past_limit"));
-    assert!(catalog.commands.iter().any(
-        |descriptor| descriptor.owner == CORE_CONFIG_OWNER && descriptor.command == "set_model"
-    ));
+    assert!(
+        catalog
+            .commands
+            .iter()
+            .any(|descriptor| descriptor.owner == CORE_CONFIG_OWNER
+                && descriptor.command == "set_llm_profile")
+    );
 }
 
 #[test]

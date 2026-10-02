@@ -162,7 +162,7 @@ impl World {
         if self.close_in_drive {
             host.control.scope_close = Arc::new(self.law_sink());
         }
-        host.providers.models = lash_core::testing::standard_test_models(model.into_handle());
+        host.providers.models = lash_core::testing::standard_test_llm_profiles(model.into_handle());
         let mut policy = lash_core::testing::mock_session_policy();
         policy.session_id = Some(self.session_id.clone());
         let state = lash_core::RuntimeSessionState {

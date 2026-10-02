@@ -201,7 +201,7 @@ async fn a_refused_cell_reservation_replays_into_a_host_with_capacity(
     let core = lash::LashCore::rlm_builder(backend, rlm)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, model_spec())
+        .serve_test_llm_profile(provider, llm_profile_spec())
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(&executions),
             output: json!({"result": "counted"}),
@@ -329,7 +329,7 @@ pub(super) fn process_host(
     lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, model_spec())
+        .serve_test_llm_profile(provider, llm_profile_spec())
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(executions),
             output: json!({"result": "counted"}),

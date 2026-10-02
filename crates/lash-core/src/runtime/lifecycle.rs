@@ -205,7 +205,7 @@ impl LashRuntime {
         }
         state.ensure_agent_frame_initialized();
         if state.effective_policy().model.is_none() {
-            return Err(SessionError::ModelUnconfigured {
+            return Err(SessionError::LlmProfileUnconfigured {
                 session_id: state.session_id.clone(),
             });
         }
@@ -758,7 +758,7 @@ mod tests {
 
     /// An embedded runtime over `state`, opened with a policy that selects a
     /// model.
-    async fn opened_with_a_model(
+    async fn opened_with_a_llm_profile(
         state: crate::RuntimeSessionState,
     ) -> Result<crate::runtime::LashRuntime, SessionError> {
         let plugins = crate::testing::test_plugin_host(Vec::new())
@@ -801,8 +801,8 @@ mod tests {
             ))
         };
         recorded.head_revision = 3;
-        match opened_with_a_model(recorded).await {
-            Err(SessionError::ModelUnconfigured { session_id }) => {
+        match opened_with_a_llm_profile(recorded).await {
+            Err(SessionError::LlmProfileUnconfigured { session_id }) => {
                 assert_eq!(session_id, SessionId::from("recorded-without-model"));
             }
             Ok(runtime) => panic!(
@@ -819,7 +819,7 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
             ))
         };
-        let created = opened_with_a_model(unrecorded)
+        let created = opened_with_a_llm_profile(unrecorded)
             .await
             .expect("a state no commit recorded takes its creator's policy");
         assert_eq!(

@@ -5,10 +5,10 @@ use super::*;
 fn dialect_request(
     dialect: lash_core::GoogleDialect,
     variant: lash_core::provider::ReasoningSelection,
-    capability: ModelCapability,
+    capability: LlmProfileCapability,
 ) -> LlmRequest {
     let mut req = request(None);
-    req.model_capability = ModelCapability {
+    req.llm_profile_capability = LlmProfileCapability {
         google_dialect: dialect,
         ..capability
     };
@@ -139,7 +139,7 @@ fn expose_thinking_requests_thoughts_without_a_reasoning_selection() {
 fn an_effort_without_capability_is_refused() {
     let error = GoogleOAuthProvider::build_request(
         &GoogleOAuthProvider::for_test(),
-        &request_with_capability(Some("medium"), ModelCapability::default()),
+        &request_with_capability(Some("medium"), LlmProfileCapability::default()),
         Vec::new(),
         None,
     )

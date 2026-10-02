@@ -47,62 +47,67 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::LlmCallRecord| {
         let _ = &value.label;
     });
-    // W0011: lash::ModelLimits [struct]
-    type_witness::<lash::ModelLimits>();
-    // W0012: lash::ModelLimits::context_window_tokens [field]
-    field_witness(|value: &lash::ModelLimits| {
+    // W0011: lash::LlmProfileLimits [struct]
+    type_witness::<lash::LlmProfileLimits>();
+    // W0012: lash::LlmProfileLimits::context_window_tokens [field]
+    field_witness(|value: &lash::LlmProfileLimits| {
         let _ = &value.context_window_tokens;
     });
-    // W0013: lash::RecordedModel::metadata [function]
-    let _ = lash::RecordedModel::metadata;
-    // W0014: lash::ModelLimits::output_token_capacity [field]
-    field_witness(|value: &lash::ModelLimits| {
+    // W0013: lash::RecordedLlmProfile::metadata [function]
+    let _ = lash::RecordedLlmProfile::metadata;
+    // W0014: lash::LlmProfileLimits::output_token_capacity [field]
+    field_witness(|value: &lash::LlmProfileLimits| {
         let _ = &value.output_token_capacity;
     });
-    // W0015: lash::ModelLimitsError [enum]
-    type_witness::<lash::ModelLimitsError>();
-    // W0016: lash::ModelLimitsError::MissingContextWindowTokens [variant]
-    variant_witness(|value: &lash::ModelLimitsError| {
-        matches!(value, lash::ModelLimitsError::MissingContextWindowTokens)
+    // W0015: lash::LlmProfileLimitsError [enum]
+    type_witness::<lash::LlmProfileLimitsError>();
+    // W0016: lash::LlmProfileLimitsError::MissingContextWindowTokens [variant]
+    variant_witness(|value: &lash::LlmProfileLimitsError| {
+        matches!(
+            value,
+            lash::LlmProfileLimitsError::MissingContextWindowTokens
+        )
     });
-    // W0017: lash::ModelLimitsError::ZeroContextWindowTokens [variant]
-    variant_witness(|value: &lash::ModelLimitsError| {
-        matches!(value, lash::ModelLimitsError::ZeroContextWindowTokens)
+    // W0017: lash::LlmProfileLimitsError::ZeroContextWindowTokens [variant]
+    variant_witness(|value: &lash::LlmProfileLimitsError| {
+        matches!(value, lash::LlmProfileLimitsError::ZeroContextWindowTokens)
     });
-    // W0018: lash::ModelLimitsError::ZeroOutputTokenCapacity [variant]
-    variant_witness(|value: &lash::ModelLimitsError| {
-        matches!(value, lash::ModelLimitsError::ZeroOutputTokenCapacity)
+    // W0018: lash::LlmProfileLimitsError::ZeroOutputTokenCapacity [variant]
+    variant_witness(|value: &lash::LlmProfileLimitsError| {
+        matches!(value, lash::LlmProfileLimitsError::ZeroOutputTokenCapacity)
     });
-    // W0019: lash::ModelMetadata::capability [field]
-    field_witness(|value: &lash::ModelMetadata| {
+    // W0019: lash::LlmProfileMetadata::capability [field]
+    field_witness(|value: &lash::LlmProfileMetadata| {
         let _ = &value.capability;
     });
-    // W0020: lash::ModelMetadata::context_window_tokens [function]
-    let _ = lash::ModelMetadata::context_window_tokens;
-    // W0021: lash::RecordedModel::key [function]
-    let _ = lash::RecordedModel::key;
-    // W0022: lash::ModelMetadata::wire_model [field]
-    field_witness(|value: &lash::ModelMetadata| {
+    // W0020: lash::LlmProfileMetadata::context_window_tokens [function]
+    let _ = lash::LlmProfileMetadata::context_window_tokens;
+    // W0021: lash::RecordedLlmProfile::key [function]
+    let _ = lash::RecordedLlmProfile::key;
+    // W0022: lash::LlmProfileMetadata::wire_model [field]
+    field_witness(|value: &lash::LlmProfileMetadata| {
         let _ = &value.wire_model;
     });
-    // W0023: lash::ModelMetadata::limits [field]
-    field_witness(|value: &lash::ModelMetadata| {
+    // W0023: lash::LlmProfileMetadata::limits [field]
+    field_witness(|value: &lash::LlmProfileMetadata| {
         let _ = &value.limits;
     });
-    // W0024: lash::ModelMetadata::new [function]
-    let _: fn(String, std::num::NonZeroUsize) -> lash::ModelMetadata = lash::ModelMetadata::new;
-    // W0025: lash::ModelConfig::reasoning [field]
-    field_witness(|value: &lash::ModelConfig| {
+    // W0024: lash::LlmProfileMetadata::new [function]
+    let _: fn(String, std::num::NonZeroUsize) -> lash::LlmProfileMetadata =
+        lash::LlmProfileMetadata::new;
+    // W0025: lash::LlmProfileConfig::reasoning [field]
+    field_witness(|value: &lash::LlmProfileConfig| {
         let _ = &value.reasoning;
     });
-    // W0026: lash::ModelMetadata::with_limits [function]
-    let _: fn(String, lash::ModelLimits) -> lash::ModelMetadata = lash::ModelMetadata::with_limits;
-    // W0027: lash::ModelConfig::with_reasoning [function]
-    let _ = lash::ModelConfig::with_reasoning;
-    // W0028: lash::ModelMetadataBuilder::output_token_capacity [function]
-    let _ = lash::ModelMetadataBuilder::output_token_capacity;
-    // W0029: lash::RuntimeModels::snapshot [function]
-    let _ = <lash::ModelRegistry as lash::RuntimeModels>::snapshot;
+    // W0026: lash::LlmProfileMetadata::with_limits [function]
+    let _: fn(String, lash::LlmProfileLimits) -> lash::LlmProfileMetadata =
+        lash::LlmProfileMetadata::with_limits;
+    // W0027: lash::LlmProfileConfig::with_reasoning [function]
+    let _ = lash::LlmProfileConfig::with_reasoning;
+    // W0028: lash::LlmProfileMetadataBuilder::output_token_capacity [function]
+    let _ = lash::LlmProfileMetadataBuilder::output_token_capacity;
+    // W0029: lash::LlmProfiles::snapshot [function]
+    let _ = <lash::LlmProfileRegistry as lash::LlmProfiles>::snapshot;
     // W0030: lash::SessionError::Protocol [variant]
     variant_witness(|value: &lash::SessionError| matches!(value, lash::SessionError::Protocol(..)));
     // W0031: lash::SessionError::Protocol::0 [field]
@@ -229,9 +234,9 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::direct::DirectRequest| {
         let _ = &value.model;
     });
-    // W0066: lash::direct::DirectRequest::model_capability [field]
+    // W0066: lash::direct::DirectRequest::llm_profile_capability [field]
     field_witness(|value: &lash::direct::DirectRequest| {
-        let _ = &value.model_capability;
+        let _ = &value.llm_profile_capability;
     });
     // W0067: lash::direct::DirectRequest::output [field]
     field_witness(|value: &lash::direct::DirectRequest| {
@@ -652,9 +657,9 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
         let _ = &value.model;
     });
-    // W0181: lash::runtime::LlmRequestSpec::model_capability [field]
+    // W0181: lash::runtime::LlmRequestSpec::llm_profile_capability [field]
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
-        let _ = &value.model_capability;
+        let _ = &value.llm_profile_capability;
     });
     // W0182: lash::runtime::LlmRequestSpec::model_variant [field]
     field_witness(|value: &lash::runtime::LlmRequestSpec| {
@@ -849,8 +854,8 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::SessionPolicy| {
         let _ = &value.model;
     });
-    // W0227: lash::runtime::SessionPolicy::model_key [function]
-    let _ = lash::runtime::SessionPolicy::model_key;
+    // W0227: lash::runtime::SessionPolicy::profile_key [function]
+    let _ = lash::runtime::SessionPolicy::profile_key;
     // W0228: lash::runtime::SessionPolicy::wire_model [function]
     let _ = lash::runtime::SessionPolicy::wire_model;
     // W0230: lash::plugins::AgentFrameRecord::protocol_turn_options [function]

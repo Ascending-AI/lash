@@ -24,7 +24,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         deleted_blob_count: 2,
     };
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("delete-partial-report")

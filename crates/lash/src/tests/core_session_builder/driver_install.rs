@@ -48,9 +48,9 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     let held = HeldFirstRequest::default();
     let core_v1 = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             tagged_provider("v1", Arc::clone(&calls), Some(held.clone())),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     // No session stays open on V1, so nothing but V1 itself and its
@@ -79,9 +79,9 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
     );
 
     let core_v2 = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(
+        .serve_test_llm_profile(
             tagged_provider("v2", Arc::clone(&calls), None),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core_v2

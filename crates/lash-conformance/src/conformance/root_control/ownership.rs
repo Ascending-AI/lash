@@ -262,7 +262,8 @@ fn script_model(parts: &mut DriveParts, script: Vec<Step>, crash: crate::Conform
             }
         })
         .build();
-    parts.host.providers.models = crate::testing::standard_test_models(provider.into_handle());
+    parts.host.providers.models =
+        crate::testing::standard_test_llm_profiles(provider.into_handle());
 }
 
 async fn runtime_with(parts: &DriveParts, tools: &Arc<OwnershipTools>) -> crate::LashRuntime {

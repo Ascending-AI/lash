@@ -23,7 +23,7 @@
 //! explicit spec is refused before acceptance.
 
 use crate::session_graph::PersistedSessionConfig;
-use crate::{GenerationOptions, ModelKey, ProtocolTurnOptions, ReasoningSelection};
+use crate::{GenerationOptions, LlmProfileKey, ProtocolTurnOptions, ReasoningSelection};
 
 /// Family version of the [`RunSpecHash`] preimage and of the canonical spec
 /// bytes it hashes.
@@ -160,7 +160,7 @@ pub struct RunOverrides {
     /// every replay reads the recorded binding. The snapshot's reasoning
     /// stays unless [`Self::reasoning`] is set too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<ModelKey>,
+    pub model: Option<LlmProfileKey>,
     /// The reasoning this root runs its model with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningSelection>,
@@ -199,7 +199,7 @@ impl RunOverrides {
     fn apply(
         &self,
         config: &mut PersistedSessionConfig,
-        models: &dyn crate::provider::RuntimeModels,
+        models: &dyn crate::provider::LlmProfiles,
     ) -> Result<(), RunResolveError> {
         if let Some(key) = &self.model {
             let recorded = models.snapshot(key).map_err(RunResolveError::Model)?;
@@ -208,7 +208,7 @@ impl RunOverrides {
                 .as_ref()
                 .map(|current| current.reasoning.clone())
                 .unwrap_or_default();
-            config.model = Some(crate::ModelConfig {
+            config.model = Some(crate::LlmProfileConfig {
                 model: recorded,
                 reasoning,
             });
@@ -217,7 +217,7 @@ impl RunOverrides {
             let model = config
                 .model
                 .as_mut()
-                .ok_or(RunShapeRefusal::ReasoningWithoutModel)?;
+                .ok_or(RunShapeRefusal::ReasoningWithoutLlmProfile)?;
             model.reasoning = reasoning.clone();
         }
         if (self.model.is_some() || self.reasoning.is_some())
@@ -417,11 +417,11 @@ pub enum RunShapeRefusal {
     /// capability refuses.
     #[error(transparent)]
     Reasoning {
-        refusal: lash_core_llm::model::ReasoningRefused,
+        refusal: lash_core_llm::llm_profile::ReasoningRefused,
     },
     /// The spec sets a reasoning selection for a session with no model.
     #[error("a reasoning override needs a model, and the session has selected none")]
-    ReasoningWithoutModel,
+    ReasoningWithoutLlmProfile,
     /// The spec states protocol turn options for a session that records no
     /// protocol plugin.
     #[error(
@@ -439,7 +439,7 @@ pub enum RunResolveError {
     /// The spec's model key has no binding on this deployment: a redeploy
     /// repairs it, so it is never the root's recorded outcome.
     #[error(transparent)]
-    Model(crate::provider::ModelUnavailable),
+    Model(crate::provider::LlmProfileUnavailable),
     /// The spec is refused, on any attempt.
     #[error(transparent)]
     Refused(#[from] RunShapeRefusal),
@@ -556,7 +556,7 @@ impl RunSpec {
         definition: Option<RunOverrides>,
         termination: TerminationPolicy,
         follow_on_recoveries: u32,
-        models: &dyn crate::provider::RuntimeModels,
+        models: &dyn crate::provider::LlmProfiles,
         owner: &dyn RunOptionsOwner,
     ) -> Result<ResolvedRun, RunResolveError> {
         let mut config = snapshot.clone();

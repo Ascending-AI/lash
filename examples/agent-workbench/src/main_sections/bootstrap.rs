@@ -160,7 +160,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     ])) as Arc<dyn TraceSink>;
 
     let model = dev_provider_scenario
-        .map(|scenario| scenario.initial_model().to_string())
+        .map(|scenario| scenario.initial_profile().to_string())
         .unwrap_or_else(|| {
             std::env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "z-ai/glm-5.3-flash".to_string())
         });
@@ -180,12 +180,12 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 .into_components(),
         )
     };
-    let selection = ModelSelection {
+    let selection = LlmProfileSelection {
         model: model.clone(),
         model_variant: Some(model_variant.clone()),
     };
     // A bad context window refuses startup rather than the first session.
-    workbench_recorded_model(&selection.key())
+    workbench_recorded_llm_profile(&selection.key())
         .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
     let database_url = std::env::var("AGENT_WORKBENCH_DATABASE_URL")
         .ok()
@@ -313,7 +313,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
-        .models(Arc::new(WorkbenchModels {
+        .llm_profiles(Arc::new(WorkbenchLlmProfiles {
             provider: provider.clone(),
         }));
     let builder = if let Some(tool_provider) =
@@ -439,7 +439,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             process_observer,
             sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
-            selected_model: Arc::new(Mutex::new(ModelSelection {
+            selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
                 model,
                 model_variant: Some(model_variant),
             })),
@@ -478,7 +478,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 // select from, so the record cannot disagree with what the host
                 // actually serves (FIG-3165).
                 "dialect": RLM_LANGUAGE_ID,
-                "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
+                "model": serde_json::to_value(state.selected_llm_profile()).unwrap_or(Value::Null),
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
                 "store_backend": stores.backend,
                 "restate_endpoint_addr": restate_endpoint_addr.to_string(),
@@ -873,21 +873,21 @@ mod startup_tests {
     }
 
     #[test]
-    fn a_selected_model_mints_with_the_once_lock_context_window_override() {
+    fn a_selected_llm_profile_mints_with_the_once_lock_context_window_override() {
         // OnceLock is process-global and can only be initialized once; keep the
         // override in this single test and do not assert an unset state elsewhere.
         let override_tokens = 84_000;
         WORKBENCH_CONTEXT_WINDOW_TOKENS
             .set(override_tokens)
             .expect("this is the sole test that initializes the process override");
-        let selected = ModelSelection {
+        let selected = LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: None,
         };
 
-        let selection = model_selection_for_request(&selected, None, None)
+        let selection = llm_profile_selection_for_request(&selected, None, None)
             .expect("the request keeps the selected model");
-        let model = workbench_recorded_model(&selection.key())
+        let model = workbench_recorded_llm_profile(&selection.key())
             .expect("the catalog mints the selected model");
 
         assert_eq!(model.context_window_tokens(), override_tokens);

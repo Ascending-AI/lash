@@ -340,7 +340,7 @@ pub struct SessionNodeRecord {
 ///     shapes(
 ///         path = "crates/lash-sansio/src/llm/capability.rs",
 ///         cover(
-///             ModelCapability, ReasoningCapability, ReasoningSelection, ReasoningEncoding,
+///             LlmProfileCapability, ReasoningCapability, ReasoningSelection, ReasoningEncoding,
 ///             SamplingCapability, StreamTermination, CacheControlDialect,
 ///         ),
 ///     ),
@@ -496,7 +496,7 @@ pub struct PersistedSessionConfig {
     /// The recorded model selection; `None` for a session that has selected
     /// no model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<crate::ModelConfig>,
+    pub model: Option<crate::LlmProfileConfig>,
     /// The session's attachment-acceptance rules (ADR 0026), recorded apart
     /// from the model so a model change keeps them.
     #[serde(
@@ -548,8 +548,8 @@ pub struct PersistedSessionConfig {
 
 impl PersistedSessionConfig {
     /// The recorded model key, when the session has selected a model.
-    pub fn model_key(&self) -> Option<&crate::ModelKey> {
-        self.model.as_ref().map(crate::ModelConfig::key)
+    pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
+        self.model.as_ref().map(crate::LlmProfileConfig::key)
     }
 
     /// The recorded wire model, when the session has selected a model.

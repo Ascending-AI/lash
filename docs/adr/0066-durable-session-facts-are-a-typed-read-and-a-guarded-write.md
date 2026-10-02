@@ -44,7 +44,7 @@ transaction. An existing id refuses with `SessionAlreadyExists`.
 `UnknownSession` and `SessionDeleted` are typed refusals. The builder carries
 the tool-source policy and the enqueue-only mode; it carries no replacement
 session config. A registry that cannot bind the recorded model key refuses
-its requests with `ModelUnavailable`.
+its requests with `LlmProfileUnavailable`.
 
 The protocol fills a missing final-answer format at creation: `Markdown` for a
 root and `RawFinalValue` for a child. Termination has no default fill, so its

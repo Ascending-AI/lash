@@ -221,7 +221,7 @@ impl lash_core::facade_support::PluginFactory for ProbeFactory {
 async fn probe_core(backend: lash_core::Backend, probe: &Arc<ProbeFactory>) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .plugin(probe.clone())
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -330,8 +330,8 @@ async fn the_command_catalog_lists_every_registered_command() -> Result<()> {
             "set_autonomy",
             "set_charge_safety",
             "set_generation",
+            "set_llm_profile",
             "set_max_tool_calls",
-            "set_model",
             "set_no_progress_budget",
             "set_reasoning",
             "set_tool_access",

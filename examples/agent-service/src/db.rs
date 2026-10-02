@@ -411,7 +411,7 @@ impl AppDb {
         )
     }
 
-    pub(crate) fn update_chat_model(
+    pub(crate) fn update_chat_llm_profile(
         &mut self,
         chat_id: &str,
         model: &str,
@@ -430,7 +430,10 @@ impl AppDb {
         Ok(self.chat(chat_id)?)
     }
 
-    pub(crate) fn chat_model_selection(&mut self, chat_id: &str) -> AppResult<ChatModelSelection> {
+    pub(crate) fn chat_llm_profile_selection(
+        &mut self,
+        chat_id: &str,
+    ) -> AppResult<ChatModelSelection> {
         self.conn
             .query_row(
                 "SELECT model, model_variant FROM chats WHERE id = ?1",

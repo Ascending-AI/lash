@@ -1,4 +1,4 @@
-use super::tests::ServeWorkbenchTestModel as _;
+use super::tests::ServeWorkbenchTestLlmProfile as _;
 use super::tests::{
     DecoratedBackend, detached_trigger_store, explicit_durable_test_facets_on,
     run_async_test_on_stack_budget, spawn_restate_ingress_capture,
@@ -41,7 +41,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         .complete_error("await-work route test should not call the provider")
         .build()
         .into_handle();
-    let model = lash::ModelMetadata::builder("test-model")
+    let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
@@ -52,7 +52,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     let (watched, wiring) = watched_process_work(&double, sink_tx);
     let backend = DecoratedBackend::over(double.lash_backend()).with_process_work(wiring);
     let core = explicit_durable_test_facets_on(backend.into())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -69,7 +69,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -233,13 +233,13 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         .complete_error("orphaned process API test should not call the provider")
         .build()
         .into_handle();
-    let model = lash::ModelMetadata::builder("test-model")
+    let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -256,7 +256,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -994,13 +994,13 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         .complete_error("session delete retention test should not call the provider")
         .build()
         .into_handle();
-    let model = lash::ModelMetadata::builder("test-model")
+    let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -1017,7 +1017,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -1246,12 +1246,12 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .complete_error("work rail window test should not call the provider")
         .build()
         .into_handle();
-    let model = lash::ModelMetadata::builder("test-model")
+    let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -1268,7 +1268,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

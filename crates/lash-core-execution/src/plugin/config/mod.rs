@@ -256,12 +256,12 @@ impl ConfigRegistrar {
     /// Register the core command `C`, whose reducer also reads the host's
     /// models. Only the core owner registers one: a plugin's reducer never
     /// sees the host's models.
-    fn models_command<C: ConfigCommand>(
+    fn llm_profiles_command<C: ConfigCommand>(
         &mut self,
         reduce: impl Fn(
             &RecordedOf<C>,
             C,
-            &dyn crate::RuntimeModels,
+            &dyn crate::LlmProfiles,
         ) -> Result<OwnerChange<RecordedOf<C>, C::Output>, RefusalOf<C>>
         + Send
         + Sync
@@ -289,7 +289,7 @@ impl ConfigRegistrar {
             .insert(TypeId::of::<C>(), C::NAME.to_string());
         owner.commands.insert(
             C::NAME.to_string(),
-            Arc::new(ModelsCommand::<C, _> {
+            Arc::new(LlmProfilesCommand::<C, _> {
                 reduce,
                 _command: std::marker::PhantomData,
             }),
@@ -372,7 +372,7 @@ trait ErasedCommand: Send + Sync {
         recorded: &serde_json::Value,
         from: ReducedFrom,
         args: &serde_json::Value,
-        models: &dyn crate::RuntimeModels,
+        models: &dyn crate::LlmProfiles,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure>;
     fn input_schema(&self) -> serde_json::Value;
     fn output_schema(&self) -> serde_json::Value;
@@ -554,7 +554,7 @@ where
         recorded: &serde_json::Value,
         from: ReducedFrom,
         args: &serde_json::Value,
-        _models: &dyn crate::RuntimeModels,
+        _llm_profiles: &dyn crate::LlmProfiles,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
         reduce_typed::<C>(recorded, from, args, |recorded, command| {
             (self.reduce)(recorded, command)
@@ -572,18 +572,18 @@ where
 
 /// A core command whose reducer also reads the host's models: the one place
 /// a reducer mints a model binding.
-struct ModelsCommand<C, F> {
+struct LlmProfilesCommand<C, F> {
     reduce: F,
     _command: std::marker::PhantomData<fn() -> C>,
 }
 
-impl<C, F> ErasedCommand for ModelsCommand<C, F>
+impl<C, F> ErasedCommand for LlmProfilesCommand<C, F>
 where
     C: ConfigCommand,
     F: Fn(
             &RecordedOf<C>,
             C,
-            &dyn crate::RuntimeModels,
+            &dyn crate::LlmProfiles,
         ) -> Result<OwnerChange<RecordedOf<C>, C::Output>, RefusalOf<C>>
         + Send
         + Sync
@@ -600,7 +600,7 @@ where
         recorded: &serde_json::Value,
         from: ReducedFrom,
         args: &serde_json::Value,
-        models: &dyn crate::RuntimeModels,
+        models: &dyn crate::LlmProfiles,
     ) -> Result<(serde_json::Value, serde_json::Value), ConfigCommandFailure> {
         reduce_typed::<C>(recorded, from, args, |recorded, command| {
             (self.reduce)(recorded, command, models)
@@ -1005,7 +1005,7 @@ impl ConfigRegistry {
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
-        models: &dyn crate::RuntimeModels,
+        models: &dyn crate::LlmProfiles,
     ) -> Result<ConfigResolution, RecordedNamespaceCorrupt> {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
@@ -1032,7 +1032,7 @@ impl ConfigRegistry {
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
-        models: &dyn crate::RuntimeModels,
+        models: &dyn crate::LlmProfiles,
     ) -> Result<ConfigResolutionDecision, ConfigFault> {
         let mut decoded_base = base.clone();
         decoded_base.plugin_config =

@@ -59,7 +59,7 @@ pub(crate) struct CreateChatRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct UpdateChatModelRequest {
+pub(crate) struct UpdateChatLlmProfileRequest {
     model: String,
     model_variant: Option<String>,
 }
@@ -92,8 +92,8 @@ pub(crate) struct CancelTurnResponse {
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct AppSettings {
-    default_model: String,
-    default_model_variant: Option<String>,
+    default_profile: String,
+    default_profile_variant: Option<String>,
     model_variants: Vec<&'static str>,
 }
 
@@ -190,8 +190,8 @@ pub(crate) async fn list_chats(
 
 pub(crate) async fn settings(State(state): State<AppStateData>) -> Json<AppSettings> {
     Json(AppSettings {
-        default_model: state.default_model().to_string(),
-        default_model_variant: state.default_model_variant().map(str::to_string),
+        default_profile: state.default_profile().to_string(),
+        default_profile_variant: state.default_profile_variant().map(str::to_string),
         model_variants: vec!["low", "medium", "high"],
     })
 }
@@ -207,11 +207,11 @@ pub(crate) async fn create_chat(
         .filter(|title| !title.is_empty())
         .unwrap_or("New chat");
     let title = title.to_string();
-    let selection = normalize_model_selection(
+    let selection = normalize_llm_profile_selection(
         request.model.as_deref(),
         request.model_variant.as_deref(),
-        state.default_model(),
-        state.default_model_variant(),
+        state.default_profile(),
+        state.default_profile_variant(),
     )?;
     state
         .with_db(move |db| {
@@ -221,17 +221,19 @@ pub(crate) async fn create_chat(
         .map(Json)
 }
 
-pub(crate) async fn update_chat_model(
+pub(crate) async fn update_chat_llm_profile(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,
-    Json(request): Json<UpdateChatModelRequest>,
+    Json(request): Json<UpdateChatLlmProfileRequest>,
 ) -> AppResult<Json<ChatSummary>> {
-    let selection =
-        normalize_optional_model_selection(Some(&request.model), request.model_variant.as_deref())?
-            .ok_or_else(|| AppError::bad_request("model is required"))?;
+    let selection = normalize_optional_llm_profile_selection(
+        Some(&request.model),
+        request.model_variant.as_deref(),
+    )?
+    .ok_or_else(|| AppError::bad_request("model is required"))?;
     state
         .with_db(move |db| {
-            db.update_chat_model(
+            db.update_chat_llm_profile(
                 &chat_id,
                 &selection.model,
                 selection.model_variant.as_deref(),
@@ -288,11 +290,11 @@ pub(crate) async fn pin_chat_branch_point(
     let selection = state
         .with_db({
             let chat_id = chat_id.clone();
-            move |db| db.chat_model_selection(&chat_id)
+            move |db| db.chat_llm_profile_selection(&chat_id)
         })
         .await?;
     let session = state
-        .open_session(&chat_id, model_choice_for_chat_selection(&selection))
+        .open_session(&chat_id, llm_profile_choice_for_chat_selection(&selection))
         .await?;
     // The chat names a branch point by the node its last turn ended at; lash
     // names the same state by the head revision that published it. Pinning
@@ -409,7 +411,7 @@ pub(crate) async fn send_message(
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
     }
-    let request_model = normalize_optional_model_selection(
+    let request_model = normalize_optional_llm_profile_selection(
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
@@ -417,7 +419,7 @@ pub(crate) async fn send_message(
     // The board is app-owned state. The user message keeps a snapshot for UI
     // replay, while tools read and mutate the canonical copy in the database.
     let user_board = request.board.clone();
-    let (user_message, model_selection) = state
+    let (user_message, llm_profile_selection) = state
         .with_db({
             let chat_id = chat_id.clone();
             let text = text.clone();
@@ -425,13 +427,13 @@ pub(crate) async fn send_message(
             move |db| {
                 db.require_chat(&chat_id)?;
                 if let Some(selection) = request_model {
-                    db.update_chat_model(
+                    db.update_chat_llm_profile(
                         &chat_id,
                         &selection.model,
                         selection.model_variant.as_deref(),
                     )?;
                 }
-                let model_selection = db.chat_model_selection(&chat_id)?;
+                let llm_profile_selection = db.chat_llm_profile_selection(&chat_id)?;
                 db.maybe_title_from_first_message(&chat_id, &text)?;
                 db.upsert_chat_board(&chat_id, &user_board)?;
                 let message = db.insert_message_with_payload(
@@ -440,7 +442,7 @@ pub(crate) async fn send_message(
                     &text,
                     Some(json!({ "board": user_board })),
                 )?;
-                Ok((message, model_selection))
+                Ok((message, llm_profile_selection))
             }
         })
         .await?;
@@ -448,8 +450,8 @@ pub(crate) async fn send_message(
     // One path in every durability mode: the chat's session takes the input
     // through `send()`, and the session's engine drives the turn -- in process
     // for the local store, in a Restate handler for the Restate deployment.
-    let turn_model = model_choice_for_chat_selection(&model_selection);
-    let session = state.open_session(&chat_id, turn_model).await?;
+    let turn_profile = llm_profile_choice_for_chat_selection(&llm_profile_selection);
+    let session = state.open_session(&chat_id, turn_profile).await?;
     state.record_board_context(&session).await?;
     let replay_cursor = session.observe().current_observation().cursor;
     let turn_id = TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4()));
@@ -900,19 +902,19 @@ async fn forward_live_replay_until_commit(
     }
 }
 
-fn normalize_model_selection(
+fn normalize_llm_profile_selection(
     model: Option<&str>,
     model_variant: Option<&str>,
-    default_model: &str,
-    default_model_variant: Option<&str>,
+    default_profile: &str,
+    default_profile_variant: Option<&str>,
 ) -> AppResult<ChatModelSelection> {
     let model = model
         .map(str::trim)
         .filter(|model| !model.is_empty())
-        .unwrap_or(default_model)
+        .unwrap_or(default_profile)
         .to_string();
     let model_variant = normalize_model_variant(model_variant).or_else(|| {
-        default_model_variant
+        default_profile_variant
             .map(str::trim)
             .filter(|variant| !variant.is_empty())
             .map(str::to_string)
@@ -926,7 +928,7 @@ fn normalize_model_selection(
     })
 }
 
-fn normalize_optional_model_selection(
+fn normalize_optional_llm_profile_selection(
     model: Option<&str>,
     model_variant: Option<&str>,
 ) -> AppResult<Option<ChatModelSelection>> {
@@ -941,9 +943,11 @@ fn normalize_optional_model_selection(
 
 /// The model key and reasoning a chat's selection runs with: the service's
 /// catalog keys every OpenRouter model by its id.
-pub(crate) fn model_choice_for_chat_selection(selection: &ChatModelSelection) -> ModelChoice {
-    ModelChoice {
-        key: lash::ModelKey::new(selection.model.clone()),
+pub(crate) fn llm_profile_choice_for_chat_selection(
+    selection: &ChatModelSelection,
+) -> LlmProfileChoice {
+    LlmProfileChoice {
+        key: lash::LlmProfileKey::new(selection.model.clone()),
         reasoning: selection
             .model_variant
             .clone()
@@ -954,8 +958,8 @@ pub(crate) fn model_choice_for_chat_selection(selection: &ChatModelSelection) ->
 
 /// A chat's model selection as the session records it.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ModelChoice {
-    pub(crate) key: lash::ModelKey,
+pub(crate) struct LlmProfileChoice {
+    pub(crate) key: lash::LlmProfileKey,
     pub(crate) reasoning: lash::provider::ReasoningSelection,
 }
 
@@ -1217,9 +1221,9 @@ finish("done through route");
             &backend,
         );
         let core = LashCore::rlm_builder(backend, factory)
-            .serve_test_model(
+            .serve_test_llm_profile(
                 provider,
-                lash::ModelMetadata::builder("mock-model")
+                lash::LlmProfileMetadata::builder("mock-model")
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),

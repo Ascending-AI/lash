@@ -81,9 +81,9 @@ async fn fixture_over_with_batching(
     let core = LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(batching)
-        .serve_test_model(
+        .serve_test_llm_profile(
             scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     Ok(Fixture {
@@ -837,7 +837,7 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
 async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             crate::testing::TestProvider::builder()
                 .kind("engine-first-open")
                 .complete(|_| async {
@@ -847,7 +847,7 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
                 })
                 .build()
                 .into_handle(),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let durable = core
@@ -883,7 +883,7 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             {
                 let calls = Arc::clone(&calls);
                 crate::testing::TestProvider::builder()
@@ -903,7 +903,7 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
                 .build()
                 .into_handle()
             },
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1385,7 +1385,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
 
 /// A send whose spec names a model key this host does not serve is refused
 /// before the input is accepted, and nothing is enqueued (FIG-4374).
-async fn a_send_under_an_unserved_model_key_is_refused_before_acceptance() -> Result<()> {
+async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture
         .core
@@ -1402,7 +1402,7 @@ async fn a_send_under_an_unserved_model_key_is_refused_before_acceptance() -> Re
         .expect_err("a key no registration serves is refused at send");
     assert!(
         matches!(&error, EmbedError::Runtime(runtime)
-            if runtime.code == lash_core::RuntimeErrorCode::ModelUnknown),
+            if runtime.code == lash_core::RuntimeErrorCode::LlmProfileUnknown),
         "the refusal is the typed unknown-model refusal: {error:?}"
     );
     let store = lash_core::runtime::live_session_view(
@@ -1462,7 +1462,7 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
     let release = Arc::new(Notify::new());
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             {
                 let calls = Arc::clone(&calls);
                 let release = Arc::clone(&release);
@@ -1486,7 +1486,7 @@ async fn exact_host_root_frame_switch(host_id: &str, cancel: bool) -> Result<()>
                     .build()
                     .into_handle()
             },
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -1716,8 +1716,8 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_send_under_an_unserved_model_key_is_refused_before_acceptance() -> Result<()> {
-                super::a_send_under_an_unserved_model_key_is_refused_before_acceptance().await
+            async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> Result<()> {
+                super::a_send_under_an_unserved_profile_key_is_refused_before_acceptance().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

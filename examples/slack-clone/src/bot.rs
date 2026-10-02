@@ -254,7 +254,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
     shutdown_result
 }
 
-fn configured_provider() -> Result<(lash::provider::ProviderHandle, lash::ModelMetadata)> {
+fn configured_provider() -> Result<(lash::provider::ProviderHandle, lash::LlmProfileMetadata)> {
     match std::env::var("SLACK_CLONE_E2E_PROVIDER") {
         Err(std::env::VarError::NotPresent) => runtime::provider_from_env(),
         Err(error) => Err(error).context("read SLACK_CLONE_E2E_PROVIDER"),

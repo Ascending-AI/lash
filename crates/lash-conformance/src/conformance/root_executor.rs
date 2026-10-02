@@ -192,7 +192,8 @@ impl Fixture {
                 }
             })
             .build();
-        parts.host.providers.models = crate::testing::standard_test_models(model.into_handle());
+        parts.host.providers.models =
+            crate::testing::standard_test_llm_profiles(model.into_handle());
         let turn_id = TurnId::from(format!("{law}-turn"));
         Self {
             parts,

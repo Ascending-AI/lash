@@ -5,15 +5,16 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result, bail};
 use lash::direct::GenerationOptions;
 use lash::provider::{
-    CacheControlDialect, ModelCapability, ProviderHandle, ProviderOptions, ProviderReliability,
-    ReasoningCapability, ReasoningEncoding, ReasoningSelection, SamplingCapability,
+    CacheControlDialect, LlmProfileCapability, ProviderHandle, ProviderOptions,
+    ProviderReliability, ReasoningCapability, ReasoningEncoding, ReasoningSelection,
+    SamplingCapability,
 };
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
     ToolOutcome, ToolProvider,
 };
 use lash::tracing::{JsonlTraceSink, TraceLevel};
-use lash::{LashCore, ModelMetadata};
+use lash::{LashCore, LlmProfileMetadata};
 use lash_provider_openai::{
     OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
 };
@@ -49,7 +50,7 @@ pub(super) fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle 
     ProviderHandle::new(components)
 }
 
-pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelMetadata> {
+pub(super) fn llm_profile_spec(model: &str, output_cap: usize) -> Result<LlmProfileMetadata> {
     let (context, output_capacity, cache_control, sampling, efforts) = match model {
         DEFAULT_RLM_MODEL => (
             1_000_000,
@@ -67,11 +68,11 @@ pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelMetadata
         ),
         _ => bail!("ModelNotPriced: {model}"),
     };
-    ModelMetadata::builder(model)
+    LlmProfileMetadata::builder(model)
         .context_window_tokens(context)
         .output_token_capacity(output_capacity)
         .max_output_tokens(output_cap as u64)
-        .capability(ModelCapability {
+        .capability(LlmProfileCapability {
             reasoning: Some(ReasoningCapability {
                 efforts: efforts.into_iter().map(String::from).collect(),
                 encoding: ReasoningEncoding::Effort,
@@ -79,7 +80,7 @@ pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelMetadata
             }),
             cache_control,
             sampling,
-            ..ModelCapability::default()
+            ..LlmProfileCapability::default()
         })
         .build()
         .with_context(|| format!("build model metadata for {model} with cap {output_cap}"))
@@ -87,13 +88,16 @@ pub(super) fn model_spec(model: &str, output_cap: usize) -> Result<ModelMetadata
 
 /// A catalog serving `model` alone through `provider`, keyed by its wire
 /// model, and that key: a live run records the model it was priced for.
-fn one_model(
+fn one_llm_profile(
     provider: ProviderHandle,
-    model: ModelMetadata,
-) -> Result<(Arc<lash::ModelRegistry>, lash::ModelKey)> {
-    let key = lash::ModelKey::new(model.wire_model.clone());
-    let models = lash::ModelRegistry::new()
-        .register(key.clone(), lash::RegisteredModel::new(model, provider))
+    model: LlmProfileMetadata,
+) -> Result<(Arc<lash::LlmProfileRegistry>, lash::LlmProfileKey)> {
+    let key = lash::LlmProfileKey::new(model.wire_model.clone());
+    let models = lash::LlmProfileRegistry::new()
+        .register(
+            key.clone(),
+            lash::RegisteredLlmProfile::new(model, provider),
+        )
         .context("register the live run's model")?;
     Ok((Arc::new(models), key))
 }
@@ -225,7 +229,7 @@ pub(super) struct StandardCoreSpec<'a> {
 
 pub(super) async fn standard_core(
     provider: ProviderHandle,
-    model: ModelMetadata,
+    model: LlmProfileMetadata,
     spec: StandardCoreSpec<'_>,
 ) -> Result<LiveCore> {
     let live = live_engine("slack-live-standard").await?;
@@ -243,12 +247,12 @@ pub(super) async fn standard_core(
 pub(super) fn standard_core_over(
     backend: lash::Backend,
     provider: ProviderHandle,
-    model: ModelMetadata,
+    model: LlmProfileMetadata,
     spec: StandardCoreSpec<'_>,
 ) -> Result<(LashCore, lash::SessionSpec)> {
-    let (models, model_key) = one_model(provider, model)?;
+    let (models, profile_key) = one_llm_profile(provider, model)?;
     let session_spec = lash::SessionSpec::new(
-        model_key,
+        profile_key,
         lash::TurnBudget::bounded(spec.turn_budget),
         lash::MaxToolCalls::new(1024),
     )
@@ -266,7 +270,7 @@ pub(super) fn standard_core_over(
     )
     .context("encode the live-E2E standard prompt")?;
     let mut builder = LashCore::standard_builder(backend)
-        .models(models)
+        .llm_profiles(models)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
@@ -293,7 +297,7 @@ pub(super) fn standard_core_over(
 
 pub(super) async fn rlm_core(
     provider: ProviderHandle,
-    model: ModelMetadata,
+    model: LlmProfileMetadata,
     output_cap: usize,
     instructions: &str,
     tools: Arc<dyn ToolProvider>,
@@ -310,9 +314,9 @@ pub(super) async fn rlm_core(
         std::sync::Arc::new(lash::rlm::TypescriptDialect),
         &backend,
     );
-    let (models, model_key) = one_model(provider, model)?;
+    let (models, profile_key) = one_llm_profile(provider, model)?;
     let session_spec = lash::SessionSpec::new(
-        model_key,
+        profile_key,
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         lash::MaxToolCalls::new(1024),
     )
@@ -330,7 +334,7 @@ pub(super) async fn rlm_core(
     )
     .context("encode the live-E2E RLM prompt")?;
     let mut builder = LashCore::rlm_builder(backend, factory)
-        .models(models)
+        .llm_profiles(models)
         .tools(tools)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

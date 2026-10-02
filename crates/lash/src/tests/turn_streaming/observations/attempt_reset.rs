@@ -1,7 +1,7 @@
 #[tokio::test]
 pub(super) async fn remote_reset_and_transcript_projection_agree() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-    .serve_test_model(retrying_visible_stream_provider(), mock_model_spec())
+    .serve_test_llm_profile(retrying_visible_stream_provider(), mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     core.session("retry-visible-observation")
         .create(crate::SessionCreation {

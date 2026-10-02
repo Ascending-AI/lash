@@ -1396,7 +1396,7 @@ async fn async_main() -> Result<()> {
                 load,
                 restate_ingress_url: state.restate_ingress_url.clone(),
                 restate_authority_id: state.restate_authority_id.clone(),
-                model: e2e_model_config()?,
+                model: e2e_llm_profile_config()?,
                 active,
             })
             .serve(),
@@ -1418,9 +1418,9 @@ async fn async_main() -> Result<()> {
 
 /// The e2e model as the deployment's registry records it: what a host-built
 /// process environment carries for the model its turns run.
-fn e2e_model_config() -> anyhow::Result<lash::ModelConfig> {
-    Ok(lash::ModelConfig::new(lash::RecordedModel::mint(
-        lash::ModelKey::new(lash_restate_postgres_workers_e2e::E2E_MODEL_KEY),
-        lash_restate_postgres_workers_e2e::e2e_model_metadata()?,
+fn e2e_llm_profile_config() -> anyhow::Result<lash::LlmProfileConfig> {
+    Ok(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+        lash::LlmProfileKey::new(lash_restate_postgres_workers_e2e::E2E_PROFILE_KEY),
+        lash_restate_postgres_workers_e2e::e2e_llm_profile_metadata()?,
     )))
 }

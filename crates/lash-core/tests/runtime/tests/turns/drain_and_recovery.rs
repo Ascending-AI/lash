@@ -156,7 +156,7 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
         lash_core::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
     );
     config.providers.models =
-        lash_core::testing::standard_test_models(transport.clone().into_handle());
+        lash_core::testing::standard_test_llm_profiles(transport.clone().into_handle());
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -810,7 +810,7 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
         .build()
         .into_handle();
 
-    let capability = lash_core::ModelCapability {
+    let capability = lash_core::LlmProfileCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
         google_dialect: Default::default(),
@@ -826,24 +826,24 @@ pub(super) async fn turn_driver_sends_an_exact_effort_unchanged() {
         sampling: lash_core::SamplingCapability::Configurable,
         reasoning_retention: Default::default(),
     };
-    let model = lash_core::ModelMetadata::builder("mock-model")
+    let model = lash_core::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid model spec")
         .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_models(
+    serve_runtime_llm_profiles(
         &mut runtime,
         [(
-            lash_core::ModelKey::new("served-model"),
-            lash_core::RegisteredModel::new(model, provider.clone()),
+            lash_core::LlmProfileKey::new("served-model"),
+            lash_core::RegisteredLlmProfile::new(model, provider.clone()),
         )],
     );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelKey::new("served-model"),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("served-model"),
         })
         .then(lash_core::plugin::config::core::SetReasoning {
             reasoning: lash_core::ReasoningSelection::Effort("max".to_string()),
@@ -900,7 +900,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         .build()
         .into_handle();
 
-    let capability = lash_core::ModelCapability {
+    let capability = lash_core::LlmProfileCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
         google_dialect: Default::default(),
@@ -916,18 +916,18 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         sampling: lash_core::SamplingCapability::Configurable,
         reasoning_retention: Default::default(),
     };
-    let model = lash_core::ModelMetadata::builder("mock-model")
+    let model = lash_core::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("valid model spec")
         .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_models(
+    serve_runtime_llm_profiles(
         &mut runtime,
         [(
-            lash_core::ModelKey::new("served-model"),
-            lash_core::RegisteredModel::new(model.clone(), provider.clone()),
+            lash_core::LlmProfileKey::new("served-model"),
+            lash_core::RegisteredLlmProfile::new(model.clone(), provider.clone()),
         )],
     );
     // A config command judges a reasoning against the model it records, so
@@ -935,8 +935,8 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
     // a spec's: unjudged, leaving the turn driver's check as the gate.
     runtime.edit_resident_state_for_test(|state| {
         state.policy.model = Some(
-            lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                lash_core::ModelKey::new("served-model"),
+            lash_core::LlmProfileConfig::new(lash_core::RecordedLlmProfile::mint(
+                lash_core::LlmProfileKey::new("served-model"),
                 model,
             ))
             .with_reasoning(lash_core::ReasoningSelection::Effort("turbo".to_string())),
@@ -1007,17 +1007,17 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_models(
+    serve_runtime_llm_profiles(
         &mut runtime,
         [(
-            lash_core::ModelKey::new("served-model"),
+            lash_core::LlmProfileKey::new("served-model"),
             // A recorded model's output-cap default is model configuration,
             // not request intent: it rides the request's defaults, never its
             // generation options, and the adapter layers it under them in
             // `resolve_generation_policy`.
-            lash_core::RegisteredModel::new(
-                lash_core::testing::test_model_metadata("mock-model").with_request_defaults(
-                    lash_core::provider::ModelRequestDefaults {
+            lash_core::RegisteredLlmProfile::new(
+                lash_core::testing::test_llm_profile_metadata("mock-model").with_request_defaults(
+                    lash_core::provider::LlmProfileRequestDefaults {
                         max_output_tokens: Some(1_024),
                         ..Default::default()
                     },
@@ -1028,8 +1028,8 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
     );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelKey::new("served-model"),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("served-model"),
         }),
     )
     .await;
@@ -1125,20 +1125,20 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_models(
+    serve_runtime_llm_profiles(
         &mut runtime,
         [(
-            lash_core::ModelKey::new("served-model"),
-            lash_core::RegisteredModel::new(
-                lash_core::testing::test_model_metadata("mock-model"),
+            lash_core::LlmProfileKey::new("served-model"),
+            lash_core::RegisteredLlmProfile::new(
+                lash_core::testing::test_llm_profile_metadata("mock-model"),
                 provider.clone(),
             ),
         )],
     );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelKey::new("served-model"),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("served-model"),
         })
         .then(lash_core::plugin::config::core::SetGeneration {
             generation: lash_core::facade_support::GenerationOverlay::Replace(
@@ -1231,12 +1231,12 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .into_handle();
 
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
-    serve_runtime_models(
+    serve_runtime_llm_profiles(
         &mut runtime,
         [(
-            lash_core::ModelKey::new("served-model"),
-            lash_core::RegisteredModel::new(
-                lash_core::ModelMetadata::builder("small-output-model")
+            lash_core::LlmProfileKey::new("served-model"),
+            lash_core::RegisteredLlmProfile::new(
+                lash_core::LlmProfileMetadata::builder("small-output-model")
                     .context_window_tokens(200_000)
                     .output_token_capacity(2_048)
                     .build()
@@ -1247,8 +1247,8 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
     );
     crate::runtime_support::configure_storeless(
         &mut runtime,
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
-            model: lash_core::ModelKey::new("served-model"),
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
+            model: lash_core::LlmProfileKey::new("served-model"),
         })
         .then(lash_core::plugin::config::core::SetGeneration {
             generation: lash_core::facade_support::GenerationOverlay::Replace(

@@ -96,7 +96,7 @@ impl Fixture {
                 .into_handle()
         };
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-            .serve_test_model(provider, mock_model_spec())
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())
             .expect("build the core");
         Self {
@@ -185,7 +185,7 @@ async fn a_second_host_reads_refused_root_usage() -> Result<()> {
 
     let second_host =
         explicit_ephemeral_facets(LashCore::standard_builder(fixture.double.lash_backend()))
-            .serve_test_model(
+            .serve_test_llm_profile(
                 crate::testing::TestProvider::builder()
                     .kind("commit-superseded")
                     .complete(|_request| async {
@@ -193,7 +193,7 @@ async fn a_second_host_reads_refused_root_usage() -> Result<()> {
                     })
                     .build()
                     .into_handle(),
-                mock_model_spec(),
+                mock_llm_profile_spec(),
             )
             .build(crate::testing::runtime_lease_owner())
             .expect("build the second host's core");

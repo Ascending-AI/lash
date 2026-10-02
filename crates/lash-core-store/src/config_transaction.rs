@@ -39,7 +39,7 @@ pub struct CoreConfig {
     /// The recorded model and the reasoning it runs with. A model command
     /// records the binding the host's registry minted when it resolved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<crate::ModelConfig>,
+    pub model: Option<crate::LlmProfileConfig>,
     #[serde(
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"

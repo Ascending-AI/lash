@@ -331,7 +331,7 @@ pub enum RuntimeEffectCommand {
         /// the request's wire model it is the recorded selection the call runs
         /// under, so a replay whose policy names another key diverges instead
         /// of continuing on it.
-        model_key: crate::ModelKey,
+        profile_key: crate::LlmProfileKey,
         request: Box<LlmRequestSpec>,
     },
     /// Run host assistant-response hooks over the raw provider completion that
@@ -351,7 +351,7 @@ pub enum RuntimeEffectCommand {
         /// (or the tool child's) recorded selection at the time of the call.
         /// The usage ledger attributes the call to it, and a replay under
         /// another key diverges instead of continuing on it.
-        model_key: crate::ModelKey,
+        profile_key: crate::LlmProfileKey,
         request: Box<LlmRequestSpec>,
         usage_source: String,
     },
@@ -1416,7 +1416,7 @@ pub struct LlmRequestSpec {
     pub tool_choice: LlmToolChoice,
     pub model_variant: crate::ReasoningSelection,
     #[serde(default)]
-    pub model_capability: crate::ModelCapability,
+    pub llm_profile_capability: crate::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules the request
     /// renders its attachments under.
     #[serde(
@@ -1428,9 +1428,9 @@ pub struct LlmRequestSpec {
     pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(
         default,
-        skip_serializing_if = "crate::provider::ModelRequestDefaults::is_default"
+        skip_serializing_if = "crate::provider::LlmProfileRequestDefaults::is_default"
     )]
-    pub request_defaults: crate::provider::ModelRequestDefaults,
+    pub request_defaults: crate::provider::LlmProfileRequestDefaults,
     #[serde(default)]
     pub generation: crate::GenerationOptions,
     pub scope: crate::LlmRequestScope,
@@ -1486,7 +1486,7 @@ impl LlmRequestSpec {
             tools: Arc::clone(&request.tools),
             tool_choice: request.tool_choice.clone(),
             model_variant: request.model_variant.clone(),
-            model_capability: request.model_capability.clone(),
+            llm_profile_capability: request.llm_profile_capability.clone(),
             attachment_acceptance: Arc::clone(&request.attachment_acceptance),
             extra_body: request.extra_body.clone(),
             request_defaults: request.request_defaults.clone(),
@@ -1509,7 +1509,7 @@ impl LlmRequestSpec {
             tools: self.tools,
             tool_choice: self.tool_choice,
             model_variant: self.model_variant,
-            model_capability: self.model_capability,
+            llm_profile_capability: self.llm_profile_capability,
             attachment_acceptance: self.attachment_acceptance,
             extra_body: self.extra_body,
             request_defaults: self.request_defaults,

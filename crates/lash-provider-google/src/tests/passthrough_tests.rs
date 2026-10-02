@@ -43,7 +43,7 @@ async fn cloud_request_passthrough_refuses_owned_nested_and_header_conflicts() {
             .contains("/generationConfig/stopSequences")
     );
     let mut req = base.clone();
-    req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+    req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
     req.extra_body = json!({"generationConfig":{"temperature":0.3}})
         .as_object()
         .cloned()

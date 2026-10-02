@@ -21,7 +21,7 @@ const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn core_over(double: &lash_restate_test::RestateTestBackend) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -220,7 +220,7 @@ mod permanent_root_admission {
             move |_| store
         });
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())
             .expect("the core over the fenced admission store");
         const ID: &str = "permanent-root-admission";

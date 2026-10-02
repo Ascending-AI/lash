@@ -152,11 +152,11 @@ impl LashRuntime {
 
 /// A recorded config that selects no model has nothing to run a model call
 /// with. The absence is recorded, so no deployment repairs it and no retry
-/// changes it: the terminal `ModelUnconfigured`, as a session's open refuses
+/// changes it: the terminal `LlmProfileUnconfigured`, as a session's open refuses
 /// the same head (FIG-4531).
-pub(crate) fn model_unconfigured(error: SessionError) -> RuntimeError {
+pub(crate) fn llm_profile_unconfigured(error: SessionError) -> RuntimeError {
     RuntimeError::new(
-        RuntimeErrorCode::ModelUnconfigured,
+        RuntimeErrorCode::LlmProfileUnconfigured,
         format!("the recorded config selects no model: {error}"),
     )
 }
@@ -170,13 +170,15 @@ fn run_resolve_fault(
     error: crate::RunResolveError,
 ) -> RuntimeEffectControllerError {
     match error {
-        crate::RunResolveError::Model(error) => RuntimeEffectControllerError::model_unavailable(
-            &error.key,
-            format!(
-                "run spec `{hash}` names a model this worker does not serve; the root \
+        crate::RunResolveError::Model(error) => {
+            RuntimeEffectControllerError::llm_profile_unavailable(
+                &error.key,
+                format!(
+                    "run spec `{hash}` names a model this worker does not serve; the root \
                  retries until a deployment serves it: {error}"
-            ),
-        ),
+                ),
+            )
+        }
         crate::RunResolveError::Refused(refusal) => {
             RuntimeEffectControllerError::run_shape_refused(refusal)
         }
@@ -217,7 +219,7 @@ struct RootSpec {
     session_id: crate::SessionId,
     store: crate::store::SessionStore,
     definitions: crate::RunDefinitions,
-    models: std::sync::Arc<dyn crate::RuntimeModels>,
+    models: std::sync::Arc<dyn crate::LlmProfiles>,
 }
 
 impl RootSpec {
@@ -406,9 +408,9 @@ mod tests {
             .with_session_id("root-view-authority")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::testing::test_model_config(
+                model: Some(crate::testing::test_llm_profile_config(
                     "test-model",
-                    crate::ModelMetadata::builder("test-model")
+                    crate::LlmProfileMetadata::builder("test-model")
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),
@@ -463,15 +465,16 @@ mod tests {
     }
 
     /// FIG-4631: a recorded config that selects no model is a recorded
-    /// absence no deployment repairs. It is the terminal `ModelUnconfigured`
+    /// absence no deployment repairs. It is the terminal `LlmProfileUnconfigured`
     /// wherever the runtime meets it, as a session's open refuses the same
-    /// head (FIG-4531), and never the retried `ModelUnavailable`.
+    /// head (FIG-4531), and never the retried `LlmProfileUnavailable`.
     #[tokio::test]
     async fn a_recorded_config_that_selects_no_model_is_terminal_model_unconfigured() {
         let session_id = crate::SessionId::from("recorded-without-model");
-        let at_the_turn = super::model_unconfigured(crate::SessionError::ModelUnconfigured {
-            session_id: session_id.clone(),
-        });
+        let at_the_turn =
+            super::llm_profile_unconfigured(crate::SessionError::LlmProfileUnconfigured {
+                session_id: session_id.clone(),
+            });
 
         let mut runtime = Box::pin(
             LashRuntime::builder(
@@ -485,9 +488,9 @@ mod tests {
             .with_session_id(session_id.as_str())
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
-                model: Some(crate::testing::test_model_config(
+                model: Some(crate::testing::test_llm_profile_config(
                     "test-model",
-                    crate::ModelMetadata::builder("test-model")
+                    crate::LlmProfileMetadata::builder("test-model")
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),
@@ -509,7 +512,7 @@ mod tests {
         for refusal in [at_the_turn, at_root_admission] {
             assert_eq!(
                 refusal.code,
-                crate::RuntimeErrorCode::ModelUnconfigured,
+                crate::RuntimeErrorCode::LlmProfileUnconfigured,
                 "{refusal:?}"
             );
             assert!(
@@ -521,7 +524,7 @@ mod tests {
                 crate::TurnFailureCause::Outcome,
                 "the refusal is the work's outcome: {refusal:?}"
             );
-            assert_eq!(refusal.model_key(), None);
+            assert_eq!(refusal.profile_key(), None);
             assert!(
                 refusal.message.contains(session_id.as_str()),
                 "the refusal names the session: {refusal:?}"
@@ -530,21 +533,21 @@ mod tests {
     }
 
     /// FIG-4631: a run spec whose model key this worker does not serve ends
-    /// its resolution with the one `ModelUnavailable` fault: the key typed,
+    /// its resolution with the one `LlmProfileUnavailable` fault: the key typed,
     /// the attempt's fault, and the key in the text the engine keeps, so the
     /// park of the exhausted retries names it.
     #[test]
     fn an_unserved_run_spec_key_is_the_typed_attempt_fault() {
-        let key = crate::ModelKey::new("kimi-k3@tensorx");
+        let key = crate::LlmProfileKey::new("kimi-k3@tensorx");
         let fault = super::run_resolve_fault(
             &"spec-hash",
-            crate::RunResolveError::Model(crate::ModelUnavailable::new(
+            crate::RunResolveError::Model(crate::LlmProfileUnavailable::new(
                 key.clone(),
-                crate::ModelUnavailableReason::UnknownKey,
+                crate::LlmProfileUnavailableReason::UnknownKey,
             )),
         );
-        assert_eq!(fault.code, crate::RuntimeErrorCode::ModelUnavailable);
-        assert_eq!(fault.model_key(), Some(&key), "{fault:?}");
+        assert_eq!(fault.code, crate::RuntimeErrorCode::LlmProfileUnavailable);
+        assert_eq!(fault.profile_key(), Some(&key), "{fault:?}");
         assert!(
             fault
                 .journal_disposition(crate::RuntimeEffectKind::ResolveTurnConfig)
@@ -557,6 +560,6 @@ mod tests {
             None,
             format!("[500] {}", fault.attempt_failure_text()),
         );
-        assert_eq!(park.model_key(), Some(&key));
+        assert_eq!(park.profile_key(), Some(&key));
     }
 }

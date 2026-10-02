@@ -79,22 +79,22 @@ async fn worker_for(
     provider: lash_core::facade_support::ProviderHandle,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
-    worker_with_models(
+    worker_with_llm_profiles(
         engine_backend,
         registry,
         session_factory,
-        lash_core::testing::standard_test_models(provider),
+        lash_core::testing::standard_test_llm_profiles(provider),
         extra_plugins,
     )
     .await
 }
 
 /// A SessionTurn worker whose deployment installs `models`.
-async fn worker_with_models(
+async fn worker_with_llm_profiles(
     engine_backend: lash_core::Backend,
     registry: Arc<dyn ProcessRegistry>,
     session_factory: Arc<dyn lash_core::DeploymentStore>,
-    models: Arc<dyn lash_core::RuntimeModels>,
+    models: Arc<dyn lash_core::LlmProfiles>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
     let mut plugins = vec![
@@ -151,19 +151,19 @@ async fn parent_runtime(
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn lash_core::DeploymentStore>,
 ) -> lash_core::facade_support::LashRuntime {
-    parent_runtime_with_models(
+    parent_runtime_with_llm_profiles(
         registry,
         factory,
-        lash_core::testing::standard_test_models(answering_provider("parent lives")),
+        lash_core::testing::standard_test_llm_profiles(answering_provider("parent lives")),
     )
     .await
 }
 
 /// The parent session's runtime on a deployment that installs `models`.
-async fn parent_runtime_with_models(
+async fn parent_runtime_with_llm_profiles(
     registry: Arc<dyn ProcessRegistry>,
     factory: Arc<dyn lash_core::DeploymentStore>,
-    models: Arc<dyn lash_core::RuntimeModels>,
+    models: Arc<dyn lash_core::LlmProfiles>,
 ) -> lash_core::facade_support::LashRuntime {
     let parent = SessionId::from("test-parent");
     let policy = lash_core::SessionPolicy {
@@ -674,7 +674,7 @@ async fn keyed_registration_for(child: &SessionId) -> ProcessRegistration {
                     lash_core::PluginOptions::default(),
                 )
                 .with_session_id(child)
-                .with_model(lash_core::ModelKey::new(FAST)),
+                .with_llm_profile(lash_core::LlmProfileKey::new(FAST)),
             ),
             turn_input: Box::new(lash_core::TurnInput::text("run the child turn")),
             result: lash_core::SessionTurnOutcome::Turn,
@@ -688,23 +688,23 @@ async fn keyed_registration_for(child: &SessionId) -> ProcessRegistration {
 }
 
 /// A deployment that serves the standard test model and [`FAST`].
-fn models_serving_fast(
+fn llm_profiles_serving_fast(
     provider: lash_core::facade_support::ProviderHandle,
-) -> Arc<dyn lash_core::RuntimeModels> {
+) -> Arc<dyn lash_core::LlmProfiles> {
     Arc::new(
-        lash_core::ModelRegistry::new()
+        lash_core::LlmProfileRegistry::new()
             .register(
                 "mock-model",
-                lash_core::RegisteredModel::new(
-                    lash_core::testing::test_model_metadata("mock-model"),
+                lash_core::RegisteredLlmProfile::new(
+                    lash_core::testing::test_llm_profile_metadata("mock-model"),
                     provider.clone(),
                 ),
             )
             .and_then(|registry| {
                 registry.register(
                     FAST,
-                    lash_core::RegisteredModel::new(
-                        lash_core::testing::test_model_metadata("fast-wire"),
+                    lash_core::RegisteredLlmProfile::new(
+                        lash_core::testing::test_llm_profile_metadata("fast-wire"),
                         provider,
                     ),
                 )
@@ -715,27 +715,27 @@ fn models_serving_fast(
 
 /// A deployment that binds any recorded binding to its transport and mints
 /// nothing: every catalog read for a key is counted and refused.
-struct BindOnlyModels {
+struct BindOnlyLlmProfiles {
     provider: lash_core::facade_support::ProviderHandle,
     mints: std::sync::atomic::AtomicUsize,
 }
 
-impl lash_core::RuntimeModels for BindOnlyModels {
+impl lash_core::LlmProfiles for BindOnlyLlmProfiles {
     fn snapshot(
         &self,
-        key: &lash_core::ModelKey,
-    ) -> Result<lash_core::RecordedModel, lash_core::ModelUnavailable> {
+        key: &lash_core::LlmProfileKey,
+    ) -> Result<lash_core::RecordedLlmProfile, lash_core::LlmProfileUnavailable> {
         self.mints.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Err(lash_core::ModelUnavailable::new(
+        Err(lash_core::LlmProfileUnavailable::new(
             key.clone(),
-            lash_core::ModelUnavailableReason::UnknownKey,
+            lash_core::LlmProfileUnavailableReason::UnknownKey,
         ))
     }
 
     fn bind(
         &self,
-        _recorded: &lash_core::RecordedModel,
-    ) -> Result<lash_core::facade_support::ProviderHandle, lash_core::ModelUnavailable> {
+        _recorded: &lash_core::RecordedLlmProfile,
+    ) -> Result<lash_core::facade_support::ProviderHandle, lash_core::LlmProfileUnavailable> {
         Ok(self.provider.clone())
     }
 }
@@ -749,10 +749,10 @@ async fn commit_keyed_child(
     registration: &ProcessRegistration,
     process_id: &ProcessId,
 ) {
-    let parent = parent_runtime_with_models(
+    let parent = parent_runtime_with_llm_profiles(
         Arc::clone(registry),
         Arc::clone(factory),
-        models_serving_fast(answering_provider("parent lives")),
+        llm_profiles_serving_fast(answering_provider("parent lives")),
     )
     .await;
     let ProcessInput::SessionTurn { create_request, .. } = registration.input.as_ref() else {
@@ -788,15 +788,15 @@ async fn redelivery_of_a_committed_keyed_child_reopens_without_reading_the_catal
     let factory = memory_session_store_factory().await;
     commit_keyed_child(&registry, &factory, &registration, &process_id).await;
 
-    let models = Arc::new(BindOnlyModels {
+    let models = Arc::new(BindOnlyLlmProfiles {
         provider: answering_provider("redelivered child answered"),
         mints: std::sync::atomic::AtomicUsize::new(0),
     });
-    let worker = worker_with_models(
+    let worker = worker_with_llm_profiles(
         memory_engine_backend().await,
         Arc::clone(&registry),
         factory,
-        Arc::clone(&models) as Arc<dyn lash_core::RuntimeModels>,
+        Arc::clone(&models) as Arc<dyn lash_core::LlmProfiles>,
         Vec::new(),
     )
     .await;
@@ -933,24 +933,24 @@ impl lash_core::facade_support::PluginFactory for DefaultsFactory {
 const ADMITTING_DEFAULT: &str = "the-admitting-deployment-default";
 
 /// A deployment's models with every catalog read for a key counted.
-struct CountingModels {
-    inner: Arc<dyn lash_core::RuntimeModels>,
+struct CountingLlmProfiles {
+    inner: Arc<dyn lash_core::LlmProfiles>,
     mints: std::sync::atomic::AtomicUsize,
 }
 
-impl lash_core::RuntimeModels for CountingModels {
+impl lash_core::LlmProfiles for CountingLlmProfiles {
     fn snapshot(
         &self,
-        key: &lash_core::ModelKey,
-    ) -> Result<lash_core::RecordedModel, lash_core::ModelUnavailable> {
+        key: &lash_core::LlmProfileKey,
+    ) -> Result<lash_core::RecordedLlmProfile, lash_core::LlmProfileUnavailable> {
         self.mints.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.snapshot(key)
     }
 
     fn bind(
         &self,
-        recorded: &lash_core::RecordedModel,
-    ) -> Result<lash_core::facade_support::ProviderHandle, lash_core::ModelUnavailable> {
+        recorded: &lash_core::RecordedLlmProfile,
+    ) -> Result<lash_core::facade_support::ProviderHandle, lash_core::LlmProfileUnavailable> {
         self.inner.bind(recorded)
     }
 }
@@ -1012,11 +1012,11 @@ pub(super) async fn a_partially_created_child_completes_from_its_recorded_creati
     store.fail_next_runtime_commit(lash_core::StoreError::Contended);
     let context = Arc::new(ReplayableRecordingContext::default());
     let authority = test_restate_authority_id();
-    let admitting = worker_with_models(
+    let admitting = worker_with_llm_profiles(
         memory_engine_backend().await,
         Arc::clone(&registry),
         Arc::clone(&factory) as Arc<_>,
-        models_serving_fast(answering_provider("never asked")),
+        llm_profiles_serving_fast(answering_provider("never asked")),
         vec![Arc::new(DefaultsFactory {
             default: ADMITTING_DEFAULT,
         })],
@@ -1066,14 +1066,14 @@ pub(super) async fn a_partially_created_child_completes_from_its_recorded_creati
     );
 
     let provider = answering_provider("redelivered child answered");
-    let (models, default): (Arc<dyn lash_core::RuntimeModels>, _) = match redeployment {
+    let (models, default): (Arc<dyn lash_core::LlmProfiles>, _) = match redeployment {
         Redeployment::KeyMetadataChanged => (
             Arc::new(
-                lash_core::ModelRegistry::new()
+                lash_core::LlmProfileRegistry::new()
                     .register(
                         FAST,
-                        lash_core::RegisteredModel::new(
-                            lash_core::ModelMetadata::builder("fast-wire")
+                        lash_core::RegisteredLlmProfile::new(
+                            lash_core::LlmProfileMetadata::builder("fast-wire")
                                 .context_window_tokens(64_000)
                                 .build()
                                 .expect("valid changed metadata"),
@@ -1085,26 +1085,26 @@ pub(super) async fn a_partially_created_child_completes_from_its_recorded_creati
             ADMITTING_DEFAULT,
         ),
         Redeployment::KeyRemoved => (
-            Arc::new(BindOnlyModels {
+            Arc::new(BindOnlyLlmProfiles {
                 provider,
                 mints: std::sync::atomic::AtomicUsize::new(0),
             }),
             ADMITTING_DEFAULT,
         ),
         Redeployment::PluginDefaultsChanged => (
-            models_serving_fast(provider),
+            llm_profiles_serving_fast(provider),
             "the-redelivery-deployment-default",
         ),
     };
-    let models = Arc::new(CountingModels {
+    let models = Arc::new(CountingLlmProfiles {
         inner: models,
         mints: std::sync::atomic::AtomicUsize::new(0),
     });
-    let redelivering = worker_with_models(
+    let redelivering = worker_with_llm_profiles(
         memory_engine_backend().await,
         Arc::clone(&registry),
         Arc::clone(&factory) as Arc<_>,
-        Arc::clone(&models) as Arc<dyn lash_core::RuntimeModels>,
+        Arc::clone(&models) as Arc<dyn lash_core::LlmProfiles>,
         vec![Arc::new(DefaultsFactory { default })],
     )
     .await;
@@ -1246,14 +1246,14 @@ async fn unserved_committed_child(child: &str) -> UnservedCommittedChild {
 }
 
 /// FIG-4531: a model key this worker does not serve ends a session-turn
-/// attempt with the typed, retried `ModelUnavailable`, whether the child is
+/// attempt with the typed, retried `LlmProfileUnavailable`, whether the child is
 /// still to be created (the key cannot be minted) or already committed (its
 /// recorded binding cannot be bound). Neither is the generic plugin-session
 /// failure, and neither is the process's outcome. Either way the key
 /// reaches the park the engine's exhausted retries become (FIG-4631).
 #[tokio::test]
 async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
-    let key = lash_core::ModelKey::new(FAST);
+    let key = lash_core::LlmProfileKey::new(FAST);
 
     // The child is still to be created: its key cannot be minted here. The
     // fault is met outside any step, so the handler ends the attempt with it.
@@ -1291,25 +1291,29 @@ async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
         Err(error) => error,
         Ok(outcome) => panic!("an unserved key ends the attempt, got: {outcome:#?}"),
     };
-    let (code, model_key) = match &error {
-        PluginError::Runtime(runtime) => (Some(runtime.code.clone()), runtime.model_key()),
+    let (code, profile_key) = match &error {
+        PluginError::Runtime(runtime) => (Some(runtime.code.clone()), runtime.profile_key()),
         PluginError::RuntimeEffectController(controller) => {
-            (Some(controller.code.clone()), controller.model_key())
+            (Some(controller.code.clone()), controller.profile_key())
         }
         _ => (None, None),
     };
     assert_eq!(
         code,
-        Some(lash_core::RuntimeErrorCode::ModelUnavailable),
-        "the refusal is typed model_unavailable: {error:?}"
+        Some(lash_core::RuntimeErrorCode::LlmProfileUnavailable),
+        "the refusal is typed llm_profile_unavailable: {error:?}"
     );
-    assert_eq!(model_key, Some(&key), "the fault names the key: {error:?}");
+    assert_eq!(
+        profile_key,
+        Some(&key),
+        "the fault names the key: {error:?}"
+    );
     assert!(
         error.is_retryable() && !error.is_terminal(),
         "a deployment that serves the key repairs it: {error:?}"
     );
     assert_eq!(
-        park_of_exhausted_retries(&error.attempt_failure_text()).model_key(),
+        park_of_exhausted_retries(&error.attempt_failure_text()).profile_key(),
         Some(&key),
         "the park of the exhausted retries names the key"
     );
@@ -1317,7 +1321,7 @@ async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
     assert!(
         ended.contains("Retryable")
             && ended.contains("lash.error")
-            && ended.contains("model_unavailable"),
+            && ended.contains("llm_profile_unavailable"),
         "the handler ends the attempt retryably, with the fault's record: {ended}"
     );
 
@@ -1329,11 +1333,11 @@ async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
         Ok(returned) => panic!("the unbound model call ends the attempt, got: {returned:#?}"),
     };
     assert!(
-        ended.failure.starts_with("model_unavailable: "),
+        ended.failure.starts_with("llm_profile_unavailable: "),
         "the attempt fails with the typed code's text: {ended:?}"
     );
     assert_eq!(
-        park_of_exhausted_retries(&ended.failure).model_key(),
+        park_of_exhausted_retries(&ended.failure).profile_key(),
         Some(&key),
         "the park of the exhausted retries names the key: {ended:?}"
     );
@@ -1344,7 +1348,7 @@ async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
 /// deployment that serves the key runs the step again and completes. A
 /// journaled fault would replay as the same refusal on every attempt.
 #[tokio::test]
-async fn a_model_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again() {
+async fn a_profile_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again() {
     let committed = Box::pin(unserved_committed_child("never-journaled-bind-fault-child")).await;
     let ended = match committed.ended {
         Err(ended) => ended,
@@ -1359,7 +1363,7 @@ async fn a_model_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again
         for (effect, bytes) in records.iter() {
             let record = String::from_utf8_lossy(bytes);
             assert!(
-                !record.contains("model_unavailable"),
+                !record.contains("llm_profile_unavailable"),
                 "step `{effect}` journaled the bind fault: {record}"
             );
         }
@@ -1376,14 +1380,14 @@ async fn a_model_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again
     // The engine's retry: the journal replays, and the step runs again on a
     // deployment that binds the recorded model.
     committed.context.start_replay_allowing_journal_extension();
-    let worker = worker_with_models(
+    let worker = worker_with_llm_profiles(
         memory_engine_backend().await,
         Arc::clone(&committed.registry),
         Arc::clone(&committed.factory),
-        Arc::new(BindOnlyModels {
+        Arc::new(BindOnlyLlmProfiles {
             provider: answering_provider("the retry answered"),
             mints: std::sync::atomic::AtomicUsize::new(0),
-        }) as Arc<dyn lash_core::RuntimeModels>,
+        }) as Arc<dyn lash_core::LlmProfiles>,
         Vec::new(),
     )
     .await;
@@ -1418,8 +1422,8 @@ async fn a_model_bind_fault_is_never_journaled_and_its_retry_runs_the_step_again
 /// and its text is all that is kept; a value is journaled.
 #[tokio::test]
 async fn a_recording_context_ends_the_attempt_at_a_retried_fault_and_journals_nothing() {
-    let fault = lash_core::RuntimeEffectControllerError::model_unavailable(
-        &lash_core::ModelKey::new(FAST),
+    let fault = lash_core::RuntimeEffectControllerError::llm_profile_unavailable(
+        &lash_core::LlmProfileKey::new(FAST),
         "the recorded model cannot be bound on this worker",
     )
     .attempt_failure_text();

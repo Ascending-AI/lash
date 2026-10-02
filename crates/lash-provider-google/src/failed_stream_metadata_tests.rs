@@ -3,7 +3,7 @@
 fn capturing_reading(headers: &[&str], body_paths: &[&str]) -> crate::provider::ResponseReading {
     crate::provider::ResponseReading {
         stream_termination: StreamTermination::RequireTerminalEvidence,
-        defaults: lash_core::provider::ModelRequestDefaults {
+        defaults: lash_core::provider::LlmProfileRequestDefaults {
             response_metadata_headers: headers.iter().map(ToString::to_string).collect(),
             response_metadata_body_paths: body_paths.iter().map(ToString::to_string).collect(),
             ..Default::default()

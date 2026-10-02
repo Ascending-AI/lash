@@ -112,7 +112,7 @@ async fn probe_session(
     let core = lash::LashCore::standard_builder(backend.clone())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider_handle, model.clone())
+        .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     core.session(session_id.to_string())

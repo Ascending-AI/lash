@@ -49,7 +49,7 @@ fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<()> {
             });
         let double = restate_double(SEED).await;
         let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .plugin(Arc::new(StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("accept"),
                 spec,
@@ -119,7 +119,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
             })
             .into();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .plugin(Arc::new(StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("accept"),
                 spec,

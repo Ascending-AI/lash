@@ -78,7 +78,7 @@ impl TestBackend {
             .into_iter()
             .fold(builder, |builder, plugin| builder.plugin(plugin));
         explicit_ephemeral_facets(builder)
-            .serve_test_model(provider, mock_model_spec())
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())
             .expect("a core over the Restate double")
     }
@@ -300,9 +300,9 @@ async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;

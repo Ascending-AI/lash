@@ -1,5 +1,5 @@
 error[E0599]: no method named `provider` found for struct `LashCoreBuilder` in the current scope
-  --> tests/ui/models_are_selected_by_key.rs:10:10
+  --> tests/ui/llm_profiles_are_selected_by_key.rs:10:10
    |
  9 |       let _ = lash::LashCore::standard_builder(backend)
    |  _____________-
@@ -8,39 +8,39 @@ error[E0599]: no method named `provider` found for struct `LashCoreBuilder` in t
    | |_________|
    |
 
-error[E0277]: the trait bound `ModelKey: From<ModelMetadata>` is not satisfied
-  --> tests/ui/models_are_selected_by_key.rs:15:9
+error[E0277]: the trait bound `LlmProfileKey: From<LlmProfileMetadata>` is not satisfied
+  --> tests/ui/llm_profiles_are_selected_by_key.rs:15:9
    |
 14 |     let _ = lash::SessionSpec::new(
    |             ---------------------- required by a bound introduced by this call
 15 |         model,
-   |         ^^^^^ the trait `From<ModelMetadata>` is not implemented for `ModelKey`
+   |         ^^^^^ the trait `From<LlmProfileMetadata>` is not implemented for `LlmProfileKey`
    |
-help: `ModelKey` implements trait `From<T>`
-  --> $WORKSPACE/crates/lash-core-llm/src/model.rs
+help: `LlmProfileKey` implements trait `From<T>`
+  --> $WORKSPACE/crates/lash-core-llm/src/llm_profile.rs
    |
-   | impl From<&str> for ModelKey {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `From<&str>`
+   | impl From<&str> for LlmProfileKey {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `From<&str>`
 ...
-   | impl From<String> for ModelKey {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `From<std::string::String>`
-   = note: required for `ModelMetadata` to implement `Into<ModelKey>`
+   | impl From<String> for LlmProfileKey {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `From<std::string::String>`
+   = note: required for `LlmProfileMetadata` to implement `Into<LlmProfileKey>`
 note: required by a bound in `SessionSpec::new`
   --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
    |
    |     pub fn new(
    |            --- required by a bound in this associated function
-   |         model: impl Into<ModelKey>,
-   |                     ^^^^^^^^^^^^^^ required by this bound in `SessionSpec::new`
+   |         model: impl Into<LlmProfileKey>,
+   |                     ^^^^^^^^^^^^^^^^^^^ required by this bound in `SessionSpec::new`
 
 error[E0599]: no method named `provider` found for struct `SessionBuilder` in the current scope
-  --> tests/ui/models_are_selected_by_key.rs:22:35
+  --> tests/ui/llm_profiles_are_selected_by_key.rs:22:35
    |
 22 |     let _ = core.session("keyed").provider(provider);
    |                                   ^^^^^^^^ method not found in `SessionBuilder`
 
 error[E0599]: no method named `provider_id` found for struct `SendBuilder` in the current scope
-  --> tests/ui/models_are_selected_by_key.rs:26:21
+  --> tests/ui/llm_profiles_are_selected_by_key.rs:26:21
    |
 26 |     let _ = builder.provider_id("route");
    |                     ^^^^^^^^^^^ method not found in `SendBuilder`

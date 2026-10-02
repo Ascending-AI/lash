@@ -44,7 +44,7 @@ fn attachment_acceptance_wire_literals_are_pinned() {
     }
     // Acceptance is recorded session config beside the model: a model's
     // capability never carries it, so a model intent serializes none.
-    let capability = RemoteModelCapability::default();
+    let capability = RemoteLlmProfileCapability::default();
     assert!(capability.is_empty());
     let intent = RemoteModelIntent {
         model: "fixture".into(),

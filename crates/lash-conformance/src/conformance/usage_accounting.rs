@@ -448,7 +448,8 @@ impl World {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-        config.providers.models = crate::testing::standard_test_models(self.model().into_handle());
+        config.providers.models =
+            crate::testing::standard_test_llm_profiles(self.model().into_handle());
         let probe: Arc<dyn crate::ToolProvider> = Arc::new(Probe {
             world: self.clone(),
         });
@@ -1051,7 +1052,7 @@ async fn assert_admission_refused(tier: &UsageAccountingTier, world: &World) {
             execution_scope_key: "usage-law-after-retirement".to_string(),
             run: crate::UsageRunId::mint(),
             source: "turn".to_string(),
-            model_key: crate::ModelKey::new("usage-law-key"),
+            profile_key: crate::LlmProfileKey::new("usage-law-key"),
             requested_model: "usage-law".to_string(),
             admitted_at_ms: 1,
         })
@@ -1105,8 +1106,8 @@ pub async fn committed_turn_totals_are_preserved(tier: &UsageAccountingTier) {
         let policy = crate::testing::mock_session_policy();
         let attribution = crate::UsageAttributionKey {
             source: "turn".to_string(),
-            model_key: policy
-                .model_key()
+            profile_key: policy
+                .profile_key()
                 .unwrap_or_else(|| panic!("{label}: the law's policy records a model"))
                 .clone(),
             requested_model: policy.wire_model().unwrap_or_default().to_string(),

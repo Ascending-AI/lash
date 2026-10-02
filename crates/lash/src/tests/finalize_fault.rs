@@ -33,9 +33,9 @@ impl Fixture {
             .into_iter()
             .fold(builder, |builder, plugin| builder.plugin(plugin));
         let core = explicit_ephemeral_facets(builder)
-            .serve_test_model(
+            .serve_test_llm_profile(
                 counting_provider(Arc::clone(&provider_calls)),
-                mock_model_spec(),
+                mock_llm_profile_spec(),
             )
             .build(crate::testing::runtime_lease_owner())?;
         Ok(Self {

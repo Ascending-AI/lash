@@ -203,7 +203,7 @@ pub struct ProcessDefinitionLocalExecution {
 
 pub(super) struct LocalDirectEffectRunner {
     /// Bound only when this body runs, never on a replay (FIG-4404).
-    binding: crate::ModelBinding,
+    binding: crate::LlmProfileBinding,
     charge_safety: crate::ChargeSafetyPolicy,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     /// Who the call spends for (ADR 0125).
@@ -880,7 +880,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     pub fn direct(
-        binding: crate::ModelBinding,
+        binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         usage: DirectUsage,
@@ -1474,7 +1474,7 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
             RuntimeEffectCommand::Direct {
-                model_key,
+                profile_key,
                 request,
                 usage_source,
             } => {
@@ -1489,7 +1489,7 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                     provider,
                     request,
                     usage_source,
-                    model_key,
+                    profile_key,
                     usage_run.as_ref(),
                 )
                 .await

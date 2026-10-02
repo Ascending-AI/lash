@@ -966,7 +966,7 @@
       "p99_anon_peak_bytes": 49971200,
       "samples": 4
     },
-    "lash-runtime/model_keys": {
+    "lash-runtime/llm_profiles": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
       "p99_anon_peak_bytes": 160014336,
@@ -2204,7 +2204,7 @@
       "p99_anon_peak_bytes": 383467520,
       "samples": 31
     },
-    "lash-runtime/model_keys": {
+    "lash-runtime/llm_profiles": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
       "p99_anon_peak_bytes": 851001344,

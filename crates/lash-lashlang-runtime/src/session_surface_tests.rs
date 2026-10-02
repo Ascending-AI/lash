@@ -78,13 +78,15 @@ fn module_requiring_session_surface() -> lashlang::Program {
 
 fn session_policy() -> SessionPolicy {
     SessionPolicy {
-        model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-            lash_core::ModelKey::from("mock-model"),
-            lash_core::ModelMetadata::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .expect("session surface test model"),
-        ))),
+        model: Some(lash_core::LlmProfileConfig::new(
+            lash_core::RecordedLlmProfile::mint(
+                lash_core::LlmProfileKey::from("mock-model"),
+                lash_core::LlmProfileMetadata::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("session surface test model"),
+            ),
+        )),
         ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
     }
 }

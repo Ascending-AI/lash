@@ -1063,9 +1063,9 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         )),
     ));
     let core = lash::LashCore::standard_builder(backend.into())
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::ModelMetadata::new(
+            lash_core::LlmProfileMetadata::new(
                 "fig-430-model",
                 std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
             ),

@@ -437,7 +437,7 @@ pub enum ParkReason {
         /// that is why they failed (FIG-4404): a deployment that serves the
         /// key again lets a resume proceed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model_key: Option<crate::ModelKey>,
+        profile_key: Option<crate::LlmProfileKey>,
     },
 }
 
@@ -451,22 +451,22 @@ impl ParkReason {
         last_failure_code: Option<String>,
         message: String,
     ) -> Self {
-        let model_key = crate::runtime_error::RuntimeEffectControllerError::in_text(&message)
-            .and_then(|fault| fault.model_key().cloned());
+        let profile_key = crate::runtime_error::RuntimeEffectControllerError::in_text(&message)
+            .and_then(|fault| fault.profile_key().cloned());
         Self::EngineRetryExhausted {
             attempts,
             last_failure_code,
             message,
-            model_key,
+            profile_key,
         }
     }
 
     /// The recorded model key the parked work could not bind, when that is
     /// why its engine retries ran out.
     #[must_use]
-    pub fn model_key(&self) -> Option<&crate::ModelKey> {
+    pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
         match self {
-            Self::EngineRetryExhausted { model_key, .. } => model_key.as_ref(),
+            Self::EngineRetryExhausted { profile_key, .. } => profile_key.as_ref(),
             _ => None,
         }
     }

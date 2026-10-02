@@ -129,7 +129,7 @@ pub(super) fn soak_core(
     tool: Arc<super::witness::WitnessTool>,
 ) -> CoreBuild {
     Arc::new(move |backend, owner| {
-        let model = process::model_spec()?;
+        let model = process::llm_profile_spec()?;
         let processes = LashlangProcesses::over(&backend);
         lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -138,7 +138,7 @@ pub(super) fn soak_core(
                 generation_rank: rank.load(Ordering::SeqCst),
                 timings: soak_lease_timings(),
             })
-            .serve_test_model(soak_provider(Arc::clone(&reached)), model)
+            .serve_test_llm_profile(soak_provider(Arc::clone(&reached)), model)
             .tools(tool.clone() as Arc<dyn lash_core::ToolProvider>)
             .plugin(Arc::new(processes))
             .build(owner)

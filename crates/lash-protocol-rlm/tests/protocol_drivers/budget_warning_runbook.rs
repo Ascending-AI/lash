@@ -45,9 +45,9 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
             let backend = double.lash_backend();
             let session_id = SessionId::from("context-budget-runbook");
             let policy = SessionPolicy {
-                model: Some(lash_core::testing::test_model_config(
+                model: Some(lash_core::testing::test_llm_profile_config(
             "scripted-budget-model",
-            lash_core::ModelMetadata::builder("scripted-budget-model")
+            lash_core::LlmProfileMetadata::builder("scripted-budget-model")
                     .context_window_tokens(41_000).build().expect("model spec"),
         )),
                 ..SessionPolicy::new(TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
@@ -135,7 +135,7 @@ fn scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_se
                 QueuedWorkBatchingConfig::new(1),
             );
             host_config.providers.models =
-                lash_core::testing::models_serving(&policy, provider);
+                lash_core::testing::llm_profiles_serving(&policy, provider);
             let host = EmbeddedRuntimeHost::new(host_config);
             let services = PersistentRuntimeServices::new(
                 plugins,

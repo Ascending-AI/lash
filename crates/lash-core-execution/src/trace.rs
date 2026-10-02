@@ -474,7 +474,12 @@ pub fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 32]]) -
     debug_assert_eq!(req.tools.len(), tool_fingerprints.len());
     let mut hash = Blake3DomainHasher::new(LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION);
     hash.update([u8::from(req.instructions.is_some())]);
-    hash.update(req.model_capability.instruction_role.as_str().as_bytes());
+    hash.update(
+        req.llm_profile_capability
+            .instruction_role
+            .as_str()
+            .as_bytes(),
+    );
     if let Some(text) = &req.instructions {
         hash.update(text.len().to_le_bytes());
         hash.update(text.as_bytes());

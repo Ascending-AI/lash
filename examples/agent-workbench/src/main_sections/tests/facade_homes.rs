@@ -5,14 +5,14 @@ use lash::rlm::RlmSendBuilderExt;
 const SEED: u64 = 0xf9_0006;
 
 #[test]
-fn host_model_capability_validates_reasoning_effort_selections() {
+fn host_llm_profile_capability_validates_reasoning_effort_selections() {
     use lash::provider::{
-        ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
+        LlmProfileEffortValidationCategory, LlmProfileEffortValidationError, ReasoningCapability,
         ReasoningEncoding, ReasoningSelection,
     };
 
-    let capability = workbench_model_capability();
-    let unsupported: ModelEffortValidationError = capability
+    let capability = workbench_llm_profile_capability();
+    let unsupported: LlmProfileEffortValidationError = capability
         .validate_selection(
             "workbench-model",
             "workbench-provider",
@@ -21,7 +21,7 @@ fn host_model_capability_validates_reasoning_effort_selections() {
         .expect_err("host capability must reject an unadvertised effort");
     assert_eq!(
         unsupported.category,
-        ModelEffortValidationCategory::UnsupportedEffort
+        LlmProfileEffortValidationCategory::UnsupportedEffort
     );
     assert!(unsupported.message.contains("Unsupported effort `ultra`"));
     capability
@@ -40,10 +40,10 @@ fn host_model_capability_validates_reasoning_effort_selections() {
             )
             .expect_err("effort names match exactly")
             .category,
-        ModelEffortValidationCategory::UnsupportedEffort
+        LlmProfileEffortValidationCategory::UnsupportedEffort
     );
 
-    let not_configurable = lash::provider::ModelCapability::default()
+    let not_configurable = lash::provider::LlmProfileCapability::default()
         .validate_selection(
             "plain-model",
             "workbench-provider",
@@ -52,7 +52,7 @@ fn host_model_capability_validates_reasoning_effort_selections() {
         .expect_err("plain model must reject configurable effort");
     assert_eq!(
         not_configurable.category,
-        ModelEffortValidationCategory::EffortNotConfigurable
+        LlmProfileEffortValidationCategory::EffortNotConfigurable
     );
     assert!(
         not_configurable
@@ -75,11 +75,11 @@ fn host_model_capability_validates_reasoning_effort_selections() {
         .expect_err("mandatory reasoning must require an explicit effort");
     assert_eq!(
         required.category,
-        ModelEffortValidationCategory::EffortRequired
+        LlmProfileEffortValidationCategory::EffortRequired
     );
     assert!(required.message.contains("requires an explicit effort"));
 
-    let malformed_capability = lash::provider::ModelCapability {
+    let malformed_capability = lash::provider::LlmProfileCapability {
         reasoning: Some(ReasoningCapability {
             efforts: vec!["low".to_string(), "high".to_string()],
             encoding: ReasoningEncoding::Budget(BTreeMap::from([("low".to_string(), 1_024)])),
@@ -97,7 +97,7 @@ fn host_model_capability_validates_reasoning_effort_selections() {
         .expect_err("budget map must cover every advertised effort");
     assert_eq!(
         malformed.category,
-        ModelEffortValidationCategory::MalformedCapability
+        LlmProfileEffortValidationCategory::MalformedCapability
     );
     assert!(
         malformed
@@ -128,13 +128,13 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .complete_error("config patch test should not call the provider")
             .build()
             .into_handle();
-        let initial_model = lash::ModelMetadata::builder("workbench-model-before")
+        let initial_profile = lash::LlmProfileMetadata::builder("workbench-model-before")
             .context_window_tokens(4_096)
             .build()
             .expect("initial config change model");
         let double = test_double_backend(SEED).await;
         let core = explicit_durable_test_facets_on(double.lash_backend())
-            .serve_workbench_model(provider, initial_model)
+            .serve_workbench_llm_profile(provider, initial_profile)
             .plugin(plugin)
             .build(crate::test_core_owner())
             .expect("build config change workbench core");
@@ -147,7 +147,7 @@ fn workbench_plugin_observes_session_config_policy_transition() {
         .open()
         .await
         .expect("open config change session");
-        let patched_model = lash::ModelMetadata::builder("workbench-model-after")
+        let patched_model = lash::LlmProfileMetadata::builder("workbench-model-after")
             .context_window_tokens(8_192)
             .build()
             .expect("patched config change model");
@@ -155,8 +155,8 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .admin()
             .config()
             .configure(lash::config::ConfigTransaction::of(
-                lash::config::SetModel {
-                    model: lash::ModelKey::new(patched_model.wire_model.clone()),
+                lash::config::SetLlmProfile {
+                    model: lash::LlmProfileKey::new(patched_model.wire_model.clone()),
                 },
             ))
             .await
@@ -166,15 +166,15 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             config_changes.latest(),
             Some(WorkbenchConfigChange {
                 session_id: SessionId::from("workbench-config-change-session"),
-                previous_model_id: "workbench-model-before".to_string(),
-                current_model_id: "workbench-model-after".to_string(),
-                service_model_id: "workbench-model-after".to_string(),
+                previous_profile_key: "workbench-model-before".to_string(),
+                current_profile_key: "workbench-model-after".to_string(),
+                service_profile_key: "workbench-model-after".to_string(),
             })
         );
         assert_eq!(
             session
                 .policy_snapshot()
-                .model_key()
+                .profile_key()
                 .map(ToString::to_string),
             Some("workbench-model-after".to_string())
         );
@@ -219,9 +219,9 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .into_handle();
         let double = test_double_backend(SEED).await;
         let core = explicit_durable_test_facets_on(double.lash_backend())
-            .serve_test_model(
+            .serve_test_llm_profile(
                 provider,
-                lash::ModelMetadata::builder("workbench-context-transform-model")
+                lash::LlmProfileMetadata::builder("workbench-context-transform-model")
                     .context_window_tokens(4_096)
                     .build()
                     .expect("context transform model"),

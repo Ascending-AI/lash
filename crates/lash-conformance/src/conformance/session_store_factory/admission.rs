@@ -100,9 +100,9 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
     assert_eq!(created_head.leaf_node_id, None);
     let restated = crate::SessionStoreCreateRequest {
         config: crate::PersistedSessionConfig::from(&crate::SessionPolicy {
-            model: Some(crate::testing::test_model_config(
+            model: Some(crate::testing::test_llm_profile_config(
                 "a-rebinding-model",
-                crate::ModelMetadata::builder("a-rebinding-model")
+                crate::LlmProfileMetadata::builder("a-rebinding-model")
                     .context_window_tokens(1_000)
                     .build()
                     .expect("valid test model"),

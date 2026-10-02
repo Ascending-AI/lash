@@ -43,12 +43,12 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         })
         .build()
         .into_handle();
-    let model = lash::ModelMetadata::builder("test-model")
+    let model = lash::LlmProfileMetadata::builder("test-model")
         .context_window_tokens(4096)
         .build()
         .expect("model spec");
     let first_core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(first_provider, model.clone())
+        .serve_workbench_llm_profile(first_provider, model.clone())
         .build(crate::test_core_owner())
         .expect("build first workbench core");
     let first_session = crate::created_session(&first_core, session_id.clone())
@@ -213,7 +213,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let resumed_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let resumed_core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(resumed_provider, model)
+        .serve_workbench_llm_profile(resumed_provider, model)
         .build(crate::test_core_owner())
         .expect("build reconstructed workbench core");
     let resumed_session_ids =
@@ -233,7 +233,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         // Process work is resolved through the core.
         sessions: resumed_session_ids,
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

@@ -21,7 +21,7 @@ async fn approval_test_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
 
-        .serve_workbench_model(provider, test_model())
+        .serve_workbench_llm_profile(provider, test_llm_profile())
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
@@ -235,7 +235,7 @@ finish(result);
             process_observer: lash::process::ProcessWorkObserver::new(process_registry),
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
-            selected_model: Arc::new(Mutex::new(ModelSelection {
+            selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
                 model: "test-model".to_string(),
                 model_variant: Default::default(),
             })),
@@ -608,7 +608,7 @@ try {
         &backend,
         // The reopen's registry must serve the session's recorded model key
         // with the wire model it recorded (ADR 0066): a changed wire model is
-        // refused as `ModelUnavailable`. The panicking completer still proves
+        // refused as `LlmProfileUnavailable`. The panicking completer still proves
         // the read never reaches it.
         lash::testing::TestProvider::builder()
             .kind("async-completion-redrive")

@@ -33,7 +33,7 @@ pub use lash_core_execution::runtime::{
 };
 pub use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;
-pub(crate) use lash_core_llm::model;
+pub(crate) use lash_core_llm::llm_profile;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::config_transaction::{
@@ -244,8 +244,8 @@ pub mod facade_support {
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
     pub use crate::provider::GenerationRetryGuarantee;
+    pub use crate::provider::LlmProfileEffortValidationCategory;
     pub use crate::provider::LlmTimeouts;
-    pub use crate::provider::ModelEffortValidationCategory;
     pub use crate::provider::Provider;
     pub use crate::provider::ProviderComponents;
     pub use crate::provider::ProviderHandle;
@@ -555,7 +555,7 @@ pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
 };
 pub use protocol_build::ProtocolBuildInput;
-pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
+pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 pub use tool_registry::{
     SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
     ToolSurfaceOpenMode,
@@ -622,9 +622,9 @@ pub use lash_trace::{
     TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
-pub use model::{
-    ModelConfig, ModelKey, ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder,
-    ReasoningRefused, RecordedModel,
+pub use llm_profile::{
+    LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata,
+    LlmProfileMetadataBuilder, ReasoningRefused, RecordedLlmProfile,
 };
 pub(crate) use plugin::PluginRuntimeDirective;
 pub use plugin::{
@@ -652,14 +652,14 @@ pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-    InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+    InstructionRole, LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability,
     ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
     ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub use provider::{
-    EmptyModels, ModelRegistry, ModelUnavailable, ModelUnavailableReason, RegisteredModel,
-    RegistrationError, RuntimeModels,
+    EmptyLlmProfiles, LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason,
+    LlmProfiles, RegisteredLlmProfile, RegistrationError,
 };
 pub(crate) use provider::{ProviderCompletion, ProviderCompletionError};
 #[cfg(any(test, feature = "testing"))]
@@ -812,7 +812,7 @@ pub use session_graph::{
     SessionNodePayload, SessionNodeRecord,
 };
 
-pub use session_model::ModelBinding;
+pub use session_model::LlmProfileBinding;
 pub use session_model::{
     ChargeSafetyPolicy, MaxToolCalls, NoProgressBudget, SessionPolicy, ToolCallLimitExceeded,
     ToolCallLimitScope, TurnBudget,

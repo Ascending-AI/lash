@@ -5,7 +5,7 @@
 //!
 //! The core owner is not a plugin. Its share of the session's config is the
 //! [`CoreConfig`] view of the config head and its reducers are the functions
-//! here. [`SetModel`] names a key; its reducer mints the key's binding
+//! here. [`SetLlmProfile`] names a key; its reducer mints the key's binding
 //! through the host's models when the transaction resolves, and the
 //! resolution records it (FIG-4374). The final candidate's reasoning is
 //! judged against the model it records.
@@ -45,22 +45,22 @@ pub struct CoreConfigOwner;
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreConfigRefusal {
-    /// The host's models register no model under the key a [`SetModel`]
+    /// The host's models register no model under the key a [`SetLlmProfile`]
     /// named.
-    UnknownModel { key: crate::ModelKey },
+    UnknownLlmProfile { key: crate::LlmProfileKey },
     /// The candidate's reasoning does not fit the capability its recorded
     /// model declares.
     ReasoningRefused {
-        key: crate::ModelKey,
+        key: crate::LlmProfileKey,
         reasoning: crate::ReasoningSelection,
-        category: crate::provider::ModelEffortValidationCategory,
+        category: crate::provider::LlmProfileEffortValidationCategory,
         message: String,
     },
     /// A charge-safety policy that accepts more unsafe retries than Lash admits.
     UnsafeRetriesAboveCeiling { requested: u8, ceiling: u8 },
     /// The candidate selects a reasoning but records no model to run it
     /// with.
-    ReasoningWithoutModel {
+    ReasoningWithoutLlmProfile {
         reasoning: crate::ReasoningSelection,
     },
 }
@@ -68,11 +68,11 @@ pub enum CoreConfigRefusal {
 impl std::fmt::Display for CoreConfigRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownModel { key } => {
+            Self::UnknownLlmProfile { key } => {
                 write!(formatter, "the host's models register no model `{key}`")
             }
             Self::ReasoningRefused { message, .. } => formatter.write_str(message),
-            Self::ReasoningWithoutModel { reasoning } => write!(
+            Self::ReasoningWithoutLlmProfile { reasoning } => write!(
                 formatter,
                 "reasoning {reasoning:?} needs a model, and the session records none"
             ),
@@ -167,14 +167,14 @@ impl ConfigOwner for CoreConfigOwner {
 /// [`SetAttachmentAcceptance`] replaces.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SetModel {
-    pub model: crate::ModelKey,
+pub struct SetLlmProfile {
+    pub model: crate::LlmProfileKey,
 }
 
-impl ConfigCommand for SetModel {
+impl ConfigCommand for SetLlmProfile {
     type Owner = CoreConfigOwner;
     type Output = ();
-    const NAME: &'static str = "set_model";
+    const NAME: &'static str = "set_llm_profile";
 }
 
 /// The reasoning the session runs its model with from here on. It is judged
@@ -342,11 +342,11 @@ fn changed(core: CoreConfig) -> Result<OwnerChange<CoreConfig, ()>, CoreConfigRe
 pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError> {
     let mut reg = ConfigRegistrar::new(CORE_CONFIG_OWNER);
     reg.owner(CoreConfigOwner)?;
-    reg.models_command::<SetModel>(|core, command, models| {
+    reg.llm_profiles_command::<SetLlmProfile>(|core, command, models| {
         let recorded =
             models
                 .snapshot(&command.model)
-                .map_err(|_| CoreConfigRefusal::UnknownModel {
+                .map_err(|_| CoreConfigRefusal::UnknownLlmProfile {
                     key: command.model.clone(),
                 })?;
         let reasoning = core
@@ -355,7 +355,7 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
             .map(|model| model.reasoning.clone())
             .unwrap_or_default();
         changed(CoreConfig {
-            model: Some(crate::ModelConfig {
+            model: Some(crate::LlmProfileConfig {
                 model: recorded,
                 reasoning,
             }),
@@ -365,7 +365,7 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
     reg.command::<SetReasoning>(|core, command| {
         let mut next = core.clone();
         let Some(model) = next.model.as_mut() else {
-            return Err(CoreConfigRefusal::ReasoningWithoutModel {
+            return Err(CoreConfigRefusal::ReasoningWithoutLlmProfile {
                 reasoning: command.reasoning,
             });
         };

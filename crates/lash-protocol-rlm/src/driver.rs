@@ -302,7 +302,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
             model_variant: ctx.config.model_variant.clone(),
-            model_capability: ctx.config.model_capability.clone(),
+            llm_profile_capability: ctx.config.llm_profile_capability.clone(),
             extra_body: ctx.config.extra_body.clone(),
             request_defaults: ctx.config.request_defaults.clone(),
             scope: LlmRequestScope::new(

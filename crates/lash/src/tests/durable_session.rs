@@ -86,7 +86,7 @@ fn counting_factory(
 
 fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -608,7 +608,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     // queued-work port, so this leg runs on a second core whose driver is
     // dropped before the pending reads below.
     let drive_core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = drive_core
         .session("checkpointed")
@@ -654,7 +654,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     let double = latest_double().expect("the backend runs on its held double");
     let factory = double.stores().session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let absent = core.session("sqlite-absent").durable().await?;
@@ -740,7 +740,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
 async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session() -> Result<()>
 {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("durable-observation")
@@ -798,7 +798,7 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
 async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-no-runtime");
     // Create the session, then release every runtime: nothing is live.
@@ -844,7 +844,7 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
 #[tokio::test]
 async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-beside-writer");
     let writer = core
@@ -1097,7 +1097,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     // follows must stay pending, so it goes through the grantless core — the
     // only core left without a driver once this one is dropped.
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core
@@ -1147,7 +1147,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
             })
             .into(),
     ))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
@@ -1276,7 +1276,7 @@ async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_ses
     let backend = DecoratedBackend::over(double.lash_backend())
         .session_store_factory(|inner| Arc::new(NoByIdLookupFactory { inner }));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     // The session exists because create wrote its catalog metadata.
@@ -1341,7 +1341,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("durable-held-input");
     let session = core
@@ -1424,7 +1424,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
             })
             .into(),
     ))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(Arc::new(RuntimeBuildProbeFactory {
         counters: Arc::clone(&counters),
     }))
@@ -1483,7 +1483,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // runs the input that was waiting. The store-seeded row was never
     // scheduled, so a second core supplies the drive that reconciles it.
     let drive_core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     // `idle`'s created handle still holds a writer claim: the drive core's
     // open races its release under the double.
@@ -1517,7 +1517,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 async fn a_retried_create_is_refused_and_preserves_the_recorded_relation() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("create-parent")
@@ -1627,7 +1627,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     let backend = double.lash_backend();
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     drop(
         core.session("create-deleted")
@@ -1665,7 +1665,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
 async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     crate::tests::create_catalog_session(&core, "fig3544-enqueue-conflict").await?;
     let durable = core.session("fig3544-enqueue-conflict").durable().await?;

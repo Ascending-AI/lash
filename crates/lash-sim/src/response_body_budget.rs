@@ -84,9 +84,9 @@ async fn witness(
                         calls: calls.clone(),
                     }));
                 let core = lash::LashCore::standard_builder(double.lash_backend())
-                    .serve_test_model(
+                    .serve_test_llm_profile(
                         ProviderHandle::new(provider.into_components()),
-                        lash::ModelMetadata::builder("budget-model")
+                        lash::LlmProfileMetadata::builder("budget-model")
                             .context_window_tokens(16_000)
                             .build()
                             .unwrap(),

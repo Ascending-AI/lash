@@ -12,7 +12,7 @@ async fn generation_changes_are_patches_and_a_reopen_writes_nothing() -> Result<
     let backend = double.lash_backend();
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     core.session("generation-merge")
         .create(crate::SessionCreation {

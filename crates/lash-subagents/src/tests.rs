@@ -39,14 +39,14 @@ const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 const SEED: u64 = 0xf10_a06;
 
 /// `model`'s binding as the host catalog mints it, run with `variant`.
-fn model_spec(
+fn llm_profile_spec(
     model: &str,
     variant: Option<String>,
     context_window_tokens: usize,
-) -> Option<lash_core::ModelConfig> {
-    let config = lash_core::testing::test_model_config(
+) -> Option<lash_core::LlmProfileConfig> {
+    let config = lash_core::testing::test_llm_profile_config(
         model,
-        lash_core::ModelMetadata::builder(model)
+        lash_core::LlmProfileMetadata::builder(model)
             .context_window_tokens(context_window_tokens)
             .build()
             .expect("valid model spec"),
@@ -91,7 +91,7 @@ fn typescript_block(code: &str) -> String {
 #[test]
 fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
     let current = SessionPolicy {
-        model: model_spec("parent-model", Some("parent-variant".to_string()), 200_000),
+        model: llm_profile_spec("parent-model", Some("parent-variant".to_string()), 200_000),
         generation: lash_core::GenerationOptions {
             seed: Some(77),
             ..Default::default()
@@ -107,7 +107,7 @@ fn static_capability_policy_fields_distinguish_inherit_set_and_clear() {
     let request = build_session_request(&registry, &current, "child").expect("request");
     assert_eq!(
         request.model,
-        Some(lash_core::ModelKey::new("child-model")),
+        Some(lash_core::LlmProfileKey::new("child-model")),
         "the capability's key rides the request, minted when the child is created"
     );
     let policy = request.policy.expect("policy");
@@ -173,7 +173,7 @@ fn capability_can_build_complete_spawn_request() {
     let registry = CapabilityRegistry::new().with(Arc::new(CustomRequestCapability));
     let current_snapshot = RuntimeSessionState {
         policy: SessionPolicy {
-            model: model_spec("parent-model", None, 200_000),
+            model: llm_profile_spec("parent-model", None, 200_000),
             ..SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -362,14 +362,14 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     // one. The final child policy inherits the live policy's explicit
     // model spec.
     let stale_policy = SessionPolicy {
-        model: model_spec("stale-parent", None, 200_000),
+        model: llm_profile_spec("stale-parent", None, 200_000),
         ..SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
         )
     };
     let live_policy = SessionPolicy {
-        model: model_spec("live-parent", None, 1234),
+        model: llm_profile_spec("live-parent", None, 1234),
         ..SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
@@ -1107,13 +1107,13 @@ async fn run_seed_probe_inner(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
-        config.providers.models = lash_core::testing::standard_test_models(provider.clone());
+        config.providers.models = lash_core::testing::standard_test_llm_profiles(provider.clone());
         config.with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
             process_engine.clone(),
         ))
     });
     let policy = SessionPolicy {
-        model: model_spec("mock-model", None, 64_000),
+        model: llm_profile_spec("mock-model", None, 64_000),
         turn_budget: lash_core::TurnBudget::bounded(4),
         ..SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1136,7 +1136,7 @@ async fn run_seed_probe_inner(
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 );
                 config.providers.models =
-                    lash_core::testing::standard_test_models(provider.clone());
+                    lash_core::testing::standard_test_llm_profiles(provider.clone());
                 config.with_process_engine_registration(
                     lash_core::ProcessEngineRegistration::accepting(process_engine),
                 )

@@ -9,7 +9,7 @@ than correlate a separate transport observation.
 ## Decision
 
 `LlmResponse.response_metadata` is a map of raw JSON values. The recorded
-model's `ModelRequestDefaults` supplies two allowlists: case-insensitive
+model's `LlmProfileRequestDefaults` supplies two allowlists: case-insensitive
 response header names and JSON pointers into response bodies. Both are empty
 by default. They are recorded with the model binding and carried on every
 request, so what a session's calls capture does not depend on the worker that

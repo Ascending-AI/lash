@@ -25,7 +25,7 @@ loads its recorded configuration, and refuses an unknown or deleted id.
 Opening does not select a new model or reconcile a host seed into the head.
 An open supplies no model: the recorded binding stands, and its key binds
 against the core's registry when a request runs. A key the registry does not
-serve, or one now serving another wire model, is refused `ModelUnavailable`.
+serve, or one now serving another wire model, is refused `LlmProfileUnavailable`.
 
 `effective_policy()` reads session policy directly. `FrameOpen` assignments
 are immutable history and retain the model recorded when the frame opens.

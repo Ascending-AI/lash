@@ -5,10 +5,10 @@ use super::*;
 
 /// `key`'s binding as a registry mints it: its own wire model and a 32k
 /// window.
-fn recorded_model(key: &str) -> crate::ModelConfig {
-    crate::ModelConfig::new(crate::RecordedModel::mint(
-        crate::ModelKey::new(key),
-        lash_core_llm::model::ModelMetadata::builder(format!("{key}-wire"))
+fn recorded_llm_profile(key: &str) -> crate::LlmProfileConfig {
+    crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+        crate::LlmProfileKey::new(key),
+        lash_core_llm::llm_profile::LlmProfileMetadata::builder(format!("{key}-wire"))
             .context_window_tokens(32_000)
             .build()
             .expect("model"),
@@ -457,7 +457,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("snapshot-test"),
         policy: SessionPolicy {
-            model: Some(recorded_model("mock")),
+            model: Some(recorded_llm_profile("mock")),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         },
         head_revision: 42,
@@ -491,7 +491,7 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
     let hydrated = RuntimeSessionState::from_snapshot(snapshot);
 
     assert_eq!(hydrated.session_id, "snapshot-test");
-    assert_eq!(hydrated.policy.model, Some(recorded_model("mock")));
+    assert_eq!(hydrated.policy.model, Some(recorded_llm_profile("mock")));
     assert_eq!(hydrated.head_revision, 0);
     assert!(hydrated.tool_state_snapshot().is_none());
     assert!(hydrated.plugin_state().is_none());
@@ -771,20 +771,20 @@ fn taking_a_root_view_restores_the_sticky_config() {
         crate::MaxToolCalls::new(1024),
     ));
     state.session_id = SessionId::from("take-root-view-law");
-    state.policy.model = Some(recorded_model("sticky-route"));
+    state.policy.model = Some(recorded_llm_profile("sticky-route"));
     state.config_revision = 3;
     let sticky = crate::store::persisted_session_config_from_state(&state);
     assert!(state.take_root_view().is_none(), "no view is installed");
 
     let mut first = sticky.clone();
-    first.model = Some(recorded_model("first-root-route"));
+    first.model = Some(recorded_llm_profile("first-root-route"));
     first.generation.seed = Some(7);
     first.tool_access = crate::SessionToolAccess::ambient()
         .with_hidden_tools(["hidden-by-root-view"])
         .expect("valid hidden tool");
     install_view(&mut state, &first);
     let mut second = sticky.clone();
-    second.model = Some(recorded_model("second-root-route"));
+    second.model = Some(recorded_llm_profile("second-root-route"));
     install_view(&mut state, &second);
     assert_eq!(
         crate::store::execution_session_config_from_state(&state),
@@ -820,7 +820,7 @@ fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
         crate::MaxToolCalls::new(1024),
     ));
     state.session_id = SessionId::from("recorded-view-law");
-    state.policy.model = Some(recorded_model("sticky-route"));
+    state.policy.model = Some(recorded_llm_profile("sticky-route"));
     let sticky = state.policy.clone();
     assert_eq!(
         crate::SessionReadView::recorded_from_runtime_state(&state)
@@ -831,7 +831,7 @@ fn recorded_session_view_reads_the_sticky_config_under_a_root_view() {
     );
 
     let mut root = crate::store::persisted_session_config_from_state(&state);
-    root.model = Some(recorded_model("root-route"));
+    root.model = Some(recorded_llm_profile("root-route"));
     root.generation.seed = Some(7);
     install_view(&mut state, &root);
 
@@ -852,10 +852,10 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         crate::MaxToolCalls::new(1024),
     ));
     state.session_id = SessionId::from("root-config-law");
-    state.policy.model = Some(recorded_model("sticky-route"));
+    state.policy.model = Some(recorded_llm_profile("sticky-route"));
     let sticky = crate::store::persisted_session_config_from_state(&state);
     let mut root = sticky.clone();
-    root.model = Some(recorded_model("root-route"));
+    root.model = Some(recorded_llm_profile("root-route"));
     root.autonomous = !sticky.autonomous;
 
     install_view(&mut state, &root);
@@ -873,7 +873,10 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
         )
         .expect("root commit");
     assert_eq!(commit.config, sticky);
-    assert_eq!(commit.config.model, Some(recorded_model("sticky-route")));
+    assert_eq!(
+        commit.config.model,
+        Some(recorded_llm_profile("sticky-route"))
+    );
 
     // A failed settlement leaves only the in-memory execution view. A
     // subsequent head reload and recorded replay must still commit the head.
@@ -914,7 +917,7 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     .expect("next root reload");
     assert_eq!(
         state.to_snapshot().policy.model,
-        Some(recorded_model("sticky-route"))
+        Some(recorded_llm_profile("sticky-route"))
     );
     assert_eq!(state.to_snapshot().policy.autonomous, sticky.autonomous);
 }
@@ -931,7 +934,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
         crate::MaxToolCalls::new(1024),
     ));
     state.session_id = SessionId::from("root-config-identity");
-    state.policy.model = Some(recorded_model("first-route"));
+    state.policy.model = Some(recorded_llm_profile("first-route"));
     let first = crate::store::persisted_session_config_from_state(&state);
     let commit_under = |state: &RuntimeSessionState| {
         crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
@@ -956,7 +959,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
     // A config change lands on the head after the root committed; the
     // redrive adopts that head, then replays the root's recorded view.
     let mut changed = first.clone();
-    changed.model = Some(recorded_model("second-route"));
+    changed.model = Some(recorded_llm_profile("second-route"));
     changed.config_revision += 1;
     state.take_root_view();
     adopt_session_config(&mut state, &changed);
@@ -974,7 +977,7 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
 
     // A root that ran under another view is another operation.
     let mut other = first.clone();
-    other.model = Some(recorded_model("other-route"));
+    other.model = Some(recorded_llm_profile("other-route"));
     install_view(&mut state, &other);
     assert_ne!(
         commit_under(&state)
@@ -1158,7 +1161,7 @@ fn a_redriven_root_runs_under_its_admitted_plugin_config_revision() {
             None,
             crate::run_spec::TerminationPolicy::default(),
             crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
-            &crate::provider::EmptyModels,
+            &crate::provider::EmptyLlmProfiles,
             &crate::run_spec::NoRunOptionsOwner,
         )
         .expect("resolve the root");

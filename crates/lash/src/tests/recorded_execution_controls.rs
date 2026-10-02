@@ -68,7 +68,7 @@ fn looping_provider(calls: &Arc<AtomicUsize>) -> ProviderHandle {
 
 fn core_over(backend: lash_core::Backend, provider: ProviderHandle) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())
 }
@@ -735,7 +735,7 @@ async fn a_recorded_budget_bounds_every_root_after_an_engine_restart(
     }
     let second = restart().await;
     let unbounded = explicit_ephemeral_facets(LashCore::standard_builder(second))
-        .serve_test_model(endless_provider(&calls), mock_model_spec())
+        .serve_test_llm_profile(endless_provider(&calls), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     for id in [created.as_str(), commanded.as_str()] {

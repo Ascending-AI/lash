@@ -4,7 +4,7 @@ use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec,
     LlmRequest, LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
 };
-use crate::provider::{ModelCapability, ModelEffortValidationCategory, ProviderHandle};
+use crate::provider::{LlmProfileCapability, LlmProfileEffortValidationCategory, ProviderHandle};
 use crate::{LashSchema, SchemaContract};
 use lash_trace::{TraceContext, TraceSink};
 use std::sync::Arc;
@@ -52,8 +52,8 @@ pub struct DirectRequest {
     pub model: String,
     #[serde(default)]
     pub model_variant: crate::ReasoningSelection,
-    #[serde(default, skip_serializing_if = "ModelCapability::is_empty")]
-    pub model_capability: ModelCapability,
+    #[serde(default, skip_serializing_if = "LlmProfileCapability::is_empty")]
+    pub llm_profile_capability: LlmProfileCapability,
     /// The attachment-acceptance rules the request renders its attachments
     /// under. A durable direct completion replaces them with its session's
     /// recorded rules.
@@ -68,9 +68,9 @@ pub struct DirectRequest {
     /// session's direct completion carries its recorded model's defaults.
     #[serde(
         default,
-        skip_serializing_if = "crate::provider::ModelRequestDefaults::is_default"
+        skip_serializing_if = "crate::provider::LlmProfileRequestDefaults::is_default"
     )]
-    pub request_defaults: crate::provider::ModelRequestDefaults,
+    pub request_defaults: crate::provider::LlmProfileRequestDefaults,
     #[serde(default)]
     pub messages: Vec<DirectMessage>,
     #[serde(default)]
@@ -114,10 +114,10 @@ impl DirectRequest {
             instructions: None,
             model: model.into(),
             model_variant: crate::ReasoningSelection::ProviderDefault,
-            model_capability: ModelCapability::default(),
+            llm_profile_capability: LlmProfileCapability::default(),
             attachment_acceptance: Arc::default(),
             extra_body: serde_json::Map::new(),
-            request_defaults: crate::provider::ModelRequestDefaults::default(),
+            request_defaults: crate::provider::LlmProfileRequestDefaults::default(),
             messages: vec![DirectMessage {
                 role: DirectRole::User,
                 parts: vec![DirectPart::Text(prompt.into())],
@@ -170,7 +170,7 @@ pub enum DirectLlmError {
     LeadingSystemMessage,
     #[error("invalid request: {message}")]
     InvalidRequest {
-        category: ModelEffortValidationCategory,
+        category: LlmProfileEffortValidationCategory,
         message: String,
     },
     #[error("invalid response: {message}")]
@@ -251,7 +251,7 @@ impl DirectLlmClient {
         // Validate the requested effort against the capability that travels
         // with the request; the selection itself travels unchanged.
         request
-            .model_capability
+            .llm_profile_capability
             .validate_selection(&request.model, self.provider.kind(), &request.model_variant)
             .map_err(|error| DirectLlmError::InvalidRequest {
                 category: error.category,
@@ -368,7 +368,7 @@ pub fn build_llm_request(
         instructions,
         model: _,
         model_variant,
-        model_capability,
+        llm_profile_capability,
         attachment_acceptance,
         extra_body,
         request_defaults,
@@ -452,7 +452,7 @@ pub fn build_llm_request(
         tool_choice: LlmToolChoice::None,
         attachment_acceptance,
         model_variant,
-        model_capability,
+        llm_profile_capability,
         extra_body,
         request_defaults,
         generation,
@@ -895,8 +895,8 @@ mod tests {
         );
     }
 
-    fn reasoning_capability() -> ModelCapability {
-        ModelCapability {
+    fn reasoning_capability() -> LlmProfileCapability {
+        LlmProfileCapability {
             instruction_role: Default::default(),
             native_mid_conversation_system: false,
             google_dialect: Default::default(),
@@ -934,7 +934,7 @@ mod tests {
         let mut request = DirectRequest::text("direct-model", "hi");
         // Effort names match exactly: no alias, case folding or clamping.
         request.model_variant = crate::ReasoningSelection::Effort("MAX".to_string());
-        request.model_capability = reasoning_capability();
+        request.llm_profile_capability = reasoning_capability();
 
         let err = client
             .complete(request)
@@ -943,7 +943,7 @@ mod tests {
         assert!(matches!(
             err,
             DirectLlmError::InvalidRequest {
-                category: ModelEffortValidationCategory::UnsupportedEffort,
+                category: LlmProfileEffortValidationCategory::UnsupportedEffort,
                 ..
             }
         ));
@@ -981,7 +981,7 @@ mod tests {
 
         let mut request = DirectRequest::text("direct-model", "hi");
         request.model_variant = crate::ReasoningSelection::Effort("max".to_string());
-        request.model_capability = reasoning_capability();
+        request.llm_profile_capability = reasoning_capability();
 
         client.complete(request).await.expect("completion");
         let seen = captured
@@ -1015,7 +1015,7 @@ mod tests {
         assert!(matches!(
             err,
             DirectLlmError::InvalidRequest {
-                category: ModelEffortValidationCategory::EffortNotConfigurable,
+                category: LlmProfileEffortValidationCategory::EffortNotConfigurable,
                 ..
             }
         ));
@@ -1033,7 +1033,7 @@ mod tests {
         let mut capability = reasoning_capability();
         capability.reasoning.as_mut().expect("reasoning").mandatory = true;
         let mut request = DirectRequest::text("direct-model", "hi");
-        request.model_capability = capability;
+        request.llm_profile_capability = capability;
         // No model_variant supplied, but the model requires one.
 
         let err = client
@@ -1043,7 +1043,7 @@ mod tests {
         assert!(matches!(
             err,
             DirectLlmError::InvalidRequest {
-                category: ModelEffortValidationCategory::EffortRequired,
+                category: LlmProfileEffortValidationCategory::EffortRequired,
                 ..
             }
         ));

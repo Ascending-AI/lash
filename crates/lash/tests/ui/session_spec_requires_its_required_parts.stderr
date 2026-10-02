@@ -58,7 +58,7 @@ note: if you're trying to build a new `SessionSpec` consider using one of the fo
   --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
    |
    | /     pub fn new(
-   | |         model: impl Into<ModelKey>,
+   | |         model: impl Into<LlmProfileKey>,
    | |         turn_budget: TurnBudget,
    | |         max_tool_calls: MaxToolCalls,
    | |     ) -> Self {

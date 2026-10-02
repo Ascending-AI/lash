@@ -4,7 +4,7 @@
 const LASH_USAGE_FACT_PAYLOAD_DOMAIN_VERSION: &str = "lash-usage-fact-payload/v4";
 
 use crate::usage::{SessionUsageReport, UsageAttributionKey, UsageTotals};
-use crate::{ModelKey, RuntimeOwner, StoreError};
+use crate::{LlmProfileKey, RuntimeOwner, StoreError};
 use lash_sansio::TokenUsage;
 use lash_sansio::llm::types::LlmCallId;
 use serde::{Deserialize, Serialize};
@@ -78,7 +78,7 @@ pub struct UsageRunAdmission {
     /// Attribution of the first dispatch; unknown liabilities report under it.
     pub source: String,
     /// The recorded model key the first dispatch ran under.
-    pub model_key: ModelKey,
+    pub profile_key: LlmProfileKey,
     /// The wire model the first dispatch's request named.
     pub requested_model: String,
     pub admitted_at_ms: u64,
@@ -130,7 +130,7 @@ pub struct UsageAttemptFact {
     pub source: String,
     /// The recorded model key the call ran under: the host's registration,
     /// which two keys that share a wire model keep apart.
-    pub model_key: ModelKey,
+    pub profile_key: LlmProfileKey,
     /// The wire model the request named.
     pub requested_model: String,
     /// The model the provider reported it served this attempt with. `None`
@@ -270,11 +270,11 @@ impl UsageCompleteness {
     }
 }
 
-/// One `(source, model_key, requested_model)` aggregate.
+/// One `(source, profile_key, requested_model)` aggregate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnerUsageRow {
     pub source: String,
-    pub model_key: ModelKey,
+    pub profile_key: LlmProfileKey,
     pub requested_model: String,
     /// Reported plus reconciled counters.
     pub usage: TokenUsage,
@@ -290,14 +290,14 @@ pub struct OutstandingUsageAttempt {
     pub provider_attempt: u32,
     pub llm_call_id: LlmCallId,
     pub source: String,
-    pub model_key: ModelKey,
+    pub profile_key: LlmProfileKey,
     pub requested_model: String,
     pub generation_id: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnerUsage {
     pub owner: RuntimeOwner,
-    pub rows: Vec<OwnerUsageRow>, // sorted, unique by (source, model_key, requested_model)
+    pub rows: Vec<OwnerUsageRow>, // sorted, unique by (source, profile_key, requested_model)
     /// Unreported attempts no correction covers, oldest first: the order
     /// their facts were recorded, so reconciliation works through them in
     /// the order they were spent.
@@ -315,7 +315,7 @@ pub struct UsageFactRecord {
     pub provider_attempt: u32,
     pub llm_call_id: LlmCallId,
     pub source: String,
-    pub model_key: ModelKey,
+    pub profile_key: LlmProfileKey,
     pub requested_model: String,
     /// Provider-reported only; a correction keeps its attempt's value.
     pub served_model: Option<String>,
@@ -485,7 +485,7 @@ pub struct UsageRunRecord {
 pub struct UsageRunDispatch {
     pub execution_scope_key: String,
     pub source: String,
-    pub model_key: ModelKey,
+    pub profile_key: LlmProfileKey,
     pub requested_model: String,
     pub admitted_at_ms: u64,
 }
@@ -626,14 +626,14 @@ fn attempt_payload_bytes(fact: &UsageAttemptFact, run: &UsageRunId) -> Vec<u8> {
         provider_attempt: _,
         llm_call_id,
         source,
-        model_key,
+        profile_key,
         requested_model,
         served_model,
         outcome,
     } = fact;
     let attribution = PayloadAttribution {
         source,
-        model_key,
+        profile_key,
         requested_model,
         served_model: served_model.as_deref(),
     };
@@ -674,7 +674,7 @@ fn correction_payload_bytes(correction: &UsageCorrection, target: &UsageFactReco
         2,
         PayloadAttribution {
             source: &target.source,
-            model_key: &target.model_key,
+            profile_key: &target.profile_key,
             requested_model: &target.requested_model,
             served_model: target.served_model.as_deref(),
         },
@@ -687,7 +687,7 @@ fn correction_payload_bytes(correction: &UsageCorrection, target: &UsageFactReco
 /// What a fact's payload says the spend is attributed to.
 struct PayloadAttribution<'a> {
     source: &'a str,
-    model_key: &'a ModelKey,
+    profile_key: &'a LlmProfileKey,
     requested_model: &'a str,
     served_model: Option<&'a str>,
 }
@@ -715,12 +715,12 @@ fn payload_bytes(
     encoder.tag(disposition);
     let PayloadAttribution {
         source,
-        model_key,
+        profile_key,
         requested_model,
         served_model,
     } = attribution;
     encoder.string(source);
-    encoder.string(model_key.as_str());
+    encoder.string(profile_key.as_str());
     encoder.string(requested_model);
     encoder.optional(served_model, |encoder, value| encoder.string(value));
     for counter in [
@@ -794,8 +794,8 @@ impl OwnerUsage {
             );
             absorb_totals(
                 report
-                    .by_model_key
-                    .entry(row.model_key.clone())
+                    .by_profile_key
+                    .entry(row.profile_key.clone())
                     .or_default(),
                 &totals,
                 &mut report.saturated,
@@ -811,7 +811,7 @@ impl OwnerUsage {
             report.by_attribution.insert(
                 UsageAttributionKey {
                     source: row.source.clone(),
-                    model_key: row.model_key.clone(),
+                    profile_key: row.profile_key.clone(),
                     requested_model: row.requested_model.clone(),
                 },
                 totals,
@@ -864,7 +864,7 @@ impl UsageAttemptFact {
             provider_attempt,
             llm_call_id,
             source,
-            model_key,
+            profile_key,
             requested_model,
             served_model,
             outcome,
@@ -877,7 +877,7 @@ impl UsageAttemptFact {
             provider_attempt: *provider_attempt,
             llm_call_id: llm_call_id.clone(),
             source: source.clone(),
-            model_key: model_key.clone(),
+            profile_key: profile_key.clone(),
             requested_model: requested_model.clone(),
             served_model: served_model.clone(),
             body: UsageFactBody::Attempt {
@@ -1024,7 +1024,7 @@ mod tests {
             provider_attempt: 0,
             llm_call_id: LlmCallId("call:é".into()),
             source: "turn".into(),
-            model_key: ModelKey::new("key"),
+            profile_key: LlmProfileKey::new("key"),
             requested_model: "model".into(),
             served_model: Some("served".into()),
             outcome: AttemptFactOutcome::Reported {
@@ -1064,7 +1064,7 @@ mod tests {
         push("unreported_no_generation", unreported);
         let mut extremes = base.clone();
         extremes.source = "".into();
-        extremes.model_key = ModelKey::new("");
+        extremes.profile_key = LlmProfileKey::new("");
         extremes.requested_model = "a\0b".into();
         extremes.served_model = None;
         extremes.outcome = AttemptFactOutcome::Reported {
@@ -1137,7 +1137,7 @@ mod tests {
             provider_attempt: 0,
             llm_call_id: LlmCallId("call".into()),
             source: "turn".into(),
-            model_key: ModelKey::new("key"),
+            profile_key: LlmProfileKey::new("key"),
             requested_model: "model".into(),
             served_model: None,
             outcome: AttemptFactOutcome::Reported {
@@ -1156,7 +1156,7 @@ mod tests {
         changed.source.push('x');
         assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
         changed = fact.clone();
-        changed.model_key = ModelKey::new("another-key");
+        changed.profile_key = LlmProfileKey::new("another-key");
         assert_ne!(hash, usage_fact_payload_hash(&changed, &run));
         changed = fact.clone();
         changed.requested_model.push('x');

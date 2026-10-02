@@ -31,7 +31,7 @@ pub(crate) struct AppState {
     pub(crate) process_observer: lash::process::ProcessWorkObserver,
     pub(crate) sessions: WorkbenchSessions,
     pub(crate) messages: Arc<Mutex<Vec<ChatMessage>>>,
-    pub(crate) selected_model: Arc<Mutex<ModelSelection>>,
+    pub(crate) selected_llm_profile: Arc<Mutex<LlmProfileSelection>>,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
     pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
     pub(crate) event_tx: SessionEventRegistry,
@@ -59,16 +59,16 @@ pub(crate) struct Settings {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct ModelSelection {
+pub(crate) struct LlmProfileSelection {
     pub(crate) model: String,
     pub(crate) model_variant: Option<String>,
 }
 
-impl ModelSelection {
+impl LlmProfileSelection {
     /// The catalog key the selection names: the workbench keys every model
     /// by its id.
-    pub(crate) fn key(&self) -> lash::ModelKey {
-        lash::ModelKey::new(self.model.clone())
+    pub(crate) fn key(&self) -> lash::LlmProfileKey {
+        lash::LlmProfileKey::new(self.model.clone())
     }
 
     /// The reasoning the selection runs its model with.

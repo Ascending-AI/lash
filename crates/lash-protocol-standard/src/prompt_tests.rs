@@ -371,9 +371,9 @@ fn module_catalog() -> lash_core::ToolCatalog {
 
 fn prompt_policy() -> lash_core::SessionPolicy {
     lash_core::SessionPolicy {
-        model: Some(lash_core::testing::test_model_config(
+        model: Some(lash_core::testing::test_llm_profile_config(
             "standard-prompt-law",
-            lash_core::testing::test_model_metadata("standard-prompt-law"),
+            lash_core::testing::test_llm_profile_metadata("standard-prompt-law"),
         )),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::bounded(4),
@@ -431,7 +431,7 @@ async fn prompt_runtime(
         lash_core::CommitBudget::bounded(8 * 1024 * 1024, 1024),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = lash_core::testing::models_serving(&prompt_policy(), provider);
+    host.providers.models = lash_core::testing::llm_profiles_serving(&prompt_policy(), provider);
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,

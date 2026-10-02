@@ -8,7 +8,7 @@ const SEED: u64 = 0xb1_1d45;
 pub(super) async fn turn_run_uses_the_engine_host_without_explicit_effects() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("configured-effect-host")
@@ -43,7 +43,7 @@ pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> R
     let core = LashCore::standard_builder(double.lash_backend())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("durable-default-effect-host")
@@ -109,7 +109,7 @@ pub(super) async fn plain_turn_entry_points_each_run_under_their_own_turn() -> R
 pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("stable-turn-id")
@@ -146,7 +146,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         .into_handle();
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("turn-started-cancel-target")
@@ -202,7 +202,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
 -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("idle-input-application")
@@ -286,7 +286,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
 pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .live_replay_store(Arc::new(
             lash_core::facade_support::InMemoryLiveReplayStore::new(
                 lash_core::facade_support::InMemoryLiveReplayStoreConfig {
@@ -350,13 +350,13 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
 /// model call with `answer`.
 async fn answering_core(answer: &'static str) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             crate::testing::TestProvider::builder()
                 .kind("mailbox-binding")
                 .complete(move |_| async move { Ok(text_response(answer)) })
                 .build()
                 .into_handle(),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())
 }
@@ -432,7 +432,7 @@ pub(super) async fn a_turn_journals_its_request_by_digest_and_no_sentinel_step()
 
     let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("request-digest")

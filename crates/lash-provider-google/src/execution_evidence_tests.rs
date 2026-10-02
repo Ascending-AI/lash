@@ -77,7 +77,7 @@ async fn google_non_streaming_response_carries_provider_execution_evidence() {
             None,
             crate::provider::ResponseReading {
                 stream_termination: StreamTermination::RequireTerminalEvidence,
-                defaults: lash_core::provider::ModelRequestDefaults {
+                defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
                     ..Default::default()
                 },
@@ -117,7 +117,7 @@ async fn google_stream_evidence_is_monotonic_and_rejects_identity_drift() {
             None,
             crate::provider::ResponseReading {
                 stream_termination: StreamTermination::RequireTerminalEvidence,
-                defaults: lash_core::provider::ModelRequestDefaults {
+                defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
                     ..Default::default()
                 },
@@ -148,7 +148,7 @@ async fn google_stream_evidence_is_monotonic_and_rejects_identity_drift() {
             None,
             crate::provider::ResponseReading {
                 stream_termination: StreamTermination::RequireTerminalEvidence,
-                defaults: lash_core::provider::ModelRequestDefaults {
+                defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
                     ..Default::default()
                 },

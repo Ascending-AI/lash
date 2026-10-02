@@ -410,7 +410,7 @@ fn build_core(
         )),
     )));
     lash::LashCore::standard_builder(backend)
-        .serve_test_model(provider, latency_model_spec()?)
+        .serve_test_llm_profile(provider, latency_llm_profile_spec()?)
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -445,8 +445,8 @@ async fn build_observer(restate: &LocalRestate, stores_dir: &Path) -> Result<las
     )
 }
 
-fn latency_model_spec() -> Result<lash::ModelMetadata> {
-    lash::ModelMetadata::builder("latency-model")
+fn latency_llm_profile_spec() -> Result<lash::LlmProfileMetadata> {
+    lash::LlmProfileMetadata::builder("latency-model")
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| anyhow::anyhow!("latency model spec: {error}"))
@@ -515,7 +515,7 @@ async fn run_lane(
         .core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            latency_model_spec()?.wire_model,
+            latency_llm_profile_spec()?.wire_model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )))

@@ -158,7 +158,7 @@ pub async fn an_obsolete_executor_never_ends_its_successors_root(
             }
         })
         .build();
-    parts.host.providers.models = crate::testing::standard_test_models(model.into_handle());
+    parts.host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     // Between the obsolete run meeting its refusal and writing its end, a
     // successor admission seals a newer drive epoch.
     let successor_sealed = Arc::new(AtomicBool::new(false));

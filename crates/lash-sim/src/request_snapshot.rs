@@ -29,7 +29,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model.clone())
+        .serve_test_llm_profile(provider, model.clone())
         .trace_jsonl_path(&trace_path)
         .trace_level(TraceLevel::Extended)
         .build(crate::sim_process_owner())

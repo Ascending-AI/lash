@@ -42,7 +42,7 @@ async fn a_turn_pinned_at_send_forks_after_collection_on_the_sim_engine() {
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model.clone())
+        .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("runtime core");
     let session = crate::open_created_session(model.wire_model.clone(), &core, "sim-revision-pins")

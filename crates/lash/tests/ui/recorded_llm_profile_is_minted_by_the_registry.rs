@@ -2,9 +2,9 @@
 // a key is selected, and recorded; its fields are private, so host code
 // cannot assemble one by literal.
 
-fn a_recorded_model_is_minted_by_the_registry_only(metadata: lash::ModelMetadata) {
-    let _ = lash::RecordedModel {
-        key: lash::ModelKey::new("forged"),
+fn a_recorded_model_is_minted_by_the_registry_only(metadata: lash::LlmProfileMetadata) {
+    let _ = lash::RecordedLlmProfile {
+        key: lash::LlmProfileKey::new("forged"),
         metadata,
     };
 }

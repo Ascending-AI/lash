@@ -48,7 +48,7 @@ pub fn reserved_generation_paths(
     if request.generation.stop_sequences_suppressed_by_protocol() {
         reserved.push(stop_path);
     }
-    if request.model_capability.sampling == lash_core::provider::SamplingCapability::Pinned {
+    if request.llm_profile_capability.sampling == lash_core::provider::SamplingCapability::Pinned {
         reserved.push(temperature_path);
     }
     reserved

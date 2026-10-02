@@ -34,7 +34,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         .build()
         .into_handle();
     let mut host = memory_host_config().await;
-    host.providers.models = lash_core::testing::standard_test_models(provider);
+    host.providers.models = lash_core::testing::standard_test_llm_profiles(provider);
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
@@ -146,7 +146,7 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
         .build()
         .into_handle();
     let mut host = memory_host_config().await;
-    host.providers.models = lash_core::testing::standard_test_models(provider);
+    host.providers.models = lash_core::testing::standard_test_llm_profiles(provider);
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
@@ -465,7 +465,7 @@ finish(await handle);
         })
         .build()
         .into_handle();
-    host.providers.models = lash_core::testing::standard_test_models(provider);
+    host.providers.models = lash_core::testing::standard_test_llm_profiles(provider);
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
             lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),

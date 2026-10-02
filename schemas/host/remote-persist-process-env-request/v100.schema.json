@@ -245,8 +245,8 @@
       ],
       "type": "string"
     },
-    "RemoteModelCapability": {
-      "description": "Mirror of the core `ModelCapability`: host-supplied model capability\nmetadata carried with the model intent so remote workers validate and\nencode effort exactly like a local runtime.",
+    "RemoteLlmProfileCapability": {
+      "description": "Mirror of the core `LlmProfileCapability`: host-supplied model capability\nmetadata carried with the model intent so remote workers validate and\nencode effort exactly like a local runtime.",
       "properties": {
         "cache_control": {
           "anyOf": [
@@ -297,15 +297,15 @@
       },
       "type": "object"
     },
-    "RemoteModelConfig": {
+    "RemoteLlmProfileConfig": {
       "additionalProperties": false,
-      "description": "Mirror of the core `ModelConfig`: the registry-minted binding a session\nrecorded for its key, and the reasoning it runs that model with.",
+      "description": "Mirror of the core `LlmProfileConfig`: the registry-minted binding a session\nrecorded for its key, and the reasoning it runs that model with.",
       "properties": {
         "key": {
           "type": "string"
         },
         "metadata": {
-          "$ref": "#/$defs/RemoteModelMetadata"
+          "$ref": "#/$defs/RemoteLlmProfileMetadata"
         },
         "reasoning": {
           "$ref": "#/$defs/RemoteReasoningSelection",
@@ -318,12 +318,12 @@
       ],
       "type": "object"
     },
-    "RemoteModelMetadata": {
+    "RemoteLlmProfileMetadata": {
       "additionalProperties": false,
-      "description": "Mirror of the core `ModelMetadata`: the recorded facts of one registered\nmodel.",
+      "description": "Mirror of the core `LlmProfileMetadata`: the recorded facts of one registered\nmodel.",
       "properties": {
         "capability": {
-          "$ref": "#/$defs/RemoteModelCapability"
+          "$ref": "#/$defs/RemoteLlmProfileCapability"
         },
         "extra_body": {
           "additionalProperties": true,
@@ -333,7 +333,7 @@
           "$ref": "#/$defs/RemoteProcessModelLimits"
         },
         "request_defaults": {
-          "$ref": "#/$defs/RemoteModelRequestDefaults"
+          "$ref": "#/$defs/RemoteLlmProfileRequestDefaults"
         },
         "wire_model": {
           "type": "string"
@@ -345,9 +345,9 @@
       ],
       "type": "object"
     },
-    "RemoteModelRequestDefaults": {
+    "RemoteLlmProfileRequestDefaults": {
       "additionalProperties": false,
-      "description": "Mirror of the core `ModelRequestDefaults`: what a model's requests do\nwhere a request states nothing, recorded with the model.",
+      "description": "Mirror of the core `LlmProfileRequestDefaults`: what a model's requests do\nwhere a request states nothing, recorded with the model.",
       "properties": {
         "cache_retention": {
           "$ref": "#/$defs/RemoteCacheRetention"
@@ -480,7 +480,7 @@
         "model": {
           "anyOf": [
             {
-              "$ref": "#/$defs/RemoteModelConfig"
+              "$ref": "#/$defs/RemoteLlmProfileConfig"
             },
             {
               "type": "null"

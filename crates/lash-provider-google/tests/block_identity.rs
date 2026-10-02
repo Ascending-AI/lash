@@ -56,7 +56,7 @@ fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::provider::ModelCapability::default(),
+        llm_profile_capability: lash_core::provider::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(

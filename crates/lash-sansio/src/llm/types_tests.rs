@@ -14,7 +14,7 @@ fn replay_request(blocks: Vec<LlmContentBlock>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: Default::default(),
@@ -59,7 +59,7 @@ fn fig1123_client_side_retention_cuts_only_at_genuine_user_segments() {
         marked_text(LlmRole::Assistant, "second answer", false),
         marked_text(LlmRole::User, "third genuine input", true),
     ];
-    *request.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+    *request.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
         selection: ReasoningRetentionSelection::ClientSideUserSegments {
             max_segments: std::num::NonZeroUsize::new(2).unwrap(),
@@ -94,7 +94,7 @@ fn fig1123_native_retention_keeps_http_history_and_rejects_cross_primitive_appro
         marked_text(LlmRole::Assistant, "answer", false),
         marked_text(LlmRole::User, "new", true),
     ];
-    *request.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+    *request.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
         capability: Some(ReasoningRetentionCapability::OpenAiContext {
             supported: vec![OpenAiReasoningContext::CurrentTurn],
         }),

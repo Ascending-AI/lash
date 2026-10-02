@@ -30,7 +30,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         no_progress_budget: Default::default(),
         model_variant: Default::default(),
         attachment_acceptance: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),

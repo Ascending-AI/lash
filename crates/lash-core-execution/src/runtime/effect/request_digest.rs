@@ -40,7 +40,7 @@ macro_rules! journaled_request {
             tools: ContentDigest::of_items(&$request.tools)?,
             tool_choice: &$request.tool_choice,
             model_variant: &$request.model_variant,
-            model_capability: &$request.model_capability,
+            llm_profile_capability: &$request.llm_profile_capability,
             attachment_acceptance: $request.attachment_acceptance.as_ref(),
             extra_body: &$request.extra_body,
             request_defaults: &$request.request_defaults,
@@ -58,8 +58,11 @@ pub(super) fn journaled_envelope_json(
         RuntimeEffectCommand::BeforeLlmCall { request } => JournaledLlmCommand::BeforeLlmCall {
             request: journaled_request!(request),
         },
-        RuntimeEffectCommand::LlmCall { model_key, request } => JournaledLlmCommand::LlmCall {
-            model_key,
+        RuntimeEffectCommand::LlmCall {
+            profile_key,
+            request,
+        } => JournaledLlmCommand::LlmCall {
+            profile_key,
             request: journaled_request!(request),
         },
         _ => return crate::stable_hash::stable_json_string(envelope),
@@ -90,7 +93,7 @@ enum JournaledLlmCommand<'a> {
         request: JournaledLlmRequest<'a>,
     },
     LlmCall {
-        model_key: &'a crate::ModelKey,
+        profile_key: &'a crate::LlmProfileKey,
         request: JournaledLlmRequest<'a>,
     },
 }
@@ -105,12 +108,12 @@ struct JournaledLlmRequest<'a> {
     tools: ContentDigest,
     tool_choice: &'a LlmToolChoice,
     model_variant: &'a crate::ReasoningSelection,
-    model_capability: &'a crate::ModelCapability,
+    llm_profile_capability: &'a crate::LlmProfileCapability,
     #[serde(skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty")]
     attachment_acceptance: &'a crate::provider::AttachmentCapabilitySnapshot,
     extra_body: &'a serde_json::Map<String, serde_json::Value>,
-    #[serde(skip_serializing_if = "crate::provider::ModelRequestDefaults::is_default")]
-    request_defaults: &'a crate::provider::ModelRequestDefaults,
+    #[serde(skip_serializing_if = "crate::provider::LlmProfileRequestDefaults::is_default")]
+    request_defaults: &'a crate::provider::LlmProfileRequestDefaults,
     generation: &'a crate::GenerationOptions,
     scope: &'a crate::LlmRequestScope,
     output_spec: &'a Option<LlmOutputSpec>,
@@ -176,7 +179,7 @@ mod tests {
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),
             model_variant: Default::default(),
-            model_capability: Default::default(),
+            llm_profile_capability: Default::default(),
             extra_body: Default::default(),
             request_defaults: Default::default(),
             generation: Default::default(),
@@ -197,7 +200,7 @@ mod tests {
                 "llm-call:digest",
             ),
             RuntimeEffectCommand::LlmCall {
-                model_key: crate::ModelKey::new("digest-model-key"),
+                profile_key: crate::LlmProfileKey::new("digest-model-key"),
                 request: Box::new(request(messages)),
             },
         )
@@ -225,15 +228,15 @@ mod tests {
         );
         let journaled: Value = serde_json::from_str(long.json()).expect("journaled json");
         assert_eq!(journaled["command"]["type"], "llm_call");
-        assert_eq!(journaled["command"]["model_key"], "digest-model-key");
+        assert_eq!(journaled["command"]["profile_key"], "digest-model-key");
         assert_eq!(journaled["command"]["request"]["model"], "digest-model");
         assert_eq!(journaled["command"]["request"]["messages"]["len"], 2);
     }
 
-    fn direct(model_key: &str) -> RuntimeEffectEnvelope {
+    fn direct(profile_key: &str) -> RuntimeEffectEnvelope {
         let mut envelope = llm_call(transcript("direct"));
         envelope.command = RuntimeEffectCommand::Direct {
-            model_key: crate::ModelKey::new(model_key),
+            profile_key: crate::LlmProfileKey::new(profile_key),
             request: Box::new(request(transcript("direct"))),
             usage_source: "direct-source".to_string(),
         };
@@ -244,11 +247,11 @@ mod tests {
     /// beside its request's wire model, and a replay that names another key
     /// for the same wire model diverges at the key.
     #[test]
-    fn a_direct_envelope_journals_its_model_key_and_another_key_diverges() {
+    fn a_direct_envelope_journals_its_profile_key_and_another_key_diverges() {
         let recorded = direct("direct-key-a").canonical_form().expect("canonical");
         let journaled: Value = serde_json::from_str(recorded.json()).expect("journaled json");
         assert_eq!(journaled["command"]["type"], "direct");
-        assert_eq!(journaled["command"]["model_key"], "direct-key-a");
+        assert_eq!(journaled["command"]["profile_key"], "direct-key-a");
         assert_eq!(journaled["command"]["request"]["model"], "digest-model");
         assert_eq!(journaled["command"]["usage_source"], "direct-source");
 
@@ -262,7 +265,7 @@ mod tests {
         .expect_err("another key for the same wire model diverges");
         assert_eq!(
             error.summary.expect("summary").first_divergent_paths,
-            ["command.model_key"]
+            ["command.profile_key"]
         );
         let same = direct("direct-key-a").canonical_form().expect("canonical");
         assert!(
@@ -327,7 +330,7 @@ mod tests {
                     }
                 } else {
                     RuntimeEffectCommand::LlmCall {
-                        model_key: crate::ModelKey::new("digest-model-key"),
+                        profile_key: crate::LlmProfileKey::new("digest-model-key"),
                         request: Box::new(spec),
                     }
                 };

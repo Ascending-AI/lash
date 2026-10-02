@@ -20,14 +20,14 @@ fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::Lash
     LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
 }
 
 #[tokio::test]
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
         LashCore::standard_builder(double_backend().await)
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing commit budget",
     );
@@ -44,7 +44,7 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
         LashCore::standard_builder(double_backend().await)
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .build(crate::testing::runtime_lease_owner()),
         "builder must reject a missing queued-work action reserve",
@@ -80,7 +80,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     );
     let build = |factory_backend: &lash_core::Backend| {
         LashCore::rlm_builder(core_backend.clone(), rlm_factory(factory_backend))
-            .serve_test_model(mock_provider(), mock_model_spec())
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .build(crate::testing::runtime_lease_owner())
@@ -386,7 +386,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let unknown_error = core
@@ -410,13 +410,13 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
             if session_id == "unknown-source"
     ));
 
-    let source_model = Some(recorded_model(model_spec(
+    let source_profile = Some(recorded_llm_profile(llm_profile_spec(
         "orphaned-source-model",
         None,
         200_000,
     )));
     let source_policy = lash_core::SessionPolicy {
-        model: source_model,
+        model: source_profile,
         session_id: Some(SessionId::from("orphaned-fork-source")),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -556,9 +556,9 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     let registry = Arc::clone(faults.get().expect("the double decorated its registry"));
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let source_model = Some(recorded_model(model_spec(
+    let source_profile = Some(recorded_llm_profile(llm_profile_spec(
         "fork-source-model",
         None,
         200_000,
@@ -567,7 +567,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         // The host and the branch point agree on the provider: a durable
         // pin is a fact, so a host naming a different one is refused at
         // open rather than silently discarded (FIG-1558).
-        model: source_model,
+        model: source_profile,
         session_id: Some(SessionId::from("fork-observer-source")),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1002,7 +1002,7 @@ async fn duplicate_only_fork_intents_are_canonical(
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let policy = lash_core::SessionPolicy {
         session_id: Some(source_session_id.clone()),
@@ -1138,7 +1138,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             config: lash_core::SessionPolicy {
-                model: Some(recorded_model(mock_model_spec())),
+                model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                 ..lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
@@ -1150,7 +1150,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     )
     .await?;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     assert!(
@@ -1219,7 +1219,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
@@ -1258,7 +1258,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     source_node_id: Some(format!("nested-source-node-{case}").into()),
                 },
                 config: lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
@@ -1399,7 +1399,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     let backend = double_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     core.session("generation-fork-host-default")
         .create(crate::SessionCreation::root(
@@ -1407,13 +1407,13 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         ))
         .await?;
 
-    let source_model = Some(recorded_model(model_spec(
+    let source_profile = Some(recorded_llm_profile(llm_profile_spec(
         "fork-source-model",
         None,
         200_000,
     )));
     let source_policy = lash_core::SessionPolicy {
-        model: source_model,
+        model: source_profile,
         session_id: Some(SessionId::from("generation-fork-source")),
         // The branch point ran with sampling of its own: the branch's.
         generation: lash_core::GenerationOptions {

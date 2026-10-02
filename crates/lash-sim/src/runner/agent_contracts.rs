@@ -623,9 +623,9 @@ async fn facade_final_value_execution_inner(
     let mut builder = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             fixed_texts_provider(provider_kind, provider_responses),
-            lash_core::ModelMetadata::builder(provider_kind)
+            lash_core::LlmProfileMetadata::builder(provider_kind)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
@@ -987,7 +987,7 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(fixed_texts_provider(provider_kind, provider_responses), lash_core::ModelMetadata::builder(provider_kind)
+        .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?);

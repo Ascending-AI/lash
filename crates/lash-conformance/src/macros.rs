@@ -2091,7 +2091,7 @@ macro_rules! queue_observation_tests {
                     let core = lash::LashCore::standard_builder(backend)
                         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                        .models(lash_core::testing::standard_test_models(lash_core::testing::runtime_helpers::mock_provider(Vec::new()).into_handle()))
+                        .llm_profiles(lash_core::testing::standard_test_llm_profiles(lash_core::testing::runtime_helpers::mock_provider(Vec::new()).into_handle()))
                         .build(lash_core::testing::runtime_lease_owner()).expect("build durable facade");
                     let durable = core.session(id).durable().await.expect("noncreating durable handle");
                     (durable.send(lash::TurnInput::text("driver wake probe")).await.is_ok(),

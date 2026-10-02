@@ -1629,7 +1629,7 @@ fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
         tool_choice: lash_core::llm::types::LlmToolChoice::None,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(SESSION, format!("{SESSION}:frame"), request_id),

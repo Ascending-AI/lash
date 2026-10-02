@@ -230,10 +230,10 @@ impl SessionBuilder {
     ///
     /// The creation spec's model key is minted into a recorded binding here,
     /// through the core's models; a key they do not register is refused with
-    /// [`EmbedError::ModelUnknown`] and nothing is created. A spec that
+    /// [`EmbedError::LlmProfileUnknown`] and nothing is created. A spec that
     /// states no model, no turn budget or no tool-call limit (a
     /// [`SessionSpec::inherit`] overlay) is refused with
-    /// [`EmbedError::MissingModel`], [`EmbedError::MissingTurnBudget`] or
+    /// [`EmbedError::MissingLlmProfile`], [`EmbedError::MissingTurnBudget`] or
     /// [`EmbedError::MissingMaxToolCalls`]: a creation has no base to take
     /// them from.
     ///
@@ -393,11 +393,11 @@ impl SessionBuilder {
             .resolve_root(self.core.env.core.providers.models.as_ref())
             .map_err(|error| match error {
                 lash_core::facade_support::SpecResolveError::Model(error) => {
-                    EmbedError::ModelUnknown(error)
+                    EmbedError::LlmProfileUnknown(error)
                 }
-                lash_core::facade_support::SpecResolveError::ReasoningWithoutModel
-                | lash_core::facade_support::SpecResolveError::RootWithoutModel => {
-                    EmbedError::MissingModel
+                lash_core::facade_support::SpecResolveError::ReasoningWithoutLlmProfile
+                | lash_core::facade_support::SpecResolveError::RootWithoutLlmProfile => {
+                    EmbedError::MissingLlmProfile
                 }
                 lash_core::facade_support::SpecResolveError::RootWithoutTurnBudget => {
                     EmbedError::MissingTurnBudget
@@ -1110,7 +1110,7 @@ impl LashSession {
             self.binding.effect_host(),
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
-            self.binding.models(),
+            self.binding.llm_profiles(),
             self.binding.usage_accounting(),
         )
     }

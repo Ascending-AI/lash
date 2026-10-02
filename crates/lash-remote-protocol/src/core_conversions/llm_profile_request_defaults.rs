@@ -1,8 +1,8 @@
 use super::*;
 
-impl From<lash_core::provider::ModelRequestDefaults> for RemoteModelRequestDefaults {
-    fn from(value: lash_core::provider::ModelRequestDefaults) -> Self {
-        let lash_core::provider::ModelRequestDefaults {
+impl From<lash_core::provider::LlmProfileRequestDefaults> for RemoteLlmProfileRequestDefaults {
+    fn from(value: lash_core::provider::LlmProfileRequestDefaults) -> Self {
+        let lash_core::provider::LlmProfileRequestDefaults {
             expose_thinking,
             max_output_tokens,
             cache_retention,
@@ -23,9 +23,9 @@ impl From<lash_core::provider::ModelRequestDefaults> for RemoteModelRequestDefau
     }
 }
 
-impl From<RemoteModelRequestDefaults> for lash_core::provider::ModelRequestDefaults {
-    fn from(value: RemoteModelRequestDefaults) -> Self {
-        let RemoteModelRequestDefaults {
+impl From<RemoteLlmProfileRequestDefaults> for lash_core::provider::LlmProfileRequestDefaults {
+    fn from(value: RemoteLlmProfileRequestDefaults) -> Self {
+        let RemoteLlmProfileRequestDefaults {
             expose_thinking,
             max_output_tokens,
             cache_retention,

@@ -491,7 +491,7 @@ pub enum RemoteParkReason {
         message: String,
         /// The recorded model key the failing attempts could not bind.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        model_key: Option<String>,
+        profile_key: Option<String>,
     },
 }
 
@@ -1358,34 +1358,34 @@ pub struct RemoteProcessModelLimits {
     pub output_token_capacity: Option<usize>,
 }
 
-/// Mirror of the core `ModelMetadata`: the recorded facts of one registered
+/// Mirror of the core `LlmProfileMetadata`: the recorded facts of one registered
 /// model.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteModelMetadata {
+pub struct RemoteLlmProfileMetadata {
     pub wire_model: String,
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(
         default,
-        skip_serializing_if = "crate::llm::RemoteModelCapability::is_empty"
+        skip_serializing_if = "crate::llm::RemoteLlmProfileCapability::is_empty"
     )]
-    pub capability: crate::llm::RemoteModelCapability,
+    pub capability: crate::llm::RemoteLlmProfileCapability,
     pub limits: RemoteProcessModelLimits,
     #[serde(
         default,
-        skip_serializing_if = "crate::llm::RemoteModelRequestDefaults::is_default"
+        skip_serializing_if = "crate::llm::RemoteLlmProfileRequestDefaults::is_default"
     )]
-    pub request_defaults: crate::llm::RemoteModelRequestDefaults,
+    pub request_defaults: crate::llm::RemoteLlmProfileRequestDefaults,
 }
 
-/// Mirror of the core `ModelConfig`: the registry-minted binding a session
+/// Mirror of the core `LlmProfileConfig`: the registry-minted binding a session
 /// recorded for its key, and the reasoning it runs that model with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteModelConfig {
+pub struct RemoteLlmProfileConfig {
     pub key: String,
-    pub metadata: RemoteModelMetadata,
+    pub metadata: RemoteLlmProfileMetadata,
     #[serde(default)]
     pub reasoning: crate::llm::RemoteReasoningSelection,
 }

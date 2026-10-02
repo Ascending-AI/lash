@@ -111,8 +111,8 @@ pub mod config {
     /// The owner of the core configuration the commands below change.
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
-        SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetMaxToolCalls,
-        SetModel, SetNoProgressBudget, SetReasoning, SetToolAccess, SetTurnBudget,
+        SetAttachmentAcceptance, SetAutonomy, SetChargeSafety, SetGeneration, SetLlmProfile,
+        SetMaxToolCalls, SetNoProgressBudget, SetReasoning, SetToolAccess, SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
@@ -128,7 +128,7 @@ pub mod config {
 /// session spec's plugin options under [`STANDARD_PROTOCOL_PLUGIN_ID`]:
 ///
 /// ```ignore
-/// let spec = SessionSpec::new(model_key, turn_budget, max_tool_calls).plugin(
+/// let spec = SessionSpec::new(profile_key, turn_budget, max_tool_calls).plugin(
 ///     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
 ///     lash::standard::StandardTurnOptions {
 ///         prompt: Some(lash::standard::StandardPrompt {
@@ -244,28 +244,28 @@ pub use lash_core::store::{
 pub use lash_core::{
     AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
-    EmptyModels, FrameKey, InputId, InputItem, LlmCallRecord, MaxToolCalls, ModelConfig, ModelKey,
-    ModelLimits, ModelLimitsError, ModelMetadata, ModelMetadataBuilder, ModelRegistry,
-    ModelUnavailable, ModelUnavailableReason, NoProgressBudget, NodeId, OmittedToolCalls,
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, ProcessId, QueuedDrainCandidate, QueuedDrainFamily,
-    QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig,
-    ReasoningRefused, RecordedModel, RegisteredModel, RegistrationError, Resolution,
-    ResolveOutcome, RuntimeModels, RuntimeOwner, SessionCreateRequest, SessionEntry, SessionError,
-    SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionView,
-    ToolCallLimitExceeded, ToolCallLimitScope, TurnActivity, TurnActivityId, TurnBudget, TurnCause,
-    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
-    TurnInput, TurnInputApplication, UnstatedSessionConfig, facade_support::GenerationOverlay,
-    facade_support::PluginStack, facade_support::SessionCommand,
-    facade_support::SessionCommandReceipt, facade_support::SessionSpec,
-    facade_support::SpecResolveError, facade_support::TurnActivitySink,
-    facade_support::TurnAddress, facade_support::TurnAttach, facade_support::TurnCancelOutcome,
-    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
-    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
-    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
-    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
-    facade_support::TurnWorkDriver,
+    EmptyLlmProfiles, FrameKey, InputId, InputItem, LlmCallRecord, LlmProfileConfig, LlmProfileKey,
+    LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
+    LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles,
+    MaxToolCalls, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
+    ProcessId, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, QueuedWorkBatchingConfig, ReasoningRefused, RecordedLlmProfile,
+    RegisteredLlmProfile, RegistrationError, Resolution, ResolveOutcome, RuntimeOwner,
+    SessionCreateRequest, SessionEntry, SessionError, SessionId, SessionListFilter,
+    SessionRelationKind, SessionStartPoint, SessionView, ToolCallLimitExceeded, ToolCallLimitScope,
+    TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent, TurnFailureEvidence,
+    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
+    UnstatedSessionConfig, facade_support::GenerationOverlay, facade_support::PluginStack,
+    facade_support::SessionCommand, facade_support::SessionCommandReceipt,
+    facade_support::SessionSpec, facade_support::SpecResolveError,
+    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
+    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
+    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
+    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
+    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
 };
 // A host's head write is a session command it submits, settles and may
 // withdraw (FIG-4202): the settlement and the typed outcomes it carries.
@@ -321,16 +321,17 @@ pub mod prelude {
     pub use crate::{
         AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus,
         DurableSession, EmbedError, InputItem, LashCore, LashCoreBuilder, LashSession,
-        MaxToolCalls, ModelConfig, ModelKey, ModelLimits, ModelLimitsError, ModelMetadata,
-        ModelMetadataBuilder, ModelRegistry, NoProgressBudget, ObservableSession, ParkedSession,
-        PendingTurnInputCancelOutcome, PluginOperations, PluginStack, RegisteredModel, Result,
-        SendBuilder, SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
-        SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeleteReport,
-        SessionDeletion, SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind,
-        SessionSpec, SessionStartPoint, SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity,
-        TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent,
-        TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome,
-        TurnOutput, TurnReport, TurnStatus, TurnStop, message_role, message_text,
+        LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileLimitsError,
+        LlmProfileMetadata, LlmProfileMetadataBuilder, LlmProfileRegistry, MaxToolCalls,
+        NoProgressBudget, ObservableSession, ParkedSession, PendingTurnInputCancelOutcome,
+        PluginOperations, PluginStack, RegisteredLlmProfile, Result, SendBuilder, SendHandle,
+        SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin, SessionCommandReceipt,
+        SessionCreateRequest, SessionCreation, SessionDeleteReport, SessionDeletion, SessionEntry,
+        SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec, SessionStartPoint,
+        SessionTriggerAdmin, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
+        TurnActivityId, TurnActivitySink, TurnBudget, TurnCause, TurnEvent, TurnExecutionMetrics,
+        TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
+        TurnStatus, TurnStop, message_role, message_text,
     };
 }
 
@@ -441,7 +442,7 @@ pub mod tools {
         ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRealized,
         ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule,
         ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
-        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionModel, ToolValue, ToolView,
+        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionLlmProfile, ToolValue, ToolView,
         ToolViewBlock, ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
         turn_outcome_from_tool_control,
@@ -1013,19 +1014,19 @@ pub mod remote {
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
             RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
             RemoteInstructionRole, RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage,
-            RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest, RemoteLlmRequestScope,
+            RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmProfileCapability,
+            RemoteLlmProfileRequestDefaults, RemoteLlmRequest, RemoteLlmRequestScope,
             RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice,
-            RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent,
-            RemoteModelRequestDefaults, RemoteNormalizedError, RemoteOpenAiReasoningContext,
-            RemoteProtocolPosition, RemoteProviderFailureKind, RemoteProviderFileScope,
-            RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
-            RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
-            RemoteProviderRouteIdentity, RemoteReasoningCapability, RemoteReasoningEncoding,
-            RemoteReasoningRetentionCapability, RemoteReasoningRetentionPolicy,
-            RemoteReasoningRetentionSelection, RemoteReasoningSelection, RemoteResponseTextMeta,
-            RemoteRetryClass, RemoteRetryDecision, RemoteRetryDeclineCause, RemoteRetryWait,
-            RemoteSchemaContract, RemoteSchemaProjectionOverride, RemoteSchemaProjectionPolicy,
-            RemoteToolResultBlock,
+            RemoteLlmToolSpec, RemoteModelIntent, RemoteNormalizedError,
+            RemoteOpenAiReasoningContext, RemoteProtocolPosition, RemoteProviderFailureKind,
+            RemoteProviderFileScope, RemoteProviderMetadata, RemoteProviderReasoningReplay,
+            RemoteProviderReplayDrop, RemoteProviderReplayDropReason, RemoteProviderReplayKind,
+            RemoteProviderReplayMeta, RemoteProviderRouteIdentity, RemoteReasoningCapability,
+            RemoteReasoningEncoding, RemoteReasoningRetentionCapability,
+            RemoteReasoningRetentionPolicy, RemoteReasoningRetentionSelection,
+            RemoteReasoningSelection, RemoteResponseTextMeta, RemoteRetryClass,
+            RemoteRetryDecision, RemoteRetryDeclineCause, RemoteRetryWait, RemoteSchemaContract,
+            RemoteSchemaProjectionOverride, RemoteSchemaProjectionPolicy, RemoteToolResultBlock,
         };
     }
 
@@ -1062,14 +1063,15 @@ pub mod remote {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonWriter, RemoteChargeSafetyPolicy,
             RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
-            RemoteLifetimeDecision, RemoteModelConfig, RemoteModelMetadata, RemoteNoProgressBudget,
-            RemoteObservedProcess, RemoteObservedProcessEvent, RemoteObservedProcessFailure,
-            RemoteObservedWorkItemState, RemoteParkReason, RemotePersistProcessEnvReceipt,
-            RemotePersistProcessEnvRequest, RemotePluginConfigNamespace, RemoteProcessAwaitOutcome,
-            RemoteProcessAwaitOutput, RemoteProcessAwaitRequest, RemoteProcessCancelReceipt,
-            RemoteProcessCancelRequest, RemoteProcessDefinition, RemoteProcessEvent,
-            RemoteProcessEventSemantics, RemoteProcessEventSemanticsSpec, RemoteProcessEventType,
-            RemoteProcessEventsRequest, RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
+            RemoteLifetimeDecision, RemoteLlmProfileConfig, RemoteLlmProfileMetadata,
+            RemoteNoProgressBudget, RemoteObservedProcess, RemoteObservedProcessEvent,
+            RemoteObservedProcessFailure, RemoteObservedWorkItemState, RemoteParkReason,
+            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+            RemotePluginConfigNamespace, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
+            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+            RemoteProcessDefinition, RemoteProcessEvent, RemoteProcessEventSemantics,
+            RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
+            RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
             RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
             RemoteProcessLifecycleState, RemoteProcessListFilter, RemoteProcessListResponse,
@@ -1368,7 +1370,7 @@ pub mod runtime {
     /// The lazy binding of a recorded model that
     /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
     /// unjournaled completion's body runs.
-    pub use lash_core::ModelBinding;
+    pub use lash_core::LlmProfileBinding;
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
@@ -1619,15 +1621,15 @@ pub mod provider {
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.
     pub use lash_core::ProviderFailureKind;
-    /// Why a host-supplied [`ModelCapability`] rejected a reasoning-effort
-    /// selection. The snake_case [`ModelEffortValidationCategory`] codes are a
+    /// Why a host-supplied [`LlmProfileCapability`] rejected a reasoning-effort
+    /// selection. The snake_case [`LlmProfileEffortValidationCategory`] codes are a
     /// stable contract a capability catalog can branch on.
-    pub use lash_core::facade_support::ModelEffortValidationCategory;
+    pub use lash_core::facade_support::LlmProfileEffortValidationCategory;
     pub use lash_core::llm::transport::TransportRetryVerdict;
     pub use lash_core::llm::types::{
         LlmContentBlock, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRole, LlmToolChoice,
     };
-    pub use lash_core::provider::ModelEffortValidationError;
+    pub use lash_core::provider::LlmProfileEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.
     /// A direct [`ProviderHandle::complete`](facade_support::ProviderHandle::complete)
     /// names its [`DispatchAdmission`]: a host calling a provider outside any
@@ -1635,14 +1637,14 @@ pub mod provider {
     /// call's accounting itself (ADR 0125).
     pub use lash_core::provider::{
         CacheRetention, DefaultProviderFailureClassifier, DispatchAdmission, DispatchRefused,
-        ModelRequestDefaults, ProviderCompletion, ProviderCompletionError, ProviderDispatch,
+        LlmProfileRequestDefaults, ProviderCompletion, ProviderCompletionError, ProviderDispatch,
         ProviderFailureClassifier, ProviderRateLimitPermit, ProviderRateLimitPolicy,
         ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy, RequestTimeout,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
         AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-        InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+        InstructionRole, LlmProfileCapability, OpenAiReasoningContext, ReasoningCapability,
         ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
         ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
         ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability,

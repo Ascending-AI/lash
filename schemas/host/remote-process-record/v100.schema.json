@@ -1323,7 +1323,7 @@
             "message": {
               "type": "string"
             },
-            "model_key": {
+            "profile_key": {
               "description": "The recorded model key the failing attempts could not bind.",
               "type": [
                 "string",

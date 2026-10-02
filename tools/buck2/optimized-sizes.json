@@ -829,7 +829,7 @@
       "samples": 0
     }
   },
-  "lash-runtime/model_keys": {
+  "lash-runtime/llm_profiles": {
     "target": {
       "cpu_count": 1,
       "memory_kb": 2097152,

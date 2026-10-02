@@ -21,7 +21,7 @@ mod session;
 
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
-pub use session::ToolSessionModel;
+pub use session::ToolSessionLlmProfile;
 
 /// Integrator class 3 session reads available inside a recorded leaf attempt.
 ///
@@ -44,7 +44,7 @@ pub struct AttemptSessionReads {
 
 impl AttemptSessionReads {
     /// Integrator class 3 read of the attempt owner's effective model policy.
-    pub async fn model(&self) -> Result<session::ToolSessionModel, PluginError> {
+    pub async fn model(&self) -> Result<session::ToolSessionLlmProfile, PluginError> {
         let policy = match &self.owner {
             crate::RuntimeOwner::Session(session_id) => {
                 self.sessions.snapshot_session(session_id).await?.policy
@@ -58,11 +58,11 @@ impl AttemptSessionReads {
         };
         let metadata = config.model.metadata();
         let generation = metadata.clamped_generation(&policy.generation);
-        Ok(session::ToolSessionModel {
-            model_key: config.model.key().clone(),
+        Ok(session::ToolSessionLlmProfile {
+            profile_key: config.model.key().clone(),
             model: metadata.wire_model.clone(),
             model_variant: config.reasoning,
-            model_capability: metadata.capability.clone(),
+            llm_profile_capability: metadata.capability.clone(),
             attachment_acceptance: policy.attachment_acceptance,
             extra_body: metadata.extra_body.clone(),
             request_defaults: metadata.request_defaults.clone(),

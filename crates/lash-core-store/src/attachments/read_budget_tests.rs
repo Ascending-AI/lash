@@ -20,7 +20,7 @@ fn request(sources: Vec<AttachmentSource>) -> LlmRequest {
         tools: Arc::new(vec![]),
         tool_choice: LlmToolChoice::None,
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         attachment_acceptance: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),

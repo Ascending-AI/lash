@@ -19,12 +19,7 @@ error[E0599]: no method named `model` found for struct `LashCoreBuilder` in the 
   --> tests/ui/core_builder_holds_no_session_defaults.rs:12:55
    |
 12 |     let _ = lash::LashCore::standard_builder(backend).model(key);
-   |                                                       ^^^^^
-   |
-help: there is a method `models` with a similar name
-   |
-12 |     let _ = lash::LashCore::standard_builder(backend).models(key);
-   |                                                            +
+   |                                                       ^^^^^ method not found in `LashCoreBuilder`
 
 error[E0599]: no method named `reasoning` found for struct `LashCoreBuilder` in the current scope
   --> tests/ui/core_builder_holds_no_session_defaults.rs:19:55

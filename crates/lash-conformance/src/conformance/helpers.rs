@@ -39,7 +39,7 @@ where
 /// fixture fabricates for it.
 /// The key of a recorded model selection, or `"<no model>"` when the
 /// session records none; laws compare it against the key they selected.
-pub(crate) fn recorded_model_key(model: &Option<crate::ModelConfig>) -> &str {
+pub(crate) fn recorded_profile_key(model: &Option<crate::LlmProfileConfig>) -> &str {
     model
         .as_ref()
         .map_or("<no model>", |model| model.key().as_str())

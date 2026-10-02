@@ -33,7 +33,7 @@ pub enum RemoteChargeSafetyPolicy {
 pub struct RemoteProcessExecutionPolicy {
     /// The recorded model selection; absent for a policy that selects none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<RemoteModelConfig>,
+    pub model: Option<RemoteLlmProfileConfig>,
     /// The session's recorded attachment-acceptance rules.
     #[serde(
         default,

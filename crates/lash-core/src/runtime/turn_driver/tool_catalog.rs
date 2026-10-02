@@ -62,7 +62,7 @@ impl RuntimeTurnDriver<'_> {
             turn_id: self.turn_id.clone(),
             autonomous: session_policy.autonomous,
             model,
-            max_context_tokens: Some(session_policy.model_config().context_window_tokens()),
+            max_context_tokens: Some(session_policy.llm_profile_config().context_window_tokens()),
             messages,
             events: self.turn_pipeline.active_events(),
             turn_causes: self.turn_causes.clone(),
@@ -70,12 +70,20 @@ impl RuntimeTurnDriver<'_> {
             turn_driver_preamble,
             turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
-            model_variant: session_policy.model_config().reasoning.clone(),
-            model_capability: session_policy.model_config().metadata().capability.clone(),
+            model_variant: session_policy.llm_profile_config().reasoning.clone(),
+            llm_profile_capability: session_policy
+                .llm_profile_config()
+                .metadata()
+                .capability
+                .clone(),
             attachment_acceptance: Arc::clone(&session_policy.attachment_acceptance),
-            extra_body: session_policy.model_config().metadata().extra_body.clone(),
+            extra_body: session_policy
+                .llm_profile_config()
+                .metadata()
+                .extra_body
+                .clone(),
             request_defaults: session_policy
-                .model_config()
+                .llm_profile_config()
                 .metadata()
                 .request_defaults
                 .clone(),
@@ -271,7 +279,7 @@ impl RuntimeTurnDriver<'_> {
     /// names the model by its recorded key, so a replay judges the same way
     /// on a deployment that no longer serves the key (FIG-4404).
     pub(super) fn validate_recorded_selection(&self) -> Result<String, Box<SessionStreamEvent>> {
-        let recorded = self.policy.model_config();
+        let recorded = self.policy.llm_profile_config();
         let model = recorded.model.wire_model().to_string();
         // Effort names match exactly, so the selection travels unchanged.
         match recorded.metadata().capability.validate_selection(

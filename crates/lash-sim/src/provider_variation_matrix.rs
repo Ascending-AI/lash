@@ -899,7 +899,7 @@ fn matrix_request(
     events: Arc<Mutex<Vec<LlmStreamEvent>>>,
 ) -> LlmRequest {
     let model = dialect_model(dialect);
-    let model_capability = lash_core::ModelCapability {
+    let llm_profile_capability = lash_core::LlmProfileCapability {
         stream_termination: Some(StreamTermination::RequireTerminalEvidence),
         ..Default::default()
     };
@@ -912,11 +912,11 @@ fn matrix_request(
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability,
+        llm_profile_capability,
         extra_body: Default::default(),
         // Every matrix row records a model that exposes thinking; Anthropic
         // additionally requires a cap, and lash invents none.
-        request_defaults: lash_core::provider::ModelRequestDefaults {
+        request_defaults: lash_core::provider::LlmProfileRequestDefaults {
             expose_thinking: true,
             max_output_tokens: (dialect == "anthropic.messages").then_some(4_096),
             ..Default::default()

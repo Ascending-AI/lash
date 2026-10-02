@@ -109,7 +109,7 @@ impl<'de> Deserialize<'de> for RequestTimeout {
 /// transport byte guards. They govern an attempt and never what a call asks
 /// for or captures: publication, the fallback output cap, the cache hint and
 /// response-metadata capture are the recorded model's
-/// [`ModelRequestDefaults`](lash_sansio::llm::capability::ModelRequestDefaults),
+/// [`LlmProfileRequestDefaults`](lash_sansio::llm::capability::LlmProfileRequestDefaults),
 /// carried by each request.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -271,7 +271,7 @@ pub fn resolve_generation_policy(
 ) -> Result<ResolvedGenerationPolicy, LlmTransportError> {
     let defaults = &request.request_defaults;
     let reasoning = request
-        .model_capability
+        .llm_profile_capability
         .reasoning_intent(&request.model, provider_kind, &request.model_variant)
         .map_err(|error| {
             refused(error.category.failure_code(), error.message)
@@ -300,7 +300,7 @@ pub fn resolve_generation_policy(
         if !wire.temperature {
             return Err(unsupported(wire, "temperature", "has no field for"));
         }
-        if !request.model_capability.allows_caller_temperature() {
+        if !request.llm_profile_capability.allows_caller_temperature() {
             return Err(unsupported(
                 wire,
                 "temperature",
@@ -392,7 +392,7 @@ impl ResolvedGenerationPolicy {
             reasoning: Outcome::from_emission(self.reasoning.is_some(), emission.reasoning),
             reasoning_retention: Outcome::from_emission(
                 !matches!(
-                    request.model_capability.reasoning_retention.selection,
+                    request.llm_profile_capability.reasoning_retention.selection,
                     ReasoningRetentionSelection::ProviderDefault
                 ),
                 emission.reasoning_retention,

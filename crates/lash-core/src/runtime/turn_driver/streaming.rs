@@ -82,7 +82,7 @@ impl RuntimeTurnDriver<'_> {
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::LlmCall {
-                    model_key: self.policy.model_config().key().clone(),
+                    profile_key: self.policy.llm_profile_config().key().clone(),
                     request: Box::new(
                         LlmRequestSpec::from_request(
                             &request,
@@ -207,7 +207,7 @@ impl RuntimeTurnDriver<'_> {
             request.generation.stop_sequences_suppressed_by_protocol();
         let clamped_output_token_cap = self
             .policy
-            .model_config()
+            .llm_profile_config()
             .metadata()
             .clamp_generation_options(&mut request.generation);
         let request = match crate::attachments::resolve_llm_request_attachments(
@@ -774,7 +774,11 @@ impl RuntimeTurnDriver<'_> {
                         response: crate::trace::trace_llm_response(
                             response_text,
                             0,
-                            self.policy.model_config().model.wire_model().to_string(),
+                            self.policy
+                                .llm_profile_config()
+                                .model
+                                .wire_model()
+                                .to_string(),
                             None,
                             response_parts,
                             None,

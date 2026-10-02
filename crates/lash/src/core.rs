@@ -763,7 +763,7 @@ impl LashCore {
 /// Builder for configuring lash core over one [`Backend`].
 pub struct LashCoreBuilder {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
-    models: Option<Arc<dyn lash_core::RuntimeModels>>,
+    models: Option<Arc<dyn lash_core::LlmProfiles>>,
     /// The run definitions sent inputs' specs may name (FIG-3838).
     run_definitions: lash_core::RunDefinitions,
     /// The one substrate every persistence port and the effect host come from.
@@ -853,7 +853,7 @@ impl LashCoreBuilder {
     /// by key at creation and at every model change, and binds a recorded
     /// binding to the transport that executes it. Without it no session can
     /// be created or run a turn.
-    pub fn models(mut self, models: Arc<dyn lash_core::RuntimeModels>) -> Self {
+    pub fn llm_profiles(mut self, models: Arc<dyn lash_core::LlmProfiles>) -> Self {
         self.models = Some(models);
         self
     }
@@ -863,13 +863,13 @@ impl LashCoreBuilder {
     /// [`SessionSpec`](crate::SessionSpec) by the wire model of the metadata
     /// it built.
     #[cfg(any(test, feature = "testing"))]
-    pub fn serve_test_model(
+    pub fn serve_test_llm_profile(
         self,
         provider: facade_support::ProviderHandle,
-        metadata: lash_core::ModelMetadata,
+        metadata: lash_core::LlmProfileMetadata,
     ) -> Self {
-        let key = lash_core::ModelKey::new(metadata.wire_model.clone());
-        self.models(lash_core::testing::single_model_registry(
+        let key = lash_core::LlmProfileKey::new(metadata.wire_model.clone());
+        self.llm_profiles(lash_core::testing::single_llm_profile_registry(
             key, metadata, provider,
         ))
     }

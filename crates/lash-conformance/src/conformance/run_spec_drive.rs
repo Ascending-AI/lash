@@ -19,21 +19,21 @@ use super::drive_admission::{DriveParts, on_tier};
 use crate::admit;
 
 /// The model the law sessions start on.
-const SESSION_MODEL: &str = "mock-model";
+const SESSION_PROFILE: &str = "mock-model";
 /// The model a config command moves a session to.
-const COMMANDED_MODEL: &str = "run-spec-commanded-model";
+const COMMANDED_PROFILE: &str = "run-spec-commanded-model";
 /// The model a spec pins its root to.
-const PINNED_MODEL: &str = "run-spec-pinned-model";
+const PINNED_PROFILE: &str = "run-spec-pinned-model";
 /// The model a later deployment's definition would pick.
-const REDEPLOYED_MODEL: &str = "run-spec-redeployed-model";
-/// A second key for the wire model [`SESSION_MODEL`] names: another
+const REDEPLOYED_PROFILE: &str = "run-spec-redeployed-model";
+/// A second key for the wire model [`SESSION_PROFILE`] names: another
 /// registration of the same model, as a host would make for a second route.
 const SHARED_WIRE_KEY: &str = "run-spec-shared-wire-key";
 /// A generation seed only the pinned spec states.
 const PINNED_SEED: i64 = 4_589;
 
-fn model(id: &str) -> crate::ModelKey {
-    crate::ModelKey::new(id)
+fn model(id: &str) -> crate::LlmProfileKey {
+    crate::LlmProfileKey::new(id)
 }
 
 /// The law's models: every model it names, all served by `provider`.
@@ -41,28 +41,31 @@ fn model(id: &str) -> crate::ModelKey {
     clippy::expect_used,
     reason = "conformance-law fixture: the law's distinct literal keys always register"
 )]
-fn law_models(provider: crate::ProviderHandle) -> Arc<crate::ModelRegistry> {
+fn law_llm_profiles(provider: crate::ProviderHandle) -> Arc<crate::LlmProfileRegistry> {
     let registry = [
-        SESSION_MODEL,
-        COMMANDED_MODEL,
-        PINNED_MODEL,
-        REDEPLOYED_MODEL,
+        SESSION_PROFILE,
+        COMMANDED_PROFILE,
+        PINNED_PROFILE,
+        REDEPLOYED_PROFILE,
     ]
     .into_iter()
-    .try_fold(crate::ModelRegistry::new(), |registry, id| {
+    .try_fold(crate::LlmProfileRegistry::new(), |registry, id| {
         registry.register(
             id,
-            crate::RegisteredModel::new(crate::testing::test_model_metadata(id), provider.clone()),
+            crate::RegisteredLlmProfile::new(
+                crate::testing::test_llm_profile_metadata(id),
+                provider.clone(),
+            ),
         )
     })
     .expect("every law model registers once");
     Arc::new(registry)
 }
 
-/// A spec pinning its root to [`PINNED_MODEL`] with [`PINNED_SEED`].
+/// A spec pinning its root to [`PINNED_PROFILE`] with [`PINNED_SEED`].
 fn pinned_spec() -> crate::RunSpec {
     crate::RunSpec::overrides(crate::RunOverrides {
-        model: Some(model(PINNED_MODEL)),
+        model: Some(model(PINNED_PROFILE)),
         generation: Some(crate::GenerationOptions {
             seed: Some(PINNED_SEED),
             ..crate::GenerationOptions::default()
@@ -113,7 +116,7 @@ fn definitions_with(definition: CountingDefinition) -> crate::RunDefinitions {
 
 /// Serve every model through one provider that records the model each call
 /// named, answering `answer <n>` to its n-th call.
-fn record_models(parts: &mut DriveParts) -> Arc<std::sync::Mutex<Vec<String>>> {
+fn record_llm_profiles(parts: &mut DriveParts) -> Arc<std::sync::Mutex<Vec<String>>> {
     let models = Arc::new(std::sync::Mutex::new(Vec::new()));
     let calls = Arc::new(AtomicUsize::new(0));
     let provider = crate::testing::TestProvider::builder()
@@ -138,7 +141,7 @@ fn record_models(parts: &mut DriveParts) -> Arc<std::sync::Mutex<Vec<String>>> {
             }
         })
         .build();
-    parts.host.providers.models = law_models(provider.into_handle());
+    parts.host.providers.models = law_llm_profiles(provider.into_handle());
     models
 }
 
@@ -238,7 +241,7 @@ pub async fn run_specs_split_roots_in_admission_order(
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-selector", &effect_host, &stores, 8).await;
     parts.compose_inputs();
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     let mut inputs = Vec::new();
     for (key, spec) in [
         ("selector-a1", pinned_spec()),
@@ -268,12 +271,12 @@ pub async fn run_specs_split_roots_in_admission_order(
     );
     assert_eq!(
         recorded(&models),
-        vec![PINNED_MODEL, SESSION_MODEL, PINNED_MODEL],
+        vec![PINNED_PROFILE, SESSION_PROFILE, PINNED_PROFILE],
         "each root ran on its own spec's shape"
     );
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
-        SESSION_MODEL,
+        crate::conformance::helpers::recorded_profile_key(&head_config(&parts).await.model),
+        SESSION_PROFILE,
         "the pinned roots left the session's model alone"
     );
     assert_eq!(
@@ -304,7 +307,7 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-default", &effect_host, &stores, 8).await;
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     enqueue(
         &parts,
         "before the command",
@@ -321,8 +324,8 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
                 .submit_config_transaction(
                     "run-spec-default-command",
                     revision,
-                    &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-                        model: model(COMMANDED_MODEL),
+                    &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+                        model: model(COMMANDED_PROFILE),
                     }),
                 )
                 .await
@@ -346,7 +349,7 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     );
     assert_eq!(
         recorded(&models),
-        vec![COMMANDED_MODEL],
+        vec![COMMANDED_PROFILE],
         "the input accepted before the command ran after its drain"
     );
 
@@ -365,13 +368,13 @@ pub async fn the_default_spec_is_the_snapshot_after_the_command_drain(
     );
     assert_eq!(
         recorded(&models),
-        vec![COMMANDED_MODEL, PINNED_MODEL, COMMANDED_MODEL],
+        vec![COMMANDED_PROFILE, PINNED_PROFILE, COMMANDED_PROFILE],
         "the pin shaped its own root only"
     );
     let head = head_config(&parts).await;
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&head.model),
-        COMMANDED_MODEL,
+        crate::conformance::helpers::recorded_profile_key(&head.model),
+        COMMANDED_PROFILE,
         "the sticky model is the command's"
     );
     assert_ne!(
@@ -404,7 +407,7 @@ pub async fn a_config_command_after_a_pinned_root_resolves_over_the_sticky_confi
 ) {
     let mut parts =
         DriveParts::new(prefix, "run-spec-sticky-command", &effect_host, &stores, 8).await;
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     enqueue(&parts, "pinned", "sticky-pinned", pinned_spec()).await;
     let pinned_request = parts.request("run-spec-sticky-command-pinned");
     let command_request = parts.request("run-spec-sticky-command-apply");
@@ -453,13 +456,13 @@ pub async fn a_config_command_after_a_pinned_root_resolves_over_the_sticky_confi
     let head = head_config(&parts).await;
     assert_eq!(
         (
-            crate::conformance::helpers::recorded_model_key(&head.model).to_string(),
+            crate::conformance::helpers::recorded_profile_key(&head.model).to_string(),
             head.generation.seed,
             head.turn_budget,
             head.config_revision,
         ),
         (
-            SESSION_MODEL.to_string(),
+            SESSION_PROFILE.to_string(),
             None,
             crate::TurnBudget::bounded(COMMANDED_TURNS),
             1,
@@ -478,7 +481,7 @@ pub async fn a_config_command_after_a_pinned_root_resolves_over_the_sticky_confi
     assert_eq!(committed_roots(&after), vec!["sticky-after"]);
     assert_eq!(
         recorded(&models),
-        vec![PINNED_MODEL, SESSION_MODEL],
+        vec![PINNED_PROFILE, SESSION_PROFILE],
         "the default root after the command runs on the session's model"
     );
 }
@@ -512,7 +515,7 @@ pub async fn a_root_resolves_its_spec_once_across_a_crash(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-once", &effect_host, &stores, 8).await;
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     let first_resolutions = Arc::new(AtomicUsize::new(0));
     let redrive_resolutions = Arc::new(AtomicUsize::new(0));
     let input = enqueue(
@@ -525,13 +528,13 @@ pub async fn a_root_resolves_its_spec_once_across_a_crash(
     let mut first = parts.clone();
     first.host.providers.run_definitions = definitions_with(CountingDefinition {
         name: "run-spec-once",
-        model: PINNED_MODEL,
+        model: PINNED_PROFILE,
         resolved: Arc::clone(&first_resolutions),
     });
     let mut redeployed = parts.clone();
     redeployed.host.providers.run_definitions = definitions_with(CountingDefinition {
         name: "run-spec-once",
-        model: REDEPLOYED_MODEL,
+        model: REDEPLOYED_PROFILE,
         resolved: Arc::clone(&redrive_resolutions),
     });
     let request = parts.request("run-spec-once-drive");
@@ -581,7 +584,7 @@ pub async fn a_root_resolves_its_spec_once_across_a_crash(
     );
     assert_eq!(
         recorded(&models),
-        vec![PINNED_MODEL],
+        vec![PINNED_PROFILE],
         "the root's one model call ran on its recorded shape"
     );
     assert_eq!(
@@ -590,8 +593,8 @@ pub async fn a_root_resolves_its_spec_once_across_a_crash(
         "the root commits once"
     );
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
-        SESSION_MODEL
+        crate::conformance::helpers::recorded_profile_key(&head_config(&parts).await.model),
+        SESSION_PROFILE
     );
 }
 
@@ -610,7 +613,7 @@ pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-missing", &effect_host, &stores, 8).await;
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     let resolutions = Arc::new(AtomicUsize::new(0));
     let input = enqueue(
         &parts,
@@ -622,7 +625,7 @@ pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
     let mut deployed = parts.clone();
     deployed.host.providers.run_definitions = definitions_with(CountingDefinition {
         name: "run-spec-missing",
-        model: PINNED_MODEL,
+        model: PINNED_PROFILE,
         resolved: Arc::clone(&resolutions),
     });
     let request = parts.request("run-spec-missing-drive");
@@ -717,7 +720,7 @@ pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
         1,
         "the deployed definition resolved the root once"
     );
-    assert_eq!(recorded(&models), vec![PINNED_MODEL]);
+    assert_eq!(recorded(&models), vec![PINNED_PROFILE]);
     assert_eq!(
         parts.applications().await,
         vec![(input, TurnId::from("missing-root"))]
@@ -781,11 +784,11 @@ pub async fn a_batch_shares_one_spec_that_each_root_resolves_once(
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-batch", &effect_host, &stores, 2).await;
     parts.compose_inputs();
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     let resolutions = Arc::new(AtomicUsize::new(0));
     parts.host.providers.run_definitions = definitions_with(CountingDefinition {
         name: "run-spec-batch",
-        model: PINNED_MODEL,
+        model: PINNED_PROFILE,
         resolved: Arc::clone(&resolutions),
     });
     let keys = ["batch-1", "batch-2", "batch-3", "batch-4"];
@@ -818,10 +821,10 @@ pub async fn a_batch_shares_one_spec_that_each_root_resolves_once(
         2,
         "the shared spec resolved once per root"
     );
-    assert_eq!(recorded(&models), vec![PINNED_MODEL, PINNED_MODEL]);
+    assert_eq!(recorded(&models), vec![PINNED_PROFILE, PINNED_PROFILE]);
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
-        SESSION_MODEL
+        crate::conformance::helpers::recorded_profile_key(&head_config(&parts).await.model),
+        SESSION_PROFILE
     );
 }
 
@@ -843,7 +846,7 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
 ) {
     let mut parts = DriveParts::new(prefix, "run-spec-batch-order", &effect_host, &stores, 8).await;
     parts.compose_inputs();
-    let models = record_models(&mut parts);
+    let models = record_llm_profiles(&mut parts);
     let before = enqueue(
         &parts,
         "before the command",
@@ -864,8 +867,8 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
                 .submit_config_transaction(
                     "run-spec-batch-order-command",
                     revision,
-                    &crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-                        model: model(COMMANDED_MODEL),
+                    &crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+                        model: model(COMMANDED_PROFILE),
                     }),
                 )
                 .await
@@ -930,12 +933,12 @@ pub async fn a_batch_keeps_its_turn_lane_place_behind_the_command_lane(
     );
     assert_eq!(
         recorded(&models),
-        vec![COMMANDED_MODEL, PINNED_MODEL, COMMANDED_MODEL],
+        vec![COMMANDED_PROFILE, PINNED_PROFILE, COMMANDED_PROFILE],
         "the command applied before the first turn-lane claim; the batch ran on its own shape"
     );
     assert_eq!(
-        crate::conformance::helpers::recorded_model_key(&head_config(&parts).await.model),
-        COMMANDED_MODEL
+        crate::conformance::helpers::recorded_profile_key(&head_config(&parts).await.model),
+        COMMANDED_PROFILE
     );
 }
 
@@ -1034,8 +1037,8 @@ async fn runtime_with_switch(
 
 /// A follow-on recovered after a crash runs under the shape its parent root
 /// recorded at the switch, not the spec resolved fresh against the session's
-/// current defaults (FIG-3877): the root's spec pins `PINNED_MODEL`, so the
-/// follow-on's model call must name `PINNED_MODEL` too.
+/// current defaults (FIG-3877): the root's spec pins `PINNED_PROFILE`, so the
+/// follow-on's model call must name `PINNED_PROFILE` too.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1083,7 +1086,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
             }
         })
         .build();
-    parts.host.providers.models = law_models(provider.into_handle());
+    parts.host.providers.models = law_llm_profiles(provider.into_handle());
     let executed = Arc::new(AtomicUsize::new(0));
     let tool: Arc<dyn crate::plugin::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
@@ -1159,7 +1162,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
     );
     assert_eq!(
         recorded(&models),
-        vec![PINNED_MODEL, PINNED_MODEL],
+        vec![PINNED_PROFILE, PINNED_PROFILE],
         "the recovered follow-on ran under the shape its parent root recorded, \
          not the session's default model"
     );
@@ -1249,7 +1252,7 @@ pub async fn a_redriven_switch_owes_its_follow_on_under_the_bound_its_root_resol
             }
         })
         .build();
-    parts.host.providers.models = law_models(provider.into_handle());
+    parts.host.providers.models = law_llm_profiles(provider.into_handle());
     let tool: Arc<dyn crate::plugin::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("conformance-run-spec-switch-probe"),
@@ -1377,17 +1380,17 @@ pub async fn usage_under_two_model_keys_that_share_a_wire_model_is_attributed_se
         })
         .build()
         .into_handle();
-    let shared_wire = crate::testing::test_model_metadata(SESSION_MODEL);
+    let shared_wire = crate::testing::test_llm_profile_metadata(SESSION_PROFILE);
     parts.host.providers.models = Arc::new(
-        crate::ModelRegistry::new()
+        crate::LlmProfileRegistry::new()
             .register(
-                SESSION_MODEL,
-                crate::RegisteredModel::new(shared_wire.clone(), provider.clone()),
+                SESSION_PROFILE,
+                crate::RegisteredLlmProfile::new(shared_wire.clone(), provider.clone()),
             )
             .and_then(|registry| {
                 registry.register(
                     SHARED_WIRE_KEY,
-                    crate::RegisteredModel::new(shared_wire, provider),
+                    crate::RegisteredLlmProfile::new(shared_wire, provider),
                 )
             })
             .expect("the two keys register once each"),
@@ -1452,15 +1455,15 @@ pub async fn usage_under_two_model_keys_that_share_a_wire_model_is_attributed_se
             .iter()
             .map(|row| (
                 row.source.as_str(),
-                row.model_key.as_str(),
+                row.profile_key.as_str(),
                 row.requested_model.as_str(),
                 row.usage.input_tokens,
                 row.reported_attempts,
             ))
             .collect::<Vec<_>>(),
         vec![
-            ("turn", SESSION_MODEL, SESSION_MODEL, 10, 1),
-            ("turn", SHARED_WIRE_KEY, SESSION_MODEL, 20, 1),
+            ("turn", SESSION_PROFILE, SESSION_PROFILE, 10, 1),
+            ("turn", SHARED_WIRE_KEY, SESSION_PROFILE, 20, 1),
         ],
         "each root's usage sits under the key its root recorded, beside the one wire model \
          both requests named"
@@ -1472,7 +1475,7 @@ pub async fn usage_under_two_model_keys_that_share_a_wire_model_is_attributed_se
         "the per-requested-model view folds the two keys: {report:?}"
     );
     assert_eq!(
-        report.by_model_key[&model(SHARED_WIRE_KEY)]
+        report.by_profile_key[&model(SHARED_WIRE_KEY)]
             .usage
             .input_tokens,
         20,
@@ -1493,14 +1496,14 @@ pub async fn usage_under_two_model_keys_that_share_a_wire_model_is_attributed_se
         facts
             .iter()
             .map(|fact| (
-                fact.model_key.as_str(),
+                fact.profile_key.as_str(),
                 fact.requested_model.as_str(),
                 fact.served_model.as_deref()
             ))
             .collect::<Vec<_>>(),
         vec![
-            (SESSION_MODEL, SESSION_MODEL, None),
-            (SHARED_WIRE_KEY, SESSION_MODEL, None),
+            (SESSION_PROFILE, SESSION_PROFILE, None),
+            (SHARED_WIRE_KEY, SESSION_PROFILE, None),
         ],
         "each fact names its key and requested model, and no served model"
     );

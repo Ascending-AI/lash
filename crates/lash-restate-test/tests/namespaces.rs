@@ -198,8 +198,8 @@ impl lash::plugins::SessionPlugin for EngineSessionPlugin {
     }
 }
 
-fn model_spec() -> lash_core::ModelMetadata {
-    lash_core::ModelMetadata::builder("mock-model")
+fn llm_profile_spec() -> lash_core::LlmProfileMetadata {
+    lash_core::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .expect("model spec")
@@ -248,7 +248,7 @@ fn build_core(backend: lash_core::Backend, label: &str, witness: &Arc<Witness>) 
     lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model_spec())
+        .serve_test_llm_profile(provider, llm_profile_spec())
         .tools(Arc::new(CountingTool {
             witness: Arc::clone(witness),
         }) as Arc<dyn lash_core::ToolProvider>)
@@ -286,9 +286,9 @@ async fn start_request(core: &lash::LashCore, label: &str) -> lash_core::Process
                 &lash_core::ProcessExecutionEnvSpec::new(
                     lash_core::AdmittedPluginConfig::default(),
                     lash_core::SessionPolicy {
-                        model: Some(lash_core::testing::test_model_config(
-                            model_spec().wire_model,
-                            model_spec(),
+                        model: Some(lash_core::testing::test_llm_profile_config(
+                            llm_profile_spec().wire_model,
+                            llm_profile_spec(),
                         )),
                         ..lash_core::SessionPolicy::new(
                             lash::TurnBudget::Unbounded,
@@ -876,7 +876,7 @@ async fn created_session(
     match core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            model_spec().wire_model,
+            llm_profile_spec().wire_model,
             lash::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
         )))

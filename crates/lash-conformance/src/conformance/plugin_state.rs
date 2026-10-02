@@ -329,9 +329,9 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         ..Default::default()
     };
     let policy = crate::SessionPolicy {
-        model: Some(crate::testing::test_model_config(
+        model: Some(crate::testing::test_llm_profile_config(
             "plugin-state-model",
-            crate::ModelMetadata::builder("plugin-state-model")
+            crate::LlmProfileMetadata::builder("plugin-state-model")
                 .context_window_tokens(4096)
                 .build()
                 .unwrap(),

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::{
-    CausalRef, ModelKey, PluginOptions, SessionCreateRequest, SessionPolicy, SessionSnapshot,
+    CausalRef, LlmProfileKey, PluginOptions, SessionCreateRequest, SessionPolicy, SessionSnapshot,
     SessionStartPoint, SessionToolAccess, SubagentSessionContext, facade_support::SessionSpec,
 };
 use lash_rlm_types::RlmTermination;
@@ -142,7 +142,7 @@ impl SubagentSpawnContext<'_> {
         .with_tool_access(self.base_tool_access.clone())
         .with_initial_nodes(initial_nodes);
         let request = match model {
-            Some(key) => request.with_model(key),
+            Some(key) => request.with_llm_profile(key),
             None => request,
         };
         self.finalize_request(request, capability_name)
@@ -236,14 +236,14 @@ pub enum ChildPluginSource {
 /// registered through [`default_registry`].
 pub struct TierCapability {
     name: String,
-    model: Option<ModelKey>,
+    model: Option<LlmProfileKey>,
     plugin_source: ChildPluginSource,
 }
 
 impl TierCapability {
     pub fn new(
         name: impl Into<String>,
-        model: Option<ModelKey>,
+        model: Option<LlmProfileKey>,
         plugin_source: ChildPluginSource,
     ) -> Self {
         Self {
@@ -290,7 +290,7 @@ fn resolve_recorded(spec: &SessionSpec, base: &SessionPolicy) -> Result<SessionP
         None => None,
     };
     let mut policy = spec
-        .resolve_against(base, &lash_core::EmptyModels)
+        .resolve_against(base, &lash_core::EmptyLlmProfiles)
         .map_err(|error| format!("subagent session spec does not resolve: {error}"))?;
     if let Some(reasoning) = keyed_reasoning
         && let Some(model) = policy.model.as_mut()
@@ -350,7 +350,7 @@ impl CapabilityRegistry {
     }
 }
 
-/// `tier_models` supplies optional explicit model keys by tier name; an absent tier runs the
+/// `tier_llm_profiles` supplies optional explicit model keys by tier name; an absent tier runs the
 /// parent session's recorded model.
 /// The built-in `explore` tier uses [`default_explore_plugin_source`] while `peer` forks the
 /// current session's plugin instances.
@@ -359,8 +359,8 @@ impl CapabilityRegistry {
 /// subagents that scan, summarise, or verify without mutating state. The
 /// `peer` tier is a parallel-self with the parent's full affordances:
 /// edits, recursion, anything the parent can do, in a fresh window.
-pub fn default_registry(tier_models: &BTreeMap<String, ModelKey>) -> CapabilityRegistry {
-    let model_for = |name: &str| tier_models.get(name).cloned();
+pub fn default_registry(tier_llm_profiles: &BTreeMap<String, LlmProfileKey>) -> CapabilityRegistry {
+    let model_for = |name: &str| tier_llm_profiles.get(name).cloned();
     let mut registry = CapabilityRegistry::new();
     registry.add(Arc::new(TierCapability::new(
         "explore",

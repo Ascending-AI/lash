@@ -10,7 +10,7 @@ impl RemoteLlmRequest {
             tool_choice,
             attachment_acceptance,
             model_variant,
-            model_capability,
+            llm_profile_capability,
             extra_body,
             request_defaults,
             generation,
@@ -26,7 +26,7 @@ impl RemoteLlmRequest {
             model_intent: RemoteModelIntent {
                 model,
                 variant: model_variant.into(),
-                capability: model_capability.into(),
+                capability: llm_profile_capability.into(),
                 request_defaults: request_defaults.into(),
                 extra_body,
                 provider: None,
@@ -82,7 +82,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
             tools: Arc::new(tools.into_iter().map(Into::into).collect()),
             tool_choice: tool_choice.into(),
             model_variant: variant.into(),
-            model_capability: capability.into(),
+            llm_profile_capability: capability.into(),
             attachment_acceptance: Arc::new(attachment_acceptance.into()),
             extra_body,
             request_defaults: request_defaults.into(),
@@ -95,9 +95,9 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
     }
 }
 
-impl From<core_llm::ModelCapability> for RemoteModelCapability {
-    fn from(value: core_llm::ModelCapability) -> Self {
-        let core_llm::ModelCapability {
+impl From<core_llm::LlmProfileCapability> for RemoteLlmProfileCapability {
+    fn from(value: core_llm::LlmProfileCapability) -> Self {
+        let core_llm::LlmProfileCapability {
             instruction_role,
             native_mid_conversation_system,
             google_dialect,
@@ -120,9 +120,9 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
     }
 }
 
-impl From<RemoteModelCapability> for core_llm::ModelCapability {
-    fn from(value: RemoteModelCapability) -> Self {
-        let RemoteModelCapability {
+impl From<RemoteLlmProfileCapability> for core_llm::LlmProfileCapability {
+    fn from(value: RemoteLlmProfileCapability) -> Self {
+        let RemoteLlmProfileCapability {
             instruction_role,
             native_mid_conversation_system,
             google_dialect,

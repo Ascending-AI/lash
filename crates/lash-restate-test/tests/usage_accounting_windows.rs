@@ -181,9 +181,9 @@ fn core(
         ..Default::default()
     })
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .serve_test_model(
+    .serve_test_llm_profile(
         provider,
-        lash_core::ModelMetadata::builder("mock-model")
+        lash_core::LlmProfileMetadata::builder("mock-model")
             .context_window_tokens(200_000)
             .build()
             .unwrap(),

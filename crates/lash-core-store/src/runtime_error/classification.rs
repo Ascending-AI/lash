@@ -203,13 +203,13 @@ impl RuntimeErrorCode {
             // the provider's failure is the recorded model-call result.
             Self::LlmProvider => Terminal,
             // a refusal of the command that named the key; the same key is refused again.
-            Self::ModelUnknown => Terminal,
+            Self::LlmProfileUnknown => Terminal,
             // the same selection over the same recorded capability is refused again.
             Self::ReasoningRefused => Terminal,
             // the model was adopted when it was set; this worker's deployment cannot bind it now.
-            Self::ModelUnavailable => Retryable,
+            Self::LlmProfileUnavailable => Retryable,
             // the recorded config selects no model; the same record is refused again.
-            Self::ModelUnconfigured => Terminal,
+            Self::LlmProfileUnconfigured => Terminal,
             // the spec names an exact revision this worker's deployment does not register yet.
             Self::RunDefinitionUnavailable => Retryable,
             Self::RecordedRendererUnavailable => Retryable,

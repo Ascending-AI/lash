@@ -81,9 +81,9 @@ struct Script {
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
-        model: Some(lash_core::testing::test_model_config(
+        model: Some(lash_core::testing::test_llm_profile_config(
             "rlm-render-law-model",
-            lash_core::ModelMetadata::builder("rlm-render-law-model")
+            lash_core::LlmProfileMetadata::builder("rlm-render-law-model")
                 .context_window_tokens(100_000)
                 .build()
                 .expect("model spec"),
@@ -163,7 +163,8 @@ async fn open_runtime(
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
-    host_config.providers.models = lash_core::testing::models_serving(&policy(), provider(script));
+    host_config.providers.models =
+        lash_core::testing::llm_profiles_serving(&policy(), provider(script));
     let runtime_host = EmbeddedRuntimeHost::new(host_config);
     let services = PersistentRuntimeServices::new(
         plugins,

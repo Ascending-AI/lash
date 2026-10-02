@@ -1,8 +1,8 @@
 //! Host model keys (FIG-4374): a host registers opaque model keys in a
-//! `ModelRegistry`, several of them served by transports that share one
+//! `LlmProfileRegistry`, several of them served by transports that share one
 //! provider kind. A session records the binding its key minted at creation
 //! and at every model change; a root runs the recorded binding, or ends its
-//! attempt with the typed `ModelUnavailable`, and never falls back to another
+//! attempt with the typed `LlmProfileUnavailable`, and never falls back to another
 //! registration or to today's catalog entry.
 //!
 //! A recorded model is bound lazily (FIG-4404): only the body of an
@@ -23,13 +23,13 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-#[path = "model_keys/session_turn_starts.rs"]
+#[path = "llm_profiles/session_turn_starts.rs"]
 mod session_turn_starts;
 use session_turn_starts::{
     a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start,
     session_turn_start, start_on, unstated_session_turn_start,
 };
-#[path = "model_keys/parked_group.rs"]
+#[path = "llm_profiles/parked_group.rs"]
 mod parked_group;
 use parked_group::{
     a_paused_group_retire_parks_its_process_opener, a_paused_group_retire_parks_its_root_opener,
@@ -39,7 +39,10 @@ use parked_group::{
 
 use lash::direct::LlmOutputPart;
 use lash::provider::{LlmResponse, ProviderHandle};
-use lash::{LashCore, ModelKey, ModelMetadata, ModelRegistry, RegisteredModel, TurnInput};
+use lash::{
+    LashCore, LlmProfileKey, LlmProfileMetadata, LlmProfileRegistry, RegisteredLlmProfile,
+    TurnInput,
+};
 
 /// The provider kind every transport of the host's catalog shares.
 const KIND: &str = "tensorx-compat";
@@ -275,23 +278,23 @@ struct Entry<'a> {
     route: &'a Route,
 }
 
-fn metadata(wire_model: &str, revision: &str) -> ModelMetadata {
+fn metadata(wire_model: &str, revision: &str) -> LlmProfileMetadata {
     let mut extra_body = serde_json::Map::new();
     extra_body.insert("catalog_revision".to_string(), revision.into());
-    ModelMetadata::builder(wire_model)
+    LlmProfileMetadata::builder(wire_model)
         .context_window_tokens(64_000)
         .extra_body(extra_body)
         .build()
         .expect("model metadata")
 }
 
-fn catalog(entries: &[Entry<'_>]) -> Arc<ModelRegistry> {
+fn catalog(entries: &[Entry<'_>]) -> Arc<LlmProfileRegistry> {
     let registry = entries
         .iter()
-        .try_fold(ModelRegistry::new(), |registry, entry| {
+        .try_fold(LlmProfileRegistry::new(), |registry, entry| {
             registry.register(
                 entry.key,
-                RegisteredModel::new(
+                RegisteredLlmProfile::new(
                     metadata(entry.wire_model, entry.revision),
                     entry.route.handle(),
                 ),
@@ -304,7 +307,7 @@ fn catalog(entries: &[Entry<'_>]) -> Arc<ModelRegistry> {
 /// A core over `entries`.
 fn core(double: &Double, entries: &[Entry<'_>], worker: &str) -> LashCore {
     LashCore::standard_builder(double.double.lash_backend())
-        .models(catalog(entries))
+        .llm_profiles(catalog(entries))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -338,7 +341,7 @@ async fn answer_of(handle: lash::SendHandle) -> String {
         .to_string()
 }
 
-fn recorded_key(session: &lash::LashSession) -> ModelKey {
+fn recorded_key(session: &lash::LashSession) -> LlmProfileKey {
     session
         .policy_snapshot()
         .model
@@ -349,7 +352,7 @@ fn recorded_key(session: &lash::LashSession) -> ModelKey {
 
 /// Wait until an attempt on the double ended with the typed refusal of an
 /// unbindable recorded model.
-async fn await_model_unavailable(double: &Double) -> String {
+async fn await_llm_profile_unavailable(double: &Double) -> String {
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             let failure = double
@@ -358,7 +361,7 @@ async fn await_model_unavailable(double: &Double) -> String {
                 .invocations()
                 .into_iter()
                 .filter_map(|view| view.last_failure.map(|(_, message)| message))
-                .find(|message| message.contains("model_unavailable"));
+                .find(|message| message.contains("llm_profile_unavailable"));
             if let Some(failure) = failure {
                 return failure;
             }
@@ -384,20 +387,20 @@ async fn await_model_unavailable(double: &Double) -> String {
 /// it, counting every question the runtime asks it.
 #[derive(Default)]
 struct LiveCatalog {
-    served: Mutex<ModelRegistry>,
+    served: Mutex<LlmProfileRegistry>,
     snapshots: AtomicUsize,
     binds: AtomicUsize,
 }
 
 impl LiveCatalog {
-    fn serving(registry: ModelRegistry) -> Arc<Self> {
+    fn serving(registry: LlmProfileRegistry) -> Arc<Self> {
         let catalog = Arc::new(Self::default());
         catalog.serve(registry);
         catalog
     }
 
     /// Replace the catalog, and count resolver calls from here on.
-    fn serve(&self, registry: ModelRegistry) {
+    fn serve(&self, registry: LlmProfileRegistry) {
         *self.served.lock().expect("served catalog") = registry;
         self.snapshots.store(0, Ordering::SeqCst);
         self.binds.store(0, Ordering::SeqCst);
@@ -412,26 +415,29 @@ impl LiveCatalog {
     }
 }
 
-impl lash::RuntimeModels for LiveCatalog {
-    fn snapshot(&self, key: &ModelKey) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+impl lash::LlmProfiles for LiveCatalog {
+    fn snapshot(
+        &self,
+        key: &LlmProfileKey,
+    ) -> Result<lash::RecordedLlmProfile, lash::LlmProfileUnavailable> {
         self.snapshots.fetch_add(1, Ordering::SeqCst);
         self.served.lock().expect("served catalog").snapshot(key)
     }
 
     fn bind(
         &self,
-        recorded: &lash::RecordedModel,
-    ) -> Result<ProviderHandle, lash::ModelUnavailable> {
+        recorded: &lash::RecordedLlmProfile,
+    ) -> Result<ProviderHandle, lash::LlmProfileUnavailable> {
         self.binds.fetch_add(1, Ordering::SeqCst);
         self.served.lock().expect("served catalog").bind(recorded)
     }
 }
 
-fn registry_of(key: &str, wire_model: &str, provider: ProviderHandle) -> ModelRegistry {
-    ModelRegistry::new()
+fn registry_of(key: &str, wire_model: &str, provider: ProviderHandle) -> LlmProfileRegistry {
+    LlmProfileRegistry::new()
         .register(
             key,
-            RegisteredModel::new(metadata(wire_model, "r1"), provider),
+            RegisteredLlmProfile::new(metadata(wire_model, "r1"), provider),
         )
         .expect("the catalog names the key once")
 }
@@ -453,7 +459,7 @@ fn core_over(
     plugins: Vec<Arc<dyn lash::plugins::PluginFactory>>,
 ) -> LashCore {
     let mut builder = LashCore::standard_builder(double.double.lash_backend())
-        .models(Arc::clone(catalog) as Arc<dyn lash::RuntimeModels>)
+        .llm_profiles(Arc::clone(catalog) as Arc<dyn lash::LlmProfiles>)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1));
     for plugin in plugins {
@@ -535,7 +541,7 @@ fn assert_no_recorded_bind_fault(double: &Double, invocation: &lash_restate_test
             Some(Err((code, message))) => format!("{code}: {message}"),
         };
         assert!(
-            !recorded.contains("model_unavailable") && !recorded.contains("is unavailable"),
+            !recorded.contains("llm_profile_unavailable") && !recorded.contains("is unavailable"),
             "a journaled step result carries the bind fault: {recorded}"
         );
     }
@@ -646,7 +652,7 @@ async fn reconcile_pass(double: &Double) -> lash_core::engine::ParkReconcileRepo
 
 // ---- the laws ---------------------------------------------------------------
 
-#[path = "model_keys/child_parent.rs"]
+#[path = "llm_profiles/child_parent.rs"]
 mod child_parent;
 use child_parent::fig4669_child_parent_survives_every_runtime_reopen;
 
@@ -720,7 +726,7 @@ async fn two_keys_sharing_a_provider_kind_select_their_own_transport(
 /// own: the session's roots keep sending the metadata it recorded, on a
 /// redeployed transport too. Changing the model to the same key re-mints
 /// the binding, and the session's next root sends the edited metadata.
-async fn a_catalog_edit_reaches_a_session_only_through_a_model_change(
+async fn a_catalog_edit_reaches_a_session_only_through_a_profile_change(
     tier: Tier,
     replay: bool,
     seed: u64,
@@ -782,8 +788,8 @@ async fn a_catalog_edit_reaches_a_session_only_through_a_model_change(
     let reselected = config
         .apply(
             lash::config::ConfigWrite::new("keys-reselect-kimi", revision),
-            lash::config::ConfigTransaction::of(lash::config::SetModel {
-                model: ModelKey::new(KIMI),
+            lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
+                model: LlmProfileKey::new(KIMI),
             }),
         )
         .await
@@ -812,9 +818,9 @@ async fn a_catalog_edit_reaches_a_session_only_through_a_model_change(
 }
 
 /// A session whose recorded key left the catalog ends each attempt with the
-/// typed `ModelUnavailable` and calls no other registration, the new default
+/// typed `LlmProfileUnavailable` and calls no other registration, the new default
 /// included; a deployment that registers the key again runs it there.
-async fn a_recorded_model_whose_key_left_the_catalog_fails_typed_and_never_falls_back(
+async fn a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never_falls_back(
     tier: Tier,
     replay: bool,
     seed: u64,
@@ -867,7 +873,7 @@ async fn a_recorded_model_whose_key_left_the_catalog_fails_typed_and_never_falls
         "keys-boot-2",
     );
     hold.release();
-    let failure = await_model_unavailable(&double).await;
+    let failure = await_llm_profile_unavailable(&double).await;
     assert!(
         failure.contains(KIMI),
         "the refusal names the recorded key: {failure}"
@@ -918,7 +924,7 @@ async fn a_recorded_model_whose_key_left_the_catalog_fails_typed_and_never_falls
 
 /// A key that now names another wire model cannot serve a session that
 /// recorded the old one: every attempt ends with the typed
-/// `ModelUnavailable`, and the transport is never sent the request.
+/// `LlmProfileUnavailable`, and the transport is never sent the request.
 async fn a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed(
     tier: Tier,
     replay: bool,
@@ -964,7 +970,7 @@ async fn a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed(
         "keys-boot-2",
     );
     hold.release();
-    let failure = await_model_unavailable(&double).await;
+    let failure = await_llm_profile_unavailable(&double).await;
     assert!(
         failure.contains("kimi-k4") && failure.contains("kimi-k3"),
         "the refusal names the served and the recorded wire models: {failure}"
@@ -1006,7 +1012,7 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
         })
         .await;
     assert!(
-        matches!(&created, Err(lash::EmbedError::ModelUnknown(error)) if error.key.as_str() == unregistered),
+        matches!(&created, Err(lash::EmbedError::LlmProfileUnknown(error)) if error.key.as_str() == unregistered),
         "creation refuses the unknown key typed: {:?}",
         created.as_ref().err()
     );
@@ -1024,7 +1030,10 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
         .await;
     match &sent {
         Err(lash::EmbedError::Runtime(error)) => {
-            assert_eq!(error.code, lash::runtime::RuntimeErrorCode::ModelUnknown);
+            assert_eq!(
+                error.code,
+                lash::runtime::RuntimeErrorCode::LlmProfileUnknown
+            );
         }
         other => panic!("the send is refused typed, got: {:?}", other.as_ref().err()),
     }
@@ -1035,8 +1044,8 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
     let changed = config
         .apply(
             lash::config::ConfigWrite::new("keys-unknown-change", revision),
-            lash::config::ConfigTransaction::of(lash::config::SetModel {
-                model: ModelKey::new(unregistered),
+            lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
+                model: LlmProfileKey::new(unregistered),
             }),
         )
         .await
@@ -1048,8 +1057,8 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier, replay: b
         refusal
             .owner_refusal::<lash::config::CoreConfigRefusal>()
             .expect("the core owner's typed refusal"),
-        lash::config::CoreConfigRefusal::UnknownModel {
-            key: ModelKey::new(unregistered),
+        lash::config::CoreConfigRefusal::UnknownLlmProfile {
+            key: LlmProfileKey::new(unregistered),
         }
     );
     assert_eq!(
@@ -1081,30 +1090,33 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(
     let thinker = Route::new("thinker answers");
     let glm = Route::new("glm answers");
     let high = lash::provider::ReasoningSelection::Effort("high".to_string());
-    let thinking = ModelMetadata::builder("thinker-1")
+    let thinking = LlmProfileMetadata::builder("thinker-1")
         .context_window_tokens(64_000)
-        .capability(lash::provider::ModelCapability {
+        .capability(lash::provider::LlmProfileCapability {
             reasoning: Some(lash::provider::ReasoningCapability {
                 efforts: vec!["high".to_string()],
                 encoding: lash::provider::ReasoningEncoding::Effort,
                 disable: false,
                 mandatory: false,
             }),
-            ..lash::provider::ModelCapability::default()
+            ..lash::provider::LlmProfileCapability::default()
         })
         .build()
         .expect("model metadata");
-    let registry = ModelRegistry::new()
-        .register(THINKER, RegisteredModel::new(thinking, thinker.handle()))
+    let registry = LlmProfileRegistry::new()
+        .register(
+            THINKER,
+            RegisteredLlmProfile::new(thinking, thinker.handle()),
+        )
         .and_then(|registry| {
             registry.register(
                 GLM,
-                RegisteredModel::new(metadata("glm-5.3-flash", "r1"), glm.handle()),
+                RegisteredLlmProfile::new(metadata("glm-5.3-flash", "r1"), glm.handle()),
             )
         })
         .expect("the catalog names each key once");
     let core = LashCore::standard_builder(double.double.lash_backend())
-        .models(Arc::new(registry))
+        .llm_profiles(Arc::new(registry))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1217,7 +1229,7 @@ async fn a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_ca
             .kind(KIND)
             .complete(move |_request| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                retiring.serve(ModelRegistry::new());
+                retiring.serve(LlmProfileRegistry::new());
                 async move { Ok(text("kimi answers")) }
             })
             .build()
@@ -1314,7 +1326,7 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
         .id("keys-bind-fault-park-root")
         .await
         .expect("the held session accepts the input");
-    catalog.serve(ModelRegistry::new());
+    catalog.serve(LlmProfileRegistry::new());
     hold.release();
 
     let parked = await_parked_on(&double, KIMI).await;
@@ -1328,14 +1340,14 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(
         .clone()
         .expect("the park's last failure");
     assert!(
-        failure.contains("model_unavailable") && failure.contains(KIMI),
+        failure.contains("llm_profile_unavailable") && failure.contains(KIMI),
         "the park's failure is the typed bind fault and names the recorded key: {failure}"
     );
     assert_no_recorded_bind_fault(&double, &parked);
     let park = park_of(session.attach_id("keys-bind-fault-park-root"), &parked).await;
     assert_eq!(
-        park.reason.model_key(),
-        Some(&ModelKey::new(KIMI)),
+        park.reason.profile_key(),
+        Some(&LlmProfileKey::new(KIMI)),
         "the root's park carries the unbindable key typed: {park:?}"
     );
     assert_eq!(kimi.calls(), 0, "no attempt reached a transport");
@@ -1404,7 +1416,7 @@ impl lash::tools::ToolProvider for AskModel {
 
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         if !self.retired.swap(true, Ordering::SeqCst) {
-            self.catalog.serve(ModelRegistry::new());
+            self.catalog.serve(LlmProfileRegistry::new());
         }
         let completed = call
             .context
@@ -1515,7 +1527,7 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
         .clone()
         .expect("the park's last failure");
     assert!(
-        failure.contains("model_unavailable") && failure.contains(KIMI),
+        failure.contains("llm_profile_unavailable") && failure.contains(KIMI),
         "the park's failure is the typed bind fault and names the recorded key: {failure}"
     );
     assert_no_recorded_bind_fault(&double, &parked);
@@ -1526,7 +1538,7 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
     assert_eq!(
         fault
             .as_ref()
-            .and_then(|fault| fault.model_key())
+            .and_then(|fault| fault.profile_key())
             .map(|key| key.as_str()),
         Some(KIMI),
         "the parked attempt's failure carries the unbindable key typed: {failure}"
@@ -1577,8 +1589,8 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
         "the root parked on its child's exhausted retries: {park:?}"
     );
     assert_eq!(
-        park.reason.model_key(),
-        Some(&ModelKey::new(KIMI)),
+        park.reason.profile_key(),
+        Some(&LlmProfileKey::new(KIMI)),
         "the root's park carries the unbindable key typed: {park:?}"
     );
     let listed = listed_parks(&core).await;
@@ -1665,7 +1677,7 @@ struct AskTwice {
 impl AskTwice {
     fn retire_at(&self, point: Retire) {
         if self.retire == point && !self.retired.swap(true, Ordering::SeqCst) {
-            self.catalog.serve(ModelRegistry::new());
+            self.catalog.serve(LlmProfileRegistry::new());
         }
     }
 
@@ -2073,8 +2085,8 @@ async fn a_send_answers_parked_at_the_park_commit_while_its_roots_run_is_residen
         "the answer carries the park's typed cause: {parked:?}"
     );
     assert_eq!(
-        parked.reason.model_key(),
-        Some(&ModelKey::new(KIMI)),
+        parked.reason.profile_key(),
+        Some(&LlmProfileKey::new(KIMI)),
         "the answer carries the unbindable key typed: {parked:?}"
     );
     let after = answered.saturating_duration_since(listed);
@@ -2130,34 +2142,34 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
     };
     let route = Route::new("child answers");
     let high = lash::provider::ReasoningSelection::Effort("high".to_string());
-    let thinking = ModelMetadata::builder("thinker")
+    let thinking = LlmProfileMetadata::builder("thinker")
         .context_window_tokens(64_000)
-        .capability(lash::provider::ModelCapability {
+        .capability(lash::provider::LlmProfileCapability {
             reasoning: Some(lash::provider::ReasoningCapability {
                 efforts: vec!["high".to_string()],
                 encoding: lash::provider::ReasoningEncoding::Effort,
                 disable: false,
                 mandatory: false,
             }),
-            ..lash::provider::ModelCapability::default()
+            ..lash::provider::LlmProfileCapability::default()
         })
         .build()
         .expect("thinking model metadata");
     let registry = Arc::new(
-        ModelRegistry::new()
-            .register(THINKER, RegisteredModel::new(thinking, route.handle()))
+        LlmProfileRegistry::new()
+            .register(THINKER, RegisteredLlmProfile::new(thinking, route.handle()))
             .and_then(|registry| {
                 registry.register(
                     GLM,
-                    RegisteredModel::new(metadata("plain", "r1"), route.handle()),
+                    RegisteredLlmProfile::new(metadata("plain", "r1"), route.handle()),
                 )
             })
             .expect("registered host models"),
     );
     let policy = lash::runtime::SessionPolicy {
         model: Some(
-            lash::ModelConfig::new(
-                lash::RuntimeModels::snapshot(registry.as_ref(), &ModelKey::new(THINKER))
+            lash::LlmProfileConfig::new(
+                lash::LlmProfiles::snapshot(registry.as_ref(), &LlmProfileKey::new(THINKER))
                     .expect("the thinking key resolves"),
             )
             .with_reasoning(high),
@@ -2168,7 +2180,7 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
         )
     };
     let host = LashCore::standard_builder(double.double.lash_backend())
-        .models(registry)
+        .llm_profiles(registry)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -2203,7 +2215,7 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
         else {
             panic!("session turn fixture");
         };
-        create_request.model = Some(ModelKey::new(GLM));
+        create_request.model = Some(LlmProfileKey::new(GLM));
         if source == "policy" {
             create_request.policy = Some(policy.clone());
         } else {
@@ -2255,7 +2267,7 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
     else {
         panic!("session turn fixture");
     };
-    create_request.model = Some(ModelKey::new(GLM));
+    create_request.model = Some(LlmProfileKey::new(GLM));
     create_request.policy = Some(lash::runtime::SessionPolicy::new(
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
@@ -2367,11 +2379,11 @@ tiered!(
     0x4374_1100
 );
 tiered!(
-    a_catalog_edit_reaches_a_session_only_through_a_model_change,
+    a_catalog_edit_reaches_a_session_only_through_a_profile_change,
     0x4374_1200
 );
 tiered!(
-    a_recorded_model_whose_key_left_the_catalog_fails_typed_and_never_falls_back,
+    a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never_falls_back,
     0x4374_1300
 );
 tiered!(

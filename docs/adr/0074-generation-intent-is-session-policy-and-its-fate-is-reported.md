@@ -30,7 +30,7 @@ FIG-4589). On open, the recorded model binds back to its
 transport by its recorded key and cannot be silently replaced.
 
 Every request taken from session policy pairs its generation options with the
-request's model. `ModelMetadata` clamps a requested output cap to that model's
+request's model. `LlmProfileMetadata` clamps a requested output cap to that model's
 capacity without rewriting stored intent. A cap is an upper bound, so using a
 smaller capacity satisfies bounded execution while reducing the requested
 allowance. The runtime records `ClampedToCapacity` on the response and attempt
@@ -39,10 +39,10 @@ carry explicit request intent; a tool selecting a different model owns that
 pairing.
 
 Provider resolution layers the recorded model's default cap
-(`ModelRequestDefaults::max_output_tokens`) beneath request intent exactly
+(`LlmProfileRequestDefaults::max_output_tokens`) beneath request intent exactly
 once. It invents no cap or temperature. The model's other behavioural defaults,
 thinking visibility, prompt-cache retention and the response-metadata
-allowlists, are recorded with the model in the same `ModelRequestDefaults` and
+allowlists, are recorded with the model in the same `LlmProfileRequestDefaults` and
 ride every `LlmRequest`, so a replay sends and captures what was recorded
 rather than whatever the provider handle is configured with now (FIG-4374,
 FIG-4397). `ProviderOptions` keeps only transport concerns: reliability and

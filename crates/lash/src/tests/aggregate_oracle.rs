@@ -512,7 +512,7 @@ fn oracle_builder(
         .build()
         .into_handle();
     explicit_ephemeral_facets(rlm_core_builder_over(backend))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .plugins(lash_core::facade_support::PluginStack::from_factories([Arc::new(
             StaticPluginFactory::new(
                 lash_core::plugin::PluginDeclaration::initial("aggregate-oracle"),

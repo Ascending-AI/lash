@@ -2,38 +2,38 @@
 //! executable transport behind each one.
 //!
 //! Selection and execution are separate moments. A session selects a model
-//! by its opaque [`ModelKey`]; the registry mints a [`RecordedModel`] for it
-//! ([`RuntimeModels::snapshot`]), and the session records that value at
+//! by its opaque [`LlmProfileKey`]; the registry mints a [`RecordedLlmProfile`] for it
+//! ([`LlmProfiles::snapshot`]), and the session records that value at
 //! creation and at every model change. Execution later binds the recorded
-//! value to a live [`ProviderHandle`] ([`RuntimeModels::bind`]), which serves
+//! value to a live [`ProviderHandle`] ([`LlmProfiles::bind`]), which serves
 //! the recorded contract or refuses typed. Nothing re-reads the catalog to
 //! decide how a recorded session or root runs.
 
 use std::collections::BTreeMap;
 
 use super::ProviderHandle;
-use crate::model::{ModelKey, ModelMetadata, RecordedModel};
+use crate::llm_profile::{LlmProfileKey, LlmProfileMetadata, RecordedLlmProfile};
 
 /// Why a key or a recorded model has no binding on this deployment.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("model `{key}` is unavailable: {reason}")]
-pub struct ModelUnavailable {
-    pub key: ModelKey,
-    pub reason: ModelUnavailableReason,
+pub struct LlmProfileUnavailable {
+    pub key: LlmProfileKey,
+    pub reason: LlmProfileUnavailableReason,
 }
 
-impl ModelUnavailable {
-    pub fn new(key: ModelKey, reason: ModelUnavailableReason) -> Self {
+impl LlmProfileUnavailable {
+    pub fn new(key: LlmProfileKey, reason: LlmProfileUnavailableReason) -> Self {
         Self { key, reason }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum ModelUnavailableReason {
+pub enum LlmProfileUnavailableReason {
     /// The deployment registers no models at all.
     #[error("this deployment registers no models")]
-    NoModels,
+    NoLlmProfiles,
     /// The registry holds no model under the key.
     #[error("no model is registered under the key")]
     UnknownKey,
@@ -46,9 +46,9 @@ pub enum ModelUnavailableReason {
 
 /// The host's models: mint a binding for a key, and bind a recorded binding
 /// to a live transport.
-pub trait RuntimeModels: Send + Sync {
+pub trait LlmProfiles: Send + Sync {
     /// Whether this deployment registers models at all. Only the
-    /// [`EmptyModels`] sentinel of a core built without a registry reports
+    /// [`EmptyLlmProfiles`] sentinel of a core built without a registry reports
     /// `false`.
     fn is_configured(&self) -> bool {
         true
@@ -58,7 +58,7 @@ pub trait RuntimeModels: Send + Sync {
     /// at session creation, at a model patch (even one naming the current
     /// key), and when a root resolves an explicit per-run key. Never called
     /// for a value that is already recorded.
-    fn snapshot(&self, key: &ModelKey) -> Result<RecordedModel, ModelUnavailable>;
+    fn snapshot(&self, key: &LlmProfileKey) -> Result<RecordedLlmProfile, LlmProfileUnavailable>;
 
     /// The transport that executes `recorded`. It must serve the recorded
     /// wire model and contract, never a newer descriptor; a transport that
@@ -76,30 +76,30 @@ pub trait RuntimeModels: Send + Sync {
     /// checks the wire model and nothing else. A host that moves a key to a
     /// transport of a kind that cannot honour bindings minted on the old one
     /// registers the new transport under a new key instead.
-    fn bind(&self, recorded: &RecordedModel) -> Result<ProviderHandle, ModelUnavailable>;
+    fn bind(&self, recorded: &RecordedLlmProfile) -> Result<ProviderHandle, LlmProfileUnavailable>;
 }
 
 /// The runtime sentinel of a core built without a model registry: it
-/// answers every lookup with [`ModelUnavailableReason::NoModels`].
+/// answers every lookup with [`LlmProfileUnavailableReason::NoLlmProfiles`].
 #[derive(Clone, Debug, Default)]
-pub struct EmptyModels;
+pub struct EmptyLlmProfiles;
 
-impl RuntimeModels for EmptyModels {
+impl LlmProfiles for EmptyLlmProfiles {
     fn is_configured(&self) -> bool {
         false
     }
 
-    fn snapshot(&self, key: &ModelKey) -> Result<RecordedModel, ModelUnavailable> {
-        Err(ModelUnavailable::new(
+    fn snapshot(&self, key: &LlmProfileKey) -> Result<RecordedLlmProfile, LlmProfileUnavailable> {
+        Err(LlmProfileUnavailable::new(
             key.clone(),
-            ModelUnavailableReason::NoModels,
+            LlmProfileUnavailableReason::NoLlmProfiles,
         ))
     }
 
-    fn bind(&self, recorded: &RecordedModel) -> Result<ProviderHandle, ModelUnavailable> {
-        Err(ModelUnavailable::new(
+    fn bind(&self, recorded: &RecordedLlmProfile) -> Result<ProviderHandle, LlmProfileUnavailable> {
+        Err(LlmProfileUnavailable::new(
             recorded.key().clone(),
-            ModelUnavailableReason::NoModels,
+            LlmProfileUnavailableReason::NoLlmProfiles,
         ))
     }
 }
@@ -108,17 +108,17 @@ impl RuntimeModels for EmptyModels {
 /// Several registrations may share one transport handle (and so its rate
 /// limiter), and several may share one provider kind.
 #[derive(Clone, Debug)]
-pub struct RegisteredModel {
-    metadata: ModelMetadata,
+pub struct RegisteredLlmProfile {
+    metadata: LlmProfileMetadata,
     provider: ProviderHandle,
 }
 
-impl RegisteredModel {
-    pub fn new(metadata: ModelMetadata, provider: ProviderHandle) -> Self {
+impl RegisteredLlmProfile {
+    pub fn new(metadata: LlmProfileMetadata, provider: ProviderHandle) -> Self {
         Self { metadata, provider }
     }
 
-    pub fn metadata(&self) -> &ModelMetadata {
+    pub fn metadata(&self) -> &LlmProfileMetadata {
         &self.metadata
     }
 
@@ -134,17 +134,17 @@ pub enum RegistrationError {
     #[error("a model key must not be empty")]
     EmptyKey,
     #[error("model `{key}` is registered twice")]
-    DuplicateKey { key: ModelKey },
+    DuplicateKey { key: LlmProfileKey },
 }
 
-/// The standard [`RuntimeModels`]: registrations keyed by opaque
-/// [`ModelKey`].
+/// The standard [`LlmProfiles`]: registrations keyed by opaque
+/// [`LlmProfileKey`].
 #[derive(Clone, Debug, Default)]
-pub struct ModelRegistry {
-    models: BTreeMap<ModelKey, RegisteredModel>,
+pub struct LlmProfileRegistry {
+    models: BTreeMap<LlmProfileKey, RegisteredLlmProfile>,
 }
 
-impl ModelRegistry {
+impl LlmProfileRegistry {
     /// An empty registry.
     pub fn new() -> Self {
         Self::default()
@@ -154,8 +154,8 @@ impl ModelRegistry {
     /// derives one from a provider kind or parses a model from one.
     pub fn register(
         mut self,
-        key: impl Into<ModelKey>,
-        entry: RegisteredModel,
+        key: impl Into<LlmProfileKey>,
+        entry: RegisteredLlmProfile,
     ) -> Result<Self, RegistrationError> {
         let key = key.into();
         if key.as_str().trim().is_empty() {
@@ -168,28 +168,34 @@ impl ModelRegistry {
         Ok(self)
     }
 
-    fn registered(&self, key: &ModelKey) -> Result<&RegisteredModel, ModelUnavailable> {
-        self.models
-            .get(key)
-            .ok_or_else(|| ModelUnavailable::new(key.clone(), ModelUnavailableReason::UnknownKey))
+    fn registered(
+        &self,
+        key: &LlmProfileKey,
+    ) -> Result<&RegisteredLlmProfile, LlmProfileUnavailable> {
+        self.models.get(key).ok_or_else(|| {
+            LlmProfileUnavailable::new(key.clone(), LlmProfileUnavailableReason::UnknownKey)
+        })
     }
 }
 
-impl RuntimeModels for ModelRegistry {
-    fn snapshot(&self, key: &ModelKey) -> Result<RecordedModel, ModelUnavailable> {
+impl LlmProfiles for LlmProfileRegistry {
+    fn snapshot(&self, key: &LlmProfileKey) -> Result<RecordedLlmProfile, LlmProfileUnavailable> {
         let entry = self.registered(key)?;
-        Ok(RecordedModel::mint(key.clone(), entry.metadata.clone()))
+        Ok(RecordedLlmProfile::mint(
+            key.clone(),
+            entry.metadata.clone(),
+        ))
     }
 
     /// Refuses a key that is not registered and a key whose registration
     /// names another wire model. The transport's kind is not compared: see
-    /// [`RuntimeModels::bind`].
-    fn bind(&self, recorded: &RecordedModel) -> Result<ProviderHandle, ModelUnavailable> {
+    /// [`LlmProfiles::bind`].
+    fn bind(&self, recorded: &RecordedLlmProfile) -> Result<ProviderHandle, LlmProfileUnavailable> {
         let entry = self.registered(recorded.key())?;
         if entry.metadata.wire_model != recorded.wire_model() {
-            return Err(ModelUnavailable::new(
+            return Err(LlmProfileUnavailable::new(
                 recorded.key().clone(),
-                ModelUnavailableReason::WireModelChanged {
+                LlmProfileUnavailableReason::WireModelChanged {
                     recorded: recorded.wire_model().to_string(),
                     served: entry.metadata.wire_model.clone(),
                 },

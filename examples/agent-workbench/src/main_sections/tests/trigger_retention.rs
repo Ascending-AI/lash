@@ -39,7 +39,7 @@ impl RetentionFixture {
             trigger_store: detached_trigger_store(),
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
-            selected_model: Arc::new(Mutex::new(ModelSelection {
+            selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
                 model: "test-model".into(),
                 model_variant: None,
             })),

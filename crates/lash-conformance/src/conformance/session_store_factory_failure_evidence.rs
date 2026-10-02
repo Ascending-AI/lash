@@ -85,7 +85,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     );
     let mut policy = request.config.session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));
-    host.providers.models = crate::testing::models_serving(&policy, provider);
+    host.providers.models = crate::testing::llm_profiles_serving(&policy, provider);
     let state = crate::RuntimeSessionState {
         session_id: SessionId::from(SESSION_ID.to_string()),
         policy: policy.clone(),

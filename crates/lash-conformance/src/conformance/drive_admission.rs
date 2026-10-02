@@ -75,7 +75,7 @@ impl DriveParts {
                 crate::QueuedWorkBatchingConfig::new(1)
                     .with_max_turn_input_admission(admission_bound),
             );
-        host.providers.models = crate::testing::standard_test_models(model.into_handle());
+        host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
         let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
         Self {
             session_id,
@@ -954,7 +954,7 @@ pub async fn admission_precedes_first_effect(
             }
         })
         .build();
-    parts.host.providers.models = crate::testing::standard_test_models(model.into_handle());
+    parts.host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     parts.enqueue("ask", Some("admission-first-root")).await;
     let request = parts.request("admission-first-drive");
     let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
@@ -1922,7 +1922,7 @@ async fn first_rendering_calls(
             }
         })
         .build();
-    parts.host.providers.models = crate::testing::standard_test_models(model.into_handle());
+    parts.host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
 
     let marker = |index: usize| format!("{law}-item-{index:02}");
     let mut wake_sequence = 0;

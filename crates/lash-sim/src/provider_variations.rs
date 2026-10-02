@@ -478,7 +478,7 @@ mod tests {
         let core = lash::LashCore::rlm_builder(backend, factory)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .serve_test_model(provider, model.clone())
+            .serve_test_llm_profile(provider, model.clone())
             .build(crate::sim_process_owner())
             .expect("RLM core");
         let session = crate::open_created_session_from(
@@ -616,7 +616,7 @@ mod tests {
     }
 
     fn provider_request(
-        model: &lash_core::ModelMetadata,
+        model: &lash_core::LlmProfileMetadata,
         variation: ProviderStopVariation,
         provider_trace: LlmProviderTraceSender,
     ) -> LlmRequest {
@@ -629,7 +629,7 @@ mod tests {
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),
             model_variant: Default::default(),
-            model_capability: Default::default(),
+            llm_profile_capability: Default::default(),
             extra_body: Default::default(),
             request_defaults: model.request_defaults.clone(),
             generation: GenerationOptions {

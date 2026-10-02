@@ -185,7 +185,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
     const SESSION: &str = "standard-output-retention";
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .output_retention(POLICY)
-        .serve_test_model(tool_calling_provider(), mock_model_spec())
+        .serve_test_llm_profile(tool_calling_provider(), mock_llm_profile_spec())
         .tools(Arc::new(RetentionTools))
         .plugin(Arc::new(StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial("output-retention-appendix"),
@@ -248,7 +248,7 @@ async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_hist
     const SESSION: &str = "rlm-output-retention";
     let core = explicit_ephemeral_facets(super::rlm_core_builder_over(backend.clone()))
         .output_retention(POLICY)
-        .serve_test_model(
+        .serve_test_llm_profile(
             super::queued_text_provider(vec![super::typescript_block(
                 r#"
 const rows = [];
@@ -258,7 +258,7 @@ for (let i = 0; i < 3000; i++) {
 print(rows);
 finish({ rows });"#,
             )]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).created().await.open().await?;

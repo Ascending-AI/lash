@@ -47,7 +47,7 @@ fn recorded_renderer_refusal_retries_the_uncommitted_presentation() {
 /// a recorded model its body cannot bind ends the attempt and is never
 /// journaled as the completion's result.
 #[test]
-fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
+fn a_direct_completion_retries_an_unbound_llm_profile_instead_of_recording_it() {
     let invocation = RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             ExecutionScope::turn("direct-session", "direct-turn"),
@@ -60,7 +60,7 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
     let route = execution::restate_effect_execution(RuntimeEffectEnvelope {
         invocation,
         command: RuntimeEffectCommand::Direct {
-            model_key: lash_core::ModelKey::new("kimi-k3@tensorx"),
+            profile_key: lash_core::LlmProfileKey::new("kimi-k3@tensorx"),
             request: Box::new(lash_core::LlmRequestSpec {
                 instructions: None,
                 model: "kimi-k3".to_string(),
@@ -69,7 +69,7 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
                 tool_choice: Default::default(),
                 attachment_acceptance: Default::default(),
                 model_variant: Default::default(),
-                model_capability: lash_core::ModelCapability::default(),
+                llm_profile_capability: lash_core::LlmProfileCapability::default(),
                 extra_body: Default::default(),
                 request_defaults: Default::default(),
                 generation: lash_core::GenerationOptions::default(),
@@ -92,8 +92,8 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
             ..
         }
     ));
-    let fault = RuntimeEffectControllerError::model_unavailable(
-        &lash_core::ModelKey::new("kimi-k3@tensorx"),
+    let fault = RuntimeEffectControllerError::llm_profile_unavailable(
+        &lash_core::LlmProfileKey::new("kimi-k3@tensorx"),
         "the recorded model cannot be bound on this worker",
     );
     for kind in [
@@ -111,9 +111,9 @@ fn a_direct_completion_retries_an_unbound_model_instead_of_recording_it() {
 /// class. A Restate terminal is a journaled completion and is never read
 /// back as the retried fault, whatever its text carries.
 #[test]
-fn a_model_bind_fault_stays_typed_across_the_engine_and_plugin_boundaries() {
-    let key = lash_core::ModelKey::new("fast\"@worker");
-    let fault = RuntimeEffectControllerError::model_unavailable(
+fn a_profile_bind_fault_stays_typed_across_the_engine_and_plugin_boundaries() {
+    let key = lash_core::LlmProfileKey::new("fast\"@worker");
+    let fault = RuntimeEffectControllerError::llm_profile_unavailable(
         &key,
         "the recorded model cannot be bound on this worker",
     );
@@ -133,24 +133,25 @@ fn a_model_bind_fault_stays_typed_across_the_engine_and_plugin_boundaries() {
         Some("500".to_string()),
         format!("[500] Handler failed with retryable error: {failure}"),
     );
-    assert_eq!(park.model_key(), Some(&key));
+    assert_eq!(park.profile_key(), Some(&key));
 
     let plugin = PluginError::RuntimeEffectController(fault.clone());
     assert!(plugin.is_retryable());
     assert!(!plugin.is_terminal());
     assert_eq!(plugin.attempt_failure_text(), failure);
     let runtime = plugin.into_turn_failure(RuntimeErrorCode::Plugin);
-    assert_eq!(runtime.code, RuntimeErrorCode::ModelUnavailable);
-    assert_eq!(runtime.model_key(), Some(&key));
+    assert_eq!(runtime.code, RuntimeErrorCode::LlmProfileUnavailable);
+    assert_eq!(runtime.profile_key(), Some(&key));
     assert!(runtime.is_retryable());
     assert!(!runtime.is_terminal());
     assert_eq!(runtime.attempt_failure_text(), failure);
 
     for message in [
         format!("Handler failed with retryable error: {failure}"),
-        "model_unavailable: model fast is unavailable".to_string(),
-        r#"failed {"lash.error":{"code":"model_unavailable","message":"unbound"}}"#.to_string(),
-        r#"failed {"lash.error":{"code":"model_unavailable"}}"#.to_string(),
+        "llm_profile_unavailable: model fast is unavailable".to_string(),
+        r#"failed {"lash.error":{"code":"llm_profile_unavailable","message":"unbound"}}"#
+            .to_string(),
+        r#"failed {"lash.error":{"code":"llm_profile_unavailable"}}"#.to_string(),
     ] {
         let error = RestateEffectError::Terminal {
             effect: "other-effect".into(),

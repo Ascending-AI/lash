@@ -41,7 +41,7 @@ const ANSWERS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn builder(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
 }
 
 /// The error a send to `id` is answered with, within [`ANSWERS_WITHIN`].

@@ -80,7 +80,7 @@ impl LlmToolsProvider {
                     instructions: Some(Arc::from("Answer the focused sub-question using only the supplied task and inputs. Return only JSON matching the requested result wrapper. Use kind=\"error\" with a concise error only when the task cannot be answered from the supplied inputs.")),
                     model: session_model.model,
                     model_variant: session_model.model_variant,
-                    model_capability: session_model.model_capability,
+                    llm_profile_capability: session_model.llm_profile_capability,
                     attachment_acceptance: session_model.attachment_acceptance,
                     extra_body: session_model.extra_body,
                     request_defaults: session_model.request_defaults,
@@ -315,10 +315,10 @@ mod tests {
     }
     use lash_sansio::sync::MutexExt;
 
-    fn model_spec(model: &str, variant: Option<&str>) -> Option<lash_core::ModelConfig> {
-        let config = lash_core::testing::test_model_config(
+    fn llm_profile_spec(model: &str, variant: Option<&str>) -> Option<lash_core::LlmProfileConfig> {
+        let config = lash_core::testing::test_llm_profile_config(
             model,
-            lash_core::testing::test_model_metadata(model),
+            lash_core::testing::test_llm_profile_metadata(model),
         );
         Some(match variant {
             Some(effort) => {
@@ -472,7 +472,7 @@ mod tests {
         let manager = Arc::new(DirectCompletionManager {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
-                    model: model_spec("root-model", Some("fast")),
+                    model: llm_profile_spec("root-model", Some("fast")),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024))
                 },
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024)))
@@ -531,13 +531,13 @@ mod tests {
     async fn llm_query_sends_only_what_the_session_recorded() {
         let mut extra_body = serde_json::Map::new();
         extra_body.insert("catalog_revision".to_string(), json!("r1"));
-        let metadata = lash_core::ModelMetadata::builder("root-model")
+        let metadata = lash_core::LlmProfileMetadata::builder("root-model")
             .context_window_tokens(64_000)
             .extra_body(extra_body.clone())
             .max_output_tokens(4096)
             .build()
             .expect("model metadata");
-        let recorded = lash_core::testing::test_model_config("root-model", metadata.clone());
+        let recorded = lash_core::testing::test_llm_profile_config("root-model", metadata.clone());
         let manager = Arc::new(DirectCompletionManager {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
@@ -568,7 +568,7 @@ mod tests {
         assert_eq!(request.model, "root-model");
         assert_eq!(request.extra_body, extra_body);
         assert_eq!(request.request_defaults, metadata.request_defaults);
-        assert_eq!(request.model_capability, metadata.capability);
+        assert_eq!(request.llm_profile_capability, metadata.capability);
     }
 
     #[tokio::test]
@@ -576,7 +576,7 @@ mod tests {
         let manager = Arc::new(DirectCompletionManager {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
-                    model: model_spec("root-model", None),
+                    model: llm_profile_spec("root-model", None),
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),

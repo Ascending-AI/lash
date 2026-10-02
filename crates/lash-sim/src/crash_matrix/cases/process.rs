@@ -120,18 +120,18 @@ const AFTER_TERMINAL_WRITE: &str = "lash.process.parent-end";
 
 pub(crate) use super::MODEL;
 
-pub(crate) fn model_spec() -> Result<lash_core::ModelMetadata, String> {
-    lash_core::ModelMetadata::builder(MODEL)
+pub(crate) fn llm_profile_spec() -> Result<lash_core::LlmProfileMetadata, String> {
+    lash_core::LlmProfileMetadata::builder(MODEL)
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| format!("model spec: {error}"))
 }
 
-/// [`model_spec`] as the matrix core's catalog records it: the core serves
+/// [`llm_profile_spec`] as the matrix core's catalog records it: the core serves
 /// the model under its wire model.
-pub(crate) fn recorded_model() -> Result<lash_core::ModelConfig, String> {
-    let metadata = model_spec()?;
-    Ok(lash_core::testing::test_model_config(
+pub(crate) fn recorded_llm_profile() -> Result<lash_core::LlmProfileConfig, String> {
+    let metadata = llm_profile_spec()?;
+    Ok(lash_core::testing::test_llm_profile_config(
         metadata.wire_model.clone(),
         metadata,
     ))
@@ -160,7 +160,7 @@ pub(super) fn rlm_core() -> CoreBuild {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .recovery_lease(super::recovery_lease())
-            .serve_test_model(provider, model_spec()?)
+            .serve_test_llm_profile(provider, llm_profile_spec()?)
             .build(owner)
             .map_err(|error| format!("build the lash core: {error}"))
     })
@@ -232,7 +232,7 @@ pub(crate) async fn publish_process(
             &(lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model()?),
+                    model: Some(recorded_llm_profile()?),
                     ..lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),

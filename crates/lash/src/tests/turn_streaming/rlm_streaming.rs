@@ -11,7 +11,7 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
+        .serve_test_llm_profile(tool_roundtrip_provider(), mock_llm_profile_spec())
         .tools(Arc::new(PendingAppTools::new(key_tx)))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -142,7 +142,7 @@ pub(super) async fn stream_returns_terminal_metadata_without_prose() -> Result<(
 #[tokio::test]
 pub(super) async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(tool_roundtrip_provider(), mock_model_spec())
+        .serve_test_llm_profile(tool_roundtrip_provider(), mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -238,7 +238,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(double_backend().await))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -384,7 +384,7 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
             .into_handle();
 
         let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-            .serve_test_model(provider, mock_model_spec())
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
@@ -451,7 +451,7 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
 #[cfg(feature = "rlm")]
 pub(super) async fn rlm_abort_drain_core(provider: ProviderHandle) -> Result<LashCore> {
     explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
 }
 
@@ -556,7 +556,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
         let backend = double_backend().await;
         let double = latest_double().expect("the backend runs on its held double");
         let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
-            .serve_test_model(provider, mock_model_spec())
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
         let session = core
@@ -840,12 +840,12 @@ pub(super) fn rlm_tool_calls_stream_from_live_exec_boundary() -> Result<()> {
 #[cfg(feature = "rlm")]
 pub(super) async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![typescript_block(
                 r#"const value = await tools.app_lookup({});
 finish("done");"#,
             )]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
@@ -1012,7 +1012,7 @@ finish("done");"#,
 pub(super) fn rlm_recovered_tool_failure_remains_in_turn_accounting() -> Result<()> {
     run_async_test_on_stack_budget("rlm-recovered-tool-failure-test", || async {
         let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-            .serve_test_model(
+            .serve_test_llm_profile(
                 queued_text_provider(vec![typescript_block(
                     r#"let failure;
 try {
@@ -1022,7 +1022,7 @@ try {
 }
 finish("recovered");"#,
                 )]),
-                mock_model_spec(),
+                mock_llm_profile_spec(),
             )
             .tools(Arc::new(FailingAppTools))
             .build(crate::testing::runtime_lease_owner())?;
@@ -1064,13 +1064,13 @@ pub(super) fn rlm_code_block_aggregate_lists_every_collected_tool_call() -> Resu
 #[cfg(feature = "rlm")]
 pub(super) async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inner() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![typescript_block(
                 r#"const a = await tools.app_lookup({});
 const b = await tools.app_lookup({});
 finish("done");"#,
             )]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .tools(Arc::new(AppTools))
         .build(crate::testing::runtime_lease_owner())?;
@@ -1142,12 +1142,12 @@ pub(super) async fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_pro
             .as_nanos()
     ));
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![typescript_block(
                 r#"const value = await tools.app_lookup({});
 finish("done");"#,
             )]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .tools(Arc::new(AppTools))
         .trace_jsonl_path(trace_path.clone())
@@ -1287,7 +1287,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             .build()
             .into_handle();
         let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-            .serve_test_model(provider, mock_model_spec())
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .trace_jsonl_path(trace_path.clone())
             .build(crate::testing::runtime_lease_owner())?;
         serve_processes(&core);
@@ -1367,11 +1367,11 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![typescript_block(
                 "const value = await tools.app_lookup({});\nfinish(value);",
             )]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .tools(Arc::new(PendingAppTools::new(key_tx)))
         .build(crate::testing::runtime_lease_owner())?;
@@ -1457,7 +1457,7 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-    .serve_test_model(queued_text_provider(vec![typescript_block(
+    .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
     const value = await tools.app_lookup({});
@@ -1466,7 +1466,7 @@ const lookup = async () => {
 const handle = await processes.start({ definition: lookup });
 const result = await handle;
 finish(result);"#,
-    )]), mock_model_spec())
+    )]), mock_llm_profile_spec())
     .tools(Arc::new(PendingAppTools::new(key_tx)))
     // ADR 0095: `processes` is catalogue presence, so a scripted cell that
     // authors `processes.start` needs this factory installed.
@@ -1555,14 +1555,14 @@ pub(super) fn continue_as_observation_emits_frame_switch_then_commit() -> Result
 #[cfg(feature = "rlm")]
 pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double_backend().await))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![
                 typescript_block(
                     r#"await control.continue_as({ task: "finish in a fresh frame" });"#,
                 ),
                 typescript_block(r#"finish("done after continue_as");"#),
             ]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
@@ -1614,13 +1614,13 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
     let append_count = Arc::new(AtomicUsize::new(0));
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![
                 typescript_block(r#"finish("plain turn complete");"#),
                 typescript_block(r#"await control.continue_as({ task: "finish turn two" });"#),
                 typescript_block(r#"finish("turn two complete");"#),
             ]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .plugin(Arc::new(TurnPersistedGraphAppendFactory {
             append_count: Arc::clone(&append_count),
@@ -1666,12 +1666,12 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
     let append_count = Arc::new(AtomicUsize::new(0));
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![
                 typescript_block(r#"await control.continue_as({ task: "finish in process" });"#),
                 typescript_block(r#"finish("done after in-process handoff");"#),
             ]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .plugin(Arc::new(TurnPersistedGraphAppendFactory {
             append_count: Arc::clone(&append_count),
@@ -1712,14 +1712,14 @@ pub(super) async fn engine_driven_continue_as_survives_post_commit_graph_append_
     let append_count = Arc::new(AtomicUsize::new(0));
     let double = restate_double(0x0036_68c1).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![
                 typescript_block(
                     r#"await control.continue_as({ task: "finish from durable handoff" });"#,
                 ),
                 typescript_block(r#"finish("done after durable handoff");"#),
             ]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .plugin(Arc::new(TurnPersistedGraphAppendFactory {
             append_count: Arc::clone(&append_count),
@@ -1904,7 +1904,7 @@ finish({ established: established.total });"#,
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-        .serve_test_model(provider, mock_model_spec())
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     serve_processes(&core);
     let session = core.session(session_id).created().await.open().await?;

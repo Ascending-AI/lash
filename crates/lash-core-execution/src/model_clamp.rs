@@ -1,6 +1,6 @@
-use crate::{GenerationOptions, ModelMetadata};
+use crate::{GenerationOptions, LlmProfileMetadata};
 
-/// `ModelMetadata` lives in `lash-core-llm`; these two methods stay here because
+/// `LlmProfileMetadata` lives in `lash-core-llm`; these two methods stay here because
 /// every caller is in `lash-core` and neither belongs on the type's public
 /// surface. The trait is crate-internal, so the published API is unchanged.
 pub trait ModelGenerationClamp {
@@ -8,7 +8,7 @@ pub trait ModelGenerationClamp {
     fn clamped_generation(&self, generation: &GenerationOptions) -> GenerationOptions;
 }
 
-impl ModelGenerationClamp for ModelMetadata {
+impl ModelGenerationClamp for LlmProfileMetadata {
     /// Reduce a requested output-token cap to what this model can produce, and
     /// report whether it had to.
     ///
@@ -68,7 +68,7 @@ mod tests {
             projection_provenance: Default::default(),
         };
 
-        let bounded = ModelMetadata::builder("small")
+        let bounded = LlmProfileMetadata::builder("small")
             .context_window_tokens(200_000)
             .output_token_capacity(2_048)
             .build()
@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(clamped.temperature, requested.temperature);
         assert_eq!(clamped.seed, requested.seed);
 
-        let roomy = ModelMetadata::builder("roomy")
+        let roomy = LlmProfileMetadata::builder("roomy")
             .context_window_tokens(200_000)
             .output_token_capacity(64_000)
             .build()
@@ -86,7 +86,7 @@ mod tests {
         assert_eq!(roomy.clamped_generation(&requested), requested);
 
         // An unknown ceiling is not a ceiling of zero.
-        let unbounded = ModelMetadata::builder("unknown")
+        let unbounded = LlmProfileMetadata::builder("unknown")
             .context_window_tokens(200_000)
             .build()
             .expect("valid model");

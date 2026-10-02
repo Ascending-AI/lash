@@ -4,7 +4,7 @@ async fn durable_core_without_advanced(
     provider: lash::provider::ProviderHandle,
     data_dir: &Path,
 ) -> lash::Result<lash::LashCore> {
-    let model = lash::ModelMetadata::builder("compile-only")
+    let model = lash::LlmProfileMetadata::builder("compile-only")
         .context_window_tokens(4096)
         .build()
         .expect("valid model metadata");
@@ -27,9 +27,12 @@ async fn durable_core_without_advanced(
         &backend,
     );
     lash::LashCore::rlm_builder(backend, factory)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
-                .register("compile-only", lash::RegisteredModel::new(model, provider))
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
+                .register(
+                    "compile-only",
+                    lash::RegisteredLlmProfile::new(model, provider),
+                )
                 .expect("one key registers"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

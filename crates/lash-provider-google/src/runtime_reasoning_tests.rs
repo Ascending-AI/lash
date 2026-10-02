@@ -119,12 +119,12 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .await
         .expect("build the Restate server double");
     let core = lash::LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "gemini-test",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gemini-test")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("gemini-test")
                             .context_window_tokens(16_000)
                             .expose_thinking(true)
                             .build()
@@ -210,12 +210,12 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         .await
         .expect("build the Restate server double");
     let core = lash::LashCore::standard_builder(double.lash_backend())
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "gemini-test",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("gemini-test")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("gemini-test")
                             .context_window_tokens(16_000)
                             .expose_thinking(true)
                             .build()

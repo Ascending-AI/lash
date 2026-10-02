@@ -62,7 +62,7 @@ async fn ingress_core_over(
         effect_host,
         process_env_store,
     )))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -71,7 +71,7 @@ async fn ingress_core_over(
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -138,7 +138,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
         Some(Arc::new(KeyJournalController::default())),
         None,
     )))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -147,7 +147,7 @@ async fn second_invocation_of(first: &LashCore) -> Result<LashCore> {
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -229,7 +229,7 @@ async fn ingress_core_with_trigger_store(
         Some(effect_host),
         None,
     )))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -238,7 +238,7 @@ async fn ingress_core_with_trigger_store(
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -519,7 +519,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
         Some(Arc::new(KeyJournalController::default())),
         None,
     )))
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -528,7 +528,7 @@ async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Resu
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -1189,7 +1189,7 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             (lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -2001,7 +2001,7 @@ fn admit_ingress_engine(
         INGRESS_ENGINE_KIND,
         serde_json::json!({
             "payload": payload,
-            "model": env.policy.model_key().map(ToString::to_string),
+            "model": env.policy.profile_key().map(ToString::to_string),
         }),
         [],
     )
@@ -2065,7 +2065,7 @@ async fn ingress_engine_core(
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .plugin(Arc::new(IngressAdmissionEngineFactory))
         .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
@@ -2074,7 +2074,7 @@ async fn ingress_engine_core(
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -2102,7 +2102,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
             (lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::AdmittedPluginConfig::default(),
                 lash_core::SessionPolicy {
-                    model: Some(recorded_model(mock_model_spec())),
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
                     ..lash_core::SessionPolicy::new(
                         crate::TurnBudget::Unbounded,
                         crate::MaxToolCalls::new(1024),
@@ -2119,7 +2119,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
-            model: Some(recorded_model(mock_model_spec())),
+            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
             ..lash_core::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),

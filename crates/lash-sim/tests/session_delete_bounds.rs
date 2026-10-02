@@ -46,7 +46,7 @@ struct Deployment {
     backend: Backend,
     core: LashCore,
     /// The model the core serves: what a law's session is created to run.
-    model: lash::ModelKey,
+    model: lash::LlmProfileKey,
     /// The next tick's interval, alternating the jitter's extremes.
     ticks: std::cell::Cell<u64>,
 }
@@ -99,7 +99,7 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
     let core = LashCore::standard_builder(backend.clone())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model.clone())
+        .serve_test_llm_profile(provider, model.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "session-delete-bounds",
             "session-delete-bounds-boot",
@@ -110,7 +110,7 @@ async fn deployment(turns: usize, session: &str, root: &str) -> Deployment {
         clock,
         backend,
         core,
-        model: lash::ModelKey::new(model.wire_model),
+        model: lash::LlmProfileKey::new(model.wire_model),
         ticks: std::cell::Cell::new(0),
     }
 }
@@ -480,7 +480,7 @@ async fn a_lapsed_claim_is_retaken_within_its_bound() {
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
-    model: &lash::ModelKey,
+    model: &lash::LlmProfileKey,
     session_id: impl Into<lash::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();

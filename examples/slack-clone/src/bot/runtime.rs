@@ -17,7 +17,7 @@ use lash::persistence::LeaseOwnerIdentity;
 use lash::provider::ProviderHandle;
 use lash::standard::{StandardPrompt, StandardTurnOptions};
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
-use lash::{LashCore, ModelMetadata, SessionSpec};
+use lash::{LashCore, LlmProfileMetadata, SessionSpec};
 use lash_plugin_mcp::{
     McpPluginFactory, McpServerConfig, McpStdioTransport, McpStreamableHttpTransport, McpTransport,
 };
@@ -195,7 +195,7 @@ pub async fn build_core(
     config: &RuntimeConfig,
     backend: lash::Backend,
     provider: ProviderHandle,
-    model: ModelMetadata,
+    model: LlmProfileMetadata,
     api: Arc<SlackApi>,
 ) -> Result<BotRuntime> {
     validate_stdio_commands(&config.mcp_servers)?;
@@ -230,15 +230,15 @@ pub async fn build_core(
     }
     // The bot runs one model: the registry keys it by its wire model, and
     // every channel session records that key when it is created.
-    let model_key = lash::ModelKey::new(model.wire_model.clone());
-    let models = lash::ModelRegistry::new()
+    let profile_key = lash::LlmProfileKey::new(model.wire_model.clone());
+    let models = lash::LlmProfileRegistry::new()
         .register(
-            model_key.clone(),
-            lash::RegisteredModel::new(model.clone(), provider.clone()),
+            profile_key.clone(),
+            lash::RegisteredLlmProfile::new(model.clone(), provider.clone()),
         )
         .context("register the bot's model")?;
     let session_spec = SessionSpec::new(
-        model_key,
+        profile_key,
         lash::TurnBudget::Unbounded,
         lash::MaxToolCalls::new(1024),
     )
@@ -254,7 +254,7 @@ pub async fn build_core(
     )
     .context("encode the bot's prompt")?;
     let builder = LashCore::standard_builder(backend)
-        .models(Arc::new(models))
+        .llm_profiles(Arc::new(models))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tools(tools::workspace_tools(api))
@@ -374,7 +374,7 @@ fn trace_sink(config: &RuntimeConfig) -> Arc<dyn TraceSink> {
 
 /// Kept separate from [`build_core`] so tests can hand in
 /// `lash::testing::TestProvider` and never reach for a network or a key.
-pub fn provider_from_env() -> Result<(ProviderHandle, ModelMetadata)> {
+pub fn provider_from_env() -> Result<(ProviderHandle, LlmProfileMetadata)> {
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .context("OPENROUTER_API_KEY is required to run the bot against a real model")?;
     let model = std::env::var("OPENROUTER_MODEL")
@@ -384,11 +384,11 @@ pub fn provider_from_env() -> Result<(ProviderHandle, ModelMetadata)> {
             .with_compat(OpenAiCompat::openrouter())
             .into_components(),
     );
-    let spec = ModelMetadata::builder(model)
+    let spec = LlmProfileMetadata::builder(model)
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| anyhow::anyhow!("invalid OPENROUTER_MODEL metadata: {error}"))?
-        .with_capability(lash::provider::ModelCapability {
+        .with_capability(lash::provider::LlmProfileCapability {
             cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
             ..Default::default()
         });

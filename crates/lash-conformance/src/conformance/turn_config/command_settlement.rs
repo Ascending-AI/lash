@@ -11,27 +11,27 @@ enum Law {
 }
 
 fn transaction(model: &str) -> crate::ConfigTransaction {
-    crate::ConfigTransaction::of(crate::plugin::config::core::SetModel {
-        model: crate::ModelKey::new(model),
+    crate::ConfigTransaction::of(crate::plugin::config::core::SetLlmProfile {
+        model: crate::LlmProfileKey::new(model),
     })
 }
 
 /// The keys these laws apply. A stale transaction's key is never minted, so
 /// it is deliberately not served.
 #[expect(clippy::expect_used, reason = "conformance fixture setup")]
-fn command_models() -> Arc<crate::ModelRegistry> {
+fn command_llm_profiles() -> Arc<crate::LlmProfileRegistry> {
     let provider = crate::testing::TestProvider::builder()
         .kind("stub")
         .build()
         .into_handle();
     Arc::new(
-        [SECOND_MODEL, "newest-model"]
+        [SECOND_PROFILE, "newest-model"]
             .into_iter()
-            .try_fold(crate::ModelRegistry::new(), |registry, key| {
+            .try_fold(crate::LlmProfileRegistry::new(), |registry, key| {
                 registry.register(
                     key,
-                    crate::RegisteredModel::new(
-                        crate::testing::test_model_metadata(key),
+                    crate::RegisteredLlmProfile::new(
+                        crate::testing::test_llm_profile_metadata(key),
                         provider.clone(),
                     ),
                 )
@@ -126,7 +126,7 @@ async fn command_law(
         "command-settlement",
         &effect_host,
         &stores,
-        command_models(),
+        command_llm_profiles(),
     )
     .await;
     let mut runtime = build_runtime(parts.clone()).await;
@@ -141,7 +141,7 @@ async fn command_law(
             .await
             .expect("first receipt")
     } else {
-        submit_config(&mut runtime, "first-key", 0, SECOND_MODEL).await
+        submit_config(&mut runtime, "first-key", 0, SECOND_PROFILE).await
     };
     let first_settlement = drive_and_settle(&runner, &parts, first.clone(), "apply-first").await;
     let first_outcome = if matches!(law, Law::ConfigOnce | Law::Stale) {
@@ -242,7 +242,7 @@ async fn command_law(
             );
         } else {
             let replay = if matches!(law, Law::ConfigOnce) {
-                submit_config(&mut runtime, "first-key", 0, SECOND_MODEL).await
+                submit_config(&mut runtime, "first-key", 0, SECOND_PROFILE).await
             } else {
                 runtime
                     .submit_session_command(

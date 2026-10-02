@@ -209,7 +209,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     );
     let recorded = recorded_create_request(&double, &started.process_id).await;
     assert_eq!(
-        recorded.model.as_ref().map(ModelKey::as_str),
+        recorded.model.as_ref().map(LlmProfileKey::as_str),
         Some(GLM),
         "the start records the key the host stated"
     );

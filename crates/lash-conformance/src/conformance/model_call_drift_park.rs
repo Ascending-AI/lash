@@ -240,7 +240,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
-    host.providers.models = crate::testing::standard_test_models(model.into_handle());
+    host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let executions = Arc::new(AtomicUsize::new(0));
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -440,7 +440,7 @@ pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = crate::testing::standard_test_models(provider.into_handle());
+    host.providers.models = crate::testing::standard_test_llm_profiles(provider.into_handle());
     let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let parts = DriftParts {
         session_id: session_id.clone(),

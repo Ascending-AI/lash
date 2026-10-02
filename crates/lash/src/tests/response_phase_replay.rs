@@ -377,7 +377,7 @@ fn core_over(
     let mut builder = LashCore::standard_builder(engine.lash_backend())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(provider, mock_model_spec());
+        .serve_test_llm_profile(provider, mock_llm_profile_spec());
     if with_hook {
         builder = builder.plugin(Arc::new(deriving_plugin(hook_calls)));
     }

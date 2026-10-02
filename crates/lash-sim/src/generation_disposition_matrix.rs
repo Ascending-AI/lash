@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use lash_core::NonNegativeFiniteF64;
 use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{
-    AnthropicThinkingRetention, GoogleDialect, ModelCapability, OpenAiReasoningContext,
+    AnthropicThinkingRetention, GoogleDialect, LlmProfileCapability, OpenAiReasoningContext,
     ProviderHandle, ProviderOptions, ReasoningCapability, ReasoningEncoding,
     ReasoningRetentionCapability, ReasoningRetentionPolicy, ReasoningRetentionSelection,
     ReasoningSelection, SamplingCapability,
@@ -248,9 +248,9 @@ impl Dialect {
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
             model_variant: ReasoningSelection::ProviderDefault,
-            model_capability: ModelCapability {
+            llm_profile_capability: LlmProfileCapability {
                 google_dialect,
-                ..ModelCapability::default()
+                ..LlmProfileCapability::default()
             },
             extra_body: Default::default(),
             request_defaults: Default::default(),
@@ -329,7 +329,7 @@ impl Setting {
 }
 
 /// Stamps the recorded model's output cap default onto a matrix request.
-fn with_model_cap(mut request: LlmRequest, cap: Option<u64>) -> LlmRequest {
+fn with_llm_profile_cap(mut request: LlmRequest, cap: Option<u64>) -> LlmRequest {
     request.request_defaults.max_output_tokens = cap;
     request
 }
@@ -343,7 +343,7 @@ async fn run(
     let mut provider = dialect.provider(transport.clone(), Vec::new());
     let result = provider
         .complete(
-            with_model_cap(request, cap),
+            with_llm_profile_cap(request, cap),
             <dyn lash_core::provider::DispatchAdmission>::host_owned(),
         )
         .await
@@ -428,7 +428,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         &transport,
     )
     .expect("runtime provider");
-    let model = lash::ModelMetadata::builder("openai/gpt-5.4")
+    let model = lash::LlmProfileMetadata::builder("openai/gpt-5.4")
         .context_window_tokens(200_000)
         .output_token_capacity(2_048)
         .build()
@@ -439,7 +439,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model.clone())
+        .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("runtime core");
     let session = crate::open_created_session_from(
@@ -511,7 +511,7 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider, model.clone())
+        .serve_test_llm_profile(provider, model.clone())
         .build(crate::sim_process_owner())
         .expect("RLM core");
     let session = crate::open_created_session_from(
@@ -600,7 +600,7 @@ async fn unset_controls_invent_no_generation_fields() {
 async fn pinned_sampling_and_mandatory_reasoning_refuse_without_io() {
     for dialect in HTTP_DIALECTS {
         let mut pinned = dialect.request();
-        pinned.model_capability.sampling = SamplingCapability::Pinned;
+        pinned.llm_profile_capability.sampling = SamplingCapability::Pinned;
         pinned.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite"));
         let (result, calls) = run(dialect, pinned, Some(4096)).await;
         assert_eq!(
@@ -611,7 +611,7 @@ async fn pinned_sampling_and_mandatory_reasoning_refuse_without_io() {
         assert_eq!(calls, 0, "{dialect:?}");
 
         let mut mandatory = dialect.request();
-        mandatory.model_capability.reasoning = Some(ReasoningCapability {
+        mandatory.llm_profile_capability.reasoning = Some(ReasoningCapability {
             efforts: vec!["high".into()],
             mandatory: true,
             ..ReasoningCapability::default()
@@ -687,7 +687,7 @@ async fn reasoning_selection_uses_only_the_declared_dialect() {
             ReasoningCase::Off,
         ] {
             let mut request = dialect.request();
-            request.model_capability.reasoning = Some(ReasoningCapability {
+            request.llm_profile_capability.reasoning = Some(ReasoningCapability {
                 efforts: vec!["high".into()],
                 encoding: if matches!(case, ReasoningCase::Budget) {
                     ReasoningEncoding::Budget([("high".into(), 1024)].into())
@@ -770,7 +770,7 @@ async fn replay_of_generation_intent_has_the_same_body_and_receipt() {
         request.generation.temperature = Some(NonNegativeFiniteF64::new(0.25).expect("finite"));
         if matches!(dialect, Dialect::CodexSse) {
             request.generation.temperature = None;
-            request.model_capability.reasoning = Some(ReasoningCapability {
+            request.llm_profile_capability.reasoning = Some(ReasoningCapability {
                 efforts: vec!["high".into()],
                 ..ReasoningCapability::default()
             });
@@ -799,7 +799,7 @@ async fn route_headers_are_sent_or_refused_before_io() {
         );
         let completion = provider
             .complete(
-                with_model_cap(dialect.request(), cap),
+                with_llm_profile_cap(dialect.request(), cap),
                 <dyn lash_core::provider::DispatchAdmission>::host_owned(),
             )
             .await
@@ -828,7 +828,7 @@ async fn route_headers_are_sent_or_refused_before_io() {
         );
         let error = provider
             .complete(
-                with_model_cap(dialect.request(), cap),
+                with_llm_profile_cap(dialect.request(), cap),
                 <dyn lash_core::provider::DispatchAdmission>::host_owned(),
             )
             .await
@@ -855,7 +855,7 @@ async fn thinking_visibility_and_summary_have_distinct_receipts() {
         let transport = Arc::new(ScriptedLlmHttpTransport::new(dialect.script()).expect("script"));
         let cap = matches!(dialect, Dialect::Anthropic).then_some(4096);
         let mut provider = dialect.provider(transport.clone(), Vec::new());
-        let mut request = with_model_cap(dialect.request(), cap);
+        let mut request = with_llm_profile_cap(dialect.request(), cap);
         request.request_defaults.expose_thinking = true;
         let completion = provider
             .complete(
@@ -1015,24 +1015,24 @@ async fn retention_is_projected_or_refused_before_io() {
             "{dialect:?} default retention"
         );
         let mut unsupported = dialect.request();
-        *unsupported.model_capability.reasoning_retention = if matches!(dialect, Dialect::Anthropic)
-        {
-            ReasoningRetentionPolicy {
-                capability: Some(ReasoningRetentionCapability::OpenAiContext {
-                    supported: vec![OpenAiReasoningContext::CurrentTurn],
-                }),
-                selection: ReasoningRetentionSelection::OpenAiContext {
-                    context: OpenAiReasoningContext::CurrentTurn,
-                },
-            }
-        } else {
-            ReasoningRetentionPolicy {
-                capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
-                selection: ReasoningRetentionSelection::AnthropicClearThinking {
-                    keep: AnthropicThinkingRetention::All,
-                },
-            }
-        };
+        *unsupported.llm_profile_capability.reasoning_retention =
+            if matches!(dialect, Dialect::Anthropic) {
+                ReasoningRetentionPolicy {
+                    capability: Some(ReasoningRetentionCapability::OpenAiContext {
+                        supported: vec![OpenAiReasoningContext::CurrentTurn],
+                    }),
+                    selection: ReasoningRetentionSelection::OpenAiContext {
+                        context: OpenAiReasoningContext::CurrentTurn,
+                    },
+                }
+            } else {
+                ReasoningRetentionPolicy {
+                    capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
+                    selection: ReasoningRetentionSelection::AnthropicClearThinking {
+                        keep: AnthropicThinkingRetention::All,
+                    },
+                }
+            };
         let (result, calls) = run(dialect, unsupported, cap).await;
         assert_eq!(
             result.unwrap_err(),
@@ -1044,7 +1044,7 @@ async fn retention_is_projected_or_refused_before_io() {
         let mut supported = dialect.request();
         let expected = match dialect {
             Dialect::Anthropic => {
-                *supported.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+                *supported.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
                     capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
                     selection: ReasoningRetentionSelection::AnthropicClearThinking {
                         keep: AnthropicThinkingRetention::All,
@@ -1053,7 +1053,7 @@ async fn retention_is_projected_or_refused_before_io() {
                 Some(("/context_management/edits/0/keep", json!("all")))
             }
             Dialect::OpenAiResponses | Dialect::CodexSse => {
-                *supported.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+                *supported.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
                     capability: Some(ReasoningRetentionCapability::OpenAiContext {
                         supported: vec![OpenAiReasoningContext::CurrentTurn],
                     }),
@@ -1064,7 +1064,7 @@ async fn retention_is_projected_or_refused_before_io() {
                 Some(("/reasoning/context", json!("current_turn")))
             }
             _ => {
-                *supported.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+                *supported.llm_profile_capability.reasoning_retention = ReasoningRetentionPolicy {
                     capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
                     selection: ReasoningRetentionSelection::ClientSideUserSegments {
                         max_segments: NonZeroUsize::new(1).expect("positive"),

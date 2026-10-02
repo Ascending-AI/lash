@@ -741,7 +741,7 @@ fn rlm_contract_config_with_turn_options(
         no_progress_budget: Default::default(),
         model_variant: Default::default(),
         attachment_acceptance: Default::default(),
-        model_capability: lash_core::ModelCapability::default(),
+        llm_profile_capability: lash_core::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: lash_core::GenerationOptions::default(),

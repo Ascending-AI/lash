@@ -6,7 +6,7 @@ impl AppState {
     /// A builder for a session the workbench opens. An open states no config
     /// and never creates (FIG-4112): the session runs with what it recorded
     /// at creation, and a turn that selects a different model moves it with
-    /// `apply_model_selection_to_session`.
+    /// `apply_llm_profile_selection_to_session`.
     pub(crate) fn session_builder(&self, session_id: impl Into<SessionId>) -> lash::SessionBuilder {
         self.core.session(session_id.into())
     }
@@ -76,12 +76,12 @@ impl AppState {
         self.sessions.current()
     }
 
-    pub(crate) fn selected_model(&self) -> ModelSelection {
-        self.selected_model.lock_recover().clone()
+    pub(crate) fn selected_llm_profile(&self) -> LlmProfileSelection {
+        self.selected_llm_profile.lock_recover().clone()
     }
 
-    pub(crate) fn set_selected_model(&self, model: ModelSelection) {
-        *self.selected_model.lock_recover() = model;
+    pub(crate) fn set_selected_llm_profile(&self, model: LlmProfileSelection) {
+        *self.selected_llm_profile.lock_recover() = model;
     }
 
     /// The settings panel for one session.
@@ -89,10 +89,10 @@ impl AppState {
     /// TypeScript is the sole RLM language (ADR 0096), so the language label is
     /// the same for every session.
     pub(crate) fn settings_for_session(&self, session_id: SessionId) -> Settings {
-        let selected_model = self.selected_model();
+        let selected_llm_profile = self.selected_llm_profile();
         Settings {
-            model: selected_model.model,
-            model_variant: selected_model.model_variant,
+            model: selected_llm_profile.model,
+            model_variant: selected_llm_profile.model_variant,
             model_variants: vec!["", "low", "medium", "high"],
             session_name: self
                 .sessions
@@ -975,27 +975,27 @@ pub(crate) fn new_session_id() -> SessionId {
 
 /// The model a request selects: its own id and variant, or the host's current
 /// selection for what it leaves out.
-pub(crate) fn model_selection_for_request(
-    selected_model: &ModelSelection,
+pub(crate) fn llm_profile_selection_for_request(
+    selected_llm_profile: &LlmProfileSelection,
     model: Option<&str>,
     model_variant: Option<&str>,
-) -> Result<ModelSelection, AppError> {
+) -> Result<LlmProfileSelection, AppError> {
     let model = model
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(selected_model.model.as_str())
+        .unwrap_or(selected_llm_profile.model.as_str())
         .to_string();
     if model.is_empty() {
         return Err(AppError::bad_request("model is required"));
     }
-    Ok(ModelSelection {
+    Ok(LlmProfileSelection {
         model,
-        model_variant: model_variant_for_request(selected_model, model_variant),
+        model_variant: model_variant_for_request(selected_llm_profile, model_variant),
     })
 }
 
 pub(crate) fn model_variant_for_request(
-    selected_model: &ModelSelection,
+    selected_llm_profile: &LlmProfileSelection,
     model_variant: Option<&str>,
 ) -> Option<String> {
     match model_variant {
@@ -1007,7 +1007,7 @@ pub(crate) fn model_variant_for_request(
                 Some(value.to_string())
             }
         }
-        None => selected_model.model_variant.clone(),
+        None => selected_llm_profile.model_variant.clone(),
     }
 }
 
@@ -1016,28 +1016,28 @@ pub(crate) fn model_variant_for_request(
 /// transport with the workbench's context window and capability. The
 /// workbench keys each model by its id, so a session records the id it
 /// selected.
-pub(crate) struct WorkbenchModels {
+pub(crate) struct WorkbenchLlmProfiles {
     pub(crate) provider: lash::provider::ProviderHandle,
 }
 
-impl lash::RuntimeModels for WorkbenchModels {
+impl lash::LlmProfiles for WorkbenchLlmProfiles {
     fn snapshot(
         &self,
-        key: &lash::ModelKey,
-    ) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
-        workbench_recorded_model(key)
+        key: &lash::LlmProfileKey,
+    ) -> Result<lash::RecordedLlmProfile, lash::LlmProfileUnavailable> {
+        workbench_recorded_llm_profile(key)
     }
 
     fn bind(
         &self,
-        recorded: &lash::RecordedModel,
-    ) -> Result<lash::provider::ProviderHandle, lash::ModelUnavailable> {
+        recorded: &lash::RecordedLlmProfile,
+    ) -> Result<lash::provider::ProviderHandle, lash::LlmProfileUnavailable> {
         // Every id is served as its own wire model; a recording that names
         // another wire model under the id was never this catalog's.
         if recorded.wire_model() != recorded.key().as_str() {
-            return Err(lash::ModelUnavailable::new(
+            return Err(lash::LlmProfileUnavailable::new(
                 recorded.key().clone(),
-                lash::ModelUnavailableReason::WireModelChanged {
+                lash::LlmProfileUnavailableReason::WireModelChanged {
                     recorded: recorded.wire_model().to_string(),
                     served: recorded.key().to_string(),
                 },
@@ -1048,34 +1048,39 @@ impl lash::RuntimeModels for WorkbenchModels {
 }
 
 /// `key`'s model as the workbench catalog mints it.
-pub(crate) fn workbench_recorded_model(
-    key: &lash::ModelKey,
-) -> Result<lash::RecordedModel, lash::ModelUnavailable> {
+pub(crate) fn workbench_recorded_llm_profile(
+    key: &lash::LlmProfileKey,
+) -> Result<lash::RecordedLlmProfile, lash::LlmProfileUnavailable> {
     if key.as_str().trim().is_empty() {
-        return Err(lash::ModelUnavailable::new(
+        return Err(lash::LlmProfileUnavailable::new(
             key.clone(),
-            lash::ModelUnavailableReason::UnknownKey,
+            lash::LlmProfileUnavailableReason::UnknownKey,
         ));
     }
-    let metadata = lash::ModelMetadata::builder(key.as_str())
+    let metadata = lash::LlmProfileMetadata::builder(key.as_str())
         .context_window_tokens(workbench_context_window_tokens())
         .expose_thinking(true)
         .build()
         .map_err(|_| {
-            lash::ModelUnavailable::new(key.clone(), lash::ModelUnavailableReason::UnknownKey)
+            lash::LlmProfileUnavailable::new(
+                key.clone(),
+                lash::LlmProfileUnavailableReason::UnknownKey,
+            )
         })?;
-    Ok(lash::RecordedModel::mint(
+    Ok(lash::RecordedLlmProfile::mint(
         key.clone(),
-        with_workbench_model_capability(metadata),
+        with_workbench_llm_profile_capability(metadata),
     ))
 }
 
-pub(crate) fn with_workbench_model_capability(model: lash::ModelMetadata) -> lash::ModelMetadata {
-    model.with_capability(workbench_model_capability())
+pub(crate) fn with_workbench_llm_profile_capability(
+    model: lash::LlmProfileMetadata,
+) -> lash::LlmProfileMetadata {
+    model.with_capability(workbench_llm_profile_capability())
 }
 
-pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
-    lash::provider::ModelCapability {
+pub(crate) fn workbench_llm_profile_capability() -> lash::provider::LlmProfileCapability {
+    lash::provider::LlmProfileCapability {
         instruction_role: Default::default(),
         native_mid_conversation_system: false,
         google_dialect: Default::default(),
@@ -1095,13 +1100,13 @@ pub(crate) fn workbench_model_capability() -> lash::provider::ModelCapability {
     }
 }
 
-pub(crate) async fn apply_model_selection_to_session(
+pub(crate) async fn apply_llm_profile_selection_to_session(
     state: &AppState,
     session: &lash::LashSession,
-    model: ModelSelection,
+    model: LlmProfileSelection,
     reason: &str,
 ) -> Result<(), AppError> {
-    state.set_selected_model(model.clone());
+    state.set_selected_llm_profile(model.clone());
     // The transaction returns only once its outcome is durable: written
     // against the revision read here, under an id naming the change. A stale
     // or refused outcome, like a queue rejection or a settlement failure,
@@ -1118,7 +1123,7 @@ pub(crate) async fn apply_model_selection_to_session(
                 ),
                 revision,
             ),
-            lash::config::ConfigTransaction::of(lash::config::SetModel { model: model.key() })
+            lash::config::ConfigTransaction::of(lash::config::SetLlmProfile { model: model.key() })
                 .then(lash::config::SetReasoning {
                     reasoning: model.reasoning(),
                 }),
@@ -1135,7 +1140,7 @@ pub(crate) async fn apply_model_selection_to_session(
     }
     state.trace_for_session(
         &session.session_id(),
-        "model_selection.applied",
+        "llm_profile_selection.applied",
         json!({
             "reason": reason,
             "model": serde_json::to_value(&model).unwrap_or(Value::Null),

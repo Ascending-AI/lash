@@ -526,8 +526,8 @@ impl Provider for TestProvider {
 
 /// Metadata for a test model: `wire_model` with a 200k prompt budget and no
 /// other facts.
-pub fn test_model_metadata(wire_model: &str) -> crate::ModelMetadata {
-    crate::ModelMetadata::builder(wire_model)
+pub fn test_llm_profile_metadata(wire_model: &str) -> crate::LlmProfileMetadata {
+    crate::LlmProfileMetadata::builder(wire_model)
         .context_window_tokens(200_000)
         .build()
         .expect("valid test model metadata")
@@ -535,38 +535,38 @@ pub fn test_model_metadata(wire_model: &str) -> crate::ModelMetadata {
 
 /// A recorded test model selection: `metadata` as a registry would mint it
 /// under `key`, run with the provider's default reasoning.
-pub fn test_model_config(
-    key: impl Into<crate::ModelKey>,
-    metadata: crate::ModelMetadata,
-) -> crate::ModelConfig {
-    crate::ModelConfig::new(crate::RecordedModel::mint(key.into(), metadata))
+pub fn test_llm_profile_config(
+    key: impl Into<crate::LlmProfileKey>,
+    metadata: crate::LlmProfileMetadata,
+) -> crate::LlmProfileConfig {
+    crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(key.into(), metadata))
 }
 
 /// A registry serving one model: `provider` executes `metadata` under `key`.
-pub fn single_model_registry(
-    key: impl Into<crate::ModelKey>,
-    metadata: crate::ModelMetadata,
+pub fn single_llm_profile_registry(
+    key: impl Into<crate::LlmProfileKey>,
+    metadata: crate::LlmProfileMetadata,
     provider: ProviderHandle,
-) -> std::sync::Arc<crate::ModelRegistry> {
+) -> std::sync::Arc<crate::LlmProfileRegistry> {
     std::sync::Arc::new(
-        crate::ModelRegistry::new()
-            .register(key, crate::RegisteredModel::new(metadata, provider))
+        crate::LlmProfileRegistry::new()
+            .register(key, crate::RegisteredLlmProfile::new(metadata, provider))
             .expect("a one-model registry registers its model"),
     )
 }
 
 /// A registry serving exactly the model `policy` records, executed by
 /// `provider`: the recorded key bound to the recorded metadata.
-pub fn models_serving(
+pub fn llm_profiles_serving(
     policy: &crate::SessionPolicy,
     provider: ProviderHandle,
-) -> std::sync::Arc<crate::ModelRegistry> {
+) -> std::sync::Arc<crate::LlmProfileRegistry> {
     let recorded = &policy
         .model
         .as_ref()
         .expect("a policy served by a registry records a model")
         .model;
-    single_model_registry(
+    single_llm_profile_registry(
         recorded.key().clone(),
         recorded.metadata().clone(),
         provider,
@@ -574,15 +574,21 @@ pub fn models_serving(
 }
 
 /// A registry serving [`standard_test_policy`]'s model with `provider`.
-pub fn standard_test_models(provider: ProviderHandle) -> std::sync::Arc<crate::ModelRegistry> {
-    single_model_registry("mock-model", test_model_metadata("mock-model"), provider)
+pub fn standard_test_llm_profiles(
+    provider: ProviderHandle,
+) -> std::sync::Arc<crate::LlmProfileRegistry> {
+    single_llm_profile_registry(
+        "mock-model",
+        test_llm_profile_metadata("mock-model"),
+        provider,
+    )
 }
 
 pub fn standard_test_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
-        model: Some(test_model_config(
+        model: Some(test_llm_profile_config(
             "mock-model",
-            test_model_metadata("mock-model"),
+            test_llm_profile_metadata("mock-model"),
         )),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
     }

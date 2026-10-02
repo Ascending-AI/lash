@@ -57,7 +57,7 @@ pub struct RuntimeDurabilityConfig {
 pub struct RuntimeProviderConfig {
     /// The host's models: the registry that mints a session's model binding
     /// and binds a recorded one to its transport.
-    pub models: Arc<dyn crate::RuntimeModels>,
+    pub models: Arc<dyn crate::LlmProfiles>,
     /// The run definitions this deployment registers (FIG-3838): a root
     /// whose spec names a definition resolves it here, by exact reference.
     pub run_definitions: crate::RunDefinitions,
@@ -221,7 +221,7 @@ impl RuntimeHostConfig {
             },
             process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
-                models: Arc::new(crate::EmptyModels),
+                models: Arc::new(crate::EmptyLlmProfiles),
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
@@ -620,7 +620,7 @@ impl RuntimeHost {
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, crate::SessionError> {
         self.runtime_policy(policy)
-            .ok_or_else(|| crate::SessionError::ModelUnconfigured {
+            .ok_or_else(|| crate::SessionError::LlmProfileUnconfigured {
                 session_id: session_id.clone(),
             })
     }
@@ -629,7 +629,7 @@ impl RuntimeHost {
     /// failure named by the owner. Nothing binds here. A recorded model this
     /// worker cannot bind is met by the body of the unjournaled call, as the
     /// typed, retryable
-    /// [`RuntimeErrorCode::ModelUnavailable`](crate::RuntimeErrorCode::ModelUnavailable):
+    /// [`RuntimeErrorCode::LlmProfileUnavailable`](crate::RuntimeErrorCode::LlmProfileUnavailable):
     /// the deployment is at fault, and a deployment that serves the key
     /// repairs it (FIG-4404, FIG-4531).
     pub fn resolve_owner_policy(

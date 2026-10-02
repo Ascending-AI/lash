@@ -277,7 +277,7 @@ pub struct SessionCreateRequest {
     /// created, and the child records that binding with its config. `None`
     /// keeps the policy's recorded model verbatim; nothing re-resolves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<crate::ModelKey>,
+    pub model: Option<crate::LlmProfileKey>,
     /// The reasoning the child runs the model its key mints with. `None`
     /// keeps the reasoning its policy's recorded model carries, or the
     /// provider's default when the policy records no model. Stated beside
@@ -371,14 +371,14 @@ impl SessionCreateRequest {
     }
 
     /// Run the child on `key`, minted when the child is created.
-    pub fn with_model(mut self, key: crate::ModelKey) -> Self {
+    pub fn with_llm_profile(mut self, key: crate::LlmProfileKey) -> Self {
         self.model = Some(key);
         self
     }
 
     /// Whether the request names a model of its own: a key to mint, or a
     /// policy that records one.
-    pub fn names_model(&self) -> bool {
+    pub fn names_llm_profile(&self) -> bool {
         self.model.is_some()
             || self
                 .policy
@@ -401,7 +401,7 @@ impl SessionCreateRequest {
         spec: &crate::SessionSpec,
     ) -> Result<Self, crate::session_model::SpecResolveError> {
         let Some(model) = spec.model.clone() else {
-            return Err(crate::session_model::SpecResolveError::RootWithoutModel);
+            return Err(crate::session_model::SpecResolveError::RootWithoutLlmProfile);
         };
         self.policy = Some(spec.stated_root_policy()?);
         self.model = Some(model);
@@ -416,7 +416,7 @@ impl SessionCreateRequest {
     pub fn unstated_root_config(&self) -> Option<UnstatedSessionConfig> {
         if self.policy.is_none() {
             Some(UnstatedSessionConfig::Policy)
-        } else if !self.names_model() {
+        } else if !self.names_llm_profile() {
             Some(UnstatedSessionConfig::Model)
         } else {
             None

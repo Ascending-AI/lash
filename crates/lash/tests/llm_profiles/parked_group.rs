@@ -117,7 +117,7 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
         park.reason.code(),
         lash::persistence::ParkReasonCode::EngineRetryExhausted
     );
-    assert_eq!(park.reason.model_key(), Some(&ModelKey::new(KIMI)));
+    assert_eq!(park.reason.profile_key(), Some(&LlmProfileKey::new(KIMI)));
     assert_eq!(
         park.build_generation,
         record
@@ -365,8 +365,8 @@ async fn paused_group_dispatch_work_parks_its_opener(
             );
         }
         let (finish, wait_for_finish) = tokio::sync::watch::channel(false);
-        let final_model_started = Arc::new(AtomicBool::new(false));
-        let model_started = Arc::clone(&final_model_started);
+        let final_profile_started = Arc::new(AtomicBool::new(false));
+        let profile_started = Arc::clone(&final_profile_started);
         let calls = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&calls);
         let provider = lash::testing::TestProvider::builder()
@@ -374,7 +374,7 @@ async fn paused_group_dispatch_work_parks_its_opener(
             .complete(move |_| {
                 let index = counted.fetch_add(1, Ordering::SeqCst);
                 let mut wait = wait_for_finish.clone();
-                let started = Arc::clone(&model_started);
+                let started = Arc::clone(&profile_started);
                 async move {
                     if index == 0 {
                         return Ok(LlmResponse {
@@ -455,7 +455,7 @@ async fn paused_group_dispatch_work_parks_its_opener(
         };
         if handler == "retire" {
             tokio::time::timeout(std::time::Duration::from_secs(60), async {
-                while !final_model_started.load(Ordering::SeqCst) {
+                while !final_profile_started.load(Ordering::SeqCst) {
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             })

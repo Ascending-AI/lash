@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn remote_model_intent_and_process_model_config_round_trip_reasoning_selections() {
+fn remote_model_intent_and_process_llm_profile_config_round_trip_reasoning_selections() {
     for selection in [
         RemoteReasoningSelection::ProviderDefault,
         RemoteReasoningSelection::Disabled,
@@ -15,7 +15,7 @@ fn remote_model_intent_and_process_model_config_round_trip_reasoning_selections(
             )]),
             request_defaults: Default::default(),
             variant: selection.clone(),
-            capability: RemoteModelCapability::default(),
+            capability: RemoteLlmProfileCapability::default(),
             provider: None,
             metadata: HashMap::new(),
         };
@@ -25,13 +25,13 @@ fn remote_model_intent_and_process_model_config_round_trip_reasoning_selections(
         assert_eq!(intent_round_trip.variant, selection);
         assert_eq!(intent_round_trip.extra_body, intent.extra_body);
 
-        let config = RemoteModelConfig {
+        let config = RemoteLlmProfileConfig {
             key: "remote-key".to_string(),
-            metadata: RemoteModelMetadata {
+            metadata: RemoteLlmProfileMetadata {
                 wire_model: "remote-model".to_string(),
                 extra_body: intent.extra_body.clone(),
                 request_defaults: Default::default(),
-                capability: RemoteModelCapability::default(),
+                capability: RemoteLlmProfileCapability::default(),
                 limits: RemoteProcessModelLimits {
                     context_window_tokens: 4096,
                     output_token_capacity: None,
@@ -40,16 +40,17 @@ fn remote_model_intent_and_process_model_config_round_trip_reasoning_selections(
             reasoning: selection.clone(),
         };
         let config_json = serde_json::to_value(&config).expect("serialize process model config");
-        let config_round_trip: RemoteModelConfig =
+        let config_round_trip: RemoteLlmProfileConfig =
             serde_json::from_value(config_json).expect("deserialize process model config");
         assert_eq!(config_round_trip.reasoning, selection);
         assert_eq!(
             config_round_trip.metadata.extra_body,
             config.metadata.extra_body
         );
-        let core = lash_core::ModelConfig::try_from(config.clone()).expect("core model config");
+        let core =
+            lash_core::LlmProfileConfig::try_from(config.clone()).expect("core model config");
         assert_eq!(core.key().as_str(), "remote-key");
         assert_eq!(core.model.wire_model(), "remote-model");
-        assert_eq!(RemoteModelConfig::from(core), config);
+        assert_eq!(RemoteLlmProfileConfig::from(core), config);
     }
 }

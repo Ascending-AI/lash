@@ -333,7 +333,7 @@ async fn seed_usage_accounting(handles: &FixtureHandles) {
             execution_scope_key: "durable-read-turn-scope".to_string(),
             run: run.clone(),
             source: "durable-read-turn".to_string(),
-            model_key: lash_core::ModelKey::new("durable-read-model-key"),
+            profile_key: lash_core::LlmProfileKey::new("durable-read-model-key"),
             requested_model: "durable-read-model".to_string(),
             admitted_at_ms: FIXTURE_WRITE_MS,
         })
@@ -351,7 +351,7 @@ async fn seed_usage_accounting(handles: &FixtureHandles) {
                     provider_attempt: 1,
                     llm_call_id: lash_core::LlmCallId("durable-read-call".to_string()),
                     source: "durable-read-turn".to_string(),
-                    model_key: lash_core::ModelKey::new("durable-read-model-key"),
+                    profile_key: lash_core::LlmProfileKey::new("durable-read-model-key"),
                     requested_model: "durable-read-model".to_string(),
                     served_model: None,
                     outcome: lash_core::AttemptFactOutcome::Reported {
@@ -380,7 +380,7 @@ async fn assert_usage_accounting(handles: &FixtureHandles) {
         .expect("durable fixture drift: owner usage read failed");
     assert_eq!(usage.rows.len(), 1);
     assert_eq!(usage.rows[0].source, "durable-read-turn");
-    assert_eq!(usage.rows[0].model_key.as_str(), "durable-read-model-key");
+    assert_eq!(usage.rows[0].profile_key.as_str(), "durable-read-model-key");
     assert_eq!(usage.rows[0].requested_model, "durable-read-model");
     assert_eq!(
         usage.rows[0].usage,
@@ -996,9 +996,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         &rebuilt_state,
         fixture_record_config_operation(),
     );
-    changed_retry.config.model = Some(lash_core::testing::test_model_config(
+    changed_retry.config.model = Some(lash_core::testing::test_llm_profile_config(
         "durable-read-changed-model",
-        lash_core::testing::test_model_metadata("durable-read-changed-model"),
+        lash_core::testing::test_llm_profile_metadata("durable-read-changed-model"),
     ));
     changed_retry
         .stamp_semantic_boundary()

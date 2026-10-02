@@ -452,13 +452,15 @@ mod tests {
                 .build()
         });
         let policy = lash_core::SessionPolicy {
-            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                lash_core::ModelKey::from("budget-unit-model"),
-                lash_core::ModelMetadata::builder("budget-unit-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model limits"),
-            ))),
+            model: Some(lash_core::LlmProfileConfig::new(
+                lash_core::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::from("budget-unit-model"),
+                    lash_core::LlmProfileMetadata::builder("budget-unit-model")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("model limits"),
+                ),
+            )),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -514,13 +516,15 @@ mod tests {
                 .build()
         });
         let policy = lash_core::SessionPolicy {
-            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                lash_core::ModelKey::from("budget-unit-model"),
-                lash_core::ModelMetadata::builder("budget-unit-model")
-                    .context_window_tokens(41_000)
-                    .build()
-                    .expect("model limits"),
-            ))),
+            model: Some(lash_core::LlmProfileConfig::new(
+                lash_core::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::from("budget-unit-model"),
+                    lash_core::LlmProfileMetadata::builder("budget-unit-model")
+                        .context_window_tokens(41_000)
+                        .build()
+                        .expect("model limits"),
+                ),
+            )),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -562,13 +566,15 @@ mod tests {
                 .build()
         });
         let policy = lash_core::SessionPolicy {
-            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                lash_core::ModelKey::from("realistic-41k-model"),
-                lash_core::ModelMetadata::builder("realistic-41k-model")
-                    .context_window_tokens(41_000)
-                    .build()
-                    .expect("model limits"),
-            ))),
+            model: Some(lash_core::LlmProfileConfig::new(
+                lash_core::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::from("realistic-41k-model"),
+                    lash_core::LlmProfileMetadata::builder("realistic-41k-model")
+                        .context_window_tokens(41_000)
+                        .build()
+                        .expect("model limits"),
+                ),
+            )),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -617,13 +623,15 @@ mod tests {
         plugin_config: lash_core::AdmittedPluginConfig,
     ) -> lash_core::plugin::CheckpointHookContext {
         let policy = lash_core::SessionPolicy {
-            model: Some(lash_core::ModelConfig::new(lash_core::RecordedModel::mint(
-                lash_core::ModelKey::from("budget-unit-model"),
-                lash_core::ModelMetadata::builder("budget-unit-model")
-                    .context_window_tokens(200_000)
-                    .build()
-                    .expect("model limits"),
-            ))),
+            model: Some(lash_core::LlmProfileConfig::new(
+                lash_core::RecordedLlmProfile::mint(
+                    lash_core::LlmProfileKey::from("budget-unit-model"),
+                    lash_core::LlmProfileMetadata::builder("budget-unit-model")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("model limits"),
+                ),
+            )),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),

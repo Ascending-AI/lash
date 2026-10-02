@@ -193,7 +193,7 @@ pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
         let fallback = attachment_feedback(msg);
         let msg = fallback.as_ref().unwrap_or(msg);
         let role = if matches!(msg.role, LlmRole::System) {
-            req.model_capability.instruction_role.as_str()
+            req.llm_profile_capability.instruction_role.as_str()
         } else {
             role_name(&msg.role)
         };

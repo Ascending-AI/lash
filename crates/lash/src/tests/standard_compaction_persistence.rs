@@ -224,9 +224,9 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
     ]);
     let window_probe = Arc::new(WindowProbe::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -235,7 +235,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,
@@ -331,14 +331,14 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
     let session_id = "standard-compaction-explicit-frame";
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![
                 response_with_usage("first response", 1),
                 response_with_usage("second response", 1),
                 response_with_usage("explicit summary", 1),
                 response_with_usage("after response", 1),
             ]),
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -346,7 +346,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,
@@ -406,9 +406,9 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         response_with_usage("verdict response", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-model", None, 200_000),
+            llm_profile_spec("standard-compaction-model", None, 200_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -416,7 +416,7 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             200_000,
@@ -569,9 +569,9 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     responses.push(response_with_usage("answer after the cap", 1));
     let (provider, calls) = standard_compaction_provider_counted(responses);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-model", None, 200_000),
+            llm_profile_spec("standard-compaction-model", None, 200_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -579,7 +579,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             200_000,
@@ -675,9 +675,9 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         response_with_usage("verdict response", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-model", None, 200_000),
+            llm_profile_spec("standard-compaction-model", None, 200_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -685,7 +685,7 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             200_000,
@@ -870,9 +870,9 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
     );
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(responses),
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -880,7 +880,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,
@@ -960,9 +960,9 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         response_with_usage("durable summary", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -971,7 +971,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,
@@ -1075,9 +1075,9 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     drop(session);
     drop(core);
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![response_with_usage("response after reopen", 1)]),
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -1085,7 +1085,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,
@@ -1120,7 +1120,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
     let session_id = "standard-compaction-repeated-compactions";
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![
                 response_with_usage("first response", 1),
                 response_with_usage("second response", 1),
@@ -1129,7 +1129,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
                 response_with_usage("fourth response", 1),
                 response_with_usage("second summary", 1),
             ]),
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -1137,7 +1137,7 @@ async fn repeated_compactions_use_distinct_physical_parents() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,
@@ -1207,12 +1207,12 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
             .stores(),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![
                 response_with_usage("first response", 60_000),
                 response_with_usage("second response", 1),
             ]),
-            model_spec("attachment-prune-model", None, 100_000),
+            llm_profile_spec("attachment-prune-model", None, 100_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -1221,7 +1221,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "attachment-prune-model",
             None,
             100_000,
@@ -1342,9 +1342,9 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         })
         .collect();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(responses),
-            model_spec("plugin-message-id-model", None, 40_000),
+            llm_profile_spec("plugin-message-id-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -1353,7 +1353,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "plugin-message-id-model",
             None,
             40_000,
@@ -1415,14 +1415,14 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
     ]);
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-rlm-model", None, 40_000),
+            llm_profile_spec("standard-compaction-rlm-model", None, 40_000),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-rlm-model",
             None,
             40_000,
@@ -1542,18 +1542,18 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![
                 response_with_usage("first response", 1),
                 response_with_usage("second response", 1),
             ]),
-            model_spec("after-turn-model", None, 40_000),
+            llm_profile_spec("after-turn-model", None, 40_000),
         )
         .plugin(Arc::new(plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "after-turn-model",
             None,
             40_000,
@@ -1686,18 +1686,18 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![
                 response_with_usage("first response", 1),
                 response_with_usage("second response", 1),
             ]),
-            model_spec("mid-turn-model", None, 40_000),
+            llm_profile_spec("mid-turn-model", None, 40_000),
         )
         .plugin(Arc::new(plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "mid-turn-model",
             None,
             40_000,
@@ -1830,18 +1830,18 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![
                 response_with_usage("first response", 1),
                 response_with_usage("second response", 1),
             ]),
-            model_spec("same-turn-model", None, 40_000),
+            llm_profile_spec("same-turn-model", None, 40_000),
         )
         .plugin(Arc::new(plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "same-turn-model",
             None,
             40_000,
@@ -1964,15 +1964,15 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             standard_compaction_provider(vec![response_with_usage("first response", 1)]),
-            model_spec("after-turn-model", None, 40_000),
+            llm_profile_spec("after-turn-model", None, 40_000),
         )
         .plugin(Arc::new(plugin))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "after-turn-model",
             None,
             40_000,
@@ -2041,9 +2041,9 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         response_with_usage("failed-then-summarized", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.into()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            model_spec("standard-compaction-model", None, 40_000),
+            llm_profile_spec("standard-compaction-model", None, 40_000),
         )
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
@@ -2051,7 +2051,7 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
-        .created_with(session_spec_for(&model_spec(
+        .created_with(session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
             40_000,

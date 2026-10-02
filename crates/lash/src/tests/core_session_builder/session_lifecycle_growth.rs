@@ -95,7 +95,7 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
                 })
             });
         let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.into()))
-            .serve_test_model(queued_text_provider(programs), mock_model_spec())
+            .serve_test_llm_profile(queued_text_provider(programs), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("flat-checkpoint-growth")
@@ -246,7 +246,7 @@ fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
                 })
             });
         let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.into()))
-            .serve_test_model(queued_text_provider(programs), mock_model_spec())
+            .serve_test_llm_profile(queued_text_provider(programs), mock_llm_profile_spec())
             .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("growing-checkpoint-witness")

@@ -104,7 +104,7 @@ pub(crate) struct HarnessProcesses {
     /// on (FIG-4454).
     pub(crate) build_generation: lash_core::engine::BuildGeneration,
     pub(crate) namespace: lash_restate::RestateNamespace,
-    pub(crate) model: lash::ModelConfig,
+    pub(crate) model: lash::LlmProfileConfig,
 }
 
 fn terminal(error: impl std::fmt::Display) -> HandlerError {
@@ -195,7 +195,7 @@ pub(crate) fn bind(
 async fn start_request(
     artifacts: &lashlang::LashlangArtifacts,
     core: &lash::LashCore,
-    model: &lash::ModelConfig,
+    model: &lash::LlmProfileConfig,
     start_key: &str,
 ) -> Result<lash_core::ProcessStartRequest> {
     let environment = lashlang::LashlangHostEnvironment::new(

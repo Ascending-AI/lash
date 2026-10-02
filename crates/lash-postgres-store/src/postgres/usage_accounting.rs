@@ -36,8 +36,8 @@ struct Statements {
 }
 lash_store_sql::statements! {
     pub(crate) struct UsageInsertPostgresStatements @ "usage_postgres" {
-        fact = "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, model_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT ON CONSTRAINT uq_usage_facts_identity DO NOTHING RETURNING seq";
-        run = "INSERT INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, model_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (owner_kind, owner_id, effect_key, run_id) DO NOTHING";
+        fact = "INSERT INTO usage_facts (owner_kind, owner_id, effect_key, call_ordinal, provider_attempt, fact_kind, disposition, run_id, llm_call_id, source, profile_key, requested_model, served_model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, generation_id, payload_hash, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT ON CONSTRAINT uq_usage_facts_identity DO NOTHING RETURNING seq";
+        run = "INSERT INTO usage_runs (owner_kind, owner_id, effect_key, run_id, execution_scope_key, source, profile_key, requested_model, admitted_at_ms, state, unknown_reason, resolved_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (owner_kind, owner_id, effect_key, run_id) DO NOTHING";
         owner = "INSERT INTO usage_owner_retirements (owner_kind, owner_id, retired_at_ms) VALUES (?1, ?2, ?3) ON CONFLICT (owner_kind, owner_id) DO NOTHING";
         lock_owner = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 0))";
         lock_writer = "SELECT pg_advisory_xact_lock_shared(hashtextextended('lash:usage:retention', 0))";
@@ -82,7 +82,7 @@ fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
         run_id: get!(8),
         llm_call_id: get!(9),
         source: get!(10),
-        model_key: get!(11),
+        profile_key: get!(11),
         requested_model: get!(12),
         served_model: get!(13),
         usage: TokenUsage {
@@ -110,7 +110,7 @@ fn decode_run(row: &PgRow, owner: &RuntimeOwner) -> Result<UsageRunRecord, Store
         run_id: get!(1),
         execution_scope_key: get!(2),
         source: get!(3),
-        model_key: get!(4),
+        profile_key: get!(4),
         requested_model: get!(5),
         admitted_at_ms: get!(6),
         state: get!(7),
@@ -160,7 +160,7 @@ async fn insert_fact(
         .bind(record.run().map(UsageRunId::as_str))
         .bind(record.llm_call_id.0.as_str())
         .bind(&record.source)
-        .bind(record.model_key.as_str())
+        .bind(record.profile_key.as_str())
         .bind(&record.requested_model)
         .bind(&record.served_model)
         .bind(usage.input_tokens)
@@ -251,7 +251,7 @@ impl UsageAccountingStore for PostgresStore {
             .bind(a.run.as_str())
             .bind(&a.execution_scope_key)
             .bind(&a.source)
-            .bind(a.model_key.as_str())
+            .bind(a.profile_key.as_str())
             .bind(&a.requested_model)
             .bind(usage_integer(a.admitted_at_ms)?)
             .bind("open")
@@ -498,7 +498,7 @@ impl UsageAccountingStore for PostgresStore {
             .map(|row| {
                 StoredUsageAggregate {
                     source: row.try_get(0).map_err(store_sqlx_error)?,
-                    model_key: row.try_get(1).map_err(store_sqlx_error)?,
+                    profile_key: row.try_get(1).map_err(store_sqlx_error)?,
                     requested_model: row.try_get(2).map_err(store_sqlx_error)?,
                     usage: TokenUsage {
                         input_tokens: row.try_get(3).map_err(store_sqlx_error)?,
@@ -528,7 +528,7 @@ impl UsageAccountingStore for PostgresStore {
                     provider_attempt: row.try_get(2).map_err(store_sqlx_error)?,
                     llm_call_id: row.try_get(3).map_err(store_sqlx_error)?,
                     source: row.try_get(4).map_err(store_sqlx_error)?,
-                    model_key: row.try_get(5).map_err(store_sqlx_error)?,
+                    profile_key: row.try_get(5).map_err(store_sqlx_error)?,
                     requested_model: row.try_get(6).map_err(store_sqlx_error)?,
                     generation_id: row.try_get(7).map_err(store_sqlx_error)?,
                 }

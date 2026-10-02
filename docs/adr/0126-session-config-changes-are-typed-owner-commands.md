@@ -39,7 +39,7 @@ the namespace registered.
 A reducer is a pure function from the recorded namespace and the command to
 the next namespace and the command's output. It sees immutable facts only. A
 setting with no command cannot change after creation. Core config is owned
-by the reserved `core` owner, whose commands include `SetModel`,
+by the reserved `core` owner, whose commands include `SetLlmProfile`,
 `SetReasoning`, `SetAttachmentAcceptance`,
 `SetGeneration`, `SetToolAccess`, `SetTurnBudget`, `SetAutonomy`,
 `SetNoProgressBudget` and `SetChargeSafety`. `SetChargeSafety` refuses a
@@ -54,9 +54,9 @@ no field for the prompt, the behaviour or a pin: a payload that names one
 does not decode and refuses the run's shape, whatever value it states
 (FIG-4652). An owner whose namespace no run overrides uses `NoRunOptions`.
 
-`SetModel` carries an opaque `ModelKey` (FIG-4374). Its reducer is the one
+`SetLlmProfile` carries an opaque `LlmProfileKey` (FIG-4374). Its reducer is the one
 core reducer that reads more than the recorded namespace: it asks the host's
-`RuntimeModels` catalog to mint a `RecordedModel` (the key and its metadata)
+`LlmProfiles` catalog to mint a `RecordedLlmProfile` (the key and its metadata)
 for the key, even when the key is the one already recorded. The resolution
 records that binding, so a redrive or replay reuses it and never re-derives it
 from a catalog that may since have changed. `SetReasoning` changes the
@@ -155,7 +155,7 @@ recorded namespace or a caller-minted replacement.
   `PluginFactory::{resolve_session_config, patch_session_config}` are gone.
 - An unknown model key and a reasoning selection the recorded model does not
   support are refused at resolution and settle as a typed `Refused` outcome
-  (`CoreConfigRefusal::UnknownModel`, `ReasoningRefused`), not as a send-time
+  (`CoreConfigRefusal::UnknownLlmProfile`, `ReasoningRefused`), not as a send-time
   error.
 - A config command added later, such as a new core execution control,
   registers on its owner and joins the same resolver, catalog and envelope.

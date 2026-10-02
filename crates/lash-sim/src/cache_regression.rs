@@ -68,7 +68,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: lash_core::LlmRequestScope::new(
@@ -84,7 +84,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
 }
 
 fn with_cache_control(mut request: LlmRequest, dialect: CacheControlDialect) -> LlmRequest {
-    request.model_capability.cache_control = Some(dialect);
+    request.llm_profile_capability.cache_control = Some(dialect);
     request
 }
 
@@ -162,9 +162,9 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::ModelMetadata::builder("cache-regression-model")
+            lash_core::LlmProfileMetadata::builder("cache-regression-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("cache regression model"),

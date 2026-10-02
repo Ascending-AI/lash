@@ -211,8 +211,8 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         // the key the session moves to. The catalog mints the workbench's
         // metadata for it, so a cap the fixture's model records by default
         // (Messages requires one) is stated as the session's generation.
-        let mut transaction = lash::config::ConfigTransaction::of(lash::config::SetModel {
-            model: lash::ModelKey::new(model.wire_model.clone()),
+        let mut transaction = lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
+            model: lash::LlmProfileKey::new(model.wire_model.clone()),
         });
         if let Some(cap) = model.request_defaults.max_output_tokens {
             transaction = transaction.then(lash::config::SetGeneration {

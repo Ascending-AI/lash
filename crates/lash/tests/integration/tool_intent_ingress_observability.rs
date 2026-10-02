@@ -37,12 +37,12 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
     }
     let [process, other_process] = <[ProcessId; 2]>::try_from(targets).expect("two targets");
     let core = lash::LashCore::standard_builder(backend)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "intent-ingress-observability-model",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("intent-ingress-observability-model")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("intent-ingress-observability-model")
                             .context_window_tokens(4_096)
                             .build()
                             .expect("valid model"),

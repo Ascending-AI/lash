@@ -824,9 +824,9 @@ fn nominal_recovery_timings() -> crate::LeaseTimings {
 )]
 fn runtime_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
-        model: Some(crate::testing::test_model_config(
+        model: Some(crate::testing::test_llm_profile_config(
             "turn-crash-model",
-            crate::ModelMetadata::builder("turn-crash-model")
+            crate::LlmProfileMetadata::builder("turn-crash-model")
                 .context_window_tokens(16_000)
                 .build()
                 .expect("valid test model"),
@@ -929,7 +929,7 @@ async fn try_build_runtime_over_host_with_delivery_failure(
     let mut trace_tool = tools.trace_tool;
     trace_tool.control = control.clone();
     host.providers.models =
-        crate::testing::models_serving(&runtime_policy(), provider_handle(control));
+        crate::testing::llm_profiles_serving(&runtime_policy(), provider_handle(control));
     let mut plugin_factories = crate::testing::test_standard_protocol_factories();
     plugin_factories.push(Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("turn_crash_trace_tool"),

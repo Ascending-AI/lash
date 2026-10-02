@@ -20,7 +20,7 @@ async fn anthropic_completion_epilogue_conformance() {
             ),
         };
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        req.model_capability.stream_termination = Some(StreamTermination::RequireTerminalEvidence);
+        req.llm_profile_capability.stream_termination = Some(StreamTermination::RequireTerminalEvidence);
         req.stream_events = Some(LlmEventSender::new(|_| {}));
         AnthropicProvider::new("key").with_transport(Arc::new(EpilogueTransport::new(body, true, scenario))).complete(req).await
     }).await;

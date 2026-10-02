@@ -555,7 +555,7 @@ async fn summarize_compaction_prefix(
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&snapshot.policy.attachment_acceptance),
         model_variant: model.reasoning.clone(),
-        model_capability: model.metadata().capability.clone(),
+        llm_profile_capability: model.metadata().capability.clone(),
         extra_body: Default::default(),
         request_defaults: model.metadata().request_defaults.clone(),
         generation: snapshot.policy.generation.clone(),

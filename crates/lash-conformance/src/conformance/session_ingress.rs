@@ -95,7 +95,7 @@ pub async fn ingress_reserved_source_keys_are_refused_before_admission(
         );
     }
     let spec = crate::RunSpec::overrides(crate::RunOverrides {
-        model: Some(crate::ModelKey::new("reserved-key-refusal")),
+        model: Some(crate::LlmProfileKey::new("reserved-key-refusal")),
         ..crate::RunOverrides::default()
     });
     let input = |key: &str| {

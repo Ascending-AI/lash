@@ -10,7 +10,7 @@ Treating those fragments as success can execute an incomplete tool call.
 
 Completion requires dialect-specific terminal evidence unless the host
 explicitly selects `StreamTermination::EofTolerated`. The alternative is
-`RequireTerminalEvidence`. `ModelCapability.stream_termination` overrides the
+`RequireTerminalEvidence`. `LlmProfileCapability.stream_termination` overrides the
 route default. OpenAI-compatible endpoint defaults live in `OpenAiCompat`;
 Anthropic and Google expose the same policy in provider configuration.
 

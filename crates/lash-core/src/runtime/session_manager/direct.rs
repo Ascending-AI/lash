@@ -191,7 +191,7 @@ impl Drop for DirectUnkeyedGuard<'_> {
 struct DirectEffectPlan {
     /// The lazy binding of the session's recorded model: the effect's body
     /// binds it, and only when the completion is unjournaled (FIG-4404).
-    binding: crate::ModelBinding,
+    binding: crate::LlmProfileBinding,
     envelope: crate::RuntimeEffectEnvelope,
     request: Box<crate::LlmRequest>,
 }
@@ -216,7 +216,7 @@ impl DirectCompletionCapability {
     async fn plan_direct_effect(
         &self,
         context: &DirectInvocationContext<'_>,
-        binding: crate::ModelBinding,
+        binding: crate::LlmProfileBinding,
         request: crate::LlmRequest,
         usage_source: &str,
         replay_position: DirectReplayPosition<'_>,
@@ -254,7 +254,7 @@ impl DirectCompletionCapability {
         let envelope = crate::RuntimeEffectEnvelope::new(
             invocation,
             crate::RuntimeEffectCommand::Direct {
-                model_key: binding.recorded().key().clone(),
+                profile_key: binding.recorded().key().clone(),
                 request: Box::new(request_spec),
                 usage_source,
             },
@@ -328,7 +328,7 @@ impl DirectCompletionCapability {
         // request is built, naming the model by the session's recorded key;
         // the selection travels unchanged.
         request
-            .model_capability
+            .llm_profile_capability
             .validate_selection(
                 &model,
                 binding.recorded().key().as_str(),
@@ -396,7 +396,7 @@ impl DirectCompletionCapability {
         // Same variant validation the text lane applies before the request
         // is planned.
         request
-            .model_capability
+            .llm_profile_capability
             .validate_selection(
                 &request.model,
                 binding.recorded().key().as_str(),
@@ -474,13 +474,13 @@ mod tests {
     }
 
     /// FIG-4531, FIG-4404: off the turn path, a recorded model this worker
-    /// cannot bind is the same typed, retryable `ModelUnavailable` the turn
+    /// cannot bind is the same typed, retryable `LlmProfileUnavailable` the turn
     /// path answers. A direct completion and a process owner resolve their
     /// policy without binding; the body of the unjournaled call binds, and
     /// this deployment registers no models, so the recorded binding has no
     /// transport.
     #[tokio::test]
-    async fn an_unbindable_model_off_the_turn_path_is_typed_model_unavailable() {
+    async fn an_unbindable_llm_profile_off_the_turn_path_is_typed_llm_profile_unavailable() {
         let (services, policy) = session_services().await;
         let resolved = services
             .current
@@ -490,10 +490,10 @@ mod tests {
             .binding()
             .bind_for_unjournaled_call()
             .expect_err("a deployment with no models cannot bind the recorded model");
-        assert_eq!(fault.code, crate::RuntimeErrorCode::ModelUnavailable);
+        assert_eq!(fault.code, crate::RuntimeErrorCode::LlmProfileUnavailable);
         assert_eq!(
-            fault.model_key(),
-            policy.model.as_ref().map(crate::ModelConfig::key),
+            fault.profile_key(),
+            policy.model.as_ref().map(crate::LlmProfileConfig::key),
             "the fault names the recorded key typed: {fault:?}"
         );
         assert!(
@@ -513,9 +513,9 @@ mod tests {
     async fn a_rebound_completion_service_resolves_the_childs_recorded_policy() {
         let (services, opener_policy) = Box::pin(session_services()).await;
         let mut child_policy = opener_policy.clone();
-        child_policy.model = Some(crate::testing::test_model_config(
+        child_policy.model = Some(crate::testing::test_llm_profile_config(
             "child-recorded-model",
-            crate::ModelMetadata::builder("child-recorded-model")
+            crate::LlmProfileMetadata::builder("child-recorded-model")
                 .context_window_tokens(128_000)
                 .build()
                 .expect("valid child model"),

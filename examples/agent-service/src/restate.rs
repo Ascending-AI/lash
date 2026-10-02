@@ -477,7 +477,7 @@ finish("done via Restate E2E");
             lash_backend,
             factory,
         )
-            .serve_test_model(provider, lash::ModelMetadata::builder("mock-model")
+            .serve_test_llm_profile(provider, lash::LlmProfileMetadata::builder("mock-model")
                     .context_window_tokens(200_000).build().expect("valid mock model spec"))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

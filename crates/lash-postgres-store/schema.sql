@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS lash_usage_facts (
     run_id TEXT,
     llm_call_id TEXT NOT NULL,
     source TEXT NOT NULL,
-    model_key TEXT NOT NULL,
+    profile_key TEXT NOT NULL,
     requested_model TEXT NOT NULL,
     -- Provider-reported only; never filled from the request.
     served_model TEXT,
@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS lash_usage_runs (
     run_id TEXT NOT NULL,
     execution_scope_key TEXT,
     source TEXT,
-    model_key TEXT,
+    profile_key TEXT,
     requested_model TEXT,
     admitted_at_ms BIGINT,
     state TEXT NOT NULL,
@@ -241,8 +241,8 @@ CREATE TABLE IF NOT EXISTS lash_usage_runs (
     resolved_at_ms BIGINT,
     PRIMARY KEY (owner_kind, owner_id, effect_key, run_id),
     CONSTRAINT ck_usage_runs_admission CHECK (
-        (execution_scope_key IS NOT NULL AND source IS NOT NULL AND model_key IS NOT NULL AND requested_model IS NOT NULL AND admitted_at_ms IS NOT NULL AND admitted_at_ms >= 0)
-     OR (execution_scope_key IS NULL AND source IS NULL AND model_key IS NULL AND requested_model IS NULL AND admitted_at_ms IS NULL AND state <> 'open')),
+        (execution_scope_key IS NOT NULL AND source IS NOT NULL AND profile_key IS NOT NULL AND requested_model IS NOT NULL AND admitted_at_ms IS NOT NULL AND admitted_at_ms >= 0)
+     OR (execution_scope_key IS NULL AND source IS NULL AND profile_key IS NULL AND requested_model IS NULL AND admitted_at_ms IS NULL AND state <> 'open')),
     CONSTRAINT ck_usage_runs_state CHECK (
         (state = 'open' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NULL)
      OR (state = 'settled' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0)

@@ -24,7 +24,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
             crate::CommitBudgetLimit::Unbounded,
         ),
     )
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("commit-budget-surface")
@@ -77,7 +77,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
             crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
         ),
     )
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("commit-node-budget-surface")
@@ -123,13 +123,13 @@ fn core_over_backend_with_commit_budget(
     commit_budget: crate::CommitBudget,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets_with_budget(LashCore::standard_builder(backend), commit_budget)
-        .serve_test_model(mock_provider(), mock_model_spec())
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
 }
 
 fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
     let policy = lash_core::SessionPolicy {
-        model: Some(recorded_model(mock_model_spec())),
+        model: Some(recorded_llm_profile(mock_llm_profile_spec())),
         ..lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),

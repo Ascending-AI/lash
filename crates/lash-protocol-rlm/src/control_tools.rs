@@ -180,10 +180,10 @@ mod tests {
     };
     use lash_rlm_types::{RlmProtocolEvent, RlmTermination};
 
-    fn model_spec(model: &str) -> Option<lash_core::ModelConfig> {
-        Some(lash_core::testing::test_model_config(
+    fn llm_profile_spec(model: &str) -> Option<lash_core::LlmProfileConfig> {
+        Some(lash_core::testing::test_llm_profile_config(
             model,
-            lash_core::testing::test_model_metadata(model),
+            lash_core::testing::test_llm_profile_metadata(model),
         ))
     }
 
@@ -489,7 +489,7 @@ mod tests {
             snapshot: {
                 let mut snapshot = RuntimeSessionState {
                     policy: SessionPolicy {
-                        model: model_spec("model"),
+                        model: llm_profile_spec("model"),
                         ..SessionPolicy::new(
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
@@ -635,7 +635,7 @@ mod tests {
         let manager = Arc::new(BatonManager {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
-                    model: model_spec("model"),
+                    model: llm_profile_spec("model"),
                     ..SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
@@ -708,7 +708,7 @@ mod tests {
         let manager = Arc::new(BatonManager {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
-                    model: model_spec("model"),
+                    model: llm_profile_spec("model"),
                     ..SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
@@ -768,7 +768,7 @@ mod tests {
         let manager = Arc::new(BatonManager {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
-                    model: model_spec("model"),
+                    model: llm_profile_spec("model"),
                     ..SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),

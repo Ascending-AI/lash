@@ -209,7 +209,7 @@ impl AnthropicProvider {
         for (index, msg) in req.messages.iter().enumerate() {
             let feedback = matches!(msg.role, LlmRole::System);
             let native = Self::native_feedback_content(msg)
-                && req.model_capability.native_mid_conversation_system
+                && req.llm_profile_capability.native_mid_conversation_system
                 && Self::native_feedback_position(req, index, &out);
             let wire_role = if native {
                 "system"
@@ -578,7 +578,7 @@ impl AnthropicProvider {
         });
 
         if let ReasoningRetentionSelection::AnthropicClearThinking { keep } =
-            req.model_capability.reasoning_retention.selection
+            req.llm_profile_capability.reasoning_retention.selection
         {
             let keep = match keep {
                 AnthropicThinkingRetention::All => json!("all"),

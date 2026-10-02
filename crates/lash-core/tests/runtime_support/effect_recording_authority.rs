@@ -66,7 +66,7 @@ pub fn host_with_effect_recorder(
 ) -> EmbeddedRuntimeHost {
     let mut config = runtime_host_config_with_effect_layer(backend, Arc::new(recorder));
     config.providers.models =
-        lash_core::testing::standard_test_models(mock_provider(Vec::new()).into_handle());
+        lash_core::testing::standard_test_llm_profiles(mock_provider(Vec::new()).into_handle());
     EmbeddedRuntimeHost::new(config)
 }
 

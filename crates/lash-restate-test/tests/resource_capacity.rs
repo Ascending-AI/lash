@@ -22,9 +22,9 @@ fn build_core(backend: &RestateTestBackend) -> lash::LashCore {
     lash::LashCore::standard_builder(backend.lash_backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
+        .serve_test_llm_profile(
             provider,
-            lash_core::testing::test_model_metadata("mock-model"),
+            lash_core::testing::test_llm_profile_metadata("mock-model"),
         )
         .plugin(lash_core::testing::process_engine_plugin_fixture())
         .build(lash_core::LeaseOwnerIdentity::opaque(

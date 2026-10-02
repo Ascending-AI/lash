@@ -530,9 +530,9 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
     let core = LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
+        .serve_test_llm_profile(
             scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())?;
     let source = format!("{prefix}-source");

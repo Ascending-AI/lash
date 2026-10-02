@@ -294,7 +294,7 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
             }
         })
         .build();
-    parts.host.providers.models = crate::testing::standard_test_models(model.into_handle());
+    parts.host.providers.models = crate::testing::standard_test_llm_profiles(model.into_handle());
     let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
     parts.host.control.scope_close = closes.clone();
     let input = parts.enqueue("ask", Some("root-superseded")).await;

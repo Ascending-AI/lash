@@ -50,18 +50,20 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
     let store = backend.process_env_store();
     let mut policy =
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-    policy.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-        crate::ModelKey::new("model"),
-        crate::ModelMetadata::builder("model")
-            .context_window_tokens(100)
-            .build()
-            .unwrap()
-            .with_capability(crate::ModelCapability {
-                instruction_role: crate::InstructionRole::Developer,
-                native_mid_conversation_system: true,
-                ..Default::default()
-            }),
-    )));
+    policy.model = Some(crate::LlmProfileConfig::new(
+        crate::RecordedLlmProfile::mint(
+            crate::LlmProfileKey::new("model"),
+            crate::LlmProfileMetadata::builder("model")
+                .context_window_tokens(100)
+                .build()
+                .unwrap()
+                .with_capability(crate::LlmProfileCapability {
+                    instruction_role: crate::InstructionRole::Developer,
+                    native_mid_conversation_system: true,
+                    ..Default::default()
+                }),
+        ),
+    ));
     let spec = ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),

@@ -105,10 +105,10 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         &SessionId::from(session_id),
     )
     .await;
-    let engine_command_model = lash_core::testing::runtime_helpers::serve_model_beside(
+    let engine_command_model = lash_core::testing::runtime_helpers::serve_llm_profile_beside(
         &mut runtime,
         "engine-command-model",
-        lash_core::ModelMetadata::builder("engine-command-model")
+        lash_core::LlmProfileMetadata::builder("engine-command-model")
             .context_window_tokens(32_000)
             .build()
             .unwrap(),
@@ -117,7 +117,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         store.as_ref(),
         &runtime,
         "engine-command",
-        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetModel {
+        lash_core::ConfigTransaction::of(lash_core::plugin::config::core::SetLlmProfile {
             model: engine_command_model,
         }),
     )

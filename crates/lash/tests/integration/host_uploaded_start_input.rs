@@ -81,11 +81,11 @@ fn core(engine: &Engine) -> lash::LashCore {
     lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .models(Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "mock-model",
-                    lash::RegisteredModel::new(mock_model_metadata(), provider),
+                    lash::RegisteredLlmProfile::new(mock_llm_profile_metadata(), provider),
                 )
                 .unwrap(),
         ))
@@ -163,17 +163,17 @@ async fn sweep(backend: &lash_core::Backend) {
     .unwrap();
 }
 
-fn mock_model_metadata() -> lash::ModelMetadata {
-    lash::ModelMetadata::builder("mock-model")
+fn mock_llm_profile_metadata() -> lash::LlmProfileMetadata {
+    lash::LlmProfileMetadata::builder("mock-model")
         .context_window_tokens(200_000)
         .build()
         .unwrap()
 }
 
 fn request(input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
-    let model = Some(lash::ModelConfig::new(lash::RecordedModel::mint(
-        lash::ModelKey::new("mock-model"),
-        mock_model_metadata(),
+    let model = Some(lash::LlmProfileConfig::new(lash::RecordedLlmProfile::mint(
+        lash::LlmProfileKey::new("mock-model"),
+        mock_llm_profile_metadata(),
     )));
     lash_core::ProcessStartRequest::new(
         lash_core::ProcessInput::SessionTurn {

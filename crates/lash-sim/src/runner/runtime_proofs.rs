@@ -22,7 +22,7 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider_handle, model.clone())
+        .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session =
@@ -133,7 +133,7 @@ pub(super) async fn run_live_turn_facts(
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(provider_handle, model.clone())
+        .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session_id = SessionId::from(format!(
@@ -308,9 +308,9 @@ pub(crate) async fn prove_pending_tool_completion_on(
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             pending_tool_roundtrip_provider(),
-            lash_core::ModelMetadata::builder("mock-model")
+            lash_core::LlmProfileMetadata::builder("mock-model")
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
@@ -588,9 +588,9 @@ pub(super) async fn final_value_session(
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .serve_test_model(
+        .serve_test_llm_profile(
             rlm_final_value_provider(),
-            lash_core::ModelMetadata::builder("mock-rlm-final-value")
+            lash_core::LlmProfileMetadata::builder("mock-rlm-final-value")
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,

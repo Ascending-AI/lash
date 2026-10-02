@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash::ModelMetadata;
+use lash::LlmProfileMetadata;
 use lash::direct::LlmOutputPart;
 use lash::provider::{
     FailureCode, LlmResponse, ProviderFailureKind, ProviderHandle, TransportRetryVerdict,
@@ -552,7 +552,7 @@ impl BotHost {
             .expect("open test ledger");
         let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
         runtime_config.trace_to_stderr = false;
-        let model = ModelMetadata::builder("mock/model")
+        let model = LlmProfileMetadata::builder("mock/model")
             .context_window_tokens(200_000)
             .build()
             .expect("valid mock model metadata");

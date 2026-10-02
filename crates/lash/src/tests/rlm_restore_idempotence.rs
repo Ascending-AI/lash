@@ -120,9 +120,9 @@ impl RuntimeStoreDecorator for FaultStore {
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
-        model: Some(lash_core::testing::test_model_config(
+        model: Some(lash_core::testing::test_llm_profile_config(
             "fig2521-model",
-            lash_core::ModelMetadata::builder("fig2521-model")
+            lash_core::LlmProfileMetadata::builder("fig2521-model")
                 .context_window_tokens(100_000)
                 .build()
                 .expect("model spec"),
@@ -365,7 +365,7 @@ async fn open_with_plugins(
         QueuedWorkBatchingConfig::new(1),
     );
     config.providers.models =
-        lash_core::testing::models_serving(&policy(), provider(script, Arc::clone(&store)));
+        lash_core::testing::llm_profiles_serving(&policy(), provider(script, Arc::clone(&store)));
     let runtime_host = EmbeddedRuntimeHost::new(config);
     let runtime_services = PersistentRuntimeServices::new(
         plugins.clone(),
@@ -1078,7 +1078,7 @@ async fn storeless_runtime(
         QueuedWorkBatchingConfig::new(1),
     );
     config.providers.models =
-        lash_core::testing::models_serving(&policy(), provider(script, detached));
+        lash_core::testing::llm_profiles_serving(&policy(), provider(script, detached));
     let runtime_host = EmbeddedRuntimeHost::new(config);
     let runtime_services = RuntimeServices::new(
         plugins,

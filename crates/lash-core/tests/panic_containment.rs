@@ -629,7 +629,7 @@ fn request() -> LlmRequest {
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: Default::default(),
+        llm_profile_capability: Default::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         generation: GenerationOptions::default(),
@@ -642,9 +642,9 @@ fn request() -> LlmRequest {
 
 fn policy() -> SessionPolicy {
     SessionPolicy {
-        model: Some(lash_core::testing::test_model_config(
+        model: Some(lash_core::testing::test_llm_profile_config(
             "panic-test-model",
-            lash_core::ModelMetadata::builder("panic-test-model")
+            lash_core::LlmProfileMetadata::builder("panic-test-model")
                 .context_window_tokens(32_000)
                 .build()
                 .expect("valid model"),
@@ -754,7 +754,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = lash_core::testing::models_serving(&policy(), provider);
+    host.providers.models = lash_core::testing::llm_profiles_serving(&policy(), provider);
     let plugin = Arc::new(StaticPluginFactory::new(
         lash_core::plugin::PluginDeclaration::initial("panic-tool-test"),
         PluginSpec::new().with_tool_provider(Arc::new(PanicTool)),
@@ -837,7 +837,7 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = lash_core::testing::models_serving(&policy(), provider);
+    host.providers.models = lash_core::testing::llm_profiles_serving(&policy(), provider);
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id("provider-panic-session")
@@ -935,7 +935,8 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    quiet_host.providers.models = lash_core::testing::models_serving(&policy(), quiet_provider);
+    quiet_host.providers.models =
+        lash_core::testing::llm_profiles_serving(&policy(), quiet_provider);
     let mut quiet_runtime = Box::pin(
         LashRuntime::builder(quiet_host, test_runtime_owner())
             .with_session_id("quiet-provider-record-session")
@@ -977,7 +978,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    loud_host.providers.models = lash_core::testing::models_serving(&policy(), loud_provider);
+    loud_host.providers.models = lash_core::testing::llm_profiles_serving(&policy(), loud_provider);
     let mut loud_runtime = Box::pin(
         LashRuntime::builder(loud_host, test_runtime_owner())
             .with_session_id("loud-provider-record-session")
@@ -1036,7 +1037,7 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = lash_core::testing::models_serving(&policy(), provider);
+    host.providers.models = lash_core::testing::llm_profiles_serving(&policy(), provider);
     let mut runtime = Box::pin(
         LashRuntime::builder(host, test_runtime_owner())
             .with_session_id("loud-provider-panic-session")
@@ -1202,7 +1203,7 @@ async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = lash_core::testing::models_serving(
+    host.providers.models = lash_core::testing::llm_profiles_serving(
         &policy(),
         ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {
             reconcile,
@@ -1499,7 +1500,7 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host.providers.models = lash_core::testing::models_serving(
+    host.providers.models = lash_core::testing::llm_profiles_serving(
         &policy(),
         ProviderHandle::new(ProviderComponents::new(Box::new(DesugaredPanicProvider {
             callback,

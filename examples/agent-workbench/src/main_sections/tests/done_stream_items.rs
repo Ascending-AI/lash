@@ -22,10 +22,10 @@ async fn done_stream_items_are_transient_and_not_snapshotted() {
         .complete_error("transient done test should not call the provider")
         .build()
         .into_handle();
-    let model = test_model();
+    let model = test_llm_profile();
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -43,7 +43,7 @@ async fn done_stream_items_are_transient_and_not_snapshotted() {
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
@@ -92,10 +92,10 @@ async fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         .complete_error("trigger dispatch done test should not call the provider")
         .build()
         .into_handle();
-    let model = test_model();
+    let model = test_llm_profile();
     let event_tx = SessionEventRegistry::new(16);
     let core = explicit_durable_test_facets_on(double.lash_backend())
-        .serve_workbench_model(provider, model)
+        .serve_workbench_llm_profile(provider, model)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -113,7 +113,7 @@ async fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
+        selected_llm_profile: Arc::new(Mutex::new(LlmProfileSelection {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),

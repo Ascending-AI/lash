@@ -508,9 +508,9 @@ fn build_turn_core(
             }
         })
         // The bench runs one model, keyed by its wire model.
-        .models(Arc::new(lash::ModelRegistry::new().register(
+        .llm_profiles(Arc::new(lash::LlmProfileRegistry::new().register(
             model,
-            lash::RegisteredModel::new(model_metadata(model)?, provider),
+            lash::RegisteredLlmProfile::new(profile_metadata(model)?, provider),
         )?))
         .tools(if channel == crate::ChannelSelection::Standard {
             world.standard_provider()
@@ -604,12 +604,12 @@ fn reasoning(effort: crate::ReasoningEffort) -> lash::provider::ReasoningSelecti
     }
 }
 
-fn model_metadata(model: &str) -> Result<lash::ModelMetadata> {
-    use lash::provider::{ModelCapability, ReasoningCapability};
-    lash::ModelMetadata::builder(model)
+fn profile_metadata(model: &str) -> Result<lash::LlmProfileMetadata> {
+    use lash::provider::{LlmProfileCapability, ReasoningCapability};
+    lash::LlmProfileMetadata::builder(model)
         .context_window_tokens(200_000)
         .expose_thinking(true)
-        .capability(ModelCapability {
+        .capability(LlmProfileCapability {
             reasoning: Some(ReasoningCapability {
                 efforts: vec!["low".into(), "medium".into(), "high".into()],
                 ..Default::default()
@@ -772,7 +772,7 @@ mod tests {
                 ReasoningSelection::Effort(effort.name().into())
             );
             assert!(
-                super::model_metadata("route/model")
+                super::profile_metadata("route/model")
                     .unwrap()
                     .capability
                     .reasoning

@@ -441,7 +441,7 @@ impl LashRuntime {
         let resolved_turn_policy = self
             .host
             .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-            .map_err(crate::runtime::drive::model_unconfigured)?;
+            .map_err(crate::runtime::drive::llm_profile_unconfigured)?;
         let manager = self
             .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {

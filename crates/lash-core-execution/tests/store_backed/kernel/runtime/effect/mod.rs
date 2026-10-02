@@ -36,7 +36,7 @@ mod tests {
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),
             model_variant: crate::ReasoningSelection::Effort("fast".to_string()),
-            model_capability: crate::ModelCapability::default(),
+            llm_profile_capability: crate::LlmProfileCapability::default(),
             extra_body: Default::default(),
             request_defaults: Default::default(),
             scope: crate::LlmRequestScope::new(
@@ -89,7 +89,7 @@ mod tests {
         let envelope = RuntimeEffectEnvelope::new(
             invocation,
             RuntimeEffectCommand::Direct {
-                model_key: crate::ModelKey::new("test"),
+                profile_key: crate::LlmProfileKey::new("test"),
                 request: Box::new(
                     LlmRequestSpec::from_request(&llm_request, &attachment_store)
                         .await

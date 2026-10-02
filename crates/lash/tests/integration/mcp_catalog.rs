@@ -398,12 +398,12 @@ async fn turn_witness(store: Store, native: bool, failure_law: bool) {
         .build()
         .into_handle();
     let core = lash::LashCore::standard_builder(backend)
-        .models(std::sync::Arc::new(
-            lash::ModelRegistry::new()
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
                 .register(
                     "catalog-fixture",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("catalog-fixture")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("catalog-fixture")
                             .context_window_tokens(16_000)
                             .build()
                             .expect("model"),

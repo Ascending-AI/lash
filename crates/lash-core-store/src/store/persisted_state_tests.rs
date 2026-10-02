@@ -1,10 +1,10 @@
 use super::*;
 
 #[test]
-fn persisted_state_hydrates_the_recorded_model_without_live_rebinding() {
-    let recorded = crate::ModelConfig::new(crate::RecordedModel::mint(
-        crate::ModelKey::new("stored-key"),
-        lash_core_llm::model::ModelMetadata::builder("stored-wire-model")
+fn persisted_state_hydrates_the_recorded_llm_profile_without_live_rebinding() {
+    let recorded = crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+        crate::LlmProfileKey::new("stored-key"),
+        lash_core_llm::llm_profile::LlmProfileMetadata::builder("stored-wire-model")
             .context_window_tokens(4096)
             .build()
             .expect("model"),
@@ -224,17 +224,19 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     );
-    config.model = Some(crate::ModelConfig::new(crate::RecordedModel::mint(
-        crate::ModelKey::new("model"),
-        lash_core_llm::model::ModelMetadata::builder("model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("model")
-            .with_capability(crate::ModelCapability {
-                reasoning_retention: Box::new(retention.clone()),
-                ..Default::default()
-            }),
-    )));
+    config.model = Some(crate::LlmProfileConfig::new(
+        crate::RecordedLlmProfile::mint(
+            crate::LlmProfileKey::new("model"),
+            lash_core_llm::llm_profile::LlmProfileMetadata::builder("model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("model")
+                .with_capability(crate::LlmProfileCapability {
+                    reasoning_retention: Box::new(retention.clone()),
+                    ..Default::default()
+                }),
+        ),
+    ));
     let payload = SessionHeadPayload {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: SessionId::from("retention-cold-reopen"),

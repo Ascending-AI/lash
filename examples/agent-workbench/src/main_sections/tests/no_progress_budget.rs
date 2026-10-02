@@ -54,7 +54,7 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
     // old behaviour can still ask for it in as many words.
     let opted_out = lash::SessionSpec::inherit()
         .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .resolve_against(&policy, &lash::EmptyModels)
+        .resolve_against(&policy, &lash::EmptyLlmProfiles)
         .expect("a spec naming no model resolves without a catalog");
     let opted_out_budget = opted_out.no_progress_budget;
     assert_eq!(opted_out_budget, lash::NoProgressBudget::Unbounded);

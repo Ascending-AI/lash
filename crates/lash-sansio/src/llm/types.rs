@@ -12,10 +12,10 @@ pub use retry::{RetryClass, RetryDecision, RetryDeclineCause, RetryWait};
 pub use crate::llm::capability::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
     AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
-    InstructionRole, ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
-    OpenAiReasoningContext, ProviderReasoningRetentionSupport, ReasoningCapability,
-    ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability, ReasoningRetentionPolicy,
-    ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    InstructionRole, LlmProfileCapability, LlmProfileEffortValidationCategory,
+    LlmProfileEffortValidationError, OpenAiReasoningContext, ProviderReasoningRetentionSupport,
+    ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 
@@ -925,7 +925,7 @@ pub struct LlmRequest {
     pub tool_choice: LlmToolChoice,
     pub model_variant: crate::llm::capability::ReasoningSelection,
     #[serde(default)]
-    pub model_capability: crate::llm::capability::ModelCapability,
+    pub llm_profile_capability: crate::llm::capability::LlmProfileCapability,
     /// The session's recorded attachment-acceptance rules (ADR 0026). They
     /// are session config, not model metadata: they decide whether an
     /// attachment reaches this request or degrades to a placeholder.
@@ -940,9 +940,9 @@ pub struct LlmRequest {
     /// [`Self::generation`] states nothing.
     #[serde(
         default,
-        skip_serializing_if = "crate::llm::capability::ModelRequestDefaults::is_default"
+        skip_serializing_if = "crate::llm::capability::LlmProfileRequestDefaults::is_default"
     )]
-    pub request_defaults: crate::llm::capability::ModelRequestDefaults,
+    pub request_defaults: crate::llm::capability::LlmProfileRequestDefaults,
     #[serde(default)]
     pub generation: GenerationOptions,
     pub scope: LlmRequestScope,
@@ -1072,13 +1072,13 @@ impl LlmRequest {
         provider_kind: &str,
         adapter_support: ProviderReasoningRetentionSupport,
     ) -> Result<std::borrow::Cow<'a, Self>, ReasoningRetentionValidationError> {
-        self.model_capability.validate_reasoning_retention(
+        self.llm_profile_capability.validate_reasoning_retention(
             &self.model,
             provider_kind,
             adapter_support,
         )?;
 
-        let cutoff = match self.model_capability.reasoning_retention.selection {
+        let cutoff = match self.llm_profile_capability.reasoning_retention.selection {
             ReasoningRetentionSelection::ClientSideUserSegments { max_segments } => {
                 let starts = self
                     .messages
@@ -1829,7 +1829,7 @@ impl LlmResponse {
 }
 
 #[derive(Clone, Debug)]
-pub struct ModelSelection {
+pub struct LlmProfileSelection {
     pub model: &'static str,
     pub variant: Option<&'static str>,
 }

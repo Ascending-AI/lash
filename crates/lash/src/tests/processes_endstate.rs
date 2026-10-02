@@ -116,7 +116,7 @@ fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
     lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
         lash_core::SessionPolicy {
-            model: Some(recorded_model(mock_model_spec())),
+            model: Some(recorded_llm_profile(mock_llm_profile_spec())),
             ..lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
@@ -235,7 +235,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
         backend,
         factory,
     )
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
     // ADR 0095: `processes` is catalogue presence, so the fixtures need this.
@@ -1497,7 +1497,7 @@ impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory 
 async fn rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn() -> Result<()> {
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .serve_test_model(
+        .serve_test_llm_profile(
             queued_text_provider(vec![
                 typescript_block(
                     r#"
@@ -1512,7 +1512,7 @@ finish(handle.id);
                 ),
                 typescript_block("finish(\"second turn\");"),
             ]),
-            mock_model_spec(),
+            mock_llm_profile_spec(),
         )
         .plugin(Arc::new(CalendarTriggerSurfaceFactory))
         .build(crate::testing::runtime_lease_owner())?;
@@ -1612,7 +1612,7 @@ finish(handle.id);
 async fn rlm_process_body_registers_a_trigger_through_the_leaf_tool() -> Result<()> {
     let backend = double_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-    .serve_test_model(queued_text_provider(vec![typescript_block(
+    .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
         r#"
 const remember = async (change: calendar.Change) => change.id;
 const registrar = async () => {
@@ -1626,7 +1626,7 @@ const registrar = async () => {
 const h = await processes.start({ definition: registrar });
 finish(await h);
 "#,
-    )]), mock_model_spec())
+    )]), mock_llm_profile_spec())
     // ADR 0095: the `processes` module is catalogue presence, so a cell that
     // authors `processes.start` needs this factory installed.
     .plugin(Arc::new(

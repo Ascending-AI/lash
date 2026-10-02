@@ -4,7 +4,7 @@ use super::*;
 fn stack_budget_rlm_lashlang_process_turn() -> Result<()> {
     run_async_test_on_stack_budget("stack-budget-rlm-lashlang-process-turn", || async {
         let core = explicit_ephemeral_facets(rlm_core_builder().await)
-            .serve_test_model(queued_text_provider(vec![typescript_block(
+            .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
                 r#"
 const child = async (value) => {
     const lookup = await tools.app_lookup({});
@@ -19,7 +19,7 @@ finish({
   right: joined.right,
   ok: joined.left.ok && joined.right.ok
 });"#,
-            )]), mock_model_spec())
+            )]), mock_llm_profile_spec())
             .tools(Arc::new(AppTools))
             // ADR 0095: `processes` is catalogue presence, so a scripted cell
             // that authors `processes.start` needs this factory installed.

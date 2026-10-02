@@ -1920,9 +1920,9 @@ fn remote_process_env_persistence_dtos_validate() {
     );
 
     let mut invalid = request;
-    invalid.env_spec.policy.model = Some(RemoteModelConfig {
+    invalid.env_spec.policy.model = Some(RemoteLlmProfileConfig {
         key: "remote-key".to_string(),
-        metadata: RemoteModelMetadata {
+        metadata: RemoteLlmProfileMetadata {
             wire_model: "remote-model".to_string(),
             extra_body: Default::default(),
             request_defaults: Default::default(),
@@ -1943,9 +1943,9 @@ fn remote_process_env_persistence_dtos_validate() {
 #[test]
 fn process_execution_policy_carries_session_generation_options() {
     let mut policy = RemoteProcessExecutionPolicy {
-        model: Some(RemoteModelConfig {
+        model: Some(RemoteLlmProfileConfig {
             key: "remote-key".to_string(),
-            metadata: RemoteModelMetadata {
+            metadata: RemoteLlmProfileMetadata {
                 wire_model: "remote-model".to_string(),
                 extra_body: Default::default(),
                 request_defaults: Default::default(),

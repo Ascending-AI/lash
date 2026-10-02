@@ -32,7 +32,7 @@ Completions has no such flag, so nothing is sent there, and the host's intent
 is still fully honored locally. The receipt splits the two halves into
 `thinking_summary` and `thinking_visibility`.
 
-**Reasoning resolves once.** `ModelCapability::reasoning_intent` resolves the
+**Reasoning resolves once.** `LlmProfileCapability::reasoning_intent` resolves the
 session's recorded `ReasoningSelection` against the recorded capability into
 `Option<ReasoningIntent>`, where `ReasoningIntent` is
 `Effort(String) | Budget(u32) | Off`. `ProviderDefault` resolves to `None` and
@@ -83,7 +83,7 @@ A custom trait object cannot supply the same durable and remote contract.
 call. It refuses everything else before the adapter does any I/O:
 
 - **Cap.** The effective cap is the request's, else the recorded model's
-  `ModelRequestDefaults.max_output_tokens`. With neither set, an optional-cap wire
+  `LlmProfileRequestDefaults.max_output_tokens`. With neither set, an optional-cap wire
   sends none, and Anthropic refuses with `output_token_cap_required`. Codex
   and `max_tokens_field: Omit` endpoints refuse any cap.
 - **Temperature.** A wire without a temperature field refuses one. A model
@@ -132,7 +132,7 @@ refuses an `omitted_sampling_pinned` outcome.
 - A mixed-model session that sets a session-wide temperature or seed must
   clear it for models or wires that cannot carry it
   (`GenerationOverlay::Replace`). A receipt cannot un-send a call.
-- Hosts on Anthropic set `ModelRequestDefaults.max_output_tokens` or a request cap.
+- Hosts on Anthropic set `LlmProfileRequestDefaults.max_output_tokens` or a request cap.
 - Hosts choose a preset or set
   `OpenAiCompat.reasoning`.
 - Replay-route ownership is exact. Opaque reasoning, tool-call and

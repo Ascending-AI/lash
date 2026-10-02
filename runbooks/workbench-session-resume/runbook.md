@@ -117,8 +117,8 @@ drive it. Retain the driving prompt and verdict with the run artifacts.
 ## Phase 0 — Boot and identify the durable session
 
 Boot with the exact deterministic-provider environment above, poll `/healthz`, and open the
-browser. The model control is the text input `#modelInput` (there is no `#model` element and
-the page never renders the model id anywhere else). Require `#modelInput` to render
+browser. The model control is the text input `#profileInput` (there is no `#model` element and
+the page never renders the model id anywhere else). Require `#profileInput` to render
 `dev/replay-route-a` and retain the startup log row
 that names `replay-route-change`; any other provider/model is a harness gap → Abort. Record the
 workbench PID, rendered session id,
@@ -197,13 +197,13 @@ provider-owned signature starts with `FIG1374-OPAQUE-REPLAY-` to
 provider `workbench-dev-failure`, endpoint `workbench-dev-failure`, and model
 `dev/replay-route-a`. Record the current end offset or record count of `trace.jsonl`.
 
-Type `dev/replay-route-b` into `#modelInput`, pause at least two seconds so a projection
+Type `dev/replay-route-b` into `#profileInput`, pause at least two seconds so a projection
 snapshot lands on the typed value, and then submit the turn, leaving the provider kind and
-endpoint unchanged. The control is read at send time (`selectedModelPayload()`), and a typed
+endpoint unchanged. The control is read at send time (`selectedProfilePayload()`), and a typed
 value that has not been sent yet is held locally against the projection: while it differs
-from `state.settings.model` the page shows the pending marker `#modelPending`
+from `state.settings.model` the page shows the pending marker `#profilePending`
 (`edited · sends with the next turn`) beside the control and no snapshot overwrites it.
-Require `#modelInput` to still read `dev/replay-route-b` after the pause and `#modelPending`
+Require `#profileInput` to still read `dev/replay-route-b` after the pause and `#profilePending`
 to be visible before the submit; a reverted input or a hidden marker is a product defect →
 Abort. The witness that the switch landed is the `POST
 /api/turn` request body — capture it and require it to name `dev/replay-route-b`. Submit a

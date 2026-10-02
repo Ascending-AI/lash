@@ -153,9 +153,11 @@ impl GoogleOAuthProvider {
         };
         // Gemini 3 accepts media inside a function response; older dialects
         // (and Claude on Vertex) take it only as ordinary user parts.
-        let multimodal_function_response =
-            matches!(req.model_capability.google_dialect, GoogleDialect::Gemini3);
-        let missing_signature = match req.model_capability.google_dialect {
+        let multimodal_function_response = matches!(
+            req.llm_profile_capability.google_dialect,
+            GoogleDialect::Gemini3
+        );
+        let missing_signature = match req.llm_profile_capability.google_dialect {
             GoogleDialect::Gemini3 => Some("skip_thought_signature_validator"),
             GoogleDialect::Legacy | GoogleDialect::ClaudeOnVertex => None,
         };
@@ -377,7 +379,7 @@ impl GoogleOAuthProvider {
             parallel_tool_calls: false,
             thinking_summary: ThinkingSummaryWire::Always,
             active_thinking_pins_sampling: matches!(
-                req.model_capability.google_dialect,
+                req.llm_profile_capability.google_dialect,
                 GoogleDialect::ClaudeOnVertex
             ),
         }
@@ -455,7 +457,7 @@ impl GoogleOAuthProvider {
         let policy =
             resolve_generation_policy(req, Self::PROVIDER_KIND, &Self::generation_wire(req))?;
         let thinking_config = Self::thinking_config(
-            req.model_capability.google_dialect,
+            req.llm_profile_capability.google_dialect,
             policy.reasoning.as_ref(),
             policy.request_thinking_summary,
             policy.max_output_tokens,
@@ -483,7 +485,7 @@ impl GoogleOAuthProvider {
         let (policy, thinking_config) = Self::resolve_generation(req)?;
         let mut emission = GenerationEmission {
             reasoning_retention: matches!(
-                req.model_capability.reasoning_retention.selection,
+                req.llm_profile_capability.reasoning_retention.selection,
                 ReasoningRetentionSelection::ClientSideUserSegments { .. }
             ),
             ..GenerationEmission::default()
@@ -524,7 +526,7 @@ impl GoogleOAuthProvider {
         request["request"]["sessionId"] = json!(req.provider_session_affinity_key());
         if !req.tools.is_empty() {
             let use_claude_on_vertex_parameters = matches!(
-                req.model_capability.google_dialect,
+                req.llm_profile_capability.google_dialect,
                 GoogleDialect::ClaudeOnVertex
             );
             request["request"]["tools"] = json!([{

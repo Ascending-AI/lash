@@ -141,13 +141,13 @@ pub(super) async fn backend_and_process_worker()
         .stamped(bindings_generation()),
     ));
     let core = lash::LashCore::standard_builder(lash_core::Backend::from(Arc::clone(&backend)))
-        .serve_test_model(
+        .serve_test_llm_profile(
             lash_core::testing::TestProvider::builder()
                 .kind("endpoint-builder-stub")
                 .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
                 .build()
                 .into_handle(),
-            lash_core::ModelMetadata::new(
+            lash_core::LlmProfileMetadata::new(
                 "endpoint-builder-model",
                 std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
             ),

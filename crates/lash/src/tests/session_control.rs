@@ -129,7 +129,7 @@ async fn a_session_close_releases_its_running_roots_execution() -> Result<()> {
     let core = LashCore::standard_builder(double.lash_backend())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(hold_provider(Arc::clone(&calls)), mock_model_spec())
+        .serve_test_llm_profile(hold_provider(Arc::clone(&calls)), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("held-close").created().await.open().await?;
     let session_id = session.session_id().clone();

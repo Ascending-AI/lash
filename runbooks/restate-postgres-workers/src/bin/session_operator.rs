@@ -103,11 +103,11 @@ impl Harness {
             std::env::var_os("LASH_OPERATOR_VM_WORKER").context("VM worker executable")?,
         ));
         let core = lash::LashCore::rlm_builder(backend, protocol)
-            .models(Arc::new(
-                lash::ModelRegistry::new().register(
+            .llm_profiles(Arc::new(
+                lash::LlmProfileRegistry::new().register(
                     "session-operator-mock",
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("session-operator-mock")
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("session-operator-mock")
                             .context_window_tokens(200_000)
                             .build()
                             .map_err(anyhow::Error::msg)?,

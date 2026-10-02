@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use lash::sync::MutexExt;
 use lash::{LashCore, LashSession, TurnWorkDriver};
 
-use crate::routes::ModelChoice;
+use crate::routes::LlmProfileChoice;
 use serde_json::json;
 
 use crate::db::AppDb;
@@ -18,8 +18,8 @@ pub(crate) struct AppStateData {
     core: Arc<LashCore>,
     turn_work_driver: TurnWorkDriver,
     db: Arc<Mutex<AppDb>>,
-    default_model: String,
-    default_model_variant: Option<String>,
+    default_profile: String,
+    default_profile_variant: Option<String>,
     restate: lash_restate::RestateConnection,
 }
 
@@ -27,8 +27,8 @@ impl AppStateData {
     pub(crate) fn new(
         core: LashCore,
         db: Arc<Mutex<AppDb>>,
-        default_model: String,
-        default_model_variant: Option<String>,
+        default_profile: String,
+        default_profile_variant: Option<String>,
         restate: lash_restate::RestateConnection,
     ) -> Self {
         let core = Arc::new(core);
@@ -37,8 +37,8 @@ impl AppStateData {
             turn_work_driver: core.turn_work_driver(),
             core,
             db,
-            default_model,
-            default_model_variant,
+            default_profile,
+            default_profile_variant,
             restate,
         }
     }
@@ -86,12 +86,12 @@ impl AppStateData {
         &self.turn_work_driver
     }
 
-    pub(crate) fn default_model(&self) -> &str {
-        &self.default_model
+    pub(crate) fn default_profile(&self) -> &str {
+        &self.default_profile
     }
 
-    pub(crate) fn default_model_variant(&self) -> Option<&str> {
-        self.default_model_variant.as_deref()
+    pub(crate) fn default_profile_variant(&self) -> Option<&str> {
+        self.default_profile_variant.as_deref()
     }
 
     /// The Restate ingress the service's own workflows are reached through.
@@ -102,7 +102,7 @@ impl AppStateData {
     pub(crate) async fn open_session(
         &self,
         chat_id: &str,
-        model: ModelChoice,
+        model: LlmProfileChoice,
     ) -> AppResult<LashSession> {
         // TypeScript is the sole RLM language (ADR 0096), so a chat states no
         // language at its open: there is nothing left to pin, and a bag that
@@ -152,10 +152,13 @@ impl AppStateData {
             Err(error) => return Err(error.into()),
         }
         let session = self.core.session(chat_id).open().await?;
-        let recorded = session.policy_snapshot().model.map(|recorded| ModelChoice {
-            key: recorded.key().clone(),
-            reasoning: recorded.reasoning,
-        });
+        let recorded = session
+            .policy_snapshot()
+            .model
+            .map(|recorded| LlmProfileChoice {
+                key: recorded.key().clone(),
+                reasoning: recorded.reasoning,
+            });
         if recorded.as_ref() != Some(&model) {
             // Written against the revision this open read, under an id that
             // names the change: a resubmission of the same change is the
@@ -168,7 +171,7 @@ impl AppStateData {
                         format!("chat-model:{}:{:?}:{revision}", model.key, model.reasoning),
                         revision,
                     ),
-                    lash::config::ConfigTransaction::of(lash::config::SetModel {
+                    lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
                         model: model.key,
                     })
                     .then(lash::config::SetReasoning {
@@ -336,9 +339,9 @@ pub(crate) mod test_support {
 
     /// The model every test chat runs: the service catalog's `mock-model`
     /// id with its provider-default reasoning.
-    pub(crate) fn mock_model() -> ModelChoice {
-        ModelChoice {
-            key: lash::ModelKey::new("mock-model"),
+    pub(crate) fn mock_llm_profile() -> LlmProfileChoice {
+        LlmProfileChoice {
+            key: lash::LlmProfileKey::new("mock-model"),
             reasoning: lash::provider::ReasoningSelection::default(),
         }
     }
@@ -461,7 +464,7 @@ pub(crate) mod test_support {
         );
         let mut builder = LashCore::rlm_builder(backend, factory)
             .tool_source_policy(tool_source_policy)
-            .models(Arc::new(crate::OpenRouterModels { provider }));
+            .llm_profiles(Arc::new(crate::OpenRouterLlmProfiles { provider }));
         if let Some(tools) = tools {
             builder = builder.tools(tools);
         }
@@ -517,7 +520,7 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod session_language_tests {
     use super::test_support::{
-        mock_model, test_core, test_core_requiring_tool_sources, test_core_with_board,
+        mock_llm_profile, test_core, test_core_requiring_tool_sources, test_core_with_board,
         test_core_with_tools, test_state,
     };
     use super::*;
@@ -575,7 +578,7 @@ mod session_language_tests {
             double.connection(),
         );
         let session = service
-            .open_session("smuggled-chat", mock_model())
+            .open_session("smuggled-chat", mock_llm_profile())
             .await
             .expect("the chat opens");
 
@@ -691,7 +694,7 @@ mod session_language_tests {
         seeding_core
             .session(chat_id.clone())
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                mock_model().key,
+                mock_llm_profile().key,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )))
@@ -717,7 +720,7 @@ mod session_language_tests {
         let core = test_core(&double).await;
         let service = test_state(&double, &core, AppDb::open(&db_path).expect("app db"));
         let session = service
-            .open_session(&chat_id, mock_model())
+            .open_session(&chat_id, mock_llm_profile())
             .await
             .expect("the chat still opens");
         session.close().await.expect("close");
@@ -744,7 +747,7 @@ mod session_language_tests {
 
         // A second open of the same chat does not repeat the notice.
         let again = service
-            .open_session(&chat_id, mock_model())
+            .open_session(&chat_id, mock_llm_profile())
             .await
             .expect("second open");
         again.close().await.expect("close");
@@ -805,7 +808,7 @@ mod session_language_tests {
         seeding_core
             .session(chat_id.clone())
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                mock_model().key,
+                mock_llm_profile().key,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )))
@@ -829,7 +832,7 @@ mod session_language_tests {
 
         let core = test_core_requiring_tool_sources(&double).await;
         let service = test_state(&double, &core, AppDb::open(&db_path).expect("app db"));
-        let refusal = match service.open_session(&chat_id, mock_model()).await {
+        let refusal = match service.open_session(&chat_id, mock_llm_profile()).await {
             Ok(_) => panic!("a Require core must refuse a chat that lost a tool"),
             Err(error) => error.message,
         };
@@ -860,13 +863,13 @@ mod session_language_tests {
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         );
         let session = service
-            .open_session("own-chat", mock_model())
+            .open_session("own-chat", mock_llm_profile())
             .await
             .expect("first open");
         session.close().await.expect("close");
 
         let reopened = service
-            .open_session("own-chat", mock_model())
+            .open_session("own-chat", mock_llm_profile())
             .await
             .expect("a chat reopens under the config it recorded");
         reopened.close().await.expect("close the reopened session");

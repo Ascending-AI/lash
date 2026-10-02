@@ -45,7 +45,7 @@ use lash_restate_postgres_workers_e2e::overflow_recovery_evidence::recovery_reco
 use serde_json::{Value, json};
 
 /// The key the recovery run serves its one scripted model under.
-const MODEL_KEY: &str = "context-overflow-recovery-mock";
+const PROFILE_KEY: &str = "context-overflow-recovery-mock";
 
 /// The oversized tool result. Large enough that no reader mistakes it for an
 /// ordinary payload, small enough that the harness stays fast.
@@ -388,11 +388,11 @@ impl Harness {
             Protocol::Standard => lash::LashCore::standard_builder(backend),
         };
         let builder = builder
-            .models(Arc::new(
-                lash::ModelRegistry::new().register(
-                    MODEL_KEY,
-                    lash::RegisteredModel::new(
-                        lash::ModelMetadata::builder("context-overflow-recovery-mock")
+            .llm_profiles(Arc::new(
+                lash::LlmProfileRegistry::new().register(
+                    PROFILE_KEY,
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("context-overflow-recovery-mock")
                             .context_window_tokens(200_000)
                             .build()
                             .map_err(anyhow::Error::msg)?,
@@ -451,7 +451,7 @@ impl Harness {
             .core
             .session(session_id)
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                MODEL_KEY,
+                PROFILE_KEY,
                 lash::TurnBudget::Unbounded,
                 lash::MaxToolCalls::new(1024),
             )))

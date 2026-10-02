@@ -209,7 +209,7 @@ pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
     pub(in crate::runtime::session_manager) plugin_host: &'a crate::PluginHost,
     pub(in crate::runtime::session_manager) protocol_plugin_id: &'a str,
     /// Mints the binding of a model key the create request names.
-    pub(in crate::runtime::session_manager) models: &'a dyn crate::RuntimeModels,
+    pub(in crate::runtime::session_manager) models: &'a dyn crate::LlmProfiles,
 }
 
 impl<'a> StarterFacts<'a> {
@@ -242,7 +242,7 @@ pub(in crate::runtime::session_manager) struct ChildFacts {
 /// re-resolving its key; only a request that names a model key of its own
 /// mints one, here, through the deployment's models, and the child records
 /// it. A key they do not register is refused with
-/// [`RuntimeErrorCode::ModelUnknown`](crate::RuntimeErrorCode::ModelUnknown),
+/// [`RuntimeErrorCode::LlmProfileUnknown`](crate::RuntimeErrorCode::LlmProfileUnknown),
 /// and inherited reasoning the minted model's capability refuses with
 /// [`RuntimeErrorCode::ReasoningRefused`](crate::RuntimeErrorCode::ReasoningRefused).
 /// A namespace no installed owner registers, or a value its owner refuses, is
@@ -263,8 +263,8 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
     if let Some(key) = request.model.as_ref() {
         let recorded = starter.models.snapshot(key).map_err(|source| {
             crate::PluginError::Runtime(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ModelUnknown,
-                crate::SessionError::ModelUnknown {
+                crate::RuntimeErrorCode::LlmProfileUnknown,
+                crate::SessionError::LlmProfileUnknown {
                     session_id: session_id.clone(),
                     source,
                 }
@@ -278,7 +278,7 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
                 .map(|model| model.reasoning.clone())
                 .unwrap_or_default()
         });
-        let model = crate::ModelConfig {
+        let model = crate::LlmProfileConfig {
             model: recorded,
             reasoning,
         };
@@ -722,7 +722,7 @@ pub(in crate::runtime::session_manager) async fn create_session(
 /// created head at revision zero finishes its create from the config it
 /// records. Only a child with no recorded head resolves the recorded
 /// request, and a model key this worker does not serve on that path is the
-/// typed, retryable `ModelUnavailable`: the start was admitted with the key,
+/// typed, retryable `LlmProfileUnavailable`: the start was admitted with the key,
 /// so the deployment is at fault, never the request.
 async fn initialize_session(
     current: &CurrentOwnerCapability,
@@ -753,7 +753,7 @@ async fn initialize_session(
     let named = request.model.clone();
     let mut plan = resolve_session_init(current, request)
         .await
-        .map_err(|error| unserved_model_key(named.as_ref(), error))?;
+        .map_err(|error| unserved_profile_key(named.as_ref(), error))?;
     plan.owning_process_id = Some(owning_process_id.clone());
     Box::pin(commit_fresh_session_init(current, plan)).await
 }
@@ -761,18 +761,18 @@ async fn initialize_session(
 /// An admitted start's model key this worker's models do not register: the
 /// start's admission minted nothing but judged the key, so a worker that
 /// cannot mint it is a deployment that does not serve it. Retried, typed
-/// `ModelUnavailable` naming the key, as a root's per-run key in the same
+/// `LlmProfileUnavailable` naming the key, as a root's per-run key in the same
 /// position is.
-fn unserved_model_key(
-    key: Option<&crate::ModelKey>,
+fn unserved_profile_key(
+    key: Option<&crate::LlmProfileKey>,
     error: crate::PluginError,
 ) -> crate::PluginError {
     match (key, error) {
         (Some(key), crate::PluginError::Runtime(runtime))
-            if runtime.code == crate::RuntimeErrorCode::ModelUnknown =>
+            if runtime.code == crate::RuntimeErrorCode::LlmProfileUnknown =>
         {
             crate::PluginError::Runtime(
-                crate::RuntimeEffectControllerError::model_unavailable(
+                crate::RuntimeEffectControllerError::llm_profile_unavailable(
                     key,
                     format!(
                         "the start's model key is not served by this worker; the process \
@@ -790,15 +790,15 @@ fn unserved_model_key(
 /// A session error from assembling a recorded session's runtime, with a
 /// store error classified as every read of the reopen is. Nothing on that
 /// path binds a model (FIG-4404), so the one model refusal it can meet is a
-/// recorded head that selects none: the terminal `ModelUnconfigured`.
+/// recorded head that selects none: the terminal `LlmProfileUnconfigured`.
 fn recorded_session_error(error: crate::SessionError) -> crate::PluginError {
     match error {
         crate::SessionError::Plugin(error) => error,
         crate::SessionError::Store { context, source } => {
             crate::PluginError::of_store_error(context, source)
         }
-        error @ crate::SessionError::ModelUnconfigured { .. } => {
-            crate::PluginError::Runtime(crate::runtime::drive::model_unconfigured(error))
+        error @ crate::SessionError::LlmProfileUnconfigured { .. } => {
+            crate::PluginError::Runtime(crate::runtime::drive::llm_profile_unconfigured(error))
         }
         error => crate::PluginError::Session(error.to_string()),
     }
@@ -1559,34 +1559,37 @@ mod tests {
 
     /// A catalog of two keys: `thinker` advertises the `high` effort, and
     /// `plain` has no reasoning controls.
-    fn child_models() -> std::sync::Arc<crate::ModelRegistry> {
+    fn child_llm_profiles() -> std::sync::Arc<crate::LlmProfileRegistry> {
         let provider = || {
             crate::testing::TestProvider::builder()
                 .kind("child-facts")
                 .build()
                 .into_handle()
         };
-        let thinker = crate::ModelMetadata::builder("thinker-wire")
+        let thinker = crate::LlmProfileMetadata::builder("thinker-wire")
             .context_window_tokens(64_000)
-            .capability(crate::ModelCapability {
+            .capability(crate::LlmProfileCapability {
                 reasoning: Some(crate::ReasoningCapability {
                     efforts: vec!["high".to_string()],
                     encoding: crate::ReasoningEncoding::Effort,
                     disable: false,
                     mandatory: false,
                 }),
-                ..crate::ModelCapability::default()
+                ..crate::LlmProfileCapability::default()
             })
             .build()
             .expect("thinker metadata");
         std::sync::Arc::new(
-            crate::ModelRegistry::new()
-                .register(THINKER, crate::RegisteredModel::new(thinker, provider()))
+            crate::LlmProfileRegistry::new()
+                .register(
+                    THINKER,
+                    crate::RegisteredLlmProfile::new(thinker, provider()),
+                )
                 .and_then(|registry| {
                     registry.register(
                         PLAIN,
-                        crate::RegisteredModel::new(
-                            crate::testing::test_model_metadata("plain-wire"),
+                        crate::RegisteredLlmProfile::new(
+                            crate::testing::test_llm_profile_metadata("plain-wire"),
                             provider(),
                         ),
                     )
@@ -1601,7 +1604,7 @@ mod tests {
         request: &SessionCreateRequest,
     ) -> Result<ChildFacts, crate::PluginError> {
         let plugin_host = crate::testing::test_plugin_host(Vec::new());
-        let models = child_models();
+        let models = child_llm_profiles();
         resolve_child_facts(
             &StarterFacts {
                 policy,
@@ -1632,23 +1635,26 @@ mod tests {
     /// FIG-4531: a child's model key is judged where the child's facts
     /// resolve. The reasoning the child inherits must fit the capability its
     /// key mints, and a key the models do not register is typed: terminal at
-    /// admission, and the retryable `ModelUnavailable` on the worker of a
+    /// admission, and the retryable `LlmProfileUnavailable` on the worker of a
     /// start that was admitted with it.
     #[test]
-    fn a_child_model_key_is_judged_typed_when_its_facts_resolve() {
-        let models = child_models();
+    fn a_child_profile_key_is_judged_typed_when_its_facts_resolve() {
+        let models = child_llm_profiles();
         let starter = SessionPolicy {
             model: Some(
-                crate::ModelConfig::new(
-                    crate::RuntimeModels::snapshot(models.as_ref(), &crate::ModelKey::new(THINKER))
-                        .expect("thinker mints"),
+                crate::LlmProfileConfig::new(
+                    crate::LlmProfiles::snapshot(
+                        models.as_ref(),
+                        &crate::LlmProfileKey::new(THINKER),
+                    )
+                    .expect("thinker mints"),
                 )
                 .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
             ),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
         };
 
-        let onto_plain = root_request().with_model(crate::ModelKey::new(PLAIN));
+        let onto_plain = root_request().with_llm_profile(crate::LlmProfileKey::new(PLAIN));
         let refused = child_facts(&starter, &onto_plain)
             .err()
             .expect("an inherited effort the key cannot take is refused");
@@ -1659,7 +1665,7 @@ mod tests {
         );
         assert!(reasoning_refused(&refused));
 
-        let onto_thinker = root_request().with_model(crate::ModelKey::new(THINKER));
+        let onto_thinker = root_request().with_llm_profile(crate::LlmProfileKey::new(THINKER));
         let facts = child_facts(&starter, &onto_thinker).expect("the effort fits the key");
         assert_eq!(
             facts
@@ -1670,19 +1676,19 @@ mod tests {
             crate::ReasoningSelection::Effort("high".to_string())
         );
 
-        let unknown = root_request().with_model(crate::ModelKey::new("retired"));
+        let unknown = root_request().with_llm_profile(crate::LlmProfileKey::new("retired"));
         let refused = child_facts(&starter, &unknown)
             .err()
             .expect("an unregistered key is refused");
         assert_eq!(
             runtime_code(&refused),
-            Some(&crate::RuntimeErrorCode::ModelUnknown),
+            Some(&crate::RuntimeErrorCode::LlmProfileUnknown),
             "admission refuses the key that was named: {refused:?}"
         );
-        let on_worker = unserved_model_key(unknown.model.as_ref(), refused);
+        let on_worker = unserved_profile_key(unknown.model.as_ref(), refused);
         assert_eq!(
             runtime_code(&on_worker),
-            Some(&crate::RuntimeErrorCode::ModelUnavailable)
+            Some(&crate::RuntimeErrorCode::LlmProfileUnavailable)
         );
         assert!(
             on_worker.is_retryable() && !on_worker.is_terminal(),
@@ -1692,8 +1698,8 @@ mod tests {
             unreachable!("the code was read from a runtime error");
         };
         assert_eq!(
-            on_worker.model_key(),
-            Some(&crate::ModelKey::new("retired")),
+            on_worker.profile_key(),
+            Some(&crate::LlmProfileKey::new("retired")),
             "the fault names the start's key typed: {on_worker:?}"
         );
         assert_eq!(
@@ -1702,23 +1708,23 @@ mod tests {
                 None,
                 on_worker.attempt_failure_text()
             )
-            .model_key(),
-            Some(&crate::ModelKey::new("retired")),
+            .profile_key(),
+            Some(&crate::LlmProfileKey::new("retired")),
             "the park of the exhausted retries names the key"
         );
     }
 
     /// FIG-4631: a recorded session whose head selects no model is refused
     /// typed and terminal when its runtime is assembled. Nothing on that
-    /// path binds a model, so no session error there is `ModelUnavailable`.
+    /// path binds a model, so no session error there is `LlmProfileUnavailable`.
     #[test]
-    fn a_recorded_session_with_no_model_is_terminal_model_unconfigured() {
-        let refused = recorded_session_error(crate::SessionError::ModelUnconfigured {
+    fn a_recorded_session_with_no_profile_is_terminal_llm_profile_unconfigured() {
+        let refused = recorded_session_error(crate::SessionError::LlmProfileUnconfigured {
             session_id: SessionId::from("recorded-without-model"),
         });
         assert_eq!(
             runtime_code(&refused),
-            Some(&crate::RuntimeErrorCode::ModelUnconfigured),
+            Some(&crate::RuntimeErrorCode::LlmProfileUnconfigured),
             "{refused:?}"
         );
         assert!(refused.is_terminal() && !refused.is_retryable());
@@ -1730,7 +1736,7 @@ mod tests {
     /// supplies nothing.
     #[test]
     fn a_request_that_states_its_spec_records_it_whatever_its_starter_holds() {
-        let models = child_models();
+        let models = child_llm_profiles();
         let spec = crate::SessionSpec::new(
             THINKER,
             crate::TurnBudget::bounded(4),
@@ -1740,8 +1746,8 @@ mod tests {
         let request = root_request().with_spec(&spec).expect("a root spec");
         assert_eq!(request.unstated_root_config(), None);
         let starter = SessionPolicy {
-            model: Some(crate::ModelConfig::new(
-                crate::RuntimeModels::snapshot(models.as_ref(), &crate::ModelKey::new(PLAIN))
+            model: Some(crate::LlmProfileConfig::new(
+                crate::LlmProfiles::snapshot(models.as_ref(), &crate::LlmProfileKey::new(PLAIN))
                     .expect("plain mints"),
             )),
             ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))

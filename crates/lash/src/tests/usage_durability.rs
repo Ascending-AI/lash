@@ -111,7 +111,7 @@ async fn usage_durability_core_with_store(
     let backend = double.lash_backend();
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-    .serve_test_model(provider, mock_model_spec())
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
     // The default 2000 ms drain would make every witness below wait on a
     // deadline that is not what is under test.
     .abort_drain_grace(Duration::from_millis(50))
@@ -171,7 +171,7 @@ fn unreported_attempts_survive_close_and_reopen_with_their_attribution() -> Resu
         let alpha = by_call(&first_call);
         assert_eq!(alpha.provider_attempt, 1);
         assert_eq!(alpha.source, "turn");
-        assert_eq!(alpha.requested_model, mock_model_spec().wire_model);
+        assert_eq!(alpha.requested_model, mock_llm_profile_spec().wire_model);
         assert_eq!(alpha.generation_id.as_deref(), Some("gen-alpha"));
         // An attempt with no generation id is a fact, not missing data: it
         // stays outstanding as unreconcilable rather than disappearing.
@@ -519,7 +519,7 @@ fn reconciliation_appends_one_correction() -> Result<()> {
         Box::pin(session.close()).await?;
 
         let second_host = explicit_ephemeral_facets(rlm_core_builder_over(double.lash_backend()))
-            .serve_test_model(provider(&log), mock_model_spec())
+            .serve_test_llm_profile(provider(&log), mock_llm_profile_spec())
             .abort_drain_grace(Duration::from_millis(50))
             .build(crate::testing::runtime_lease_owner())?;
         let reopened = second_host

@@ -470,13 +470,13 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(false).await
-        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(false).await
-        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+        }; (an_older_admission_redriven_after_a_profile_change_is_fenced_out, "turn-config-stale-fenced-out"));
 
         // FIG-4646's recorded-view and recorded-bound laws.
         lash_conformance::turn_config_tests!(@law [
@@ -510,13 +510,13 @@ mod recorded_termination {
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(true).await
-        }; (a_committed_root_redriven_after_a_model_change_answers_from_its_receipt, "turn-config-stale-redrive"));
+        }; (a_committed_root_redriven_after_a_profile_change_answers_from_its_receipt, "turn-config-stale-redrive"));
 
         lash_conformance::turn_config_tests!(@law [
             #[ignore = "PostgreSQL service leg: scripts/ci/store-tests.sh pg-store"]
         ] {
             super::harness(true).await
-        }; (an_older_admission_redriven_after_a_model_change_is_fenced_out, "turn-config-stale-fenced-out"));
+        }; (an_older_admission_redriven_after_a_profile_change_is_fenced_out, "turn-config-stale-fenced-out"));
     }
 }
 

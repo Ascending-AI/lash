@@ -7,7 +7,7 @@ use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmOutputPart, LlmRole, LlmToolChoice, LlmUsage,
     ProviderReasoningReplay,
 };
-use crate::provider::{CacheRetention, ModelRequestDefaults, ReasoningSelection};
+use crate::provider::{CacheRetention, LlmProfileRequestDefaults, ReasoningSelection};
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
 /// Every test double that completes with an empty `Stop` response shares
@@ -721,7 +721,7 @@ pub(super) fn empty_request() -> LlmRequest {
         tool_choice: LlmToolChoice::None,
         attachment_acceptance: Default::default(),
         model_variant: Default::default(),
-        model_capability: crate::ModelCapability::default(),
+        llm_profile_capability: crate::LlmProfileCapability::default(),
         extra_body: Default::default(),
         request_defaults: Default::default(),
         scope: crate::LlmRequestScope::new(
@@ -1098,7 +1098,7 @@ fn provider_reliability_without_response_start_timeout_preserves_derived_bound()
 
 #[test]
 fn model_request_defaults_roundtrip_output_limit_retention_thinking_and_capture() {
-    let defaults = ModelRequestDefaults {
+    let defaults = LlmProfileRequestDefaults {
         expose_thinking: true,
         max_output_tokens: Some(16_384),
         cache_retention: CacheRetention::Long,
@@ -1119,7 +1119,8 @@ fn model_request_defaults_roundtrip_output_limit_retention_thinking_and_capture(
         serde_json::json!(["/usage/cost"])
     );
 
-    let roundtripped: ModelRequestDefaults = serde_json::from_value(value).expect("deserialize");
+    let roundtripped: LlmProfileRequestDefaults =
+        serde_json::from_value(value).expect("deserialize");
     assert_eq!(roundtripped, defaults);
 }
 
@@ -1179,10 +1180,10 @@ fn provider_options_roundtrip_sse_buffer_caps() {
 
 #[test]
 fn model_request_defaults_default_omits_and_restores_every_field() {
-    let value = serde_json::to_value(ModelRequestDefaults::default()).expect("serialize");
+    let value = serde_json::to_value(LlmProfileRequestDefaults::default()).expect("serialize");
     assert_eq!(value, serde_json::json!({}));
 
-    let restored: ModelRequestDefaults =
+    let restored: LlmProfileRequestDefaults =
         serde_json::from_value(serde_json::json!({})).expect("default");
     assert!(!restored.expose_thinking);
     assert_eq!(restored.max_output_tokens, None);

@@ -34,7 +34,7 @@ impl RuntimeEffectControllerError {
             RunShapeRefusal::Reasoning { .. } => RuntimeErrorCode::ReasoningRefused,
             RunShapeRefusal::Definition { .. }
             | RunShapeRefusal::Owner { .. }
-            | RunShapeRefusal::ReasoningWithoutModel
+            | RunShapeRefusal::ReasoningWithoutLlmProfile
             | RunShapeRefusal::ProtocolOptionsWithoutProtocol
             | RunShapeRefusal::Render { .. } => RuntimeErrorCode::RunShapeRefused,
         };

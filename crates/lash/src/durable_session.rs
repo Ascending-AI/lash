@@ -97,7 +97,7 @@ pub struct DurableSession {
     live_replay_store: Arc<dyn LiveReplayStore>,
     /// The host's models a [`send`](Self::send) checks a per-run model key
     /// against before the input is accepted (FIG-3877).
-    models: Arc<dyn lash_core::RuntimeModels>,
+    models: Arc<dyn lash_core::LlmProfiles>,
     /// The deployment's usage ledger, read by [`usage`](Self::usage).
     usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
 }
@@ -114,7 +114,7 @@ impl DurableSession {
         ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
-        models: Arc<dyn lash_core::RuntimeModels>,
+        models: Arc<dyn lash_core::LlmProfiles>,
         usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
     ) -> Self {
         Self {
@@ -149,7 +149,7 @@ impl DurableSession {
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
-        models: Arc<dyn lash_core::RuntimeModels>,
+        models: Arc<dyn lash_core::LlmProfiles>,
         usage_accounting: Arc<dyn lash_core::UsageAccountingStore>,
     ) -> Self {
         Self {

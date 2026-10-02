@@ -41,7 +41,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
             .contains("/stop")
     );
     let mut req = base.clone();
-    req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+    req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
     req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
     assert!(
         provider

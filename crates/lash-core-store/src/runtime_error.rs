@@ -14,7 +14,7 @@ pub use attachment_retention::{AttachmentRetentionFailure, AttachmentRetentionSt
 mod cause;
 mod classification;
 pub use cause::{GroupChildCapability, RuntimeErrorCause, StoredDataCorruption};
-pub(crate) mod model_unavailable;
+pub(crate) mod llm_profile_unavailable;
 mod run_shape;
 mod tool_call_limit;
 pub(crate) use classification::RuntimeErrorClass;
@@ -233,7 +233,7 @@ pub enum RuntimeErrorCode {
     /// host's registry does not register: a send and a create request are
     /// refused typed before anything is accepted, a config command is
     /// refused when its transaction resolves. Nothing changes either way.
-    ModelUnknown,
+    LlmProfileUnknown,
     /// A send, a root's run spec or a child's create request selects
     /// reasoning the capability of the model it would run refuses
     /// (FIG-4531). It is refused where it is stated, before anything runs:
@@ -244,12 +244,12 @@ pub enum RuntimeErrorCode {
     /// binding on this worker. The model was adopted when it was set, so this
     /// is the worker's deployment, not the session's intent: the engine
     /// retries the root, and its retry budget parks it.
-    ModelUnavailable,
+    LlmProfileUnavailable,
     /// A recorded config selects no model, so the work it governs has
     /// nothing to run a model call with. It is a recorded absence no
     /// deployment can repair, so it is the work's outcome and is never
-    /// retried, unlike [`Self::ModelUnavailable`].
-    ModelUnconfigured,
+    /// retried, unlike [`Self::LlmProfileUnavailable`].
+    LlmProfileUnconfigured,
     /// A root's run spec names a definition revision this worker does not
     /// register (FIG-3838). It is the deployment, not the input: the root
     /// retries, its retry budget parks it, and a redeploy that registers the
@@ -679,10 +679,10 @@ impl RuntimeErrorCode {
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
             Self::LiveReplay => "live_replay",
             Self::LlmProvider => "llm_provider",
-            Self::ModelUnknown => "model_unknown",
+            Self::LlmProfileUnknown => "model_unknown",
             Self::ReasoningRefused => "reasoning_refused",
-            Self::ModelUnavailable => "model_unavailable",
-            Self::ModelUnconfigured => "model_unconfigured",
+            Self::LlmProfileUnavailable => "llm_profile_unavailable",
+            Self::LlmProfileUnconfigured => "llm_profile_unconfigured",
             Self::RunDefinitionUnavailable => "run_definition_unavailable",
             Self::RecordedRendererUnavailable => "recorded_renderer_unavailable",
             Self::OutputRetentionFailed => "output_retention_failed",
@@ -976,10 +976,10 @@ impl RuntimeErrorCode {
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
             "live_replay" => Self::LiveReplay,
             "llm_provider" => Self::LlmProvider,
-            "model_unknown" => Self::ModelUnknown,
+            "model_unknown" => Self::LlmProfileUnknown,
             "reasoning_refused" => Self::ReasoningRefused,
-            "model_unavailable" => Self::ModelUnavailable,
-            "model_unconfigured" => Self::ModelUnconfigured,
+            "llm_profile_unavailable" => Self::LlmProfileUnavailable,
+            "llm_profile_unconfigured" => Self::LlmProfileUnconfigured,
             "run_definition_unavailable" => Self::RunDefinitionUnavailable,
             "recorded_renderer_unavailable" => Self::RecordedRendererUnavailable,
             "output_retention_failed" => Self::OutputRetentionFailed,
@@ -1452,7 +1452,7 @@ impl RuntimeError {
             | RuntimeErrorCause::Compat { .. }
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
-            | RuntimeErrorCause::ModelUnavailable { .. }
+            | RuntimeErrorCause::LlmProfileUnavailable { .. }
             | RuntimeErrorCause::AttachmentRetention { .. }
             | RuntimeErrorCause::MaxToolCallsExceeded { .. }
             | RuntimeErrorCause::StoredDataCorrupt { .. }
@@ -1695,7 +1695,7 @@ impl RuntimeEffectControllerError {
     /// ([`Self::turn_cancel_watch_lost`]): that fault is about the attempt,
     /// never the step. A model call and a direct completion consume it for
     /// one more fault alone: the recorded model this worker could not bind
-    /// before the call ([`Self::model_unavailable`], FIG-4404). A tool attempt
+    /// before the call ([`Self::llm_profile_unavailable`], FIG-4404). A tool attempt
     /// also consumes local retry authority for a typed VM worker fault
     /// encountered before its pure derivation returned (FIG-4707).
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalPolicy {
@@ -1726,7 +1726,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AdmitTriggerDelivery
                 | RuntimeEffectKind::Process
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
-            || self.is_unbound_model_call(kind)
+            || self.is_unbound_llm_profile_call(kind)
             || matches!(
                 (kind, self.cause.as_ref()),
                 (

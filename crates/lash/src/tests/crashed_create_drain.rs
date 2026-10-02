@@ -113,7 +113,7 @@ fn core_over(double: &lash_restate_test::RestateTestBackend, nodes: usize) -> Re
         LashCore::standard_builder(double.lash_backend()),
         crate::CommitBudget::bounded(1024 * 1024, nodes),
     )
-    .serve_test_model(mock_provider(), mock_model_spec())
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())
 }
 

@@ -209,7 +209,7 @@ pub async fn public_signal_intent_wakes_parked_process(
                             crate::QueuedWorkBatchingConfig::new(1),
                         );
                     host.providers.models =
-                        crate::testing::standard_test_models(model.into_handle());
+                        crate::testing::standard_test_llm_profiles(model.into_handle());
                     let mut policy = crate::testing::mock_session_policy();
                     policy.session_id = Some(session_id.clone());
                     let state = crate::RuntimeSessionState {

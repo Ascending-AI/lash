@@ -149,14 +149,14 @@ fn sampling_controls_do_not_disturb_the_rest_of_the_chat_body() {
         output_schema: json!({}).into(),
     }]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-    req.model_capability = ModelCapability {
+    req.llm_profile_capability = LlmProfileCapability {
         reasoning: Some(ReasoningCapability {
             efforts: vec!["high".to_string()],
             encoding: ReasoningEncoding::Effort,
             disable: false,
             mandatory: false,
         }),
-        ..ModelCapability::default()
+        ..LlmProfileCapability::default()
     };
 
     let body = openrouter_provider()
@@ -308,7 +308,7 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
     }
     let pinned = |req: &mut LlmRequest| {
         req.generation.temperature = Some(NonNegativeFiniteF64::new(0.2).expect("finite"));
-        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.llm_profile_capability.sampling = lash_core::SamplingCapability::Pinned;
     };
     // (label, endpoint is Responses, compat, options, request, expected code)
     let cases: Vec<(&str, bool, OpenAiCompat, ProviderOptions, LlmRequest, &str)> = vec![
@@ -380,7 +380,7 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
             OpenAiCompat::default(),
             ProviderOptions::default(),
             with(|req| {
-                req.model_capability = reasoning_capability();
+                req.llm_profile_capability = reasoning_capability();
                 req.model_variant =
                     lash_core::provider::ReasoningSelection::Effort("high".to_string());
             }),
@@ -392,7 +392,7 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
             OpenAiCompat::openrouter(),
             ProviderOptions::default(),
             with(|req| {
-                req.model_capability = reasoning_capability();
+                req.llm_profile_capability = reasoning_capability();
                 req.model_variant =
                     lash_core::provider::ReasoningSelection::Effort("High".to_string());
             }),
@@ -539,7 +539,7 @@ fn expose_thinking_on_chat_is_local_visibility_only() {
 #[test]
 fn codex_speaks_responses_in_the_openai_reasoning_dialect() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model_capability = reasoning_capability();
+    req.llm_profile_capability = reasoning_capability();
     let codex = CodexProvider::new("access", "refresh", 0);
 
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
@@ -550,7 +550,7 @@ fn codex_speaks_responses_in_the_openai_reasoning_dialect() {
     let body = codex.build_request_body(&req, true).unwrap();
     assert_eq!(body["reasoning"], json!({ "effort": "none" }));
 
-    req.model_capability = budget_reasoning_capability();
+    req.llm_profile_capability = budget_reasoning_capability();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     let error = codex
         .build_request_body(&req, true)

@@ -335,7 +335,7 @@ impl CodexProvider {
             }
         }
         if let ReasoningRetentionSelection::OpenAiContext { context } =
-            req.model_capability.reasoning_retention.selection
+            req.llm_profile_capability.reasoning_retention.selection
         {
             reasoning_object(&mut body)["context"] = json!(context.as_str());
             emission.reasoning_retention = true;
