@@ -50,13 +50,6 @@ impl ProcessRuntimeContext {
                     "process `{process_id}` is externally-owned and has no execution runtime"
                 )));
             }
-            // Registration refuses an unresolved start by id, so no row
-            // holds one.
-            crate::ProcessInput::Definition { definition_id, .. } => {
-                return Err(crate::PluginError::Session(format!(
-                    "process `{process_id}` names definition `{definition_id}` unresolved"
-                )));
-            }
         }
         let Some(env_ref) = registration.env_ref.as_ref() else {
             return Err(crate::PluginError::Session(format!(

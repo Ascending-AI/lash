@@ -15,7 +15,8 @@ use crate::tool_dispatch::ToolTriggerEffectOutcome;
 use crate::{
     AttachmentCreateMeta, CausalRef, CheckpointDelivery, EffectAddress, ExecResponse,
     ExecutionScope, LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput,
-    ProcessExecutionContext, ProcessListMode, ProcessRecord, ProcessRegistration, SessionScope,
+    ProcessExecutionContext, ProcessListMode, ProcessRecord, ProcessStartRegistration,
+    SessionScope,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -680,7 +681,7 @@ pub enum ProcessListSelection {
 #[allow(clippy::large_enum_variant)]
 pub enum ProcessCommand {
     Start {
-        registration: ProcessRegistration,
+        registration: ProcessStartRegistration,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         observers: Vec<SessionId>,
         #[serde(
@@ -765,7 +766,7 @@ pub enum ProcessCommand {
 #[allow(clippy::large_enum_variant)]
 enum ProcessCommandDecode {
     Start {
-        registration: ProcessRegistration,
+        registration: ProcessStartRegistration,
         #[serde(default)]
         observers: Vec<SessionId>,
         #[serde(default)]

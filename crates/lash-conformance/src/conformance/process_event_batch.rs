@@ -152,14 +152,14 @@ async fn folded(
     (
         events,
         (
-            record.status,
+            record.status(),
             record.last_event_sequence,
-            record.wait.map(|wait| {
+            record.wait().map(|wait| {
                 // The since instant is the writer's clock; the law compares
                 // what the fold derived.
                 crate::WaitState {
                     since_ms: 0,
-                    ..wait
+                    ..wait.clone()
                 }
             }),
         ),
@@ -308,7 +308,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
         )
         .await
         .expect("enter the wait with its prelude");
-    assert!(waiting.wait.is_some(), "the process waits");
+    assert!(waiting.wait().is_some(), "the process waits");
     assert_eq!(
         change_clock(&registry).await - clock,
         1,
@@ -351,7 +351,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
         )
         .await
         .expect("clear the wait with its prelude");
-    assert!(resumed.wait.is_none(), "the process resumed");
+    assert!(resumed.wait().is_none(), "the process resumed");
     assert_eq!(
         change_clock(&registry).await - clock,
         1,

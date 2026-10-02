@@ -77,10 +77,42 @@ pub(super) fn decode_process_wake_delivery(
 /// The stamp a pruned process leaves behind in its tombstone row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessTombstoneStamp {
-    /// The terminal `status` label the row carried when it was pruned.
-    pub terminal_label: String,
+    /// The status the row carried when it was pruned.
+    pub terminal_label: crate::RetiredProcessStatus,
     /// When the prune removed the process row.
     pub pruned_at_ms: u64,
+}
+
+impl ProcessTombstoneStamp {
+    /// The stamp of `process_id`'s stored tombstone row.
+    ///
+    /// # Errors
+    ///
+    /// A stored label that is not a retired status: the row is corrupt, and
+    /// is refused rather than reported under a status it never had.
+    pub fn from_row(
+        process_id: &ProcessId,
+        terminal_label: &str,
+        pruned_at_ms: u64,
+    ) -> Result<Self, PluginError> {
+        Ok(Self {
+            terminal_label: retired_process_status_from_label(process_id, terminal_label)?,
+            pruned_at_ms,
+        })
+    }
+}
+
+/// The single reader of a tombstone's stored `terminal_label`: an
+/// unrecognised or live label is a refusal, never a default.
+pub fn retired_process_status_from_label(
+    process_id: &ProcessId,
+    label: &str,
+) -> Result<crate::RetiredProcessStatus, PluginError> {
+    crate::RetiredProcessStatus::from_label(label).ok_or_else(|| {
+        PluginError::Session(format!(
+            "process `{process_id}` tombstone has unknown retired status `{label}`"
+        ))
+    })
 }
 
 /// Refusal for a process whose row was pruned but whose tombstone is retained.
@@ -226,22 +258,56 @@ impl WakeDeliveryRow {
             &self.delivery_id,
             self.discard_reason_label.as_deref(),
         )?;
-        let disposition = match (state, self.claim_token) {
-            (WakeDeliveryState::Pending, _) => WakeDeliveryLifecycle::Pending,
-            (WakeDeliveryState::Enqueuing, Some(claim_token)) => {
+        // The row is total (`ck_process_wake_deliveries_lifecycle`): a claim
+        // token exactly while enqueuing, a discard reason exactly once
+        // discarded. A row outside that is refused, never repaired.
+        let disposition = match (state, self.claim_token, discard_reason) {
+            (WakeDeliveryState::Pending, None, None) => WakeDeliveryLifecycle::Pending,
+            (WakeDeliveryState::Enqueuing, Some(claim_token), None) => {
                 WakeDeliveryLifecycle::Enqueuing { claim_token }
             }
-            (WakeDeliveryState::Enqueuing, None) => {
+            (WakeDeliveryState::Enqueued, None, None) => WakeDeliveryLifecycle::Enqueued,
+            (WakeDeliveryState::Discarded, None, Some(reason)) => {
+                WakeDeliveryLifecycle::Discarded { reason }
+            }
+            (WakeDeliveryState::Enqueuing, None, _) => {
                 return Err(PluginError::Session(format!(
                     "wake delivery `{}` is enqueuing without a claim token",
                     self.delivery_id
                 )));
             }
-            (WakeDeliveryState::Enqueued, _) => WakeDeliveryLifecycle::Enqueued,
-            (WakeDeliveryState::Discarded, _) => match discard_reason {
-                Some(reason) => WakeDeliveryLifecycle::Discarded { reason },
-                None => WakeDeliveryLifecycle::DiscardedUnattributed,
-            },
+            (WakeDeliveryState::Discarded, _, None) => {
+                return Err(PluginError::Session(format!(
+                    "wake delivery `{}` is discarded without a discard reason",
+                    self.delivery_id
+                )));
+            }
+            (
+                WakeDeliveryState::Pending
+                | WakeDeliveryState::Enqueued
+                | WakeDeliveryState::Discarded,
+                Some(_),
+                _,
+            ) => {
+                return Err(PluginError::Session(format!(
+                    "wake delivery `{}` is {} with a claim token",
+                    self.delivery_id,
+                    state.as_str()
+                )));
+            }
+            (
+                WakeDeliveryState::Pending
+                | WakeDeliveryState::Enqueuing
+                | WakeDeliveryState::Enqueued,
+                _,
+                Some(_),
+            ) => {
+                return Err(PluginError::Session(format!(
+                    "wake delivery `{}` is {} with a discard reason",
+                    self.delivery_id,
+                    state.as_str()
+                )));
+            }
         };
         let wake = decode_process_wake_delivery(&self.delivery_json, fleet_format)?;
         Ok(WakeDelivery {

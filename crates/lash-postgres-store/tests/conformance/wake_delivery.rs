@@ -1,30 +1,5 @@
 use super::*;
 
-struct PostgresWakeDeliveryOrderingGroupFaultInjector {
-    pool: sqlx::PgPool,
-}
-
-#[async_trait::async_trait]
-impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
-    for PostgresWakeDeliveryOrderingGroupFaultInjector
-{
-    async fn discard_without_reason(&self, delivery_id: &str) {
-        assert_eq!(
-            sqlx::query(
-                "UPDATE lash_process_wake_deliveries
-                 SET state = 'discarded', claim_token = NULL, discard_reason = NULL
-                 WHERE delivery_id = $1 AND state = 'enqueuing'",
-            )
-            .bind(delivery_id)
-            .execute(&self.pool)
-            .await
-            .expect("inject reasonless Postgres wake discard")
-            .rows_affected(),
-            1
-        );
-    }
-}
-
 lash_conformance::wake_delivery_crash_tests!({
     let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
@@ -82,9 +57,6 @@ lash_conformance::wake_delivery_ordering_tests!({
     (
         _database_fixture,
         registry as Arc<dyn ProcessRegistry>,
-        Arc::new(PostgresWakeDeliveryOrderingGroupFaultInjector {
-            pool: storage.pool().clone(),
-        }),
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
         || async {},

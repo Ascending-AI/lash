@@ -30,15 +30,11 @@ impl DurableProcessWorker {
             process_id = process_id.as_str(),
             reason_code = code.as_str(),
             effect_kind = parked
-                .park
-                .as_deref()
+                .park()
                 .and_then(|park| park.reason.effect_kind())
                 .unwrap_or_default(),
-            attempts = parked.park.as_deref().map_or(0, |park| park.attempts),
-            park_id = parked
-                .park
-                .as_deref()
-                .map_or(0, |park| park.park_id.feed_sequence()),
+            attempts = parked.park().map_or(0, |park| park.attempts),
+            park_id = parked.park().map_or(0, |park| park.park_id.feed_sequence()),
             "process parked on a replay refusal"
         );
         Ok(())

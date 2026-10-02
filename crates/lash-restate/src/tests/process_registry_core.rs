@@ -851,7 +851,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "background-start"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration,
+                    registration: registration.into(),
                     observers: vec![SessionId::from("session")],
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
@@ -967,10 +967,10 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
     assert!(
         record.is_terminal(),
         "the compensated row must be terminal, got {:?}; error: {injected_error}",
-        record.status
+        record.status()
     );
     assert_eq!(
-        record.status,
+        record.status(),
         lash_core::ProcessStatus::Cancelled,
         "a StartFailed request against a never-started row is Cancelled"
     );
@@ -1160,7 +1160,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
     assert!(
         !stored.is_terminal(),
         "a submission that may be running must not be terminalised, got {:?}",
-        stored.status
+        stored.status()
     );
     assert!(
         stored.cancel_request.is_none(),
@@ -1237,7 +1237,7 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     assert!(
         !stored.is_terminal(),
         "a retry must never terminalise the row an earlier attempt created, got {:?}",
-        stored.status
+        stored.status()
     );
     assert!(
         stored.cancel_request.is_none(),
@@ -1274,7 +1274,7 @@ pub(super) async fn start_recovery_effect(
     RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::Process, start_key),
         RuntimeEffectCommand::process(ProcessCommand::Start {
-            registration,
+            registration: registration.into(),
             observers: vec![SessionId::from("session")],
             execution_context: Box::new(ProcessExecutionContext::default()),
         }),
@@ -1306,7 +1306,8 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
             runtime_invocation(RuntimeEffectKind::Process, "process-start-replay"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration()
-                    .with_start_key(Some(lash_core::StartKey::for_host("process-start-replay"))),
+                    .with_start_key(Some(lash_core::StartKey::for_host("process-start-replay")))
+                    .into(),
                 observers: Vec::new(),
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
@@ -1493,7 +1494,8 @@ pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() 
             runtime_invocation(RuntimeEffectKind::Process, effect_id),
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration()
-                    .with_start_key(Some(lash_core::StartKey::for_host("restart-after-prune"))),
+                    .with_start_key(Some(lash_core::StartKey::for_host("restart-after-prune")))
+                    .into(),
                 observers: Vec::new(),
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
@@ -1575,7 +1577,7 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "process-start-existing-ref"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration,
+                registration: registration.into(),
                 observers: Vec::new(),
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
@@ -1604,7 +1606,8 @@ pub(super) async fn run_parent_shaped_start_await_suspend_flow(
                 runtime_invocation(RuntimeEffectKind::Process, "parent-flow-start-child"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration: external_registration()
-                        .with_start_key(Some(lash_core::StartKey::for_host("parent-flow-child"))),
+                        .with_start_key(Some(lash_core::StartKey::for_host("parent-flow-child")))
+                        .into(),
                     observers: Vec::new(),
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),

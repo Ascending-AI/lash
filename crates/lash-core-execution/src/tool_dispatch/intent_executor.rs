@@ -884,7 +884,11 @@ mod tests {
         };
         let request = start.into_request(&identity);
         let record = crate::ProcessRecord::from_registration(
-            request.clone().into_registration(),
+            request
+                .clone()
+                .into_registration()
+                .stating_input()
+                .expect("the start states its input"),
             crate::ProcessId::fixture("large-environment-child"),
         );
         let command = crate::ProcessCommand::Start {

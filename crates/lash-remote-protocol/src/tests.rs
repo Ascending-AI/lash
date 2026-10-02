@@ -849,12 +849,12 @@ fn remote_trigger_dtos_json_round_trip() {
                 label: Some("on_button".to_string()),
                 definition_id: Some(remote_process_definition_identity().id),
             },
-            input: RemoteProcessInput::Engine {
+            input: RemoteProcessStartTarget::Input(RemoteProcessInput::Engine {
                 kind: "lashlang".to_string(),
                 payload: serde_json::json!({
                     "args": {}
                 }),
-            },
+            }),
             inputs: remote_trigger_input_template(),
         },
         enabled: true,
@@ -1235,9 +1235,9 @@ fn remote_process_dtos_json_round_trip() {
     assert_eq!(REMOTE_PROTOCOL_VERSION, 100, "remote DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         start_key: Some("host-start-1".to_string()),
-        input: RemoteProcessInput::External {
+        input: RemoteProcessStartTarget::Input(RemoteProcessInput::External {
             metadata: serde_json::json!({ "label": "Import" }),
-        },
+        }),
         env_ref: Some(
             RemoteProcessExecutionEnvRef::parse(format!(
                 "process-env:v6:blake3:{}",
@@ -1510,12 +1510,12 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
             source_key: "source-key".to_string(),
             source: serde_json::json!({ "button": "blue" }),
             payload_schema: serde_json::json!({ "kind": "any" }),
-            target: RemoteProcessInput::Engine {
+            target: RemoteProcessStartTarget::Input(RemoteProcessInput::Engine {
                 kind: "lashlang".to_string(),
                 payload: serde_json::json!({
                     "args": {}
                 }),
-            },
+            }),
             target_identity: RemoteProcessIdentity {
                 kind: "lashlang".to_string(),
                 label: Some("on_button".to_string()),
@@ -2021,10 +2021,10 @@ fn trigger_target_label_round_trips_independently_of_the_identity_label() {
         canonical_env_ref().parse().expect("canonical env ref"),
         "ui.button.pressed",
         "source-key",
-        RemoteProcessInput::Engine {
+        RemoteProcessStartTarget::Input(RemoteProcessInput::Engine {
             kind: "external".to_string(),
             payload: serde_json::json!({}),
-        },
+        }),
         RemoteProcessIdentity {
             kind: "external".to_string(),
             label: Some("identity-label".to_string()),
@@ -2176,7 +2176,7 @@ fn remote_process_event_type() -> RemoteProcessEventType {
         payload_schema: serde_json::json!({}),
         semantics: RemoteProcessEventSemanticsSpec {
             terminal: Some(RemoteProcessTerminalSpec {
-                status: RemoteProcessStatus::Completed,
+                status: RemoteTerminalProcessStatus::Completed,
                 await_output: Some(RemoteProcessValueSelector::Pointer(
                     "/await_output".to_string(),
                 )),
@@ -2228,7 +2228,8 @@ fn remote_process_record() -> RemoteProcessRecord {
         }),
         first_started: None,
         cancel_request: None,
-        wait: Some(RemoteProcessWaitState {
+        lifecycle: RemoteProcessLifecycleState::Waiting {
+        wait: RemoteProcessWaitState {
             kind: RemoteProcessWaitKind::Signal {
                 name: "ready".to_string(),
                 event_type: "signal.ready".to_string(),
@@ -2236,7 +2237,7 @@ fn remote_process_record() -> RemoteProcessRecord {
                 ordinal: 1,
             },
             since_ms: 2,
-        }),
+        },
         park: Some(RemoteProcessPark {
             reason: RemoteParkReason::EffectReplayDivergence {
                 effect_kind: "llm_call".to_string(),
@@ -2250,8 +2251,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             engine: None,
             build_generation: None,
         }),
-        status: RemoteProcessStatus::Running,
-        outcome: None,
+        },
     lifetime: crate::RemoteLifetimeDecision::Detached,
     ancestry: Vec::new(),
     session_capability: None,
@@ -2260,22 +2260,22 @@ fn remote_process_record() -> RemoteProcessRecord {
 
 fn cancelled_remote_process_record() -> RemoteProcessRecord {
     let mut record = remote_process_record();
-    record.wait = None;
-    record.park = None;
-    record.status = RemoteProcessStatus::Cancelled;
-    record.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
-                origin: None,
-                message: "cancelled".to_string(),
-                source: RemoteProcessToolFailureSource::Cancellation,
-                raw: None,
-            }),
-            control: None,
-            view: None,
-            projection_value: None,
-        },
-    });
+    record.lifecycle = RemoteProcessLifecycleState::Terminal {
+        outcome: RemoteProcessTerminal::try_from(RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                    origin: None,
+                    message: "cancelled".to_string(),
+                    source: RemoteProcessToolFailureSource::Cancellation,
+                    raw: None,
+                }),
+                control: None,
+                view: None,
+                projection_value: None,
+            },
+        })
+        .expect("a terminal outcome"),
+    };
     record
 }
 
@@ -2307,8 +2307,7 @@ fn remote_process_event() -> RemoteProcessEvent {
         }),
         semantics: RemoteProcessEventSemantics {
             terminal: Some(RemoteProcessTerminalSemantics {
-                status: RemoteProcessStatus::Completed,
-                outcome: RemoteProcessAwaitOutput::Settled {
+                outcome: RemoteProcessTerminal::Settled {
                     output: RemoteProcessToolCallOutput {
                         outcome: RemoteProcessToolCallOutcome::Success(serde_json::json!(true)),
                         control: None,
@@ -2391,9 +2390,9 @@ fn remote_trigger_registration_refuses_non_engine_target() {
         canonical_env_ref().parse().expect("canonical env ref"),
         "source",
         "key",
-        RemoteProcessInput::External {
+        RemoteProcessStartTarget::Input(RemoteProcessInput::External {
             metadata: serde_json::Value::Null,
-        },
+        }),
         RemoteProcessIdentity {
             kind: "external".to_string(),
             label: None,
@@ -2408,10 +2407,10 @@ fn remote_trigger_registration_refuses_non_engine_target() {
         lash_core::TriggerSubscriptionDraft::try_from(draft.clone()),
         Err(RemoteProtocolError::InvalidEnvelope { .. })
     ));
-    draft.target = RemoteProcessInput::Engine {
+    draft.target = RemoteProcessStartTarget::Input(RemoteProcessInput::Engine {
         kind: "engine".to_string(),
         payload: serde_json::json!({}),
-    };
+    });
     draft
         .validate()
         .expect("an Engine target passes wire registration");

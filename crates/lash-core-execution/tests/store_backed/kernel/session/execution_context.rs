@@ -67,7 +67,7 @@ mod tests {
             .session_id("session")
             .build()
             .into_runtime();
-        let prepared = crate::process_start_execution_env(&context, engine_start())
+        let prepared = crate::process_start_execution_env(&context, engine_start().into())
             .await
             .expect("capture");
         let env_ref = prepared
@@ -116,7 +116,7 @@ mod tests {
             .build()
             .into_runtime()
             .with_process_execution(crate::ProcessId::fixture("parent"), &parent, None);
-        let prepared = crate::process_start_execution_env(&context, engine_start())
+        let prepared = crate::process_start_execution_env(&context, engine_start().into())
             .await
             .expect("capture child");
         assert_eq!(prepared.env_ref, Some(inherited.clone()));
@@ -145,7 +145,7 @@ mod tests {
             .build()
             .into_runtime()
             .with_recorded_render(render.clone());
-        let prepared = crate::process_start_execution_env(&context, engine_start())
+        let prepared = crate::process_start_execution_env(&context, engine_start().into())
             .await
             .expect("capture child");
         let spec = crate::load_process_execution_env(

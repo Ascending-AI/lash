@@ -51,7 +51,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
         .await
         .expect("enter wait");
     assert_eq!(
-        waiting.status.label(),
+        waiting.status().label(),
         "waiting",
         "the wait must land in the persisted status label the retention SQL reads"
     );

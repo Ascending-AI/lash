@@ -1344,65 +1344,6 @@
         }
       ]
     },
-    "RemoteProcessAwaitOutput": {
-      "oneOf": [
-        {
-          "properties": {
-            "output": {
-              "$ref": "#/$defs/RemoteProcessToolCallOutput"
-            },
-            "type": {
-              "const": "settled",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "output"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "control": true,
-            "evidence": {
-              "$ref": "#/$defs/RemoteAbandonEvidence"
-            },
-            "type": {
-              "const": "abandoned",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "evidence"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "pruned_at_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "terminal_label": {
-              "type": "string"
-            },
-            "type": {
-              "const": "no_longer_retained",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "terminal_label",
-            "pruned_at_ms"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "RemoteProcessEventSemanticsSpec": {
       "properties": {
         "terminal": {
@@ -1502,37 +1443,6 @@
       "oneOf": [
         {
           "properties": {
-            "args": {
-              "additionalProperties": true,
-              "default": {},
-              "type": "object"
-            },
-            "definition_id": {
-              "$ref": "#/$defs/DefinitionIdSchema"
-            },
-            "signature_claim": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/RemoteProcessSignature"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "type": {
-              "const": "definition",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "definition_id"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
             "kind": {
               "type": "string"
             },
@@ -1588,6 +1498,93 @@
           },
           "required": [
             "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteProcessLifecycleState": {
+      "description": "Mirrors [`lash_core::ProcessLifecycleState`]: each state owns the facts\nthat exist only in it, so a record cannot carry a wait or a park beside an\noutcome, or a terminal status without one.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "park": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RemoteProcessPark"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The park the process is in, while its body refuses to replay its\njournal (FIG-3659 NOW-B)."
+            },
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "park": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RemoteProcessPark"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "const": "waiting",
+              "type": "string"
+            },
+            "wait": {
+              "$ref": "#/$defs/RemoteProcessWaitState"
+            }
+          },
+          "required": [
+            "state",
+            "wait"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`].\nA variant with fields, so that a decode refuses a wait, a park or an\noutcome beside it as it does for every other state.",
+          "properties": {
+            "state": {
+              "const": "caller_departed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "$ref": "#/$defs/RemoteProcessTerminal"
+            },
+            "state": {
+              "const": "terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "outcome"
           ],
           "type": "object"
         }
@@ -1773,39 +1770,6 @@
         }
       ]
     },
-    "RemoteProcessSignature": {
-      "description": "A signature claim travelling on a definition reference, or the explicit\nabsence of one (ADR 0090's unknown process type).",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "signature": {
-              "const": "unknown",
-              "type": "string"
-            }
-          },
-          "required": [
-            "signature"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "encoding": true,
-            "signature": {
-              "const": "known",
-              "type": "string"
-            }
-          },
-          "required": [
-            "signature",
-            "encoding"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "RemoteProcessStarted": {
       "description": "Wire mirror of the durable execution-started fact.",
       "properties": {
@@ -1844,23 +1808,41 @@
       ],
       "type": "object"
     },
-    "RemoteProcessStatus": {
+    "RemoteProcessTerminal": {
+      "description": "Mirrors [`lash_core::ProcessTerminal`]: the outcome a process ended in,\nwhich a terminal record and a terminal event carry. Its status is derived\nfrom it ([`Self::status`]) and carried nowhere beside it.",
       "oneOf": [
         {
-          "enum": [
-            "running",
-            "waiting",
-            "completed",
-            "failed",
-            "cancelled",
-            "abandoned"
+          "properties": {
+            "output": {
+              "$ref": "#/$defs/RemoteProcessToolCallOutput"
+            },
+            "type": {
+              "const": "settled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "output"
           ],
-          "type": "string"
+          "type": "object"
         },
         {
-          "const": "caller_departed",
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably\ndistinguishable, deliberately never terminal.",
-          "type": "string"
+          "properties": {
+            "control": true,
+            "evidence": {
+              "$ref": "#/$defs/RemoteAbandonEvidence"
+            },
+            "type": {
+              "const": "abandoned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "evidence"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -1877,7 +1859,7 @@
           ]
         },
         "status": {
-          "$ref": "#/$defs/RemoteProcessStatus"
+          "$ref": "#/$defs/RemoteTerminalProcessStatus"
         }
       },
       "required": [
@@ -2324,6 +2306,16 @@
         }
       ]
     },
+    "RemoteTerminalProcessStatus": {
+      "description": "Mirrors [`lash_core::TerminalProcessStatus`]: the statuses a recorded\noutcome ends a process in.",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned"
+      ],
+      "type": "string"
+    },
     "RemoteToolFailureClass": {
       "enum": [
         "invalid_request",
@@ -2548,30 +2540,13 @@
       "minimum": 0,
       "type": "integer"
     },
+    "lifecycle": {
+      "$ref": "#/$defs/RemoteProcessLifecycleState",
+      "description": "The one lifecycle state the process is in: its status, wait, park and\noutcome are read from it and carried nowhere beside it."
+    },
     "lifetime": {
       "$ref": "#/$defs/RemoteLifetimeDecision",
       "description": "The recorded lifetime decision: what ends the process."
-    },
-    "outcome": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/RemoteProcessAwaitOutput"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "park": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/RemoteProcessPark"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "The park the process is in, while its body refuses to replay its\njournal (FIG-3659 NOW-B)."
     },
     "process_id": {
       "type": "string"
@@ -2593,24 +2568,10 @@
         "null"
       ]
     },
-    "status": {
-      "$ref": "#/$defs/RemoteProcessStatus",
-      "default": "running"
-    },
     "updated_at_ms": {
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
-    },
-    "wait": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/RemoteProcessWaitState"
-        },
-        {
-          "type": "null"
-        }
-      ]
     }
   },
   "required": [
@@ -2621,7 +2582,8 @@
     "identity",
     "provenance",
     "created_at_ms",
-    "updated_at_ms"
+    "updated_at_ms",
+    "lifecycle"
   ],
   "title": "RemoteProcessRecord",
   "type": "object",

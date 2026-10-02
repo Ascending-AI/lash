@@ -22,9 +22,10 @@ pub use lifecycle::{
 
 mod outcomes;
 pub use outcomes::{
-    RemoteObservedProcessFailure, RemoteProcessAwaitOutput, RemoteProcessToolCallOutcome,
-    RemoteProcessToolCallOutput, RemoteProcessToolCancellation, RemoteProcessToolFailure,
-    RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus, RemoteToolFailureClass,
+    RemoteObservedProcessFailure, RemoteProcessAwaitOutput, RemoteProcessTerminal,
+    RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput, RemoteProcessToolCancellation,
+    RemoteProcessToolFailure, RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
+    RemoteToolFailureClass,
 };
 
 mod operations;
@@ -257,14 +258,6 @@ impl RemoteProcessIdentity {
 // justification: this public remote DTO preserves its source-compatible inline SessionTurn construction and matching API.
 #[allow(clippy::large_enum_variant)]
 pub enum RemoteProcessInput {
-    Definition {
-        #[schemars(with = "DefinitionIdSchema")]
-        definition_id: lash_sansio::ProcessDefinitionId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        signature_claim: Option<RemoteProcessSignature>,
-        #[serde(default)]
-        args: serde_json::Map<String, serde_json::Value>,
-    },
     Engine {
         kind: String,
         #[serde(default)]
@@ -282,6 +275,43 @@ pub enum RemoteProcessInput {
         #[serde(default)]
         metadata: serde_json::Value,
     },
+}
+
+/// What a remote start names to run: an executable input, or the immutable
+/// definition one is resolved from. Mirrors
+/// [`lash_core::ProcessStartTarget`]: a start request and a trigger target
+/// carry it, and a process record carries the [`RemoteProcessInput`] it
+/// resolved to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+// justification: this public remote DTO mirrors RemoteProcessInput, whose inline SessionTurn construction it preserves.
+#[allow(clippy::large_enum_variant)]
+pub enum RemoteProcessStartTarget {
+    Definition {
+        #[schemars(with = "DefinitionIdSchema")]
+        definition_id: lash_sansio::ProcessDefinitionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature_claim: Option<RemoteProcessSignature>,
+        #[serde(default)]
+        args: serde_json::Map<String, serde_json::Value>,
+    },
+    #[serde(untagged)]
+    Input(RemoteProcessInput),
+}
+
+impl From<RemoteProcessInput> for RemoteProcessStartTarget {
+    fn from(input: RemoteProcessInput) -> Self {
+        Self::Input(input)
+    }
+}
+
+impl RemoteProcessStartTarget {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Definition { .. } => Ok(()),
+            Self::Input(input) => input.validate(type_name),
+        }
+    }
 }
 
 /// What a remote `SessionTurn` process answers when its child turn ends.
@@ -307,7 +337,6 @@ impl RemoteSessionTurnOutcome {
 impl RemoteProcessInput {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::Definition { .. } => Ok(()),
             Self::Engine { kind, payload: _ } => require_non_empty(type_name, "kind", kind),
             Self::SessionTurn {
                 definition_key,
@@ -328,7 +357,7 @@ impl RemoteProcessInput {
     /// ref and declarative ones must not (FIG-2985).
     fn requires_execution_env(&self) -> bool {
         match self {
-            Self::Definition { .. } | Self::Engine { .. } | Self::SessionTurn { .. } => true,
+            Self::Engine { .. } | Self::SessionTurn { .. } => true,
             Self::External { .. } => false,
         }
     }
@@ -348,6 +377,20 @@ pub enum RemoteProcessStatus {
     Abandoned,
     /// Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably
     /// distinguishable, deliberately never terminal.
+    CallerDeparted,
+}
+
+/// Mirrors [`lash_core::RetiredProcessStatus`]: the status a pruned process
+/// ended in, which its tombstone keeps.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteRetiredProcessStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Abandoned,
     CallerDeparted,
 }
 
@@ -598,40 +641,85 @@ pub struct RemoteProcessRecord {
     pub first_started: Option<RemoteProcessStarted>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<lash_sansio::CancelRequest>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wait: Option<RemoteProcessWaitState>,
-    /// The park the process is in, while its body refuses to replay its
-    /// journal (FIG-3659 NOW-B).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub park: Option<RemoteProcessPark>,
-    #[serde(default)]
-    pub status: RemoteProcessStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<RemoteProcessAwaitOutput>,
+    /// The one lifecycle state the process is in: its status, wait, park and
+    /// outcome are read from it and carried nowhere beside it.
+    pub lifecycle: RemoteProcessLifecycleState,
 }
 
-fn validate_status_and_outcome(
-    type_name: &'static str,
-    status: RemoteProcessStatus,
-    outcome: Option<&RemoteProcessAwaitOutput>,
-) -> Result<(), RemoteProtocolError> {
-    match (status.is_terminal(), outcome) {
-        (false, None) => Ok(()),
-        (false, Some(_)) => Err(RemoteProtocolError::InvalidEnvelope {
-            type_name,
-            message: format!("non-terminal process status `{status:?}` must not carry an outcome"),
-        }),
-        (true, None) => Err(RemoteProtocolError::InvalidEnvelope {
-            type_name,
-            message: format!("terminal process status `{status:?}` must carry an outcome"),
-        }),
-        (true, Some(outcome)) if outcome.terminal_status() != Some(status) => {
-            Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!("process status `{status:?}` contradicts its outcome"),
-            })
+/// Mirrors [`lash_core::ProcessLifecycleState`]: each state owns the facts
+/// that exist only in it, so a record cannot carry a wait or a park beside an
+/// outcome, or a terminal status without one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteProcessLifecycleState {
+    Running {
+        /// The park the process is in, while its body refuses to replay its
+        /// journal (FIG-3659 NOW-B).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        park: Option<RemoteProcessPark>,
+    },
+    Waiting {
+        wait: RemoteProcessWaitState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        park: Option<RemoteProcessPark>,
+    },
+    /// Mirrors [`lash_core::ProcessStatus::CallerDeparted`].
+    /// A variant with fields, so that a decode refuses a wait, a park or an
+    /// outcome beside it as it does for every other state.
+    CallerDeparted {},
+    Terminal {
+        outcome: RemoteProcessTerminal,
+    },
+}
+
+impl RemoteProcessLifecycleState {
+    /// The status this state is.
+    pub fn status(&self) -> RemoteProcessStatus {
+        match self {
+            Self::Running { .. } => RemoteProcessStatus::Running,
+            Self::Waiting { .. } => RemoteProcessStatus::Waiting,
+            Self::CallerDeparted {} => RemoteProcessStatus::CallerDeparted,
+            Self::Terminal { outcome } => outcome.status().into(),
         }
-        (true, Some(_)) => Ok(()),
+    }
+
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Running { park } => park
+                .as_ref()
+                .map_or(Ok(()), |park| park.validate(type_name)),
+            Self::Waiting { wait, park } => {
+                wait.validate(type_name)?;
+                park.as_ref()
+                    .map_or(Ok(()), |park| park.validate(type_name))
+            }
+            Self::CallerDeparted {} => Ok(()),
+            Self::Terminal { outcome } => outcome.validate(type_name),
+        }
+    }
+}
+
+/// Mirrors [`lash_core::TerminalProcessStatus`]: the statuses a recorded
+/// outcome ends a process in.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTerminalProcessStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Abandoned,
+}
+
+impl From<RemoteTerminalProcessStatus> for RemoteProcessStatus {
+    fn from(status: RemoteTerminalProcessStatus) -> Self {
+        match status {
+            RemoteTerminalProcessStatus::Completed => Self::Completed,
+            RemoteTerminalProcessStatus::Failed => Self::Failed,
+            RemoteTerminalProcessStatus::Cancelled => Self::Cancelled,
+            RemoteTerminalProcessStatus::Abandoned => Self::Abandoned,
+        }
     }
 }
 
@@ -679,16 +767,12 @@ impl RemoteProcessRecord {
         if let Some(first_started) = &self.first_started {
             first_started.owner.validate(type_name)?;
         }
-        if let Some(wait) = &self.wait {
-            wait.validate(type_name)?;
-        }
-        if let Some(park) = &self.park {
-            park.validate(type_name)?;
-        }
-        if let Some(outcome) = &self.outcome {
-            outcome.validate(type_name)?;
-        }
-        validate_status_and_outcome(type_name, self.status, self.outcome.as_ref())
+        self.lifecycle.validate(type_name)
+    }
+
+    /// The status the record's lifecycle state is.
+    pub fn status(&self) -> RemoteProcessStatus {
+        self.lifecycle.status()
     }
 }
 
@@ -917,26 +1001,17 @@ impl RemoteProcessEventSemanticsSpec {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessTerminalSpec {
-    pub status: RemoteProcessStatus,
+    pub status: RemoteTerminalProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub await_output: Option<RemoteProcessValueSelector>,
 }
 
 impl RemoteProcessTerminalSpec {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        if !self.status.is_terminal() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "terminal event semantics require a terminal status, got `{:?}`",
-                    self.status
-                ),
-            });
-        }
         if let Some(await_output) = &self.await_output {
             await_output.validate(type_name)?;
         }
-        if self.status != RemoteProcessStatus::Completed && self.await_output.is_none() {
+        if self.status != RemoteTerminalProcessStatus::Completed && self.await_output.is_none() {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
                 message:
@@ -988,7 +1063,6 @@ impl RemoteProcessEventSemantics {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         if let Some(terminal) = &self.terminal {
             terminal.outcome.validate(type_name)?;
-            validate_status_and_outcome(type_name, terminal.status, Some(&terminal.outcome))?;
         }
         if let Some(wake) = &self.wake {
             wake.validate(type_name)?;
@@ -1070,9 +1144,9 @@ const fn remote_first_process_attempt() -> u32 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessTerminalSemantics {
-    pub status: RemoteProcessStatus,
-    pub outcome: RemoteProcessAwaitOutput,
+    pub outcome: RemoteProcessTerminal,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

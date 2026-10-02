@@ -18,12 +18,12 @@
 //! ([`ProcessStopDelivery`](crate::process_stop::ProcessStopDelivery)) is
 //! execution-side only: the drive never reads it.
 
-use lash_sansio::ProcessId;
 use std::sync::Arc;
 
 use lash_core::{
     AbandonEvidence, AbandonWriter, PluginError, ProcessAwaitOutput, ProcessExecutionContext,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ScopedEffectController,
+    ProcessId, ProcessRecord, ProcessRegistration, ProcessRegistry, ScopedEffectController,
+    TerminalProcessStatus,
 };
 use restate_sdk::context::{
     ContextClient, ContextPromises, SharedWorkflowContext, WorkflowContext,
@@ -608,7 +608,7 @@ where
                         .complete_process(process_id, proposed, authority)
                         .await
                     {
-                        Ok(completion) => match completion.stored().outcome.clone() {
+                        Ok(completion) => match completion.stored().outcome() {
                             Some(stored) => Ok(Ok(SubstrateLostRecovery::Ended(Box::new(stored)))),
                             None => Ok(Err(format!(
                                 "process `{process_id}` completion returned a non-terminal record"
@@ -848,7 +848,7 @@ where
         let outcome = match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal { output, prelude })
                 if is_session_turn
-                    && output.terminal_status() != Some(lash_core::ProcessStatus::Cancelled) =>
+                    && output.terminal_status() != Some(TerminalProcessStatus::Cancelled) =>
             {
                 if drive
                     .controller()
@@ -957,7 +957,7 @@ where
         match parked {
             Ok(parked) => {
                 lash_core::operational_metrics::record_work_parked("process", code.as_str());
-                let park = parked.park.as_deref();
+                let park = parked.park();
                 tracing::warn!(
                     event = "process.parked",
                     process_id = process_id.as_str(),
@@ -1012,7 +1012,7 @@ pub(crate) async fn complete_process_outcome(
         lash_core::ProcessCompletionOutcome::AlreadyApplied { stored }
         | lash_core::ProcessCompletionOutcome::Superseded { stored } => stored,
     };
-    record.outcome.ok_or_else(|| {
+    record.outcome().ok_or_else(|| {
         PluginError::Session(format!(
             "process `{process_id}` completion returned a non-terminal record"
         ))

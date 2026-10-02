@@ -1021,6 +1021,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     delivery_json     TEXT NOT NULL,
     CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
     CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound', 'source_unreadable', 'content_conflict')),
+    CONSTRAINT ck_process_wake_deliveries_lifecycle CHECK ((state = 'enqueuing') = (claim_token IS NOT NULL) AND (state = 'discarded') = (discard_reason IS NOT NULL)),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
@@ -1045,7 +1046,8 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
     process_id          TEXT PRIMARY KEY,
     terminal_label      TEXT NOT NULL,
     pruned_at_ms        INTEGER NOT NULL,
-    pruned_change_seq   INTEGER NOT NULL
+    pruned_change_seq   INTEGER NOT NULL,
+    CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ('completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);

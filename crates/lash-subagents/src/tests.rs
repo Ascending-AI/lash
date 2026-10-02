@@ -747,8 +747,8 @@ try {
         .terminal
         .as_ref()
         .expect("filtered on terminal semantics");
-    assert_eq!(terminal.status, lash_core::ProcessStatus::Failed);
-    let lash_core::ProcessAwaitOutput::Settled { output } = &terminal.outcome else {
+    assert_eq!(terminal.status(), lash_core::TerminalProcessStatus::Failed);
+    let lash_core::ProcessTerminal::Settled { output } = &terminal.outcome else {
         panic!("the child settled with a terminal outcome: {terminal_event:?}");
     };
     let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
@@ -1266,7 +1266,7 @@ impl SeedProbe {
         .expect("list processes through the parent session observer");
         let observed_identities = observed_processes
             .iter()
-            .map(|process| (&process.id, &process.identity, &process.status))
+            .map(|process| (&process.id, &process.identity, process.status()))
             .collect::<Vec<_>>();
         let matching = observed_processes
             .iter()
@@ -1326,7 +1326,7 @@ impl SeedProbe {
             "process.first_started must precede process.completed for {}: {events:?}",
             process.id
         );
-        assert_eq!(process.status, lash_core::ProcessStatus::Completed);
+        assert_eq!(process.status(), lash_core::ProcessStatus::Completed);
     }
 }
 

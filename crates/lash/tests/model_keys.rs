@@ -2192,7 +2192,11 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
     for source in ["policy", "environment"] {
         let key = format!("host-reasoning-{source}");
         let mut request = unstated_session_turn_start(&key, "run the child");
-        let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut request.input else {
+        let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+            create_request,
+            ..
+        }) = &mut request.input
+        else {
             panic!("session turn fixture");
         };
         create_request.model = Some(ModelKey::new(GLM));
@@ -2240,7 +2244,11 @@ async fn a_host_process_start_refuses_unsupported_inherited_reasoning_before_rec
     // An explicit policy overrides the environment's inherited effort.
     let mut accepted = unstated_session_turn_start("host-reasoning-environment", "run the child")
         .with_env_ref(env_ref);
-    let lash_core::ProcessInput::SessionTurn { create_request, .. } = &mut accepted.input else {
+    let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+        create_request,
+        ..
+    }) = &mut accepted.input
+    else {
         panic!("session turn fixture");
     };
     create_request.model = Some(ModelKey::new(GLM));

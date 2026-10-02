@@ -84,13 +84,6 @@ impl RuntimeSessionServices {
                     "externally-owned process must not be executed by lash".to_string(),
                 )))
             }
-            // Registration refuses an unresolved start by id: realization
-            // registers the engine start it resolves to, so no row holds one.
-            crate::ProcessInput::Definition { definition_id, .. } => {
-                Err(crate::ProcessInfraError::new(crate::PluginError::Session(
-                    format!("process row names definition `{definition_id}` unresolved"),
-                )))
-            }
         }
     }
 }

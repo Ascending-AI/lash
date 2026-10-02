@@ -103,7 +103,8 @@ fn main() {
         start_key: Some("start-key".to_string()),
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),
-        },
+        }
+        .into(),
         env_ref: Some(
             lash::remote::processes::RemoteProcessExecutionEnvRef::parse(format!(
                 "process-env:v6:blake3:{}",

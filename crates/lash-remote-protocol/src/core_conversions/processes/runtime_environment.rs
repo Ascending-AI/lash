@@ -8,9 +8,8 @@ impl TryFrom<lash_core::facade_support::ProcessTerminalSemantics>
     fn try_from(
         value: lash_core::facade_support::ProcessTerminalSemantics,
     ) -> Result<Self, Self::Error> {
-        let lash_core::facade_support::ProcessTerminalSemantics { status, outcome } = value;
+        let lash_core::facade_support::ProcessTerminalSemantics { outcome } = value;
         Ok(Self {
-            status: status.into(),
             outcome: outcome.try_into()?,
         })
     }
@@ -22,9 +21,8 @@ impl TryFrom<RemoteProcessTerminalSemantics>
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessTerminalSemantics) -> Result<Self, Self::Error> {
-        let RemoteProcessTerminalSemantics { status, outcome } = value;
+        let RemoteProcessTerminalSemantics { outcome } = value;
         Ok(Self {
-            status: status.into(),
             outcome: outcome.try_into()?,
         })
     }

@@ -718,7 +718,7 @@ async fn successor_runs_once_on_the_newest_build(seed: u64, cut: Cut, event: Eve
     let expected = process_success(serde_json::json!({ "build": successor }));
     assert_eq!(output, expected, "{case}: the awaiter's one terminal");
     assert_eq!(
-        roll.record(&process_id).await.outcome,
+        roll.record(&process_id).await.outcome(),
         Some(expected),
         "{case}: the process terminal"
     );
@@ -845,7 +845,7 @@ async fn cancel_reaches_the_live_segments_recorded_route(seed: u64, cut: Cut) {
 
     assert_eq!(
         output.terminal_status(),
-        Some(lash_core::ProcessStatus::Cancelled),
+        Some(lash_core::TerminalProcessStatus::Cancelled),
         "{case}: the terminal is Cancelled: {output:?}"
     );
     let record = roll.record(&process_id).await;
@@ -854,7 +854,7 @@ async fn cancel_reaches_the_live_segments_recorded_route(seed: u64, cut: Cut) {
         "{case}: the cancel request is recorded"
     );
     assert_eq!(
-        record.outcome,
+        record.outcome(),
         Some(output),
         "{case}: one Cancelled terminal"
     );
@@ -960,7 +960,8 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
     let park = roll
         .record(&process_id)
         .await
-        .park
+        .park()
+        .cloned()
         .unwrap_or_else(|| panic!("{case}: the refused successor parked its process"));
     assert!(
         matches!(
@@ -1010,7 +1011,7 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
     assert_eq!(output, expected, "{case}: the awaiter's one terminal");
     let record = roll.record(&process_id).await;
     assert_eq!(
-        record.outcome,
+        record.outcome(),
         Some(expected),
         "{case}: the process terminal"
     );
@@ -1177,7 +1178,12 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
         "{case}: one refused run"
     );
     assert!(roll.runs_of(SUCCESSOR).is_empty(), "{case}: zero dispatch");
-    let park = roll.record(&process_id).await.park.expect("still parked");
+    let park = roll
+        .record(&process_id)
+        .await
+        .park()
+        .cloned()
+        .expect("still parked");
     assert_eq!(park.attempts, 1, "{case}: no second refusal");
 
     let lane = crate::services::DEFAULT_NAMESPACE
@@ -1225,7 +1231,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
         "{case}: the forced redrive entered no runner"
     );
     assert_eq!(
-        roll.record(&process_id).await.outcome,
+        roll.record(&process_id).await.outcome(),
         Some(output),
         "{case}: the terminal stands"
     );
@@ -1309,7 +1315,7 @@ async fn a_generation_lane_refuses_a_misrouted_input(seed: u64) {
         );
         let record = roll.record(&process_id).await;
         assert!(
-            record.park.is_none() && record.outcome.is_none(),
+            record.park().is_none() && record.outcome().is_none(),
             "{case}: a misroute is the sender's error, never the process's: {record:?}"
         );
     }

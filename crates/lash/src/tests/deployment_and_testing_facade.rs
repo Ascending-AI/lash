@@ -217,7 +217,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
         )
         .await
         .expect("park the process");
-    let process_park = parked_process.park.as_deref().cloned().expect("parked");
+    let process_park = parked_process.park().cloned().expect("parked");
 
     let session_id = lash_core::SessionId::from("parked-work-turn");
     let mut policy =

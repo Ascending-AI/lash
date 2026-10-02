@@ -30,7 +30,8 @@ use super::{
 use crate::plugin::PluginError;
 use crate::{
     ArtifactName, ArtifactReferrer, ArtifactStoreId, ProcessEngineRegistry, ProcessExecutionEnvRef,
-    ProcessId, ProcessInput, ReferrerClaim, ReferrerGuard, SessionId, SubscriptionRevisionId,
+    ProcessId, ProcessInput, ProcessStartTarget, ReferrerClaim, ReferrerGuard, SessionId,
+    SubscriptionRevisionId,
 };
 
 /// A [`TriggerStore`] whose `execute_command` holds the revision a command
@@ -191,12 +192,13 @@ impl RevisionReferrerTriggerStore {
             store: ArtifactStoreId::ProcessEnv,
             artifact_ref: revision.env_ref.as_str().to_owned(),
         }];
-        if let ProcessInput::Definition { definition_id, .. } = &revision.target {
+        if let ProcessStartTarget::Definition { definition_id, .. } = &revision.target {
             ports
                 .acquire_definition(&self.engines, &claim, definition_id)
                 .await?;
         }
-        if let ProcessInput::Engine { kind, payload } = &revision.target {
+        if let ProcessStartTarget::Input(ProcessInput::Engine { kind, payload }) = &revision.target
+        {
             names.extend(self.engines.require(kind)?.start_artifacts(payload)?);
         }
         // A fence means an earlier execution of this same command committed
@@ -250,7 +252,7 @@ impl RevisionReferrerTriggerStore {
 struct PendingRevision {
     referrer: SubscriptionRevisionId,
     env_ref: ProcessExecutionEnvRef,
-    target: ProcessInput,
+    target: ProcessStartTarget,
 }
 
 impl PendingRevision {
@@ -260,7 +262,7 @@ impl PendingRevision {
         incarnation: String,
         revision: u64,
         env_ref: ProcessExecutionEnvRef,
-        target: ProcessInput,
+        target: ProcessStartTarget,
     ) -> Result<Self, PluginError> {
         let id = SubscriptionRevisionId::new(
             deterministic_subscription_id(owner_scope, subscription_key),

@@ -205,8 +205,6 @@ pub enum WakeDeliveryLifecycle {
         /// The classification that made this delivery terminal.
         reason: WakeDiscardReason,
     },
-    /// A deliberately representable legacy row whose durable discard reason is `NULL`.
-    DiscardedUnattributed,
 }
 
 impl WakeDeliveryLifecycle {
@@ -215,7 +213,7 @@ impl WakeDeliveryLifecycle {
             Self::Pending => WakeDeliveryState::Pending,
             Self::Enqueuing { .. } => WakeDeliveryState::Enqueuing,
             Self::Enqueued => WakeDeliveryState::Enqueued,
-            Self::Discarded { .. } | Self::DiscardedUnattributed => WakeDeliveryState::Discarded,
+            Self::Discarded { .. } => WakeDeliveryState::Discarded,
         }
     }
 
@@ -445,7 +443,6 @@ impl WakeDeliveryReport {
                         WakeDiscardReason::ContentConflict => report.content_conflict += 1,
                     }
                 }
-                WakeDeliveryLifecycle::DiscardedUnattributed => report.discarded += 1,
             }
         }
 

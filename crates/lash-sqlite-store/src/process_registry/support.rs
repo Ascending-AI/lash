@@ -126,7 +126,7 @@ pub(super) async fn recent_events(
 }
 
 pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
-    record.status.label()
+    record.status().label()
 }
 
 /// The `cancel_requested_at_ms` column: the first accepted cancellation's
@@ -190,15 +190,10 @@ impl SqliteProcessRegistry {
             process_id,
             tombstone
                 .map(|(terminal_label, pruned_at_ms)| {
-                    Ok::<_, lash_core_execution::PluginError>(
-                        registry_transitions::ProcessTombstoneStamp {
-                            terminal_label,
-                            pruned_at_ms: plugin_u64_from_sql(
-                                "ProcessTombstone",
-                                "pruned_at_ms",
-                                pruned_at_ms,
-                            )?,
-                        },
+                    registry_transitions::ProcessTombstoneStamp::from_row(
+                        process_id,
+                        &terminal_label,
+                        plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", pruned_at_ms)?,
                     )
                 })
                 .transpose()?,
@@ -489,18 +484,13 @@ impl SqliteProcessRegistry {
                 cancel_requested_at_ms(record),
                 process_encode_json(record)?,
                 record
-                    .park
-                    .as_deref()
+                    .park()
                     .map(|park| crate::clamp_epoch_ms(park.since_ms)),
+                record.park().map(|park| park.reason.code().as_str()),
                 record
-                    .park
-                    .as_deref()
-                    .map(|park| park.reason.code().as_str()),
-                record
-                    .park
-                    .as_deref()
+                    .park()
                     .and_then(|park| park.reason.retired_executable_generation_key()),
-                record.park.as_deref().and_then(|park| park
+                record.park().and_then(|park| park
                     .build_generation
                     .as_ref()
                     .map(|g| g.as_str().to_string()))
@@ -727,7 +717,7 @@ impl SqliteProcessRegistry {
                 )
                 .map_err(process_sqlite_error)?;
                 let park_transitions = lash_core_execution::runtime::process_park_transitions(
-                    record.park.as_deref(),
+                    record.park(),
                     &projected_record,
                 );
                 *record = projected_record;
@@ -740,8 +730,7 @@ impl SqliteProcessRegistry {
                     &park_transitions,
                     occurred_at_ms,
                     record
-                        .park
-                        .as_deref()
+                        .park()
                         .and_then(|park| park.build_generation.as_ref().map(|g| g.as_str())),
                 )?;
                 // A process that just reached a terminal status is an ended

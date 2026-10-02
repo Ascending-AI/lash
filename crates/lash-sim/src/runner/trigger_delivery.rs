@@ -92,11 +92,13 @@ impl SimTriggerHarness {
             let registration = lash_core::ProcessRegistration::new(
                 lash_core::ProcessInput::External {
                     metadata: match &subscription.target {
-                        lash_core::ProcessInput::Engine { payload, .. } => payload.clone(),
+                        lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine {
+                            payload,
+                            ..
+                        }) => payload.clone(),
                         target => {
                             return Err(FixedScriptRunnerError::Runtime(format!(
-                                "simulation trigger requires an Engine target, received {}",
-                                target.engine_kind()
+                                "simulation trigger requires an Engine target, received {target:?}"
                             )));
                         }
                     },

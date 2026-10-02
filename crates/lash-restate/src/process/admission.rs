@@ -480,7 +480,7 @@ pub(crate) async fn admit_segment(
                 };
                 let record = read_record(&registry, &process_id).await?;
                 if segment_ordinal > 0
-                    && let Some(output) = record.outcome.clone().filter(|_| record.is_terminal())
+                    && let Some(output) = record.outcome().filter(|_| record.is_terminal())
                 {
                     return Ok(Json(AdmissionVerdict::Ended {
                         output: Box::new(output),
@@ -716,7 +716,7 @@ async fn start_later_segment(
         Ok(recorded) => recorded,
         Err(PluginError::ProcessAlreadyTerminal { .. }) => {
             let ended = read_record(registry, process_id).await?;
-            return match ended.outcome {
+            return match ended.outcome() {
                 Some(output) => Ok(StartOutcome::Ended {
                     output: Box::new(output),
                 }),

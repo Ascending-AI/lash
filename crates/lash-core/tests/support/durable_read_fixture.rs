@@ -1046,8 +1046,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .await
         .expect("durable fixture drift: process read failed")
         .expect("durable fixture drift: process disappeared");
-    assert_eq!(process.status, ProcessStatus::Waiting);
-    assert_eq!(process.wait.as_ref(), Some(&fixture_wait_state()));
+    assert_eq!(process.status(), ProcessStatus::Waiting);
+    assert_eq!(process.wait(), Some(&fixture_wait_state()));
     assert_eq!(process.env_ref.as_ref(), Some(&expected.process_env_ref));
     assert_eq!(
         process, expected.waiting_process,
@@ -1147,7 +1147,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             .await
             .expect("durable fixture drift: wake process read failed")
             .expect("durable fixture drift: wake process disappeared")
-            .status,
+            .status(),
         ProcessStatus::Running
     );
     let wake_events = handles
@@ -1201,7 +1201,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             terminal_label,
             pruned_at_ms,
         }) => {
-            assert_eq!(terminal_label, "completed");
+            assert_eq!(terminal_label, lash_core::RetiredProcessStatus::Completed);
             assert_eq!(pruned_at_ms, FIXTURE_WRITE_MS);
         }
         other => panic!(
@@ -1370,7 +1370,10 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
                 observed.insert(record.id.clone(), "upsert".to_string());
             }
             ProcessChange::Deleted { tombstone } => {
-                assert_eq!(tombstone.terminal_label, "completed");
+                assert_eq!(
+                    tombstone.terminal_label,
+                    lash_core::RetiredProcessStatus::Completed
+                );
                 assert_eq!(tombstone.pruned_at_ms, FIXTURE_WRITE_MS);
                 observed.insert(tombstone.process_id, "deleted".to_string());
             }
@@ -1559,7 +1562,8 @@ fn fixture_register_command(env_ref: ProcessExecutionEnvRef) -> TriggerCommand {
             target: ProcessInput::Engine {
                 kind: "durable-read-trigger-target".to_string(),
                 payload: serde_json::json!({"fixture": "trigger"}),
-            },
+            }
+            .into(),
             target_identity: ProcessIdentity::for_definition(
                 lash_core::ProcessDefinitionRef::unclaimed(
                     "durable-read-trigger-target",

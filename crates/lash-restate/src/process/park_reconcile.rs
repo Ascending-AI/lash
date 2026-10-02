@@ -67,7 +67,7 @@ use crate::services::LashService;
 /// Replaying an opener cannot redrive its paused engine child. Control
 /// clears that park before child resume; a segment only redrives its own.
 pub(crate) fn segment_can_redrive_park(record: &ProcessRecord) -> bool {
-    record.park.as_deref().is_some_and(|park| {
+    record.park().is_some_and(|park| {
         park.refusing
             && (park.engine.is_some()
                 || park.reason.code() != lash_core::store::ParkReasonCode::EngineRetryExhausted)
@@ -197,7 +197,7 @@ async fn reconcile_process_work(
     };
     // Re-read after the park: a redrive may have resumed this invocation
     // since the listing. A running child must not re-park its opener.
-    if record.park.is_some()
+    if record.park().is_some()
         && !admin
             .invocation_status(&invocation.invocation_id())
             .await
@@ -226,7 +226,7 @@ async fn reconcile_process_work(
         process_id = record.id.as_str(),
         reason_code = reason.as_str(),
         invocation_id = invocation.id.as_str(),
-        attempts = parked.park.as_deref().map_or(0, |park| park.attempts),
+        attempts = parked.park().map_or(0, |park| park.attempts),
         "a process whose engine retries ran out is parked"
     );
     report.parked.push(record.id);
@@ -530,7 +530,7 @@ pub async fn resume_parked_process(
         .get_process(process_id)
         .await?
         .ok_or_else(|| lash_core::runtime::registry_transitions::unknown_process(process_id))?;
-    if record.park.is_none() {
+    if record.park().is_none() {
         return Err(PluginError::Session(format!(
             "process `{process_id}` is not parked"
         )));
@@ -551,7 +551,7 @@ pub(crate) async fn resume_process_invocation(
     namespace: &crate::RestateNamespace,
     record: &ProcessRecord,
 ) -> Result<Option<RestateInvocationId>, PluginError> {
-    let invocation = match record.park.as_deref().and_then(|park| park.engine.as_ref()) {
+    let invocation = match record.park().and_then(|park| park.engine.as_ref()) {
         Some(engine) => Some(RestateInvocationId::new(engine.as_str().to_string())),
         None => paused_invocation_of(admin, namespace, &record.id).await?,
     };

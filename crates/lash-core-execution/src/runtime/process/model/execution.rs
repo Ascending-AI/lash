@@ -215,7 +215,7 @@ impl ProcessCompletionOutcome {
     /// Classifies a repeated completion as already applied only when the stored terminal outcome
     /// exactly equals the proposal; a different retained outcome is superseding evidence.
     pub fn from_stored(record: ProcessRecord, proposed: &super::ProcessAwaitOutput) -> Self {
-        if record.outcome.as_ref() == Some(proposed) {
+        if record.outcome().as_ref() == Some(proposed) {
             Self::AlreadyApplied { stored: record }
         } else {
             Self::Superseded { stored: record }

@@ -340,7 +340,7 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
         (
             "batch-prune-a",
             settled_success(serde_json::Value::Null),
-            "completed",
+            crate::RetiredProcessStatus::Completed,
         ),
         (
             "batch-prune-b",
@@ -349,12 +349,12 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
                 "batch_failure",
                 "batch failure",
             ),
-            "failed",
+            crate::RetiredProcessStatus::Failed,
         ),
         (
             "batch-prune-c",
             settled_cancellation("batch cancellation"),
-            "cancelled",
+            crate::RetiredProcessStatus::Cancelled,
         ),
     ];
     // Minted ids sort in registration order, so the batch tombstones in the
@@ -418,6 +418,29 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
         assert_eq!(tombstone.process_id, *expected_id);
         assert_eq!(tombstone.terminal_label, *expected_label);
         assert_eq!(tombstone.pruned_change_seq, expected_sequence);
+        // A pruned await answers the status the process ended in: only the
+        // completed one is a success.
+        let Err(PluginError::ProcessNoLongerRetained {
+            terminal_label,
+            pruned_at_ms,
+        }) = registry.get_process(expected_id).await
+        else {
+            panic!("a pruned process must answer its tombstone");
+        };
+        assert_eq!(terminal_label, *expected_label);
+        let answered = ProcessAwaitOutput::NoLongerRetained {
+            terminal_label,
+            pruned_at_ms,
+        }
+        .into_tool_output();
+        match (expected_label, &answered.outcome) {
+            (crate::RetiredProcessStatus::Completed, crate::ToolCallOutcome::Success(_))
+            | (crate::RetiredProcessStatus::Failed, crate::ToolCallOutcome::Failure(_))
+            | (crate::RetiredProcessStatus::Cancelled, crate::ToolCallOutcome::Cancelled(_)) => {}
+            (status, outcome) => {
+                panic!("a pruned `{status}` process answered {outcome:?}")
+            }
+        }
         sequences.push(tombstone.pruned_change_seq);
         cursor = next_cursor;
     }
@@ -566,8 +589,8 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
             .await
             .expect("read terminal variant")
             .expect("terminal variant retained");
-        assert_eq!(stored.outcome, Some(output));
-        assert_eq!(stored.status.label(), name);
+        assert_eq!(stored.outcome(), Some(output));
+        assert_eq!(stored.status().label(), name);
         assert_refold_matches_stored_projection(&registry, &terminal_base, &terminal_base.id, name)
             .await;
     }
@@ -646,83 +669,20 @@ pub async fn watched_process_registry_start_key_after_prune_starts_a_new_process
     a_start_key_after_prune_starts_a_new_process(Arc::clone(watched.registry())).await;
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn lifecycle_transition_refusals_are_backend_invariant(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let departed_id = "transition-refusal-departed-wait";
-    let departed = registry
-        .register_process(executed_registration(departed_id))
-        .await
-        .expect("register departed-wait-refusal process");
-    let departed_id = departed.id.clone();
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        departed_id.clone(),
-        "transition-refusal:execution",
-    )
-    .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &departed_id,
-            authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &authority,
-        )
-        .await
-        .expect("record departed-wait process execution start");
-    assert_session_refusal(
-        registry.record_caller_departure(&departed_id).await,
-        &format!(
-            "process `{departed_id}` is not externally-owned and cannot record a caller departure"
-        ),
-    );
-    registry
-        .complete_process(
-            &departed_id,
-            settled_success(serde_json::Value::Null),
-            ProcessCompletionAuthority::workflow_key(departed_id.as_str()),
-        )
-        .await
-        .expect("reconcile departed-wait-refusal process");
+    lifecycle::lifecycle_transition_refusals_are_backend_invariant(registry).await;
+}
 
-    let external_ref_id = "transition-refusal-external-ref";
-    let transition_refusal_external_ref_record = registry
-        .register_process(registration(external_ref_id))
-        .await
-        .expect("register external-ref-refusal process");
-    let external_ref_id = transition_refusal_external_ref_record.id.clone();
-    registry
-        .set_external_ref(
-            &external_ref_id,
-            crate::ProcessExternalRef {
-                backend: "first-backend".to_string(),
-                id: "first-id".to_string(),
-                metadata: None,
-                segment_ordinal: None,
-            },
-        )
-        .await
-        .expect("record first external reference");
-    assert_session_refusal(
-        registry
-            .set_external_ref(
-                &external_ref_id,
-                crate::ProcessExternalRef {
-                    backend: "second-backend".to_string(),
-                    id: "second-id".to_string(),
-                    metadata: None,
-                    segment_ordinal: None,
-                },
-            )
-            .await,
-        &format!(
-            "process `{external_ref_id}` external ref conflict: existing first-backend / first-id, requested second-backend / second-id"
-        ),
-    );
+/// An ended process stays ended. A record holds one lifecycle state, so a
+/// `process.resumed` appended after the outcome has no running state to
+/// return to: it is refused typed, writes no event, and the record keeps the
+/// status its outcome derives (FIG-4656 F17).
+pub async fn a_resume_event_cannot_return_an_ended_process_to_running(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    lifecycle::a_resume_event_cannot_return_an_ended_process_to_running(registry).await;
 }
 
 fn assert_session_refusal<T>(result: Result<T, crate::PluginError>, expected: &str) {
@@ -1417,7 +1377,7 @@ pub async fn producer_terminal_status_must_match_materialized_outcome(
                     payload_schema: LashSchema::any(),
                     semantics: ProcessEventSemanticsSpec {
                         terminal: Some(crate::ProcessTerminalSpec {
-                            status: ProcessStatus::Failed,
+                            status: crate::TerminalProcessStatus::Failed,
                             await_output: Some(ProcessValueSelector::Pointer("/out".to_string())),
                         }),
                         ..ProcessEventSemanticsSpec::default()
@@ -1748,8 +1708,8 @@ pub async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry
         )
         .await
         .expect("complete process");
-    assert_eq!(terminal.status, ProcessStatus::Completed);
-    assert_eq!(terminal.outcome, Some(expected));
+    assert_eq!(terminal.status(), ProcessStatus::Completed);
+    assert_eq!(terminal.outcome(), Some(expected));
 }
 
 #[expect(
@@ -2035,23 +1995,23 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
         .await
         .expect("register externally-owned audit row");
     let process_id = registered.id.clone();
-    assert_eq!(registered.status, ProcessStatus::Running);
+    assert_eq!(registered.status(), ProcessStatus::Running);
 
     // running -> caller_departed.
     let departed = registry
         .record_caller_departure(&process_id)
         .await
         .expect("running externally-owned row records a caller departure");
-    assert_eq!(departed.status, ProcessStatus::CallerDeparted);
+    assert_eq!(departed.status(), ProcessStatus::CallerDeparted);
     assert!(
         !departed.is_terminal(),
         "the state must never claim an outcome lash cannot observe"
     );
     assert!(
-        departed.outcome.is_none(),
+        departed.outcome().is_none(),
         "a caller-departed row carries no outcome"
     );
-    assert!(departed.status.is_retired());
+    assert!(departed.status().is_retired());
 
     // The transition is a durable event, so the fold reproduces it.
     let events = registry
@@ -2077,7 +2037,7 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
         .record_caller_departure(&process_id)
         .await
         .expect("repeat departure is idempotent");
-    assert_eq!(again.status, ProcessStatus::CallerDeparted);
+    assert_eq!(again.status(), ProcessStatus::CallerDeparted);
     assert_eq!(again.updated_at_ms, departed.updated_at_ms);
 
     // A caller-departed row is not live: recovery must never pick it up, and a
@@ -2197,7 +2157,7 @@ pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) 
         .expect("read reconciled row")
         .expect("reconciled row remains stored");
     assert_eq!(
-        closed.status,
+        closed.status(),
         ProcessStatus::Completed,
         "reconciliation, not lash, supplies the outcome"
     );
@@ -2461,7 +2421,7 @@ pub async fn work_wait_seam_covers_unknown_pruned_departed_and_external_processe
         .await
         .expect("prune external");
     assert!(
-        matches!(work.await_process_terminal(&external.id).await.expect("pruned information"), crate::ProcessTerminalWait::Terminal(ProcessAwaitOutput::NoLongerRetained { terminal_label, .. }) if terminal_label == "completed")
+        matches!(work.await_process_terminal(&external.id).await.expect("pruned information"), crate::ProcessTerminalWait::Terminal(ProcessAwaitOutput::NoLongerRetained { terminal_label, .. }) if terminal_label == crate::RetiredProcessStatus::Completed)
     );
     let departed = registry
         .register_process(registration("wait-departed"))

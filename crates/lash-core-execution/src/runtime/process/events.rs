@@ -27,7 +27,7 @@ pub struct ProcessEventSemanticsSpec {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessTerminalSpec {
-    pub status: ProcessStatus,
+    pub status: TerminalProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub await_output: Option<ProcessValueSelector>,
 }
@@ -251,15 +251,12 @@ impl ProcessCompletionAuthority {
 }
 
 /// Terminal event type name for a terminal state.
-pub fn terminal_event_type_name(status: ProcessStatus) -> &'static str {
+pub fn terminal_event_type_name(status: TerminalProcessStatus) -> &'static str {
     match status {
-        ProcessStatus::Completed => "process.completed",
-        ProcessStatus::Failed => "process.failed",
-        ProcessStatus::Cancelled => "process.cancelled",
-        ProcessStatus::Abandoned => "process.abandoned",
-        ProcessStatus::Running | ProcessStatus::Waiting | ProcessStatus::CallerDeparted => {
-            unreachable!("non-terminal process status has no terminal event")
-        }
+        TerminalProcessStatus::Completed => "process.completed",
+        TerminalProcessStatus::Failed => "process.failed",
+        TerminalProcessStatus::Cancelled => "process.cancelled",
+        TerminalProcessStatus::Abandoned => "process.abandoned",
     }
 }
 
@@ -315,7 +312,7 @@ pub enum ProcessAwaitOutput {
         control: Option<crate::ToolControl>,
     },
     NoLongerRetained {
-        terminal_label: String,
+        terminal_label: RetiredProcessStatus,
         pruned_at_ms: u64,
     },
 }
@@ -353,7 +350,7 @@ enum ProcessAwaitOutputDecode {
         control: Option<crate::ToolControl>,
     },
     NoLongerRetained {
-        terminal_label: String,
+        terminal_label: RetiredProcessStatus,
         pruned_at_ms: u64,
     },
 }
@@ -447,15 +444,11 @@ impl ProcessAwaitOutput {
     }
 
     /// Projects only terminal process outcomes to their durable status for store implementors,
-    /// returning `None` for non-terminal or deferred output.
-    pub fn terminal_status(&self) -> Option<ProcessStatus> {
+    /// returning `None` for an answer that is not an outcome.
+    pub fn terminal_status(&self) -> Option<TerminalProcessStatus> {
         match self {
-            Self::Settled { output } => Some(match &output.outcome {
-                crate::ToolCallOutcome::Success(_) => ProcessStatus::Completed,
-                crate::ToolCallOutcome::Failure(_) => ProcessStatus::Failed,
-                crate::ToolCallOutcome::Cancelled(_) => ProcessStatus::Cancelled,
-            }),
-            Self::Abandoned { .. } => Some(ProcessStatus::Abandoned),
+            Self::Settled { output } => Some(settled_status(output)),
+            Self::Abandoned { .. } => Some(TerminalProcessStatus::Abandoned),
             Self::NoLongerRetained { .. } => None,
         }
     }
@@ -518,17 +511,170 @@ impl ProcessAwaitOutput {
                 output.control = control;
                 output
             }
+            // The outcome was pruned, the status it ended in was not: only a
+            // process that completed answers a success, and every other
+            // retired status answers the failure or cancellation it was.
             Self::NoLongerRetained {
                 terminal_label,
                 pruned_at_ms,
-            } => crate::ToolCallOutput::success(serde_json::json!({
-                "type": "information",
-                "code": "process_no_longer_retained",
-                "message": "process completed, but its outcome is no longer retained",
-                "terminal_label": terminal_label,
-                "pruned_at_ms": pruned_at_ms,
-            })),
+            } => {
+                let detail = serde_json::json!({
+                    "terminal_label": terminal_label,
+                    "pruned_at_ms": pruned_at_ms,
+                });
+                let failure = |class, message: &str| {
+                    let mut failure =
+                        crate::ToolFailure::runtime(class, "process_no_longer_retained", message);
+                    failure.raw = Some(crate::ToolValue::untrusted_json(detail.clone()));
+                    crate::ToolCallOutput::failure(failure)
+                };
+                match terminal_label {
+                    RetiredProcessStatus::Completed => {
+                        crate::ToolCallOutput::success(serde_json::json!({
+                            "type": "information",
+                            "code": "process_no_longer_retained",
+                            "message": "process completed, but its outcome is no longer retained",
+                            "terminal_label": terminal_label,
+                            "pruned_at_ms": pruned_at_ms,
+                        }))
+                    }
+                    RetiredProcessStatus::Failed => failure(
+                        crate::ToolFailureClass::Execution,
+                        "process failed, and its outcome is no longer retained",
+                    ),
+                    RetiredProcessStatus::Cancelled => {
+                        let mut cancellation = crate::ToolCancellation::runtime(
+                            "process was cancelled, and its outcome is no longer retained",
+                        );
+                        cancellation.raw = Some(crate::ToolValue::untrusted_json(detail));
+                        crate::ToolCallOutput::cancelled(cancellation)
+                    }
+                    RetiredProcessStatus::Abandoned => failure(
+                        crate::ToolFailureClass::External,
+                        "process was abandoned, and its evidence is no longer retained",
+                    ),
+                    RetiredProcessStatus::CallerDeparted => failure(
+                        crate::ToolFailureClass::External,
+                        "process recorded a caller departure before any outcome, and is no \
+                         longer retained",
+                    ),
+                }
+            }
         }
+    }
+}
+
+fn settled_status(output: &crate::ToolCallOutput) -> TerminalProcessStatus {
+    match &output.outcome {
+        crate::ToolCallOutcome::Success(_) => TerminalProcessStatus::Completed,
+        crate::ToolCallOutcome::Failure(_) => TerminalProcessStatus::Failed,
+        crate::ToolCallOutcome::Cancelled(_) => TerminalProcessStatus::Cancelled,
+    }
+}
+
+/// The outcome a process ended in: what a terminal record and a terminal
+/// event hold.
+///
+/// It is the part of [`ProcessAwaitOutput`] that is an outcome, so its status
+/// is a total function of it ([`Self::status`]) and is stored nowhere beside
+/// it. It serializes exactly as the [`ProcessAwaitOutput`] it is.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProcessTerminal {
+    Settled {
+        output: Box<crate::ToolCallOutput>,
+    },
+    /// See [`ProcessAwaitOutput::Abandoned`].
+    Abandoned {
+        evidence: Box<AbandonEvidence>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control: Option<crate::ToolControl>,
+    },
+}
+
+impl ProcessTerminal {
+    /// The status this outcome ends a process in.
+    pub fn status(&self) -> TerminalProcessStatus {
+        match self {
+            Self::Settled { output } => settled_status(output),
+            Self::Abandoned { .. } => TerminalProcessStatus::Abandoned,
+        }
+    }
+
+    /// Builds the outcome of a process whose work answered `output`.
+    pub fn from_tool_output(output: crate::ToolCallOutput) -> Self {
+        Self::Settled {
+            output: Box::new(output),
+        }
+    }
+
+    /// This outcome as an await answers it.
+    pub fn into_await_output(self) -> ProcessAwaitOutput {
+        self.into()
+    }
+
+    /// Stamps a cancelled outcome with the standing process request's
+    /// origin ([`ProcessAwaitOutput::with_cancel_origin`]).
+    pub fn with_cancel_origin(mut self, origin: Option<crate::CancelOrigin>) -> Self {
+        if let Some(origin) = origin
+            && let Self::Settled { output } = &mut self
+            && let crate::ToolCallOutcome::Cancelled(cancellation) = &mut output.outcome
+        {
+            cancellation.origin = Some(origin);
+        }
+        self
+    }
+}
+
+impl From<ProcessTerminal> for ProcessAwaitOutput {
+    fn from(terminal: ProcessTerminal) -> Self {
+        match terminal {
+            ProcessTerminal::Settled { output } => Self::Settled { output },
+            ProcessTerminal::Abandoned { evidence, control } => {
+                Self::Abandoned { evidence, control }
+            }
+        }
+    }
+}
+
+/// An await answer that is not an outcome: its process was pruned, and only
+/// the status it retired in remains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "a pruned process (`{terminal_label}`, pruned at {pruned_at_ms}ms) has no retained outcome"
+)]
+pub struct ProcessOutcomeNotRetained {
+    pub terminal_label: RetiredProcessStatus,
+    pub pruned_at_ms: u64,
+}
+
+impl TryFrom<ProcessAwaitOutput> for ProcessTerminal {
+    type Error = ProcessOutcomeNotRetained;
+
+    fn try_from(output: ProcessAwaitOutput) -> Result<Self, Self::Error> {
+        match output {
+            ProcessAwaitOutput::Settled { output } => Ok(Self::Settled { output }),
+            ProcessAwaitOutput::Abandoned { evidence, control } => {
+                Ok(Self::Abandoned { evidence, control })
+            }
+            ProcessAwaitOutput::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            } => Err(ProcessOutcomeNotRetained {
+                terminal_label,
+                pruned_at_ms,
+            }),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ProcessTerminal {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::try_from(ProcessAwaitOutput::deserialize(deserializer)?)
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -854,7 +1000,7 @@ fn page_more<T>(
 pub enum ProcessEventHistoryRetention {
     /// The process was pruned and its payload-free tombstone is still present.
     Pruned {
-        terminal_label: String,
+        terminal_label: RetiredProcessStatus,
         pruned_at_ms: u64,
     },
 }
@@ -1262,18 +1408,18 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
     .into_iter()
     .filter_map(runtime_lifecycle_event_type)
     .collect();
-    event_types.extend([
-        terminal_event_type("process.completed", ProcessStatus::Completed),
-        terminal_event_type("process.failed", ProcessStatus::Failed),
-        terminal_event_type("process.cancelled", ProcessStatus::Cancelled),
-        terminal_event_type("process.abandoned", ProcessStatus::Abandoned),
-    ]);
+    event_types.extend(
+        TerminalProcessStatus::ALL
+            .iter()
+            .copied()
+            .map(terminal_event_type),
+    );
     event_types
 }
 
-fn terminal_event_type(name: &str, status: ProcessStatus) -> ProcessEventType {
+fn terminal_event_type(status: TerminalProcessStatus) -> ProcessEventType {
     ProcessEventType {
-        name: name.to_string(),
+        name: terminal_event_type_name(status).to_string(),
         payload_schema: crate::LashSchema::any(),
         semantics: ProcessEventSemanticsSpec {
             terminal: Some(ProcessTerminalSpec {
@@ -1358,6 +1504,52 @@ mod cancellation_identity_tests {
     }
 
     #[test]
+    fn a_pruned_await_answers_the_status_the_process_retired_in() {
+        for status in RetiredProcessStatus::ALL.iter().copied() {
+            let output = ProcessAwaitOutput::NoLongerRetained {
+                terminal_label: status,
+                pruned_at_ms: 7,
+            }
+            .into_tool_output();
+            match (status, &output.outcome) {
+                (RetiredProcessStatus::Completed, crate::ToolCallOutcome::Success(_)) => {}
+                (
+                    RetiredProcessStatus::Failed
+                    | RetiredProcessStatus::Abandoned
+                    | RetiredProcessStatus::CallerDeparted,
+                    crate::ToolCallOutcome::Failure(failure),
+                ) => {
+                    assert_eq!(failure.code, "process_no_longer_retained");
+                    assert_eq!(
+                        failure.raw.clone().map(|raw| raw.to_json_value()),
+                        Some(serde_json::json!({
+                            "terminal_label": status.label(),
+                            "pruned_at_ms": 7,
+                        }))
+                    );
+                }
+                (RetiredProcessStatus::Cancelled, crate::ToolCallOutcome::Cancelled(_)) => {}
+                (status, outcome) => panic!("a pruned `{status}` process answered {outcome:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_pruned_await_refuses_a_label_that_is_not_a_retired_status() {
+        for label in ["running", "waiting", "finished", ""] {
+            let output = serde_json::json!({
+                "type": "no_longer_retained",
+                "terminal_label": label,
+                "pruned_at_ms": 7,
+            });
+            assert!(
+                serde_json::from_value::<ProcessAwaitOutput>(output).is_err(),
+                "`{label}` is not a status a process is pruned in"
+            );
+        }
+    }
+
+    #[test]
     fn process_output_rejects_malformed_tags_in_every_tool_value_arm() {
         let malformed = serde_json::json!({
             "$lash_tool_value": "attachment",
@@ -1410,16 +1602,17 @@ mod cancellation_identity_tests {
     }
 }
 
+/// What a terminal event ends its process in: the outcome, whose status is
+/// derived from it and stored nowhere beside it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessTerminalSemantics {
-    pub status: ProcessStatus,
-    pub outcome: ProcessAwaitOutput,
+    pub outcome: ProcessTerminal,
 }
 
 impl ProcessTerminalSemantics {
-    /// Maps a terminal process outcome to its durable status for process-store implementors;
-    /// non-terminal variants remain running.
-    pub fn into_status(self) -> ProcessStatus {
-        self.status
+    /// The status the outcome ends the process in.
+    pub fn status(&self) -> TerminalProcessStatus {
+        self.outcome.status()
     }
 }

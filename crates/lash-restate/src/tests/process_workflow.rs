@@ -250,7 +250,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
             .get_process(&process_id)
             .await
             .expect("read terminal child")
-            .and_then(|record| record.outcome),
+            .and_then(|record| record.outcome()),
         Some(ProcessAwaitOutput::Settled {
             output: output.clone(),
         })
@@ -303,7 +303,7 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
         .expect("read interrupted child")
         .expect("interrupted child remains registered");
     assert!(
-        !interrupted.is_terminal() && interrupted.outcome.is_none(),
+        !interrupted.is_terminal() && interrupted.outcome().is_none(),
         "a divergence abort must leave the child non-terminal: {interrupted:?}"
     );
 
@@ -369,7 +369,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
         .expect("read interrupted child")
         .expect("child remains registered");
     assert!(!interrupted.is_terminal());
-    assert!(interrupted.outcome.is_none());
+    assert!(interrupted.outcome().is_none());
 
     let rerun = workflow
         .run_registration_for_test(
@@ -488,15 +488,18 @@ pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
         executed_registration(),
         ProcessId::fixture("wait"),
     );
-    record.wait = Some(lash_core::WaitState {
-        since_ms: 1,
-        kind: lash_core::WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: "process:wait:signal.ready:1".to_string(),
-            ordinal: 1,
+    record.lifecycle = lash_core::ProcessLifecycleState::Waiting {
+        wait: lash_core::WaitState {
+            since_ms: 1,
+            kind: lash_core::WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: "process:wait:signal.ready:1".to_string(),
+                ordinal: 1,
+            },
         },
-    });
+        park: None,
+    };
     assert!(boundary_must_be_declined(
         lash_core::BoundaryReason::JournalBudget,
         Some(&record)
@@ -507,7 +510,7 @@ pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
         lash_core::BoundaryReason::HandOver,
         Some(&record)
     ));
-    record.wait = None;
+    record.lifecycle = lash_core::ProcessLifecycleState::running();
     assert!(!boundary_must_be_declined(
         lash_core::BoundaryReason::JournalBudget,
         Some(&record)
@@ -555,7 +558,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_e
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "background-smoke-start"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration,
+                    registration: registration.into(),
                     observers: vec![SessionId::from("session")],
                     execution_context: Box::new(execution_context),
                 }),
@@ -1397,7 +1400,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "recovery-start"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration,
+                    registration: registration.into(),
                     observers: vec![creator_scope.session_id.clone()],
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),

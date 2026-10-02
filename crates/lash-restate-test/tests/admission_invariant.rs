@@ -187,11 +187,11 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         .expect("read the process")
         .expect("the process exists");
     assert_eq!(
-        record.status,
+        record.status(),
         lash_core::ProcessStatus::Failed,
         "the process is not stranded Running: {record:?}"
     );
-    let stored = record.outcome.clone().expect("a terminal is stored");
+    let stored = record.outcome().expect("a terminal is stored");
     assert!(
         serde_json::to_string(&stored)
             .expect("encode the stored terminal")

@@ -290,7 +290,7 @@ impl DurableProcessWorker {
         // An exhausted engine child can park a still-running process.
         // Admission replay cannot redrive that child; control clears its
         // refusing flag when it resumes the engine work explicitly.
-        if current.park.as_deref().is_some_and(|park| {
+        if current.park().is_some_and(|park| {
             park.refusing
                 && (park.engine.is_some()
                     || park.reason.code() != crate::store::ParkReasonCode::EngineRetryExhausted)

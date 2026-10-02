@@ -288,7 +288,7 @@ impl HandedOverSegment {
             .await
             .expect("read the process")
             .expect("the process exists")
-            .outcome
+            .outcome()
     }
 
     fn runs(&self) -> usize {
@@ -542,7 +542,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         .expect("read the refused process")
         .expect("the process exists");
     let started = record.first_started.as_deref().cloned().expect("started");
-    let outcome = record.outcome.expect("the refusal is stored");
+    let outcome = record.outcome().expect("the refusal is stored");
     assert!(substrate_lost(started.owner)(&outcome), "got {outcome:?}");
 }
 
@@ -615,12 +615,12 @@ pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() 
         "the admitted start record names the generation the lashlang engine runs it as"
     );
     assert!(
-        record.outcome.is_none(),
+        record.outcome().is_none(),
         "an admitted fresh process is never refused before its body runs: {:?}",
-        record.outcome
+        record.outcome()
     );
     assert_eq!(
-        record.status,
+        record.status(),
         lash_core::ProcessStatus::Running,
         "the admitted process is observable Running across its first boundary"
     );
@@ -717,7 +717,7 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         .get_process(&started_id)
         .await
         .expect("read the refused row")
-        .and_then(|record| record.outcome)
+        .and_then(|record| record.outcome())
         .expect("the refusal is a stored terminal");
     assert!(substrate_lost(started.owner)(&outcome), "got {outcome:?}");
 
@@ -747,7 +747,7 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         .expect("read the run row")
         .expect("the row exists");
     assert_eq!(
-        record.outcome,
+        record.outcome(),
         Some(process_success(serde_json::json!("ran")))
     );
     let root = record
@@ -880,7 +880,7 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
 
 /// The failure code a terminal record carries, if it ended Failed.
 fn terminal_failure_code(record: &lash_core::ProcessRecord) -> Option<String> {
-    let outcome = serde_json::to_value(record.outcome.as_ref()?).ok()?;
+    let outcome = serde_json::to_value(record.outcome().as_ref()?).ok()?;
     fn find(value: &serde_json::Value) -> Option<String> {
         match value {
             serde_json::Value::Object(map) => map
@@ -1452,7 +1452,7 @@ impl ZombieRoot {
             .await
             .expect("read the process")
             .expect("the process exists")
-            .outcome
+            .outcome()
     }
 
     fn runs(&self) -> usize {

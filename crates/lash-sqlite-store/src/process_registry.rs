@@ -69,14 +69,15 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
                         .map_err(process_sqlite_error)?;
                     if let Some((terminal_label, pruned_at_ms)) = tombstone {
                         return Err(registry_transitions::process_no_longer_retained(
-                            registry_transitions::ProcessTombstoneStamp {
-                                terminal_label,
-                                pruned_at_ms: plugin_u64_from_sql(
+                            registry_transitions::ProcessTombstoneStamp::from_row(
+                                &process_id,
+                                &terminal_label,
+                                plugin_u64_from_sql(
                                     "ProcessTombstone",
                                     "pruned_at_ms",
                                     pruned_at_ms,
                                 )?,
-                            },
+                            )?,
                         ));
                     }
                     Ok(None)

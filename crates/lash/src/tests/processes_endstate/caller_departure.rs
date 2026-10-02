@@ -86,7 +86,7 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
             .get_process(&live)
             .await?
             .expect("the running sibling survives retention")
-            .status,
+            .status(),
         lash_core::ProcessStatus::Running,
     );
 

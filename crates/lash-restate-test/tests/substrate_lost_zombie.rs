@@ -306,7 +306,7 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
         .expect("read the process")
         .expect("the process exists");
     let stored = record
-        .outcome
+        .outcome()
         .clone()
         .expect("exactly one terminal is stored");
     match first {
@@ -323,7 +323,7 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
                 matches!(
                     &zombie,
                     lash_core::ProcessCompletionOutcome::Superseded { stored }
-                        if stored.outcome.as_ref().is_some_and(is_substrate_lost)
+                        if stored.outcome().as_ref().is_some_and(is_substrate_lost)
                 ),
                 "the zombie's write is superseded by the recovery's: {zombie:?}"
             );

@@ -418,10 +418,10 @@ finish({ timedOut: winner === undefined, job: job.process_id });"#,
         .expect("read the job")
         .expect("the job is registered");
     assert!(
-        !record.status.is_terminal(),
+        !record.status().is_terminal(),
         "{}: releasing the losing wait does not end the process, got {:?}",
         tier.name,
-        record.status
+        record.status()
     );
     Ok(())
 }

@@ -301,9 +301,12 @@ impl Scenario {
             self.invocation(CHILD),
             RuntimeEffectCommand::Process {
                 command: Box::new(crate::ProcessCommand::Start {
-                    registration: self.child_registration().with_execution_env_ref(Some(
-                        crate::testing::process_execution_env_fixture_ref(),
-                    )),
+                    registration: self
+                        .child_registration()
+                        .with_execution_env_ref(Some(
+                            crate::testing::process_execution_env_fixture_ref(),
+                        ))
+                        .into(),
                     observers: Vec::new(),
                     execution_context: Box::default(),
                 }),
@@ -513,7 +516,7 @@ async fn child_settled(scenario: &Scenario) {
                     .get_process(&child_id)
                     .await
                     .unwrap_or_else(|error| panic!("read the child: {error}"));
-                if record.is_some_and(|record| record.outcome.is_some()) {
+                if record.is_some_and(|record| record.outcome().is_some()) {
                     return;
                 }
             }
@@ -759,14 +762,14 @@ async fn run_scenario(
         .await
         .unwrap_or_else(|error| panic!("{name}: read the recovered process: {error}"))
         .unwrap_or_else(|| panic!("{name}: the process exists"))
-        .outcome
+        .outcome()
         .unwrap_or_else(|| panic!("{name}: the recovered process reached its terminal"));
     let probe = &scenario.probe;
     match recovery {
         SegmentRecovery::Replay => {
             assert_eq!(
                 outcome.terminal_status(),
-                Some(crate::ProcessStatus::Completed),
+                Some(crate::TerminalProcessStatus::Completed),
                 "{name}: the replayed segment completes: {outcome:?}"
             );
             for effect in kind.effects() {

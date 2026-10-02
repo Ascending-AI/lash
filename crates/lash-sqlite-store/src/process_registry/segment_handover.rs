@@ -18,7 +18,7 @@ impl SqliteProcessRegistry {
                     if record.is_terminal() {
                         return Err(lash_core_execution::PluginError::ProcessAlreadyTerminal {
                             process_id: record.id.clone(),
-                            status: record.status,
+                            status: record.status(),
                         });
                     }
                     let existing: Option<String> = tx
@@ -215,7 +215,7 @@ impl SqliteProcessRegistry {
                     if record.is_terminal() {
                         return Err(lash_core_execution::PluginError::ProcessAlreadyTerminal {
                             process_id: record.id.clone(),
-                            status: record.status,
+                            status: record.status(),
                         });
                     }
                     let encoded = process_encode_json(&marker)?;

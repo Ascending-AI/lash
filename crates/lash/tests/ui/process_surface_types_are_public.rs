@@ -52,6 +52,12 @@ use lash::process::{
     WatchedRegistry, lifetime, process_wake_source_key, watch_process_registry,
     watch_process_registry_with_sink,
 };
+// FIG-4656: the lifecycle state a record holds, the outcome a terminal state
+// owns, the statuses derived from them, and the start target a request names.
+use lash::process::{
+    ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessStartRegistration, ProcessStartTarget,
+    ProcessTerminal, RetiredProcessStatus, TerminalProcessStatus,
+};
 
 fn paged_events_signature_is_public(processes: &Processes, cursor: ProcessCursor) {
     let _future = processes.events(

@@ -5,7 +5,7 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     ProcessCancelReceipt, ProcessCompletionOutcome, ProcessHandleView, ProcessListMode,
-    ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
+    ProcessRecord, ProcessStartOptions, ProcessStartRegistration, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
 
@@ -79,7 +79,7 @@ pub trait ProcessService: Send + Sync {
     async fn start(
         &self,
         session_id: &SessionId,
-        registration: ProcessRegistration,
+        registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
@@ -321,7 +321,7 @@ impl ProcessService for UnavailableProcessService {
     async fn start(
         &self,
         _session_id: &SessionId,
-        _registration: ProcessRegistration,
+        _registration: ProcessStartRegistration,
         _options: ProcessStartOptions,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
@@ -454,7 +454,6 @@ mod tests {
     use super::*;
     use crate::{
         ProcessAwaitOutput, ProcessEvent, ProcessInput, ProcessProvenance, ProcessRegistration,
-        ProcessStatus,
     };
 
     struct RecordingProcessService {
@@ -521,7 +520,7 @@ mod tests {
         async fn start(
             &self,
             _session_id: &SessionId,
-            _registration: ProcessRegistration,
+            _registration: ProcessStartRegistration,
             _options: ProcessStartOptions,
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessRecord, PluginError> {
@@ -662,10 +661,13 @@ mod tests {
             ),
             process_id.clone(),
         );
-        record.status = ProcessStatus::Cancelled;
-        record.outcome = Some(ProcessAwaitOutput::from_tool_output(
-            crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime("cancelled")),
-        ));
+        record.lifecycle = crate::ProcessLifecycleState::Terminal {
+            outcome: ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                crate::ToolCancellation::runtime("cancelled"),
+            ))
+            .try_into()
+            .expect("a terminal outcome"),
+        };
         record
     }
 

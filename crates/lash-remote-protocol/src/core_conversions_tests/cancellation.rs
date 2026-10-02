@@ -144,17 +144,20 @@ fn every_cancellation_origin_survives_record_observation_and_output_transport() 
         let mut record = process_record(&lash_sansio::ProcessId::fixture("typed-cancel-transport"));
         assert!(record.cancel_request.is_none());
         record.cancel_request = Some(Box::new(request.clone()));
-        record.status = lash_core::ProcessStatus::Cancelled;
-        record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
-            lash_core::ToolCallOutput::cancelled(
-                lash_core::ToolCancellation::runtime("runner settled").with_origin(origin),
-            ),
-        ));
+        record.lifecycle = lash_core::ProcessLifecycleState::Terminal {
+            outcome: lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::cancelled(
+                    lash_core::ToolCancellation::runtime("runner settled").with_origin(origin),
+                ),
+            )
+            .try_into()
+            .expect("a terminal outcome"),
+        };
         let remote = RemoteProcessRecord::try_from(record.clone()).expect("encode record");
         assert_eq!(remote.cancel_request, Some(request.clone()));
         let returned = lash_core::ProcessRecord::try_from(remote).expect("decode record");
         assert_eq!(returned.cancel_request.as_deref(), Some(&request));
-        assert!(matches!(returned.outcome,
+        assert!(matches!(returned.outcome(),
             Some(lash_core::ProcessAwaitOutput::Settled { output })
                 if matches!(&output.outcome, lash_core::ToolCallOutcome::Cancelled(cancellation)
                     if cancellation.origin == Some(origin))

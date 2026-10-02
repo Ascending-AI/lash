@@ -84,13 +84,13 @@ impl ObligationRelay for ProcessTerminalRelay {
         let Some(record) = record else {
             return Ok(());
         };
-        let Some(output) = record.outcome.as_ref() else {
+        let Some(output) = record.outcome() else {
             return Err(DeliveryFailure::row_invariant(format!(
                 "process `{process_id}` owes a terminal publication but stores no terminal"
             )));
         };
         self.port
-            .publish_process_terminal(process_id, output, id.as_str())
+            .publish_process_terminal(process_id, &output, id.as_str())
             .await
             .map_err(DeliveryFailure::of_plugin)
     }

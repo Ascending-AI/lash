@@ -100,7 +100,7 @@ impl LinkedTestProcess {
             source_key,
             source: serde_json::json!({}),
             payload_schema: lash_core::LashSchema::any(),
-            target: self.process_input(),
+            target: self.process_input().into(),
             target_identity: self.process_identity(),
             event_types: lash_lashlang_runtime::lashlang_process_event_types()
                 .into_iter()
@@ -534,7 +534,8 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                     target: lash_core::ProcessInput::Engine {
                         kind: "test".to_string(),
                         payload: serde_json::json!({ "process": "worker" }),
-                    },
+                    }
+                    .into(),
                     target_identity: lash_core::ProcessIdentity::new("test"),
                     event_types: Vec::new(),
                     input_template,

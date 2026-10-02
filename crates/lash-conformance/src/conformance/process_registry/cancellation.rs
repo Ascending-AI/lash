@@ -144,7 +144,7 @@ pub(super) async fn contract(
     let settled = read(&reader, &process_id).await;
     assert!(
         matches!(
-            settled.outcome,
+            settled.outcome(),
             Some(ProcessAwaitOutput::Settled { ref output })
                 if matches!(&output.outcome, lash_core::ToolCallOutcome::Cancelled(cancellation)
                     if cancellation.origin == Some(first.origin))
@@ -211,9 +211,9 @@ pub(super) async fn contract(
         )
         .await
         .expect("fold failed start");
-    assert_eq!(failed.status, ProcessStatus::Cancelled);
+    assert_eq!(failed.status(), ProcessStatus::Cancelled);
     let output = failed
-        .outcome
+        .outcome()
         .clone()
         .expect("terminal outcome")
         .into_tool_output();
@@ -233,8 +233,8 @@ pub(super) async fn contract(
             .terminal
             .as_ref()
             .expect("terminal event semantics")
-            .status,
-        ProcessStatus::Cancelled
+            .status(),
+        crate::TerminalProcessStatus::Cancelled
     );
     let standing = failed
         .cancel_request
@@ -327,7 +327,7 @@ pub(super) async fn contract(
 
     let mut custom_type = plain_event_type("custom.finished");
     custom_type.semantics.terminal = Some(lash_core::ProcessTerminalSpec {
-        status: ProcessStatus::Completed,
+        status: crate::TerminalProcessStatus::Completed,
         await_output: Some(lash_core::ProcessValueSelector::Pointer(
             "/await_output".to_string(),
         )),
@@ -353,9 +353,9 @@ pub(super) async fn contract(
         .await
         .expect("append custom terminal event");
     let custom = read(&reader, &custom_ref).await;
-    assert_eq!(custom.status, ProcessStatus::Completed);
+    assert_eq!(custom.status(), ProcessStatus::Completed);
     assert_eq!(
-        custom.outcome,
+        custom.outcome(),
         Some(settled_success(serde_json::json!("custom payload")))
     );
     assert!(

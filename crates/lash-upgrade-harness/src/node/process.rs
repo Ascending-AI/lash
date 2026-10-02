@@ -465,7 +465,7 @@ pub(super) async fn status(args: ProcessStatusArgs) -> Result<ProcessStatusRepor
         .filter(|event| event.event_type == signal_type)
         .map(|event| event.payload)
         .collect();
-    let waiting_for = record.wait.as_ref().map(|wait| match &wait.kind {
+    let waiting_for = record.wait().map(|wait| match &wait.kind {
         lash_core::WaitKind::Signal { name, .. } => name.clone(),
     });
     let (output, error) = if record.is_terminal() {
@@ -488,7 +488,7 @@ pub(super) async fn status(args: ProcessStatusArgs) -> Result<ProcessStatusRepor
     };
     Ok(ProcessStatusReport {
         process_id: args.process,
-        lifecycle: format!("{:?}", record.status),
+        lifecycle: format!("{:?}", record.status()),
         waiting_for,
         signals,
         output,

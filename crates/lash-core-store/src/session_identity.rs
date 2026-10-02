@@ -751,7 +751,7 @@ pub enum SessionObservedProcessOutcome {
     Observed,
     NotFound,
     NoLongerRetained {
-        terminal_label: String,
+        terminal_label: crate::RetiredProcessStatus,
         pruned_at_ms: u64,
     },
     Unavailable {

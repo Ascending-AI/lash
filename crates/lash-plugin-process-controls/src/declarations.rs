@@ -262,7 +262,7 @@ pub async fn execute_process_start_tool_call(
         }
     };
     let declaration = lash_core::ProcessStartDeclaration::new(
-        lash_core::ProcessInput::Definition {
+        lash_core::ProcessStartTarget::Definition {
             definition_id: target.definition_id().clone(), args: run_args,
             signature_claim: Some(target.signature_claim().clone()),
         },

@@ -412,7 +412,7 @@ fn process_observation_gap_wire_contract() {
     for retention in [
         RemoteProcessHistoryRetention::Unknown,
         RemoteProcessHistoryRetention::Pruned {
-            terminal_label: "completed".to_string(),
+            terminal_label: RemoteRetiredProcessStatus::Completed,
             pruned_at_ms: 9,
         },
     ] {
@@ -651,7 +651,7 @@ fn paged_process_events_wire_contract() {
         process_id: request.process_id,
         outcome: lash_core::ProcessEventReadOutcome::NoLongerRetained(
             lash_core::ProcessEventHistoryRetention::Pruned {
-                terminal_label: "completed".to_string(),
+                terminal_label: lash_core::RetiredProcessStatus::Completed,
                 pruned_at_ms: 42,
             },
         ),

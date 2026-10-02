@@ -687,33 +687,6 @@ lash_conformance::admitted_head_redrive_tests!(
     }
 );
 
-/// Discards a claimed wake delivery with no reason, straight in the SQLite
-/// memory registry the Restate wake-ordering leg writes through.
-struct SqliteWakeDiscards {
-    backend: lash_sqlite_store::SqliteStoreSet,
-}
-
-#[async_trait::async_trait]
-impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector for SqliteWakeDiscards {
-    async fn discard_without_reason(&self, delivery_id: &str) {
-        let conn = rusqlite::Connection::open(
-            self.backend
-                .database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry),
-        )
-        .expect("open the memory registry");
-        assert_eq!(
-            conn.execute(
-                "UPDATE process_wake_deliveries
-                 SET state = 'discarded', claim_token = NULL, discard_reason = NULL
-                 WHERE delivery_id = ?1 AND state = 'enqueuing'",
-                rusqlite::params![delivery_id],
-            )
-            .expect("inject a reasonless wake discard"),
-            1
-        );
-    }
-}
-
 lash_conformance::wake_delivery_ordering_tests!({
     let backend = lash_sqlite_store::SqliteStoreSet::memory()
         .await
@@ -729,8 +702,6 @@ lash_conformance::wake_delivery_ordering_tests!({
     (
         wait_transport,
         registry,
-        Arc::new(SqliteWakeDiscards { backend })
-            as Arc<dyn lash_conformance::WakeDeliveryOrderingGroupFaultInjector>,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
         move || async move {

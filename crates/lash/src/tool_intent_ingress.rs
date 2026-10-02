@@ -1119,10 +1119,12 @@ impl ToolIntentIngress {
     /// live catalog or artifact store, so replaying the same intent is safe.
     async fn admit_engine_start(
         &self,
-        registration: lash_core::ProcessRegistration,
+        registration: lash_core::ProcessStartRegistration,
         env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
-    ) -> crate::Result<lash_core::ProcessRegistration> {
-        let lash_core::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
+    ) -> crate::Result<lash_core::ProcessStartRegistration> {
+        let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine { kind, payload }) =
+            registration.input.as_ref()
+        else {
             return Ok(registration);
         };
         // `LashCore::env.core` deliberately carries no engines: every runtime

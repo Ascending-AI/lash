@@ -3,10 +3,10 @@ use crate::plugin::PluginError;
 
 use super::events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessEventSemantics,
-    ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessValueSelector,
-    ProcessWake, ProcessWakeSpec,
+    ProcessEventSemanticsSpec, ProcessTerminal, ProcessTerminalSemantics, ProcessTerminalSpec,
+    ProcessValueSelector, ProcessWake, ProcessWakeSpec,
 };
-use super::model::ProcessStatus;
+use super::model::TerminalProcessStatus;
 
 pub fn materialize_process_event_semantics(
     process_id: &ProcessId,
@@ -45,16 +45,22 @@ fn materialize_terminal_semantics(
     payload: &serde_json::Value,
     terminal: &ProcessTerminalSpec,
 ) -> Result<ProcessTerminalSemantics, PluginError> {
-    let await_output = match &terminal.await_output {
+    let outcome = match &terminal.await_output {
         Some(selector) => {
             let selected = select_value(payload, selector)?;
             match serde_json::from_value::<ProcessAwaitOutput>(selected.clone()) {
-                Ok(output) => output,
-                Err(_) => selected_value_to_await_output(terminal.status, selected)?,
+                // An await answer that is not an outcome ends nothing.
+                Ok(output) => ProcessTerminal::try_from(output).map_err(|_| {
+                    PluginError::ProcessTerminalOutcomeMismatch {
+                        declared_status: terminal.status.into(),
+                        outcome_status: None,
+                    }
+                })?,
+                Err(_) => selected_value_to_terminal(terminal.status, selected),
             }
         }
-        None if terminal.status == ProcessStatus::Completed => {
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(payload.clone()))
+        None if terminal.status == TerminalProcessStatus::Completed => {
+            ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(payload.clone()))
         }
         None => {
             return Err(PluginError::Session(
@@ -62,48 +68,45 @@ fn materialize_terminal_semantics(
             ));
         }
     };
-    let outcome_status = await_output.terminal_status();
-    if outcome_status != Some(terminal.status) {
+    let outcome_status = outcome.status();
+    if outcome_status != terminal.status {
         return Err(PluginError::ProcessTerminalOutcomeMismatch {
-            declared_status: terminal.status,
-            outcome_status,
+            declared_status: terminal.status.into(),
+            outcome_status: Some(outcome_status.into()),
         });
     }
-    Ok(ProcessTerminalSemantics {
-        status: terminal.status,
-        outcome: await_output,
-    })
+    Ok(ProcessTerminalSemantics { outcome })
 }
 
-fn selected_value_to_await_output(
-    status: ProcessStatus,
+fn selected_value_to_terminal(
+    status: TerminalProcessStatus,
     value: serde_json::Value,
-) -> Result<ProcessAwaitOutput, PluginError> {
-    Ok(match status {
-        ProcessStatus::Completed => {
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
+) -> ProcessTerminal {
+    match status {
+        TerminalProcessStatus::Completed => {
+            ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(value))
         }
-        ProcessStatus::Failed => {
+        TerminalProcessStatus::Failed => {
             let mut failure = crate::ToolFailure::runtime(
                 crate::ToolFailureClass::Execution,
                 "process_failed",
                 selector_value_to_string(&value),
             );
             failure.raw = Some(crate::ToolValue::untrusted_json(value));
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure))
+            ProcessTerminal::from_tool_output(crate::ToolCallOutput::failure(failure))
         }
-        ProcessStatus::Cancelled => {
+        TerminalProcessStatus::Cancelled => {
             let mut cancellation =
                 crate::ToolCancellation::runtime(selector_value_to_string(&value));
             cancellation.raw = Some(crate::ToolValue::untrusted_json(value));
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(cancellation))
+            ProcessTerminal::from_tool_output(crate::ToolCallOutput::cancelled(cancellation))
         }
         // Reached only if a producer declares its own `Abandoned` terminal event
-        // and emits a raw value (not a serialized `ProcessAwaitOutput`); every
+        // and emits a raw value (not a serialized outcome); every
         // lash-written abandonment carries structured evidence through
         // `complete_process`, which deserializes directly above. With no
         // structured evidence to carry, the producer is the writer.
-        ProcessStatus::Abandoned => ProcessAwaitOutput::Abandoned {
+        TerminalProcessStatus::Abandoned => ProcessTerminal::Abandoned {
             evidence: Box::new(AbandonEvidence {
                 writer: AbandonWriter::Producer,
                 owner: None,
@@ -111,13 +114,7 @@ fn selected_value_to_await_output(
             }),
             control: None,
         },
-        ProcessStatus::Running | ProcessStatus::Waiting | ProcessStatus::CallerDeparted => {
-            return Err(PluginError::Session(format!(
-                "terminal event semantics used non-terminal status `{}`",
-                status.label()
-            )));
-        }
-    })
+    }
 }
 
 fn materialize_wake(

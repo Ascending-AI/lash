@@ -176,7 +176,7 @@ mod tests {
                 effect_id,
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: registration.with_execution_env_ref(Some(env_ref)),
+                registration: registration.with_execution_env_ref(Some(env_ref)).into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
@@ -353,7 +353,8 @@ mod tests {
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
                 registration: engine_registration(key, "delivery")
-                    .with_execution_env_ref(Some(env_ref.clone())),
+                    .with_execution_env_ref(Some(env_ref.clone()))
+                    .into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
@@ -476,7 +477,9 @@ mod tests {
                 "crashed-start",
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: registration("retry").with_execution_env_ref(Some(retry_ref.clone())),
+                registration: registration("retry")
+                    .with_execution_env_ref(Some(retry_ref.clone()))
+                    .into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),

@@ -221,7 +221,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     async fn start(
         &self,
         session_id: &SessionId,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {

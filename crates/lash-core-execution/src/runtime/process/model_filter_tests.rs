@@ -183,17 +183,20 @@ fn process_list_filter_matches_definition_and_status() {
 
     let mut matching = record(&crate::process_id_for_test("matching"), "target", 100);
     matching.identity.definition_id = Some(target_ref);
-    matching.status = ProcessStatus::Completed;
-    matching.outcome = Some(crate::ProcessAwaitOutput::from_tool_output(
-        crate::ToolCallOutput::success(json!(true)),
-    ));
+    matching.lifecycle = crate::ProcessLifecycleState::Terminal {
+        outcome: crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+            json!(true),
+        ))
+        .try_into()
+        .expect("a terminal outcome"),
+    };
     let mut wrong_definition = record(
         &crate::process_id_for_test("wrong-definition"),
         "other",
         100,
     );
     wrong_definition.identity.definition_id = Some(other_ref);
-    wrong_definition.status = matching.status;
+    wrong_definition.lifecycle = crate::ProcessLifecycleState::fixture(matching.status());
 
     assert_eq!(filter.list_mode(), ProcessListMode::All);
     assert!(filter.matches_record(&matching));
@@ -281,17 +284,18 @@ fn process_list_filter_keeps_live_rows_and_bounds_retired_rows() {
     let mut old_live = record(&crate::process_id_for_test("old-live"), "live", 1);
     old_live.updated_at_ms = 1;
     let mut fresh_terminal = record(&crate::process_id_for_test("fresh-terminal"), "fresh", 1);
-    fresh_terminal.status = ProcessStatus::Completed;
+    fresh_terminal.lifecycle = crate::ProcessLifecycleState::fixture(ProcessStatus::Completed);
     fresh_terminal.updated_at_ms = 100;
     let mut old_terminal = record(&crate::process_id_for_test("old-terminal"), "old", 1);
-    old_terminal.status = ProcessStatus::Completed;
+    old_terminal.lifecycle = crate::ProcessLifecycleState::fixture(ProcessStatus::Completed);
     old_terminal.updated_at_ms = 99;
     let mut old_caller_departed = record(
         &crate::process_id_for_test("old-caller-departed"),
         "departed",
         1,
     );
-    old_caller_departed.status = ProcessStatus::CallerDeparted;
+    old_caller_departed.lifecycle =
+        crate::ProcessLifecycleState::fixture(ProcessStatus::CallerDeparted);
     old_caller_departed.updated_at_ms = 99;
 
     assert!(filter.matches_record(&old_live));

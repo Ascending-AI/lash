@@ -487,7 +487,7 @@ pub(super) async fn selected_observer_intents(
         let mut projected = first.clone();
         lash_core::runtime::apply_process_event_projection(&mut projected, &historical)
             .expect("historical observer author has no lifecycle projection");
-        assert_eq!(projected.status, first.status);
+        assert_eq!(projected.status(), first.status());
         assert_eq!(historical.payload["by"]["kind"], "fork_inheritance");
         let mut meta = store
             .load_session_meta(&session_id)

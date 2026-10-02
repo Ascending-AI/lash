@@ -48,7 +48,7 @@ fn is_cancelled_terminal(outcome: &lash_core::ProcessRunOutcome) -> bool {
     matches!(
         outcome,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+            if output.terminal_status() == Some(lash_core::TerminalProcessStatus::Cancelled)
     )
 }
 

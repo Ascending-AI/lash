@@ -335,7 +335,7 @@ pub trait ProcessObserverRegistry: ProcessQuery {
             )
             .await?
             .into_iter()
-            .filter(|record| !record.status.is_retired())
+            .filter(|record| !record.status().is_retired())
             .collect())
     }
 

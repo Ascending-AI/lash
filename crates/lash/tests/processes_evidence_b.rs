@@ -687,13 +687,6 @@ fn processes_area_witnesses_b() {
             let _ = reason;
         }
     });
-    // W0568: lash::process::WakeDeliveryLifecycle::DiscardedUnattributed [variant]
-    variant_witness(|value: &lash::process::WakeDeliveryLifecycle| {
-        matches!(
-            value,
-            lash::process::WakeDeliveryLifecycle::DiscardedUnattributed
-        )
-    });
     // W0569: lash::process::WakeDeliveryLifecycle::Enqueued [variant]
     variant_witness(|value: &lash::process::WakeDeliveryLifecycle| {
         matches!(value, lash::process::WakeDeliveryLifecycle::Enqueued)
@@ -881,7 +874,7 @@ fn processes_area_witnesses_b() {
     });
     // W0638: lash::process::ProcessTerminalSemantics::status [field]
     field_witness(|value: &lash::process::ProcessTerminalSemantics| {
-        let _ = &value.status;
+        let _ = &value.status();
     });
     // W0640: lash::persistence::QueuedCheckpointTurnInput [struct]
     type_witness::<lash::persistence::QueuedCheckpointTurnInput>();

@@ -838,7 +838,7 @@ impl LashlangProcessInput {
                 env_ref,
                 source_type,
                 source_key,
-                self.clone().try_into()?,
+                lash_remote_protocol::RemoteProcessInput::try_from(self.clone())?,
                 self.remote_identity(),
             ),
         )

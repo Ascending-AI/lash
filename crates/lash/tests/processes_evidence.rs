@@ -52,10 +52,6 @@ fn processes_area_witnesses() {
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation;
     // W0008: lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation;
-    // W0009: lash_conformance::WakeDeliveryOrderingGroupFaultInjector::discard_without_reason [function]
-    fn meth_0009<T: lash_conformance::WakeDeliveryOrderingGroupFaultInjector>(_: &T) {
-        let _ = T::discard_without_reason;
-    }
     // W0010: lash::LashCoreBuilder::process_wake_delivery_policy [function]
     let _ = lash::LashCoreBuilder::process_wake_delivery_policy;
     // W0011: lash::SessionCreateRequest::observed_processes [field]
@@ -680,7 +676,7 @@ fn processes_area_witnesses() {
     // W0234: lash::process::ProcessRecord::from_registration_with_clock [function]
     let _ = lash::process::ProcessRecord::from_registration_with_clock;
     // W0235: lash::process::ProcessRegistration::with_event_types [function]
-    let _ = lash::process::ProcessRegistration::with_event_types(
+    let _ = lash::process::ProcessRegistration::<lash::process::ProcessInput>::with_event_types(
         todo!(),
         std::iter::empty::<lash::process::ProcessEventType>(),
     );
@@ -886,7 +882,7 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessStartRequest::into_registration;
     // W0296: lash::process::ProcessStartRequest::new [function]
     let _ = lash::process::ProcessStartRequest::new(
-        todo!(),
+        todo!() as lash::process::ProcessStartTarget,
         todo!(),
         lash::process::LifetimeDecision::Detached,
     );

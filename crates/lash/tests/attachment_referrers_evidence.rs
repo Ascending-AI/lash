@@ -1409,7 +1409,7 @@ finish(cancelled.status);",
             .await
             .expect("read the held child")
             .expect("the child is retained");
-        assert!(held.status.is_live(), "held child: {held:?}");
+        assert!(held.status().is_live(), "held child: {held:?}");
         assert!(held.cancel_request.is_none(), "held child: {held:?}");
         assert_eq!(referrers(&fixture, &id).await, vec![record.clone()]);
         hold.release();
@@ -1432,12 +1432,12 @@ finish(cancelled.status);",
         .await
         .expect("read the terminal child")
         .expect("the child is retained until prune");
-    assert_eq!(terminal.status, lash_core::ProcessStatus::Cancelled);
+    assert_eq!(terminal.status(), lash_core::ProcessStatus::Cancelled);
     witness.release_one();
     assert!(blob_present(&fixture, &id).await);
     eprintln!(
         "seed=0x4215_0102, cancel_contention={delay_cancellation}, child={:?}",
-        terminal.status
+        terminal.status()
     );
     assert_eq!(
         referrers(&fixture, &id).await,

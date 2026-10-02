@@ -181,12 +181,8 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         .expect("read the exhausted process")
         .expect("the exhausted process is retained");
     assert!(!parked.is_terminal(), "a park is non-terminal: {parked:?}");
-    assert_eq!(parked.outcome, None, "a park writes no terminal evidence");
-    let park = parked
-        .park
-        .as_deref()
-        .cloned()
-        .expect("the process is parked");
+    assert_eq!(parked.outcome(), None, "a park writes no terminal evidence");
+    let park = parked.park().cloned().expect("the process is parked");
     let lash_core::store::ParkReason::EngineRetryExhausted {
         attempts, message, ..
     } = &park.reason
@@ -227,7 +223,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
             .get_process(&process_id)
             .await
             .expect("read the process again")
-            .and_then(|record| record.park.map(|park| park.attempts)),
+            .and_then(|record| record.park().map(|park| park.attempts)),
         Some(1),
         "a repeated reconcile does not re-park"
     );
@@ -250,8 +246,8 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         .await
         .expect("read the resumed process")
         .expect("the resumed process is retained");
-    assert_eq!(completed.status, lash_core::ProcessStatus::Completed);
-    assert_eq!(completed.park, None, "completion ends the park");
+    assert_eq!(completed.status(), lash_core::ProcessStatus::Completed);
+    assert_eq!(completed.park(), None, "completion ends the park");
     assert_eq!(
         process_feed(&registry, &process_id).await,
         vec![

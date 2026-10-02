@@ -66,13 +66,6 @@ impl RecordingWakeTurnHandle {
     }
 }
 
-/// Backend-owned seam for creating a discarded wake with no recorded reason. Production APIs
-/// require a typed reason; conformance uses raw backend state to cover nullable durable rows.
-#[async_trait::async_trait]
-pub trait WakeDeliveryOrderingGroupFaultInjector: Send + Sync {
-    async fn discard_without_reason(&self, delivery_id: &str);
-}
-
 /// Expected attachment geometry for a process-terminal control embedded in a
 /// wake-delivery conformance run.
 ///
@@ -88,11 +81,10 @@ pub enum ProcessTerminalWaitWitness {
     Reattach,
 }
 
-/// Proves that blocking, non-blocking, and reasonless discarded heads have the same ordering-group
-/// behavior on every process-registry backend.
+/// Proves that blocking and non-blocking discarded heads have the same ordering-group behavior
+/// on every process-registry backend.
 pub async fn wake_delivery_ordering_group_conformance<BeforeTerminal, BeforeTerminalFuture>(
     registry: Arc<dyn crate::ProcessRegistry>,
-    injector: Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     terminal_wait_witness: ProcessTerminalWaitWitness,
     before_terminal: BeforeTerminal,
@@ -102,21 +94,18 @@ pub async fn wake_delivery_ordering_group_conformance<BeforeTerminal, BeforeTerm
 {
     ordering_group_discard_case(
         &registry,
-        &injector,
         "blocking",
-        Some(crate::WakeDiscardReason::Expired),
+        crate::WakeDiscardReason::Expired,
         true,
     )
     .await;
     ordering_group_discard_case(
         &registry,
-        &injector,
         "non-blocking",
-        Some(crate::WakeDiscardReason::SequenceRewound),
+        crate::WakeDiscardReason::SequenceRewound,
         false,
     )
     .await;
-    ordering_group_discard_case(&registry, &injector, "reasonless", None, false).await;
     assert_process_terminal_wait(
         &registry,
         &process_work,
@@ -204,9 +193,8 @@ async fn assert_process_terminal_wait<BeforeTerminal, BeforeTerminalFuture>(
 )]
 async fn ordering_group_discard_case(
     registry: &Arc<dyn crate::ProcessRegistry>,
-    injector: &Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
     case: &str,
-    reason: Option<crate::WakeDiscardReason>,
+    reason: crate::WakeDiscardReason,
     blocks: bool,
 ) {
     let target_session_id = SessionId::from(format!("wake-ordering-group-target-{case}"));
@@ -244,22 +232,17 @@ async fn ordering_group_discard_case(
         .next()
         .expect("ordering-group head is claimable");
     assert_eq!(head.delivery_id, wakes[0].wake_id);
-    match reason {
-        Some(reason) => assert_eq!(
-            registry
-                .discard_wake_delivery(
-                    &head.delivery_id,
-                    head.claim_token().expect("ordering-group head claim token"),
-                    reason,
-                )
-                .await
-                .expect("discard typed ordering-group head"),
-            crate::WakeDeliveryClaimOutcome::Applied
-        ),
-        None => {
-            injector.discard_without_reason(&head.delivery_id).await;
-        }
-    }
+    assert_eq!(
+        registry
+            .discard_wake_delivery(
+                &head.delivery_id,
+                head.claim_token().expect("ordering-group head claim token"),
+                reason,
+            )
+            .await
+            .expect("discard typed ordering-group head"),
+        crate::WakeDeliveryClaimOutcome::Applied
+    );
 
     let claimed = registry
         .claim_pending_wake_deliveries(1)

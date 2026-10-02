@@ -704,11 +704,13 @@ async fn apply_operation(
             if result.is_ok()
                 && let Some(expected) = model.process_mut(&id).expected_mut()
             {
-                if expected.wait.as_ref() != Some(&wait_state(&id)) {
+                if expected.wait() != Some(&wait_state(&id)) {
                     event_sequences.advance(expected);
                 }
-                expected.wait = Some(wait_state(&id));
-                expected.status = crate::ProcessStatus::Waiting;
+                expected.lifecycle = crate::ProcessLifecycleState::Waiting {
+                    wait: wait_state(&id),
+                    park: None,
+                };
             }
         }
         StoreContractOp::ClearWait { process, stale } => {
@@ -731,13 +733,10 @@ async fn apply_operation(
             .await?;
             if result.is_ok()
                 && let Some(expected) = model.process_mut(&id).expected_mut()
+                && expected.wait().is_some()
             {
-                if expected.wait.take().is_some() {
-                    event_sequences.advance(expected);
-                }
-                if !expected.is_terminal() {
-                    expected.status = crate::ProcessStatus::Running;
-                }
+                event_sequences.advance(expected);
+                expected.lifecycle = crate::ProcessLifecycleState::running();
             }
         }
         StoreContractOp::SetExternalRef { process, value } => {
@@ -866,15 +865,13 @@ async fn apply_operation(
                         shape[RunShapeCounter::TerminalTransitions].saturating_add(1);
                     if let Some(expected) = model.process_mut(&id).expected_mut() {
                         event_sequences.advance(expected);
-                        expected.wait = None;
                         let settled = terminal_outcome_under_standing_cancel(
                             output,
                             expected.cancel_request.as_deref(),
                         );
-                        expected.status = settled
-                            .terminal_status()
-                            .expect("generated output is terminal");
-                        expected.outcome = Some(settled);
+                        expected.lifecycle = crate::ProcessLifecycleState::Terminal {
+                            outcome: settled.try_into().expect("generated output is terminal"),
+                        };
                     }
                 }
             }

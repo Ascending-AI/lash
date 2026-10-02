@@ -221,7 +221,7 @@ pub(super) async fn run_once_process_list_stress(
                         },
                     )
                     .await?;
-                if waiting.wait.is_none() {
+                if waiting.wait().is_none() {
                     anyhow::bail!("process_list_stress wait facet did not round-trip");
                 }
                 registry.clear_process_wait(&signal_process_id).await?;
@@ -355,7 +355,7 @@ fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json
                 lash_core::ProcessHandleView::new(
                     record.id.clone(),
                     record.identity.clone(),
-                    record.status,
+                    record.status(),
                 )
             })
             .collect::<Vec<_>>()

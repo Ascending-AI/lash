@@ -443,7 +443,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
         .expect("read the record")
         .expect("the record stands");
     assert!(
-        after.park.as_deref().is_some_and(|park| !park.refusing),
+        after.park().is_some_and(|park| !park.refusing),
         "the rerun began under the recorded park, the one write the read leads to"
     );
     assert_eq!(

@@ -1141,12 +1141,12 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// is journaled. The command carries only the published digest.
     pub(crate) async fn process_start_execution_env(
         &self,
-        registration: crate::ProcessRegistration,
-    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
+        registration: crate::ProcessStartRegistration,
+    ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
         if registration.env_ref.is_some()
             || matches!(
                 registration.input.as_ref(),
-                crate::ProcessInput::External { .. }
+                crate::ProcessStartTarget::Input(crate::ProcessInput::External { .. })
             )
         {
             return Ok(registration);
@@ -1619,7 +1619,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         };
         if !matches!(
             draft.target,
-            crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. }
+            crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { .. })
+                | crate::ProcessStartTarget::Definition { .. }
         ) {
             return Ok(());
         }
@@ -1636,7 +1637,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .as_ref()
             .and_then(crate::TriggerRouter::process_engines)
         else {
-            if matches!(draft.target, crate::ProcessInput::Definition { .. }) {
+            if matches!(draft.target, crate::ProcessStartTarget::Definition { .. }) {
                 return Err(crate::RuntimeEffectControllerError::foreign(
                     "process_definition_store_unavailable",
                     crate::TurnFailureCause::Outcome,

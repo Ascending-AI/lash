@@ -39,7 +39,7 @@ fn is_cancelled(outcome: &Result<lash_core::ProcessRunOutcome, PluginError>) -> 
     matches!(
         outcome,
         Ok(lash_core::ProcessRunOutcome::Terminal { output, .. })
-            if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+            if output.terminal_status() == Some(lash_core::TerminalProcessStatus::Cancelled)
     )
 }
 

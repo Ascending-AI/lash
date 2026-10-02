@@ -6,14 +6,14 @@ use crate::SessionId;
 use crate::plugin::PluginError;
 
 use super::events::{
-    ProcessAwaitOutput, ProcessEvent, ProcessEventAppendRequest, ProcessEventKind,
-    ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessWakeDelivery,
-    default_process_event_types, is_runtime_lifecycle_event_type, runtime_lifecycle_event_type,
+    ProcessEvent, ProcessEventAppendRequest, ProcessEventKind, ProcessEventSemanticsSpec,
+    ProcessTerminal, ProcessTerminalSemantics, ProcessWakeDelivery, default_process_event_types,
+    is_runtime_lifecycle_event_type, runtime_lifecycle_event_type,
 };
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus,
-    WaitState,
+    ProcessExternalRef, ProcessLifecycleState, ProcessRecord, ProcessRegistration, ProcessStarted,
+    ProcessStatus, TerminalProcessStatus, WaitState,
 };
 
 pub fn validate_generic_process_event_append(
@@ -229,7 +229,7 @@ pub fn prepare_process_transition(
                 {
                     return Err(PluginError::ProcessAlreadyTerminal {
                         process_id: record.id.clone(),
-                        status: record.status,
+                        status: record.status(),
                     });
                 }
                 // Nothing recorded yet: this writer names the owner.
@@ -268,23 +268,23 @@ pub fn prepare_process_transition(
             append
         }
         ProcessTransition::RecordCallerDeparture => {
-            if record.status == ProcessStatus::CallerDeparted {
+            if record.status() == ProcessStatus::CallerDeparted {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
             ProcessEventAppendRequest::caller_departed(&record.id)
         }
         ProcessTransition::EnterWait(wait) => {
-            if record.status == ProcessStatus::Waiting && record.wait.as_ref() == Some(&wait) {
+            if record.wait() == Some(&wait) {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
             let mut append = ProcessEventAppendRequest::wait_entered(&record.id, &wait);
-            if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
+            if record.is_terminal() || record.status() == ProcessStatus::CallerDeparted {
                 route_transition_refusal_to_fold(&mut append)?;
             }
             append
         }
         ProcessTransition::ClearWait => {
-            let Some(wait) = record.wait.as_ref() else {
+            let Some(wait) = record.wait() else {
                 return Ok(ProcessTransitionPlan::Unchanged);
             };
             ProcessEventAppendRequest::wait_cleared(&record.id, wait)
@@ -295,13 +295,13 @@ pub fn prepare_process_transition(
             }
             let mut append =
                 ProcessEventAppendRequest::parked(&record.id, &park, record.last_event_sequence);
-            if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
+            if record.is_terminal() || record.status() == ProcessStatus::CallerDeparted {
                 route_transition_refusal_to_fold(&mut append)?;
             }
             append
         }
         ProcessTransition::BeginParkedRerun => {
-            let Some(park) = record.park.as_deref().filter(|park| park.refusing) else {
+            let Some(park) = record.park().filter(|park| park.refusing) else {
                 return Ok(ProcessTransitionPlan::Unchanged);
             };
             ProcessEventAppendRequest::park_rerun_began(
@@ -327,19 +327,6 @@ fn route_transition_refusal_to_fold(
     Ok(())
 }
 
-pub fn apply_process_status_projection(
-    record: &mut ProcessRecord,
-    status: ProcessStatus,
-    updated_at_ms: u64,
-) {
-    record.status = status;
-    if record.status.is_terminal() {
-        record.wait = None;
-        record.park = None;
-    }
-    record.updated_at_ms = updated_at_ms;
-}
-
 /// Apply the caller-departure transition to a process record fold.
 ///
 /// The legal transitions are exactly `running -> caller_departed` and the
@@ -360,20 +347,20 @@ pub(super) fn apply_caller_departure(record: &mut ProcessRecord) -> Result<(), P
             record.id
         )));
     }
-    match record.status {
-        ProcessStatus::CallerDeparted => Ok(()),
-        ProcessStatus::Running => {
-            record.status = ProcessStatus::CallerDeparted;
+    match &record.lifecycle {
+        ProcessLifecycleState::CallerDeparted {} => Ok(()),
+        ProcessLifecycleState::Running { .. } => {
+            record.lifecycle = ProcessLifecycleState::CallerDeparted {};
             Ok(())
         }
-        status if status.is_terminal() => Err(PluginError::Session(format!(
+        ProcessLifecycleState::Terminal { .. } => Err(PluginError::Session(format!(
             "terminal process `{}` cannot record a caller departure",
             record.id
         ))),
-        status => Err(PluginError::Session(format!(
+        ProcessLifecycleState::Waiting { .. } => Err(PluginError::Session(format!(
             "process `{}` cannot record a caller departure from `{}`",
             record.id,
-            status.label()
+            record.status().label()
         ))),
     }
 }
@@ -412,32 +399,47 @@ pub fn apply_process_event_projection(
                 }
             }
         }
-        ProcessEventKind::Waiting => {
-            if record.is_terminal() {
+        // A wait is a fact of the process's own execution past a refusal, so
+        // entering or leaving one ends its park (NOW-B).
+        ProcessEventKind::Waiting => match &record.lifecycle {
+            ProcessLifecycleState::Terminal { .. } => {
                 return Err(PluginError::Session(format!(
                     "terminal process `{}` cannot enter a wait state",
                     record.id
                 )));
             }
-            if record.status == ProcessStatus::CallerDeparted {
+            ProcessLifecycleState::CallerDeparted {} => {
                 return Err(PluginError::Session(format!(
                     "caller-departed process `{}` cannot enter a wait state",
                     record.id
                 )));
             }
-            record.wait = Some(lifecycle_payload(event, "wait")?);
-            record.status = ProcessStatus::Waiting;
-        }
-        ProcessEventKind::Resumed => {
-            if record.status == ProcessStatus::CallerDeparted {
+            ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
+                record.lifecycle = ProcessLifecycleState::Waiting {
+                    wait: lifecycle_payload(event, "wait")?,
+                    park: None,
+                };
+            }
+        },
+        ProcessEventKind::Resumed => match &record.lifecycle {
+            // An ended process stays ended: no later fact takes its outcome
+            // back, so a resume cannot return it to running.
+            ProcessLifecycleState::Terminal { .. } => {
+                return Err(PluginError::ProcessAlreadyTerminal {
+                    process_id: record.id.clone(),
+                    status: record.status(),
+                });
+            }
+            ProcessLifecycleState::CallerDeparted {} => {
                 return Err(PluginError::Session(format!(
                     "caller-departed process `{}` cannot resume",
                     record.id
                 )));
             }
-            record.wait = None;
-            record.status = ProcessStatus::Running;
-        }
+            ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
+                record.lifecycle = ProcessLifecycleState::running();
+            }
+        },
         ProcessEventKind::ExternalRefSet => {
             let external_ref = lifecycle_payload(event, "external_ref")?;
             // Compare-and-set on the segment ordinal, never last-write-wins.
@@ -471,18 +473,17 @@ pub fn apply_process_event_projection(
             let request = cancel_request_payload(&event.payload)?;
             // Replaying the stored StartFailed event must repair its own fold
             // even though that same event made this record terminal.
-            let own_terminal_replay = record.status == ProcessStatus::Cancelled
-                && record.last_event_sequence == event.sequence
-                && request.origin == CancelOrigin::StartFailed
-                && event
-                    .semantics
-                    .terminal
-                    .as_ref()
-                    .is_some_and(|terminal| terminal.status == ProcessStatus::Cancelled);
+            let own_terminal_replay =
+                record.status() == ProcessStatus::Cancelled
+                    && record.last_event_sequence == event.sequence
+                    && request.origin == CancelOrigin::StartFailed
+                    && event.semantics.terminal.as_ref().is_some_and(|terminal| {
+                        terminal.status() == TerminalProcessStatus::Cancelled
+                    });
             if record.is_terminal() && !own_terminal_replay {
                 return Err(PluginError::ProcessAlreadyTerminal {
                     process_id: record.id.clone(),
-                    status: record.status,
+                    status: record.status(),
                 });
             }
             match record.cancel_request.as_deref() {
@@ -501,13 +502,14 @@ pub fn apply_process_event_projection(
             apply_caller_departure(record)?;
         }
         ProcessEventKind::Parked => {
-            if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
+            let status = record.status();
+            let process_id = record.id.clone();
+            let Some(slot) = record.lifecycle.park_mut() else {
                 return Err(PluginError::Session(format!(
-                    "process `{}` cannot park from `{}`",
-                    record.id,
-                    record.status.label()
+                    "process `{process_id}` cannot park from `{}`",
+                    status.label()
                 )));
-            }
+            };
             let reason: crate::store::ParkReason = lifecycle_payload(event, "reason")?;
             let engine: Option<crate::store::EnginePark> = event
                 .payload
@@ -531,7 +533,7 @@ pub fn apply_process_event_projection(
                         event.event_type
                     ))
                 })?;
-            match record.park.as_deref_mut() {
+            match slot.as_deref_mut() {
                 Some(park) => {
                     park.reason = reason;
                     if engine.is_some() {
@@ -545,7 +547,7 @@ pub fn apply_process_event_projection(
                     park.refusing = true;
                 }
                 None => {
-                    record.park = Some(Box::new(crate::store::ProcessPark {
+                    *slot = Some(Box::new(crate::store::ProcessPark {
                         reason,
                         park_id: crate::store::ParkId::from_feed_sequence(event.sequence),
                         since_ms: event.occurred_at,
@@ -559,7 +561,11 @@ pub fn apply_process_event_projection(
             }
         }
         ProcessEventKind::ParkRerunBegan => {
-            if let Some(park) = record.park.as_deref_mut() {
+            if let Some(park) = record
+                .lifecycle
+                .park_mut()
+                .and_then(|slot| slot.as_deref_mut())
+            {
                 park.refusing = false;
             }
         }
@@ -587,19 +593,21 @@ pub fn apply_process_event_projection(
             | ProcessEventKind::Waiting
             | ProcessEventKind::Resumed
             | ProcessEventKind::Custom
-    ) {
-        record.park = None;
+    ) && let Some(slot) = record.lifecycle.park_mut()
+    {
+        *slot = None;
     }
 
-    if let Some(terminal) = event.semantics.terminal.clone() {
+    if let Some(terminal) = event.semantics.terminal.as_ref() {
         if record.is_terminal() {
             return Ok(());
         }
-        record.outcome = Some(terminal.outcome.clone());
-        apply_process_status_projection(record, terminal.into_status(), event.occurred_at);
-    } else {
-        record.updated_at_ms = event.occurred_at;
+        // The outcome is the state: it takes the wait and the park with it.
+        record.lifecycle = ProcessLifecycleState::Terminal {
+            outcome: terminal.outcome.clone(),
+        };
     }
+    record.updated_at_ms = event.occurred_at;
     record.last_event_sequence = event.sequence;
     Ok(())
 }
@@ -616,7 +624,7 @@ pub fn process_park_transitions(
 ) -> Vec<(crate::store::ParkId, crate::store::ParkEventKind)> {
     use crate::store::{ParkCancelCause, ParkEventKind, UnparkCause};
     let closing = |park: &crate::store::ProcessPark| {
-        let kind = if after.status == ProcessStatus::Cancelled {
+        let kind = if after.status() == ProcessStatus::Cancelled {
             ParkEventKind::Cancelled {
                 cause: ParkCancelCause::ProcessCancelled {
                     origin: after
@@ -628,7 +636,7 @@ pub fn process_park_transitions(
         } else if after.is_terminal() {
             ParkEventKind::Unparked {
                 cause: UnparkCause::ProcessTerminal {
-                    status: after.status,
+                    status: after.status(),
                 },
             }
         } else {
@@ -646,7 +654,7 @@ pub fn process_park_transitions(
             },
         )
     };
-    match (before, after.park.as_deref()) {
+    match (before, after.park()) {
         (None, None) => Vec::new(),
         (None, Some(opened)) => vec![opening(opened)],
         (Some(closed), None) => vec![closing(closed)],
@@ -827,7 +835,7 @@ pub fn prepare_process_event_append(
     {
         return Err(PluginError::ProcessAlreadyTerminal {
             process_id: process_id.clone(),
-            status: record.status,
+            status: record.status(),
         });
     }
     let runtime_owned = runtime_lifecycle_event_type(&request.event_type);
@@ -868,8 +876,7 @@ pub fn prepare_process_event_append(
                 crate::ToolCancellation::runtime("process start failed before execution")
                     .with_origin(cancel.origin);
             semantics.terminal = Some(ProcessTerminalSemantics {
-                status: ProcessStatus::Cancelled,
-                outcome: ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                outcome: ProcessTerminal::from_tool_output(crate::ToolCallOutput::cancelled(
                     cancellation,
                 )),
             });
@@ -886,7 +893,7 @@ pub fn prepare_process_event_append(
     if semantics.terminal.is_some() && record.is_terminal() {
         return Err(PluginError::ProcessAlreadyTerminal {
             process_id: process_id.clone(),
-            status: record.status,
+            status: record.status(),
         });
     }
     semantics.signal_wait = super::events::process_signal_name_from_event_type(&request.event_type)
@@ -965,7 +972,7 @@ fn select_process_signal_wait(
                 ..
             },
         ..
-    }) = &record.wait
+    }) = record.wait()
         && name == signal_name
         && waiting_type == event_type
     {
@@ -1232,11 +1239,7 @@ pub enum ProcessRegistrationRefusal {
     EmptyEventTypeName,
     DuplicateEventType,
     ReservedRuntimeEventType,
-    NonTerminalTerminalStatus,
     TerminalEventWithoutAwaitOutput,
-    /// A start by definition id reached registration unresolved: only
-    /// realization resolves one, into the engine start its definition is.
-    UnresolvedDefinitionInput,
 }
 
 impl ProcessRegistrationRefusal {
@@ -1251,9 +1254,7 @@ impl ProcessRegistrationRefusal {
         Self::EmptyEventTypeName,
         Self::DuplicateEventType,
         Self::ReservedRuntimeEventType,
-        Self::NonTerminalTerminalStatus,
         Self::TerminalEventWithoutAwaitOutput,
-        Self::UnresolvedDefinitionInput,
     ];
 }
 
@@ -1356,16 +1357,6 @@ pub(crate) fn classify_process_registration(
                 ));
             }
         }
-        super::model::ProcessInput::Definition { definition_id, .. } => {
-            return Err(refuse(
-                ProcessRegistrationRefusal::UnresolvedDefinitionInput,
-                format!(
-                    "process `{}` names definition `{definition_id}` unresolved; a start by id \
-                     registers the engine start its definition resolves to",
-                    registration_name(registration)
-                ),
-            ));
-        }
         super::model::ProcessInput::SessionTurn { definition_key, .. } => {
             if definition_key.trim().is_empty() {
                 return Err(refuse(
@@ -1422,28 +1413,18 @@ pub(crate) fn classify_process_registration(
                 ),
             ));
         }
-        if let Some(terminal) = &event_type.semantics.terminal {
-            if !terminal.status.is_terminal() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::NonTerminalTerminalStatus,
-                    format!(
-                        "terminal event `{}` for process `{}` must declare a terminal status, got `{}`",
-                        event_type.name,
-                        registration_name(registration),
-                        terminal.status.label()
-                    ),
-                ));
-            }
-            if terminal.status != ProcessStatus::Completed && terminal.await_output.is_none() {
-                return Err(refuse(
-                    ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput,
-                    format!(
-                        "terminal event `{}` for process `{}` must declare await output",
-                        event_type.name,
-                        registration_name(registration)
-                    ),
-                ));
-            }
+        if let Some(terminal) = &event_type.semantics.terminal
+            && terminal.status != TerminalProcessStatus::Completed
+            && terminal.await_output.is_none()
+        {
+            return Err(refuse(
+                ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput,
+                format!(
+                    "terminal event `{}` for process `{}` must declare await output",
+                    event_type.name,
+                    registration_name(registration)
+                ),
+            ));
         }
     }
     Ok(())

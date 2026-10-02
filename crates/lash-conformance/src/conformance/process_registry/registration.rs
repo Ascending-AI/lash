@@ -348,7 +348,7 @@ pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegi
         )
         .await
         .expect("register process with observers");
-    assert_eq!(record.status, ProcessStatus::Running);
+    assert_eq!(record.status(), ProcessStatus::Running);
     assert_eq!(
         registry
             .observers_for_process(&record.id)

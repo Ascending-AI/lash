@@ -117,8 +117,7 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
     let input = run_input(&process_id, &registration);
     let diverged_reason = |record: &lash_core::ProcessRecord| {
         record
-            .park
-            .as_deref()
+            .park()
             .map(|park| park.reason.clone())
             .expect("the diverged process is parked")
     };
@@ -141,7 +140,7 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
         .expect("read the diverged process")
         .expect("the diverged process is retained");
     assert!(!parked.is_terminal(), "a park is non-terminal: {parked:?}");
-    assert_eq!(parked.outcome, None, "a park writes no terminal evidence");
+    assert_eq!(parked.outcome(), None, "a park writes no terminal evidence");
     assert_eq!(
         diverged_reason(&parked),
         lash_core::store::ParkReason::EffectReplayDivergence {
@@ -150,7 +149,7 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
         },
         "the park names the diverged effect kind"
     );
-    let opened = parked.park.as_deref().cloned().expect("parked");
+    let opened = parked.park().cloned().expect("parked");
     assert_eq!(opened.attempts, 1);
     assert!(opened.refusing);
 
@@ -176,7 +175,7 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
         .await
         .expect("read the re-parked process")
         .expect("the re-parked process is retained");
-    let park = reparked.park.as_deref().expect("the process stays parked");
+    let park = reparked.park().expect("the process stays parked");
     assert_eq!(park.park_id, opened.park_id, "a re-park keeps the park");
     assert_eq!(park.since_ms, opened.since_ms, "a re-park keeps its since");
     assert_eq!(park.attempts, 2, "a re-park counts the refusal");
@@ -207,8 +206,8 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
         .await
         .expect("read the completed process")
         .expect("the completed process is retained");
-    assert_eq!(completed.status, lash_core::ProcessStatus::Completed);
-    assert_eq!(completed.park, None, "completion ends the park");
+    assert_eq!(completed.status(), lash_core::ProcessStatus::Completed);
+    assert_eq!(completed.park(), None, "completion ends the park");
     assert_eq!(
         process_feed(&registry, &process_id).await,
         vec![
@@ -367,8 +366,8 @@ pub(super) async fn a_segment_retried_under_another_generation_parks_before_its_
             .expect("read the parked process")
             .expect("retained");
         assert!(!parked.is_terminal(), "{case}: a park is non-terminal");
-        assert_eq!(parked.outcome, None, "{case}");
-        let park = parked.park.as_deref().cloned().expect("parked");
+        assert_eq!(parked.outcome(), None, "{case}");
+        let park = parked.park().cloned().expect("parked");
         assert_eq!(
             park.reason,
             lash_core::store::ParkReason::retired_process_generation(
@@ -408,11 +407,11 @@ pub(super) async fn a_segment_retried_under_another_generation_parks_before_its_
             .expect("read the completed process")
             .expect("retained");
         assert_eq!(
-            completed.status,
+            completed.status(),
             lash_core::ProcessStatus::Completed,
             "{case}"
         );
-        assert_eq!(completed.park, None, "{case}: completion ends the park");
+        assert_eq!(completed.park(), None, "{case}: completion ends the park");
         assert_eq!(
             process_feed(&registry, &process_id).await.len(),
             2,

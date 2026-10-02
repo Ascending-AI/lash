@@ -100,7 +100,7 @@ pub(crate) struct PreparedTriggerDraft {
     pub source: Value,
     pub payload_schema: lash_core::LashSchema,
     pub source_capture: lash_core::TriggerSourceCapture,
-    pub target: lash_core::ProcessInput,
+    pub target: lash_core::ProcessStartTarget,
     pub target_identity: lash_core::ProcessIdentity,
     pub event_types: Vec<lash_core::ProcessEventType>,
     pub input_template: BTreeMap<String, lash_core::TriggerInputBinding>,
@@ -215,7 +215,7 @@ pub(crate) async fn prepare_trigger_draft(
         &request.source.source_type,
         &source_key,
     )?;
-    let target = lash_core::ProcessInput::Definition {
+    let target = lash_core::ProcessStartTarget::Definition {
         definition_id: resolved.id().clone(),
         args: serde_json::Map::new(),
         signature_claim: Some(resolved.definition.signature.clone()),

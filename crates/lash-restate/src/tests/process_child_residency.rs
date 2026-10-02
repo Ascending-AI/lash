@@ -85,7 +85,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         matches!(
             outcome,
             lash_core::ProcessRunOutcome::Terminal { ref output, .. }
-                if output.terminal_status() == Some(lash_core::ProcessStatus::Completed)
+                if output.terminal_status() == Some(lash_core::TerminalProcessStatus::Completed)
         ),
         "the child turn completed: {outcome:#?}"
     );

@@ -178,7 +178,7 @@ async fn retention_before_a_wait_match_returns_the_typed_error_without_writing_a
     let processes =
         RetainingSignalWaitProcesses::new([lash_core::ProcessEventReadOutcome::NoLongerRetained(
             lash_core::ProcessEventHistoryRetention::Pruned {
-                terminal_label: "completed".to_string(),
+                terminal_label: lash_core::RetiredProcessStatus::Completed,
                 pruned_at_ms: 42,
             },
         )]);
@@ -191,7 +191,7 @@ async fn retention_before_a_wait_match_returns_the_typed_error_without_writing_a
         SignalWaitSetupError::Read(lash_core::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms: 42,
-        }) if terminal_label == "completed"
+        }) if terminal_label == lash_core::RetiredProcessStatus::Completed
     ));
     assert!(processes.written_waits().is_empty());
 }
@@ -235,7 +235,7 @@ async fn retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes
         lash_core::ProcessEventReadOutcome::Retained(first_page),
         lash_core::ProcessEventReadOutcome::NoLongerRetained(
             lash_core::ProcessEventHistoryRetention::Pruned {
-                terminal_label: "completed".to_string(),
+                terminal_label: lash_core::RetiredProcessStatus::Completed,
                 pruned_at_ms: 43,
             },
         ),

@@ -1049,7 +1049,8 @@ async fn a_reserved_delivery_crash_recovers_one_bound_process(engine: Engine) {
                     target: input
                         .clone()
                         .into_process_input()
-                        .expect("the process input serializes"),
+                        .expect("the process input serializes")
+                        .into(),
                     target_identity: input.process_identity(),
                     event_types: lash_lashlang_runtime::lashlang_process_event_types(),
                     input_template: std::collections::BTreeMap::new(),

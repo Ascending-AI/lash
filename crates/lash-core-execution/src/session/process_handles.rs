@@ -25,7 +25,7 @@ impl RuntimeExecutionContext<'_> {
     pub(super) fn process_status_value(status: &crate::ProcessRecord) -> serde_json::Value {
         json!({
             "process_id": status.id,
-            "status": status.status.label(),
+            "status": status.status().label(),
         })
     }
 

@@ -169,8 +169,7 @@ pub async fn parked_processes_list_by_since_with_filters_and_keyset_pages(
 
     let since = |record: &ProcessRecord| {
         record
-            .park
-            .as_deref()
+            .park()
             .map(|park| park.since_ms)
             .expect("the process is parked")
     };
@@ -278,15 +277,11 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
         )
         .await
         .expect("park the process");
-    let opened = first
-        .park
-        .as_deref()
-        .cloned()
-        .expect("the first refusal parks");
+    let opened = first.park().cloned().expect("the first refusal parks");
     assert_eq!(opened.attempts, 1);
     assert!(opened.refusing);
     assert!(!first.is_terminal(), "a park is never terminal");
-    assert_eq!(first.outcome, None, "a park writes no terminal evidence");
+    assert_eq!(first.outcome(), None, "a park writes no terminal evidence");
     assert_eq!(
         opened.build_generation,
         Some(checkpoint_generation.clone()),
@@ -320,7 +315,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
         .await
         .expect("repeat the park write");
     assert_eq!(
-        repeated.park.as_deref(),
+        repeated.park(),
         Some(&opened),
         "a refusing park is unchanged by a repeated write"
     );
@@ -329,20 +324,24 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
         .begin_parked_rerun_with_authority(&id, &authority)
         .await
         .expect("begin a rerun");
-    let rerunning = rerun.park.as_deref().expect("a rerun keeps the park");
+    let rerunning = rerun.park().expect("a rerun keeps the park");
     assert!(!rerunning.refusing, "a rerun stops the park refusing");
     assert_eq!(rerunning.park_id, opened.park_id);
     let again = registry
         .begin_parked_rerun_with_authority(&id, &authority)
         .await
         .expect("begin the rerun again");
-    assert_eq!(again.park, rerun.park, "a second rerun start is unchanged");
+    assert_eq!(
+        again.park(),
+        rerun.park(),
+        "a second rerun start is unchanged"
+    );
 
     let reparked = registry
         .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
         .expect("the rerun refuses again");
-    let park = reparked.park.as_deref().expect("the process stays parked");
+    let park = reparked.park().expect("the process stays parked");
     assert_eq!(park.park_id, opened.park_id, "a re-park keeps its park id");
     assert_eq!(park.since_ms, opened.since_ms, "a re-park keeps its since");
     assert_eq!(park.attempts, 2, "a re-park counts the refusal");
@@ -366,7 +365,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
 )]
 pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn ProcessRegistry>) {
     let (id, authority, first) = parked(&registry, cell_divergence()).await;
-    let opened = first.park.as_deref().cloned().expect("the refusal parks");
+    let opened = first.park().cloned().expect("the refusal parks");
     registry
         .begin_parked_rerun_with_authority(&id, &authority)
         .await
@@ -388,7 +387,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
         )
         .await
         .expect("the rerun got past replay and waits");
-    assert_eq!(progressed.park, None, "progress ends the park");
+    assert_eq!(progressed.park(), None, "progress ends the park");
     assert_eq!(
         transitions_of(&registry, &id).await,
         vec![
@@ -420,7 +419,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
         .park_process_with_authority(&id, divergence("llm_call").into(), &authority)
         .await
         .expect("a later refusal parks again");
-    let park = reparked.park.as_deref().expect("a new park");
+    let park = reparked.park().expect("a new park");
     assert_ne!(park.park_id, opened.park_id, "a new park has a new id");
     assert_eq!(park.attempts, 1);
     assert_eq!(transitions_of(&registry, &id).await.len(), 3);
@@ -438,7 +437,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let (failed, _authority, record) = parked(&registry, cell_divergence()).await;
-    let park_id = record.park.as_deref().expect("parked").park_id;
+    let park_id = record.park().expect("parked").park_id;
     let completed = registry
         .complete_process(
             &failed,
@@ -459,7 +458,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
         .await
         .expect("read the failed process")
         .expect("the failed process is retained");
-    assert_eq!(terminal.park, None, "a terminal process is not parked");
+    assert_eq!(terminal.park(), None, "a terminal process is not parked");
     assert_eq!(
         transitions_of(&registry, &failed).await.last(),
         Some(&(
@@ -473,7 +472,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
     );
 
     let (cancelled, _authority, record) = parked(&registry, cell_divergence()).await;
-    let park_id = record.park.as_deref().expect("parked").park_id;
+    let park_id = record.park().expect("parked").park_id;
     let requested = registry
         .request_process_cancel(
             &record.id,
@@ -484,7 +483,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
         .await
         .expect("request the parked process's cancel");
     assert!(
-        requested.park.is_some(),
+        requested.park().is_some(),
         "a cancel request alone does not end the park"
     );
     registry

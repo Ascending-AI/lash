@@ -242,8 +242,21 @@ pub(super) fn project_trigger_source_capture(
 
 fn project_trigger_process_input(
     identity: &mut crate::stable_identity::IdentityEncoder,
-    input: &crate::ProcessInput,
+    target: &crate::ProcessStartTarget,
 ) {
+    let input = match target {
+        crate::ProcessStartTarget::Input(input) => input,
+        crate::ProcessStartTarget::Definition {
+            definition_id,
+            args,
+            ..
+        } => {
+            identity.tag(5);
+            identity.string(definition_id.as_str());
+            project_process_payload_leaf(identity, &serde_json::Value::Object(args.clone()));
+            return;
+        }
+    };
     match input {
         crate::ProcessInput::Engine { kind, payload } => {
             identity.tag(2);
@@ -269,15 +282,6 @@ fn project_trigger_process_input(
         crate::ProcessInput::External { metadata } => {
             identity.tag(4);
             project_process_payload_leaf(identity, metadata);
-        }
-        crate::ProcessInput::Definition {
-            definition_id,
-            args,
-            ..
-        } => {
-            identity.tag(5);
-            identity.string(definition_id.as_str());
-            project_process_payload_leaf(identity, &serde_json::Value::Object(args.clone()));
         }
     }
 }
@@ -1074,7 +1078,7 @@ impl TriggerRouter {
         // occurrence would make a delivery fail on catalog drift the
         // subscription already survived, and every delivery for one reservation
         // must stay deterministic.
-        let registration = crate::ProcessRegistration::new(
+        let registration = crate::ProcessStartRegistration::of_target(
             target,
             crate::ProcessProvenance::new(subscription.registrant.clone())
                 .with_caused_by(Some(causal_ref.clone())),
@@ -1432,17 +1436,17 @@ fn materialize_trigger_process_args(
 }
 
 fn apply_trigger_inputs(
-    mut target: crate::ProcessInput,
+    mut target: crate::ProcessStartTarget,
     args: serde_json::Map<String, serde_json::Value>,
-) -> Result<crate::ProcessInput, PluginError> {
+) -> Result<crate::ProcessStartTarget, PluginError> {
     match &mut target {
-        crate::ProcessInput::Definition {
+        crate::ProcessStartTarget::Definition {
             args: target_args, ..
         } => {
             *target_args = args;
             Ok(target)
         }
-        crate::ProcessInput::Engine { payload, .. } => {
+        crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { payload, .. }) => {
             let object = payload.as_object_mut().ok_or_else(|| {
                 PluginError::Session(
                     "trigger engine target payload must be a JSON object".to_string(),
@@ -1451,7 +1455,10 @@ fn apply_trigger_inputs(
             object.insert("args".to_string(), serde_json::Value::Object(args));
             Ok(target)
         }
-        other => Err(PluginError::Session(format!(
+        crate::ProcessStartTarget::Input(
+            other
+            @ (crate::ProcessInput::SessionTurn { .. } | crate::ProcessInput::External { .. }),
+        ) => Err(PluginError::Session(format!(
             "trigger target must be an engine process, got {}",
             other.engine_kind()
         ))),

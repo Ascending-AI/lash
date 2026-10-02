@@ -208,7 +208,7 @@ pub(super) async fn signal_id_deduplicates_append_without_caller_replay_key(engi
                 .await
                 .expect("process read")
                 .expect("process exists");
-            if matches!(record.wait.as_ref().map(|wait| &wait.kind), Some(lash_core::WaitKind::Signal { name, .. }) if name == SIGNAL)
+            if matches!(record.wait().map(|wait| &wait.kind), Some(lash_core::WaitKind::Signal { name, .. }) if name == SIGNAL)
             {
                 return;
             }

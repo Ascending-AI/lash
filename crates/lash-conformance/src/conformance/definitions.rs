@@ -326,8 +326,8 @@ impl World {
         id: &crate::ProcessDefinitionId,
         starter: &crate::EffectJournalIdentity,
     ) -> Result<crate::RegisteredProcessStart, crate::RuntimeEffectControllerError> {
-        let registration = crate::ProcessRegistration::new(
-            crate::ProcessInput::Definition {
+        let registration = crate::ProcessStartRegistration::of_target(
+            crate::ProcessStartTarget::Definition {
                 signature_claim: None,
                 definition_id: id.clone(),
                 args: serde_json::Map::from_iter([("n".to_owned(), serde_json::json!(1))]),

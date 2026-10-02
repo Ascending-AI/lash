@@ -235,7 +235,7 @@ impl StartProcessIntent {
     pub(crate) fn admission_refusal(&self) -> Option<crate::ToolIntentRefusalReason> {
         (matches!(
             self.declaration.input,
-            crate::ProcessInput::SessionTurn { .. }
+            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn { .. })
         ) && self.declaration.env_ref.is_none())
         .then_some(crate::ToolIntentRefusalReason::ExecutionEnvMissing)
     }

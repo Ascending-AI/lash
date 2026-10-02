@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::events::{ProcessEventType, default_process_event_types};
-use super::{LifetimeDecision, ProcessInput, ProcessProvenance, ProcessRegistration, SessionId};
+use super::{
+    LifetimeDecision, ProcessInput, ProcessProvenance, ProcessStartRegistration,
+    ProcessStartTarget, SessionId,
+};
 
 /// A start request as a leaf tool attempt declares it: everything a process
 /// start needs except its key.
@@ -14,7 +17,8 @@ use super::{LifetimeDecision, ProcessInput, ProcessProvenance, ProcessRegistrati
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessStartDeclaration {
-    pub input: ProcessInput,
+    /// What the start runs: an input, or the definition one is resolved from.
+    pub input: ProcessStartTarget,
     /// The lifetime the declaring attempt chose from its start context,
     /// journaled with the declaration: realization never re-runs the policy
     /// (FIG-3607 R4b).
@@ -36,12 +40,12 @@ impl ProcessStartDeclaration {
     /// Declare a process start for store and durable-substrate implementors.
     /// The key is absent by construction; realization derives it.
     pub fn new(
-        input: ProcessInput,
+        input: impl Into<ProcessStartTarget>,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         Self {
-            input,
+            input: input.into(),
             lifetime: lifetime.into(),
             env_ref: None,
             originator,
@@ -132,7 +136,8 @@ pub struct ProcessStartRequest {
     /// The start's idempotency key; `None` starts a new process every time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start_key: Option<crate::StartKey>,
-    pub input: ProcessInput,
+    /// What the start runs: an input, or the definition one is resolved from.
+    pub input: ProcessStartTarget,
     /// What ends the process. A host start is a root: `Detached`, or `Until`
     /// a session the host looked up.
     pub lifetime: LifetimeDecision,
@@ -156,13 +161,13 @@ impl ProcessStartRequest {
     /// The request carries no process id: the registrar mints one. An
     /// idempotent host start adds a key with [`Self::with_host_start_key`].
     pub fn new(
-        input: ProcessInput,
+        input: impl Into<ProcessStartTarget>,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         Self {
             start_key: None,
-            input,
+            input: input.into(),
             lifetime: lifetime.into(),
             env_ref: None,
             originator,
@@ -304,8 +309,8 @@ impl ProcessStartRequest {
 
     /// Extracts the registration outcome for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
-    pub fn into_registration(self) -> ProcessRegistration {
-        let mut registration = ProcessRegistration::new(
+    pub fn into_registration(self) -> ProcessStartRegistration {
+        let mut registration = ProcessStartRegistration::of_target(
             self.input,
             ProcessProvenance::new(self.originator),
             self.lifetime,

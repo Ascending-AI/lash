@@ -113,7 +113,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "lashlang-process-start"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration,
+                    registration: registration.into(),
                     observers: Vec::new(),
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
@@ -1362,9 +1362,9 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         .expect("read process after cancellation")
         .expect("process remains registered");
     assert!(
-        !record.status.is_terminal(),
+        !record.status().is_terminal(),
         "the process must not terminalize over a runner infrastructure failure: {:?}",
-        record.status
+        record.status()
     );
 }
 
@@ -1425,9 +1425,9 @@ pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverab
         .expect("read process after failed run")
         .expect("process remains registered");
     assert!(
-        !record.status.is_terminal(),
+        !record.status().is_terminal(),
         "the process stays recoverable while the runner failure is unsettled: {:?}",
-        record.status
+        record.status()
     );
 }
 
@@ -1509,9 +1509,9 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
         .expect("read process")
         .expect("process remains registered");
     assert!(
-        !record.status.is_terminal(),
+        !record.status().is_terminal(),
         "the process must not terminalize over a runner infrastructure failure: {:?}",
-        record.status
+        record.status()
     );
 }
 

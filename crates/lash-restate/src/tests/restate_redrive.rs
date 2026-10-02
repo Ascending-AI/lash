@@ -906,7 +906,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
             .await
             .expect("read process")
             .expect("read redriven process")
-            .outcome,
+            .outcome(),
         Some(ref output) if is_process_cancellation(output)
     ));
 }
@@ -1058,7 +1058,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         .await
         .expect("read terminal process")
         .expect("terminal process record")
-        .outcome
+        .outcome()
         .expect("stored terminal outcome");
     assert_eq!(
         restate_output_json::<RestateProcessWorkflowOutput>(&output),
@@ -1152,7 +1152,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
             .await
             .expect("read terminal process")
             .expect("terminal process record")
-            .outcome
+            .outcome()
             .is_some(),
         "the attempt commits a durable terminal outcome before its root delivery suspends"
     );
@@ -1161,7 +1161,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
         .await
         .expect("read terminal process")
         .expect("terminal process record")
-        .outcome;
+        .outcome();
     continuations
         .delete_segment_handovers(&process_id)
         .await
@@ -1223,7 +1223,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
             .await
             .expect("read terminal process")
             .expect("terminal process record")
-            .outcome,
+            .outcome(),
         stored,
         "no terminal is fabricated over the stored one"
     );
@@ -1367,7 +1367,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         .await
         .expect("read effectful terminal process")
         .expect("effectful terminal process record")
-        .outcome
+        .outcome()
         .expect("stored effectful terminal outcome");
     assert_eq!(
         restate_output_json::<RestateProcessWorkflowOutput>(&completed),

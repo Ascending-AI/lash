@@ -653,10 +653,7 @@ lash_store_sql::statements! {
                WHERE {{not_enqueued_wake_delivery_state(earlier.state)}}
                  AND NOT (
                      {{discarded_wake_delivery_state(earlier.state)}}
-                     AND (
-                         earlier.discard_reason IS NULL
-                         OR earlier.discard_reason = ANY(?3::TEXT[])
-                     )
+                     AND earlier.discard_reason = ANY(?3::TEXT[])
                  )
                  AND earlier.target_session_id = candidate.target_session_id
                  AND earlier.process_id = candidate.process_id

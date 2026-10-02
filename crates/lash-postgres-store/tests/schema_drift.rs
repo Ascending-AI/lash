@@ -1045,7 +1045,8 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
                  DROP CONSTRAINT ck_processes_status;
              ALTER TABLE lash_process_wake_deliveries
                  DROP CONSTRAINT ck_process_wake_deliveries_state,
-                 DROP CONSTRAINT ck_process_wake_deliveries_discard_reason;
+                 DROP CONSTRAINT ck_process_wake_deliveries_discard_reason,
+                 DROP CONSTRAINT ck_process_wake_deliveries_lifecycle;
              ALTER TABLE lash_tool_intent_submissions
                  DROP CONSTRAINT ck_tool_intent_submissions_kind;
              ALTER TABLE lash_trigger_subscriptions
@@ -1109,6 +1110,7 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
         "ck_processes_status",
         "ck_process_wake_deliveries_state",
         "ck_process_wake_deliveries_discard_reason",
+        "ck_process_wake_deliveries_lifecycle",
         "ck_tool_intent_submissions_kind",
         "ck_trigger_subscriptions_lifecycle",
         "ck_trigger_subscriptions_lifecycle_deleted_at",

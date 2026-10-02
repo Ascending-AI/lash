@@ -287,7 +287,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     async fn start(
         &self,
         _session_id: &SessionId,
-        _registration: crate::ProcessRegistration,
+        _registration: crate::ProcessStartRegistration,
         _options: crate::ProcessStartOptions,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {

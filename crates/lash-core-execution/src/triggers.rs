@@ -348,7 +348,7 @@ pub struct TriggerRegistration {
 pub struct TriggerTarget {
     pub label: Option<String>,
     pub identity: crate::ProcessIdentity,
-    pub input: crate::ProcessInput,
+    pub input: crate::ProcessStartTarget,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, TriggerInputBinding>,
 }
@@ -597,7 +597,7 @@ pub struct TriggerSubscriptionDraft {
     /// delivery or restore its route, so a record written before the capture
     /// existed is refused rather than defaulted into a false authority.
     pub source_capture: TriggerSourceCapture,
-    pub target: crate::ProcessInput,
+    pub target: crate::ProcessStartTarget,
     pub target_identity: crate::ProcessIdentity,
     #[serde(default)]
     pub event_types: Vec<crate::ProcessEventType>,
@@ -613,9 +613,10 @@ impl TriggerSubscriptionDraft {
         env_ref: crate::ProcessExecutionEnvRef,
         source_type: impl Into<String>,
         source_key: impl Into<String>,
-        target: crate::ProcessInput,
+        target: impl Into<crate::ProcessStartTarget>,
         target_identity: crate::ProcessIdentity,
     ) -> Self {
+        let target = target.into();
         let target_label = target_identity.label.clone();
         Self {
             subscription_key: subscription_key.into(),
@@ -696,16 +697,16 @@ impl TriggerSubscriptionDraft {
     }
 }
 
-fn validate_trigger_target(target: &crate::ProcessInput) -> Result<(), PluginError> {
-    if matches!(
-        target,
-        crate::ProcessInput::Engine { .. } | crate::ProcessInput::Definition { .. }
-    ) {
-        Ok(())
-    } else {
-        Err(PluginError::InvalidTriggerTarget {
-            kind: target.engine_kind().to_string(),
-        })
+fn validate_trigger_target(target: &crate::ProcessStartTarget) -> Result<(), PluginError> {
+    match target {
+        crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { .. })
+        | crate::ProcessStartTarget::Definition { .. } => Ok(()),
+        crate::ProcessStartTarget::Input(
+            input
+            @ (crate::ProcessInput::SessionTurn { .. } | crate::ProcessInput::External { .. }),
+        ) => Err(PluginError::InvalidTriggerTarget {
+            kind: input.engine_kind().to_string(),
+        }),
     }
 }
 
@@ -914,7 +915,7 @@ pub struct TriggerSubscriptionRecord {
     /// written before the capture existed has no authority to deliver against
     /// and is refused at decode; see the store's format-version refusal.
     pub source_capture: TriggerSourceCapture,
-    pub target: crate::ProcessInput,
+    pub target: crate::ProcessStartTarget,
     pub target_identity: crate::ProcessIdentity,
     #[serde(default)]
     pub event_types: Vec<crate::ProcessEventType>,

@@ -28,13 +28,11 @@ pub(crate) fn project_process_event_type(
             await_output,
         } = terminal;
         identity.tag(match status {
-            crate::ProcessStatus::Running => 1,
-            crate::ProcessStatus::Waiting => 2,
-            crate::ProcessStatus::Completed => 3,
-            crate::ProcessStatus::Failed => 4,
-            crate::ProcessStatus::Cancelled => 5,
-            crate::ProcessStatus::Abandoned => 6,
-            crate::ProcessStatus::CallerDeparted => 7,
+            // Tags 1, 2 and 7 were the statuses no terminal event may declare.
+            crate::TerminalProcessStatus::Completed => 3,
+            crate::TerminalProcessStatus::Failed => 4,
+            crate::TerminalProcessStatus::Cancelled => 5,
+            crate::TerminalProcessStatus::Abandoned => 6,
         });
         identity.optional(await_output.as_ref(), project_process_value_selector);
     });

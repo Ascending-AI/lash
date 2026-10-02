@@ -6,7 +6,7 @@ pub(super) fn process_event_type() -> lash_core::ProcessEventType {
         payload_schema: lash_core::LashSchema::any(),
         semantics: lash_core::ProcessEventSemanticsSpec {
             terminal: Some(lash_core::ProcessTerminalSpec {
-                status: lash_core::ProcessStatus::Completed,
+                status: lash_core::TerminalProcessStatus::Completed,
                 await_output: Some(lash_core::ProcessValueSelector::Pointer(
                     "/await_output".to_string(),
                 )),
@@ -43,15 +43,18 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
         metadata: Some(serde_json::json!({ "queue": "default" })),
         segment_ordinal: None,
     });
-    record.wait = Some(lash_core::WaitState {
-        kind: lash_core::WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: lash_core::runtime::process_signal_wait_key(process_id, "ready", 1),
-            ordinal: 1,
+    record.lifecycle = lash_core::ProcessLifecycleState::Waiting {
+        wait: lash_core::WaitState {
+            kind: lash_core::WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: lash_core::runtime::process_signal_wait_key(process_id, "ready", 1),
+                ordinal: 1,
+            },
+            since_ms: 10,
         },
-        since_ms: 10,
-    });
+        park: None,
+    };
     record
 }
 
@@ -75,8 +78,7 @@ pub(super) fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
         })),
         semantics: lash_core::runtime::ProcessEventSemantics {
             terminal: Some(lash_core::facade_support::ProcessTerminalSemantics {
-                status: lash_core::ProcessStatus::Completed,
-                outcome: lash_core::ProcessAwaitOutput::from_tool_output(
+                outcome: lash_core::ProcessTerminal::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!(true)),
                 ),
             }),

@@ -791,6 +791,10 @@ pub(crate) use runtime::{
 };
 pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
+pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
+pub use runtime::{
+    ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,
+};
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
 pub(crate) use session::RuntimeExecutionProcessEventContext;

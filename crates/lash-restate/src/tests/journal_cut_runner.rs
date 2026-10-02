@@ -358,7 +358,7 @@ mod served_only_outside_a_run {
                             invocation(format!("{namespace}:0000000000:process:start:{start_key}")),
                             RuntimeEffectCommand::Process {
                                 command: Box::new(ProcessCommand::Start {
-                                    registration,
+                                    registration: registration.into(),
                                     observers: Vec::new(),
                                     execution_context: Box::default(),
                                 }),

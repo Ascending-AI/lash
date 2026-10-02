@@ -90,8 +90,8 @@ pub fn emit_tool_call_completed(
 /// The digest-only start registration after its execution holds the environment.
 pub async fn process_start_execution_env(
     context: &crate::RuntimeExecutionContext<'_>,
-    registration: crate::ProcessRegistration,
-) -> Result<crate::ProcessRegistration, crate::PluginError> {
+    registration: crate::ProcessStartRegistration,
+) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
     context.process_start_execution_env(registration).await
 }
 

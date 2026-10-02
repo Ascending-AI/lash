@@ -174,7 +174,7 @@ impl ProcessListFilter {
     }
 
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
-        self.status.matches(record.status)
+        self.status.matches(record.status())
             && self
                 .definition_id
                 .as_ref()
@@ -188,7 +188,7 @@ impl ProcessListFilter {
                 .as_ref()
                 .is_none_or(|scope| record.lifetime.scope() == Some(scope))
             && self.cancel_pending_before_ms.is_none_or(|before_ms| {
-                !record.status.is_terminal()
+                !record.status().is_terminal()
                     && record
                         .cancel_request
                         .as_ref()
@@ -219,7 +219,7 @@ impl ProcessListFilter {
                 .created_at_end_ms
                 .is_none_or(|end_ms| record.created_at_ms < end_ms)
             && self.retired_since_ms.is_none_or(|since_ms| {
-                !record.status.is_retired() || record.updated_at_ms >= since_ms
+                !record.status().is_retired() || record.updated_at_ms >= since_ms
             })
     }
 }

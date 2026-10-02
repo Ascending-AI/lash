@@ -588,14 +588,26 @@ async fn seed_wake(
     process_id: &ProcessId,
     state: &str,
 ) {
+    // A row carries its claim token while it is enqueuing and its discard
+    // reason once it is discarded, and neither otherwise.
+    let claim_token = if state == "enqueuing" {
+        "'claim'"
+    } else {
+        "NULL"
+    };
+    let discard_reason = if state == "discarded" {
+        "'retargeted'"
+    } else {
+        "NULL"
+    };
     scratch
         .apply(&format!(
             "INSERT INTO lash_process_wake_deliveries (
                  delivery_id, process_id, target_session_id, sequence, state,
-                 next_attempt_at_ms, expires_at_ms, delivery_json
+                 claim_token, discard_reason, next_attempt_at_ms, expires_at_ms, delivery_json
              ) VALUES (
                  '{delivery_id}', '{process_id}', 'session-target', 1, '{state}',
-                 0, 0, '{{\"delivery\":\"{delivery_id}\"}}'
+                 {claim_token}, {discard_reason}, 0, 0, '{{\"delivery\":\"{delivery_id}\"}}'
              )"
         ))
         .await;

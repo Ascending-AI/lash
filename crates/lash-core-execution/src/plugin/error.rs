@@ -307,7 +307,7 @@ pub enum PluginError {
         "process outcome is no longer retained (terminal state `{terminal_label}`, pruned at {pruned_at_ms}ms)"
     )]
     ProcessNoLongerRetained {
-        terminal_label: String,
+        terminal_label: crate::RetiredProcessStatus,
         pruned_at_ms: u64,
     },
     /// A wait was requested on a row whose registering caller departed before

@@ -267,7 +267,7 @@ fn assert_completed(outcome: &lash_core::ProcessRunOutcome) {
         matches!(
             outcome,
             lash_core::ProcessRunOutcome::Terminal { output, .. }
-                if output.terminal_status() == Some(lash_core::ProcessStatus::Completed)
+                if output.terminal_status() == Some(lash_core::TerminalProcessStatus::Completed)
         ),
         "the SessionTurn process completed: {outcome:#?}"
     );
@@ -305,7 +305,7 @@ fn assert_cancelled(outcome: &lash_core::ProcessRunOutcome) {
         matches!(
             outcome,
             lash_core::ProcessRunOutcome::Terminal { output, .. }
-                if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+                if output.terminal_status() == Some(lash_core::TerminalProcessStatus::Cancelled)
         ),
         "the child process must settle cancelled: {outcome:#?}"
     );

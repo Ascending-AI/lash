@@ -378,7 +378,7 @@ fn waiters_served(ledger: &Ledger) -> CustomCheck {
                                 .collect();
                             format!(
                                 "process `{}` is {:?}, first started {:?}, external ref {:?}: nothing finished it; its engine invocations: {engine:?}",
-                                record.id, record.status, record.first_started, record.external_ref
+                                record.id, record.status(), record.first_started, record.external_ref
                             )
                         }),
                 ),

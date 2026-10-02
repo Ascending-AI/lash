@@ -920,9 +920,10 @@ pub async fn execute_effect_locally(
                 let result = Box::pin(execution.execute(&receiver, *command)).await?;
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }
-            let joined =
-                crate::task::spawn(async move { execution.execute(&receiver, *command).await })
-                    .await;
+            let joined = crate::task::spawn(async move {
+                Box::pin(execution.execute(&receiver, *command)).await
+            })
+            .await;
             let result = match joined {
                 Ok(result) => result?,
                 Err(error) => {
@@ -1809,7 +1810,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     async fn start(
         &self,
         _session_id: &SessionId,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -2040,9 +2041,9 @@ impl crate::ProcessService for EffectBackedProcessService {
 /// runtime's realization does (FIG-3607 R1, R2): these test services stand in
 /// for that realization.
 fn admitted_registration(
-    registration: crate::ProcessRegistration,
+    registration: crate::ProcessStartRegistration,
     scope: &crate::ProcessOpScope<'_>,
-) -> Result<crate::ProcessRegistration, PluginError> {
+) -> Result<crate::ProcessStartRegistration, PluginError> {
     match scope
         .start_cx()
         .map_err(|error| PluginError::Session(format!("process start refused: {error}")))?
@@ -2372,11 +2373,18 @@ impl crate::ProcessService for MockSessionManager {
     async fn start(
         &self,
         _session_id: &SessionId,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
-        let registration = admitted_registration(registration, &scope)?;
+        let registration = admitted_registration(registration, &scope)?
+            .stating_input()
+            .map_err(|registration| {
+                PluginError::Session(format!(
+                    "{} names a definition, which this mock executor cannot resolve",
+                    registration.refusal_name()
+                ))
+            })?;
         // This mock stands in as the executor, so it completes the row under the
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.

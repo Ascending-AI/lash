@@ -282,7 +282,8 @@ fn fig1067_cron_registration(
         target: lash::process::ProcessInput::Engine {
             kind: "cron-test-engine".to_string(),
             payload: serde_json::json!({}),
-        },
+        }
+        .into(),
         target_identity: lash::process::ProcessIdentity::new("cron-test-engine"),
         event_types: Vec::new(),
         input_template: std::collections::BTreeMap::new(),

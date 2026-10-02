@@ -1848,7 +1848,10 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         // the env its own record carries and stamps the identity the engine
         // resolved, which is where the process's signal event types come from.
         let registration = match registration.input.as_ref() {
-            lash_core::ProcessInput::Engine { kind, payload } => {
+            lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::Engine {
+                kind,
+                payload,
+            }) => {
                 let admitted = self
                     .engines
                     .admit(kind, payload, request_env_spec.as_ref())
@@ -1924,7 +1927,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
     async fn start(
         &self,
         session_id: &SessionId,
-        mut registration: lash_core::ProcessRegistration,
+        mut registration: lash_core::ProcessStartRegistration,
         options: lash_core::ProcessStartOptions,
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
@@ -1961,34 +1964,36 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
             .with_wake_session_id(wake_session_id);
-        if matches!(
-            registration.input.as_ref(),
-            lash_core::ProcessInput::Definition { .. }
-        ) {
-            let starter = scope
-                .effect_controller
-                .execution_scope()
-                .journal_identity()
-                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
-            return lash_core::runtime::register_process_start(
-                &lash_core::runtime::ProcessStartStores {
-                    registry: self.registry.as_ref(),
-                    env_store: Some(&self.env_store),
-                    engines: Some(&self.engines),
-                    engines_required: true,
-                    session_catalog: None,
-                    session_turn_admission: None,
-                    executor: "the signal fixture",
-                    starter: &starter,
-                    trigger_route: None,
-                },
-                registration,
-                &options.initial_observers,
-            )
-            .await
-            .map(|started| started.record)
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()));
-        }
+        // A start that names a definition is resolved by realization; one
+        // that states its input registers it as stated.
+        let registration = match registration.stating_input() {
+            Ok(registration) => registration,
+            Err(registration) => {
+                let starter = scope
+                    .effect_controller
+                    .execution_scope()
+                    .journal_identity()
+                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+                return lash_core::runtime::register_process_start(
+                    &lash_core::runtime::ProcessStartStores {
+                        registry: self.registry.as_ref(),
+                        env_store: Some(&self.env_store),
+                        engines: Some(&self.engines),
+                        engines_required: true,
+                        session_catalog: None,
+                        session_turn_admission: None,
+                        executor: "the signal fixture",
+                        starter: &starter,
+                        trigger_route: None,
+                    },
+                    *registration,
+                    &options.initial_observers,
+                )
+                .await
+                .map(|started| started.record)
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()));
+            }
+        };
         lash_core::ProcessRegistrar::register_process_with_observers(
             self.registry.as_ref(),
             registration,

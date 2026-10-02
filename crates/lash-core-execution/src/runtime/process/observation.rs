@@ -393,7 +393,10 @@ impl ProcessWorkObserver {
 
 impl ObservedProcess {
     fn from_record(record: ProcessRecord) -> Self {
-        let lifecycle = record.status;
+        let lifecycle = record.status();
+        let outcome = record.outcome();
+        let wait = record.wait().cloned();
+        let park = record.park().cloned();
         let input = record.input.as_ref().clone();
         let identity = record.identity;
         let process_id = record.id;
@@ -405,8 +408,8 @@ impl ObservedProcess {
             lifetime: record.lifetime,
             ancestry: record.ancestry,
             identity,
-            error: terminal_error(record.outcome.as_ref()),
-            error_code: terminal_error_code(record.outcome.as_ref()),
+            error: terminal_error(outcome.as_ref()),
+            error_code: terminal_error_code(outcome.as_ref()),
             created_at_ms: record.created_at_ms,
             updated_at_ms: record.updated_at_ms,
             first_started: record.first_started.map(|started| *started),
@@ -415,8 +418,8 @@ impl ObservedProcess {
             env_ref: record.env_ref,
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
-            wait: record.wait,
-            park: record.park.map(|park| *park),
+            wait,
+            park,
             child_session_id: child_session_id(&input).map(Into::into),
             input,
         }
@@ -508,8 +511,6 @@ fn child_session_id(input: &ProcessInput) -> Option<String> {
         ProcessInput::SessionTurn { create_request, .. } => {
             create_request.session_id.clone().map(Into::into)
         }
-        ProcessInput::Engine { .. }
-        | ProcessInput::External { .. }
-        | ProcessInput::Definition { .. } => None,
+        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
     }
 }

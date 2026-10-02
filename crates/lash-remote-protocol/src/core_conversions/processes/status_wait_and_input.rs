@@ -28,6 +28,121 @@ impl From<RemoteProcessStatus> for lash_core::ProcessStatus {
     }
 }
 
+impl From<lash_core::TerminalProcessStatus> for RemoteTerminalProcessStatus {
+    fn from(value: lash_core::TerminalProcessStatus) -> Self {
+        match value {
+            lash_core::TerminalProcessStatus::Completed => Self::Completed,
+            lash_core::TerminalProcessStatus::Failed => Self::Failed,
+            lash_core::TerminalProcessStatus::Cancelled => Self::Cancelled,
+            lash_core::TerminalProcessStatus::Abandoned => Self::Abandoned,
+        }
+    }
+}
+
+impl From<RemoteTerminalProcessStatus> for lash_core::TerminalProcessStatus {
+    fn from(value: RemoteTerminalProcessStatus) -> Self {
+        match value {
+            RemoteTerminalProcessStatus::Completed => Self::Completed,
+            RemoteTerminalProcessStatus::Failed => Self::Failed,
+            RemoteTerminalProcessStatus::Cancelled => Self::Cancelled,
+            RemoteTerminalProcessStatus::Abandoned => Self::Abandoned,
+        }
+    }
+}
+
+impl TryFrom<lash_core::ProcessTerminal> for RemoteProcessTerminal {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: lash_core::ProcessTerminal) -> Result<Self, Self::Error> {
+        RemoteProcessAwaitOutput::try_from(lash_core::ProcessAwaitOutput::from(value))?.try_into()
+    }
+}
+
+impl TryFrom<RemoteProcessTerminal> for lash_core::ProcessTerminal {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessTerminal) -> Result<Self, Self::Error> {
+        let output =
+            lash_core::ProcessAwaitOutput::try_from(RemoteProcessAwaitOutput::from(value))?;
+        Self::try_from(output).map_err(|error| RemoteProtocolError::InvalidEnvelope {
+            type_name: "RemoteProcessTerminal",
+            message: error.to_string(),
+        })
+    }
+}
+
+impl TryFrom<lash_core::ProcessLifecycleState> for RemoteProcessLifecycleState {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: lash_core::ProcessLifecycleState) -> Result<Self, Self::Error> {
+        let park = |park: Option<Box<lash_core::store::ProcessPark>>| {
+            park.map(|park| RemoteProcessPark::try_from(*park))
+                .transpose()
+        };
+        Ok(match value {
+            lash_core::ProcessLifecycleState::Running { park: parked } => Self::Running {
+                park: park(parked)?,
+            },
+            lash_core::ProcessLifecycleState::Waiting { wait, park: parked } => Self::Waiting {
+                wait: wait.into(),
+                park: park(parked)?,
+            },
+            lash_core::ProcessLifecycleState::CallerDeparted {} => Self::CallerDeparted {},
+            lash_core::ProcessLifecycleState::Terminal { outcome } => Self::Terminal {
+                outcome: outcome.try_into()?,
+            },
+        })
+    }
+}
+
+impl TryFrom<RemoteProcessLifecycleState> for lash_core::ProcessLifecycleState {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessLifecycleState) -> Result<Self, Self::Error> {
+        let park = |park: Option<RemoteProcessPark>| {
+            park.map(|park| lash_core::store::ProcessPark::try_from(park).map(Box::new))
+                .transpose()
+        };
+        Ok(match value {
+            RemoteProcessLifecycleState::Running { park: parked } => Self::Running {
+                park: park(parked)?,
+            },
+            RemoteProcessLifecycleState::Waiting { wait, park: parked } => Self::Waiting {
+                wait: wait.into(),
+                park: park(parked)?,
+            },
+            RemoteProcessLifecycleState::CallerDeparted {} => Self::CallerDeparted {},
+            RemoteProcessLifecycleState::Terminal { outcome } => Self::Terminal {
+                outcome: outcome.try_into()?,
+            },
+        })
+    }
+}
+
+impl From<lash_core::RetiredProcessStatus> for RemoteRetiredProcessStatus {
+    fn from(value: lash_core::RetiredProcessStatus) -> Self {
+        match value {
+            lash_core::RetiredProcessStatus::Completed => Self::Completed,
+            lash_core::RetiredProcessStatus::Failed => Self::Failed,
+            lash_core::RetiredProcessStatus::Cancelled => Self::Cancelled,
+            lash_core::RetiredProcessStatus::Abandoned => Self::Abandoned,
+            lash_core::RetiredProcessStatus::CallerDeparted => Self::CallerDeparted,
+        }
+    }
+}
+
+impl From<RemoteRetiredProcessStatus> for lash_core::RetiredProcessStatus {
+    fn from(value: RemoteRetiredProcessStatus) -> Self {
+        match value {
+            RemoteRetiredProcessStatus::Completed => Self::Completed,
+            RemoteRetiredProcessStatus::Failed => Self::Failed,
+            RemoteRetiredProcessStatus::Cancelled => Self::Cancelled,
+            RemoteRetiredProcessStatus::Abandoned => Self::Abandoned,
+            RemoteRetiredProcessStatus::CallerDeparted => Self::CallerDeparted,
+        }
+    }
+}
+
 impl From<lash_core::ProcessExternalRef> for RemoteProcessExternalRef {
     fn from(value: lash_core::ProcessExternalRef) -> Self {
         let lash_core::ProcessExternalRef {
@@ -221,7 +336,36 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                 result: result.into(),
             }),
             lash_core::ProcessInput::External { metadata } => Ok(Self::External { metadata }),
-            lash_core::ProcessInput::Definition {
+        }
+    }
+}
+
+impl TryFrom<lash_core::ProcessStartTarget> for RemoteProcessStartTarget {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: lash_core::ProcessStartTarget) -> Result<Self, Self::Error> {
+        match value {
+            lash_core::ProcessStartTarget::Input(input) => Ok(Self::Input(input.try_into()?)),
+            lash_core::ProcessStartTarget::Definition {
+                definition_id,
+                args,
+                signature_claim,
+            } => Ok(Self::Definition {
+                definition_id,
+                args,
+                signature_claim: signature_claim.map(Into::into),
+            }),
+        }
+    }
+}
+
+impl TryFrom<RemoteProcessStartTarget> for lash_core::ProcessStartTarget {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessStartTarget) -> Result<Self, Self::Error> {
+        match value {
+            RemoteProcessStartTarget::Input(input) => Ok(Self::Input(input.try_into()?)),
+            RemoteProcessStartTarget::Definition {
                 definition_id,
                 args,
                 signature_claim,
@@ -240,15 +384,6 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
     fn try_from(value: RemoteProcessInput) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessInput")?;
         match value {
-            RemoteProcessInput::Definition {
-                definition_id,
-                args,
-                signature_claim,
-            } => Ok(Self::Definition {
-                definition_id,
-                args,
-                signature_claim: signature_claim.map(Into::into),
-            }),
             RemoteProcessInput::Engine { kind, payload } => Ok(Self::Engine { kind, payload }),
             RemoteProcessInput::SessionTurn {
                 definition_key,

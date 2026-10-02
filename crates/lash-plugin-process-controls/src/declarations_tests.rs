@@ -96,7 +96,7 @@ async fn start_process_declares_a_start_and_answers_with_its_start_slot() {
     let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
         panic!("one start")
     };
-    let lash_core::ProcessInput::Definition {
+    let lash_core::ProcessStartTarget::Definition {
         definition_id,
         args,
         signature_claim,
@@ -158,7 +158,7 @@ async fn start_and_get_accept_only_the_exact_definition_contracts() {
         panic!("one start")
     };
     assert!(
-        matches!(&intent.declaration.input, lash_core::ProcessInput::Definition {definition_id, args, ..} if definition_id == &id(1) && args.is_empty())
+        matches!(&intent.declaration.input, lash_core::ProcessStartTarget::Definition {definition_id, args, ..} if definition_id == &id(1) && args.is_empty())
     );
     let (slot, get) = intents(attempt!(
         "get_process_definition",

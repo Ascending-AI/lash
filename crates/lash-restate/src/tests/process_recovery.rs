@@ -605,7 +605,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
         matches!(
             outcome,
             lash_core::ProcessRunOutcome::Terminal { ref output, .. }
-                if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+                if output.terminal_status() == Some(lash_core::TerminalProcessStatus::Cancelled)
         ),
         "the process resumed past its wake and produced {outcome:#?}"
     );
@@ -615,7 +615,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
             .await
             .expect("read sleeping process")
             .expect("sleeping process remains registered")
-            .status,
+            .status(),
         lash_core::ProcessStatus::Cancelled,
         "process terminal status"
     );
@@ -713,7 +713,7 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
             .await
             .expect("read process after worker crash")
             .expect("crashed process remains registered")
-            .status,
+            .status(),
         lash_core::ProcessStatus::Running,
         "the crash must land before process settlement"
     );
@@ -761,7 +761,7 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
         matches!(
             redelivery,
             lash_core::ProcessRunOutcome::Terminal { ref output, .. }
-                if output.terminal_status() != Some(lash_core::ProcessStatus::Cancelled)
+                if output.terminal_status() != Some(lash_core::TerminalProcessStatus::Cancelled)
         ),
         "the redelivery must reach the terminal its journal records: {redelivery:#?}"
     );
@@ -1801,7 +1801,7 @@ pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_canc
     assert!(
         !cancelling.is_terminal(),
         "the relay must never terminalise a row it did not run, got {:?}",
-        cancelling.status
+        cancelling.status()
     );
     assert_eq!(
         cancelling

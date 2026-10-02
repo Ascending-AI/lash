@@ -28,7 +28,7 @@ mod tests {
         let error = absent_process_error(
             &lash_core_execution::ProcessId::fixture("process"),
             Some(ProcessTombstoneStamp {
-                terminal_label: "completed".to_string(),
+                terminal_label: lash_core_execution::RetiredProcessStatus::Completed,
                 pruned_at_ms: 4_242,
             }),
         );
@@ -37,7 +37,10 @@ mod tests {
                 terminal_label,
                 pruned_at_ms,
             } => {
-                assert_eq!(terminal_label, "completed");
+                assert_eq!(
+                    terminal_label,
+                    lash_core_execution::RetiredProcessStatus::Completed
+                );
                 assert_eq!(pruned_at_ms, 4_242);
             }
             other => panic!("unexpected refusal: {other}"),
@@ -354,21 +357,58 @@ mod tests {
     }
 
     #[test]
-    fn a_discarded_wake_delivery_without_a_reason_projects_as_unattributed() {
-        let delivery = WakeDeliveryRow {
-            state_label: "discarded".to_string(),
-            discard_reason_label: None,
-            claim_token: None,
-            ..wake_row()
+    fn a_wake_delivery_row_outside_its_lifecycle_is_refused() {
+        let reason = Some("retargeted".to_string());
+        let token = Some("claim".to_string());
+        for (state, claim_token, discard_reason_label, refusal) in [
+            (
+                "discarded",
+                None,
+                None,
+                "discarded without a discard reason",
+            ),
+            (
+                "discarded",
+                token.clone(),
+                reason.clone(),
+                "discarded with a claim token",
+            ),
+            ("pending", token.clone(), None, "pending with a claim token"),
+            (
+                "enqueued",
+                token.clone(),
+                None,
+                "enqueued with a claim token",
+            ),
+            (
+                "pending",
+                None,
+                reason.clone(),
+                "pending with a discard reason",
+            ),
+            (
+                "enqueued",
+                None,
+                reason.clone(),
+                "enqueued with a discard reason",
+            ),
+            (
+                "enqueuing",
+                token,
+                reason,
+                "enqueuing with a discard reason",
+            ),
+        ] {
+            let error = WakeDeliveryRow {
+                state_label: state.to_string(),
+                discard_reason_label,
+                claim_token,
+                ..wake_row()
+            }
+            .project(lash_core_execution::FleetFormat::current())
+            .expect_err("a row outside the wake-delivery lifecycle is refused");
+            assert!(error.to_string().contains(refusal), "{state}: {error}");
         }
-        .project(lash_core_execution::FleetFormat::current())
-        .expect("a deliberately-valid reasonless discard projects");
-
-        assert_eq!(
-            delivery.disposition,
-            WakeDeliveryLifecycle::DiscardedUnattributed
-        );
-        assert_eq!(delivery.state(), WakeDeliveryState::Discarded);
     }
 
     #[test]

@@ -1252,10 +1252,12 @@ impl crate::ProcessService for GatedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let call_id = match &request.input {
-            crate::ProcessInput::External { metadata } => metadata["call_id"]
-                .as_str()
-                .unwrap_or("<unlabelled>")
-                .to_string(),
+            crate::ProcessStartTarget::Input(crate::ProcessInput::External { metadata }) => {
+                metadata["call_id"]
+                    .as_str()
+                    .unwrap_or("<unlabelled>")
+                    .to_string()
+            }
             _ => "<unlabelled>".to_string(),
         };
         let identity = match request.start_key() {
@@ -1324,7 +1326,7 @@ impl crate::ProcessService for GatedProcessService {
     async fn start(
         &self,
         session_id: &crate::SessionId,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {

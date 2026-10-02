@@ -527,9 +527,19 @@ impl ProcessStatus {
     /// Lets process-store implementors apply retention only to completed, failed, cancelled, or
     /// abandoned rows; running, waiting, and caller-departed rows are never terminal.
     pub fn is_terminal(&self) -> bool {
+        self.terminal().is_some()
+    }
+
+    /// The terminal status this is, or `None` for a row with no recorded
+    /// outcome. Exhaustive on purpose: a new variant must declare whether it
+    /// is terminal before anything can compile.
+    pub fn terminal(&self) -> Option<TerminalProcessStatus> {
         match self {
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned => true,
-            Self::Running | Self::Waiting | Self::CallerDeparted => false,
+            Self::Completed => Some(TerminalProcessStatus::Completed),
+            Self::Failed => Some(TerminalProcessStatus::Failed),
+            Self::Cancelled => Some(TerminalProcessStatus::Cancelled),
+            Self::Abandoned => Some(TerminalProcessStatus::Abandoned),
+            Self::Running | Self::Waiting | Self::CallerDeparted => None,
         }
     }
 
@@ -541,14 +551,172 @@ impl ProcessStatus {
     /// record one: leaving those rows out would let a host accumulate them
     /// without bound, since nothing may honestly terminalize them.
     pub fn is_retired(&self) -> bool {
+        self.retired().is_some()
+    }
+
+    /// The retired status this is, or `None` for a live row. Exhaustive on
+    /// purpose: a new variant must declare which side of the live/retired
+    /// partition it falls on before anything can compile.
+    pub fn retired(&self) -> Option<RetiredProcessStatus> {
         match self {
-            Self::Completed
-            | Self::Failed
-            | Self::Cancelled
-            | Self::Abandoned
-            | Self::CallerDeparted => true,
-            Self::Running | Self::Waiting => false,
+            Self::Completed => Some(RetiredProcessStatus::Completed),
+            Self::Failed => Some(RetiredProcessStatus::Failed),
+            Self::Cancelled => Some(RetiredProcessStatus::Cancelled),
+            Self::Abandoned => Some(RetiredProcessStatus::Abandoned),
+            Self::CallerDeparted => Some(RetiredProcessStatus::CallerDeparted),
+            Self::Running | Self::Waiting => None,
         }
+    }
+}
+
+/// The status of a process whose outcome is recorded: the terminal subset of
+/// [`ProcessStatus`].
+///
+/// A terminal event type declares one, and a terminal outcome derives one,
+/// so neither can name a status no outcome ends a process in.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalProcessStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Abandoned,
+}
+
+impl TerminalProcessStatus {
+    /// Every variant, in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Completed,
+        Self::Failed,
+        Self::Cancelled,
+        Self::Abandoned,
+    ];
+
+    /// This status in the whole lifecycle vocabulary.
+    pub fn status(self) -> ProcessStatus {
+        match self {
+            Self::Completed => ProcessStatus::Completed,
+            Self::Failed => ProcessStatus::Failed,
+            Self::Cancelled => ProcessStatus::Cancelled,
+            Self::Abandoned => ProcessStatus::Abandoned,
+        }
+    }
+
+    /// The durable spelling, shared with [`ProcessStatus::label`].
+    pub fn label(self) -> &'static str {
+        self.status().label()
+    }
+}
+
+impl From<TerminalProcessStatus> for ProcessStatus {
+    fn from(status: TerminalProcessStatus) -> Self {
+        status.status()
+    }
+}
+
+impl fmt::Display for TerminalProcessStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
+/// The status a process row had when retention reclaimed it: the retired
+/// subset of [`ProcessStatus`].
+///
+/// A tombstone and every "no longer retained" answer carry one, so a pruned
+/// process still says how it ended: a `failed` one is never reported as
+/// completed, and a `caller_departed` one is never reported as having an
+/// outcome at all.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RetiredProcessStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Abandoned,
+    CallerDeparted,
+}
+
+impl RetiredProcessStatus {
+    /// Every variant, in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Completed,
+        Self::Failed,
+        Self::Cancelled,
+        Self::Abandoned,
+        Self::CallerDeparted,
+    ];
+
+    /// This status in the whole lifecycle vocabulary.
+    pub fn status(self) -> ProcessStatus {
+        match self {
+            Self::Completed => ProcessStatus::Completed,
+            Self::Failed => ProcessStatus::Failed,
+            Self::Cancelled => ProcessStatus::Cancelled,
+            Self::Abandoned => ProcessStatus::Abandoned,
+            Self::CallerDeparted => ProcessStatus::CallerDeparted,
+        }
+    }
+
+    /// The durable spelling, shared with [`ProcessStatus::label`].
+    pub fn label(self) -> &'static str {
+        self.status().label()
+    }
+
+    /// The single reader of a tombstone's stored label: an unrecognised or
+    /// live label is `None`, never a default.
+    pub fn from_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|status| status.label() == label)
+    }
+}
+
+impl From<RetiredProcessStatus> for ProcessStatus {
+    fn from(status: RetiredProcessStatus) -> Self {
+        status.status()
+    }
+}
+
+impl From<TerminalProcessStatus> for RetiredProcessStatus {
+    fn from(status: TerminalProcessStatus) -> Self {
+        match status {
+            TerminalProcessStatus::Completed => Self::Completed,
+            TerminalProcessStatus::Failed => Self::Failed,
+            TerminalProcessStatus::Cancelled => Self::Cancelled,
+            TerminalProcessStatus::Abandoned => Self::Abandoned,
+        }
+    }
+}
+
+impl fmt::Display for RetiredProcessStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.label())
     }
 }
 

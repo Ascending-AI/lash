@@ -16,7 +16,7 @@
 use super::super::events::{ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSpec};
 use super::super::model::{
     Ancestry, Lifetime, LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance,
-    ProcessRegistration, ProcessStatus, ScopeGrant, ScopeId,
+    ProcessRegistration, ScopeGrant, ScopeId, TerminalProcessStatus,
 };
 use super::super::validation::ProcessRegistrationRefusal;
 
@@ -154,33 +154,12 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             declared.payload_schema = crate::LashSchema::new(serde_json::json!({"type": "object"}));
             vec![registration]
         }
-        ProcessRegistrationRefusal::NonTerminalTerminalStatus => {
-            vec![with_event_type(custom_event_type(
-                "app.terminal",
-                ProcessEventSemanticsSpec {
-                    terminal: Some(ProcessTerminalSpec {
-                        status: ProcessStatus::Running,
-                        await_output: Some(crate::ProcessValueSelector::Pointer(
-                            "/await_output".to_string(),
-                        )),
-                    }),
-                    ..ProcessEventSemanticsSpec::default()
-                },
-            ))]
-        }
-        ProcessRegistrationRefusal::UnresolvedDefinitionInput => {
-            vec![host_registration(ProcessInput::Definition {
-                signature_claim: None,
-                definition_id: crate::ProcessDefinitionId::from_sha256_digest([0; 32]),
-                args: serde_json::Map::new(),
-            })]
-        }
         ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput => {
             vec![with_event_type(custom_event_type(
                 "app.terminal",
                 ProcessEventSemanticsSpec {
                     terminal: Some(ProcessTerminalSpec {
-                        status: ProcessStatus::Failed,
+                        status: TerminalProcessStatus::Failed,
                         await_output: None,
                     }),
                     ..ProcessEventSemanticsSpec::default()

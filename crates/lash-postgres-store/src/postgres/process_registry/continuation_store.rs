@@ -20,7 +20,7 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
         if record.is_terminal() {
             return Err(PluginError::ProcessAlreadyTerminal {
                 process_id: record.id.clone(),
-                status: record.status,
+                status: record.status(),
             });
         }
         let result = sqlx::query(process_sql().handover_postgres.upsert_identical.sql())
@@ -111,7 +111,7 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
         if record.is_terminal() {
             return Err(PluginError::ProcessAlreadyTerminal {
                 process_id: record.id.clone(),
-                status: record.status,
+                status: record.status(),
             });
         }
         sqlx::query(process_sql().handover.mark_started.sql())

@@ -130,7 +130,7 @@ pub(crate) use lash_sansio::{
 pub(crate) use plugin_state::PluginState;
 #[cfg(any(test, feature = "testing"))]
 pub use process_identity::process_id_for_test;
-pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus};
+pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus, RetiredProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
     AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch,

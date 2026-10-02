@@ -107,7 +107,7 @@ pub(super) async fn a_reattached_emission_reports_the_deliveries_its_committed_a
                         .expect("read the started process")
                         .expect("the started process is retained");
                     outputs.push(
-                        serde_json::to_value(&record.outcome).expect("encode the process outcome"),
+                        serde_json::to_value(record.outcome()).expect("encode the process outcome"),
                     );
                 }
                 answers.lock().unwrap().push((started, outputs));

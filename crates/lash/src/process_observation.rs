@@ -341,7 +341,7 @@ fn remote_snapshot(
             pruned_at_ms,
         }) => Durable::NoLongerRetained {
             retention: Retention::Pruned {
-                terminal_label,
+                terminal_label: terminal_label.into(),
                 pruned_at_ms,
             },
         },
@@ -890,7 +890,7 @@ async fn acquire_durable(
     }
     Ok(ProcessDurableSnapshot::Retained {
         sequence: high_water,
-        status: record.status,
+        status: record.status(),
         summary,
         completeness,
     })

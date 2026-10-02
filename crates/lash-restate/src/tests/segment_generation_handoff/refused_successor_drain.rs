@@ -376,7 +376,7 @@ impl World {
                 self.successor_runs(process_id).await.iter().any(|run| {
                     run.target_service_name == PROCESS_WORKFLOW && !run.is_still_active()
                 });
-            if let Some(park) = record.park.filter(|_| ended) {
+            if let Some(park) = record.park().filter(|_| ended) {
                 assert!(
                     matches!(
                         park.reason,
@@ -389,7 +389,7 @@ impl World {
                     Some(generation("N")),
                     "the park carries the sender's generation"
                 );
-                return *park;
+                return park.clone();
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
@@ -731,7 +731,7 @@ async fn a_re_sent_successor_stays_on_its_recorded_lane(world: World) {
         .expect("build N runs the re-sent successor");
     let record = world.record(&process_id).await;
     assert!(
-        record.park.is_none(),
+        record.park().is_none(),
         "the segment's first fact ended the park: {record:?}"
     );
 
@@ -809,7 +809,7 @@ async fn a_re_sent_successor_stays_on_its_recorded_lane(world: World) {
     let output = ended(awaiter).await;
     assert_eq!(
         output.terminal_status(),
-        Some(lash_core::ProcessStatus::Cancelled),
+        Some(lash_core::TerminalProcessStatus::Cancelled),
         "the cancel ended the process: {output:?}"
     );
     server.settle().await;
@@ -864,11 +864,7 @@ async fn a_refused_successor_of_a_gone_generation_keeps_its_work(world: World) {
         "the refusal is typed: {refusal:?}"
     );
     let record = world.record(&process_id).await;
-    assert_eq!(
-        record.park.as_deref(),
-        Some(&park),
-        "the process keeps its park"
-    );
+    assert_eq!(record.park(), Some(&park), "the process keeps its park");
     let handover = world
         .continuations
         .latest_segment_handover(&process_id)

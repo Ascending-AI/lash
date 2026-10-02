@@ -98,13 +98,13 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
         .expect("read the process")
         .expect("the process is retained");
     let park = record
-        .park
-        .as_deref()
+        .park()
         .cloned()
         .expect("the paused group child parks the process that opened its group");
     assert!(!record.is_terminal());
     assert_eq!(
-        record.outcome, None,
+        record.outcome(),
+        None,
         "exhaustion writes no terminal evidence"
     );
     assert_eq!(park.attempts, 1);
@@ -144,8 +144,8 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
             .await
             .expect("read")
             .expect("retained")
-            .park,
-        record.park,
+            .park(),
+        record.park(),
         "reconciliation retains every park field"
     );
 
@@ -185,15 +185,12 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
         .await
         .expect("read")
         .expect("retained");
-    let second = reparked
-        .park
-        .as_deref()
-        .expect("the second exhaustion re-parks");
+    let second = reparked.park().expect("the second exhaustion re-parks");
     assert_eq!(second.park_id, park.park_id);
     assert_eq!(second.since_ms, park.since_ms);
     assert_eq!(second.attempts, 2, "one refusal per exhausted retry loop");
     assert!(second.refusing);
-    assert_eq!(reparked.outcome, None);
+    assert_eq!(reparked.outcome(), None);
     let listed_again = listed_parks(&core).await;
     reconcile_pass(&double).await;
     assert_eq!(
@@ -207,8 +204,8 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
             .await
             .expect("read")
             .expect("retained")
-            .park,
-        reparked.park
+            .park(),
+        reparked.park()
     );
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -236,8 +233,8 @@ pub(super) async fn a_process_opened_group_child_parks_resumes_and_reparks_idemp
     })
     .await
     .expect("the resumed process completes");
-    assert_eq!(completed.status, lash_core::ProcessStatus::Completed);
-    assert_eq!(completed.park, None);
+    assert_eq!(completed.status(), lash_core::ProcessStatus::Completed);
+    assert_eq!(completed.park(), None);
     assert!(listed_parks(&core).await.is_empty());
     assert_eq!(
         double
@@ -613,7 +610,7 @@ async fn paused_group_dispatch_work_parks_its_opener(
                         .expect("read")
                         .expect("retained");
                     if record.is_terminal() {
-                        assert_eq!(record.status, lash_core::ProcessStatus::Completed);
+                        assert_eq!(record.status(), lash_core::ProcessStatus::Completed);
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;

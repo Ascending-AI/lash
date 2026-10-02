@@ -200,7 +200,7 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics() {
             .await
             .expect("read durable terminal")
             .expect("retained process");
-        assert_eq!(retained.outcome.as_ref(), Some(&decoded));
+        assert_eq!(retained.outcome().as_ref(), Some(&decoded));
         let events = registry
             .recent_events(&record.id, 4)
             .await
@@ -210,7 +210,11 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics() {
             .filter_map(|event| event.semantics.terminal.as_ref())
             .collect();
         assert_eq!(terminals.len(), 1, "replay writes one terminal event");
-        assert_eq!(terminals[0].outcome, decoded, "event retains the cause");
+        assert_eq!(
+            lash_core::ProcessAwaitOutput::from(terminals[0].outcome.clone()),
+            decoded,
+            "event retains the cause"
+        );
     }
 }
 

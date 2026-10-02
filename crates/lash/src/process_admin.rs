@@ -589,9 +589,10 @@ impl Processes {
         let observers = request.observers.clone();
         let mut registration = request.into_registration();
         let host_session_turn_environment = match registration.input.as_ref() {
-            lash_core::ProcessInput::SessionTurn { create_request, .. }
-                if registration.env_ref.is_none() =>
-            {
+            lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+                create_request,
+                ..
+            }) if registration.env_ref.is_none() => {
                 Some(self.host_session_turn_environment(create_request)?)
             }
             _ => None,
@@ -604,8 +605,10 @@ impl Processes {
                     .journal_identity()
                     .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
             ));
-            if let lash_core::ProcessInput::SessionTurn { create_request, .. } =
-                registration.input.as_ref()
+            if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+                create_request,
+                ..
+            }) = registration.input.as_ref()
             {
                 if let Some(environment) = host_session_turn_environment.as_ref() {
                     let env_ref = environment.stable_ref().map_err(|error| {

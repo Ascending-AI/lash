@@ -31,12 +31,13 @@ impl RemoteProcessCancelReceipt {
         require_non_empty("RemoteProcessCancelReceipt", "process_id", &self.process_id)?;
         if let Some(record) = &self.record {
             record.validate("RemoteProcessCancelReceipt")?;
-            if record.status != self.status {
+            if record.status() != self.status {
                 return Err(RemoteProtocolError::InvalidEnvelope {
                     type_name: "RemoteProcessCancelReceipt",
                     message: format!(
                         "cancel receipt status `{:?}` contradicts its record status `{:?}`",
-                        self.status, record.status
+                        self.status,
+                        record.status()
                     ),
                 });
             }
@@ -224,7 +225,7 @@ pub struct RemoteProcessStartRequest {
     /// the process id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key: Option<String>,
-    pub input: RemoteProcessInput,
+    pub input: RemoteProcessStartTarget,
     pub lifetime: RemoteStartLifetime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<RemoteProcessExecutionEnvRef>,

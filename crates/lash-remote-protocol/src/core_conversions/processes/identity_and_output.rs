@@ -255,7 +255,7 @@ impl TryFrom<lash_core::ProcessAwaitOutput> for RemoteProcessAwaitOutput {
                 terminal_label,
                 pruned_at_ms,
             } => Ok(Self::NoLongerRetained {
-                terminal_label,
+                terminal_label: terminal_label.into(),
                 pruned_at_ms,
             }),
         }
@@ -279,7 +279,7 @@ impl TryFrom<RemoteProcessAwaitOutput> for lash_core::ProcessAwaitOutput {
                 terminal_label,
                 pruned_at_ms,
             } => Ok(Self::NoLongerRetained {
-                terminal_label,
+                terminal_label: terminal_label.into(),
                 pruned_at_ms,
             }),
         }

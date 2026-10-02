@@ -385,11 +385,11 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     assert_eq!(event.sequence, 1);
     assert_eq!(event.occurred_at, 42);
     assert!(matches!(
-        repair_record.as_ref().map(|record| record.status),
+        repair_record.as_ref().map(|record| record.status()),
         Some(ProcessStatus::Completed)
     ));
     assert!(matches!(
-        repair_record.and_then(|record| record.outcome),
+        repair_record.and_then(|record| record.outcome()),
         Some(ProcessAwaitOutput::Settled { .. })
     ));
 }

@@ -668,7 +668,7 @@ async fn check_children(world: &CrashWorld, expected: &Expected, violations: &mu
                 if !record.is_terminal() && record.cancel_request.is_none() {
                     violations.push(format!(
                         "child `{child}` of ended `{parent}` is orphaned: {:?} with no cancel request",
-                        record.status
+                        record.status()
                     ));
                 }
             }

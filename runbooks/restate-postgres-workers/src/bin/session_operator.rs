@@ -334,13 +334,13 @@ impl Harness {
                 let record: String = sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
                     .bind(&child.0).fetch_one(&self.pool).await?;
                 let record: lash_core::ProcessRecord = serde_json::from_str(&record)?;
-                let substrate_lost = matches!(&record.outcome,
+                let substrate_lost = matches!(&record.outcome(),
                     Some(lash_core::ProcessAwaitOutput::Abandoned { evidence, .. })
                     if evidence.writer == lash_core::AbandonWriter::ResumeRefused {
                         reason: lash_core::ProcessResumeRefusal::SubstrateLost,
                     });
-                let child_ended = record.status == lash_core::ProcessStatus::Cancelled
-                    || (allow_substrate_loss && record.status == lash_core::ProcessStatus::Abandoned && substrate_lost);
+                let child_ended = record.status() == lash_core::ProcessStatus::Cancelled
+                    || (allow_substrate_loss && record.status() == lash_core::ProcessStatus::Abandoned && substrate_lost);
                 let closes: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_parent_end_plans WHERE parent_kind = 'turn' AND parent_id = $1 AND settled_at_ms IS NOT NULL")
                     .bind(&child.1).fetch_one(&self.pool).await?;
                 let child_scope = lash_core::ScopeId::process(record.id.clone()).storage_id();
@@ -356,7 +356,7 @@ impl Harness {
                         .bind(&child.0).fetch_one(&self.pool).await?;
                     ensure!(writes == 1 && cancels == 1, "terminal writes={writes}, child cancels={cancels}");
                     return Ok(json!({"terminal_kind": kind, "terminal_writes": writes, "child_cancels": cancels, "scope_closes": closes, "child_scope_closes": child_closes,
-                        "child": child.0, "child_status": record.status, "child_outcome": record.outcome,
+                        "child": child.0, "child_status": record.status(), "child_outcome": record.outcome(),
                         "child_cancel_request": request, "scope": child.1, "terminal_at_ms": row.get::<Option<i64>, _>("terminal_at_ms"),
                         "terminal_cause": row.get::<Option<String>, _>("terminal_cause_json")}));
                 }

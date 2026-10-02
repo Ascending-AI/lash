@@ -182,8 +182,8 @@ async fn stalled_process(engine: &Engine, id: &ProcessId) -> String {
                 report,
                 "record: terminal={} wait={:?} park={:?}",
                 record.is_terminal(),
-                record.wait,
-                record.park
+                record.wait(),
+                record.park()
             );
         }
         other => {
@@ -212,7 +212,7 @@ async fn stalled_process(engine: &Engine, id: &ProcessId) -> String {
 }
 
 fn signal_wait(record: &lash_core::ProcessRecord) -> bool {
-    matches!(record.wait.as_ref().map(|wait| &wait.kind), Some(lash_core::WaitKind::Signal { name, .. }) if name == SIGNAL)
+    matches!(record.wait().map(|wait| &wait.kind), Some(lash_core::WaitKind::Signal { name, .. }) if name == SIGNAL)
 }
 
 async fn cold(engine: Engine, executions: &Arc<AtomicUsize>) -> (Engine, lash::LashCore) {
@@ -804,7 +804,7 @@ async fn retired_journal_case() {
     engine.install_process_worker(worker(&core));
     signal(&engine, &core, &id).await;
     let parked = record_where(&engine, &id, |record| {
-        record.park.as_ref().is_some_and(|p| {
+        record.park().is_some_and(|p| {
             matches!(
                 p.reason,
                 lash_core::store::ParkReason::RetiredGeneration { .. }
@@ -812,7 +812,7 @@ async fn retired_journal_case() {
         })
     })
     .await;
-    let park = parked.park.as_ref().unwrap();
+    let park = parked.park().unwrap();
     assert_eq!(park.build_generation.as_ref(), Some(&generation));
     assert!(park.refusing);
     assert!(!parked.is_terminal());
@@ -856,7 +856,7 @@ async fn retired_journal_case() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        retried.park.as_ref().unwrap().park_id,
+        retried.park().unwrap().park_id,
         park_id,
         "retry extends one refusal rather than opening a second park"
     );

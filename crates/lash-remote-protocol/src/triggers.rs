@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::processes::{
     RemoteProcessEventType, RemoteProcessExecutionEnvRef, RemoteProcessIdentity,
-    RemoteProcessInput, RemoteProcessOriginator, RemoteSessionScope,
+    RemoteProcessInput, RemoteProcessOriginator, RemoteProcessStartTarget, RemoteSessionScope,
 };
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 
@@ -240,7 +240,7 @@ pub struct RemoteTriggerTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub identity: RemoteProcessIdentity,
-    pub input: RemoteProcessInput,
+    pub input: RemoteProcessStartTarget,
     #[serde(default)]
     pub inputs: RemoteTriggerInputTemplate,
 }
@@ -373,7 +373,7 @@ pub struct RemoteTriggerSubscriptionSpec {
     #[serde(default)]
     pub payload_schema: serde_json::Value,
     pub source_capture: RemoteTriggerSourceCapture,
-    pub target: RemoteProcessInput,
+    pub target: RemoteProcessStartTarget,
     pub target_identity: RemoteProcessIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_types: Vec<RemoteProcessEventType>,
@@ -397,7 +397,8 @@ impl RemoteTriggerSubscriptionSpec {
         require_non_empty(type_name, "source_key", &self.source_key)?;
         if !matches!(
             self.target,
-            RemoteProcessInput::Engine { .. } | RemoteProcessInput::Definition { .. }
+            RemoteProcessStartTarget::Input(RemoteProcessInput::Engine { .. })
+                | RemoteProcessStartTarget::Definition { .. }
         ) {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
@@ -440,9 +441,10 @@ impl RemoteTriggerSubscriptionDraft {
         env_ref: RemoteProcessExecutionEnvRef,
         source_type: impl Into<String>,
         source_key: impl Into<String>,
-        target: RemoteProcessInput,
+        target: impl Into<RemoteProcessStartTarget>,
         target_identity: RemoteProcessIdentity,
     ) -> Self {
+        let target = target.into();
         let target_label = target_identity.label.clone();
         Self {
             spec: RemoteTriggerSubscriptionSpec {

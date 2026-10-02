@@ -17,7 +17,7 @@ type StartedIds = Arc<Mutex<Vec<(ProcessId, lash_core::ProcessRegistrationOutcom
 /// addressed by its key.
 fn start_envelope(
     scoped: &lash_core::ScopedEffectController<'_>,
-    registration: ProcessRegistration,
+    registration: lash_core::ProcessStartRegistration,
 ) -> RuntimeEffectEnvelope {
     let command = ProcessCommand::Start {
         registration,
@@ -41,12 +41,12 @@ fn start_envelope(
 async fn start_and_record(
     scoped: &lash_core::ScopedEffectController<'_>,
     registry: &Arc<dyn ProcessRegistry>,
-    registration: ProcessRegistration,
+    registration: impl Into<lash_core::ProcessStartRegistration>,
     started: &StartedIds,
 ) -> ProcessId {
     let outcome = scoped
         .execute_effect(
-            start_envelope(scoped, registration),
+            start_envelope(scoped, registration.into()),
             registry_local_executor(Arc::clone(registry)),
         )
         .await

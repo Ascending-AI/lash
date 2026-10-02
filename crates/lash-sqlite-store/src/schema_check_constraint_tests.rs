@@ -197,6 +197,41 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
          )",
         "ck_process_wake_deliveries_discard_reason",
     );
+    // A claim token exactly while enqueuing, a discard reason exactly once
+    // discarded: the four pairs outside that.
+    for (delivery_id, state, claim_token, discard_reason) in [
+        ("enqueuing-unclaimed", "enqueuing", "NULL", "NULL"),
+        ("pending-claimed", "pending", "'claim'", "NULL"),
+        ("discarded-reasonless", "discarded", "NULL", "NULL"),
+        ("enqueued-with-reason", "enqueued", "NULL", "'expired'"),
+    ] {
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO process_wake_deliveries (
+                     delivery_id, process_id, target_session_id, sequence, state,
+                     claim_token, next_attempt_at_ms, expires_at_ms, discard_reason,
+                     delivery_json
+                 ) VALUES (
+                     '{delivery_id}', 'wake-parent', 'target', 3, '{state}',
+                     {claim_token}, 0, 1, {discard_reason}, '{{}}'
+                 )"
+            ),
+            "ck_process_wake_deliveries_lifecycle",
+        );
+    }
+    // A tombstone names the retired status its process was pruned in.
+    for label in ["running", "waiting", "finished"] {
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO process_tombstones (
+                     process_id, terminal_label, pruned_at_ms, pruned_change_seq
+                 ) VALUES ('tombstone-{label}', '{label}', 0, 1)"
+            ),
+            "ck_process_tombstones_terminal_label",
+        );
+    }
     assert_check_rejects(
         &process,
         "INSERT INTO tool_intent_submissions (
@@ -399,5 +434,31 @@ fn turn_cancellation_shape_is_guarded() {
         )
         .expect("count snapshots"),
         0
+    );
+}
+
+/// The tombstone CHECK admits exactly the statuses a process is pruned in:
+/// its literal is the retired partition of `ProcessStatus`, in order.
+#[test]
+fn the_tombstone_check_derives_from_the_retired_process_statuses() {
+    let retired = lash_core_execution::RetiredProcessStatus::ALL
+        .iter()
+        .map(|status| format!("'{}'", status.label()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_eq!(
+        lash_core_execution::ProcessStatus::ALL
+            .iter()
+            .filter_map(lash_core_execution::ProcessStatus::retired)
+            .collect::<Vec<_>>(),
+        lash_core_execution::RetiredProcessStatus::ALL,
+    );
+    let constraint = format!(
+        "CONSTRAINT ck_process_tombstones_terminal_label CHECK (terminal_label IN ({retired}))"
+    );
+    assert_eq!(
+        PROCESS_SCHEMA.matches(constraint.as_str()).count(),
+        1,
+        "the SQLite DDL must carry `{constraint}`"
     );
 }

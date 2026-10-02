@@ -217,8 +217,12 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
         .await
         .expect("read the process")
         .expect("the process");
-    assert_eq!(record.outcome, None, "a refused replay writes no terminal");
-    let park = record.park.expect("the refused replay parks the process");
+    assert_eq!(
+        record.outcome(),
+        None,
+        "a refused replay writes no terminal"
+    );
+    let park = record.park().expect("the refused replay parks the process");
     assert!(
         matches!(
             &park.reason,
@@ -244,11 +248,11 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
         .expect("read the process")
         .expect("the process");
     assert_eq!(
-        record.outcome,
+        record.outcome(),
         Some(process_success(serde_json::json!(
             "replayed under its own generation"
         ))),
         "the resumed journal completes the process"
     );
-    assert!(record.park.is_none(), "the completion closes the park");
+    assert!(record.park().is_none(), "the completion closes the park");
 }

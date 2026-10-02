@@ -7,7 +7,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::definition_ref::{ProcessDefinitionRef, ProcessEngineKind};
-use super::events::{ProcessAwaitOutput, ProcessEventType, default_process_event_types};
+use super::events::{
+    ProcessAwaitOutput, ProcessEventType, ProcessTerminal, default_process_event_types,
+};
 use super::op_scope::ProcessOpScope;
 use super::validation::prepare_process_registration;
 
@@ -113,9 +115,20 @@ pub enum ProcessInput {
         #[serde(default)]
         metadata: serde_json::Value,
     },
+}
+
+/// What a start names to run: an executable input, or the immutable
+/// definition one is resolved from.
+///
+/// A start request, a trigger target and their journal entries carry it; a
+/// process row carries the [`ProcessInput`] it resolved to. An input is
+/// spelled exactly as [`ProcessInput`] spells it, so a start of one reads the
+/// same on the wire as the row it registers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProcessStartTarget {
     /// A start of the immutable definition `definition_id` names, with its
-    /// arguments (ADR 0095, ADR 0113 §3.6). A start request and its journal
-    /// entry carry it; no process row does. Realization acquires the
+    /// arguments (ADR 0095, ADR 0113 §3.6). Realization acquires the
     /// definition's closure under the start's referrer, has its engine check
     /// it, and registers the engine start it resolves to, whose identity
     /// names the id ([`register_process_start`](crate::runtime::register_process_start)).
@@ -126,6 +139,62 @@ pub enum ProcessInput {
         #[serde(default)]
         args: serde_json::Map<String, serde_json::Value>,
     },
+    /// A start of an input as its author stated it.
+    #[serde(untagged)]
+    Input(ProcessInput),
+}
+
+impl From<ProcessInput> for ProcessStartTarget {
+    fn from(input: ProcessInput) -> Self {
+        Self::Input(input)
+    }
+}
+
+impl ProcessStartTarget {
+    /// The input this start states, when it states one rather than naming a
+    /// definition to resolve.
+    pub fn input(&self) -> Option<&ProcessInput> {
+        match self {
+            Self::Input(input) => Some(input),
+            Self::Definition { .. } => None,
+        }
+    }
+
+    /// Stored attachments the target carries, sorted and deduplicated. A
+    /// definition's arguments are opaque JSON and carry no typed attachments
+    /// (ADR 0124).
+    pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        match self {
+            Self::Input(input) => input.stored_attachment_ids(),
+            Self::Definition { .. } => Vec::new(),
+        }
+    }
+
+    /// Whether lash never executes a process started from this target
+    /// ([`ProcessInput::is_externally_owned`]). A definition is resolved to
+    /// an engine start, which lash executes.
+    pub fn is_externally_owned(&self) -> bool {
+        match self {
+            Self::Input(input) => input.is_externally_owned(),
+            Self::Definition { .. } => false,
+        }
+    }
+
+    /// The identity a start of this target is registered under until its
+    /// realization admits one: an input's derived identity, or a definition
+    /// named by its id, which realization replaces with the identity its
+    /// engine admits.
+    pub fn identity(&self) -> ProcessIdentity {
+        match self {
+            Self::Input(input) => ProcessIdentity::from_process_input(input),
+            Self::Definition { definition_id, .. } => ProcessIdentity {
+                kind: ProcessEngineKind::from("definition"),
+                label: None,
+                definition: None,
+                definition_id: Some(definition_id.clone()),
+            },
+        }
+    }
 }
 
 /// What a `ProcessInput::SessionTurn` runner answers with when the child's
@@ -168,15 +237,6 @@ impl Clone for ProcessInput {
             Self::External { metadata } => Self::External {
                 metadata: metadata.clone(),
             },
-            Self::Definition {
-                definition_id,
-                signature_claim,
-                args,
-            } => Self::Definition {
-                definition_id: definition_id.clone(),
-                signature_claim: signature_claim.clone(),
-                args: args.clone(),
-            },
         }
     }
 }
@@ -194,7 +254,7 @@ impl ProcessInput {
     pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
         match self {
             Self::SessionTurn { turn_input, .. } => turn_input.stored_attachment_ids(),
-            Self::Engine { .. } | Self::Definition { .. } | Self::External { .. } => Vec::new(),
+            Self::Engine { .. } | Self::External { .. } => Vec::new(),
         }
     }
 
@@ -204,7 +264,6 @@ impl ProcessInput {
             Self::Engine { .. } => "engine",
             Self::SessionTurn { .. } => "session_turn",
             Self::External { .. } => "external",
-            Self::Definition { .. } => "definition",
         }
     }
 
@@ -547,17 +606,22 @@ impl SessionScope {
 
 /// Serializable process spec used to start or recover a runtime process.
 ///
+/// What it runs is `I`. A registrar, a process row and a running process hold
+/// a `ProcessRegistration`, whose input is executable. A start still to be
+/// realized holds a [`ProcessStartRegistration`], whose target may name a
+/// definition: realization resolves it, so no registrar is ever handed one.
+///
 /// Unknown fields are refused: the retired shape named its process with an
 /// `id` of its own, and must not decode as a keyless start.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProcessRegistration {
+pub struct ProcessRegistration<I = ProcessInput> {
     /// The start's idempotency key (ADR 0107). While a process registered
     /// under the same key is retained, registration returns that process
     /// instead of minting another. `None` is a keyless start: always new.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_key: Option<StartKey>,
-    pub input: Arc<ProcessInput>,
+    pub input: Arc<I>,
     /// What ends the process: the recorded decision (FIG-3607 R4b).
     pub lifetime: LifetimeDecision,
     /// Where the start came from, nearest first; empty for a root start. A
@@ -597,7 +661,11 @@ pub struct ProcessRegistration {
     pub engine_config: Option<serde_json::Value>,
 }
 
-impl Clone for ProcessRegistration {
+/// A start as its command carries it, before realization: its target may
+/// name a definition still to be resolved.
+pub type ProcessStartRegistration = ProcessRegistration<ProcessStartTarget>;
+
+impl<I> Clone for ProcessRegistration<I> {
     fn clone(&self) -> Self {
         Self {
             start_key: self.start_key.clone(),
@@ -684,6 +752,68 @@ impl ProcessRegistration {
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         let identity = ProcessIdentity::from_process_input(&input);
+        Self::with_derived_identity(input, identity, provenance, lifetime)
+    }
+
+    /// The lineage this process's body starts children under (FIG-3607 R1,
+    /// R10): the process, its own session when it runs one, then its recorded
+    /// ancestry and session capability.
+    pub fn lineage(&self, process_id: &ProcessId) -> ProcessLineage {
+        recorded_lineage(
+            process_id,
+            &self.input,
+            &self.ancestry,
+            self.session_capability.as_ref(),
+        )
+    }
+}
+
+impl From<ProcessRegistration> for ProcessStartRegistration {
+    /// The start of an input a caller already holds as a registration.
+    fn from(registration: ProcessRegistration) -> Self {
+        let target = ProcessStartTarget::Input(registration.input.as_ref().clone());
+        registration.with_input(Arc::new(target))
+    }
+}
+
+impl ProcessStartRegistration {
+    /// The registration of the input this start states.
+    ///
+    /// # Errors
+    ///
+    /// The start itself, when its target names a definition: only
+    /// realization resolves one
+    /// ([`register_process_start`](crate::runtime::register_process_start)).
+    pub fn stating_input(self) -> Result<ProcessRegistration, Box<Self>> {
+        match self.input.as_ref() {
+            ProcessStartTarget::Input(input) => {
+                let input = Arc::new(input.clone());
+                Ok(self.with_input(input))
+            }
+            ProcessStartTarget::Definition { .. } => Err(Box::new(self)),
+        }
+    }
+
+    /// Constructs the registration of a start of `target`, with the identity
+    /// the target derives until realization admits one.
+    pub fn of_target(
+        target: impl Into<ProcessStartTarget>,
+        provenance: ProcessProvenance,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        let target = target.into();
+        let identity = target.identity();
+        Self::with_derived_identity(target, identity, provenance, lifetime)
+    }
+}
+
+impl<I> ProcessRegistration<I> {
+    fn with_derived_identity(
+        input: I,
+        identity: ProcessIdentity,
+        provenance: ProcessProvenance,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
         let lifetime = lifetime.into();
         // A root holds a session only through the host's lookup grant.
         let session_capability = match &lifetime {
@@ -738,16 +868,25 @@ impl ProcessRegistration {
         self
     }
 
-    /// The lineage this process's body starts children under (FIG-3607 R1,
-    /// R10): the process, its own session when it runs one, then its recorded
-    /// ancestry and session capability.
-    pub fn lineage(&self, process_id: &ProcessId) -> ProcessLineage {
-        recorded_lineage(
-            process_id,
-            &self.input,
-            &self.ancestry,
-            self.session_capability.as_ref(),
-        )
+    /// This registration running `input` instead: everything else it
+    /// records is kept. Realization uses it to hand a registrar the input a
+    /// start's target resolved to.
+    pub fn with_input<J>(self, input: Arc<J>) -> ProcessRegistration<J> {
+        ProcessRegistration {
+            start_key: self.start_key,
+            input,
+            lifetime: self.lifetime,
+            ancestry: self.ancestry,
+            session_capability: self.session_capability,
+            identity: self.identity,
+            event_types: self.event_types,
+            provenance: self.provenance,
+            env_ref: self.env_ref,
+            wake_session_id: self.wake_session_id,
+            consumer_hold: self.consumer_hold,
+            trigger_delivery_pin: self.trigger_delivery_pin,
+            engine_config: self.engine_config,
+        }
     }
 
     /// Records the admitted start context a runtime start was made in: its
@@ -1121,13 +1260,6 @@ impl ProcessIdentity {
                     .map(str::to_string);
                 Self::labelled("external", label)
             }
-            // Realization replaces it with the engine's admitted identity.
-            ProcessInput::Definition { definition_id, .. } => Self {
-                kind: ProcessEngineKind::from("definition"),
-                label: None,
-                definition: None,
-                definition_id: Some(definition_id.clone()),
-            },
         }
     }
 }
@@ -1239,7 +1371,8 @@ impl ProcessHandleView {
     /// Builds a `ProcessHandleView` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
-        Self::new(record.id, record.identity, record.status)
+        let status = record.status();
+        Self::new(record.id, record.identity, status)
     }
 }
 
@@ -1280,6 +1413,7 @@ impl ProcessCancelReceipt {
     /// Builds a `ProcessCancelReceipt` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Result<Self, crate::PluginError> {
+        let status = record.status();
         let request = record.cancel_request.ok_or_else(|| {
             crate::PluginError::Session(format!(
                 "process `{}` has no cancellation request",
@@ -1288,7 +1422,7 @@ impl ProcessCancelReceipt {
         })?;
         Ok(Self {
             process_id: record.id,
-            status: record.status,
+            status,
             origin: request.origin,
         })
     }
@@ -1398,7 +1532,8 @@ impl ProcessObserverBy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessTombstone {
     pub process_id: ProcessId,
-    pub terminal_label: String,
+    /// The status the process was pruned in.
+    pub terminal_label: RetiredProcessStatus,
     pub pruned_at_ms: u64,
     pub pruned_change_seq: u64,
 }
@@ -1458,19 +1593,138 @@ pub struct ProcessRecord {
     /// The first accepted cancellation request, retained across retries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<Box<CancelRequest>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wait: Option<WaitState>,
-    /// The park the process is in, while its body refuses to replay its
-    /// journal (FIG-3586, FIG-3659 NOW-B). Folded from `process.parked`
-    /// facts and cleared by the first lifecycle fact past the refusal; never
-    /// set on a terminal record. Boxed for the same reason as the other
-    /// usually-absent facts.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub park: Option<Box<crate::store::ProcessPark>>,
-    #[serde(default)]
-    pub status: ProcessStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<ProcessOutcome>,
+    /// The one lifecycle state the process is in. Its status, wait, park and
+    /// outcome are read from it ([`Self::status`], [`Self::wait`],
+    /// [`Self::park`], [`Self::terminal`]) and stored nowhere beside it.
+    pub lifecycle: ProcessLifecycleState,
+}
+
+/// The lifecycle state of a process record: each state owns the facts that
+/// exist only in it, so a record cannot hold a wait or a park beside an
+/// outcome, or a terminal status without one.
+///
+/// A park is folded from `process.parked` facts while the process's body
+/// refuses to replay its journal (FIG-3586, FIG-3659 NOW-B) and cleared by
+/// the first lifecycle fact past the refusal. It is boxed so the
+/// usually-absent fact does not enlarge the pervasive [`ProcessRecord`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProcessLifecycleState {
+    Running {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        park: Option<Box<crate::store::ProcessPark>>,
+    },
+    Waiting {
+        wait: WaitState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        park: Option<Box<crate::store::ProcessPark>>,
+    },
+    /// The caller that registered an externally-owned row departed before
+    /// any outcome was recorded ([`ProcessStatus::CallerDeparted`]).
+    /// A variant with fields, so that a decode refuses a wait, a park or an
+    /// outcome beside it as it does for every other state.
+    CallerDeparted {},
+    Terminal {
+        outcome: ProcessTerminal,
+    },
+}
+
+impl ProcessLifecycleState {
+    /// The state of a newly registered process.
+    pub fn running() -> Self {
+        Self::Running { park: None }
+    }
+
+    /// A representative state of `status`, for fixtures that need a record
+    /// in a status and do not care what put it there: a terminal status
+    /// holds a minimal outcome of that status, and `waiting` a signal wait.
+    pub fn fixture(status: ProcessStatus) -> Self {
+        let settled = |output| Self::Terminal {
+            outcome: ProcessTerminal::from_tool_output(output),
+        };
+        match status {
+            ProcessStatus::Running => Self::running(),
+            ProcessStatus::Waiting => Self::Waiting {
+                wait: WaitState {
+                    kind: WaitKind::Signal {
+                        name: "fixture".to_string(),
+                        event_type: "signal.fixture".to_string(),
+                        key: "fixture".to_string(),
+                        ordinal: 1,
+                    },
+                    since_ms: 0,
+                },
+                park: None,
+            },
+            ProcessStatus::CallerDeparted => Self::CallerDeparted {},
+            ProcessStatus::Completed => {
+                settled(crate::ToolCallOutput::success(serde_json::Value::Null))
+            }
+            ProcessStatus::Failed => {
+                settled(crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Execution,
+                    "fixture_failure",
+                    "fixture failure",
+                )))
+            }
+            ProcessStatus::Cancelled => settled(crate::ToolCallOutput::cancelled(
+                crate::ToolCancellation::runtime("fixture cancellation"),
+            )),
+            ProcessStatus::Abandoned => Self::Terminal {
+                outcome: ProcessTerminal::Abandoned {
+                    evidence: Box::new(super::events::AbandonEvidence {
+                        writer: super::events::AbandonWriter::Producer,
+                        owner: None,
+                        epoch_ms: 0,
+                    }),
+                    control: None,
+                },
+            },
+        }
+    }
+
+    /// The status this state is. Exhaustive on purpose: the status is a
+    /// function of the state and has no home of its own.
+    pub fn status(&self) -> ProcessStatus {
+        match self {
+            Self::Running { .. } => ProcessStatus::Running,
+            Self::Waiting { .. } => ProcessStatus::Waiting,
+            Self::CallerDeparted {} => ProcessStatus::CallerDeparted,
+            Self::Terminal { outcome } => outcome.status().into(),
+        }
+    }
+
+    /// The wait the process is in.
+    pub fn wait(&self) -> Option<&WaitState> {
+        match self {
+            Self::Waiting { wait, .. } => Some(wait),
+            Self::Running { .. } | Self::CallerDeparted {} | Self::Terminal { .. } => None,
+        }
+    }
+
+    /// The park the process is in.
+    pub fn park(&self) -> Option<&crate::store::ProcessPark> {
+        match self {
+            Self::Running { park } | Self::Waiting { park, .. } => park.as_deref(),
+            Self::CallerDeparted {} | Self::Terminal { .. } => None,
+        }
+    }
+
+    /// The park slot of a state that can hold one.
+    pub(super) fn park_mut(&mut self) -> Option<&mut Option<Box<crate::store::ProcessPark>>> {
+        match self {
+            Self::Running { park } | Self::Waiting { park, .. } => Some(park),
+            Self::CallerDeparted {} | Self::Terminal { .. } => None,
+        }
+    }
+
+    /// The outcome the process ended in.
+    pub fn terminal(&self) -> Option<&ProcessTerminal> {
+        match self {
+            Self::Terminal { outcome } => Some(outcome),
+            Self::Running { .. } | Self::Waiting { .. } | Self::CallerDeparted {} => None,
+        }
+    }
 }
 /// The lineage a process's body starts children under, from the facts its
 /// row records: the process, the session it runs of its own (a `SessionTurn`
@@ -1488,9 +1742,7 @@ fn recorded_lineage(
                 .clone()
                 .unwrap_or_else(|| process_child_session_id(process_id)),
         ),
-        ProcessInput::Engine { .. }
-        | ProcessInput::External { .. }
-        | ProcessInput::Definition { .. } => None,
+        ProcessInput::Engine { .. } | ProcessInput::External { .. } => None,
     };
     ProcessLineage::of_process(
         process_id,
@@ -1558,17 +1810,40 @@ impl ProcessRecord {
             external_ref: None,
             first_started: None,
             cancel_request: None,
-            wait: None,
-            park: None,
-            status: ProcessStatus::Running,
-            outcome: None,
+            lifecycle: ProcessLifecycleState::running(),
         }
+    }
+
+    /// The status the record's lifecycle state is: what a store projects
+    /// into its `status` column.
+    pub fn status(&self) -> ProcessStatus {
+        self.lifecycle.status()
+    }
+
+    /// The wait the process is in.
+    pub fn wait(&self) -> Option<&WaitState> {
+        self.lifecycle.wait()
+    }
+
+    /// The park the process is in.
+    pub fn park(&self) -> Option<&crate::store::ProcessPark> {
+        self.lifecycle.park()
+    }
+
+    /// The outcome the process ended in.
+    pub fn terminal(&self) -> Option<&ProcessTerminal> {
+        self.lifecycle.terminal()
+    }
+
+    /// What an await of the process answers once it has ended: its outcome.
+    pub fn outcome(&self) -> Option<ProcessOutcome> {
+        self.terminal().cloned().map(ProcessOutcome::from)
     }
 
     /// Lets process-store implementors gate retention on the folded durable status rather than the
     /// presence of an incidental event.
     pub fn is_terminal(&self) -> bool {
-        self.status.is_terminal()
+        self.terminal().is_some()
     }
 
     /// The key this process's park projection and park feed name it by. The
@@ -1581,7 +1856,7 @@ impl ProcessRecord {
     /// Whether the process is parked and its latest run refused: the only
     /// state in which a recovery rerun is exempt from the attempt budget.
     pub fn is_refusing_park(&self) -> bool {
-        self.park.as_deref().is_some_and(|park| park.refusing)
+        self.park().is_some_and(|park| park.refusing)
     }
 
     /// Exposes originator id to store and durable-substrate implementors while persisting and

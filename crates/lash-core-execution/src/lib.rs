@@ -864,6 +864,10 @@ pub(crate) use runtime::{
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
 pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
+pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
+pub use runtime::{
+    ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,
+};
 pub use session::{
     ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionError,
     ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope,

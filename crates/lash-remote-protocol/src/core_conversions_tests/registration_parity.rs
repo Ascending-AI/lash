@@ -80,10 +80,7 @@ fn peer_record(
         external_ref: None,
         first_started: None,
         cancel_request: None,
-        wait: None,
-        park: None,
-        status: RemoteProcessStatus::Running,
-        outcome: None,
+        lifecycle: RemoteProcessLifecycleState::Running { park: None },
     })
 }
 

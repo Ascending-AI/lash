@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn only_a_settled_output_delivers_attachments() {
         let abandoned = ProcessAwaitOutput::NoLongerRetained {
-            terminal_label: "completed".to_string(),
+            terminal_label: crate::RetiredProcessStatus::Completed,
             pruned_at_ms: 1,
         };
         assert!(delivered_attachment_ids(&abandoned).is_empty());

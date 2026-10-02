@@ -640,7 +640,7 @@ impl HandOff {
                 .await
                 .ok()
                 .flatten()
-                .is_some_and(|record| record.wait.is_some())
+                .is_some_and(|record| record.wait().is_some())
     }
 
     async fn ended(&self, process_id: &ProcessId) -> bool {

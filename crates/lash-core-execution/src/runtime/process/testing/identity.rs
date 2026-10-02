@@ -129,7 +129,7 @@ fn engine_entry(
         )))),
         process_id.clone(),
     );
-    record.status = status;
+    record.lifecycle = crate::ProcessLifecycleState::fixture(status);
     record
 }
 
@@ -142,15 +142,18 @@ fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
         "target",
         ProcessStatus::Waiting,
     );
-    waiting_entry.wait = Some(WaitState {
-        since_ms: 42,
-        kind: WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: "process:waiting:signal.ready:1".to_string(),
-            ordinal: 1,
+    waiting_entry.lifecycle = crate::ProcessLifecycleState::Waiting {
+        wait: WaitState {
+            since_ms: 42,
+            kind: WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: "process:waiting:signal.ready:1".to_string(),
+                ordinal: 1,
+            },
         },
-    });
+        park: None,
+    };
     let idle_entry = engine_entry(
         &crate::process_id_for_test("idle"),
         process_id,

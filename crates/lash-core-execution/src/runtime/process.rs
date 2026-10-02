@@ -64,12 +64,12 @@ pub use events::{
     ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessResumeRefusal, ProcessSignal,
-    ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessTerminalSemantics, ProcessTerminalSpec,
-    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec, admitted_signal_wait,
-    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
-    runtime_lifecycle_event_type, terminal_append_request, terminal_event_type_name,
-    validate_process_signal_name,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessOutcomeNotRetained, ProcessResumeRefusal,
+    ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessTerminal,
+    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessValueSelector, ProcessWake,
+    ProcessWakeDelivery, ProcessWakeSpec, admitted_signal_wait, process_signal_event_type,
+    process_signal_name_from_event_type, process_signal_wait_key, runtime_lifecycle_event_type,
+    terminal_append_request, terminal_event_type_name, validate_process_signal_name,
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
@@ -78,17 +78,18 @@ pub use model::{
     ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvLoadError,
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationOutcome,
-    ProcessRegistrationReceipt, ProcessSessionDeleteReport, ProcessSpawnProvenance,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
+    ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessLineage,
+    ProcessListFilter, ProcessListMode, ProcessObserverBy, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessSessionDeleteReport,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
-    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization, WaitKind,
-    WaitState, artifact_referrer_ended, artifact_store_plugin_error, lifetime,
-    load_process_execution_env, mint_process_id, process_child_session_id, process_session_turn_id,
-    publish_process_execution_env,
+    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization,
+    TerminalProcessStatus, WaitKind, WaitState, artifact_referrer_ended,
+    artifact_store_plugin_error, lifetime, load_process_execution_env, mint_process_id,
+    process_child_session_id, process_session_turn_id, publish_process_execution_env,
 };
 pub use model::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use observation::{
@@ -134,11 +135,10 @@ pub use testing::*;
 pub use validation::{
     ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
     ProcessTransitionPlan, TriggerDeliveryBinding, abandoned_consumer_refusal,
-    allocate_process_event_sequence, apply_process_event_projection,
-    apply_process_status_projection, check_retained_start, check_trigger_delivery_start,
-    fold_process_record, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition, process_park_transitions,
-    require_event_replay, validate_generic_process_event_append,
+    allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
+    check_trigger_delivery_start, fold_process_record, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
+    process_park_transitions, require_event_replay, validate_generic_process_event_append,
 };
 
 pub fn current_epoch_ms() -> u64 {

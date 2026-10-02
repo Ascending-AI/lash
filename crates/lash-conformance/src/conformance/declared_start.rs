@@ -1317,7 +1317,7 @@ pub async fn declared_start_crash_at_every_launch_boundary(tier: DeclaredStartTi
         let child = world.only_child().await;
         let child = world.terminal(&child.id).await;
         assert_eq!(
-            child.status,
+            child.status(),
             crate::ProcessStatus::Completed,
             "{boundary:?}: the one child completed: {child:#?}"
         );
@@ -1484,7 +1484,7 @@ pub async fn declared_start_timeout_cancels_the_child(tier: DeclaredStartTier) {
     let child = world.only_child().await;
     let child = world.terminal(&child.id).await;
     assert_eq!(
-        child.status,
+        child.status(),
         crate::ProcessStatus::Cancelled,
         "the timed-out child is cancelled: {child:#?}"
     );
@@ -1579,7 +1579,7 @@ pub async fn declared_start_cancel_at_each_point(tier: DeclaredStartTier) {
                 for child in &children {
                     let child = world.terminal(&child.id).await;
                     assert_eq!(
-                        child.status,
+                        child.status(),
                         crate::ProcessStatus::Cancelled,
                         "C2: a child the launch registered is cancelled: {child:#?}"
                     );
@@ -1589,7 +1589,7 @@ pub async fn declared_start_cancel_at_each_point(tier: DeclaredStartTier) {
                 assert_eq!(children.len(), 1, "{point:?}: one child: {children:#?}");
                 let child = world.terminal(&children[0].id).await;
                 assert_eq!(
-                    child.status,
+                    child.status(),
                     crate::ProcessStatus::Cancelled,
                     "{point:?}: the child is cancelled: {child:#?}"
                 );
@@ -1598,7 +1598,7 @@ pub async fn declared_start_cancel_at_each_point(tier: DeclaredStartTier) {
                 assert_eq!(children.len(), 1, "C5: one child: {children:#?}");
                 let child = world.terminal(&children[0].id).await;
                 assert_eq!(
-                    child.status,
+                    child.status(),
                     crate::ProcessStatus::Completed,
                     "C5: the terminal wins over the cancel: {child:#?}"
                 );
@@ -1954,7 +1954,7 @@ async fn batch_of_spawns_cancelled_mid_flight(tier: &DeclaredStartTier) {
     for child in children {
         let child = world.terminal(&child.id).await;
         assert_eq!(
-            child.status,
+            child.status(),
             crate::ProcessStatus::Cancelled,
             "every child is cancelled: {child:#?}"
         );
@@ -2110,7 +2110,7 @@ pub async fn declared_start_scope_close_cancels_until_children(tier: DeclaredSta
     let (child, scope) = closed.await.expect("the scope closed");
     let child = world.terminal(&child).await;
     assert_eq!(
-        child.status,
+        child.status(),
         crate::ProcessStatus::Cancelled,
         "the child is cancelled: {child:#?}"
     );

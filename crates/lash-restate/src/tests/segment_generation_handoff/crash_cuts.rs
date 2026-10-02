@@ -112,7 +112,7 @@ async fn handover_recovers_at_every_cut(fixture: &Fixture) {
             1,
             "{point:?}: one successor"
         );
-        assert_eq!(roll.record(&process_id).await.outcome, Some(expected));
+        assert_eq!(roll.record(&process_id).await.outcome(), Some(expected));
         assert_eq!(
             roll.invocations_of(&format!(
                 "{PROCESS_WORKFLOW}/{process_id}/complete_terminal"
@@ -184,7 +184,7 @@ impl HttpTransport for NoIngress {
     }
 }
 
-async fn retained_outcome_wins_on_every_host(fixture: &Fixture) {
+async fn a_wait_answers_the_record_state_on_every_host(fixture: &Fixture) {
     let faults = Arc::new(lash_core::testing::ProcessRegistryFaults::new(
         fixture.stores.process_registry(),
     ));
@@ -194,7 +194,6 @@ async fn retained_outcome_wins_on_every_host(fixture: &Fixture) {
         .await
         .expect("register");
     let process_id = record.id.clone();
-    record.status = lash_core::ProcessStatus::CallerDeparted;
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
     let hosts: Vec<(&str, Box<dyn lash_core::ProcessWorkSubstrate>)> = vec![
         (
@@ -215,7 +214,13 @@ async fn retained_outcome_wins_on_every_host(fixture: &Fixture) {
     ];
     let expected = process_success(serde_json::json!({ "retained": true }));
     for outcome in [Some(expected.clone()), None] {
-        record.outcome.clone_from(&outcome);
+        // A record holds one state: its outcome, or its caller's departure.
+        record.lifecycle = match &outcome {
+            Some(outcome) => lash_core::ProcessLifecycleState::Terminal {
+                outcome: outcome.clone().try_into().expect("a terminal outcome"),
+            },
+            None => lash_core::ProcessLifecycleState::CallerDeparted {},
+        };
         for (host, work) in &hosts {
             faults.set_process_read_override(record.clone());
             let reads = faults.process_point_reads();
@@ -234,7 +239,7 @@ async fn retained_outcome_wins_on_every_host(fixture: &Fixture) {
                 assert_eq!(
                     result.expect(host),
                     lash_core::ProcessTerminalWait::Terminal(outcome.clone()),
-                    "{host}: retained outcome precedes caller departure"
+                    "{host}: a retained outcome resolves the wait"
                 );
             } else {
                 assert!(
@@ -264,17 +269,17 @@ async fn postgres_ingress_handover_crash_cuts_with_forced_replay() {
 }
 
 #[tokio::test]
-async fn retained_outcome_precedes_caller_departure_on_sqlite_memory() {
-    retained_outcome_wins_on_every_host(&Fixture::sqlite(false).await).await;
+async fn a_wait_answers_the_outcome_or_the_departure_on_sqlite_memory() {
+    a_wait_answers_the_record_state_on_every_host(&Fixture::sqlite(false).await).await;
 }
 
 #[tokio::test]
-async fn retained_outcome_precedes_caller_departure_on_sqlite_file() {
-    retained_outcome_wins_on_every_host(&Fixture::sqlite(true).await).await;
+async fn a_wait_answers_the_outcome_or_the_departure_on_sqlite_file() {
+    a_wait_answers_the_record_state_on_every_host(&Fixture::sqlite(true).await).await;
 }
 
 #[tokio::test]
 #[ignore = "requires PostgreSQL; run in kiln gate with pg16"]
-async fn postgres_ingress_retained_outcome_precedes_caller_departure() {
-    retained_outcome_wins_on_every_host(&Fixture::postgres().await).await;
+async fn postgres_ingress_a_wait_answers_the_outcome_or_the_departure() {
+    a_wait_answers_the_record_state_on_every_host(&Fixture::postgres().await).await;
 }

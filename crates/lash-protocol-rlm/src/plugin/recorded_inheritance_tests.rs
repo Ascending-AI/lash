@@ -137,7 +137,7 @@ async fn register_on(
         let tx = tx.clone();
         Box::pin(async move {
             let command = lash_core::ProcessCommand::Start {
-                registration,
+                registration: registration.into(),
                 observers: Vec::new(),
                 execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
             };

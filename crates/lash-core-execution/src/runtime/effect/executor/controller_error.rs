@@ -122,7 +122,7 @@ mod tests {
             ),
             (
                 PluginError::ProcessNoLongerRetained {
-                    terminal_label: "completed".to_string(),
+                    terminal_label: crate::RetiredProcessStatus::Completed,
                     pruned_at_ms: 42,
                 },
                 RuntimeErrorCode::ProcessNoLongerRetained,

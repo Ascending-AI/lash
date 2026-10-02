@@ -204,7 +204,7 @@ impl LawRig {
                 .await
                 .expect("read the process")
                 .expect("the process is retained until it is pruned");
-            if record.status.is_terminal() {
+            if record.status().is_terminal() {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -823,7 +823,8 @@ fn increment_subscription(
         target: crate::ProcessInput::Engine {
             kind: INCREMENT_KIND.to_string(),
             payload: serde_json::json!({ "process": "increment" }),
-        },
+        }
+        .into(),
         target_identity: crate::ProcessIdentity::for_definition(
             lash_core::ProcessDefinitionRef::unclaimed(
                 INCREMENT_KIND,

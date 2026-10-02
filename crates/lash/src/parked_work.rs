@@ -276,7 +276,7 @@ impl ParkedWork {
         let mut processes = processes
             .into_iter()
             .filter_map(|record| {
-                let park = record.park.as_deref()?.clone();
+                let park = record.park()?.clone();
                 Some((record.park_key(), park))
             })
             .peekable();

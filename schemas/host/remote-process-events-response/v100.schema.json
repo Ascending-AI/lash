@@ -647,7 +647,7 @@
               "type": "string"
             },
             "terminal_label": {
-              "type": "string"
+              "$ref": "#/$defs/RetiredProcessStatus"
             }
           },
           "required": [
@@ -1063,65 +1063,6 @@
       ],
       "type": "object"
     },
-    "RemoteProcessAwaitOutput": {
-      "oneOf": [
-        {
-          "properties": {
-            "output": {
-              "$ref": "#/$defs/RemoteProcessToolCallOutput"
-            },
-            "type": {
-              "const": "settled",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "output"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "control": true,
-            "evidence": {
-              "$ref": "#/$defs/RemoteAbandonEvidence"
-            },
-            "type": {
-              "const": "abandoned",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "evidence"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "pruned_at_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "terminal_label": {
-              "type": "string"
-            },
-            "type": {
-              "const": "no_longer_retained",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "terminal_label",
-            "pruned_at_ms"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "RemoteProcessEvent": {
       "additionalProperties": false,
       "properties": {
@@ -1273,37 +1214,52 @@
       ],
       "type": "object"
     },
-    "RemoteProcessStatus": {
+    "RemoteProcessTerminal": {
+      "description": "Mirrors [`lash_core::ProcessTerminal`]: the outcome a process ended in,\nwhich a terminal record and a terminal event carry. Its status is derived\nfrom it ([`Self::status`]) and carried nowhere beside it.",
       "oneOf": [
         {
-          "enum": [
-            "running",
-            "waiting",
-            "completed",
-            "failed",
-            "cancelled",
-            "abandoned"
+          "properties": {
+            "output": {
+              "$ref": "#/$defs/RemoteProcessToolCallOutput"
+            },
+            "type": {
+              "const": "settled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "output"
           ],
-          "type": "string"
+          "type": "object"
         },
         {
-          "const": "caller_departed",
-          "description": "Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably\ndistinguishable, deliberately never terminal.",
-          "type": "string"
+          "properties": {
+            "control": true,
+            "evidence": {
+              "$ref": "#/$defs/RemoteAbandonEvidence"
+            },
+            "type": {
+              "const": "abandoned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "evidence"
+          ],
+          "type": "object"
         }
       ]
     },
     "RemoteProcessTerminalSemantics": {
+      "additionalProperties": false,
       "properties": {
         "outcome": {
-          "$ref": "#/$defs/RemoteProcessAwaitOutput"
-        },
-        "status": {
-          "$ref": "#/$defs/RemoteProcessStatus"
+          "$ref": "#/$defs/RemoteProcessTerminal"
         }
       },
       "required": [
-        "status",
         "outcome"
       ],
       "type": "object"
@@ -1813,6 +1769,17 @@
         "replay_key"
       ],
       "type": "object"
+    },
+    "RetiredProcessStatus": {
+      "description": "The status a process row had when retention reclaimed it: the retired\nsubset of [`ProcessStatus`].\n\nA tombstone and every \"no longer retained\" answer carry one, so a pruned\nprocess still says how it ended: a `failed` one is never reported as\ncompleted, and a `caller_departed` one is never reported as having an\noutcome at all.",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned",
+        "caller_departed"
+      ],
+      "type": "string"
     },
     "RuntimeOwner": {
       "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the\nplugin session, the tool catalog, the attachment facade, the authority a\ntool intent is declared under \u2014 and those interfaces take a\n`RuntimeOwner`. A process runtime is never handed a session id as a\nstand-in for its own identity.",

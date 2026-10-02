@@ -126,7 +126,7 @@ fn enriched_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscrip
             payload_schema: crate::LashSchema::new(serde_json::json!({"type": "object"})),
             semantics: crate::ProcessEventSemanticsSpec {
                 terminal: Some(crate::ProcessTerminalSpec {
-                    status: crate::ProcessStatus::Completed,
+                    status: crate::TerminalProcessStatus::Completed,
                     await_output: Some(crate::ProcessValueSelector::Template {
                         template: "{payload}:{pointer}:{const}:{present}".to_string(),
                         fields: selector_fields,
@@ -473,7 +473,9 @@ fn enriched_engine_trigger_definition_keeps_v3_and_tracks_payload() {
         "trigger-definition:v3:blake3:e81330239140b8feb59360f1dcdbecf2a98fd210dfd84828fd2524ac5a20aea3"
     );
     assert!(first.starts_with("trigger-definition:v3:blake3:"));
-    let crate::ProcessInput::Engine { payload, .. } = &mut draft.target else {
+    let crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { payload, .. }) =
+        &mut draft.target
+    else {
         unreachable!()
     };
     *payload = serde_json::json!({"payload": 1});

@@ -1067,24 +1067,25 @@ pub mod remote {
             RemoteProcessEventsRequest, RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
             RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
-            RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
-            RemoteProcessObserverBy, RemoteProcessOriginator, RemoteProcessOriginatorFilter,
-            RemoteProcessPark, RemoteProcessPluginConfig, RemoteProcessProvenance,
-            RemoteProcessRecord, RemoteProcessResumeRefusal, RemoteProcessSignalReceipt,
-            RemoteProcessSignalRequest, RemoteProcessSignalWaitBinding, RemoteProcessSignature,
-            RemoteProcessStartOutcome, RemoteProcessStartReceipt, RemoteProcessStartRequest,
-            RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
+            RemoteProcessLifecycleState, RemoteProcessListFilter, RemoteProcessListResponse,
+            RemoteProcessModelLimits, RemoteProcessObserverBy, RemoteProcessOriginator,
+            RemoteProcessOriginatorFilter, RemoteProcessPark, RemoteProcessPluginConfig,
+            RemoteProcessProvenance, RemoteProcessRecord, RemoteProcessResumeRefusal,
+            RemoteProcessSignalReceipt, RemoteProcessSignalRequest, RemoteProcessSignalWaitBinding,
+            RemoteProcessSignature, RemoteProcessStartOutcome, RemoteProcessStartReceipt,
+            RemoteProcessStartRequest, RemoteProcessStartTarget, RemoteProcessStarted,
+            RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminal,
             RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
             RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
             RemoteProcessToolCancellation, RemoteProcessToolFailure,
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-            RemoteProcessWorkSnapshot, RemoteRecordedRender, RemoteRuntimeAttribution,
-            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
-            RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
-            RemoteSessionTurnOutcome, RemoteStartLifetime, RemoteToolFailureClass,
-            RemoteTurnBudget,
+            RemoteProcessWorkSnapshot, RemoteRecordedRender, RemoteRetiredProcessStatus,
+            RemoteRuntimeAttribution, RemoteRuntimeInvocation, RemoteRuntimeReplay,
+            RemoteRuntimeReplayAttribution, RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId,
+            RemoteSessionScope, RemoteSessionTurnOutcome, RemoteStartLifetime,
+            RemoteTerminalProcessStatus, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
@@ -1195,6 +1196,11 @@ pub mod process {
         WakeDeliveryClaimOutcome, WakeDeliveryLifecycle, WakeDeliveryReport, WakeDeliveryState,
         WakeDiscardReason,
     };
+    /// The one lifecycle state a process record holds, and the outcome a
+    /// terminal one ends in.
+    pub use lash_core::runtime::{
+        ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal,
+    };
     /// Registry admission receipts and lifecycle write outcomes.
     pub use lash_core::runtime::{
         ProcessRegistrationReceipt, ProcessRegistryBinding, StoreRealization,
@@ -1224,11 +1230,12 @@ pub mod process {
         ProcessRegistrationOutcome, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
         ProcessRetention, ProcessService, ProcessSessionDeleteReport, ProcessSignal,
         ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessStartOptions,
-        ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus,
-        ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalWait, ProcessToolIntents,
-        ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate,
-        ProcessWorkWiring, ProjectionWatermark, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId,
-        ScopeRef, ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey,
+        ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
+        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
+        ProcessTerminalWait, ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox,
+        ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
+        RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
+        ScopeStorageError, SessionScope, StartCx, StartCxError, StartKey, TerminalProcessStatus,
         TriggerDeliveryPin, WatchedRegistry, facade_support::ObservedProcess,
         facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
         facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,

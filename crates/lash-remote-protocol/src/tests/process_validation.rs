@@ -1,70 +1,114 @@
 use super::*;
 
 #[test]
-fn remote_terminal_semantics_reject_non_terminal_status() {
-    let terminal = RemoteProcessTerminalSpec {
-        status: RemoteProcessStatus::Running,
-        await_output: Some(RemoteProcessValueSelector::Payload),
-    };
-    assert!(
-        terminal
-            .validate("RemoteProcessTerminalSpec")
-            .expect_err("running terminal semantics must be rejected")
-            .to_string()
-            .contains("require a terminal status")
-    );
+fn remote_terminal_semantics_cannot_name_a_non_terminal_status() {
+    for (status, terminal) in [
+        ("running", false),
+        ("waiting", false),
+        ("caller_departed", false),
+        ("completed", true),
+        ("failed", true),
+        ("cancelled", true),
+        ("abandoned", true),
+    ] {
+        let decoded = serde_json::from_value::<RemoteProcessTerminalSpec>(serde_json::json!({
+            "status": status,
+            "await_output": "payload",
+        }));
+        assert_eq!(
+            decoded.is_ok(),
+            terminal,
+            "`{status}` as a terminal event status"
+        );
+    }
 }
 
+/// A record carries one tagged lifecycle state. The flat `wait`, `park`,
+/// `status` and `outcome` it replaced could contradict each other; none of
+/// those contradictions decodes.
 #[test]
-fn remote_process_record_rejects_contradictory_status_and_outcome() {
-    let mut terminal_without_outcome = remote_process_record();
-    terminal_without_outcome.status = RemoteProcessStatus::Completed;
-    assert!(
-        terminal_without_outcome
-            .validate("RemoteProcessRecord")
-            .expect_err("terminal status without outcome must be rejected")
-            .to_string()
-            .contains("must carry an outcome")
-    );
+fn remote_process_record_decodes_one_lifecycle_state() {
+    let record = serde_json::to_value(remote_process_record()).expect("encode record");
+    let with_lifecycle = |lifecycle: serde_json::Value| {
+        let mut record = record.clone();
+        record["lifecycle"] = lifecycle;
+        serde_json::from_value::<RemoteProcessRecord>(record)
+    };
+    let outcome = serde_json::to_value(settled_success()).expect("encode outcome");
+    let wait = record["lifecycle"]["wait"].clone();
+    assert!(wait.is_object(), "the fixture record is waiting");
 
-    let mut non_terminal_with_outcome = remote_process_record();
-    non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
-            control: None,
-            view: None,
-            projection_value: None,
-        },
-    });
-    assert!(
-        non_terminal_with_outcome
-            .validate("RemoteProcessRecord")
-            .expect_err("non-terminal status with outcome must be rejected")
-            .to_string()
-            .contains("must not carry an outcome")
-    );
+    for (status, lifecycle) in [
+        (
+            RemoteProcessStatus::Running,
+            serde_json::json!({"state": "running"}),
+        ),
+        (
+            RemoteProcessStatus::Waiting,
+            serde_json::json!({"state": "waiting", "wait": wait}),
+        ),
+        (
+            RemoteProcessStatus::CallerDeparted,
+            serde_json::json!({"state": "caller_departed"}),
+        ),
+        (
+            RemoteProcessStatus::Completed,
+            serde_json::json!({"state": "terminal", "outcome": outcome}),
+        ),
+    ] {
+        assert_eq!(
+            with_lifecycle(lifecycle)
+                .expect("a lifecycle state decodes")
+                .status(),
+            status
+        );
+    }
 
-    let mut mismatched = remote_process_record();
-    mismatched.status = RemoteProcessStatus::Completed;
-    mismatched.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
-                origin: None,
-                message: "cancelled".to_string(),
-                source: RemoteProcessToolFailureSource::Cancellation,
-                raw: None,
-            }),
-            control: None,
-            view: None,
-            projection_value: None,
-        },
-    });
+    for (case, lifecycle) in [
+        (
+            "a terminal state without an outcome",
+            serde_json::json!({"state": "terminal"}),
+        ),
+        (
+            "a running state with an outcome",
+            serde_json::json!({"state": "running", "outcome": outcome}),
+        ),
+        (
+            "a terminal state with a wait",
+            serde_json::json!({"state": "terminal", "outcome": outcome, "wait": wait}),
+        ),
+        (
+            "a waiting state without a wait",
+            serde_json::json!({"state": "waiting"}),
+        ),
+        (
+            "a caller-departed state with an outcome",
+            serde_json::json!({"state": "caller_departed", "outcome": outcome}),
+        ),
+        (
+            "a pruned answer as an outcome",
+            serde_json::json!({"state": "terminal", "outcome": {
+                "type": "no_longer_retained",
+                "terminal_label": "completed",
+                "pruned_at_ms": 1,
+            }}),
+        ),
+        (
+            "a status beside the state",
+            serde_json::json!({"state": "running", "status": "completed"}),
+        ),
+    ] {
+        assert!(with_lifecycle(lifecycle).is_err(), "{case} must not decode");
+    }
+
+    let mut flat = record.clone();
+    let object = flat.as_object_mut().expect("a record is an object");
+    object.remove("lifecycle");
+    object.insert("status".to_string(), serde_json::json!("completed"));
+    object.insert("outcome".to_string(), outcome.clone());
     assert!(
-        mismatched
-            .validate("RemoteProcessRecord")
-            .expect_err("mismatched terminal status and outcome must be rejected")
-            .to_string()
-            .contains("contradicts its outcome")
+        serde_json::from_value::<RemoteProcessRecord>(flat).is_err(),
+        "the flat status and outcome a record used to carry must not decode"
     );
 }
 
@@ -95,58 +139,41 @@ fn settled_cancelled() -> RemoteProcessAwaitOutput {
     }
 }
 
+/// A terminal event carries its outcome only: a status beside it, or an
+/// answer that is not an outcome, does not decode.
 #[test]
-fn remote_process_event_semantics_reject_contradictory_status_and_outcome() {
-    let mismatched = RemoteProcessEventSemantics {
-        terminal: Some(RemoteProcessTerminalSemantics {
-            status: RemoteProcessStatus::Completed,
-            outcome: settled_cancelled(),
-        }),
-        wake: None,
-        signal_wait: None,
-    };
-    assert!(
-        mismatched
-            .validate("RemoteProcessEventSemantics")
-            .expect_err("mismatched terminal status and outcome must be rejected")
-            .to_string()
-            .contains("contradicts its outcome")
+fn remote_process_event_semantics_decode_an_outcome_only() {
+    let outcome = serde_json::to_value(settled_cancelled()).expect("encode outcome");
+    let decoded = serde_json::from_value::<RemoteProcessEventSemantics>(serde_json::json!({
+        "terminal": {"outcome": outcome},
+    }))
+    .expect("an outcome decodes");
+    assert_eq!(
+        decoded.terminal.expect("terminal").outcome.status(),
+        RemoteTerminalProcessStatus::Cancelled
     );
-
-    let nonterminal = RemoteProcessEventSemantics {
-        terminal: Some(RemoteProcessTerminalSemantics {
-            status: RemoteProcessStatus::Running,
-            outcome: settled_success(),
-        }),
-        wake: None,
-        signal_wait: None,
-    };
-    assert!(
-        nonterminal
-            .validate("RemoteProcessEventSemantics")
-            .expect_err("nonterminal status in the terminal slot must be rejected")
-            .to_string()
-            .contains("must not carry an outcome")
-    );
-
-    let no_longer_retained = RemoteProcessEventSemantics {
-        terminal: Some(RemoteProcessTerminalSemantics {
-            status: RemoteProcessStatus::Completed,
-            outcome: RemoteProcessAwaitOutput::NoLongerRetained {
-                terminal_label: "completed".to_string(),
-                pruned_at_ms: 1,
-            },
-        }),
-        wake: None,
-        signal_wait: None,
-    };
-    assert!(
-        no_longer_retained
-            .validate("RemoteProcessEventSemantics")
-            .expect_err("NoLongerRetained must not be a terminal event outcome")
-            .to_string()
-            .contains("contradicts its outcome")
-    );
+    for (case, terminal) in [
+        (
+            "a status beside the outcome",
+            serde_json::json!({"status": "completed", "outcome": outcome}),
+        ),
+        (
+            "a pruned answer as the outcome",
+            serde_json::json!({"outcome": {
+                "type": "no_longer_retained",
+                "terminal_label": "completed",
+                "pruned_at_ms": 1,
+            }}),
+        ),
+    ] {
+        assert!(
+            serde_json::from_value::<RemoteProcessEventSemantics>(
+                serde_json::json!({"terminal": terminal})
+            )
+            .is_err(),
+            "{case} must not decode"
+        );
+    }
 }
 
 fn settled_failed() -> RemoteProcessAwaitOutput {
@@ -178,21 +205,24 @@ fn abandoned_outcome() -> RemoteProcessAwaitOutput {
     }
 }
 
-fn terminal_event(status: RemoteProcessStatus, outcome: RemoteProcessAwaitOutput) {
+fn terminal_event(status: RemoteTerminalProcessStatus, outcome: RemoteProcessAwaitOutput) {
+    let outcome = RemoteProcessTerminal::try_from(outcome).expect("a terminal outcome");
+    assert_eq!(outcome.status(), status);
     RemoteProcessEventSemantics {
-        terminal: Some(RemoteProcessTerminalSemantics { status, outcome }),
+        terminal: Some(RemoteProcessTerminalSemantics { outcome }),
         wake: None,
         signal_wait: None,
     }
     .validate("RemoteProcessEventSemantics")
-    .expect("matching terminal status and outcome must be accepted");
+    .expect("a terminal outcome must be accepted");
 }
 
 #[test]
-fn remote_process_event_semantics_accept_matching_failed_cancelled_and_abandoned() {
-    terminal_event(RemoteProcessStatus::Failed, settled_failed());
-    terminal_event(RemoteProcessStatus::Cancelled, settled_cancelled());
-    terminal_event(RemoteProcessStatus::Abandoned, abandoned_outcome());
+fn remote_process_event_semantics_derive_failed_cancelled_and_abandoned() {
+    terminal_event(RemoteTerminalProcessStatus::Completed, settled_success());
+    terminal_event(RemoteTerminalProcessStatus::Failed, settled_failed());
+    terminal_event(RemoteTerminalProcessStatus::Cancelled, settled_cancelled());
+    terminal_event(RemoteTerminalProcessStatus::Abandoned, abandoned_outcome());
 }
 
 #[test]

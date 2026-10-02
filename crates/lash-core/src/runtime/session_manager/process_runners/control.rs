@@ -34,7 +34,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn start(
         &self,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         observers: Vec<SessionId>,
         execution_context: crate::ProcessExecutionContext,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -327,7 +327,7 @@ impl ProcessCapability {
     async fn capture_execution_env(
         &self,
         current: &CurrentOwnerCapability,
-        registration: &crate::ProcessRegistration,
+        registration: &crate::ProcessStartRegistration,
         scope: &crate::ProcessOpScope<'_>,
     ) -> Result<
         (
@@ -361,7 +361,7 @@ impl ProcessCapability {
         }
         if matches!(
             registration.input.as_ref(),
-            crate::ProcessInput::External { .. }
+            crate::ProcessStartTarget::Input(crate::ProcessInput::External { .. })
         ) {
             return Ok((None, None));
         }
@@ -379,7 +379,7 @@ impl ProcessCapability {
         &self,
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -537,12 +537,17 @@ impl ProcessCapability {
     async fn admit_and_stamp_engine_start(
         &self,
         current: &CurrentOwnerCapability,
-        registration: crate::ProcessRegistration,
+        registration: crate::ProcessStartRegistration,
         env_spec: Option<&crate::ProcessExecutionEnvSpec>,
-    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
+    ) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
         let (kind, payload) = match registration.input.as_ref() {
-            crate::ProcessInput::Engine { kind, payload } => (kind, payload),
-            crate::ProcessInput::SessionTurn { create_request, .. } => {
+            crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { kind, payload }) => {
+                (kind, payload)
+            }
+            crate::ProcessStartTarget::Input(crate::ProcessInput::SessionTurn {
+                create_request,
+                ..
+            }) => {
                 let Some(env_spec) = env_spec else {
                     return Err(crate::PluginError::Session(format!(
                         "process `{}` requires a captured execution env",
@@ -557,7 +562,8 @@ impl ProcessCapability {
                 )?;
                 return Ok(registration);
             }
-            crate::ProcessInput::External { .. } | crate::ProcessInput::Definition { .. } => {
+            crate::ProcessStartTarget::Input(crate::ProcessInput::External { .. })
+            | crate::ProcessStartTarget::Definition { .. } => {
                 return Ok(registration);
             }
         };
@@ -773,7 +779,7 @@ impl ProcessCapability {
                     .into_iter()
                     .filter(|record| record.ancestry.starter() == Some(&starter))
                     .filter(|record| match mode {
-                        crate::ProcessListMode::Live => !record.status.is_retired(),
+                        crate::ProcessListMode::Live => !record.status().is_retired(),
                         crate::ProcessListMode::All => true,
                     })
                     .collect())
@@ -1109,9 +1115,9 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// above the session (R1).
 async fn with_admitted_start_cx(
     current: &CurrentOwnerCapability,
-    registration: crate::ProcessRegistration,
+    registration: crate::ProcessStartRegistration,
     scope: &crate::ProcessOpScope<'_>,
-) -> Result<crate::ProcessRegistration, crate::PluginError> {
+) -> Result<crate::ProcessStartRegistration, crate::PluginError> {
     let process_id = match scope.start_cx() {
         Ok(Some(cx)) => {
             if scope.process_lineage.is_none()

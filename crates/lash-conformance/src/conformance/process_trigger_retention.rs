@@ -183,7 +183,8 @@ where
                     target: ProcessInput::Engine {
                         kind: "test".to_string(),
                         payload: serde_json::Value::Null,
-                    },
+                    }
+                    .into(),
                     ..draft(&session, "delivery-refusal-key", "delivery-refusal-source")
                 },
             },
@@ -679,7 +680,8 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
         target: ProcessInput::Engine {
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": "worker" }),
-        },
+        }
+        .into(),
         target_identity: ProcessIdentity::labelled("test", Some("worker".to_string())),
         event_types: Vec::new(),
         input_template,
@@ -1493,7 +1495,7 @@ async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
             .await
             .expect("read the child")
             .expect("the child is retained")
-            .status
+            .status()
             .is_terminal(),
         "the child completed before the bind recovered"
     );

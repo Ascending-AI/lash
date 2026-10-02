@@ -236,7 +236,8 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
             runtime_invocation(RuntimeEffectKind::Process, "fig3827-start"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
                 registration: external_registration()
-                    .with_start_key(Some(lash_core::StartKey::for_host("fig3827-started-child"))),
+                    .with_start_key(Some(lash_core::StartKey::for_host("fig3827-started-child")))
+                    .into(),
                 observers: Vec::new(),
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),

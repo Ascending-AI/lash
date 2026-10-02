@@ -1510,7 +1510,7 @@ fn terminal_is_parent_end_cancelled(
         | Err(lash::EmbedError::Plugin(lash::plugins::PluginError::ProcessNoLongerRetained {
             terminal_label,
             ..
-        })) => terminal_label == "cancelled",
+        })) => *terminal_label == lash::process::RetiredProcessStatus::Cancelled,
         _ => false,
     }
 }
@@ -1543,7 +1543,8 @@ async fn wait_for_cancel_request(
                 pruned_at_ms,
             }) => {
                 assert_eq!(
-                    terminal_label, "cancelled",
+                    terminal_label,
+                    lash::process::RetiredProcessStatus::Cancelled,
                     "process {process_id} tombstoned `{terminal_label}` at {pruned_at_ms}ms, \
                      not by the session end's cancel"
                 );

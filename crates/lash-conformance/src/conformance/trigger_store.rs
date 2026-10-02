@@ -557,7 +557,8 @@ fn sample_draft(
         target: crate::ProcessInput::Engine {
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": process_name }),
-        },
+        }
+        .into(),
         target_identity: crate::ProcessIdentity::labelled("test", Some(process_name.to_string())),
         event_types: Vec::new(),
         input_template: inputs,

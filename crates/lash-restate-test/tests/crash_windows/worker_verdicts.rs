@@ -461,7 +461,7 @@ async fn a_spent_cpu_budget_is_never_the_process_terminal(engine: Engine) {
     assert!(
         !met.is_terminal() && proposals.load(Ordering::SeqCst) == 0,
         "a live worker verdict became the process terminal: {:?}",
-        met.outcome
+        met.outcome()
     );
     assert_eq!(
         executions.load(Ordering::SeqCst),

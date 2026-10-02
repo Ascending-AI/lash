@@ -27,7 +27,7 @@ fn producer_cannot_override_runtime_lifecycle_event_types() {
     let mut collision =
         super::runtime_lifecycle_event_type("process.waiting").expect("reserved event type");
     collision.semantics.terminal = Some(crate::ProcessTerminalSpec {
-        status: crate::ProcessStatus::Completed,
+        status: crate::TerminalProcessStatus::Completed,
         await_output: None,
     });
     let registration = fixture_registration("reserved-collision").with_event_types([collision]);
@@ -327,27 +327,203 @@ fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
 }
 
 #[test]
-fn terminal_semantics_reject_non_terminal_status() {
-    let registration = fixture_registration("invalid-terminal-status").with_extra_event_types([
-        crate::ProcessEventType {
-            name: "producer.invalid_terminal".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: crate::ProcessEventSemanticsSpec {
-                terminal: Some(crate::ProcessTerminalSpec {
-                    status: crate::ProcessStatus::Running,
-                    await_output: Some(crate::ProcessValueSelector::Payload),
-                }),
-                ..crate::ProcessEventSemanticsSpec::default()
-            },
-        },
-    ]);
-    let error = prepare_process_registration(registration)
-        .expect_err("non-terminal status must be rejected at registration");
-    assert!(
-        error
-            .to_string()
-            .contains("must declare a terminal status, got `running`")
+fn terminal_semantics_cannot_name_a_non_terminal_status() {
+    for status in crate::ProcessStatus::ALL {
+        let spec = serde_json::json!({
+            "status": status.label(),
+            "await_output": "payload",
+        });
+        let decoded = serde_json::from_value::<crate::ProcessTerminalSpec>(spec);
+        assert_eq!(
+            decoded
+                .ok()
+                .map(|spec| crate::ProcessStatus::from(spec.status)),
+            status.terminal().map(crate::ProcessStatus::from),
+            "a terminal event declares `{}` exactly when it is terminal",
+            status.label()
+        );
+    }
+}
+
+/// A record holds one lifecycle state, on the stored row and the wire alike:
+/// the status is read from it, and a wait, a park, a status or an outcome
+/// that contradicts it has no encoding to arrive in.
+#[test]
+fn a_process_record_decodes_one_lifecycle_state() {
+    let record = crate::ProcessRecord::from_registration(
+        fixture_registration("one-lifecycle-state"),
+        crate::process_id_for_test("one-lifecycle-state"),
     );
+    let encoded = serde_json::to_value(&record).expect("encode record");
+    for flat in ["status", "wait", "park", "outcome"] {
+        assert!(
+            encoded.get(flat).is_none(),
+            "a record carries no `{flat}` beside its lifecycle"
+        );
+    }
+    assert_eq!(
+        encoded["lifecycle"],
+        serde_json::json!({"state": "running"})
+    );
+    let with_lifecycle = |lifecycle: serde_json::Value| {
+        let mut encoded = encoded.clone();
+        encoded["lifecycle"] = lifecycle;
+        serde_json::from_value::<crate::ProcessRecord>(encoded)
+    };
+    let outcome = serde_json::to_value(crate::ProcessTerminal::from_tool_output(
+        crate::ToolCallOutput::success(serde_json::json!(1)),
+    ))
+    .expect("encode outcome");
+    let wait = serde_json::to_value(crate::ProcessLifecycleState::fixture(
+        crate::ProcessStatus::Waiting,
+    ))
+    .expect("encode a waiting state")["wait"]
+        .clone();
+    assert!(wait.is_object(), "a waiting state carries its wait");
+
+    for status in crate::ProcessStatus::ALL {
+        let state = crate::ProcessLifecycleState::fixture(*status);
+        assert_eq!(state.status(), *status, "a state derives its status");
+        let decoded = with_lifecycle(serde_json::to_value(&state).expect("encode state"))
+            .expect("every lifecycle state decodes");
+        assert_eq!(decoded.status(), *status);
+        assert_eq!(decoded.is_terminal(), decoded.outcome().is_some());
+        assert_eq!(
+            decoded
+                .outcome()
+                .and_then(|outcome| outcome.terminal_status()),
+            status.terminal()
+        );
+    }
+
+    for (case, lifecycle) in [
+        (
+            "a terminal state without an outcome",
+            serde_json::json!({"state": "terminal"}),
+        ),
+        (
+            "a running state with an outcome",
+            serde_json::json!({"state": "running", "outcome": outcome}),
+        ),
+        (
+            "a terminal state with a wait",
+            serde_json::json!({"state": "terminal", "outcome": outcome, "wait": wait}),
+        ),
+        (
+            "a waiting state without a wait",
+            serde_json::json!({"state": "waiting"}),
+        ),
+        (
+            "a caller-departed state with an outcome",
+            serde_json::json!({"state": "caller_departed", "outcome": outcome}),
+        ),
+        (
+            "a pruned answer as an outcome",
+            serde_json::json!({"state": "terminal", "outcome": {
+                "type": "no_longer_retained",
+                "terminal_label": "completed",
+                "pruned_at_ms": 1,
+            }}),
+        ),
+        (
+            "a status beside the state",
+            serde_json::json!({"state": "running", "status": "completed"}),
+        ),
+        (
+            "a status in place of a state",
+            serde_json::json!({"state": "completed"}),
+        ),
+    ] {
+        assert!(with_lifecycle(lifecycle).is_err(), "{case} must not decode");
+    }
+
+    let terminal = serde_json::json!({"outcome": outcome});
+    serde_json::from_value::<crate::ProcessTerminalSemantics>(terminal)
+        .expect("a stored terminal event carries its outcome");
+    assert!(
+        serde_json::from_value::<crate::ProcessTerminalSemantics>(
+            serde_json::json!({"status": "completed", "outcome": outcome})
+        )
+        .is_err(),
+        "a stored terminal event carries no status beside its outcome"
+    );
+}
+
+#[test]
+fn a_resume_cannot_return_an_ended_process_to_running() {
+    let mut record = crate::ProcessRecord::from_registration(
+        fixture_registration("resume-after-terminal"),
+        crate::process_id_for_test("resume-after-terminal"),
+    );
+    let wait = WaitState {
+        since_ms: 1,
+        kind: crate::WaitKind::Signal {
+            name: "ready".to_string(),
+            event_type: "signal.ready".to_string(),
+            key: crate::runtime::process_signal_wait_key(&record.id, "ready", 1),
+            ordinal: 1,
+        },
+    };
+    let process_id = record.id.clone();
+    let event =
+        |sequence, request: crate::ProcessEventAppendRequest, terminal| crate::ProcessEvent {
+            process_id: process_id.clone(),
+            sequence,
+            event_type: request.event_type,
+            payload: request.payload,
+            invocation: crate::runtime::causal::process_event_invocation(
+                &process_id,
+                sequence,
+                "fixture",
+                request.replay,
+            ),
+            semantics: crate::ProcessEventSemantics {
+                terminal,
+                ..crate::ProcessEventSemantics::default()
+            },
+            occurred_at: sequence,
+        };
+    let outcome = crate::ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!(1),
+    ));
+    let waiting = event(
+        1,
+        crate::ProcessEventAppendRequest::wait_entered(&process_id, &wait),
+        None,
+    );
+    let completed = event(
+        2,
+        crate::terminal_append_request(&process_id, &outcome.clone().into(), None),
+        Some(crate::ProcessTerminalSemantics {
+            outcome: outcome.clone(),
+        }),
+    );
+    let resumed = event(
+        3,
+        crate::ProcessEventAppendRequest::wait_cleared(&process_id, &wait),
+        None,
+    );
+    super::apply_process_event_projection(&mut record, &waiting).expect("enter the wait");
+    assert_eq!(record.wait(), Some(&wait));
+    super::apply_process_event_projection(&mut record, &completed).expect("end the process");
+    let ended = record.clone();
+    assert_eq!(ended.status(), crate::ProcessStatus::Completed);
+    assert_eq!(ended.wait(), None, "the outcome takes the wait with it");
+
+    let error = super::apply_process_event_projection(&mut record, &resumed)
+        .expect_err("a resume cannot take an outcome back");
+    assert!(
+        matches!(
+            error,
+            crate::PluginError::ProcessAlreadyTerminal {
+                status: crate::ProcessStatus::Completed,
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert_eq!(record, ended, "the refused resume leaves the record ended");
+    assert_eq!(record.terminal(), Some(&outcome));
 }
 
 #[test]
@@ -362,7 +538,7 @@ fn a_core_named_override_remains_a_valid_registration() {
         .find(|event_type| event_type.name == "process.completed")
         .expect("completed default");
     completed.semantics.terminal = Some(crate::ProcessTerminalSpec {
-        status: crate::ProcessStatus::Completed,
+        status: crate::TerminalProcessStatus::Completed,
         await_output: Some(crate::ProcessValueSelector::Pointer(
             "/hijacked".to_string(),
         )),
@@ -444,7 +620,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
         record = projected_record;
     }
     assert!(record.first_started.is_some());
-    assert!(record.wait.is_none());
+    assert!(record.wait().is_none());
     assert!(record.external_ref.is_some());
 }
 
@@ -533,27 +709,33 @@ fn a_signal_append_selects_its_declared_wait_or_its_position() {
         "an unparked signal needs the store's count"
     );
 
-    record.wait = Some(WaitState {
-        since_ms: 1,
-        kind: crate::WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: crate::runtime::process_signal_wait_key(&record.id, "ready", 7),
-            ordinal: 7,
+    record.lifecycle = crate::ProcessLifecycleState::Waiting {
+        wait: WaitState {
+            since_ms: 1,
+            kind: crate::WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: crate::runtime::process_signal_wait_key(&record.id, "ready", 7),
+                ordinal: 7,
+            },
         },
-    });
+        park: None,
+    };
     assert_eq!(selected(&record, Some(2)).expect("parked"), binding(7));
     assert_eq!(selected(&record, None).expect("parked"), binding(7));
 
-    record.wait = Some(WaitState {
-        since_ms: 1,
-        kind: crate::WaitKind::Signal {
-            name: "other".to_string(),
-            event_type: "signal.other".to_string(),
-            key: crate::runtime::process_signal_wait_key(&record.id, "other", 7),
-            ordinal: 7,
+    record.lifecycle = crate::ProcessLifecycleState::Waiting {
+        wait: WaitState {
+            since_ms: 1,
+            kind: crate::WaitKind::Signal {
+                name: "other".to_string(),
+                event_type: "signal.other".to_string(),
+                key: crate::runtime::process_signal_wait_key(&record.id, "other", 7),
+                ordinal: 7,
+            },
         },
-    });
+        park: None,
+    };
     assert_eq!(
         selected(&record, Some(2)).expect("parked elsewhere"),
         binding(3),

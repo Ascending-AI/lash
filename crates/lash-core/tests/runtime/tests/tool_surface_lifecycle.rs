@@ -1143,7 +1143,8 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     lash_core::ProcessProvenance::host(),
                     lash_core::Lifetime::Detached,
                 )
-                .with_start_key(Some(lash_core::StartKey::for_host(process_id))),
+                .with_start_key(Some(lash_core::StartKey::for_host(process_id)))
+                .into(),
                 options,
                 lash_core::ProcessOpScope::new(handler.scoped()),
             )
@@ -1250,7 +1251,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         lash_core::testing::runtime_internals::SessionObservedProcessOutcome::NoLongerRetained {
             terminal_label,
             ..
-        } if terminal_label == "completed"
+        } if *terminal_label == lash_core::RetiredProcessStatus::Completed
     ));
     assert!(
         registry

@@ -19,7 +19,7 @@ pub async fn admit_trigger_registration_target(
     draft: &mut TriggerSubscriptionDraft,
 ) -> Result<(), PluginError> {
     validate_trigger_target(&draft.target)?;
-    if let crate::ProcessInput::Definition {
+    if let crate::ProcessStartTarget::Definition {
         definition_id,
         signature_claim,
         ..

@@ -975,7 +975,10 @@ trait SignalWaitProcesses: Send + Sync {
 #[async_trait::async_trait]
 impl SignalWaitProcesses for lash_core::facade_support::ProcessEngineProcessContext {
     async fn current_wait(&self) -> Result<Option<lash_core::WaitState>, lash_core::PluginError> {
-        Ok(self.record().await?.and_then(|record| record.wait))
+        Ok(self
+            .record()
+            .await?
+            .and_then(|record| record.wait().cloned()))
     }
 
     async fn event_page(

@@ -249,7 +249,7 @@ pub(crate) fn boundary_must_be_declined(
     record: Option<&ProcessRecord>,
 ) -> bool {
     reason != lash_core::BoundaryReason::HandOver
-        && record.is_some_and(|record| record.wait.is_some())
+        && record.is_some_and(|record| record.wait().is_some())
 }
 
 pub(crate) fn restate_process_terminal_await_key(
@@ -723,7 +723,7 @@ impl RestateProcessIngressRunner {
             return Ok(None);
         };
         let parked_for_generation = !record.is_terminal()
-            && record.park.as_deref().is_some_and(|park| {
+            && record.park().is_some_and(|park| {
                 matches!(
                     park.reason,
                     lash_core::store::ParkReason::RetiredGeneration { .. }
@@ -829,15 +829,15 @@ impl RestateProcessIngressRunner {
         process_id: &ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
         let record = self.registry.get_process(process_id).await?;
-        if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
-            return Ok(ProcessTerminalWait::Terminal(output.clone()));
+        if let Some(output) = record.as_ref().and_then(|record| record.outcome()) {
+            return Ok(ProcessTerminalWait::Terminal(output));
         }
         // FIG-1383: a row whose caller departed before any outcome has no
         // actor left to end it, and lash never invents its outcome, so a
         // wait on it is refused rather than parked.
         if record
             .as_ref()
-            .is_some_and(|record| record.status == ProcessStatus::CallerDeparted)
+            .is_some_and(|record| record.status() == ProcessStatus::CallerDeparted)
         {
             return Err(PluginError::ProcessCallerDeparted {
                 process_id: process_id.clone(),

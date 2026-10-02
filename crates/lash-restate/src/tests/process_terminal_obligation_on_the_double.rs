@@ -283,7 +283,7 @@ async fn store_terminal_without_publishing(
         .expect("store the terminal");
     completion
         .stored()
-        .outcome
+        .outcome()
         .clone()
         .expect("the completion stores a terminal")
 }
@@ -363,7 +363,7 @@ pub(super) async fn a_segment_that_publishes_its_terminal_settles_the_obligation
         .get_process(&process_id)
         .await
         .expect("read the process")
-        .and_then(|record| record.outcome)
+        .and_then(|record| record.outcome())
         .expect("the segment stored its terminal");
     assert_eq!(published, stored);
     assert_eq!(
@@ -429,7 +429,7 @@ pub(super) async fn a_paused_terminal_segment_is_killed_once_its_terminal_is_pub
         .await
         .expect("read the process")
         .expect("the process is retained");
-    assert_eq!(record.outcome, Some(stored), "the stored terminal stands");
+    assert_eq!(record.outcome(), Some(stored), "the stored terminal stands");
 }
 
 /// FIG-3900: the lost-run scan reads the runs lash still waits on — the

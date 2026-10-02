@@ -925,7 +925,7 @@ impl SessionControlEngine for RestateSessionControl {
             .await
             .map_err(refusal)?
             .ok_or_else(|| process_gone(process))?;
-        let current = record.park.as_deref().ok_or_else(|| {
+        let current = record.park().ok_or_else(|| {
             EngineRefusal::permanent(
                 lash_core::RuntimeErrorCode::ProcessNotParked,
                 format!("process `{process}` is not parked"),

@@ -253,7 +253,8 @@ impl SurfaceRunner {
                         target: ProcessInput::Engine {
                             kind: "surface".to_string(),
                             payload: serde_json::json!({"key": key}),
-                        },
+                        }
+                        .into(),
                         target_identity: ProcessIdentity::labelled(
                             "surface",
                             Some("surface-worker".to_string()),

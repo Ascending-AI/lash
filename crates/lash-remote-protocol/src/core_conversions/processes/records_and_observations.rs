@@ -171,10 +171,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             external_ref,
             first_started,
             cancel_request,
-            wait,
-            park,
-            status,
-            outcome,
+            lifecycle,
         } = value;
         Ok(Self {
             process_id: id,
@@ -198,10 +195,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
                 .map(|started| (*started).try_into())
                 .transpose()?,
             cancel_request: cancel_request.map(|request| *request),
-            wait: wait.map(Into::into),
-            park: park.map(|park| (*park).try_into()).transpose()?,
-            status: status.into(),
-            outcome: outcome.map(TryInto::try_into).transpose()?,
+            lifecycle: lifecycle.try_into()?,
         })
     }
 }
@@ -229,10 +223,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             external_ref,
             first_started,
             cancel_request,
-            wait,
-            park,
-            status,
-            outcome,
+            lifecycle,
         } = value;
         let start_key = start_key_digest
             .map(|start_key| {
@@ -283,10 +274,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             .map(|started| started.try_into().map(Box::new))
             .transpose()?;
         record.cancel_request = cancel_request.map(Box::new);
-        record.wait = wait.map(Into::into);
-        record.park = park.map(|park| park.try_into().map(Box::new)).transpose()?;
-        record.status = status.into();
-        record.outcome = outcome.map(TryInto::try_into).transpose()?;
+        record.lifecycle = lifecycle.try_into()?;
         Ok(record)
     }
 }

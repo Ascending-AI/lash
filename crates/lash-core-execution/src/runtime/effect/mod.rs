@@ -130,7 +130,7 @@ mod tests {
         let envelope = RuntimeEffectEnvelope::new(
             invocation,
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration,
+                registration: registration.into(),
                 observers: Vec::new(),
                 execution_context: Box::new(crate::ProcessExecutionContext::default()),
             }),
@@ -157,7 +157,9 @@ mod tests {
         };
         assert!(observers.is_empty());
         assert!(execution_context.is_empty());
-        let crate::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
+        let crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { kind, payload }) =
+            registration.input.as_ref()
+        else {
             panic!("wrong process input");
         };
         assert_eq!(kind, "echo");

@@ -20,8 +20,9 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             observers,
             event_types,
         } = value;
+        let target: lash_core::ProcessStartTarget = input.try_into()?;
         let mut request = lash_core::ProcessStartRequest::new(
-            input.try_into()?,
+            target,
             originator.try_into()?,
             lash_core::LifetimeDecision::from(lifetime),
         );

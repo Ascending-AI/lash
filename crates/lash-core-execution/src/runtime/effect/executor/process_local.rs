@@ -43,7 +43,7 @@ pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> 
 /// that caused it, or, for a start with no causal effect, the start's own
 /// runtime-operation scope keyed by its start key (ADR 0113 §3.3).
 fn process_start_starter(
-    registration: &crate::ProcessRegistration,
+    registration: &crate::ProcessStartRegistration,
     execution_context: &crate::ProcessExecutionContext,
 ) -> Result<lash_sansio::EffectJournalIdentity, RuntimeEffectControllerError> {
     let scope = match execution_context
@@ -145,8 +145,10 @@ impl ProcessLocalExecution {
                 // transaction. The process-work substrate executes it. A
                 // runtime start derives its key from its admitted operation,
                 // and a host start from its caller or its admitted scope
-                // (ADR 0107).
-                let started = crate::runtime::register_process_start(
+                // (ADR 0107). Boxed: staging holds the start and the
+                // registration it resolves to, and inlining it would grow
+                // every caller's future by both.
+                let started = Box::pin(crate::runtime::register_process_start(
                     &crate::runtime::ProcessStartStores {
                         registry: registry.as_ref(),
                         env_store: process_env_store.as_ref(),
@@ -165,7 +167,7 @@ impl ProcessLocalExecution {
                     },
                     registration,
                     &observers,
-                )
+                ))
                 .await?;
                 let realization = started.realization();
                 let disposition = started.disposition;

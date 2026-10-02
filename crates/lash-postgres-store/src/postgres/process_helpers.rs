@@ -12,7 +12,7 @@ fn decode_process_record(json: &str) -> Result<ProcessRecord, PluginError> {
 }
 
 pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
-    record.status.label()
+    record.status().label()
 }
 
 /// The `cancel_requested_at_ms` column: the first accepted cancellation's
@@ -104,10 +104,11 @@ pub(crate) async fn require_process_tx(
         .map_err(plugin_sqlx_error)?;
     let tombstone = row
         .map(|row| {
-            Ok::<_, PluginError>(registry_transitions::ProcessTombstoneStamp {
-                terminal_label: row.get(0),
-                pruned_at_ms: plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", row.get(1))?,
-            })
+            registry_transitions::ProcessTombstoneStamp::from_row(
+                process_id,
+                row.get(0),
+                plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", row.get(1))?,
+            )
         })
         .transpose()?;
     Err(registry_transitions::absent_process_error(
@@ -151,28 +152,16 @@ pub(crate) async fn save_process_tx(
         .bind(record.last_event_sequence as i64)
         .bind(cancel_requested_at_ms(record))
         .bind(serde_json::to_string(record).map_err(process_decode_error)?)
+        .bind(record.park().map(|park| clamp_epoch_ms(park.since_ms)))
+        .bind(record.park().map(|park| park.reason.code().as_str()))
         .bind(
             record
-                .park
-                .as_deref()
-                .map(|park| clamp_epoch_ms(park.since_ms)),
-        )
-        .bind(
-            record
-                .park
-                .as_deref()
-                .map(|park| park.reason.code().as_str()),
-        )
-        .bind(
-            record
-                .park
-                .as_deref()
+                .park()
                 .and_then(|park| park.reason.retired_executable_generation_key()),
         )
         .bind(
             record
-                .park
-                .as_deref()
+                .park()
                 .and_then(|park| park.build_generation.as_ref().map(|g| g.as_str())),
         )
         .execute(&mut **tx)
@@ -474,7 +463,7 @@ async fn stage_process_event_append_tx(
                 .await
                 .map_err(plugin_sqlx_error)?;
             let park_transitions = lash_core_execution::runtime::process_park_transitions(
-                record.park.as_deref(),
+                record.park(),
                 &projected_record,
             );
             *record = projected_record;
@@ -487,8 +476,7 @@ async fn stage_process_event_append_tx(
                 &park_transitions,
                 occurred_at_ms,
                 record
-                    .park
-                    .as_deref()
+                    .park()
                     .and_then(|park| park.build_generation.as_ref().map(|g| g.as_str())),
             )
             .await?;

@@ -228,9 +228,9 @@ where
                     Err(error) => return Ok(Err(error)),
                 };
                 if record.is_terminal()
-                    && record.status != lash_core::ProcessStatus::Cancelled
+                    && record.status() != lash_core::ProcessStatus::Cancelled
                     && record.cancel_request.is_none()
-                    && let Some(output) = record.outcome
+                    && let Some(output) = record.outcome()
                 {
                     let output = match attachments {
                         Some(attachments) => {

@@ -305,7 +305,7 @@ pub(crate) fn waiter_completed(waiter: String, process: ProcessId) -> CustomChec
                 Ok(Some(record)) if record.is_terminal() => {}
                 Ok(Some(record)) => violations.push(format!(
                     "process `{process}` is {:?}, not terminal",
-                    record.status
+                    record.status()
                 )),
                 Ok(None) => violations.push(format!("process `{process}` is gone")),
                 Err(error) => violations.push(format!("read process `{process}`: {error}")),
@@ -348,7 +348,7 @@ fn ended_substrate_lost(process: ProcessId) -> CustomCheck {
                 .get_process(&process)
                 .await
             {
-                Ok(record) => record.and_then(|record| record.outcome),
+                Ok(record) => record.and_then(|record| record.outcome()),
                 Err(error) => return vec![format!("read process `{process}`: {error}")],
             };
             match outcome {

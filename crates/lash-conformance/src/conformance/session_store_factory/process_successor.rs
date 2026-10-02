@@ -98,6 +98,6 @@ pub async fn a_same_start_key_successor_after_prune_has_independent_attachment_r
         .await
         .expect("read successor")
         .expect("successor retained");
-    assert_eq!(record.status, crate::ProcessStatus::Completed);
-    assert_eq!(record.outcome.as_ref(), Some(&output));
+    assert_eq!(record.status(), crate::ProcessStatus::Completed);
+    assert_eq!(record.outcome().as_ref(), Some(&output));
 }

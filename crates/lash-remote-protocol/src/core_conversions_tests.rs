@@ -490,7 +490,7 @@ fn trigger_dtos_round_trip_core_values() {
         target: lash_core::facade_support::TriggerTarget {
             label: Some("on_button".to_string()),
             identity: engine_process_identity("on_button"),
-            input: engine_process_input("on_button", serde_json::json!({})),
+            input: engine_process_input("on_button", serde_json::json!({})).into(),
             inputs,
         },
         enabled: true,
@@ -746,10 +746,13 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         "instruction_limit": { "bounded": 1000000 },
         "memory_limit": { "bounded": 67108864 }
     }));
-    record.status = lash_core::ProcessStatus::Completed;
-    record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
-    ));
+    record.lifecycle = lash_core::ProcessLifecycleState::Terminal {
+        outcome: lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
+        )
+        .try_into()
+        .expect("a terminal outcome"),
+    };
     let remote = RemoteProcessRecord::try_from(record.clone()).expect("remote record");
     let wire = serde_json::to_value(&remote).expect("remote wire record");
     assert_eq!(wire.get("engine_config"), record.engine_config.as_ref());
@@ -761,7 +764,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let core = lash_core::ProcessRecord::try_from(remote).expect("core record");
     assert_eq!(core.engine_config, record.engine_config);
     assert_eq!(core.id, record.id);
-    assert_eq!(core.status.label(), record.status.label());
+    assert_eq!(core.status().label(), record.status().label());
     assert_eq!(
         serde_json::to_value(core.input.as_ref()).expect("core input json"),
         serde_json::to_value(record.input.as_ref()).expect("record input json")
@@ -2113,7 +2116,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
         source_key: "source-key".to_string(),
         source: serde_json::json!({ "button": "blue" }),
         payload_schema: lash_core::LashSchema::any(),
-        target: engine_process_input("on_button", serde_json::json!({})),
+        target: engine_process_input("on_button", serde_json::json!({})).into(),
         target_identity: engine_process_identity("on_button"),
         event_types: vec![process_event_type()],
         input_template: trigger_input_template(),

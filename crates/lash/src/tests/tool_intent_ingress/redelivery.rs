@@ -132,7 +132,8 @@ async fn redelivered_start_realizes_one_process_and_a_changed_declaration_return
     };
     intent.declaration.input = lash_core::ProcessInput::External {
         metadata: serde_json::json!({"law": "changed-under-a-bound-identity"}),
-    };
+    }
+    .into();
     let coalesced = ingress_of(&changed_invocation)?.submit(key, changed).await;
     assert_replayed(&coalesced, true, "a changed declaration under a bound key");
     assert_eq!(

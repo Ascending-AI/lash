@@ -134,7 +134,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     // Terminal outcome rides the await seam (ADR 0016)...
     assert_eq!(
         result.outcome.terminal_status(),
-        Some(lash::process::ProcessStatus::Completed)
+        Some(lash::process::TerminalProcessStatus::Completed)
     );
     assert!(matches!(
         &result.outcome,
@@ -492,7 +492,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         .expect("register process and initial observers");
     let process_id = record.id.clone();
     assert_eq!(record.start_key.as_ref(), Some(&start_key));
-    assert_eq!(record.status, ProcessStatus::Running);
+    assert_eq!(record.status(), ProcessStatus::Running);
     assert!(!record.is_terminal());
     assert_eq!(record.originator_id(), "session-finance");
     assert_eq!(
@@ -521,8 +521,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     assert!(record.updated_at_ms >= record.created_at_ms);
     assert!(record.external_ref.is_none());
     assert!(record.first_started.is_none());
-    assert!(record.wait.is_none());
-    assert!(record.outcome.is_none());
+    assert!(record.wait().is_none());
+    assert!(record.outcome().is_none());
     let replay = registry
         .register_process_with_observers(
             replay_registration,
@@ -672,7 +672,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         .await
         .expect("read running process")
         .expect("registered process remains visible");
-    assert_eq!(running.status, ProcessStatus::Running);
+    assert_eq!(running.status(), ProcessStatus::Running);
 
     let filter = ProcessListFilter::decode(&json!({
         "status": {"in":["running"]},
@@ -738,7 +738,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
     let success = ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::success(
         json!({ "artifact": "invoices.csv", "rows": 12 }),
     ));
-    assert_eq!(success.terminal_status(), Some(ProcessStatus::Completed));
+    assert_eq!(
+        success.terminal_status(),
+        Some(lash::process::TerminalProcessStatus::Completed)
+    );
     assert_eq!(
         success.clone().into_tool_output().value_for_projection()["artifact"],
         "invoices.csv"
@@ -755,9 +758,9 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         lash::process::ProcessCompletionOutcome::Committed(record) => record,
         other => panic!("first completion was not committed: {other:?}"),
     };
-    assert_eq!(completed.status, ProcessStatus::Completed);
+    assert_eq!(completed.status(), ProcessStatus::Completed);
     assert!(completed.is_terminal());
-    assert_eq!(completed.outcome.as_ref(), Some(&success));
+    assert_eq!(completed.outcome().as_ref(), Some(&success));
 
     let replay = registry
         .complete_process(
@@ -772,15 +775,15 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         | lash::process::ProcessCompletionOutcome::Superseded { stored } => stored,
         other => panic!("replayed completion was not settled: {other:?}"),
     };
-    assert_eq!(replay.status, ProcessStatus::Completed);
-    assert_eq!(replay.outcome.as_ref(), Some(&success));
+    assert_eq!(replay.status(), ProcessStatus::Completed);
+    assert_eq!(replay.outcome().as_ref(), Some(&success));
     let cancellation =
         ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
             lash::tools::ToolCancellation::runtime("operator cancelled"),
         ));
     assert_eq!(
         cancellation.terminal_status(),
-        Some(ProcessStatus::Cancelled)
+        Some(lash::process::TerminalProcessStatus::Cancelled)
     );
     assert_eq!(
         cancellation.into_tool_output().value_for_projection()["message"],
@@ -868,9 +871,9 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_execution_aut
         )
         .await
         .expect("external owner closes its work");
-    assert_eq!(external_completion.status, ProcessStatus::Failed);
+    assert_eq!(external_completion.status(), ProcessStatus::Failed);
     assert!(matches!(
-        external_completion.outcome.as_ref(),
+        external_completion.outcome().as_ref(),
         Some(ProcessAwaitOutput::Settled { output })
             if !output.is_success()
                 && output.value_for_projection()["class"] == "external"
@@ -1313,7 +1316,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         .await
         .expect("record the caller departure");
     assert!(
-        !departed.status.is_terminal(),
+        !departed.status().is_terminal(),
         "caller departure is not an outcome"
     );
     stale_registry

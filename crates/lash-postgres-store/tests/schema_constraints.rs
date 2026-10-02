@@ -395,6 +395,43 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         "ck_process_wake_deliveries_discard_reason",
     )
     .await;
+    // A claim token exactly while enqueuing, a discard reason exactly once
+    // discarded: the four pairs outside that.
+    for (delivery_id, state, claim_token, discard_reason) in [
+        ("enqueuing-unclaimed", "enqueuing", "NULL", "NULL"),
+        ("pending-claimed", "pending", "'claim'", "NULL"),
+        ("discarded-reasonless", "discarded", "NULL", "NULL"),
+        ("enqueued-with-reason", "enqueued", "NULL", "'expired'"),
+    ] {
+        assert_check_rejects(
+            &mut connection,
+            &format!(
+                "INSERT INTO lash_process_wake_deliveries (
+                     delivery_id, process_id, target_session_id, sequence, state,
+                     claim_token, next_attempt_at_ms, expires_at_ms, discard_reason,
+                     delivery_json
+                 ) VALUES (
+                     '{delivery_id}', 'wake-parent', 'target', 3, '{state}',
+                     {claim_token}, 0, 1, {discard_reason}, '{{}}'
+                 )"
+            ),
+            "ck_process_wake_deliveries_lifecycle",
+        )
+        .await;
+    }
+    // A tombstone names the retired status its process was pruned in.
+    for label in ["running", "waiting", "finished"] {
+        assert_check_rejects(
+            &mut connection,
+            &format!(
+                "INSERT INTO lash_process_tombstones (
+                     process_id, terminal_label, pruned_at_ms, pruned_change_seq
+                 ) VALUES ('tombstone-{label}', '{label}', 0, 1)"
+            ),
+            "ck_process_tombstones_terminal_label",
+        )
+        .await;
+    }
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_tool_intent_submissions (

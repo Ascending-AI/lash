@@ -793,37 +793,6 @@ mod tests {
         );
     }
 
-    /// ADR 0016: a retained outcome resolves the wait even after caller departure.
-    #[tokio::test]
-    async fn retained_outcome_precedes_caller_departure() {
-        let raw = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
-        let (registry, hub) = watched_parts(watch_process_registry(
-            Arc::clone(&raw) as Arc<dyn ProcessRegistry>
-        ));
-        let awaiter = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub);
-
-        let proc_departed_record = registry
-            .register_process(registration())
-            .await
-            .expect("register");
-
-        let mut record = registry
-            .get_process(&proc_departed_record.id)
-            .await
-            .expect("get_process")
-            .expect("record exists");
-        let process_id = record.id.clone();
-        record.status = crate::ProcessStatus::CallerDeparted;
-        record.outcome = Some(success(serde_json::json!("completed-value")));
-
-        raw.set_process_read_override(record);
-        let output = awaiter
-            .await_terminal(&process_id)
-            .await
-            .expect("retained outcome resolves a caller-departed process");
-        assert_eq!(output, success(serde_json::json!("completed-value")));
-    }
-
     /// Sim-style race: many waiters attach to one process and completion fires
     /// while they are mid-flight between their subscribe and their first read.
     /// The change hub must resolve every one with identical output — no lost

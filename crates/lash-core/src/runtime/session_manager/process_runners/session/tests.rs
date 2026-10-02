@@ -319,7 +319,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         .expect("persist child-turn cancellation");
     let recorded = completion
         .stored()
-        .outcome
+        .outcome()
         .as_ref()
         .expect("terminal process outcome")
         .clone()
@@ -327,7 +327,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
     assert_child_turn_cancellation(&recorded, &evidence);
     let parent_result = completion
         .stored()
-        .outcome
+        .outcome()
         .clone()
         .expect("parent await result")
         .into_tool_output();

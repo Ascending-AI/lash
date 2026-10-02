@@ -599,7 +599,7 @@ async fn assert_session_process_admission_contract(
         .expect("list runtime processes through the session observer");
     let observed_identities = observed
         .iter()
-        .map(|process| (&process.id, &process.identity, &process.status))
+        .map(|process| (&process.id, &process.identity, process.status()))
         .collect::<Vec<_>>();
     for (kind, count) in expected_processes {
         // The label is the lifted declaration's digest name, so the pin is the
@@ -616,7 +616,7 @@ async fn assert_session_process_admission_contract(
             "the parent session observer must expose {count} lifted {kind} process records; observed={observed_identities:?}"
         );
         for process in matching {
-            assert_eq!(process.status, lash_core::ProcessStatus::Completed);
+            assert_eq!(process.status(), lash_core::ProcessStatus::Completed);
             let observers = registry
                 .observers_for_process(&process.id)
                 .await

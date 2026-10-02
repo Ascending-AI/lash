@@ -436,7 +436,8 @@ fn workbench_receipt_register_command(session_id: &SessionId) -> lash::triggers:
             target: lash::process::ProcessInput::Engine {
                 kind: "test".to_string(),
                 payload: json!({ "process": "receipt_prune_demo" }),
-            },
+            }
+            .into(),
             target_identity: lash::process::ProcessIdentity::labelled(
                 "test",
                 Some("receipt prune demo".to_string()),

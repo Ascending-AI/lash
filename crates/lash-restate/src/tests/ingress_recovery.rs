@@ -100,8 +100,8 @@ async fn process_wait_reattaches_after_ingress_failure_to_the_real_outcome() {
             .await
             .expect("read after the failed connection")
             .expect("the process remains retained");
-        assert_eq!(still_running.status, process.status);
-        assert!(still_running.outcome.is_none());
+        assert_eq!(still_running.status(), process.status());
+        assert!(still_running.outcome().is_none());
         assert_eq!(
             runner
                 .await_process_terminal(&process.id)
@@ -167,7 +167,7 @@ async fn a_definitive_process_target_failure_keeps_its_typed_error() {
                 .await
                 .expect("read")
                 .expect("retained process")
-                .outcome
+                .outcome()
                 .is_none()
         );
     }
@@ -199,8 +199,8 @@ async fn caller_departure_refuses_the_wait_without_contacting_ingress() {
         .await
         .expect("read")
         .expect("retained");
-    assert_eq!(record.status, lash_core::ProcessStatus::CallerDeparted);
-    assert!(record.outcome.is_none());
+    assert_eq!(record.status(), lash_core::ProcessStatus::CallerDeparted);
+    assert!(record.outcome().is_none());
 }
 
 fn child_watch(ingress: &Arc<ScriptedIngress>) -> Arc<dyn lash_core::GroupChildCancelWatch> {

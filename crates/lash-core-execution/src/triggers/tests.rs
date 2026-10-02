@@ -19,7 +19,7 @@ async fn trigger_registration_refuses_non_engine_target() {
     for target in targets {
         let expected = target.engine_kind();
         let mut draft = incarnation_fixture_draft();
-        draft.target = target;
+        draft.target = target.into();
         let registry = crate::ProcessEngineRegistry::default();
         for error in [
             draft

@@ -292,7 +292,7 @@ mod tests {
         async fn start(
             &self,
             _session_id: &SessionId,
-            _registration: lash_core::ProcessRegistration,
+            _registration: lash_core::ProcessStartRegistration,
             _options: lash_core::ProcessStartOptions,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {

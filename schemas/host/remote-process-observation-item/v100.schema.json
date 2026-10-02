@@ -728,7 +728,7 @@
               "type": "string"
             },
             "terminal_label": {
-              "type": "string"
+              "$ref": "#/$defs/RemoteRetiredProcessStatus"
             }
           },
           "required": [
@@ -884,6 +884,17 @@
           "type": "string"
         }
       ]
+    },
+    "RemoteRetiredProcessStatus": {
+      "description": "Mirrors [`lash_core::RetiredProcessStatus`]: the status a pruned process\nended in, which its tombstone keeps.",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned",
+        "caller_departed"
+      ],
+      "type": "string"
     },
     "RetryClass": {
       "description": "Evidence that permits another provider attempt.",

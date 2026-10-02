@@ -15,24 +15,78 @@ pub enum RemoteProcessAwaitOutput {
         control: Option<serde_json::Value>,
     },
     NoLongerRetained {
-        terminal_label: String,
+        terminal_label: RemoteRetiredProcessStatus,
         pruned_at_ms: u64,
     },
 }
 
-impl RemoteProcessAwaitOutput {
-    pub(super) fn terminal_status(&self) -> Option<RemoteProcessStatus> {
+/// Mirrors [`lash_core::ProcessTerminal`]: the outcome a process ended in,
+/// which a terminal record and a terminal event carry. Its status is derived
+/// from it ([`Self::status`]) and carried nowhere beside it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteProcessTerminal {
+    Settled {
+        output: RemoteProcessToolCallOutput,
+    },
+    Abandoned {
+        evidence: RemoteAbandonEvidence,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control: Option<serde_json::Value>,
+    },
+}
+
+impl RemoteProcessTerminal {
+    /// The status this outcome ends a process in.
+    pub fn status(&self) -> RemoteTerminalProcessStatus {
         match self {
-            Self::Settled { output } => Some(match &output.outcome {
-                RemoteProcessToolCallOutcome::Success(_) => RemoteProcessStatus::Completed,
-                RemoteProcessToolCallOutcome::Failure(_) => RemoteProcessStatus::Failed,
-                RemoteProcessToolCallOutcome::Cancelled(_) => RemoteProcessStatus::Cancelled,
-            }),
-            Self::Abandoned { .. } => Some(RemoteProcessStatus::Abandoned),
-            Self::NoLongerRetained { .. } => None,
+            Self::Settled { output } => match &output.outcome {
+                RemoteProcessToolCallOutcome::Success(_) => RemoteTerminalProcessStatus::Completed,
+                RemoteProcessToolCallOutcome::Failure(_) => RemoteTerminalProcessStatus::Failed,
+                RemoteProcessToolCallOutcome::Cancelled(_) => {
+                    RemoteTerminalProcessStatus::Cancelled
+                }
+            },
+            Self::Abandoned { .. } => RemoteTerminalProcessStatus::Abandoned,
         }
     }
 
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        RemoteProcessAwaitOutput::from(self.clone()).validate(type_name)
+    }
+}
+
+impl From<RemoteProcessTerminal> for RemoteProcessAwaitOutput {
+    fn from(terminal: RemoteProcessTerminal) -> Self {
+        match terminal {
+            RemoteProcessTerminal::Settled { output } => Self::Settled { output },
+            RemoteProcessTerminal::Abandoned { evidence, control } => {
+                Self::Abandoned { evidence, control }
+            }
+        }
+    }
+}
+
+impl TryFrom<RemoteProcessAwaitOutput> for RemoteProcessTerminal {
+    type Error = RemoteProtocolError;
+
+    fn try_from(output: RemoteProcessAwaitOutput) -> Result<Self, Self::Error> {
+        match output {
+            RemoteProcessAwaitOutput::Settled { output } => Ok(Self::Settled { output }),
+            RemoteProcessAwaitOutput::Abandoned { evidence, control } => {
+                Ok(Self::Abandoned { evidence, control })
+            }
+            RemoteProcessAwaitOutput::NoLongerRetained { .. } => {
+                Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteProcessTerminal",
+                    message: "a pruned process has no retained outcome".to_string(),
+                })
+            }
+        }
+    }
+}
+
+impl RemoteProcessAwaitOutput {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Settled { output } => output.validate(type_name),

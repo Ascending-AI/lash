@@ -28,7 +28,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    SessionId, StoreRealization, artifact_referrer_ended,
+    ProcessStartRegistration, ProcessStartTarget, SessionId, StoreRealization,
+    artifact_referrer_ended,
 };
 use crate::{
     ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreId, ModuleArtifactStore,
@@ -337,23 +338,29 @@ impl RegisteredProcessStart {
     #[must_use]
     pub fn running_registration(
         &self,
-        mut registration: ProcessRegistration,
+        registration: impl Into<ProcessStartRegistration>,
     ) -> ProcessRegistration {
+        let mut registration = registration.into();
         registration.engine_config = self.record.engine_config.clone();
-        if let ProcessInput::SessionTurn { .. } = registration.input.as_ref() {
+        match registration.input.as_ref() {
             // The row holds the request with the default binding its
             // registration recorded; the process runs that (FIG-4531).
-            registration.input = Arc::clone(&self.record.input);
-            return registration;
+            ProcessStartTarget::Input(ProcessInput::SessionTurn { .. }) => {
+                registration.with_input(Arc::clone(&self.record.input))
+            }
+            ProcessStartTarget::Input(
+                input @ (ProcessInput::Engine { .. } | ProcessInput::External { .. }),
+            ) => {
+                let input = Arc::new(input.clone());
+                registration.with_input(input)
+            }
+            ProcessStartTarget::Definition { .. } => {
+                let mut resolved = registration.with_input(Arc::clone(&self.record.input));
+                resolved.identity = self.record.identity.clone();
+                resolved.event_types = self.record.event_types.clone();
+                resolved
+            }
         }
-        if !matches!(registration.input.as_ref(), ProcessInput::Definition { .. }) {
-            return registration;
-        }
-        let mut resolved = registration;
-        resolved.input = Arc::clone(&self.record.input);
-        resolved.identity = self.record.identity.clone();
-        resolved.event_types = self.record.event_types.clone();
-        resolved
     }
 }
 
@@ -380,9 +387,10 @@ impl RegisteredProcessStart {
 /// start needs, and any store failure.
 pub async fn register_process_start(
     stores: &ProcessStartStores<'_>,
-    registration: ProcessRegistration,
+    registration: impl Into<ProcessStartRegistration>,
     observers: &[SessionId],
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
+    let registration = registration.into();
     let Some(start_key) = registration.start_key.clone() else {
         return Err(RuntimeEffectControllerError::foreign(
             "process_start_key_missing",
@@ -432,7 +440,7 @@ pub async fn register_process_start(
 /// terminal, so the admission records it too.
 async fn require_host_session_live(
     stores: &ProcessStartStores<'_>,
-    registration: &ProcessRegistration,
+    registration: &ProcessStartRegistration,
 ) -> Result<(), RuntimeEffectControllerError> {
     let super::model::LifetimeDecision::Until {
         scope: super::model::ScopeId::Session(session_id),
@@ -527,14 +535,14 @@ async fn abandon_start(
 async fn stage_and_register(
     stores: &ProcessStartStores<'_>,
     start_key: &StartKey,
-    mut registration: ProcessRegistration,
+    registration: ProcessStartRegistration,
     observers: &[SessionId],
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
     let claim = ReferrerClaim::guarded(ReferrerGuard::Start {
         start_key: start_key.clone(),
         starter: stores.starter.clone(),
     });
-    let env = stage_env(stores, &claim, &registration).await?;
+    let env = stage_env(stores, &claim, registration.env_ref.clone()).await?;
     let env_spec = match env.as_ref() {
         Some(env) => Some(
             super::load_process_execution_env(
@@ -553,7 +561,8 @@ async fn stage_and_register(
         ),
         None => None,
     };
-    let definition = stage_definition(stores, &claim, &mut registration, env_spec.as_ref()).await?;
+    let (definition, mut registration) =
+        resolve_start_target(stores, &claim, registration, env_spec.as_ref()).await?;
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
     registration.engine_config = creation_config(stores, &registration, env_spec.as_ref())?;
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
@@ -753,9 +762,9 @@ async fn acquire_env(
 async fn stage_env(
     stores: &ProcessStartStores<'_>,
     claim: &ReferrerClaim,
-    registration: &ProcessRegistration,
+    env_ref: Option<ProcessExecutionEnvRef>,
 ) -> Result<Option<StagedEnv>, RuntimeEffectControllerError> {
-    let Some(env_ref) = registration.env_ref.clone() else {
+    let Some(env_ref) = env_ref else {
         return Ok(None);
     };
     let env_store = stores.env_store.ok_or_else(|| RuntimeEffectControllerError::foreign(
@@ -840,6 +849,41 @@ async fn stage_engine<'a>(
     }))
 }
 
+/// The registration a start's target resolves to: the input it states, or
+/// the engine start its definition is ([`stage_definition`]). This is the
+/// only place a start becomes a registration, so no registrar is ever handed
+/// an unresolved definition.
+async fn resolve_start_target<'a>(
+    stores: &'a ProcessStartStores<'a>,
+    claim: &ReferrerClaim,
+    registration: ProcessStartRegistration,
+    env_spec: Option<&ProcessExecutionEnvSpec>,
+) -> Result<(Option<StagedDefinition<'a>>, ProcessRegistration), RuntimeEffectControllerError> {
+    match registration.input.as_ref() {
+        ProcessStartTarget::Input(input) => {
+            let input = Arc::new(input.clone());
+            Ok((None, registration.with_input(input)))
+        }
+        ProcessStartTarget::Definition {
+            definition_id,
+            signature_claim,
+            args,
+        } => {
+            let (staged, registration) = stage_definition(
+                stores,
+                claim,
+                &registration,
+                definition_id,
+                signature_claim.as_ref(),
+                args,
+                env_spec,
+            )
+            .await?;
+            Ok((Some(staged), registration))
+        }
+    }
+}
+
 /// A start by definition id (ADR 0113 §3.6, the crash table's "before start
 /// admission" row): hold the definition's closure under `Start(key)`, have
 /// its engine check the descriptor and derive its signature, then admit the
@@ -855,17 +899,12 @@ async fn stage_engine<'a>(
 async fn stage_definition<'a>(
     stores: &'a ProcessStartStores<'a>,
     claim: &ReferrerClaim,
-    registration: &mut ProcessRegistration,
+    registration: &ProcessStartRegistration,
+    definition_id: &super::ProcessDefinitionId,
+    signature_claim: Option<&super::ProcessSignature>,
+    args: &serde_json::Map<String, serde_json::Value>,
     env_spec: Option<&ProcessExecutionEnvSpec>,
-) -> Result<Option<StagedDefinition<'a>>, RuntimeEffectControllerError> {
-    let ProcessInput::Definition {
-        definition_id,
-        signature_claim,
-        args,
-    } = registration.input.as_ref()
-    else {
-        return Ok(None);
-    };
+) -> Result<(StagedDefinition<'a>, ProcessRegistration), RuntimeEffectControllerError> {
     let (Some(engines), Some(ports)) = (stores.engines, stores.ports()) else {
         return Err(RuntimeEffectControllerError::foreign(
             "process_definition_store_unavailable",
@@ -920,17 +959,20 @@ async fn stage_definition<'a>(
         .signals;
     identity.definition_id = Some(resolved.id().clone());
     let id = resolved.id().clone();
-    let mut resolved_registration = registration.clone();
-    resolved_registration.input = Arc::new(ProcessInput::Engine { kind, payload });
-    *registration = resolved_registration
+    let registration = registration
+        .clone()
+        .with_input(Arc::new(ProcessInput::Engine { kind, payload }))
         .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity, signals))
         .with_host_facing_label(declared_label);
-    Ok(Some(StagedDefinition {
-        engines,
-        ports,
-        id,
-        staged,
-    }))
+    Ok((
+        StagedDefinition {
+            engines,
+            ports,
+            id,
+            staged,
+        },
+        registration,
+    ))
 }
 
 struct StagedDefinition<'a> {

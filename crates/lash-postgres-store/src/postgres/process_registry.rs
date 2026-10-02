@@ -65,14 +65,11 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             .map_err(plugin_sqlx_error)?;
         if let Some(row) = row {
             return Err(registry_transitions::process_no_longer_retained(
-                registry_transitions::ProcessTombstoneStamp {
-                    terminal_label: row.get(0),
-                    pruned_at_ms: plugin_u64_from_sql(
-                        "ProcessTombstone",
-                        "pruned_at_ms",
-                        row.get(1),
-                    )?,
-                },
+                registry_transitions::ProcessTombstoneStamp::from_row(
+                    process_id,
+                    row.get(0),
+                    plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", row.get(1))?,
+                )?,
             ));
         }
         Ok(None)

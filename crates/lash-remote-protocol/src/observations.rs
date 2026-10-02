@@ -354,7 +354,7 @@ pub struct RemoteProcessEffectNodeReport {
 pub enum RemoteProcessHistoryRetention {
     /// The process was pruned and its payload-free tombstone remains.
     Pruned {
-        terminal_label: String,
+        terminal_label: crate::RemoteRetiredProcessStatus,
         pruned_at_ms: u64,
     },
     /// No retained process or tombstone has this id.

@@ -120,7 +120,7 @@ async fn start_request(
     seed: u64,
 ) -> Result<lash_core::ProcessStartRequest, String> {
     Ok(lash_core::ProcessStartRequest::new(
-        lash_core::ProcessInput::Definition {
+        lash_core::ProcessStartTarget::Definition {
             signature_claim: None,
             definition_id: id.clone(),
             args: serde_json::Map::new(),
@@ -215,7 +215,8 @@ fn admitted_at_most_once(published: Published, seed: u64) -> CustomCheck {
                     if !record.is_terminal() {
                         return vec![format!(
                             "process `{}` is {:?}, not terminal",
-                            record.id, record.status
+                            record.id,
+                            record.status()
                         )];
                     }
                 }
@@ -305,7 +306,8 @@ fn started_once(id: lash_core::ProcessDefinitionId, seed: u64) -> CustomCheck {
             if !keyed.is_terminal() {
                 violations.push(format!(
                     "process `{}` is {:?}, not terminal",
-                    keyed.id, keyed.status
+                    keyed.id,
+                    keyed.status()
                 ));
             }
             if started != [keyed.id.clone()] {

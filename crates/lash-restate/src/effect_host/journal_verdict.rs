@@ -164,7 +164,7 @@ async fn process_journal_settled(
     else {
         return Ok(true);
     };
-    if !record.status.is_terminal() {
+    if !record.status().is_terminal() {
         return Ok(false);
     }
     let last_segment = record
