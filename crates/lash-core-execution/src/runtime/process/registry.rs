@@ -616,6 +616,12 @@ pub trait ProcessEventLogTestSupport: ProcessEventLog {
                 terminal_label,
                 pruned_at_ms,
             }),
+            super::events::ProcessEventReadOutcome::NoLongerRetained(
+                super::events::ProcessEventHistoryRetention::Released { released_through },
+            ) => Err(PluginError::ProcessEventsReleased {
+                process_id: process_id.clone(),
+                released_through,
+            }),
         }
     }
 }

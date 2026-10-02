@@ -121,6 +121,20 @@ failure rolls the transaction back. Receipts whose owner cannot be established
 from their retained record remain protected; an irreversible hashed receipt key
 is not evidence for assigning an owner.
 
+#### Process-event ownership
+
+| Row or payload | Owner | Reclaim trigger |
+| --- | --- | --- |
+| Retained event payload | Process history readers selected by the host | Explicit prefix release under ADR 0023, or terminal process pruning. |
+| Released event metadata and digest | Process replay and signal-ordinal evidence | Terminal process pruning. Prefix release keeps these fences. |
+| Process event horizon | The retained process | Process deletion cascades the horizon. |
+| Segment continuation and start marker | The engine's segment execution | Journaled retirement after successor handover, or terminal process pruning. |
+
+Event release preserves execution state and releases host-selected history
+payloads. It cannot delete a live continuation or its dependencies. The
+[growth inventory](../operations/process-history-release.md) identifies
+growing records outside this operation.
+
 ### 4. Report contract: a three-way split
 
 A pass reports completed work, incomplete work, or a stop. The concrete

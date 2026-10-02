@@ -226,11 +226,17 @@ table lash_process_change_clock
   column singleton boolean not-null default
   column tombstone_compaction_horizon bigint not-null default
   primary-key (singleton)
+table lash_process_event_horizons
+  column process_id text not-null
+  column released_through bigint not-null
+  primary-key (process_id)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_events
   column event_json text not-null
   column event_type text not-null
   column idempotency_key text nullable
   column process_id text not-null
+  column released_payload_digest text nullable
   column sequence bigint not-null
   unique (process_id, idempotency_key) where idempotency_key is not null
   primary-key (process_id, sequence)

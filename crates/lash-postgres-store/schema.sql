@@ -945,12 +945,22 @@ CREATE TABLE IF NOT EXISTS lash_process_events (
     event_type TEXT NOT NULL,
     idempotency_key TEXT,
     event_json TEXT NOT NULL,
+    released_payload_digest TEXT,
     PRIMARY KEY (process_id, sequence),
     FOREIGN KEY (process_id) REFERENCES lash_processes(process_id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_process_events_key
     ON lash_process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- The event prefix a host released of a still-retained process (FIG-3482):
+-- events at or below `released_through` keep their row without a payload,
+-- and reads below it are refused typed.
+CREATE TABLE IF NOT EXISTS lash_process_event_horizons (
+    process_id TEXT COLLATE "C" PRIMARY KEY,
+    released_through BIGINT NOT NULL CONSTRAINT ck_process_event_horizons_positive CHECK (released_through > 0),
+    FOREIGN KEY (process_id) REFERENCES lash_processes(process_id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS lash_wake_allocation_floors (
     target_session_id TEXT NOT NULL,

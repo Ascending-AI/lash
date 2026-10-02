@@ -259,6 +259,122 @@ async fn handover_crash_cuts_on_sqlite_memory_with_forced_replay() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn releasing_events_during_handover_preserves_replay_and_live_dependencies() {
+    let fixture = Fixture::sqlite(false).await;
+    let roll = Roll::start_on(seed(), PROGRAM, false, Arc::clone(&fixture.stores), true).await;
+    let process_id = roll.register_process().await;
+    let awaiter = roll.arm_awaiter(&process_id).await;
+    let registry = Arc::clone(&roll.registry);
+    let continuations = Arc::clone(&roll.continuations);
+    let pid = process_id.clone();
+    roll.gated.arm(
+        GatePoint::AfterHandoverPut(SUCCESSOR),
+        Box::pin(async move {
+            let record = registry
+                .get_process(&pid)
+                .await
+                .expect("process read")
+                .expect("process");
+            let handover = continuations
+                .get_segment_handover(&pid, SUCCESSOR)
+                .await
+                .expect("handover read")
+                .expect("the unjournaled handover is stored");
+            let wakes = registry
+                .list_wake_deliveries(None)
+                .await
+                .expect("wake read");
+            assert!(!record.is_terminal());
+            assert!(record.last_event_sequence > 0);
+            let released = registry
+                .release_process_events(&pid, record.last_event_sequence)
+                .await
+                .expect("host releases the running process's history");
+            assert_eq!(released.released_through, record.last_event_sequence);
+            assert!(released.released_events > 0);
+            assert_eq!(
+                registry.get_process(&pid).await.expect("process read"),
+                Some(record)
+            );
+            assert_eq!(
+                continuations
+                    .get_segment_handover(&pid, SUCCESSOR)
+                    .await
+                    .expect("handover read"),
+                Some(handover),
+                "release preserves the successor's replay authority"
+            );
+            assert_eq!(
+                registry
+                    .list_wake_deliveries(None)
+                    .await
+                    .expect("wake read"),
+                wakes,
+                "release preserves delivery content and claims"
+            );
+        }),
+    );
+    let key = process_segment_workflow_key(&process_id, HANDING_OVER);
+    roll.server.crash_on(
+        CrashRule::new(CrashPoint::BeforeRunResult {
+            name: Some("lash.segment.handover".into()),
+        })
+        .service(PROCESS_WORKFLOW)
+        .handler("run")
+        .key(&key),
+    );
+    roll.send_segment_zero(&process_id).await;
+    let expected = process_success(serde_json::json!({ "build": "N" }));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(60), awaiter)
+            .await
+            .expect("released-history replay completes")
+            .expect("awaiter task")
+            .expect("terminal"),
+        expected
+    );
+    roll.wait_for(|roll| {
+        roll.invocations_of(&format!("{PROCESS_WORKFLOW}/{key}/run"))
+            .iter()
+            .all(|view| view.status == "completed")
+    })
+    .await;
+    roll.settle().await;
+    assert!(
+        !roll.gated.is_armed(),
+        "the host release executed at the cut"
+    );
+    assert_eq!(roll.server.stats().crashes, 1);
+    assert!(roll.server.stats().replays > 0);
+    assert_eq!(roll.record(&process_id).await.outcome(), Some(expected));
+    assert_eq!(
+        roll.invocations_of(&format!(
+            "{PROCESS_WORKFLOW}/{}/run",
+            process_segment_workflow_key(&process_id, SUCCESSOR)
+        ))
+        .len(),
+        1,
+        "cleanup and replay schedule one successor"
+    );
+    let resumed = roll.runner_n.resumptions.lock_recover();
+    let expected_handover = lash_core::SegmentHandover {
+        reason: lash_core::BoundaryReason::JournalBudget,
+        program_hash: PROGRAM.into(),
+        engine_state: vec![1],
+    };
+    let successors: Vec<_> = resumed
+        .iter()
+        .filter(|(ordinal, _)| *ordinal == SUCCESSOR)
+        .collect();
+    assert!(!successors.is_empty());
+    assert!(
+        successors
+            .iter()
+            .all(|(_, handover)| *handover == Some(expected_handover.clone()))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn handover_crash_cuts_on_sqlite_file_with_forced_replay() {
     handover_recovers_at_every_cut(&Fixture::sqlite(true).await).await;
 }

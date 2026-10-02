@@ -11921,6 +11921,40 @@
         },
         {
           "additionalProperties": false,
+          "description": "A read of one process's events starts below the prefix its host released\n(`release_process_events`). The events at or below the horizon keep\ntheir sequence and replay identity but no longer carry their payload;\nthe reader resumes after the reported horizon.",
+          "properties": {
+            "message": {
+              "additionalProperties": false,
+              "properties": {
+                "process_id": {
+                  "type": "string"
+                },
+                "released_through": {
+                  "description": "The highest released sequence: reads resume strictly after it.",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "process_id",
+                "released_through"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "process_events_released",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "message": {
               "$ref": "#/$defs/ToolIntentRuntimeFailure"

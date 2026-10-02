@@ -589,6 +589,11 @@
           "const": "summary_undecodable",
           "description": "A summary event in the history did not decode.",
           "type": "string"
+        },
+        {
+          "const": "history_released",
+          "description": "The host released a prefix of the history; the summary folds only\nthe events after it.",
+          "type": "string"
         }
       ]
     },

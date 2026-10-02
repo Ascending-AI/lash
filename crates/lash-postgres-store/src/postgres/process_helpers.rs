@@ -184,22 +184,33 @@ pub(crate) async fn next_process_change_seq_tx(
     plugin_u64_from_sql("ProcessChangeClock", "current_seq", seq)
 }
 
+/// The event `request`'s replay key already recorded, if any. A released
+/// event comes back with `request`'s payload when it carries the released
+/// digest, and refuses as a conflict when it does not.
 pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &ProcessId,
     replay_key: &str,
+    request: &ProcessEventAppendRequest,
 ) -> Result<Option<ProcessEvent>, PluginError> {
-    let row = sqlx::query(process_sql().event.select_by_replay_key.sql())
+    let Some(row) = sqlx::query(process_sql().event.select_by_replay_key.sql())
         .bind(process_id.as_str())
         .bind(replay_key)
         .fetch_optional(&mut **tx)
         .await
-        .map_err(plugin_sqlx_error)?;
-    row.map(|row| {
-        let json: String = row.get(0);
-        serde_json::from_str(&json).map_err(process_decode_error)
-    })
-    .transpose()
+        .map_err(plugin_sqlx_error)?
+    else {
+        return Ok(None);
+    };
+    let json: String = row.get(0);
+    let released_digest: Option<String> = row.get(1);
+    let mut event: ProcessEvent = serde_json::from_str(&json).map_err(process_decode_error)?;
+    if let Some(digest) = released_digest {
+        lash_core_execution::runtime::restore_released_process_event_payload(
+            &mut event, &digest, request,
+        )?;
+    }
+    Ok(Some(event))
 }
 
 pub(crate) async fn next_process_event_sequence_tx(
@@ -390,7 +401,7 @@ async fn stage_process_event_append_tx(
     let process_id = record.id.clone();
     let replay_lookup =
         if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
-            load_event_by_key_tx(tx, &process_id, replay_key).await?
+            load_event_by_key_tx(tx, &process_id, replay_key, &request).await?
         } else {
             None
         };

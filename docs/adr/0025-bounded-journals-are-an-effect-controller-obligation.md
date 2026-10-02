@@ -51,6 +51,6 @@ process environment store and durable referrers keep it available for replay
 and realization (ADR 0113). Tool output values have no universal core byte cap.
 Hosts size their engine entry limits and apply tool/provider output policy.
 
-Restate owns invocation-journal retention. Domain-store maintenance does not manage SQL replay rows. Author-visible chaining and a generic store incarnation mechanism are rejected because they expose an engine limit to every author and host instead of keeping it with the controller.
+Restate owns invocation-journal retention. Domain-store maintenance does not manage SQL replay rows. The process event log grows with the process rather than with a segment; hosts release its payloads through the ADR 0023 release lever while the process runs. Author-visible chaining and a generic store incarnation mechanism are rejected because they expose an engine limit to every author and host instead of keeping it with the controller.
 
 [Boundary predicate](../../crates/lash-restate/src/controller/mod.rs), [continuation capture and restore](../../crates/lash-lashlang-runtime/src/process.rs), [workflow handover](../../crates/lash-restate/src/process/workflow.rs) and [retained handovers](../../crates/lash-sqlite-store/src/process_registry/segment_handover.rs) implement the contract.

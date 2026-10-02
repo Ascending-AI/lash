@@ -108,6 +108,9 @@ pub struct ProcessObservationProjection {
 pub enum ProcessDurableGapReason {
     AcquisitionBudgetExhausted,
     SummaryUndecodable,
+    /// The host released a prefix of the history (FIG-3482): the summary
+    /// folds only the events after it.
+    HistoryReleased,
 }
 
 /// Durable-summary completeness, reported apart from the live graph's.
@@ -130,7 +133,10 @@ pub enum ProcessDurableSnapshot {
         completeness: ProcessDurableCompleteness,
     },
     /// The process's history is typed-absent: it was pruned.
-    NoLongerRetained(ProcessEventHistoryRetention),
+    NoLongerRetained {
+        terminal_label: lash_core::RetiredProcessStatus,
+        pruned_at_ms: u64,
+    },
     /// No retained process or tombstone has this id.
     Unknown,
 }
@@ -139,14 +145,14 @@ impl ProcessDurableSnapshot {
     fn high_water(&self) -> u64 {
         match self {
             Self::Retained { sequence, .. } => *sequence,
-            Self::NoLongerRetained(_) | Self::Unknown => 0,
+            Self::NoLongerRetained { .. } | Self::Unknown => 0,
         }
     }
 
     fn gap_reason(&self) -> Option<ProcessObservationGapReason> {
         match self {
             Self::Retained { .. } => None,
-            Self::NoLongerRetained(ProcessEventHistoryRetention::Pruned { .. }) | Self::Unknown => {
+            Self::NoLongerRetained { .. } | Self::Unknown => {
                 Some(ProcessObservationGapReason::HistoryUnavailable)
             }
         }
@@ -331,15 +337,16 @@ fn remote_snapshot(
                             ProcessDurableGapReason::SummaryUndecodable => {
                                 DurableGap::SummaryUndecodable
                             }
+                            ProcessDurableGapReason::HistoryReleased => DurableGap::HistoryReleased,
                         },
                     }
                 }
             },
         },
-        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Pruned {
+        ProcessDurableSnapshot::NoLongerRetained {
             terminal_label,
             pruned_at_ms,
-        }) => Durable::NoLongerRetained {
+        } => Durable::NoLongerRetained {
             retention: Retention::Pruned {
                 terminal_label: terminal_label.into(),
                 pruned_at_ms,
@@ -827,12 +834,10 @@ async fn acquire_durable(
             terminal_label,
             pruned_at_ms,
         }) => {
-            return Ok(ProcessDurableSnapshot::NoLongerRetained(
-                ProcessEventHistoryRetention::Pruned {
-                    terminal_label,
-                    pruned_at_ms,
-                },
-            ));
+            return Ok(ProcessDurableSnapshot::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            });
         }
         Err(PluginError::ProcessUnknown { .. }) => return Ok(ProcessDurableSnapshot::Unknown),
         Err(error) => return Err(error),
@@ -861,8 +866,25 @@ async fn acquire_durable(
             .await?
         {
             ProcessEventReadOutcome::Retained(page) => page,
-            ProcessEventReadOutcome::NoLongerRetained(retention) => {
-                return Ok(ProcessDurableSnapshot::NoLongerRetained(retention));
+            ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Pruned {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                return Ok(ProcessDurableSnapshot::NoLongerRetained {
+                    terminal_label,
+                    pruned_at_ms,
+                });
+            }
+            // A released prefix is a gap the summary reports, not a reason
+            // to drop the events after it: fold on from the horizon.
+            ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Released {
+                released_through,
+            }) => {
+                completeness = ProcessDurableCompleteness::Incomplete {
+                    reason: ProcessDurableGapReason::HistoryReleased,
+                };
+                after = released_through;
+                continue;
             }
         };
         let ProcessEventPageEvents::Full(events) = page.events else {
@@ -1251,7 +1273,13 @@ pub(crate) async fn read_events(
         ProcessEventReadOutcome::Retained(page) => {
             page.last_sequence(|event| event.sequence, |event| event.sequence)
         }
-        ProcessEventReadOutcome::NoLongerRetained(_) => None,
+        // The reader resumes after the released prefix it was told about.
+        ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Released {
+            released_through,
+        }) => Some(*released_through),
+        ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Pruned {
+            ..
+        }) => None,
     };
     let cursor = match last {
         Some(sequence) => cursor.with_sequence(sequence),

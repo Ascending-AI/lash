@@ -908,6 +908,70 @@ pub enum ProcessEventHistoryRetention {
         terminal_label: RetiredProcessStatus,
         pruned_at_ms: u64,
     },
+    /// The host released the process's events at or below `released_through`
+    /// ([`ProcessRetention::release_process_events`](super::ProcessRetention::release_process_events)).
+    /// The process is retained; a reader resumes strictly after the horizon.
+    Released { released_through: u64 },
+}
+
+/// What one host release of a process's event prefix settled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessEventRelease {
+    /// The process's release horizon after the call: every event at or below
+    /// it is released. Never lower than before the call, and never above the
+    /// process's last event.
+    pub released_through: u64,
+    /// The events this call released. Zero when the prefix was already
+    /// released, so repeated cleanup reports nothing new.
+    pub released_events: u64,
+}
+
+/// The payload digest a released event keeps in place of its payload: the
+/// SHA-256 of the payload's identity leaf, so a re-presented append under the
+/// event's replay key is matched on the same bytes [`ProcessEventAppendRequest`]
+/// replay matching compares.
+fn released_payload_digest(payload: &serde_json::Value) -> String {
+    crate::stable_hash::sha256_hex(&crate::identity_json::payload_leaf(payload))
+}
+
+/// Release `event` in place for a store's prefix release: its payload is
+/// replaced by `null` and the digest returned, which the store keeps beside the
+/// row. Sequence, type, replay identity and the rest of the event stay, so
+/// sequence allocation, signal ordinals and the replay-key fence are exactly
+/// what they were.
+///
+/// `None` leaves the event as it is: a cancel request matches its replays on
+/// its cancellation rather than on payload bytes, and is one row per process.
+pub fn release_process_event_payload(event: &mut ProcessEvent) -> Option<String> {
+    if ProcessEventKind::from_event_type(&event.event_type) == ProcessEventKind::CancelRequested {
+        return None;
+    }
+    let digest = released_payload_digest(&event.payload);
+    event.payload = serde_json::Value::Null;
+    Some(digest)
+}
+
+/// Prepare a released event found under a re-presented replay key for the
+/// append's replay match: a request whose payload has the released digest
+/// gets its payload back on `existing`, so the replay answers the recorded
+/// event; any other payload is the same durable-identity conflict a retained
+/// event refuses.
+pub fn restore_released_process_event_payload(
+    existing: &mut ProcessEvent,
+    released_digest: &str,
+    requested: &ProcessEventAppendRequest,
+) -> Result<(), crate::PluginError> {
+    if existing.event_type == requested.event_type
+        && released_payload_digest(&requested.payload) == released_digest
+    {
+        existing.payload = requested.payload.clone();
+        return Ok(());
+    }
+    Err(crate::durable_identity_conflict(format!(
+        "process `{}` event replay key conflicts with released event {}",
+        existing.process_id, existing.sequence
+    )))
 }
 
 /// Result of reading a process-event history without collapsing retention into

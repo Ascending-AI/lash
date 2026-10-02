@@ -6,6 +6,7 @@ use lash_sansio::ProcessId;
 mod continuation_store;
 #[path = "process_registry/delivery_binding.rs"]
 mod delivery_binding;
+mod event_release;
 #[cfg(test)]
 mod list_tests;
 pub(crate) mod pages;
@@ -571,6 +572,16 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                     #[cfg(feature = "testing")]
                     if let Some(pauses) = read_pause.as_ref() {
                         pauses.reach_process_event_page_after_identity();
+                    }
+                    let released_through = Self::released_through_conn(conn, &process_id)?;
+                    if after_sequence < released_through {
+                        return Ok(
+                            lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
+                                lash_core_execution::ProcessEventHistoryRetention::Released {
+                                    released_through,
+                                },
+                            ),
+                        );
                     }
                     let after_sequence = i64::try_from(after_sequence).map_err(|_| {
                         lash_core_execution::PluginError::Session(

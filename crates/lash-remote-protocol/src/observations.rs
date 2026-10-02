@@ -282,6 +282,9 @@ pub enum RemoteProcessDurableGapReason {
     AcquisitionBudgetExhausted,
     /// A summary event in the history did not decode.
     SummaryUndecodable,
+    /// The host released a prefix of the history; the summary folds only
+    /// the events after it.
+    HistoryReleased,
 }
 
 /// Durable-summary completeness, reported apart from live-graph completeness.

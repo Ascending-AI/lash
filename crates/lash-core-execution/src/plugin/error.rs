@@ -741,6 +741,28 @@ define_plugin_errors! {
         => Self::ProcessParkFeedCursorCompacted { .. }
         => "process_park_feed_cursor_compacted"
         => crate::ToolFailureClass::Internal;
+/// A read of one process's events starts below the prefix its host released
+    /// (`release_process_events`). The events at or below the horizon keep
+    /// their sequence and replay identity but no longer carry their payload;
+    /// the reader resumes after the reported horizon.
+    #[error(
+        "process `{process_id}` events through sequence {released_through} were released by the host"
+    )]
+    ProcessEventsReleased {
+        process_id: ProcessId,
+        /// The highest released sequence: reads resume strictly after it.
+        released_through: u64,
+    }
+        => PluginError::ProcessEventsReleased { process_id, released_through }
+        => {
+        process_id: ProcessId,
+        /// The highest released sequence: reads resume strictly after it.
+        released_through: u64,
+    }
+        => Self::ProcessEventsReleased { process_id: process_id.clone(), released_through: *released_through }
+        => Self::ProcessEventsReleased { .. }
+        => "process_events_released"
+        => crate::ToolFailureClass::InvalidRequest;
 #[error(transparent)]
     RuntimeEffectController (#[from] crate::RuntimeEffectControllerError)
         => PluginError::RuntimeEffectController(source)
@@ -1097,6 +1119,7 @@ impl PluginError {
             | Self::ProcessChangeCursorPruned { .. }
             | Self::TriggerSubscriptionChangeCursorPruned { .. }
             | Self::ProcessParkFeedCursorCompacted { .. }
+            | Self::ProcessEventsReleased { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }

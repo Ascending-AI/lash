@@ -13,12 +13,12 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    abandoned_consumer_holds::AbandonedConsumerHoldStatements, events::EventStatements,
-    observers::ObserverStatements, parent_end_plans::ParentEndPlanStatements,
-    park_events::ProcessParkEventStatements, processes::ProcessStatements,
-    segment_handovers::SegmentHandoverStatements, tombstones::TombstoneStatements,
-    wake_allocation_floors::WakeAllocationFloorStatements, wake_deliveries::WakeDeliveryStatements,
-    wake_redelivery_fences::WakeRedeliveryFenceStatements,
+    abandoned_consumer_holds::AbandonedConsumerHoldStatements,
+    event_horizons::EventHorizonStatements, events::EventStatements, observers::ObserverStatements,
+    parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
+    processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
+    tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
+    wake_deliveries::WakeDeliveryStatements, wake_redelivery_fences::WakeRedeliveryFenceStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -808,6 +808,8 @@ pub(crate) struct ProcessSql {
     pub(crate) registry_postgres: ProcessRegistryPostgresStatements,
     /// `process_events` statements both backends issue verbatim.
     pub(crate) event: EventStatements,
+    /// `process_event_horizons` statements both backends issue verbatim.
+    pub(crate) event_horizon: EventHorizonStatements,
     /// `process_observers` statements both backends issue verbatim.
     pub(crate) observer: ObserverStatements,
     /// `process_observers` statements only PostgreSQL issues.
@@ -853,6 +855,7 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         process_postgres: ProcessPostgresStatements::render(dialect),
         registry_postgres: ProcessRegistryPostgresStatements::render(dialect),
         event: EventStatements::render(dialect),
+        event_horizon: EventHorizonStatements::render(dialect),
         observer: ObserverStatements::render(dialect),
         observer_postgres: ObserverPostgresStatements::render(dialect),
         handover: SegmentHandoverStatements::render(dialect),

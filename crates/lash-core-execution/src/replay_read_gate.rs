@@ -163,6 +163,7 @@ const STORE_WRITES: &[&str] = &[
     // ProcessRetention
     "compact_process_tombstones",
     "compact_process_park_feed",
+    "release_process_events",
     "prune_terminal_processes",
     "release_consumer_hold",
     "release_trigger_delivery_pin",

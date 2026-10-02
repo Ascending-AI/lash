@@ -1037,6 +1037,7 @@ CREATE TABLE IF NOT EXISTS process_events (
     event_type        TEXT NOT NULL,
     idempotency_key   TEXT,
     event_json        TEXT NOT NULL,
+    released_payload_digest TEXT,
     PRIMARY KEY (process_id, sequence),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
@@ -1044,6 +1045,15 @@ CREATE TABLE IF NOT EXISTS process_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
     ON process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- The event prefix a host released of a still-retained process (FIG-3482):
+-- events at or below `released_through` keep their row without a payload,
+-- and reads below it are refused typed.
+CREATE TABLE IF NOT EXISTS process_event_horizons (
+    process_id        TEXT PRIMARY KEY,
+    released_through  INTEGER NOT NULL CONSTRAINT ck_process_event_horizons_positive CHECK (released_through > 0),
+    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS wake_allocation_floors (
     target_session_id TEXT NOT NULL,

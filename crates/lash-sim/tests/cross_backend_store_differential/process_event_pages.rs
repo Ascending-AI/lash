@@ -1,6 +1,125 @@
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
 
+#[expect(
+    clippy::expect_used,
+    reason = "differential fixture: setup and oracle failures stop the comparison"
+)]
+async fn release_observations(
+    registry: &dyn lash_core::ProcessRegistry,
+) -> (lash_sansio::ProcessId, Vec<lash_core::ProcessEventRelease>) {
+    let process_id = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "release.event".to_string(),
+                payload_schema: lash_core::JsonSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+        )
+        .await
+        .expect("register release process")
+        .id;
+    let request = |ordinal: u64| {
+        lash_core::ProcessEventAppendRequest::new(
+            "release.event",
+            serde_json::json!({ "ordinal": ordinal, "body": "x".repeat(4096) }),
+        )
+        .with_replay_key(format!("release-event-{ordinal}"))
+    };
+    for ordinal in 1..=3 {
+        assert_eq!(
+            registry
+                .append_event(&process_id, request(ordinal))
+                .await
+                .expect("append release event")
+                .event
+                .sequence,
+            ordinal
+        );
+    }
+    let mut releases = Vec::new();
+    for through in [2, 1, u64::MAX] {
+        releases.push(
+            registry
+                .release_process_events(&process_id, through)
+                .await
+                .expect("release compared prefix"),
+        );
+    }
+    let limit = std::num::NonZeroUsize::MIN;
+    for mode in [
+        lash_core::ProcessEventQueryMode::Full,
+        lash_core::ProcessEventQueryMode::Lite,
+    ] {
+        assert_eq!(
+            registry
+                .event_page_after(&process_id, 0, limit, mode)
+                .await
+                .expect("read released prefix"),
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Released {
+                    released_through: 3,
+                }
+            )
+        );
+    }
+    let replay = registry
+        .append_event(&process_id, request(1))
+        .await
+        .expect("replay released event");
+    assert_eq!(replay.event.sequence, 1);
+    assert_eq!(replay.event.payload, request(1).payload);
+    assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
+    assert_eq!(
+        registry
+            .append_event(&process_id, request(4))
+            .await
+            .expect("append retained suffix")
+            .event
+            .sequence,
+        4
+    );
+    (process_id, releases)
+}
+
+#[tokio::test]
+async fn event_release_differential_on_sqlite_memory_and_file() {
+    let directory = tempfile::tempdir().expect("SQLite directory");
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("SQLite memory store set");
+    let file = lash_sqlite_store::SqliteStoreSet::open(directory.path().join("file"))
+        .await
+        .expect("SQLite file store set");
+    let (_, memory_releases) = release_observations(memory.process_registry().as_ref()).await;
+    let (_, file_releases) = release_observations(file.process_registry().as_ref()).await;
+    assert_eq!(memory_releases, file_releases);
+    assert_eq!(
+        memory_releases,
+        vec![
+            lash_core::ProcessEventRelease {
+                released_through: 2,
+                released_events: 2,
+            },
+            lash_core::ProcessEventRelease {
+                released_through: 2,
+                released_events: 0,
+            },
+            lash_core::ProcessEventRelease {
+                released_through: 3,
+                released_events: 1,
+            },
+        ]
+    );
+}
+
 async fn read_all_event_metadata<R>(
     registry: &R,
     process_id: &lash_sansio::ProcessId,
@@ -383,6 +502,17 @@ pub(super) async fn compare_bounded_process_event_pages(
         node.occurrences[6].outcome_class,
         lash_core::ProcessEffectOutcomeClass::Failure
     );
+    let (_, sqlite_releases) = release_observations(&sqlite).await;
+    let (postgres_release_id, postgres_releases) = release_observations(&postgres_registry).await;
+    assert_eq!(
+        sqlite_releases, postgres_releases,
+        "event releases diverged"
+    );
+    sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
+        .bind(postgres_release_id.as_str())
+        .execute(postgres.pool())
+        .await
+        .expect("clean up PostgreSQL release process");
     sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
         .bind(process_id.as_str())
         .execute(postgres.pool())

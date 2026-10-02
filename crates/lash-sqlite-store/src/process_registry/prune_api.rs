@@ -98,6 +98,14 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         super::park_feed::compact_process_park_feed(self, through).await
     }
 
+    async fn release_process_events(
+        &self,
+        process_id: &ProcessId,
+        through: u64,
+    ) -> Result<lash_core_execution::ProcessEventRelease, lash_core_execution::PluginError> {
+        self.release_process_events_impl(process_id, through).await
+    }
+
     async fn prune_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,

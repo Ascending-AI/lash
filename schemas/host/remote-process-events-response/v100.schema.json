@@ -669,6 +669,26 @@
             "pruned_at_ms"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The host released the process's events at or below `released_through`\n([`ProcessRetention::release_process_events`](super::ProcessRetention::release_process_events)).\nThe process is retained; a reader resumes strictly after the horizon.",
+          "properties": {
+            "reason": {
+              "const": "released",
+              "type": "string"
+            },
+            "released_through": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "reason",
+            "released_through"
+          ],
+          "type": "object"
         }
       ]
     },

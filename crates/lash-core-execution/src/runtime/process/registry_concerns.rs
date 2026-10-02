@@ -875,6 +875,36 @@ pub trait ProcessRetention: Send + Sync {
         through: crate::store::ParkFeedCursor,
     ) -> Result<(), PluginError>;
 
+    /// Release the payloads of `process_id`'s events at or below `through`,
+    /// while the process stays retained, running or not (FIG-3482).
+    ///
+    /// The host chooses the prefix; the store clamps it to the process's last
+    /// event and never lowers a horizon an earlier release raised, so the
+    /// call is idempotent and repeated cleanup reports nothing new. A released
+    /// event keeps its row: sequence, type, replay key and a digest of its
+    /// payload. Sequence allocation and signal ordinals therefore do not move,
+    /// and a writer that re-presents a released event's replay key — a
+    /// segment or tool child replaying its journal, a host retrying a signal
+    /// — coalesces on the digest exactly as it would on the payload, or is
+    /// refused as a conflict. Releasing therefore needs no proof that every
+    /// such writer has finished, which storage cannot observe.
+    ///
+    /// Reads strictly after the horizon are unchanged. A page read starting
+    /// below it answers [`ProcessEventHistoryRetention::Released`](super::events::ProcessEventHistoryRetention::Released)
+    /// rather than skipping the released events, and the recent-event tail
+    /// never returns one. The host must finish projecting that prefix and
+    /// accept the typed expiry of any event reader that still needs it.
+    /// Execution state is retained separately: waits, outcomes and wake
+    /// deliveries are held by the process row, the engine and delivery rows.
+    /// A pruned process refuses with
+    /// [`PluginError::ProcessNoLongerRetained`] and an unknown one with
+    /// [`PluginError::ProcessUnknown`].
+    async fn release_process_events(
+        &self,
+        process_id: &ProcessId,
+        through: u64,
+    ) -> Result<super::events::ProcessEventRelease, PluginError>;
+
     /// Physically delete terminal process rows whose `updated_at_ms` is older
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence allowed by the caller's explicit projection

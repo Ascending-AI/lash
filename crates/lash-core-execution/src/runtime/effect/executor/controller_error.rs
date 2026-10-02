@@ -121,6 +121,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ProcessChangeCursorPruned { .. }
             | PluginError::TriggerSubscriptionChangeCursorPruned { .. }
             | PluginError::ProcessParkFeedCursorCompacted { .. }
+            | PluginError::ProcessEventsReleased { .. }
             | PluginError::ProcessCallerDeparted { .. }
             | PluginError::ProcessHandedOver { .. }
             | PluginError::ProcessTerminalOutcomeMismatch { .. }

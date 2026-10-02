@@ -919,6 +919,14 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         self.inner.compact_process_park_feed(through).await
     }
 
+    async fn release_process_events(
+        &self,
+        process_id: &crate::ProcessId,
+        through: u64,
+    ) -> Result<crate::ProcessEventRelease, crate::PluginError> {
+        self.inner.release_process_events(process_id, through).await
+    }
+
     async fn prune_terminal_processes(
         &self,
         cutoff_epoch_ms: u64,

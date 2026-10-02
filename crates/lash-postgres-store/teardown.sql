@@ -106,6 +106,8 @@ DROP TABLE IF EXISTS lash_process_park_events CASCADE;
 
 DROP TABLE IF EXISTS lash_process_events CASCADE;
 
+DROP TABLE IF EXISTS lash_process_event_horizons CASCADE;
+
 DROP TABLE IF EXISTS lash_wake_allocation_floors CASCADE;
 
 DROP TABLE IF EXISTS lash_process_wake_deliveries CASCADE;

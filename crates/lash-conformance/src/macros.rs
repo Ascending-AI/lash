@@ -333,6 +333,7 @@ macro_rules! process_registry_tests {
                 (a_process_event_batch_is_one_commit, "process-event-batch"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
+                (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
                 (signal_admission_retains_its_identity_and_selected_wait, "signal-admission"),
                 (raw_signal_appends_are_refused, "raw-signal-refusal"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),

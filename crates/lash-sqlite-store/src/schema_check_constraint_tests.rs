@@ -180,6 +180,12 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         .expect("insert valid wake parent");
     assert_check_rejects(
         &process,
+        "INSERT INTO process_event_horizons (process_id, released_through)
+         VALUES ('wake-parent', 0)",
+        "ck_process_event_horizons_positive",
+    );
+    assert_check_rejects(
+        &process,
         "INSERT INTO process_wake_deliveries (
              delivery_id, process_id, target_session_id, sequence, state,
              next_attempt_at_ms, expires_at_ms, delivery_json

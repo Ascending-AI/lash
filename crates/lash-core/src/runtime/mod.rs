@@ -294,7 +294,7 @@ pub use process::{
     ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink,
+    ProcessEventRelease, ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink,
     ProcessEventSinkRegistration, ProcessEventType, ProcessExecutionContext,
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,

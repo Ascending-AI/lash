@@ -193,6 +193,10 @@ plugin_error_samples! {
     ProcessParkFeedCursorCompacted { .. } => PluginError::ProcessParkFeedCursorCompacted {
         horizon: crate::store::ParkFeedCursor::initial(),
     },
+    ProcessEventsReleased { .. } => PluginError::ProcessEventsReleased {
+        process_id: process(),
+        released_through: 3,
+    },
     RuntimeEffectController(_) => PluginError::RuntimeEffectController(
         RuntimeEffectControllerError::new(RuntimeErrorCode::Plugin, "sampled"),
     ),

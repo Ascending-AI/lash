@@ -814,7 +814,13 @@ impl Processes {
             lash_core::ProcessEventReadOutcome::Retained(page) => page
                 .last_sequence(|event| event.sequence, |event| event.sequence)
                 .map_or_else(|| cursor.clone(), |sequence| cursor.with_sequence(sequence)),
-            lash_core::ProcessEventReadOutcome::NoLongerRetained(_) => cursor,
+            // The reader resumes after the released prefix it was told about.
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Released { released_through },
+            ) => cursor.with_sequence(*released_through),
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Pruned { .. },
+            ) => cursor,
         };
         Ok((process_id.clone(), outcome, cursor).try_into()?)
     }
@@ -954,6 +960,35 @@ impl Processes {
             )
             .await
             .map_err(Into::into)
+    }
+
+    /// Host-scheduled history release (ADR 0023, FIG-3482): release the
+    /// payloads of `process_id`'s events at or below `through` while the
+    /// process stays retained, typically a long-running process whose events
+    /// the host has already projected.
+    ///
+    /// The host must preserve any history its projections or event awaiters
+    /// still need; reads below the selected horizon expire explicitly.
+    ///
+    /// The prefix is clamped to the process's last event and a horizon never
+    /// moves back, so repeating the call releases nothing new. Released events
+    /// keep their sequence, type and replay identity: sequences, signal
+    /// ordinals and replayed appends behave exactly as before, so the release
+    /// is safe while the process runs. A read starting below the horizon
+    /// answers [`ProcessEventHistoryRetention::Released`](lash_core::ProcessEventHistoryRetention::Released)
+    /// with a cursor after it, and an observation snapshot reports its effect
+    /// summary incomplete with
+    /// [`ProcessDurableGapReason::HistoryReleased`](crate::process_observation::ProcessDurableGapReason::HistoryReleased).
+    /// Pruning a retired process remains [`Self::prune`].
+    pub async fn release_events(
+        &self,
+        process_id: &ProcessId,
+        through: u64,
+    ) -> Result<lash_core::ProcessEventRelease> {
+        Ok(self
+            .registry()
+            .release_process_events(process_id, through)
+            .await?)
     }
 
     /// Host-scheduled retention lever (ADR 0017): physically delete retired

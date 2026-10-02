@@ -10,6 +10,8 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
+#[path = "process_registry/event_release.rs"]
+mod event_release;
 #[path = "process_registry/lifecycle.rs"]
 mod lifecycle;
 #[cfg(test)]
@@ -875,6 +877,17 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
                 return Err(error);
             }
         }
+        let released_through = event_release::released_through_tx(&mut tx, process_id).await?;
+        if after_sequence < released_through {
+            tx.rollback().await.map_err(plugin_sqlx_error)?;
+            return Ok(
+                lash_core_execution::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_core_execution::ProcessEventHistoryRetention::Released {
+                        released_through,
+                    },
+                ),
+            );
+        }
         let after_sequence = i64::try_from(after_sequence).map_err(|_| {
             PluginError::Session("process event page sequence exceeds the SQL cursor range".into())
         })?;
@@ -1117,6 +1130,14 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         through: lash_core_execution::store::ParkFeedCursor,
     ) -> Result<(), PluginError> {
         park_feed::compact_process_park_feed(self, through).await
+    }
+
+    async fn release_process_events(
+        &self,
+        process_id: &ProcessId,
+        through: u64,
+    ) -> Result<lash_core_execution::ProcessEventRelease, PluginError> {
+        event_release::release_process_events(self, process_id, through).await
     }
 
     async fn compact_process_tombstones(

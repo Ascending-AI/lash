@@ -633,7 +633,7 @@ async fn l8_prune_and_a_successor_are_typed_retention_gaps() {
     );
     assert!(matches!(
         snapshot.durable,
-        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Pruned { .. })
+        ProcessDurableSnapshot::NoLongerRetained { .. }
     ));
     assert!(
         pruned.recv().await.expect("recv").is_none(),
@@ -656,7 +656,7 @@ async fn l8_prune_and_a_successor_are_typed_retention_gaps() {
     );
     assert!(matches!(
         snapshot.durable,
-        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Pruned { .. })
+        ProcessDurableSnapshot::NoLongerRetained { .. }
     ));
     let mut new = fixture
         .hub
@@ -757,6 +757,103 @@ async fn l8_full_and_lite_history_page_through_one_cursor() {
         Err(ProcessCursorError::RetiredVersion {
             found: "lashpc1".to_string()
         })
+    );
+}
+
+/// A host-released prefix (FIG-3482) is never served short: a read from the
+/// start answers the typed release with a cursor after it, the next read
+/// continues from there, and a snapshot folds the retained events and says
+/// its summary is missing the released ones.
+#[tokio::test]
+async fn a_released_prefix_is_a_typed_gap_in_reads_and_snapshots() {
+    let fixture = Fixture::new("l8-released", true).await;
+    let mut committed = Vec::new();
+    for occurrence in 1..=4 {
+        committed.push(fixture.commit_outcome(occurrence, true).await);
+    }
+    let horizon = committed[1].sequence;
+    let release = lash_core::ProcessRetention::release_process_events(
+        fixture.registry.as_ref(),
+        &fixture.process_id,
+        horizon,
+    )
+    .await
+    .expect("release the prefix");
+    assert_eq!(release.released_through, horizon);
+
+    let limit = std::num::NonZeroUsize::new(16).expect("page size");
+    let read = read_events(
+        &fixture.registry,
+        Some(fixture.hub.as_ref()),
+        ProcessEventsFrom::Start(fixture.process_id.clone()),
+        limit,
+        ProcessEventQueryMode::Full,
+    )
+    .await
+    .expect("read from the start");
+    assert_eq!(
+        read.outcome,
+        ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Released {
+            released_through: horizon,
+        })
+    );
+    let cursor = read.cursor.expect("a named lifetime");
+    assert_eq!(
+        cursor.sequence(),
+        horizon,
+        "the reader resumes after the release"
+    );
+    let read = read_events(
+        &fixture.registry,
+        Some(fixture.hub.as_ref()),
+        ProcessEventsFrom::After(cursor),
+        limit,
+        ProcessEventQueryMode::Full,
+    )
+    .await
+    .expect("read after the release");
+    let ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+        events: ProcessEventPageEvents::Full(retained),
+        ..
+    }) = read.outcome
+    else {
+        panic!("the events after the release are retained");
+    };
+    assert_eq!(
+        retained
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        committed[2..]
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>()
+    );
+
+    let mut expected = ProcessEffectReport::default();
+    for event in &retained {
+        expected
+            .fold_event(
+                &event.event_type,
+                &event.payload,
+                lash_core::FleetFormat::current(),
+            )
+            .expect("fold");
+    }
+    let mut subscription = fixture.subscribe(None).await;
+    let ProcessObservationItem::Snapshot { snapshot, .. } = next(&mut subscription).await else {
+        panic!("snapshot");
+    };
+    assert_eq!(
+        snapshot.durable,
+        ProcessDurableSnapshot::Retained {
+            sequence: fixture.high_water().await,
+            status: lash_core::ProcessStatus::Running,
+            summary: expected,
+            completeness: ProcessDurableCompleteness::Incomplete {
+                reason: ProcessDurableGapReason::HistoryReleased,
+            },
+        }
     );
 }
 

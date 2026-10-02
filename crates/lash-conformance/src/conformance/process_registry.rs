@@ -7,6 +7,7 @@ mod completion_authority;
 mod consumer_holds;
 mod event_count;
 mod event_paging;
+mod event_release;
 mod event_replay;
 mod external_ref;
 mod identity_claims;
@@ -105,6 +106,13 @@ pub async fn count_events_through_counts_every_event_at_any_top_bound(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     event_count::count_events_through_counts_every_event_at_any_top_bound(registry).await;
+}
+
+pub async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    event_release::releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(registry)
+        .await;
 }
 
 pub async fn signal_admission_retains_its_identity_and_selected_wait(

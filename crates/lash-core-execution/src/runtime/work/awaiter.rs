@@ -186,6 +186,16 @@ impl ProcessRegistryAwaiter {
                         pruned_at_ms,
                     });
                 }
+                // The event asked for may lie in the released prefix: say so
+                // rather than answer from the events after it.
+                crate::ProcessEventReadOutcome::NoLongerRetained(
+                    crate::ProcessEventHistoryRetention::Released { released_through },
+                ) => {
+                    return Err(PluginError::ProcessEventsReleased {
+                        process_id: process_id.clone(),
+                        released_through,
+                    });
+                }
             };
             let crate::ProcessEventPageEvents::Full(events) = page.events else {
                 unreachable!("full process event query returned a lite page");

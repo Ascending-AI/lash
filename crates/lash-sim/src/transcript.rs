@@ -443,6 +443,14 @@ mod tests {
                         pruned_at_ms,
                     });
                 }
+                lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                    lash_core::ProcessEventHistoryRetention::Released { released_through },
+                ) => {
+                    return Err(lash_core::PluginError::ProcessEventsReleased {
+                        process_id: process_id.clone(),
+                        released_through,
+                    });
+                }
             };
             let lash_core::ProcessEventPageEvents::Full(page_events) = page.events else {
                 unreachable!("full process event query returned a lite page");

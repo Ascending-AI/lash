@@ -529,21 +529,33 @@ impl SqliteProcessRegistry {
         .map_err(process_sqlite_error)
     }
 
+    /// The event `request`'s replay key already recorded, if any. A released
+    /// event comes back with `request`'s payload when it carries the released
+    /// digest, and refuses as a conflict when it does not.
     pub(crate) fn load_event_by_key_conn(
         conn: &Connection,
         process_id: &ProcessId,
         replay_key: &str,
+        request: &ProcessEventAppendRequest,
     ) -> Result<Option<ProcessEvent>, lash_core_execution::PluginError> {
-        let row: Option<String> = conn
+        let row: Option<(String, Option<String>)> = conn
             .query_row(
                 process_sql().event.select_by_replay_key.sql(),
                 params![process_id.as_str(), replay_key],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        row.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-            .transpose()
+        let Some((json, released_digest)) = row else {
+            return Ok(None);
+        };
+        let mut event: ProcessEvent = serde_json::from_str(&json).map_err(process_decode_error)?;
+        if let Some(digest) = released_digest {
+            lash_core_execution::runtime::restore_released_process_event_payload(
+                &mut event, &digest, request,
+            )?;
+        }
+        Ok(Some(event))
     }
 
     /// One process-event append for the SQLite store: the append sequence
@@ -639,7 +651,7 @@ impl SqliteProcessRegistry {
         let process_id = record.id.clone();
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
-                Self::load_event_by_key_conn(conn, &process_id, replay_key)?
+                Self::load_event_by_key_conn(conn, &process_id, replay_key, &request)?
             } else {
                 None
             };

@@ -17,17 +17,12 @@ impl WatchedProcessRegistry {
         if self.sinks.lock_recover().is_empty() {
             return None;
         }
-        self.inner
-            .recent_events(process_id, 1)
-            .await
-            .ok()
-            .map(|events| {
-                events
-                    .into_iter()
-                    .map(|event| event.sequence)
-                    .max()
-                    .unwrap_or(0)
-            })
+        // The record's high-water mark, not the newest retained event: a
+        // host release can leave no event to read the position from.
+        match self.inner.get_process(process_id).await {
+            Ok(Some(record)) => Some(record.last_event_sequence),
+            Ok(None) | Err(_) => None,
+        }
     }
 
     pub(super) async fn emit_event_pages_since(&self, process_id: &ProcessId, cursor: Option<u64>) {

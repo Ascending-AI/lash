@@ -1107,6 +1107,14 @@ async fn wait_since_ms(
                     pruned_at_ms,
                 });
             }
+            // The host released the prefix: a wait entered there no longer
+            // tells its start, so the scan reads what is still retained.
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Released { released_through },
+            ) => {
+                after_sequence = released_through;
+                continue;
+            }
         };
         let lash_core::ProcessEventPageEvents::Full(events) = page.events else {
             unreachable!("full process event query returned a lite page");
