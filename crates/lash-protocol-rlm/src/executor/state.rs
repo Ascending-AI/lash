@@ -670,7 +670,7 @@ impl RlmExecutionState {
         if self.execution_response_returned {
             return Err("the previous code execution response has not been settled");
         }
-        self.cancel_code_execution();
+        self.rollback_code_execution();
         Ok(())
     }
 
@@ -683,12 +683,19 @@ impl RlmExecutionState {
         self.execution_response_returned = false;
     }
 
-    pub(crate) fn cancel_code_execution(&mut self) {
+    pub(crate) fn rollback_code_execution(&mut self) {
         let Some(checkpoint) = self.active_execution_checkpoint.take() else {
             self.execution_response_returned = false;
             return;
         };
         self.restore_execution_checkpoint(checkpoint);
+    }
+
+    /// Cancellation ends continuation ownership; a discarded attempt only
+    /// rolls back, so its next retry still has the committed suspension.
+    pub(crate) fn terminate_code_execution(&mut self) {
+        self.rollback_code_execution();
+        self.take_suspended_cell();
     }
 
     /// Encode the canonical RLM root and only the leaf bodies whose logical

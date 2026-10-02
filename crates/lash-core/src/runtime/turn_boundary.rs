@@ -416,6 +416,24 @@ impl TurnBoundary {
         let (store, plugins, execution_state_update) = match session {
             Some(session) => {
                 let store = session.history_store();
+                // The final gate may cancel an already accepted suspension.
+                // Terminal cleanup precedes the capture published atomically
+                // with the Run's terminal and the cleared follow-on.
+                let run_terminates = self.shift_commit.as_ref().map_or_else(
+                    || {
+                        matches!(
+                            returned_turn.outcome,
+                            TurnOutcome::Finished(_) | TurnOutcome::Stopped(_)
+                        )
+                    },
+                    |commit| commit.terminal.is_some(),
+                );
+                if run_terminates && let Some(executor) = session.plugins().code_executor() {
+                    executor
+                        .settle_code_execution(crate::plugin::CodeExecutionOutcome::Terminated)
+                        .await
+                        .map_err(execution_state_capture_error)?;
+                }
                 let execution_state_update = if agent_frame_switch_materializes {
                     let initial_nodes = self
                         .graph_appends

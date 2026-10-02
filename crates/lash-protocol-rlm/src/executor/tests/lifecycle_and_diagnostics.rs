@@ -860,7 +860,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
             }
 
             assert!(state.vm.state().globals().get(tail_binding).is_some());
-            state.cancel_code_execution();
+            state.terminate_code_execution();
             assert!(state.vm.state().globals().get(tail_binding).is_none());
             assert!(state.vm.state().globals().get("survives").is_some());
 
@@ -954,7 +954,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 .await;
                 handler.close().await.expect("close the cell's handler");
                 assert_eq!(tail.error, None, "{language}: tail cell");
-                state.cancel_code_execution();
+                state.terminate_code_execution();
 
                 let final_snapshot = state
                     .snapshot_execution_state(lash_core::FleetFormat::current())

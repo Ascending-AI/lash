@@ -267,7 +267,10 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     ));
     assert_eq!(
         executor.dispositions(),
-        vec![lash_core::plugin::CodeExecutionOutcome::Cancelled]
+        vec![
+            lash_core::plugin::CodeExecutionOutcome::Cancelled,
+            lash_core::plugin::CodeExecutionOutcome::Terminated,
+        ]
     );
 }
 
@@ -363,7 +366,9 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         executor.dispositions(),
         vec![
             lash_core::plugin::CodeExecutionOutcome::Cancelled,
+            lash_core::plugin::CodeExecutionOutcome::Terminated,
             lash_core::plugin::CodeExecutionOutcome::Accepted,
+            lash_core::plugin::CodeExecutionOutcome::Terminated,
         ]
     );
 }

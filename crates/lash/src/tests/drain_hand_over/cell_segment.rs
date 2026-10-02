@@ -60,7 +60,7 @@ fn cell_provider(
                     requests.push(request);
                     requests.len()
                 };
-                Ok(text_response(&if call == 1 {
+                Ok(text_response(&if call <= 2 {
                     cell
                 } else {
                     typescript_block(r#"finish("asked again");"#)
@@ -109,6 +109,7 @@ struct CellRoll {
     old: BuildGeneration,
     next: BuildGeneration,
     _keep: Keep,
+    script: Arc<lash_core::testing::Script>,
 }
 
 /// The continuation's recovery run, at the recovery count its shift
@@ -128,7 +129,13 @@ impl CellRoll {
             .build_generation()
             .expect("the engine's generation is bound")
             .clone();
-        let core = cell_core(engine.old_backend(), engine.old_work(), &signal, &requests);
+        let script = Arc::new(lash_core::testing::Script::new());
+        let scripted = Arc::clone(&script);
+        let backend =
+            lash_core::testing::runtime_helpers::LayeredBackend::over(engine.old_backend())
+                .map_session_store_factory(move |inner| scripted.wrap("cell-run", inner))
+                .into_backend();
+        let core = cell_core(backend, engine.old_work(), &signal, &requests);
         double.install_process_worker(
             lash_core_worker::DurableProcessWorker::new(core.durable_process_worker_config()?)
                 .expect("the core's process worker"),
@@ -168,6 +175,7 @@ impl CellRoll {
             old,
             next,
             _keep,
+            script,
         })
     }
 
@@ -500,31 +508,116 @@ async fn a_run_parked_inside_a_cell_hands_over_and_resumes_mid_cell(
     roll.assert_ended().await
 }
 
-/// A cancel of the run that lands after the hand-over, while its
-/// continuation is parked inside the resumed cell on the newest build, ends
-/// the run: the cancellation is the logical run's, wherever its cell waits.
-async fn a_cancel_after_the_hand_over_reaches_the_resumed_cell(
+/// Cancellation after capture and cancellation in the successor both end
+/// continuation ownership. Store gates fix each crash window precisely.
+#[derive(Clone, Copy, Debug)]
+enum CancelAt {
+    Captured,
+    Successor,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CancelCrash {
+    BeforeAuthorization,
+    AfterAuthorization,
+    BeforeCommit,
+    AfterCommit,
+}
+
+async fn cancellation_discards_the_cell(
     storage: Storage,
-    (): (),
+    (at, crash): (CancelAt, Option<CancelCrash>),
 ) -> Result<()> {
-    let mut roll = CellRoll::start(storage, "cell-segment-cancel").await?;
-    roll.parked_run("run-run", 1).await;
-    roll.hand_over().await?;
-    roll.parked_run(CONTINUATION, 1).await;
+    use lash_core::testing::StoreOp;
+    let crash_name = crash.map_or_else(|| "None".to_owned(), |point| format!("{point:?}"));
+    let session = format!("cell-cancel-{at:?}-{crash_name}");
+    let mut roll = CellRoll::start(storage, &session).await?;
+    let old_run = roll.parked_run("run-run", 1).await;
+    let capture_gate = matches!(at, CancelAt::Captured).then(|| {
+        roll.script
+            .on(StoreOp::authorize_turn_cancel_closure)
+            .nth(roll.script.calls(StoreOp::authorize_turn_cancel_closure) + 1)
+            .before()
+            .pause()
+    });
+    let invocation = if let Some(gate) = &capture_gate {
+        let mut wake = Box::pin(async {
+            loop {
+                roll.core
+                    ._session_shifts
+                    .reconcile(
+                        &lash_core::engine::ReconcileCursor::default(),
+                        std::num::NonZeroUsize::new(16).expect("non-zero page"),
+                    )
+                    .await
+                    .expect("wake the cell for handover");
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        });
+        gate.reached_by(&mut wake, 1).await;
+        old_run
+    } else {
+        roll.hand_over().await?;
+        roll.parked_run(CONTINUATION, 1).await
+    };
+    let settlement_gate = capture_gate.clone().unwrap_or_else(|| {
+        roll.script
+            .on(StoreOp::authorize_turn_cancel_closure)
+            .nth(roll.script.calls(StoreOp::authorize_turn_cancel_closure) + 1)
+            .before()
+            .pause()
+    });
     let receipt = roll
         .handle
         .as_ref()
-        .expect("the run's send handle")
+        .expect("the Run's send handle")
         .cancel()
         .origin("cell-segment-law")
         .await?;
     assert!(
         matches!(&receipt, crate::CancelReceipt::Requested { run, .. } if run.as_str() == "run-run"),
-        "the cancel reaches the running run: {receipt:?}"
+        "the cancel reaches the logical Run: {receipt:?}"
     );
+    settlement_gate.reached(1).await;
+    let crashes = lash_restate_test::CrashCount::new();
+    assert!(roll.server().on_crash(crashes.listener()));
+    let crash_gate = crash.map(|point| {
+        if matches!(point, CancelCrash::BeforeAuthorization) {
+            return Arc::clone(&settlement_gate);
+        }
+        let (op, after) = match point {
+            CancelCrash::BeforeAuthorization => (StoreOp::authorize_turn_cancel_closure, false),
+            CancelCrash::AfterAuthorization => (StoreOp::authorize_turn_cancel_closure, true),
+            CancelCrash::BeforeCommit => (StoreOp::commit_runtime_state, false),
+            CancelCrash::AfterCommit => (StoreOp::commit_runtime_state, true),
+        };
+        // The capture gate intercepted the first authorization. Its stale
+        // observed intent is refused, and the retry authorizes the cancel.
+        let next = roll.script.calls(op)
+            + usize::from(
+                !matches!(point, CancelCrash::AfterAuthorization) || capture_gate.is_some(),
+            );
+        let rule = roll.script.on(op).nth(next);
+        if after {
+            rule.after().pause()
+        } else {
+            rule.before().pause()
+        }
+    });
+    if !matches!(crash, Some(CancelCrash::BeforeAuthorization)) {
+        settlement_gate.open_all();
+    }
+    if let Some(gate) = crash_gate {
+        gate.reached(1).await;
+        assert!(
+            roll.server().crash(&invocation.id),
+            "crash the cancelling Run at {crash:?}"
+        );
+        gate.open_all();
+    }
     let outcome = tokio::time::timeout(WEDGE, roll.sent().outcome())
         .await
-        .expect("the cancelled run answers")?;
+        .expect("the cancelled Run answers")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Cancelled);
     assert_eq!(
         outcome.run().map(lash_core::TurnId::as_str),
@@ -532,7 +625,133 @@ async fn a_cancel_after_the_hand_over_reaches_the_resumed_cell(
     );
     assert_eq!(roll.requests.lock_recover().len(), 1);
     assert_eq!(roll.started().await, 1);
+    assert_eq!(
+        crashes.get(),
+        u64::from(crash.is_some()),
+        "exactly the planned crash occurred"
+    );
+    let store = lash_core::runtime::live_session_view(&roll.core.store_factory, &roll.session)
+        .await?
+        .expect("the cancelled session has a store");
+    let terminal = store
+        .run_terminal(&lash_core::TurnId::fixture("run-run"))
+        .await?
+        .expect("cancellation has durable logical-Run terminal evidence");
+    assert_eq!(
+        terminal.kind(),
+        lash_core::store::RunTerminalKind::Cancelled
+    );
+    assert!(
+        store.load_pending_follow_on().await?.is_none(),
+        "no continuation is owed"
+    );
+    let head = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("the cancelled session has a head");
+    let execution = head
+        .state
+        .execution_state_hydration()?
+        .expect("the cancelled session retains its ordinary globals");
+    #[derive(serde::Deserialize)]
+    struct SuspensionProbe {
+        suspended_cell: Option<serde::de::IgnoredAny>,
+    }
+    let root: SuspensionProbe =
+        rmp_serde::from_slice(&execution.root).expect("decode the persisted RLM root");
+    assert!(
+        root.suspended_cell.is_none(),
+        "terminal cancellation must discard the suspended cell"
+    );
+
+    // An independent deployment has no resident interpreter or SessionShifts
+    // from the cancelled Run. It reopens the durable session on a fresh engine.
+    let Engine::Double(double) = &roll.engine else {
+        unreachable!("the law runs on the double");
+    };
+    let fresh_build = double
+        .add_separate_build(
+            roll.next.clone(),
+            "reopened",
+            lash_restate_test::DeploymentHooks::default(),
+        )
+        .await
+        .expect("start a fresh deployment over the persisted session");
+    let reopened = cell_core(
+        fresh_build.lash_backend(),
+        fresh_build.explicit_reconcile_session_work(),
+        &roll.signal,
+        &roll.requests,
+    );
+    fresh_build.processes().install(
+        lash_core_worker::DurableProcessWorker::new(reopened.durable_process_worker_config()?)
+            .expect("the reopened deployment's process worker"),
+    );
+    let fresh = reopened
+        .session(roll.session.clone())
+        .open()
+        .await?
+        .send(TurnInput::text("start the same cell in a new Run"))
+        .id("fresh-run")
+        .await?;
+    let deadline = tokio::time::Instant::now() + WEDGE;
+    loop {
+        if let Some(process) = reopened
+            .processes()
+            .list(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            })
+            .await?
+            .into_iter()
+            .find(|process| {
+                process.process_id != roll.process
+                    && matches!(
+                        process.wait.as_ref().map(|wait| &wait.kind),
+                        Some(lash_core::WaitKind::Signal { name, .. }) if name == &roll.signal
+                    )
+            })
+        {
+            roll.process = process.process_id;
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "identical source did not execute its process-start prefix again"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        roll.started().await,
+        2,
+        "the new Run starts its own process"
+    );
+    roll.release_process().await?;
+    let output = tokio::time::timeout(WEDGE, fresh.output())
+        .await
+        .expect("the fresh Run ends")?;
+    assert_eq!(
+        output.result.outcome,
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+            value: serde_json::json!({ "answer": "done", "before": 42 }),
+        }),
+        "the fresh Run executes its own bindings and prefix"
+    );
+    assert_eq!(
+        roll.requests.lock_recover().len(),
+        2,
+        "each Run asked for the identical cell once"
+    );
     Ok(())
+}
+
+async fn a_cancel_after_the_hand_over_reaches_the_resumed_cell(
+    storage: Storage,
+    (): (),
+) -> Result<()> {
+    cancellation_discards_the_cell(storage, (CancelAt::Successor, None)).await
 }
 
 async fn hands_over(storage: Storage, crash: Option<Crash>) -> Result<()> {
@@ -605,4 +824,27 @@ cell_segment_laws! {
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     cell_cancel_after_postgres:
         a_cancel_after_the_hand_over_reaches_the_resumed_cell, Storage::Postgres, ();
+    cell_cancel_capture_before_authorization_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Captured, Some(CancelCrash::BeforeAuthorization));
+    cell_cancel_capture_after_authorization_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Captured, Some(CancelCrash::AfterAuthorization));
+    cell_cancel_capture_before_commit_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Captured, Some(CancelCrash::BeforeCommit));
+    cell_cancel_capture_after_commit_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Captured, Some(CancelCrash::AfterCommit));
+    cell_cancel_successor_before_authorization_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Successor, Some(CancelCrash::BeforeAuthorization));
+    cell_cancel_successor_after_authorization_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Successor, Some(CancelCrash::AfterAuthorization));
+    cell_cancel_successor_before_commit_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Successor, Some(CancelCrash::BeforeCommit));
+    cell_cancel_successor_after_commit_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Successor, Some(CancelCrash::AfterCommit));
+    cell_cancel_capture_sqlite_memory:
+        cancellation_discards_the_cell, Storage::SqliteMemory, (CancelAt::Captured, None);
+    cell_cancel_capture_sqlite_file:
+        cancellation_discards_the_cell, Storage::SqliteFile, (CancelAt::Captured, None);
+    #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+    cell_cancel_capture_postgres:
+        cancellation_discards_the_cell, Storage::Postgres, (CancelAt::Captured, None);
 }

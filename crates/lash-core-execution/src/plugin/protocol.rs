@@ -241,7 +241,7 @@ pub enum ProtocolLlmCallAction {
     },
 }
 
-/// How the runtime settled the code effect after observing its response.
+/// How the runtime settles a code response or ends its logical Run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodeExecutionOutcome {
     /// The response was accepted for normal protocol processing.
@@ -252,6 +252,9 @@ pub enum CodeExecutionOutcome {
     /// A cancellation won at the response handoff, so cell-local mutations
     /// must be discarded.
     Cancelled,
+    /// The logical Run has reached its terminal commit. Discard its code
+    /// continuation before capturing execution state, preserving frame globals.
+    Terminated,
 }
 
 #[async_trait::async_trait]
@@ -334,14 +337,16 @@ pub trait CodeExecutorPlugin: Send + Sync {
 
     async fn abort_execution_state_capture(&self) {}
 
-    /// Settle the most recently returned code effect at the response handoff.
+    /// Settle a code response, or discard its continuation at logical termination.
     ///
     /// This closes the cancellation race between the executor's final token
     /// observation and the runtime consuming its response. Stateful executors
     /// can retain a cell checkpoint until this call and roll it back when the
     /// outcome is not [`CodeExecutionOutcome::Accepted`]. The runtime
     /// settles each returned response before starting another code effect for
-    /// the same session.
+    /// the same session. It also calls this with [`CodeExecutionOutcome::Terminated`]
+    /// before a terminal commit captures state, including when cancellation
+    /// replaces an accepted segment boundary during final settlement.
     async fn settle_code_execution(
         &self,
         _outcome: CodeExecutionOutcome,

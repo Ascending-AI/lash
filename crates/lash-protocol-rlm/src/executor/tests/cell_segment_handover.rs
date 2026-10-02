@@ -109,6 +109,15 @@ impl Fixture {
     /// Runs `CELL` as the cell of `turn`, in a handler and a journal of its
     /// own, admitting the processes it starts while it runs.
     async fn run_cell(&self, state: &mut RlmExecutionState, turn: &str) -> ExecResponse {
+        self.run_cell_for_run(state, turn, "cell-run").await
+    }
+
+    async fn run_cell_for_run(
+        &self,
+        state: &mut RlmExecutionState,
+        turn: &str,
+        run: &str,
+    ) -> ExecResponse {
         let handler = self
             .table
             .open_handler(lash_core::AdmittedScope::turn(
@@ -136,6 +145,10 @@ impl Fixture {
         ))
         .build()
         .into_runtime()
+        .with_logical_run(lash_core_worker::TurnAddress::new(
+            "test-session",
+            lash_core::TurnId::fixture(run),
+        ))
         .with_turn_hand_over(true);
         let (response, ()) = Box::pin(tokio::time::timeout(
             std::time::Duration::from_secs(60),
@@ -189,6 +202,99 @@ impl Fixture {
             .expect("list the session's processes")
             .len()
     }
+}
+
+#[tokio::test]
+async fn identical_source_in_another_run_executes_its_own_prefix() {
+    let fixture = Fixture::new(0x4861_0001).await;
+    fixture.hand_over.store(true, Ordering::SeqCst);
+    let mut state = fixture.state();
+    let stopped = fixture
+        .run_cell_for_run(&mut state, "first", "old-run")
+        .await;
+    assert!(stopped.suspended, "{:?}", stopped.error);
+    let durable = state
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .await
+        .expect("capture the suspended cell");
+    let mut reopened = fixture.state();
+    reopened
+        .restore_execution_state(&durable, lash_core::FleetFormat::current())
+        .await
+        .expect("reopen the session state");
+    fixture.hand_over.store(false, Ordering::SeqCst);
+    let fresh = fixture
+        .run_cell_for_run(&mut reopened, "fresh", "new-run")
+        .await;
+    assert!(fresh.error.is_none(), "{:?}", fresh.error);
+    assert_eq!(
+        fresh.terminal_finish,
+        Some(serde_json::json!({ "answer": "done", "before": 42 }))
+    );
+    assert_eq!(
+        fixture.started().await,
+        2,
+        "the new Run executed its prefix and process start"
+    );
+    assert!(reopened.suspended_cell().is_none());
+}
+
+#[tokio::test]
+async fn discarded_resume_retains_the_cell_and_terminal_cancellation_discards_it() {
+    let fixture = Fixture::new(0x4861_0002).await;
+    let mut state = fixture.state();
+    state
+        .vm
+        .state_mut()
+        .insert_global("survives", lashlang::Value::Number(7.0))
+        .await
+        .expect("seed an ordinary frame global");
+    fixture.hand_over.store(true, Ordering::SeqCst);
+    assert!(fixture.run_cell(&mut state, "first").await.suspended);
+    state.accept_code_execution();
+    let checkpoint = state
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .await
+        .expect("the committed suspension");
+    fixture.hand_over.store(false, Ordering::SeqCst);
+    let resumed = fixture.run_cell(&mut state, "second").await;
+    assert!(resumed.error.is_none(), "{:?}", resumed.error);
+    assert!(state.suspended_cell().is_none());
+    state.rollback_code_execution();
+    assert!(
+        state.suspended_cell().is_some(),
+        "a discarded attempt owes the same continuation"
+    );
+    assert_eq!(
+        state
+            .hydrated_execution_state(lash_core::FleetFormat::current())
+            .await
+            .expect("the retry's restored checkpoint"),
+        checkpoint
+    );
+    state.terminate_code_execution();
+    assert!(
+        state.suspended_cell().is_none(),
+        "terminal cancellation releases the continuation"
+    );
+    assert_eq!(
+        state.vm.state().globals().get("survives"),
+        Some(&lashlang::Value::Number(7.0))
+    );
+    let terminal = state
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .await
+        .expect("capture terminal cleanup");
+    let mut reopened = fixture.state();
+    reopened
+        .restore_execution_state(&terminal, lash_core::FleetFormat::current())
+        .await
+        .expect("reopen the terminal state");
+    assert!(reopened.suspended_cell().is_none());
+    assert_eq!(
+        reopened.vm.state().globals().get("survives"),
+        Some(&lashlang::Value::Number(7.0))
+    );
 }
 
 /// What a cell's response says it did, without the identities that differ

@@ -70,12 +70,11 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
 ) -> ExecResponse {
     let clean_code = clean_model_code(&request.code);
     // A cell a segment boundary stopped inside is resumed by the next
-    // execution of the same cell (FIG-4739): the Run's successor segment
+    // execution of the same cell by its owning Run: the Run's successor segment
     // restored the turn at the effect that ran it, and issues it again.
-    let resumed = match state
-        .suspended_cell()
-        .map(|bytes| cell_segment::CellSegmentState::decode_for(bytes, &clean_code))
-    {
+    let resumed = match state.suspended_cell().map(|bytes| {
+        cell_segment::CellSegmentState::decode_for(bytes, ctx.logical_run(), &clean_code)
+    }) {
         Some(Ok(resumed)) => resumed,
         Some(Err(error)) => {
             let mut response = exec_setup_failure(lash_core::CellFailure::new(
@@ -1067,7 +1066,7 @@ async fn execute_code_in_worker_scope(
         Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value)),
         Ok(ExecutionOutcome::Continued) => None,
         Ok(ExecutionOutcome::Failed(value)) if host.cancellation_observed() => {
-            state.cancel_code_execution();
+            state.rollback_code_execution();
             return exec_response_from(
                 host.into_collected(),
                 Some(lash_core::CellFailure::new(
@@ -1099,7 +1098,7 @@ async fn execute_code_in_worker_scope(
             if host.cancellation_observed()
                 || matches!(&failure.error, lashlang::RuntimeError::HostCancelled)
             {
-                state.cancel_code_execution();
+                state.rollback_code_execution();
             }
             // A `max_tool_calls` refusal is reported in its own words, at the
             // call that met it: the model reads the limit, not the channel the
@@ -1152,6 +1151,10 @@ async fn suspend_cell(
     let ctx = host.ctx();
     let segment = cell_segment::CellSegmentState {
         version: cell_segment::CELL_SEGMENT_STATE_VERSION,
+        owner: ctx
+            .logical_run()
+            .cloned()
+            .ok_or_else(|| "a suspended foreground cell has no admitted logical Run".to_owned())?,
         code: cell_segment::CellSegmentState::code_digest(code),
         vm,
         ordinals: cell.ordinals(),
@@ -1268,7 +1271,7 @@ fn exec_setup_failure_or_stop(
     error: impl Into<String>,
 ) -> ExecResponse {
     if ctx.is_cancelled() {
-        state.cancel_code_execution();
+        state.rollback_code_execution();
         return exec_setup_failure(lash_core::CellFailure::new(
             lash_core::CellFailureKind::Host,
             "foreground execution stopped during setup",
@@ -1312,7 +1315,7 @@ fn worker_setup_failure(
     ) = &error
     {
         if ctx.is_cancelled() {
-            state.cancel_code_execution();
+            state.rollback_code_execution();
         }
         return exec_setup_failure(
             lash_core::CellFailure::new(lash_core::CellFailureKind::Host, source.to_string())

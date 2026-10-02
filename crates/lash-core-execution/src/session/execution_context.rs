@@ -66,6 +66,9 @@ pub struct RuntimeExecutionContext<'run> {
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     chronological_projection: Arc<crate::ChronologicalProjection>,
     turn_context: crate::TurnContext,
+    /// The admitted logical Run owning a foreground cell, independent of
+    /// the effect scope of a process-owned session shift.
+    logical_run: Option<crate::TurnAddress>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
@@ -577,6 +580,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             attachment_store: Arc::clone(&self.attachment_store),
             chronological_projection: Arc::clone(&self.chronological_projection),
             turn_context: self.turn_context.clone(),
+            logical_run: self.logical_run.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
@@ -1083,6 +1087,17 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
         self.turn_cancel_scope = Some(scope);
         self
+    }
+
+    /// Bind the admitted logical Run whose cell may cross segment boundaries.
+    pub fn with_logical_run(mut self, run: crate::TurnAddress) -> Self {
+        self.logical_run = Some(run);
+        self
+    }
+
+    /// The admitted logical Run authorized to resume this cell's continuation.
+    pub fn logical_run(&self) -> Option<&crate::TurnAddress> {
+        self.logical_run.as_ref()
     }
 
     /// The complete turn-cancel trio for one wait built from this execution:

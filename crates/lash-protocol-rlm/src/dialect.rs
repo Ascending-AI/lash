@@ -773,9 +773,12 @@ impl DialectSession {
             lash_core::plugin::CodeExecutionOutcome::Accepted => {
                 self.state.accept_code_execution();
             }
-            lash_core::plugin::CodeExecutionOutcome::Discarded
-            | lash_core::plugin::CodeExecutionOutcome::Cancelled => {
-                self.state.cancel_code_execution();
+            lash_core::plugin::CodeExecutionOutcome::Discarded => {
+                self.state.rollback_code_execution();
+            }
+            lash_core::plugin::CodeExecutionOutcome::Cancelled
+            | lash_core::plugin::CodeExecutionOutcome::Terminated => {
+                self.state.terminate_code_execution();
             }
         }
         Ok(())

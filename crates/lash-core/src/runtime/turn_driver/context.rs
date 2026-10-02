@@ -73,6 +73,15 @@ impl<'run> RuntimeTurnDriver<'run> {
             .map(|context| {
                 self.register_live_opener(context.dispatch(), event_tx);
                 context
+                    .with_logical_run(crate::TurnAddress::new(
+                        self.session_id.clone(),
+                        self.shift_run.clone().unwrap_or_else(|| {
+                            self.scoped_effect_controller
+                                .execution_scope()
+                                .logical_run()
+                                .unwrap_or_else(|| self.turn_id.clone())
+                        }),
+                    ))
                     .with_recorded_turn_cancel(
                         self.turn_cancel.is_some(),
                         Arc::clone(&self.turn_control),

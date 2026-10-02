@@ -69,8 +69,9 @@ pub(super) struct RecordedPrint(#[serde(with = "lashlang::effect_value")] pub la
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct CellSegmentState {
     pub version: u32,
-    /// The digest of the cell's source: only an execution of the same cell
-    /// resumes this state.
+    /// The logical Run that owns this continuation across physical segments.
+    pub owner: lash_core_worker::TurnAddress,
+    /// The digest of the cell's source, checked after Run ownership.
     pub code: String,
     /// The worker's continuation, opaque to the parent (ADR 0123).
     pub vm: lash_vm_protocol::OpaqueVmState,
@@ -109,10 +110,12 @@ impl CellSegmentState {
         rmp_serde::to_vec_named(self).map_err(|error| error.to_string())
     }
 
-    /// Decodes a suspended cell for an execution of `code`. `Ok(None)` when
-    /// the state is another cell's: the turn moved on without resuming it,
-    /// and this execution starts fresh.
-    pub(super) fn decode_for(bytes: &[u8], code: &str) -> Result<Option<Self>, String> {
+    /// Another Run or another cell starts fresh, even with identical source.
+    pub(super) fn decode_for(
+        bytes: &[u8],
+        owner: Option<&lash_core_worker::TurnAddress>,
+        code: &str,
+    ) -> Result<Option<Self>, String> {
         let state: Self = rmp_serde::from_slice(bytes).map_err(|error| error.to_string())?;
         if state.version != CELL_SEGMENT_STATE_VERSION {
             return Err(format!(
@@ -120,7 +123,7 @@ impl CellSegmentState {
                 state.version
             ));
         }
-        Ok((state.code == Self::code_digest(code)).then_some(state))
+        Ok((owner == Some(&state.owner) && state.code == Self::code_digest(code)).then_some(state))
     }
 
     /// The parent ledgers of `ctx` a boundary hands over.
