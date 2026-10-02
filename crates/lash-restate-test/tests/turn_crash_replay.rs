@@ -7,7 +7,8 @@
 //! its journals and its answer. Then, for every journal point of the drive,
 //! of the root's workflow and of the tool child's dispatch handler, a fresh
 //! backend under the same seed drops the handler just before the server
-//! stores that frame and replays the invocation. Every crash must reach the
+//! stores that frame on the first attempt that reaches it, including after
+//! suspension, and replays the invocation. Every crash must reach the
 //! reference answer, and each effect runs exactly once unless its result was
 //! the frame the crash lost — then at least once, never more than twice.
 //! There are no known divergences: a crash point that does not recover fails
@@ -26,10 +27,12 @@ use lash_core::engine::RootOutcome;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
+use lash_restate_test::protocol::generated::CallCommandMessage;
 use lash_restate_test::{
     CrashPoint, CrashRule, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig,
     TURN_DRIVER_SERVICE,
 };
+use prost::Message as _;
 use serde_json::json;
 
 const DISPATCH: &str = "EffectGroupDispatch";
@@ -66,6 +69,7 @@ fn model_reply(request: &LlmRequest) -> LlmResponse {
 
 struct CountingTool {
     executions: Arc<AtomicUsize>,
+    gate: Arc<lash_core::testing::Gate>,
 }
 
 fn tool_definition() -> lash_core::ToolDefinition {
@@ -89,6 +93,7 @@ impl lash_core::ToolProvider for CountingTool {
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.gate.pass().await;
         self.executions.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolOutcome::ok(json!({"result": "counted"})).into()
     }
@@ -111,6 +116,7 @@ struct Run {
     llm_calls: usize,
     tool_executions: usize,
     crashes: u64,
+    turn_attempts: u32,
     /// Every invocation's journal, by id.
     journals: Vec<InvocationJournal>,
 }
@@ -119,10 +125,15 @@ fn owner() -> lash_core::LeaseOwnerIdentity {
     lash_core::LeaseOwnerIdentity::opaque("lash-restate-test", "turn-crash-replay")
 }
 
-async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
-    let backend: RestateTestBackend = lash_restate_test::backend(seed, ServerConfig::default())
+async fn run_turn(seed: u64, crash: Option<CrashRule>, config: ServerConfig) -> Run {
+    let backend: RestateTestBackend = lash_restate_test::backend(seed, config)
         .await
         .expect("build the Restate test backend");
+    let server = backend.server();
+    // A completed tool skips wait-registration commands. Hold its body
+    // until the opener has registered its wait, so all sweep cells take the
+    // same journal path regardless of how quickly the tool would finish.
+    let tool_gate = Arc::new(lash_core::testing::Gate::new("turn crash matrix tool"));
     let crash = crash.inspect(|rule| backend.server().crash_on(rule.clone()));
     let llm_calls = Arc::new(AtomicUsize::new(0));
     let tool_executions = Arc::new(AtomicUsize::new(0));
@@ -149,6 +160,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         )
         .tools(Arc::new(CountingTool {
             executions: Arc::clone(&tool_executions),
+            gate: Arc::clone(&tool_gate),
         }) as Arc<dyn lash_core::ToolProvider>)
         .build(owner())
         .expect("build the lash core");
@@ -171,7 +183,35 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         receipt.input_id.as_str(),
         lash_core::drive::FIRST_INGRESS_ATTEMPT,
     );
-    let server = backend.server();
+    tool_gate.reached(1).await;
+    let root = server
+        .invocations()
+        .into_iter()
+        .find(|view| {
+            view.target.starts_with(&format!("{TURN_DRIVER_SERVICE}/"))
+                && view.target.ends_with("/run")
+        })
+        .expect("the held tool has a root invocation");
+    tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        while !server
+            .journal(&root.id)
+            .unwrap_or_default()
+            .into_iter()
+            .any(|entry| {
+                entry.ty == MessageType::CallCommand
+                    && CallCommandMessage::decode(entry.payload).is_ok_and(|call| {
+                        call.service_name == "LashDurableWaitIndex"
+                            && call.handler_name == "register_awakeable"
+                    })
+            })
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the opener registers its wait while the tool is held");
+    assert_eq!(tool_executions.load(Ordering::SeqCst), 0);
+    tool_gate.open_all();
     let drive = tokio::time::timeout(
         std::time::Duration::from_secs(8),
         backend.attach_drive(&session_id, request),
@@ -212,12 +252,33 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     server.settle().await;
     let mut views = server.invocations();
     views.sort_by(|left, right| left.id.cmp(&right.id));
-    if crash.is_none() {
+    let turn_attempts = views
+        .iter()
+        .filter(|view| {
+            view.target.starts_with(&format!("{TURN_DRIVER_SERVICE}/"))
+                && view.target.ends_with("/run")
+        })
+        .map(|view| view.attempts)
+        .max()
+        .unwrap_or_default();
+    if crash.is_none() || server.stats().crashes == 0 {
         for view in &views {
             println!(
                 "reference invocation {} attempts={} last_failure={:?}",
                 view.target, view.attempts, view.last_failure
             );
+            if crash.is_some() {
+                let journal: Vec<_> = server
+                    .journal(&view.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|entry| (entry.ty, entry.name))
+                    .collect();
+                println!(
+                    "missed crash {crash:?}: {} suspensions={} journal={journal:?}",
+                    view.target, view.suspensions
+                );
+            }
         }
     }
     let journals = views
@@ -252,6 +313,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         llm_calls: llm_calls.load(Ordering::SeqCst),
         tool_executions: tool_executions.load(Ordering::SeqCst),
         crashes: server.stats().crashes,
+        turn_attempts,
         journals,
     }
 }
@@ -286,10 +348,12 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
             // the point was enumerated from: another invocation's same-index
             // command is a different step.
             let rule = |point| {
+                // The journal survives suspension and retry. A later point
+                // may first be reached on a later attempt; the one-shot rule
+                // stays armed until that frame arrives.
                 let rule = CrashRule::new(point)
                     .service(journal_service.clone())
-                    .handler(handler.clone())
-                    .within_attempts(1);
+                    .handler(handler.clone());
                 match key {
                     Some(key) => rule.key(key.clone()),
                     None => rule,
@@ -315,7 +379,7 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
 async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
     let seed = 0x3665;
     let started = Instant::now();
-    let reference = run_turn(seed, None).await;
+    let reference = run_turn(seed, None, ServerConfig::default()).await;
     assert_eq!(reference.answer, "done");
     assert_eq!(reference.tool_executions, 1);
     assert_eq!(reference.crashes, 0);
@@ -335,7 +399,7 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
         assert!(!points.is_empty(), "{service} has journal points");
         for (rule, lost_run) in points {
             let label = format!("{service} {:?}", rule.point);
-            let run = run_turn(seed, Some(rule)).await;
+            let run = run_turn(seed, Some(rule), ServerConfig::default()).await;
             cases += 1;
             let lost_llm = lost_run.is_some() && service == TURN_DRIVER_SERVICE;
             let lost_tool = lost_run.is_some() && service == DISPATCH;
@@ -368,6 +432,44 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
     assert!(
         violations.is_empty(),
         "crash points that did not recover (FIG-3678):\n{violations:#?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_crash_point_stays_armed_across_suspension() {
+    let seed = 0x3665;
+    // Closing input after replay forces unresolved awaits to suspend, without
+    // depending on wall time or the host's scheduling load.
+    let config = ServerConfig::default().always_replay(true);
+    let reference = run_turn(seed, None, config.clone()).await;
+    assert_eq!(reference.answer, "done");
+    assert_eq!(reference.crashes, 0);
+    assert!(
+        reference.turn_attempts > 1,
+        "the turn resumed after suspension"
+    );
+    let (rule, _) = crash_points(&reference, TURN_DRIVER_SERVICE)
+        .into_iter()
+        .rev()
+        .find(|(rule, _)| matches!(rule.point, CrashPoint::BeforeRunResultAt { .. }))
+        .expect("the turn has a final run result to lose");
+    let point = rule.point.clone();
+    let run = run_turn(seed, Some(rule), config).await;
+    assert_eq!(run.answer, "done");
+    assert!(
+        run.turn_attempts > 1,
+        "the crash cell resumed after suspension"
+    );
+    assert_eq!(run.tool_executions, 1);
+    assert!((2..=3).contains(&run.llm_calls));
+    assert_eq!(
+        run.crashes, 1,
+        "the prearmed {point:?} must fire on the attempt that reaches it ({} attempts)",
+        run.turn_attempts
+    );
+    println!(
+        "turn crash after suspension: {point:?}, {} attempts, {} crashes",
+        run.turn_attempts, run.crashes
     );
 }
 
