@@ -225,10 +225,9 @@ impl RuntimeTurnDriver<'_> {
             // stays unrecorded and the engine runs it again. A hook's own
             // failure, and an answer the store did give, are still recorded:
             // a superseded drive fence ends the run typed, with no retry.
-            Err(fault)
-                if fault.code == RuntimeErrorCode::StoreCommitFailed
-                    && fault.turn_failure_cause() == crate::TurnFailureCause::LiveFault =>
-            {
+            // The fault is told by its cause, not its code: every store
+            // error that is not terminal is one (FIG-4824).
+            Err(fault) if fault.turn_failure_cause() == crate::TurnFailureCause::LiveFault => {
                 return Err(
                     RuntimeEffectControllerError::from(fault).retryable_uncommitted_derivation()
                 );

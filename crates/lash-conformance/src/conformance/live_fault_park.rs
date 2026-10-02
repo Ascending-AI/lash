@@ -264,7 +264,12 @@ impl World {
 /// code: a live store fault, never a recorded outcome. Answers how many
 /// reported; an engine that fails the attempt inside a step ends the
 /// execution before it can report.
-fn assert_aborted_on_live_fault(reports: &mut TurnReports, fault: &str, phase: &str) -> usize {
+fn assert_aborted_on_live_fault(
+    reports: &mut TurnReports,
+    code: crate::RuntimeErrorCode,
+    fault: &str,
+    phase: &str,
+) -> usize {
     let mut aborted = 0;
     while let Ok(report) = reports.try_recv() {
         let error = match report {
@@ -272,8 +277,7 @@ fn assert_aborted_on_live_fault(reports: &mut TurnReports, fault: &str, phase: &
             Err(error) => error,
         };
         assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::StoreCommitFailed,
+            error.code, code,
             "{phase}: the attempt aborts under the fault's own code: {error:?}"
         );
         assert_eq!(
@@ -317,7 +321,12 @@ pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_root(
     runner
         .run_parking_turn_until_rested(parked.admitted(), parked.attempt(report))
         .await;
-    let aborted = assert_aborted_on_live_fault(&mut reports, CONTRIBUTOR_FAULT, "install park");
+    let aborted = assert_aborted_on_live_fault(
+        &mut reports,
+        crate::RuntimeErrorCode::StoreCommitFailed,
+        CONTRIBUTOR_FAULT,
+        "install park",
+    );
     assert!(
         aborted > 0,
         "the install runs in the drive, which reports its abort"
@@ -342,7 +351,12 @@ pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_root(
         .run_turn(repaired.admitted(), repaired.attempt(report.clone()))
         .await;
     assert_eq!(
-        assert_aborted_on_live_fault(&mut reports, CONTRIBUTOR_FAULT, "install fault"),
+        assert_aborted_on_live_fault(
+            &mut reports,
+            crate::RuntimeErrorCode::StoreCommitFailed,
+            CONTRIBUTOR_FAULT,
+            "install fault",
+        ),
         1
     );
     repaired.contributor_armed.store(false, Ordering::SeqCst);
@@ -368,7 +382,7 @@ pub async fn a_live_fault_installing_a_recorded_tool_surface_parks_the_root(
 }
 
 /// Law: a store that does not answer a checkpoint's admission ends the
-/// attempt as `store_commit_failed`; the fault is never recorded as the
+/// attempt as `runtime_store`; the fault is never recorded as the
 /// checkpoint's outcome. The engine retries the turn and rests it while the
 /// fault lasts, running the unrecorded checkpoint again and asking the model
 /// nothing again; once the store answers, the retry runs the checkpoint and
@@ -395,7 +409,12 @@ pub async fn a_store_fault_at_checkpoint_admission_parks_the_root(
     runner
         .run_parking_turn_until_rested(parked.admitted(), parked.attempt(report))
         .await;
-    assert_aborted_on_live_fault(&mut reports, ADMISSION_FAULT, "checkpoint park");
+    assert_aborted_on_live_fault(
+        &mut reports,
+        crate::RuntimeErrorCode::RuntimeStore,
+        ADMISSION_FAULT,
+        "checkpoint park",
+    );
     assert!(
         parked.admissions.load(Ordering::SeqCst) >= 2,
         "the faulted admission was never recorded, so every retry ran it again ({} runs)",
@@ -430,7 +449,7 @@ pub async fn a_store_fault_at_checkpoint_admission_parks_the_root(
                 Err(error) => {
                     assert_eq!(
                         error.code,
-                        crate::RuntimeErrorCode::StoreCommitFailed,
+                        crate::RuntimeErrorCode::RuntimeStore,
                         "the attempt aborts under the fault's own code: {error:?}"
                     );
                     assert_eq!(
