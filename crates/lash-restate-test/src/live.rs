@@ -565,6 +565,11 @@ impl<Stores: StoreSet + ?Sized> LiveRestateBackend<Stores> {
         lash_core::Backend::new(self.inner.restate.clone())
     }
 
+    /// lash-restate's own backend value, for APIs that name it.
+    pub fn restate(&self) -> &Arc<RestateEngine> {
+        &self.inner.restate
+    }
+
     /// The engine's session work without its wall-clock reconcile interval;
     /// see [`RestateTestBackend::explicit_reconcile_session_work`](crate::RestateTestBackend::explicit_reconcile_session_work).
     pub fn explicit_reconcile_session_work(&self) -> Arc<dyn SessionWorkEngine> {

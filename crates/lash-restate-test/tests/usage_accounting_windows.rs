@@ -168,19 +168,29 @@ fn core(
         })
         .build()
         .into_handle();
-    lash::LashCore::standard_builder(backend.lash_backend())
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .serve_test_model(
-            provider,
-            lash_core::ModelMetadata::builder("mock-model")
-                .context_window_tokens(200_000)
-                .build()
-                .unwrap(),
-        )
-        .tools(Arc::new(Probe) as Arc<dyn lash_core::ToolProvider>)
-        .build(lash_core::testing::runtime_lease_owner())
-        .unwrap()
+    // Recovery runs only when a law asks for a pass, and a pass waits on its
+    // deliveries for the law's own bound.
+    lash::LashCore::standard_builder(
+        lash_core::testing::runtime_helpers::LayeredBackend::over(backend.lash_backend())
+            .with_session_work(backend.explicit_reconcile_session_work())
+            .into_backend(),
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .recovery_pass_budget(lash::RecoveryPassBudget {
+        tick_wait: BOUND,
+        ..Default::default()
+    })
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    .serve_test_model(
+        provider,
+        lash_core::ModelMetadata::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .unwrap(),
+    )
+    .tools(Arc::new(Probe) as Arc<dyn lash_core::ToolProvider>)
+    .build(lash_core::testing::runtime_lease_owner())
+    .unwrap()
 }
 
 async fn charged(
@@ -307,6 +317,16 @@ async fn cut_before_send(kill: bool) {
         .unwrap()
         .unwrap()
         .head_revision;
+    let lost = factory
+        .non_terminal_roots_page(None, std::num::NonZeroUsize::new(2).unwrap())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|open| open.target.root)
+        .collect::<Vec<_>>();
+    let [lost] = lost.as_slice() else {
+        panic!("one open root at the cut: {lost:?}");
+    };
     if kill {
         assert!(
             backend.kill_and_await(&root.id).await.unwrap(),
@@ -364,6 +384,43 @@ async fn cut_before_send(kill: bool) {
         );
         send.abort();
         let _ = send.await;
+        // Nothing of the killed root outlives it: the recovery pass that
+        // ends the root lost also closes its scope, which releases what the
+        // aborted send left waiting on its terminal.
+        let driver = backend
+            .restate()
+            .session_work_engine()
+            .driver_slot()
+            .installed()
+            .expect("the core installed its driver");
+        tokio::time::timeout(
+            BOUND,
+            driver.reconcile(
+                &lash_core::engine::ReconcileCursor::default(),
+                std::num::NonZeroUsize::MIN.saturating_add(63),
+            ),
+        )
+        .await
+        .expect("one recovery pass")
+        .unwrap();
+        let terminal = factory.root_terminal(&id, lost).await.unwrap();
+        assert!(
+            matches!(
+                terminal.as_ref().map(|terminal| &terminal.cause),
+                Some(lash_core::store::RootTerminalCause::SubstrateLost { .. })
+            ),
+            "the pass ends the killed root substrate-lost: {terminal:?}"
+        );
+        assert_eq!(
+            backend
+                .stores()
+                .obligation_ledger(lash_core::store::ObligationKind::ScopeClose)
+                .state(&lash_core::store::scope_close_obligation_id(&id, lost))
+                .await
+                .unwrap(),
+            Some(lash_core::store::ObligationState::Delivered),
+            "the pass that ended the root delivered its scope close"
+        );
     } else {
         tokio::time::timeout(BOUND, send)
             .await

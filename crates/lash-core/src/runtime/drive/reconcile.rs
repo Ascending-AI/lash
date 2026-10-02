@@ -25,6 +25,12 @@
 //!    on the newest build, and a successor the newest build refused is sent
 //!    back to a build of the generation (FIG-4750): [`drain_hand_over_slot`].
 //!
+//! A root the parks arm ended lost armed its scope close in that write, after
+//! this tick's due passes claimed. The tick is that row's producer, so the
+//! scope-close kind looks once more before the tick returns
+//! ([`close_ended_roots`], FIG-4760): the root's children and registered
+//! waits end with it, not a period later.
+//!
 //! Undriven ingress has no arm: every admitted turn input and queued batch
 //! carries an ingress obligation armed in its admission transaction, which
 //! the producer delivers at once and the ingress relay retries through its
@@ -39,12 +45,13 @@ use std::sync::Arc;
 
 use super::lanes::RelayLanes;
 use super::park::StoreParkRecovery;
-use super::relay::ObligationRelay;
+use super::relay::{ObligationRelay, relay_kind};
 use crate::engine::{
     EnginePage, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, ScopeCloseSink,
     SlotPass,
 };
 use crate::runtime::recovery_lease::RecoveryDuties;
+use crate::store::ObligationKind;
 use crate::{
     Clock, DeploymentStore, ProcessRegistry, ProcessWorkSubstrate, SessionWorkEngine, StoreError,
 };
@@ -201,7 +208,70 @@ pub async fn reconcile_once(
             }
         }
     }
+    close_ended_roots(parts, page, &mut report).await;
     report
+}
+
+/// Deliver the scope closes this tick's parks arm armed (FIG-4760): the
+/// scope-close kind's due pass runs once more on its lane, under the same
+/// wait as the tick's first.
+///
+/// A root the arm ended lost wrote its terminal after the tick's due passes
+/// claimed, so without this its scope stays open for a whole period after
+/// the root ended: its `Until`-scope children keep running and the waits
+/// registered under it stay parked on a root that will never publish. A
+/// pass still delivering when the wait runs out finishes on its lane, and a
+/// lane an earlier pass still holds is reported busy; the next tick's due
+/// pass owns what either leaves.
+async fn close_ended_roots(
+    parts: &ReconcileParts<'_>,
+    page: NonZeroUsize,
+    report: &mut ReconcileTick,
+) {
+    if !parts.duties.due_claims
+        || report
+            .parks
+            .as_ref()
+            .is_none_or(|parks| parks.ended_roots.is_empty())
+    {
+        return;
+    }
+    let Some(relay) = parts
+        .relays
+        .iter()
+        .find(|relay| relay_kind(relay.as_ref()) == ObligationKind::ScopeClose)
+    else {
+        return;
+    };
+    let lanes = parts.lanes.tick(std::slice::from_ref(relay), page).await;
+    for (kind, ended) in lanes.ended {
+        match ended {
+            Ok(pass) => match report
+                .obligations
+                .iter_mut()
+                .find(|(seen, _)| *seen == kind)
+            {
+                Some((_, total)) => {
+                    total.claimed += pass.claimed;
+                    total.delivered += pass.delivered;
+                    total.requested += pass.requested;
+                    total.retried += pass.retried;
+                    total.stalled += pass.stalled;
+                    total.claim_lost += pass.claim_lost;
+                }
+                None => report.obligations.push((kind, pass)),
+            },
+            Err(error) => report.failures.push(ReconcileFailure {
+                arm: ReconcileArm::Obligations,
+                error: format!("{kind} obligations: {error}"),
+            }),
+        }
+    }
+    for kind in lanes.busy {
+        if !report.obligations_busy.contains(&kind) {
+            report.obligations_busy.push(kind);
+        }
+    }
 }
 
 async fn bounded_arm<T, E: std::fmt::Display>(

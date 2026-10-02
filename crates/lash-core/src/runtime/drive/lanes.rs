@@ -89,7 +89,7 @@ impl RelayLanes {
     /// A delivery can arm another kind's row (a close intent's
     /// acknowledgement arms its session's delete), so while the wait lasts a
     /// kind whose pass claimed nothing gets another pass once some other
-    /// kind's pass claimed rows. A kind claims rows at most once a tick.
+    /// kind's pass claimed rows. A kind claims rows at most once a call.
     pub async fn tick(&self, relays: &[Arc<dyn ObligationRelay>], page: NonZeroUsize) -> LanesTick {
         let deadline = self.clock.now() + self.tick_wait;
         let mut lanes = std::mem::take(

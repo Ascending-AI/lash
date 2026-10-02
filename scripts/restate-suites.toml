@@ -312,8 +312,6 @@ timeout_seconds = 180
 label = "//crates/lash-restate-test:usage_accounting_windows__test"
 cwd = "crates/lash-restate-test"
 filters = ["live_restate_usage_crash_"]
-# FIG-4760: a killed root retains its suspended output wait on replay.
-skips = ["live_restate_usage_crash_p6_killed_between_entry_and_send"]
 endpoints = ["CW"]
 shards = 1
 timeout_seconds = 120
