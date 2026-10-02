@@ -8,6 +8,7 @@ use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
 };
+use lash_core::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{RestateTestBackend, ServerConfig};
 use restate_sdk::context::{ContextPromises, SharedWorkflowContext};
@@ -475,16 +476,6 @@ fn assert_original(storage: &str, case: Advance, passes: &[Evidence]) -> Evidenc
     original
 }
 
-async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(60), async {
-        while !done() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
-}
-
 async fn witness(
     double: RestateTestBackend<dyn lash_core::StoreSet>,
     storage: &str,
@@ -565,7 +556,7 @@ async fn witness(
             .filter(|e| e.ty == lash_restate_test::protocol::MessageType::GetPromiseCommand)
             .count()
     };
-    until("the evidence is recorded and the handler parks", || {
+    wait_until("the evidence is recorded and the handler parks", || {
         invocation().is_some_and(|i| promises(&i.id) == 1)
     })
     .await;
@@ -592,7 +583,7 @@ async fn witness(
         .call_workflow_json::<_, String>(SERVICE, &run, "release", &RESUME)
         .await
         .unwrap();
-    until("the replay reaches its second promise", || {
+    wait_until("the replay reaches its second promise", || {
         let current = invocation().unwrap();
         if let Some((code, message)) = &current.last_failure {
             assert!(

@@ -31,6 +31,7 @@ use std::time::Duration;
 use lash::restate::RestateWait;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core::testing::wait_until;
 use lash_restate_test::{
     RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
 };
@@ -117,16 +118,6 @@ impl OneDriverHost for Host {
     }
 }
 
-async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while !done() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
-}
-
 /// The named steps each invocation of `service` journaled.
 fn journaled_steps(backend: &RestateTestBackend, service: &str) -> Vec<(String, Vec<String>)> {
     let server = backend.server();
@@ -194,7 +185,7 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
                 .expect("the host answers")
         }
     });
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;

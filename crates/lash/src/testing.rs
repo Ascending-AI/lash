@@ -101,5 +101,9 @@ pub use lash_core::testing::store_fixtures;
 /// operation's own error (ADR 0044 §Simulation).
 pub use lash_core::testing::ScriptedError;
 
+/// Waits until a state no event reports — a fixture's atomic, a server's
+/// admin view — holds, for laws that poll what the engine's own tasks reach.
+pub use lash_core::testing::wait_until;
+
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};

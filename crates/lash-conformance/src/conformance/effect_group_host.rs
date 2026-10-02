@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use lash_core::testing::wait_until;
 use lash_sansio::sync::MutexExt;
 use tokio::sync::{Notify, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -89,7 +90,10 @@ pub async fn a_reopen_dispatches_the_retained_membership<F: Fn() -> Host>(make: 
         ))
         .await
         .expect("the group opens");
-    until(|| accepted.load(Ordering::SeqCst) == 2).await;
+    wait_until("both retained children park", || {
+        accepted.load(Ordering::SeqCst) == 2
+    })
+    .await;
     drop(handle);
     drop(scoped);
     drop(opener);
@@ -1073,7 +1077,7 @@ pub async fn a_closed_group_with_a_draining_loser_is_not_quiescent<F: Fn() -> Ho
     .expect("the refused retirement left the scope unfenced");
 
     loser.release();
-    until(|| loser.finished() == 1).await;
+    wait_until("the loser settles", || loser.finished() == 1).await;
     // The terminal is journaled after the executor returns, so the retirement
     // is retried until the store proves the scope quiescent.
     tokio::time::timeout(AWAIT_BUDGET, async {
@@ -1476,7 +1480,7 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
     println!("EFFECT_GROUP_CLOSURE_LAW fresh_host_closed_read PASS");
 
     loser.release();
-    until(|| loser.finished() == 1).await;
+    wait_until("the loser settles", || loser.finished() == 1).await;
 }
 
 /// `Cancel`: the losers stop.
@@ -2258,22 +2262,6 @@ async fn read_back_ranks(
         .await
         .expect("the reading host closes the group");
     recorded
-}
-
-/// Waits for a condition a host reaches on its own tasks, so a law never
-/// depends on how many yields a settlement happens to take.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn until(mut condition: impl FnMut() -> bool) {
-    tokio::time::timeout(AWAIT_BUDGET, async {
-        while !condition() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("the host reaches the awaited state");
 }
 
 #[expect(clippy::expect_used, reason = "conformance fixture assertions")]

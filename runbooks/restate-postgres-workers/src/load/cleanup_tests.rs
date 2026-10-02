@@ -3,6 +3,7 @@
 #![allow(deprecated, reason = "the pinned SDK retains the trait workflow API")]
 
 use super::*;
+use lash_core::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::{RestateTestBackend, ServerConfig};
 use restate_sdk::context::{ContextPromises, ContextWriteState, SharedWorkflowContext};
@@ -114,16 +115,6 @@ async fn child(backend: lash_core::Backend, session: &str) -> lash_core::Process
         .id
 }
 
-async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while !done() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
-}
-
 async fn witness(double: RestateTestBackend<dyn lash_core::StoreSet>, storage: &str) {
     let cell = Arc::new(OnceLock::from(services(
         double.lash_backend(),
@@ -185,7 +176,7 @@ async fn witness(double: RestateTestBackend<dyn lash_core::StoreSet>, storage: &
             .filter(|e| e.ty == lash_restate_test::protocol::MessageType::GetPromiseCommand)
             .count()
     };
-    until("cleanup returns and the delete parks", || {
+    wait_until("cleanup returns and the delete parks", || {
         invocation().is_some_and(|i| promises(&i.id) == 1)
     })
     .await;
@@ -205,7 +196,7 @@ async fn witness(double: RestateTestBackend<dyn lash_core::StoreSet>, storage: &
         .call_workflow_json::<_, String>(SERVICE, session, "release", &RESUME)
         .await
         .unwrap();
-    until("the replay reaches its second promise", || {
+    wait_until("the replay reaches its second promise", || {
         let current = invocation().unwrap();
         if let Some((code, message)) = &current.last_failure {
             assert!(
@@ -618,7 +609,7 @@ async fn deadline_law(replay: bool) {
             .find(|i| i.target == format!("{SERVICE}/{key}/run"))
             .unwrap()
     };
-    until("the terminal read blocks", || {
+    wait_until("the terminal read blocks", || {
         stalled.load(Ordering::SeqCst) > 0
     })
     .await;
@@ -768,7 +759,7 @@ async fn cancelled_turn_cleanup_settles_parked_children_and_preserves_other_sess
         }
     });
     let server = double.server();
-    until("cleanup settles its cancelled child", || {
+    wait_until("cleanup settles its cancelled child", || {
         server.invocations().into_iter().any(|i| {
             i.target == format!("{SERVICE}/{key}/run")
                 && server

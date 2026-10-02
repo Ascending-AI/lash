@@ -58,6 +58,7 @@ use lash::restate::RestateWait;
 use lash_core::StoreSet;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
+use lash_core::testing::wait_until;
 use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
@@ -481,16 +482,6 @@ async fn world_over_gated(
     })
 }
 
-async fn until(what: &str, mut done: impl FnMut() -> bool) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while !done() {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
-}
-
 /// The names of the `ctx.run` steps journaled on `service`'s invocations.
 fn journaled_runs(backend: &RestateTestBackend<dyn StoreSet>, service: &str) -> Vec<String> {
     let server = backend.server();
@@ -546,7 +537,7 @@ async fn a_host_replayed_after_acceptance_submits_once() {
         .within_attempts(1),
     );
     let run = run_host(&world).await;
-    until("the engine calls the model while the host waits", || {
+    wait_until("the engine calls the model while the host waits", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
             && world.backend.server().stats().crashes == 1
     })
@@ -589,11 +580,11 @@ async fn a_host_replayed_after_acceptance_submits_once() {
 async fn a_host_waits_out_a_turn_longer_than_its_handler_timeouts() {
     let world = world(ServerConfig::default().always_replay(true)).await;
     let run = run_host(&world).await;
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
-    until("the host has waited through several probes", || {
+    wait_until("the host has waited through several probes", || {
         journaled_runs(&world.backend, "DurableSendHost")
             .iter()
             .filter(|name| *name == "lash.host.outcome")
@@ -644,7 +635,7 @@ async fn an_exclusive_handler_accepts_and_a_shared_handler_waits() {
                 .expect("the shared handler answers")
         }
     });
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -801,7 +792,7 @@ async fn a_host_replayed_after_its_session_was_deleted_keeps_its_journal(replay:
                 .expect("the host answers")
         }
     });
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -821,7 +812,7 @@ async fn a_host_replayed_after_its_session_was_deleted_keeps_its_journal(replay:
             .filter(|entry| entry.ty == MessageType::GetPromiseCommand)
             .count()
     };
-    until("the host parks on its first promise", || {
+    wait_until("the host parks on its first promise", || {
         host().is_some_and(|host| promises(&host.id) == 1)
     })
     .await;
@@ -983,7 +974,7 @@ async fn live_restate_host_killed_after_its_session_was_deleted_replays_its_jour
                 .await;
         }
     });
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -1194,7 +1185,7 @@ async fn live_restate_root_killed_after_its_session_was_deleted_ends_typed() {
         .id(root.clone())
         .await
         .expect("the input is accepted");
-    until("the run dies before its head inspection", || {
+    wait_until("the run dies before its head inspection", || {
         deleted.load(Ordering::SeqCst)
     })
     .await;
@@ -1371,7 +1362,7 @@ async fn a_committed_root_answers_its_follower_while_the_session_wait_index_is_b
                 .expect("the first follower answers")
         }
     });
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -1507,7 +1498,7 @@ async fn a_dropped_terminal_attach_leaves_no_second_server_invocation(
         .call_object_json::<_, String>("ChatObject", "chat", "submit", &"attached twice")
         .await
         .expect("the exclusive handler accepts and returns");
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -1528,7 +1519,7 @@ async fn a_dropped_terminal_attach_leaves_no_second_server_invocation(
     };
 
     let dropped = attached(Arc::clone(&attach));
-    until("the first attach opens its server-side waiter", || {
+    wait_until("the first attach opens its server-side waiter", || {
         terminal_attaches(&world.backend, &wait) >= 1
     })
     .await;
@@ -1728,7 +1719,7 @@ async fn live_restate_a_committed_root_answers_its_follower_while_the_session_wa
                 .expect("the first follower answers")
         }
     });
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -1775,7 +1766,7 @@ async fn live_restate_a_dropped_terminal_attach_leaves_no_second_server_invocati
         .call_object_json::<_, String>("ChatObject", &world.key, "submit", &"attached twice")
         .await
         .expect("the exclusive handler accepts and returns");
-    until("the engine calls the model", || {
+    wait_until("the engine calls the model", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -2057,7 +2048,7 @@ async fn live_restate_follow_on_root_killed_after_its_session_was_deleted_ends_t
         .id(root.clone())
         .await
         .expect("the input is accepted");
-    until("the recovery root dies before its decision", || {
+    wait_until("the recovery root dies before its decision", || {
         deleted.load(Ordering::SeqCst)
     })
     .await;

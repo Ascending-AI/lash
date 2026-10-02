@@ -223,7 +223,7 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         .send(lash::TurnInput::text("answered before deletion"))
         .await
         .expect("accept");
-    until("the model runs", || {
+    wait_until("the model runs", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -249,13 +249,13 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
             .await
             .expect("accept successor");
         world.barrier.release.notify_one();
-        until("the successor pins its closure", || {
+        wait_until("the successor pins its closure", || {
             gate.pin_reached.load(Ordering::SeqCst)
         })
         .await;
     } else {
         root_run_completed(&world, &root).await;
-        until("the answered root owes its close", || {
+        wait_until("the answered root owes its close", || {
             gate.close_reached.load(Ordering::SeqCst)
         })
         .await;
@@ -271,7 +271,7 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         }
     });
     if pinned {
-        until("the waiter reads the retained pin", || {
+        wait_until("the waiter reads the retained pin", || {
             gate.pin_reads.load(Ordering::SeqCst) >= 5
         })
         .await;
@@ -283,14 +283,14 @@ async fn delete_after_answer(stores: Stores, replay: bool, pinned: bool) {
         );
         gate.release_pin();
     } else {
-        until("the delete closes the session", || {
+        wait_until("the delete closes the session", || {
             world.backend.server().invocations().iter().any(|run| {
                 run.target.starts_with("LashTestHandlerHost/") && run.status == "completed"
             })
         })
         .await;
         let reads = gate.closing_reads.load(Ordering::SeqCst);
-        until("the waiter observes closing or returns", || {
+        wait_until("the waiter observes closing or returns", || {
             deleting.is_finished() || gate.closing_reads.load(Ordering::SeqCst) >= reads + 5
         })
         .await;
@@ -426,7 +426,7 @@ async fn live_delete_after_answer(pinned: bool) {
         .send(lash::TurnInput::text("answered before deletion"))
         .await
         .expect("accept");
-    until("the model runs", || {
+    wait_until("the model runs", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -446,12 +446,12 @@ async fn live_delete_after_answer(pinned: bool) {
             .await
             .expect("accept successor");
         world.barrier.release.notify_one();
-        until("the closure is pinned", || {
+        wait_until("the closure is pinned", || {
             gate.pin_reached.load(Ordering::SeqCst)
         })
         .await;
     } else {
-        until("the root owes its close", || {
+        wait_until("the root owes its close", || {
             gate.close_reached.load(Ordering::SeqCst)
         })
         .await;
@@ -471,7 +471,7 @@ async fn live_delete_after_answer(pinned: bool) {
         }
     });
     if pinned {
-        until("the waiter observes retained closure", || {
+        wait_until("the waiter observes retained closure", || {
             gate.pin_reads.load(Ordering::SeqCst) >= 5
         })
         .await;
@@ -489,7 +489,7 @@ async fn live_delete_after_answer(pinned: bool) {
         gate.release_pin();
     } else {
         let reads = gate.closing_reads.load(Ordering::SeqCst);
-        until("the waiter observes retained close", || {
+        wait_until("the waiter observes retained close", || {
             gate.closing_reads.load(Ordering::SeqCst) >= reads + 5 || deleting.is_finished()
         })
         .await;
@@ -573,7 +573,7 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
         .send(lash::TurnInput::text("stalled cleanup"))
         .await
         .expect("accept");
-    until("the model runs", || {
+    wait_until("the model runs", || {
         world.barrier.calls.load(Ordering::SeqCst) == 1
     })
     .await;
@@ -586,7 +586,7 @@ async fn deletion_wait_reports_state_and_stalls(stores: Stores, replay: bool) {
         .cloned()
         .expect("root");
     root_run_completed(&world, &root).await;
-    until("the root close is owed", || {
+    wait_until("the root close is owed", || {
         gate.close_reached.load(Ordering::SeqCst)
     })
     .await;
@@ -699,7 +699,7 @@ async fn root_run_completed(world: &World, root: &lash::TurnId) {
             .service_name(lash_restate_test::TURN_DRIVER_SERVICE),
         lash_restate::turn_workflow_key(&SESSION.into(), root)
     );
-    until("the root's run has completed beside its held close", || {
+    wait_until("the root's run has completed beside its held close", || {
         world
             .backend
             .server()
