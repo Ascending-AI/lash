@@ -219,9 +219,9 @@ pub async fn build_core(
         log_out!(
             "slack-clone-bot MCP server {}: connected={}, tools={}, last_error={}",
             status.server_name,
-            status.connected,
+            status.health.is_connected(),
             status.tool_count,
-            status.last_error.as_ref().map_or("none", |f| f.message())
+            status.health.error().unwrap_or("none")
         );
     }
     // The bot runs one model: the registry keys it by its wire model, and

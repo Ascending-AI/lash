@@ -30,7 +30,9 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash_plugin_mcp::{McpConnectionPool, McpError, McpPluginFactory, McpServerStatus};
+use lash_plugin_mcp::{
+    McpConnectionPool, McpError, McpPluginFactory, McpServerHealth, McpServerStatus,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -96,10 +98,10 @@ impl ServerView {
     fn new(status: McpServerStatus, tools: Vec<String>) -> Self {
         Self {
             name: status.server_name,
-            connected: status.connected,
+            connected: status.health.is_connected(),
             tool_count: status.tool_count,
-            reconnect_exhausted: status.reconnect_exhausted,
-            last_error: status.last_error.map(|fault| fault.to_string()),
+            reconnect_exhausted: matches!(&status.health, McpServerHealth::Exhausted { .. }),
+            last_error: status.health.error().map(str::to_owned),
             tools,
         }
     }

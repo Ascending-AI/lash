@@ -885,9 +885,13 @@ async fn the_configured_http_header_is_what_lets_the_transport_connect() {
         .await
         .expect("attach the HTTP MCP server");
     let accepted = status_of(&runtime, mcp_http_server::SERVER_NAME);
-    assert!(accepted.connected, "last_error: {:?}", accepted.last_error);
+    assert!(
+        accepted.health.is_connected(),
+        "last_error: {:?}",
+        accepted.health.error()
+    );
     assert_eq!(accepted.tool_count, 5);
-    assert_eq!(accepted.last_error, None);
+    assert_eq!(accepted.health.error(), None);
 
     // Same server, same URL, wrong credential: attach still succeeds, because a
     // server that is refusing right now is a server the pool keeps retrying.
@@ -901,12 +905,9 @@ async fn the_configured_http_header_is_what_lets_the_transport_connect() {
         .await
         .expect("attach registers a server the credential is rejected by");
     let refused = status_of(&runtime, "workspace_http_denied");
-    assert!(!refused.connected);
+    assert!(!refused.health.is_connected());
     assert_eq!(refused.tool_count, 0);
-    let last_error = refused
-        .last_error
-        .map(|fault| fault.to_string())
-        .unwrap_or_default();
+    let last_error = refused.health.error().unwrap_or_default();
     assert!(
         last_error.contains("401") || last_error.to_lowercase().contains("unauthorized"),
         "the rejection must name the credential failure: {last_error}"
@@ -1162,7 +1163,11 @@ async fn a_stalled_call_times_out_as_a_tool_failure_and_keeps_the_connection() {
     // case the default is for: a slow tool is reported as a typed timeout and
     // the connection is kept.
     let status = status_of(&runtime, mcp_http_server::SERVER_NAME);
-    assert!(status.connected, "last_error: {:?}", status.last_error);
+    assert!(
+        status.health.is_connected(),
+        "last_error: {:?}",
+        status.health.error()
+    );
     session
         .send(TurnInput::text("@lashbot check the integration again"))
         .output()
@@ -1227,9 +1232,9 @@ async fn a_host_can_opt_out_of_timeout_disconnects_entirely() {
     assert_eq!(failure["code"], "mcp_call_timeout");
     let status = status_of(&runtime, mcp_http_server::SERVER_NAME);
     assert!(
-        status.connected,
+        status.health.is_connected(),
         "no probe runs under `Never`, so the entry stays connected: {:?}",
-        status.last_error
+        status.health.error()
     );
 
     slack_clone::bot::shutdown_core(&runtime.core)

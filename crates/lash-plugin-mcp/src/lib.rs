@@ -32,6 +32,7 @@
 //! Hosts can read them from advertised manifests for discovery. Standard and
 //! RLM prompts render them once per visible module from the recorded catalog.
 
+mod call_failure;
 pub mod config;
 pub mod error;
 pub mod host;
@@ -54,7 +55,7 @@ pub use host::{
 pub use plugin::{
     McpDeferredToolProvider, McpPluginFactory, McpPluginFactoryBuilder, McpToolProvider,
 };
-pub use pool::{McpConnectionPool, McpServerFault, McpServerStatus};
+pub use pool::{McpConnectionPool, McpServerHealth, McpServerStatus};
 pub use rmcp::model::{
     CreateElicitationRequestParams, CreateElicitationResult as CreateElicitationOutcome,
     CreateMessageRequestParams, CreateMessageResult as CreateMessageOutcome, ElicitationAction,

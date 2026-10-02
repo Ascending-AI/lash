@@ -560,9 +560,9 @@ async fn connect_tolerates_unreachable_server() {
     let statuses = pool.server_statuses();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].server_name, "down");
-    assert!(!statuses[0].connected);
+    assert!(!statuses[0].health.is_connected());
     assert!(
-        statuses[0].last_error.is_some(),
+        statuses[0].health.error().is_some(),
         "the connection failure is recorded for observability"
     );
 
@@ -810,7 +810,9 @@ async fn eager_connects_start_in_parallel() {
     .expect("parallel eager connects complete");
 
     assert!(
-        pool.server_statuses().iter().all(|status| status.connected),
+        pool.server_statuses()
+            .iter()
+            .all(|status| status.health.is_connected()),
         "both handshakes require their peer child to have started"
     );
     pool.shutdown_all().await;
@@ -886,7 +888,7 @@ async fn tools_list_changed_refreshes_the_live_catalog() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_tool_id() {
+async fn mcp_law_catalog_miss_is_an_invalid_request() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let refresh_marker = scratch.path().join("refresh");
     let initialize = json!({
@@ -1007,8 +1009,8 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
     let lash_core::ToolCallOutcome::Failure(failure) = &dropped.as_output().outcome else {
         panic!("dropped tool must fail through the typed unknown-id path: {dropped:?}");
     };
-    assert_eq!(failure.class, lash_core::ToolFailureClass::Execution);
-    assert_eq!(failure.code, "tool_error");
+    assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+    assert_eq!(failure.code, "mcp_unknown_tool_id");
     assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     assert!(failure.message.contains("Unknown MCP tool id"));
 
@@ -1200,8 +1202,8 @@ async fn attach_registers_an_outage_and_retries_like_initial_connect() {
     let statuses = pool.server_statuses();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].server_name, "down");
-    assert!(!statuses[0].connected);
-    assert!(statuses[0].last_error.is_some());
+    assert!(!statuses[0].health.is_connected());
+    assert!(statuses[0].health.error().is_some());
     pool.shutdown_all().await;
 }
 
@@ -1273,15 +1275,25 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
 }
 
 #[test]
-fn known_protocol_errors_are_not_connection_loss() {
-    assert!(!is_connection_loss(&ServiceError::UnexpectedResponse));
-    assert!(!is_connection_loss(&ServiceError::Cancelled {
-        reason: None
-    }));
-    assert!(!is_connection_loss(&ServiceError::Timeout {
-        timeout: Duration::from_secs(1),
-    }));
-    assert!(is_connection_loss(&ServiceError::TransportClosed));
+fn known_protocol_errors_keep_their_typed_cause() {
+    assert!(matches!(
+        McpServiceFailure::from(ServiceError::UnexpectedResponse),
+        McpServiceFailure::UnexpectedResponse
+    ));
+    assert!(matches!(
+        McpServiceFailure::from(ServiceError::Cancelled { reason: None }),
+        McpServiceFailure::Cancelled { reason: None }
+    ));
+    assert!(matches!(
+        McpServiceFailure::from(ServiceError::Timeout {
+            timeout: Duration::from_secs(1)
+        }),
+        McpServiceFailure::Timeout { timeout_ms: 1000 }
+    ));
+    assert!(matches!(
+        McpServiceFailure::from(ServiceError::TransportClosed),
+        McpServiceFailure::TransportClosed
+    ));
 }
 
 // Subscribe before the call that terminates the mock. Publication follows
@@ -1819,8 +1831,8 @@ async fn discovery_hang_surfaces_startup_timeout() {
     assert!(entry.service_snapshot().is_none());
     assert!(
         matches!(
-            entry.last_error.read_recover().as_ref(),
-            Some(McpServerFault::Connection(err))
+            &*entry.health.read_recover(),
+            McpServerHealth::Reconnecting { last_error: Some(err) }
                 if err.contains("timed out") || err.contains("timeout")
         ),
         "the failure is recorded for status reporting"
@@ -1962,10 +1974,8 @@ async fn oversized_stdio_message_disconnects_with_typed_cause() {
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             let status = &pool.server_statuses()[0];
-            if let Some(fault) = &status.last_error
-                && fault
-                    .message()
-                    .contains("inbound message exceeded the 8388608-byte limit")
+            if let Some(error) = status.health.error()
+                && error.contains("inbound message exceeded the 8388608-byte limit")
             {
                 return;
             }
@@ -1975,4 +1985,52 @@ async fn oversized_stdio_message_disconnects_with_typed_cause() {
     .await
     .expect("the typed overflow cause reaches the server's fault record");
     pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn mcp_law_tool_error_preserves_cause_and_attachment_roots() {
+    let result = serde_json::from_value(json!({
+        "content":[
+            {"type":"text","text":"bad input"},
+            {"type":"image","data":"YQ==","mimeType":"image/png"}
+        ],
+        "structuredContent":{"$lash_tool_value":"attachment","source":{"foreign":true}},
+        "isError":true
+    }))
+    .expect("valid MCP result");
+    let root = tempfile::tempdir().expect("attachment directory");
+    let store = Arc::new(
+        lash_core::facade_support::RuntimeAttachmentStore::ephemeral(Arc::new(
+            lash_core::facade_support::FileAttachmentStore::new(root.path()),
+        )),
+    );
+    let controller: Arc<dyn lash_core::RuntimeEffectController> =
+        Arc::new(lash_core::testing::UnavailableEffectController);
+    let dispatch = lash_core::testing::TestExecutionContextBuilder::over_controller(controller)
+        .attachment_store(store)
+        .build()
+        .dispatch;
+    let fixture = lash_core::testing::ToolCallFixture::from_dispatch(dispatch);
+    let output = tool_result_from_rmcp(result, &fixture.attempt("test-turn"))
+        .await
+        .into_done_output()
+        .expect("settled");
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("tool error must fail");
+    };
+    assert_eq!(failure.class, ToolFailureClass::Execution);
+    assert_eq!(failure.code, "mcp_tool_error");
+    assert_eq!(failure.source, ToolFailureSource::Tool);
+    assert_eq!(failure.message, "bad input");
+    let raw = failure.raw.as_ref().expect("typed cause");
+    assert_eq!(raw.to_json_value()["kind"], "tool_error");
+    let roots = raw.attachments();
+    assert_eq!(roots.len(), 1, "only the retained image is a typed root");
+    let reloaded: lash_core::ToolCallOutput =
+        serde_json::from_value(serde_json::to_value(&output).expect("recorded output"))
+            .expect("replayed output");
+    let lash_core::ToolCallOutcome::Failure(failure) = reloaded.outcome else {
+        panic!("replay preserves failure");
+    };
+    assert_eq!(failure.raw.expect("recorded cause").attachments(), roots);
 }

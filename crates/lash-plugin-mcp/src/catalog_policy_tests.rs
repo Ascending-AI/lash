@@ -72,13 +72,12 @@ async fn assert_catalog_refused(behavior: &'static str, reason: &str) {
     .expect("pool retains refused server");
     let status = pool.server_statuses().remove(0);
     let error = status
-        .last_error
-        .as_ref()
-        .map(McpServerFault::message)
+        .health
+        .error()
         .unwrap_or("")
         .to_string();
     pool.shutdown_all().await;
-    assert!(!status.connected, "oversized catalog was installed");
+    assert!(!status.health.is_connected(), "oversized catalog was installed");
     assert!(error.contains(reason), "expected {reason}, got {error}");
 }
 

@@ -1,8 +1,7 @@
 use lash_core::facade_support::ReconfigureError;
 
-/// Errors surfaced by `lash-plugin-mcp` when a server fails to connect,
-/// when a tool call errors out, or when the registry rejects the new
-/// surface.
+/// Errors from pool configuration, server startup, and registry reconfiguration.
+/// Tool call failures carry their MCP cause in the returned tool outcome.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum McpError {
@@ -18,10 +17,6 @@ pub enum McpError {
     Protocol(String),
     #[error("MCP startup timed out for `{server}` after {timeout_ms}ms")]
     StartupTimeout { server: String, timeout_ms: u64 },
-    #[error("MCP tool call timed out for `{server}` after {timeout_ms}ms")]
-    CallTimeout { server: String, timeout_ms: u64 },
-    #[error("failed to decode MCP image payload: {0}")]
-    Decode(#[from] base64::DecodeError),
     #[error("tool registration failed: {0}")]
     Reconfigure(#[from] ReconfigureError),
 }

@@ -16,7 +16,7 @@ use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout};
 
-use super::{McpEntry, McpServerFault, McpToolListRefresh, PublishedService, import_tools};
+use super::{McpEntry, McpServerHealth, McpToolListRefresh, PublishedService, import_tools};
 use crate::config::McpShutdownPolicy;
 use crate::error::McpError;
 use crate::service_lifecycle::{ConnectingService, StdioChildGuard, connect_service};
@@ -35,7 +35,7 @@ pub(super) enum LifecycleCommand {
     },
     CallTimedOut {
         generation: u64,
-        reply: oneshot::Sender<Option<String>>,
+        reply: oneshot::Sender<Option<u64>>,
     },
     Shutdown,
 }
@@ -52,6 +52,7 @@ pub(super) struct LifecycleActor {
     reconnect_attempts: u64,
     reconnect_at: Option<Instant>,
     keepalive_at: Option<Instant>,
+    finished: bool,
 }
 
 enum ConnectionExit {
@@ -98,7 +99,7 @@ enum CommandAction {
     },
     CallSucceeded,
     CallTimedOut {
-        reply: oneshot::Sender<Option<String>>,
+        reply: oneshot::Sender<Option<u64>>,
     },
     Shutdown,
     Continue,
@@ -232,6 +233,7 @@ impl Connection {
                         server_name,
                     ) {
                         CommandAction::Shutdown => {
+                            actor.begin_shutdown();
                             // Keep the already-running reap future alive. The
                             // entry deadline includes both policy durations plus margin.
                             shutdown_observed = true;
@@ -342,6 +344,7 @@ impl LifecycleActor {
             published,
             active_pid,
             shutdown_policy: *config.shutdown_policy(),
+            finished: false,
             generation: 0,
             reconnect_backoff: config.reconnect_initial_backoff(),
             reconnect_attempts: 0,
@@ -352,6 +355,11 @@ impl LifecycleActor {
     }
 
     pub(super) async fn run(mut self) {
+        self.run_inner().await;
+        self.finished = true;
+    }
+
+    async fn run_inner(&mut self) {
         loop {
             let reconnect_at = self.reconnect_at;
             let keepalive_at = self.keepalive_at;
@@ -361,13 +369,14 @@ impl LifecycleActor {
                         CommandAction::Establish { reply } => {
                             self.reconnect_at = None;
                             self.reconnect_attempts = 0;
-                            self.set_reconnect_exhausted(false);
+                            self.set_health(McpServerHealth::Connecting);
                             if matches!(self.connect_and_run(Some(reply)).await, ConnectionExit::Shutdown) {
                                 return;
                             }
                             self.schedule_reconnect();
                         }
                         CommandAction::Shutdown => {
+                            self.begin_shutdown();
                             self.wedge_shutdown_if_injected().await;
                             return;
                         }
@@ -386,7 +395,6 @@ impl LifecycleActor {
                             let max_attempts = self.entry.upgrade()
                                 .map_or(0, |entry| entry.config.reconnect_max_attempts());
                             if max_attempts != 0 && self.reconnect_attempts >= max_attempts {
-                                self.set_reconnect_exhausted(true);
                                 self.record_exhaustion();
                             } else {
                                 self.schedule_reconnect();
@@ -421,7 +429,7 @@ impl LifecycleActor {
         let server_name = entry.server_name.clone();
         let config = entry.config.clone();
         let host_services = entry.host_services.clone();
-        let shutdown_requested = Arc::clone(&entry.shutting_down);
+        let shutdown_requested = Arc::clone(&entry.health);
         let startup_timeout = config.startup_timeout();
         let refresh = Arc::new(McpToolListRefresh {
             entry: Arc::downgrade(&entry),
@@ -475,6 +483,7 @@ impl LifecycleActor {
                     &server_name,
                 ) {
                     CommandAction::Shutdown => {
+                        self.begin_shutdown();
                         drop(connection_attempt);
                         if let Some(pid) = stdio_child.as_ref().map(StdioChildGuard::pid) {
                             self.record_error(format!(
@@ -578,6 +587,7 @@ impl LifecycleActor {
                     &server_name,
                 ) {
                     CommandAction::Shutdown => {
+                        self.begin_shutdown();
                         connection.cancel_and_reap(self, &server_name).await;
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
@@ -618,8 +628,9 @@ impl LifecycleActor {
             return ConnectionExit::Failed;
         }
         entry.consecutive_timeouts.store(0, Ordering::SeqCst);
-        *entry.last_error.write_recover() = None;
-        entry.reconnect_exhausted.store(false, Ordering::SeqCst);
+        self.set_health(McpServerHealth::Connected {
+            catalog_error: None,
+        });
         self.reconnect_attempts = 0;
         drop(entry);
         self.published.send_replace(Some(Arc::new(PublishedService {
@@ -699,6 +710,7 @@ impl LifecycleActor {
                         };
                     }
                     CommandAction::Shutdown => {
+                        self.begin_shutdown();
                         self.unpublish(generation);
                         let _ = connection.cancel_and_reap(self, &server_name).await;
                         return ConnectionExit::Shutdown;
@@ -706,7 +718,7 @@ impl LifecycleActor {
                     CommandAction::CallSucceeded => {
                         if let Some(entry) = self.entry.upgrade() {
                             entry.consecutive_timeouts.store(0, Ordering::SeqCst);
-                            *entry.last_error.write_recover() = None;
+                            self.set_health(McpServerHealth::Connected { catalog_error: None });
                         }
                     }
                     CommandAction::CallTimedOut { reply } => {
@@ -725,7 +737,7 @@ impl LifecycleActor {
                         let cause = format!(
                             "MCP server `{server_name}` reached {consecutive} consecutive call timeouts"
                         );
-                        let _ = reply.send(Some(cause.clone()));
+                        let _ = reply.send(Some(consecutive));
                         drop(entry);
                         self.unpublish(generation);
                         self.record_error(cause);
@@ -800,6 +812,7 @@ impl LifecycleActor {
                                     &server_name,
                                 ) {
                                     CommandAction::Shutdown => {
+                                        self.begin_shutdown();
                                         drop(probe);
                                         drop(entry);
                                         self.unpublish(generation);
@@ -820,7 +833,7 @@ impl LifecycleActor {
                                     }
                                     CommandAction::CallSucceeded => {
                                         entry.consecutive_timeouts.store(0, Ordering::SeqCst);
-                                        *entry.last_error.write_recover() = None;
+                                        self.set_health(McpServerHealth::Connected { catalog_error: None });
                                     }
                                     CommandAction::CallTimedOut { reply } => {
                                         let consecutive = entry.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
@@ -832,7 +845,7 @@ impl LifecycleActor {
                                         let cause = format!(
                                             "MCP server `{server_name}` reached {consecutive} consecutive call timeouts"
                                         );
-                                        let _ = reply.send(Some(cause.clone()));
+                                        let _ = reply.send(Some(consecutive));
                                         drop(probe);
                                         drop(entry);
                                         self.unpublish(generation);
@@ -886,6 +899,13 @@ impl LifecycleActor {
     fn unpublish(&self, generation: u64) {
         if self.current_generation() == Some(generation) {
             self.published.send_replace(None);
+            if let Some(entry) = self.entry.upgrade()
+                && !entry.is_shutting_down()
+            {
+                self.set_health(McpServerHealth::Reconnecting {
+                    last_error: self.health_error(),
+                });
+            }
         }
     }
 
@@ -897,6 +917,13 @@ impl LifecycleActor {
     }
 
     fn schedule_reconnect(&mut self) {
+        if self
+            .entry
+            .upgrade()
+            .is_some_and(|entry| entry.is_shutting_down())
+        {
+            return;
+        }
         let jittered = self
             .entry
             .upgrade()
@@ -905,7 +932,9 @@ impl LifecycleActor {
             });
         let deadline = Instant::now() + jittered;
         self.reconnect_at = Some(deadline);
-        self.set_reconnect_exhausted(false);
+        self.set_health(McpServerHealth::Reconnecting {
+            last_error: self.health_error(),
+        });
         #[cfg(test)]
         if let Some(observer) = self
             .entry
@@ -928,7 +957,14 @@ impl LifecycleActor {
     }
 
     fn rearm_exhausted_reconnect(&mut self) {
-        if self.reconnect_at.is_none() && self.is_reconnect_exhausted() {
+        if self.reconnect_at.is_none()
+            && self.entry.upgrade().is_some_and(|entry| {
+                matches!(
+                    *entry.health.read_recover(),
+                    McpServerHealth::Exhausted { .. }
+                )
+            })
+        {
             self.reconnect_attempts = 0;
             self.schedule_reconnect();
         }
@@ -941,42 +977,53 @@ impl LifecycleActor {
         self.keepalive_at = (!interval.is_zero()).then(|| Instant::now() + interval);
     }
 
-    fn record_error(&self, error: String) {
+    fn set_health(&self, health: McpServerHealth) {
         if let Some(entry) = self.entry.upgrade() {
-            *entry.last_error.write_recover() = Some(McpServerFault::Connection(error));
+            *entry.health.write_recover() = health;
         }
     }
 
-    fn set_reconnect_exhausted(&self, exhausted: bool) {
-        if let Some(entry) = self.entry.upgrade() {
-            entry.reconnect_exhausted.store(exhausted, Ordering::SeqCst);
-        }
-    }
-
-    fn is_reconnect_exhausted(&self) -> bool {
+    fn health_error(&self) -> Option<String> {
         self.entry
             .upgrade()
-            .is_some_and(|entry| entry.reconnect_exhausted.load(Ordering::SeqCst))
+            .and_then(|entry| entry.health.read_recover().error().map(str::to_owned))
     }
 
-    fn record_exhaustion(&self) {
+    fn begin_shutdown(&self) {
+        self.set_health(McpServerHealth::ShuttingDown {
+            reason: self.health_error(),
+        });
+    }
+
+    fn record_error(&self, error: String) {
         let Some(entry) = self.entry.upgrade() else {
             return;
         };
-        let mut slot = entry.last_error.write_recover();
-        let previous = slot
-            .take()
-            .map(McpServerFault::into_message)
-            .unwrap_or_else(|| "unknown connection error".to_string());
-        *slot = Some(McpServerFault::ReconnectExhausted(format!(
-            "MCP server `{}` reconnect attempts exhausted after {} attempt(s); no background recovery is active; last error: {previous}",
-            entry.server_name, self.reconnect_attempts
-        )));
-        tracing::warn!(
-            server = %entry.server_name,
-            attempts = self.reconnect_attempts,
-            "MCP reconnect attempts exhausted"
-        );
+        let health = if entry.is_shutting_down() {
+            McpServerHealth::ShuttingDown {
+                reason: Some(error),
+            }
+        } else if self.current_generation().is_some() {
+            McpServerHealth::Connected {
+                catalog_error: Some(error),
+            }
+        } else {
+            McpServerHealth::Reconnecting {
+                last_error: Some(error),
+            }
+        };
+        self.set_health(health);
+    }
+
+    fn record_exhaustion(&self) {
+        self.set_health(McpServerHealth::Exhausted {
+            attempts: self.reconnect_attempts,
+            last_error: self.health_error(),
+        });
+        let Some(entry) = self.entry.upgrade() else {
+            return;
+        };
+        tracing::warn!(server = %entry.server_name, attempts = self.reconnect_attempts, "MCP reconnect attempts exhausted");
         #[cfg(test)]
         if let Some(observer) = entry.lifecycle_observer() {
             let _ = observer.send(crate::service_lifecycle::LifecycleEvent::ReconnectExhausted);
@@ -1001,7 +1048,10 @@ impl LifecycleActor {
                     command,
                     "",
                 ) {
-                    CommandAction::Shutdown => return true,
+                    CommandAction::Shutdown => {
+                        self.begin_shutdown();
+                        return true;
+                    },
                     CommandAction::Continue => {}
                     _ => unreachable!("test-pause reducer returned an active action"),
                 }
@@ -1048,6 +1098,32 @@ impl LifecycleActor {
     async fn wedge_shutdown_if_injected(&self) {}
 }
 
+impl Drop for LifecycleActor {
+    fn drop(&mut self) {
+        self.published.send_replace(None);
+        if self.finished {
+            self.begin_shutdown();
+            return;
+        }
+        let pid = self.active_pid.load(Ordering::SeqCst);
+        let bound = super::entry_shutdown_total_bound(&self.shutdown_policy);
+        let reason = if std::thread::panicking() {
+            "MCP lifecycle actor terminated with JoinError: actor panicked".to_string()
+        } else if pid == 0 {
+            format!(
+                "MCP lifecycle actor abandoned: it did not finish within the {bound:?} per-entry total shutdown deadline"
+            )
+        } else {
+            format!(
+                "MCP stdio child PID {pid} abandoned: lifecycle actor did not finish within the {bound:?} per-entry total shutdown deadline"
+            )
+        };
+        self.set_health(McpServerHealth::ShuttingDown {
+            reason: Some(reason),
+        });
+    }
+}
+
 async fn reap_child(
     entry: Weak<McpEntry>,
     active_pid: Arc<AtomicU32>,
@@ -1077,7 +1153,9 @@ async fn reap_child(
             "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: {error}"
         );
         if let Some(entry) = entry.upgrade() {
-            *entry.last_error.write_recover() = Some(McpServerFault::Shutdown(reason.clone()));
+            *entry.health.write_recover() = McpServerHealth::ShuttingDown {
+                reason: Some(reason.clone()),
+            };
         }
         tracing::error!(server = %server_name, pid, reason = %reason, "MCP lifecycle actor abandoned a stdio child");
     }

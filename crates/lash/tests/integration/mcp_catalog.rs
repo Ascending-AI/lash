@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use lash::direct::LlmOutputPart;
-use lash::mcp::{McpPluginFactory, McpServerConfig, McpStdioTransport};
+use lash::mcp::{McpPluginFactory, McpServerConfig, McpServerHealth, McpStdioTransport};
 use lash::plugins::PluginFactory;
 use lash::provider::LlmResponse;
 use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
@@ -145,7 +145,15 @@ for line in sys.stdin:
                 pending.append((message['id'], lists))
             started.set()
     elif method == 'tools/call':
-        threading.Thread(target=storm, args=(message['id'],), daemon=True).start()
+        if os.environ.get('FAILURE_LAW') == 'true':
+            if message['params'].get('arguments', {}).get('attachment'):
+                send({'jsonrpc':'2.0', 'id':message['id'], 'result':{'content':[
+                    {'type':'image', 'data':'YWJj', 'mimeType':'image/png'}]}})
+            else:
+                send({'jsonrpc':'2.0', 'id':message['id'], 'error':{
+                    'code':-32602, 'message':'bad field', 'data':{'field':'query'}}})
+        else:
+            threading.Thread(target=storm, args=(message['id'],), daemon=True).start()
     elif method == 'ping':
         send({'jsonrpc':'2.0', 'id':message['id'], 'result':{}})
 "#;
@@ -208,6 +216,10 @@ async fn make_stores(
 }
 
 async fn witness(store: Store, native: bool) {
+    turn_witness(store, native, false).await;
+}
+
+async fn turn_witness(store: Store, native: bool, failure_law: bool) {
     println!(
         "host load: {}",
         std::fs::read_to_string("/proc/loadavg").expect("host load")
@@ -258,7 +270,7 @@ async fn witness(store: Store, native: bool) {
         double = Some(
             lash_restate_test::backend_with_store_set(
                 4296,
-                lash_restate_test::ServerConfig::default(),
+                lash_restate_test::ServerConfig::default().always_replay(failure_law),
                 lash_restate_test::DeploymentHooks::default(),
                 |clock| async {
                     Ok(make_stores(store, root.path(), storage.as_ref(), clock).await)
@@ -277,7 +289,10 @@ async fn witness(store: Store, native: bool) {
                     "python3",
                     vec!["-u".to_string(), "-c".to_string(), PEER.to_string()],
                 )
-                .with_env([("FIXTURE_ROOT", root.path().display().to_string())]),
+                .with_env([
+                    ("FIXTURE_ROOT", root.path().display().to_string()),
+                    ("FAILURE_LAW", failure_law.to_string()),
+                ]),
             )
             .with_timeouts(
                 Duration::from_secs(600),
@@ -289,7 +304,10 @@ async fn witness(store: Store, native: bool) {
         .expect("MCP peer"),
     );
     assert!(
-        factory.server_statuses()[0].connected,
+        matches!(
+            factory.server_statuses()[0].health,
+            McpServerHealth::Connected { .. }
+        ),
         "{:?}",
         factory.server_statuses()
     );
@@ -298,7 +316,18 @@ async fn witness(store: Store, native: bool) {
     let name = lash::mcp::mcp_tool_names("catalog", &["storm"])["storm"].clone();
     let provider = lash_core::testing::TestProvider::builder()
         .complete(move |_| {
-            let part = match observed.fetch_add(1, Ordering::SeqCst) {
+            let call = observed.fetch_add(1, Ordering::SeqCst);
+            let extra = if failure_law && call == 0 {
+                Some(LlmOutputPart::ToolCall {
+                    call_id: "attachment-1".to_string(),
+                    tool_name: name.clone(),
+                    input_json: "{\"attachment\":true}".to_string(),
+                    replay: None,
+                })
+            } else {
+                None
+            };
+            let part = match call {
                 0 => LlmOutputPart::ToolCall {
                     call_id: "storm-1".to_string(),
                     tool_name: name.clone(),
@@ -313,7 +342,7 @@ async fn witness(store: Store, native: bool) {
             };
             async move {
                 Ok(LlmResponse {
-                    parts: vec![part],
+                    parts: std::iter::once(part).chain(extra).collect(),
                     ..Default::default()
                 })
             }
@@ -339,6 +368,7 @@ async fn witness(store: Store, native: bool) {
             )
             .expect("register the test model"),
     ))
+    .max_attachment_bytes(failure_law.then_some(1))
     .model("catalog-fixture")
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -396,7 +426,80 @@ async fn witness(store: Store, native: bool) {
     .await
     .expect("turn deadline")
     .expect("turn completes during stalled discovery");
-    assert_eq!(output.result.tool_calls.len(), 1);
+    assert_eq!(
+        output.result.tool_calls.len(),
+        if failure_law { 2 } else { 1 }
+    );
+    if failure_law {
+        let persisted = session
+            .durable()
+            .read()
+            .await
+            .expect("durable read")
+            .expect("persisted session");
+        assert_eq!(persisted.turn_index(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        if let Some(double) = &double {
+            assert!(
+                double
+                    .server()
+                    .invocations()
+                    .iter()
+                    .any(|view| view.suspensions > 0),
+                "the failure turn must replay its journal"
+            );
+        }
+        factory.shutdown().await.expect("MCP shutdown");
+        if let Some(stop) = stop {
+            let _ = stop.send(());
+        }
+        if let Some(endpoint) = endpoint {
+            endpoint.await.expect("endpoint joins");
+        }
+        for (record, class, code, kind) in output
+            .result
+            .tool_calls
+            .iter()
+            .zip([
+                (
+                    lash::tools::ToolFailureClass::InvalidRequest,
+                    "mcp_json_rpc_error",
+                    "json_rpc",
+                ),
+                (
+                    lash::tools::ToolFailureClass::ResourceLimit,
+                    "mcp_attachment_store",
+                    "attachment_store",
+                ),
+            ])
+            .rev()
+            .map(|(record, (class, code, kind))| (record, class, code, kind))
+        {
+            let lash::tools::ToolCallOutcome::Failure(error) = &record.output.outcome else {
+                panic!("expected typed failure: {record:?}");
+            };
+            assert_eq!(error.class, class);
+            assert_eq!(error.code, code);
+            assert_eq!(error.retry, lash::tools::ToolRetryStatus::Never);
+            let raw = error.raw.as_ref().expect("typed cause").to_json_value();
+            assert_eq!(raw["kind"], kind);
+            if kind == "json_rpc" {
+                assert_eq!(raw["error"]["code"], -32602);
+                assert_eq!(raw["error"]["data"], serde_json::json!({"field":"query"}));
+            } else {
+                assert_eq!(
+                    raw["cause"],
+                    serde_json::json!({"kind":"size_limit_exceeded", "byte_len":3, "max_bytes":1})
+                );
+            }
+            let replayed: lash::tools::ToolCallOutput = serde_json::from_slice(
+                &serde_json::to_vec(&record.output).expect("recorded output"),
+            )
+            .expect("replayed output");
+            assert_eq!(replayed.outcome, record.output.outcome);
+        }
+        return;
+    }
     assert_eq!(output.result.assistant_message(), Some("storm done"));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(
@@ -465,4 +568,34 @@ async fn catalog_storm_native_sqlite_file_turn_witness() {
 #[ignore = "requires the managed native Restate and PostgreSQL service gate"]
 async fn catalog_storm_native_postgres_turn_witness() {
     witness(Store::Postgres, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_law_turn_failures_sqlite_memory() {
+    turn_witness(Store::SqliteMemory, false, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_law_turn_failures_sqlite_file() {
+    turn_witness(Store::SqliteFile, false, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the managed PostgreSQL service gate"]
+async fn mcp_law_turn_failures_postgres() {
+    turn_witness(Store::Postgres, false, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the managed PostgreSQL and live Restate service gate"]
+async fn mcp_law_turn_failures_postgres_live() {
+    turn_witness(Store::Postgres, true, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the managed live Restate service gate"]
+async fn mcp_law_turn_failures_sqlite_memory_live() {
+    turn_witness(Store::SqliteMemory, true, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the managed live Restate service gate"]
+async fn mcp_law_turn_failures_sqlite_file_live() {
+    turn_witness(Store::SqliteFile, true, true).await;
 }

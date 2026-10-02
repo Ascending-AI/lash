@@ -174,9 +174,9 @@ async fn connect_mock(root: &Path, options: MockOptions) -> Arc<McpConnectionPoo
 fn assert_connected(pool: &McpConnectionPool) {
     let status = &pool.server_statuses()[0];
     assert!(
-        status.connected,
+        status.health.is_connected(),
         "policy mock failed to connect: {:?}",
-        status.last_error
+        status.health
     );
 }
 
@@ -369,7 +369,7 @@ async fn wall_clock_cap_fires_despite_continuous_progress() {
     let result = request.await;
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
     assert_eq!(failure(&result).code, "mcp_call_deadline_exceeded");
-    assert!(pool.server_statuses()[0].connected);
+    assert!(pool.server_statuses()[0].health.is_connected());
     assert_eq!(
         entry(&pool).consecutive_timeouts.load(Ordering::SeqCst),
         0,
@@ -422,7 +422,7 @@ async fn answered_probe_keeps_connection(behavior: &'static str) {
     mock.event("cancelled").await;
     mock.event("ping").await;
     assert_eq!(failure(&result).class, ToolFailureClass::Timeout);
-    assert!(pool.server_statuses()[0].connected);
+    assert!(pool.server_statuses()[0].health.is_connected());
     drop(clock);
     pool.shutdown_all().await;
 }
@@ -478,10 +478,10 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
     lifecycle.reconnect_exhausted().await;
     assert_eq!(starts(root.path()), 2);
     let status = &pool.server_statuses()[0];
-    assert!(!status.connected);
-    assert!(status.last_error.is_some());
+    assert!(!status.health.is_connected());
+    assert!(status.health.error().is_some());
     assert!(
-        status.reconnect_exhausted,
+        matches!(status.health, McpServerHealth::Exhausted { .. }),
         "terminal reconnect exhaustion must be visible in public status"
     );
     let terminal = call(&pool).await;
@@ -528,8 +528,9 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         failure(&expire(&pool, &mut mock).await).class,
         ToolFailureClass::Timeout
     );
-    *entry(&pool).last_error.write_recover() =
-        Some(McpServerFault::Connection("stale error".to_string()));
+    *entry(&pool).health.write_recover() = McpServerHealth::Connected {
+        catalog_error: Some("stale error".to_string()),
+    };
     let mut request = Box::pin(call(&pool));
     assert!(futures_util::poll!(request.as_mut()).is_pending());
     mock.started(&pool).await;
@@ -540,7 +541,7 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         .establish()
         .await
         .expect("success observation barrier");
-    assert!(pool.server_statuses()[0].last_error.is_none());
+    assert!(pool.server_statuses()[0].health.error().is_none());
     assert_eq!(
         failure(&expire(&pool, &mut mock).await).class,
         ToolFailureClass::Timeout
@@ -561,7 +562,7 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
         ToolFailureClass::Timeout
     );
     assert!(
-        pool.server_statuses()[0].connected,
+        pool.server_statuses()[0].health.is_connected(),
         "the first timeout after reconnect must start a fresh budget"
     );
     drop(clock);
@@ -610,7 +611,7 @@ async fn late_failure_after_reconnect_cannot_disconnect_healthy_service() {
         .establish()
         .await
         .expect("actor queue barrier after stale disconnect");
-    assert!(pool.server_statuses()[0].connected);
+    assert!(pool.server_statuses()[0].health.is_connected());
     assert_eq!(
         current_entry
             .service_snapshot()
@@ -773,7 +774,10 @@ async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation()
     }
     published_generation(&entry, 4).await;
     assert_eq!(starts(root.path()), 4);
-    assert!(!pool.server_statuses()[0].reconnect_exhausted);
+    assert!(!matches!(
+        pool.server_statuses()[0].health,
+        McpServerHealth::Exhausted { .. }
+    ));
     drop(clock);
     pool.shutdown_all().await;
 }
@@ -859,7 +863,7 @@ async fn disconnect_immediately_after_reconnect_publish_rearms_actor() {
         .expect_err("the eager connection must fail");
     clock.expire(lifecycle.reconnect_scheduled().await).await;
     published_generation(&entry, 2).await;
-    assert!(pool.server_statuses()[0].connected);
+    assert!(pool.server_statuses()[0].health.is_connected());
 
     assert!(entry.mark_disconnected("forced post-publish disconnect".to_string(), 2));
     clock.expire(lifecycle.reconnect_scheduled().await).await;
@@ -1150,10 +1154,10 @@ async fn startup_timeout_drops_handshake_before_graceful_reap() {
     let current_entry = entry(&pool);
     assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
     assert_eq!(
-        current_entry.last_error.read_recover().clone(),
-        Some(McpServerFault::Connection(
-            "MCP startup timed out for `mock` after 400ms".to_string()
-        ))
+        current_entry.health.read_recover().clone(),
+        McpServerHealth::Reconnecting {
+            last_error: Some("MCP startup timed out for `mock` after 400ms".to_string())
+        }
     );
     pool.shutdown_all().await;
 }
@@ -1197,10 +1201,12 @@ async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
     ));
     assert_eq!(process_state(pid), None);
     assert_eq!(
-        current_entry.last_error.read_recover().clone(),
-        Some(McpServerFault::Connection(format!(
-            "MCP stdio child PID {pid} handshake interrupted by pool shutdown"
-        )))
+        current_entry.health.read_recover().clone(),
+        McpServerHealth::ShuttingDown {
+            reason: Some(format!(
+                "MCP stdio child PID {pid} handshake interrupted by pool shutdown"
+            ))
+        }
     );
     assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
 }
@@ -1270,10 +1276,12 @@ async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
     shutdown.await;
     assert_eq!(Instant::now(), cleanup + scripted::TIMER_TICK);
     assert_eq!(
-        current_entry.last_error.read_recover().clone(),
-        Some(McpServerFault::Shutdown(format!(
-            "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: MCP stdio child PID {pid} did not exit within 1s after the kill request"
-        )))
+        current_entry.health.read_recover().clone(),
+        McpServerHealth::ShuttingDown {
+            reason: Some(format!(
+                "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: MCP stdio child PID {pid} did not exit within 1s after the kill request"
+            ))
+        }
     );
     assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
     assert_eq!(process_state(pid), Some('Z'));
@@ -1405,11 +1413,11 @@ async fn shutdown_all_bounds_an_actor_that_never_finishes() {
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
-        entry.last_error.read_recover().clone(),
-        Some(McpServerFault::Shutdown(
+        entry.health.read_recover().clone(),
+        McpServerHealth::ShuttingDown { reason: Some(
             "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
                 .to_string()
-        ))
+        ) }
     );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(
@@ -1447,12 +1455,11 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
         .elapses(shutdown.as_mut(), started, Duration::from_millis(1_150))
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
-    let fault = entry
-        .last_error
-        .read_recover()
-        .clone()
-        .expect("shortened shutdown must record the abandoned actor");
-    let McpServerFault::Shutdown(reason) = fault else {
+    let fault = entry.health.read_recover().clone();
+    let McpServerHealth::ShuttingDown {
+        reason: Some(reason),
+    } = fault
+    else {
         panic!("expected a shutdown fault, got {fault:?}");
     };
     assert!(
@@ -1691,18 +1698,18 @@ async fn two_wedged_entries_shutdown_concurrently_within_one_total_bound() {
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     assert_eq!(
-        first.last_error.read_recover().clone(),
-        Some(McpServerFault::Shutdown(
+        first.health.read_recover().clone(),
+        McpServerHealth::ShuttingDown { reason: Some(
             "MCP stdio child PID 111111 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
                 .to_string()
-        ))
+        ) }
     );
     assert_eq!(
-        second.last_error.read_recover().clone(),
-        Some(McpServerFault::Shutdown(
+        second.health.read_recover().clone(),
+        McpServerHealth::ShuttingDown { reason: Some(
             "MCP stdio child PID 222222 abandoned: lifecycle actor did not finish within the 6s per-entry total shutdown deadline"
                 .to_string()
-        ))
+        ) }
     );
 }
 
@@ -1746,8 +1753,8 @@ async fn actor_panic_surfaces_as_join_error_and_shutdown_continues() {
     );
     assert!(
         matches!(
-            entry.last_error.read_recover().as_ref(),
-            Some(McpServerFault::Shutdown(error)) if error.contains("JoinError")
+            &*entry.health.read_recover(),
+            McpServerHealth::ShuttingDown { reason: Some(error) } if error.contains("JoinError")
         ),
         "actor panic must surface through its retained JoinHandle"
     );
@@ -1787,8 +1794,8 @@ fn shutdown_all_reaps_stdio_child_on_a_runtime_without_a_signal_driver() {
         "shutdown_all reaps the child without a SIGCHLD stream"
     );
     assert_eq!(
-        entry.last_error.read_recover().clone(),
-        None,
+        entry.health.read_recover().clone(),
+        McpServerHealth::ShuttingDown { reason: None },
         "the lifecycle actor must finish shutdown without a JoinError"
     );
     assert!(
@@ -1946,13 +1953,13 @@ async fn cancelled_call_is_call_level_and_keeps_connection() {
         result.as_done_output().expect("cancelled output").outcome,
         ToolCallOutcome::Cancelled(_)
     ));
-    assert!(pool.server_statuses()[0].connected);
+    assert!(pool.server_statuses()[0].health.is_connected());
     drop(_clock);
     pool.shutdown_all().await;
 }
 
 #[tokio::test]
-async fn dead_transport_short_circuits_before_dispatch_timeout() {
+async fn mcp_law_dispatch_preserves_actor_health() {
     let _clock = scripted::Clock::new().await;
     let root = tempfile::tempdir().unwrap();
     let (pool, mut mock) = scripted::Mock::connect(
@@ -1970,14 +1977,11 @@ async fn dead_transport_short_circuits_before_dispatch_timeout() {
         .await
         .expect("lifecycle acknowledges closed transport");
     let started = tokio::time::Instant::now();
+    let before = pool.server_statuses()[0].health.clone();
     let result = call(&pool).await;
     assert_eq!(failure(&result).class, ToolFailureClass::Unavailable);
     assert_eq!(started.elapsed(), Duration::ZERO);
-    assert!(matches!(
-        pool.server_statuses()[0].last_error.as_ref(),
-        Some(McpServerFault::DispatchUnavailable(error))
-            if error.contains("before tool dispatch")
-    ));
+    assert_eq!(pool.server_statuses()[0].health, before);
     drop(_clock);
     pool.shutdown_all().await;
 }
@@ -2000,11 +2004,11 @@ async fn idle_service_death_updates_status_without_a_tool_call() {
     mock.event("eof").await;
     unpublished(&entry(&pool)).await;
     let status = &pool.server_statuses()[0];
-    assert!(!status.connected);
+    assert!(!status.health.is_connected());
     assert!(
         matches!(
-            status.last_error.as_ref(),
-            Some(McpServerFault::Connection(error)) if error.contains("service quit")
+            &status.health,
+            McpServerHealth::Reconnecting { last_error: Some(error) } if error.contains("service quit")
         ),
         "idle death must retain its quit reason: {status:?}"
     );
@@ -2043,12 +2047,12 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
     unpublished(&entry).await;
 
     let status = &pool.server_statuses()[0];
-    assert!(!status.connected);
+    assert!(!status.health.is_connected());
     assert_eq!(
-        status.last_error,
-        Some(McpServerFault::Connection(
-            "MCP server `mock` service quit: Ok(Closed)".to_string()
-        ))
+        status.health,
+        McpServerHealth::Reconnecting {
+            last_error: Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+        }
     );
     assert_eq!(status.tool_count, 1);
     assert_eq!(
@@ -2080,7 +2084,7 @@ async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
     let current_entry = entry(&pool);
     lifecycle.observe(&current_entry);
     let pid = current_entry.active_pid.load(Ordering::SeqCst);
-    assert!(pool.server_statuses()[0].connected);
+    assert!(pool.server_statuses()[0].health.is_connected());
 
     mock.command("close").await;
     let (reaping, deadline) = lifecycle.grace_armed().await;
@@ -2100,12 +2104,12 @@ async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
     lifecycle.reaped(pid).await;
     shutdown.await;
 
-    assert!(!status_during_cleanup.connected);
+    assert!(!status_during_cleanup.health.is_connected());
     assert_eq!(
-        status_during_cleanup.last_error,
-        Some(McpServerFault::Connection(
-            "MCP server `mock` service quit: Ok(Closed)".to_string()
-        )),
+        status_during_cleanup.health,
+        McpServerHealth::Reconnecting {
+            last_error: Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+        },
         "service quit cause must be visible throughout bounded child cleanup"
     );
     assert_eq!(
@@ -2157,10 +2161,10 @@ async fn probe_loop_observes_waiting_reason_and_reaps() {
         "service quit while the probe is pending must unpublish its generation"
     );
     assert_eq!(
-        current_entry.last_error.read_recover().clone(),
-        Some(McpServerFault::Connection(
-            "MCP server `mock` service quit: Ok(Closed)".to_string()
-        )),
+        current_entry.health.read_recover().clone(),
+        McpServerHealth::Reconnecting {
+            last_error: Some("MCP server `mock` service quit: Ok(Closed)".to_string())
+        },
         "the probe loop must retain the same quit cause as the outer connected loop"
     );
     assert!(
@@ -2395,8 +2399,8 @@ async fn interval_probe_marks_unresponsive_peer_disconnected() {
         .await;
     unpublished(&entry(&pool)).await;
     assert!(matches!(
-        pool.server_statuses()[0].last_error.as_ref(),
-        Some(McpServerFault::Connection(error))
+        &pool.server_statuses()[0].health,
+        McpServerHealth::Reconnecting { last_error: Some(error) }
             if error.contains("background liveness probe failed")
     ));
     drop(clock);
@@ -2423,3 +2427,82 @@ fn one_millisecond_backoff_never_jitters_to_zero() {
 }
 
 include!("catalog_policy_tests.rs");
+
+#[tokio::test]
+async fn mcp_law_invalid_arguments_keep_request_class_and_cause() {
+    let clock = scripted::Clock::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(root.path(), MockOptions::default()).await;
+    let result = pool
+        .call_tool(
+            &mcp_name("mock", "work"),
+            &json!([1]),
+            &lash_core::testing::mock_attempt_context(),
+        )
+        .await;
+    let error = failure(&result).clone();
+    drop(clock);
+    pool.shutdown_all().await;
+    assert_eq!(error.class, ToolFailureClass::InvalidRequest);
+    assert_eq!(error.code, "mcp_invalid_arguments");
+    assert_eq!(error.source, ToolFailureSource::Plugin);
+    let restored: ToolFailure =
+        serde_json::from_value(serde_json::to_value(&error).unwrap()).unwrap();
+    assert_eq!(
+        restored.raw.unwrap().to_json_value()["kind"],
+        "invalid_arguments"
+    );
+}
+
+#[tokio::test]
+async fn mcp_law_json_rpc_error_keeps_code_and_data() {
+    let clock = scripted::Clock::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        root.path(),
+        MockOptions {
+            behavior: "rpc_invalid_params",
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let result = call(&pool).await;
+    let error = failure(&result).clone();
+    drop(clock);
+    pool.shutdown_all().await;
+    assert_eq!(error.class, ToolFailureClass::InvalidRequest);
+    assert_eq!(error.code, "mcp_json_rpc_error");
+    assert_eq!(error.source, ToolFailureSource::Tool);
+    let restored: ToolFailure =
+        serde_json::from_value(serde_json::to_value(&error).unwrap()).unwrap();
+    let cause = restored.raw.unwrap().to_json_value();
+    assert_eq!(cause["kind"], "json_rpc");
+    assert_eq!(cause["error"]["code"], -32602);
+    assert_eq!(
+        cause["error"]["data"],
+        json!({"field":"query", "expected":"string"})
+    );
+}
+
+#[tokio::test]
+async fn mcp_law_attachment_decode_and_mime_are_typed() {
+    let context = lash_core::testing::mock_attempt_context();
+    for (encoded, mime, code, kind) in [
+        (
+            "!",
+            "image/png",
+            "mcp_attachment_decode",
+            "attachment_decode",
+        ),
+        ("YQ==", "broken", "mcp_attachment_mime", "attachment_mime"),
+    ] {
+        let result = store_mcp_attachment(&context, encoded, mime, "fixture")
+            .await
+            .unwrap_err();
+        let error = failure(&result);
+        assert_eq!(error.class, ToolFailureClass::External);
+        assert_eq!(error.code, code);
+        assert_eq!(error.source, ToolFailureSource::Plugin);
+        assert_eq!(error.raw.as_ref().unwrap().to_json_value()["kind"], kind);
+    }
+}

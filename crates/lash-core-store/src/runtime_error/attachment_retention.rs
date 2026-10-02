@@ -98,6 +98,32 @@ impl AttachmentRetentionStoreFailure {
 }
 
 impl AttachmentRetentionFailure {
+    /// The tool-visible class of a failed attachment retention. This does
+    /// not authorize replaying the external tool that produced the attachment.
+    pub fn tool_failure_class(&self) -> lash_sansio::ToolFailureClass {
+        use lash_sansio::ToolFailureClass as C;
+        match self {
+            Self::SizeLimitExceeded { .. }
+            | Self::ReadLimitExceeded { .. }
+            | Self::RequestBudgetExceeded { .. } => C::ResourceLimit,
+            Self::NotFound { .. } | Self::Contract => C::Internal,
+            Self::Io { .. } => C::Io,
+            Self::Backend { class, .. } => match class {
+                AttachmentStoreFailureClass::Transient => C::Unavailable,
+                AttachmentStoreFailureClass::Credentials => C::PermissionDenied,
+                AttachmentStoreFailureClass::Terminal => C::External,
+            },
+            Self::ReferrersOperationFailed { source, .. }
+            | Self::RootSetOperationFailed { source, .. }
+            | Self::RootSetEnumerationFailed { source } => match source.as_ref() {
+                AttachmentRetentionStoreFailure::Transient { .. } => C::Unavailable,
+                AttachmentRetentionStoreFailure::Refused { .. } => C::Internal,
+            },
+            Self::WriteRollbackFailed { write_error, .. } => write_error.tool_failure_class(),
+            Self::ReclamationInFlight { .. } => C::Unavailable,
+        }
+    }
+
     /// Whether retrying the identical retention can succeed.
     pub fn is_retryable(&self) -> bool {
         match self {

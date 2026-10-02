@@ -349,9 +349,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         eprintln!(
             "agent-workbench MCP server {}: connected={}, tools={}, last_error={}",
             status.server_name,
-            status.connected,
+            status.health.is_connected(),
             status.tool_count,
-            status.last_error.as_ref().map_or("none", |f| f.message())
+            status.health.error().unwrap_or("none")
         );
     }
     let plugin_mcp: Arc<dyn PluginFactory> = Arc::clone(&mcp_search) as Arc<dyn PluginFactory>;
@@ -943,7 +943,7 @@ mod startup_tests {
             "the search server must stay registered while it reconnects: {statuses:?}"
         );
         assert!(
-            statuses.iter().all(|status| !status.connected),
+            statuses.iter().all(|status| !status.health.is_connected()),
             "an unreachable server must stay disconnected: {statuses:?}"
         );
     }

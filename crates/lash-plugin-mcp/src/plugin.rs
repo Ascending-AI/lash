@@ -211,9 +211,13 @@ impl McpDeferredToolProvider {
         if valid {
             return Ok(());
         }
-        Err(ToolOutcome::err_fmt(format_args!(
-            "MCP deferred execution for tool id `{tool_id}` requires an execution binding with kind `mcp` and matching `tool_id`"
-        )))
+        Err(
+            crate::call_failure::McpCallFailure::InvalidExecutionBinding {
+                tool_id: tool_id.to_string(),
+                binding: binding.clone(),
+            }
+            .into(),
+        )
     }
 }
 
@@ -518,12 +522,16 @@ mod tests {
             &lash_core::testing::mock_attempt_context(),
         )
         .await;
-        assert!(!missing_binding.is_success());
+        let lash_core::ToolCallOutcome::Failure(missing_binding) = &missing_binding
+            .as_done_output()
+            .expect("inline failure")
+            .outcome
+        else {
+            panic!("missing binding must fail")
+        };
         assert!(
             missing_binding
-                .value_for_projection()
-                .as_str()
-                .expect("string error")
+                .message
                 .contains("requires an execution binding"),
             "{missing_binding:?}"
         );
@@ -660,5 +668,33 @@ mod tests {
             factory.server_statuses().is_empty(),
             "a second plugin shutdown is a no-op"
         );
+    }
+    #[tokio::test]
+    async fn mcp_law_binding_and_catalog_name_keep_request_causes() {
+        let id = lash_core::ToolId::new("mcp:fixture/work");
+        let binding =
+            McpDeferredToolProvider::validate_execution_binding(&id, &json!({})).unwrap_err();
+        let context = lash_core::testing::mock_attempt_context();
+        let missing = McpConnectionPool::empty()
+            .call_tool("missing", &json!({}), &context)
+            .await;
+        for (result, code, kind) in [
+            (
+                binding,
+                "mcp_invalid_execution_binding",
+                "invalid_execution_binding",
+            ),
+            (missing, "mcp_unknown_tool", "unknown_tool"),
+        ] {
+            let lash_core::ToolCallOutcome::Failure(error) =
+                &result.as_done_output().unwrap().outcome
+            else {
+                panic!("expected failure");
+            };
+            assert_eq!(error.class, lash_core::ToolFailureClass::InvalidRequest);
+            assert_eq!(error.code, code);
+            assert_eq!(error.source, lash_core::ToolFailureSource::Plugin);
+            assert_eq!(error.raw.as_ref().unwrap().to_json_value()["kind"], kind);
+        }
     }
 }

@@ -1,14 +1,14 @@
+use crate::pool::McpServerHealth;
+use lash_sansio::sync::{MutexExt, RwLockExt};
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::process::Stdio;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
-use lash_sansio::sync::MutexExt;
-use rmcp::ServiceError;
 use rmcp::service::{RoleClient, RunningService, ServiceExt};
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
@@ -42,7 +42,7 @@ pub(crate) fn connect_service(
     host_services: McpHostServices,
     tool_list_changed: Arc<dyn McpToolListChangedHandler>,
     active_pid: Arc<AtomicU32>,
-    shutdown_requested: Arc<AtomicBool>,
+    shutdown_requested: Arc<RwLock<McpServerHealth>>,
 ) -> Result<ConnectingService, McpError> {
     let client_handler = LashMcpClientHandler::new(server_name, host_services)
         .with_tool_list_changed_handler(tool_list_changed);
@@ -228,19 +228,6 @@ pub(crate) fn build_http_headers(
     Ok(out)
 }
 
-/// Transport-level failures mean the connection is gone (dead child process,
-/// closed HTTP stream). Protocol-level errors leave the connection usable.
-pub(crate) fn is_connection_loss(error: &ServiceError) -> bool {
-    match error {
-        ServiceError::TransportSend(_) | ServiceError::TransportClosed => true,
-        ServiceError::McpError(_)
-        | ServiceError::UnexpectedResponse
-        | ServiceError::Cancelled { .. }
-        | ServiceError::Timeout { .. } => false,
-        _ => true,
-    }
-}
-
 pub(crate) fn equal_jitter(max: std::time::Duration) -> std::time::Duration {
     let max_ms = u64::try_from(max.as_millis()).unwrap_or(u64::MAX);
     let min_ms = max_ms.saturating_add(1) / 2;
@@ -393,7 +380,7 @@ pub(crate) struct StdioChildGuard {
     child: std::process::Child,
     reaped: bool,
     explicit_abandonment: bool,
-    shutdown_requested: Arc<AtomicBool>,
+    shutdown_requested: Arc<RwLock<McpServerHealth>>,
     #[cfg(test)]
     never_finish_reap: bool,
     #[cfg(test)]
@@ -404,7 +391,7 @@ impl StdioChildGuard {
     pub(crate) fn new(
         server_name: &str,
         child: std::process::Child,
-        shutdown_requested: Arc<AtomicBool>,
+        shutdown_requested: Arc<RwLock<McpServerHealth>>,
     ) -> Self {
         Self {
             server_name: server_name.to_string(),
@@ -569,7 +556,9 @@ impl Drop for StdioChildGuard {
             // is effectively the group SIGKILL, which is what must not miss.
             let _ = self.terminate();
             let _ = self.force_kill();
-            if self.explicit_abandonment || self.shutdown_requested.load(Ordering::SeqCst) {
+            if self.explicit_abandonment
+                || self.shutdown_requested.read_recover().is_shutting_down()
+            {
                 tracing::error!(
                     pid = self.pid,
                     server = %self.server_name,
@@ -614,7 +603,11 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn stdio child");
-        let mut guard = StdioChildGuard::new("witness", child, Arc::new(AtomicBool::new(false)));
+        let mut guard = StdioChildGuard::new(
+            "witness",
+            child,
+            Arc::new(RwLock::new(McpServerHealth::Connecting)),
+        );
         let (observer, events) = tokio::sync::mpsc::unbounded_channel();
         guard.observe(observer);
         (guard, events)
@@ -715,7 +708,11 @@ mod tests {
         );
         let transport = McpStdioTransport::new("sh", vec!["-c".to_string(), script]);
         let child = spawn_stdio_server("fixture", &transport).expect("spawn fixture server");
-        let mut guard = StdioChildGuard::new("fixture", child, Arc::new(AtomicBool::new(false)));
+        let mut guard = StdioChildGuard::new(
+            "fixture",
+            child,
+            Arc::new(RwLock::new(McpServerHealth::Connecting)),
+        );
         let pid = guard.pid();
         assert_eq!(
             process_group_of(pid),

@@ -235,12 +235,12 @@ async fn http_catalog_refuses_cycles_and_each_limit_plus_one() {
                 .expect("retained HTTP entry");
         let status = pool.server_statuses().remove(0);
         pool.shutdown_all().await;
-        assert!(!status.connected, "catalog was installed");
+        assert!(!status.health.is_connected(), "catalog was installed");
         assert!(
             status
-                .last_error
+                .health
+                .error()
                 .expect("catalog fault")
-                .message()
                 .contains(reason)
         );
     }
