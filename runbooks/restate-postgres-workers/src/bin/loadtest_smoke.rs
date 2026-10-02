@@ -1,28 +1,33 @@
 use anyhow::{Context, Result, ensure};
-use lash_postgres_store::PostgresStorage;
+use lash_restate_postgres_workers_e2e::load::control::register_through_worker;
 use lash_restate_postgres_workers_e2e::{
-    TurnRequest, TurnResponse, TurnScenario, e2e_backend, expected_attachment_bytes, required_env,
-    s3_store_from_env, turn_session_id, witness,
+    TurnRequest, TurnResponse, TurnScenario, expected_attachment_bytes, required_env,
+    turn_session_id, witness,
 };
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let storage = PostgresStorage::connect(&required_env("DATABASE_URL")?).await?;
     let ingress = required_env("RESTATE_INGRESS_URL")?;
-    let engine = e2e_backend(
-        &storage,
-        Arc::new(s3_store_from_env()?),
-        ingress.clone(),
-        required_env("RESTATE_ADMIN_URL")?,
-        lash_restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?,
-    );
-    engine
-        .register_deployment(&required_env("WORKER_DEPLOYMENT_URL")?)
-        .await?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(180))
         .build()?;
+    let workers: Vec<String> = required_env("WORKER_CONTROL_URLS")?
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    ensure!(
+        workers.len() >= 2,
+        "cross-worker smoke requires at least two workers"
+    );
+    // A worker registers the deployment: only a serving build has the
+    // generation its lanes are named by.
+    register_through_worker(
+        &client,
+        &workers[0],
+        &required_env("WORKER_DEPLOYMENT_URL")?,
+    )
+    .await?;
     let witness = witness::connect_witness().await?;
     let workflow_id = format!("topology-{}", uuid::Uuid::new_v4());
     let request = TurnRequest {
@@ -46,14 +51,6 @@ async fn main() -> Result<()> {
     ensure!(
         !response.attachment_id.is_empty(),
         "public turn produced no attachment"
-    );
-    let workers: Vec<String> = required_env("WORKER_CONTROL_URLS")?
-        .split(',')
-        .map(str::to_owned)
-        .collect();
-    ensure!(
-        workers.len() >= 2,
-        "cross-worker smoke requires at least two workers"
     );
     let mut peer_reads = 0;
     for worker in workers {

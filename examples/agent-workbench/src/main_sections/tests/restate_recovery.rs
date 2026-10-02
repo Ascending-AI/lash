@@ -1905,30 +1905,18 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
     std::fs::write(data_dir.join("session-id"), session_id.as_str())
         .expect("write recovery E2E session id");
 
-    let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
-    let first_pid = first.id();
-    wait_for_endpoint_socket(endpoint_bind).await;
-    // The registration runs in this test process while the serving endpoint
-    // lives in the child, so it needs its own engine — a scratch store set
-    // suffices because registration reads only the configured authority,
-    // namespace and admin connection.
-    let registration_engine = lash_restate::RestateEngine::new(
-        Arc::new(
-            lash_sqlite_store::SqliteStoreSet::memory()
-                .await
-                .expect("open the recovery registration scratch store set"),
-        ),
-        lash::restate::RestateConfig::new(
-            ingress_url.clone(),
-            admin_url.clone(),
-            lash_restate::RestateAuthorityId::new(
-                std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
-            )
-            .expect("valid Restate authority id"),
-        ),
+    // The first owner registers its own endpoint: the deployment's lanes are
+    // named by the serving build's generation, which only the process that
+    // built the core has.
+    let mut first = spawn_recovery_e2e_child(
+        &data_dir,
+        endpoint_bind,
+        &ingress_url,
+        backend,
+        Some(&endpoint_url),
     );
-    let deployment_id =
-        register_restate_deployment(&registration_engine, &admin_url, &endpoint_url).await;
+    let first_pid = first.id();
+    let deployment_id = wait_for_recovery_deployment_id(&data_dir, hang).await;
     // The first owner sends the turn once its handlers are registered, as the
     // browser's send would reach it.
     std::fs::write(data_dir.join(RECOVERY_E2E_START_TURN), turn_id.as_str())
@@ -1954,7 +1942,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> 
 
     first.stop_and_reap();
 
-    let mut replacement = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
+    let mut replacement =
+        spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend, None);
     let _replacement_pid = replacement.id();
     wait_for_endpoint_socket(endpoint_bind).await;
     // This is a process restart of the same configuration and storage at the
@@ -2113,11 +2102,19 @@ async fn wait_for_restate_deployment_and_unpinned_invocations_drained(
 /// Only the first owner finds it unconsumed: it removes the file once sent.
 const RECOVERY_E2E_START_TURN: &str = "start-turn";
 
+/// The file the owner that registered the endpoint writes the admitted
+/// deployment's id to.
+const RECOVERY_E2E_DEPLOYMENT_ID: &str = "deployment-id";
+
+/// Spawn an ingress owner serving `endpoint_bind`. With `register`, the owner
+/// also registers that endpoint URL as its deployment; a restarted owner
+/// passes `None` and keeps the deployment its predecessor registered.
 fn spawn_recovery_e2e_child(
     data_dir: &std::path::Path,
     endpoint_bind: SocketAddr,
     ingress_url: &str,
     backend: &str,
+    register: Option<&str>,
 ) -> OwnedFixtureChild {
     let mut command = std::process::Command::new(
         std::env::current_exe().expect("resolve workbench test executable"),
@@ -2134,6 +2131,10 @@ fn spawn_recovery_e2e_child(
             endpoint_bind.to_string(),
         )
         .env("RESTATE_INGRESS_URL", ingress_url);
+    match register {
+        Some(endpoint_url) => command.env("AGENT_WORKBENCH_RECOVERY_E2E_REGISTER", endpoint_url),
+        None => command.env_remove("AGENT_WORKBENCH_RECOVERY_E2E_REGISTER"),
+    };
     let child = command.spawn().expect("spawn workbench recovery child");
     record_fixture_owned_child(child.id());
     OwnedFixtureChild::new(child)
@@ -2191,9 +2192,20 @@ async fn live_restate_recovery_child() {
     restate::spawn_restate_endpoint(
         endpoint_bind,
         harness.state,
-        harness.backend,
+        Arc::clone(&harness.backend),
         harness.process_worker,
     );
+    if let Ok(endpoint_url) = std::env::var("AGENT_WORKBENCH_RECOVERY_E2E_REGISTER") {
+        wait_for_endpoint_socket(endpoint_bind).await;
+        let deployment_id =
+            register_restate_deployment(&harness.backend, &state.restate_admin_url, &endpoint_url)
+                .await;
+        // Written beside and renamed, so the parent never reads a partial id.
+        let staged = data_dir.join(format!("{RECOVERY_E2E_DEPLOYMENT_ID}.staged"));
+        std::fs::write(&staged, deployment_id).expect("stage the recovery E2E deployment id");
+        std::fs::rename(staged, data_dir.join(RECOVERY_E2E_DEPLOYMENT_ID))
+            .expect("publish the recovery E2E deployment id");
+    }
     let start_turn = data_dir.join(RECOVERY_E2E_START_TURN);
     let mut followers = Vec::new();
     loop {
@@ -2220,6 +2232,21 @@ async fn live_restate_recovery_child() {
             );
             std::fs::remove_file(&start_turn).expect("consume the recovery E2E start request");
         }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_recovery_deployment_id(data_dir: &std::path::Path, timeout: Duration) -> String {
+    let path = data_dir.join(RECOVERY_E2E_DEPLOYMENT_ID);
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if let Ok(deployment_id) = std::fs::read_to_string(&path) {
+            return deployment_id;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the first ingress owner did not register its endpoint within {timeout:?}"
+        );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }

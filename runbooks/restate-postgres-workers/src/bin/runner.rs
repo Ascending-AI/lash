@@ -409,17 +409,12 @@ async fn async_main() -> Result<()> {
     {
         anyhow::bail!("the runner's witness ledger was connected twice");
     }
-    // Register through the engine the workers run on — same store set, same
-    // authority — so the namespace guard (FIG-3898) applies to this
-    // registration exactly as it would to a worker's own.
-    let registration_engine = e2e_backend(
-        &storage,
-        attachment_store.clone(),
-        ingress_url.clone(),
-        admin_url.clone(),
-        restate_authority_id()?,
-    );
-    register_restate_deployment(&registration_engine, &deployment_url).await?;
+    // A worker registers the deployment through the engine it serves on, so
+    // the lanes are named by the serving build's generation and the namespace
+    // guard (FIG-3898) applies exactly as it does to a worker's own
+    // registration.
+    let worker_control_url = env("WORKER_CONTROL_URL", "http://worker-a:18101");
+    register_restate_deployment(&worker_control_url, &deployment_url).await?;
     let watchdog = tokio::spawn(runner_stall_watchdog(
         storage.pool().clone(),
         admin_url.clone(),

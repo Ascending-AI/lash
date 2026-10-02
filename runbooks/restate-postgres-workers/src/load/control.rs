@@ -74,9 +74,14 @@ async fn active(State(control): State<FaultControl>) -> Json<WorkerActivity> {
     })
 }
 
-/// Register this build's deployment at a fresh immutable URI through lash's
+/// Register this build's deployment at an immutable URI through lash's
 /// registration, which refuses a URI another build holds rather than
-/// force-registering over it.
+/// force-registering over it. The worker registers for itself because the
+/// generation its lanes are named by exists only where its core does: a
+/// process that serves no endpoint has no generation to register under.
+///
+/// A name another authority holds answers `409 Conflict`: that refusal is
+/// permanent, where every other failure may pass on a retry.
 async fn register(
     State(control): State<FaultControl>,
     Json(registration): Json<Registration>,
@@ -85,12 +90,64 @@ async fn register(
         .engine
         .register_deployment(&registration.uri)
         .await
-        .map_err(failed)?;
+        .map_err(|error| match error {
+            lash_restate::RestateRegistrationError::NameTaken { .. } => {
+                (StatusCode::CONFLICT, error.to_string())
+            }
+            error => failed(error),
+        })?;
     Ok(Json(json!({
         "uri": registration.uri,
         "generation": control.core.build_generation().as_str(),
         "worker_id": control.worker_id,
     })))
+}
+
+/// Why a worker did not register its deployment.
+#[derive(Debug)]
+pub enum WorkerRegistrationError {
+    /// Another authority holds one of the deployment's names: permanent.
+    NameTaken(String),
+    /// The worker or the admin API it registers through is not ready, or
+    /// refused: a retry may pass.
+    Unregistered(String),
+}
+
+impl std::fmt::Display for WorkerRegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::NameTaken(refusal) | Self::Unregistered(refusal)) = self;
+        f.write_str(refusal)
+    }
+}
+
+impl std::error::Error for WorkerRegistrationError {}
+
+/// Have the worker whose control endpoint is `control_url` register its
+/// deployment at `uri` (`POST /deployment/register`).
+pub async fn register_through_worker(
+    client: &reqwest::Client,
+    control_url: &str,
+    uri: &str,
+) -> Result<(), WorkerRegistrationError> {
+    let response = client
+        .post(format!(
+            "{}/deployment/register",
+            control_url.trim_end_matches('/')
+        ))
+        .json(&json!({ "uri": uri }))
+        .send()
+        .await
+        .map_err(|error| WorkerRegistrationError::Unregistered(error.to_string()))?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let refusal = response.text().await.unwrap_or_default();
+    Err(if status == StatusCode::CONFLICT {
+        WorkerRegistrationError::NameTaken(refusal)
+    } else {
+        WorkerRegistrationError::Unregistered(format!("{status}: {refusal}"))
+    })
 }
 
 /// Mark `generation` draining from this, the replacing, build. A build

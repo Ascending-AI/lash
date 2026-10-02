@@ -483,19 +483,25 @@ pub(super) async fn wait_for_s3(store: &impl lash::persistence::AttachmentStore)
     )
 }
 
-/// Register the worker deployment through the engine's namespace guard
-/// (FIG-3898): a name another authority holds refuses the registration
-/// outright, while an unreachable or not-yet-consistent admin API retries.
+/// Have a worker register the worker deployment: the serving build names its
+/// lanes by its own generation, which the runner, serving no endpoint, does
+/// not have. The registration passes the engine's namespace guard
+/// (FIG-3898) in the worker: a name another authority holds refuses it
+/// outright, while a worker or admin API that is not ready yet retries.
 pub(super) async fn register_restate_deployment(
-    backend: &lash_restate::RestateEngine,
+    worker_control_url: &str,
     deployment_url: &str,
 ) -> Result<()> {
+    use lash_restate_postgres_workers_e2e::load::control::{
+        WorkerRegistrationError, register_through_worker,
+    };
+    let client = reqwest::Client::new();
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut last_error = None;
     while Instant::now() < deadline {
-        match backend.register_deployment(deployment_url).await {
+        match register_through_worker(&client, worker_control_url, deployment_url).await {
             Ok(()) => return Ok(()),
-            Err(error @ lash_restate::RestateRegistrationError::NameTaken { .. }) => {
+            Err(error @ WorkerRegistrationError::NameTaken(_)) => {
                 return Err(anyhow::Error::new(error)
                     .context("register the worker deployment with Restate"));
             }
