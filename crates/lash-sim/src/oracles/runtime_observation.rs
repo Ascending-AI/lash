@@ -232,7 +232,7 @@ pub fn backend_failure_observed(
             .any(|session| session.backend_failure_count > 0),
         "no backend failure boundary was observed",
         backend_fault_classification_semantics(events),
-        "backend fault evidence lost the production error class or transaction point",
+        "backend failure boundary was observed but its fault evidence lost the production error class or transaction point",
         "generated transaction faults retain the production error class across retries",
     )
 }
