@@ -273,28 +273,35 @@ CREATE INDEX IF NOT EXISTS idx_usage_facts_unreported
     WHERE disposition = 'unreported';
 
 CREATE TABLE IF NOT EXISTS usage_runs (
-    owner_kind          TEXT NOT NULL CONSTRAINT ck_usage_runs_owner_kind CHECK (owner_kind IN ('session', 'process')),
-    owner_id            TEXT NOT NULL,
-    effect_key          TEXT NOT NULL,
-    run_id              TEXT NOT NULL,
-    execution_scope_key TEXT NOT NULL,
-    source              TEXT NOT NULL,
-    model_key           TEXT NOT NULL,
-    requested_model     TEXT NOT NULL,
-    admitted_at_ms      INTEGER NOT NULL,
-    state               TEXT NOT NULL,
-    unknown_reason      TEXT,
-    conflict_detail     TEXT,
-    resolved_at_ms      INTEGER,
+    owner_kind TEXT NOT NULL CONSTRAINT ck_usage_runs_owner_kind CHECK (owner_kind IN ('session', 'process')),
+    owner_id TEXT NOT NULL,
+    effect_key TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    execution_scope_key TEXT,
+    source TEXT,
+    model_key TEXT,
+    requested_model TEXT,
+    admitted_at_ms INTEGER,
+    state TEXT NOT NULL,
+    unknown_reason TEXT,
+    conflict_call_ordinal INTEGER,
+    conflict_provider_attempt INTEGER,
+    conflict_fact_kind TEXT,
+    conflict_stored_payload_hash TEXT,
+    conflict_offered_payload_hash TEXT,
+    resolved_at_ms INTEGER,
     PRIMARY KEY (owner_kind, owner_id, effect_key, run_id),
+    CONSTRAINT ck_usage_runs_admission CHECK (
+        (execution_scope_key IS NOT NULL AND source IS NOT NULL AND model_key IS NOT NULL AND requested_model IS NOT NULL AND admitted_at_ms IS NOT NULL AND admitted_at_ms >= 0)
+     OR (execution_scope_key IS NULL AND source IS NULL AND model_key IS NULL AND requested_model IS NULL AND admitted_at_ms IS NULL AND state <> 'open')),
     CONSTRAINT ck_usage_runs_state CHECK (
-        (state = 'open' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NULL)
-     OR (state = 'settled' AND unknown_reason IS NULL AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL)
-     OR (state = 'unknown' AND conflict_detail IS NULL AND resolved_at_ms IS NOT NULL
-         AND unknown_reason IN ('superseded_run', 'call_without_record', 'facts_unjournalable',
-                                'execution_ended', 'owner_retired'))
-     OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_detail IS NOT NULL
-         AND resolved_at_ms IS NOT NULL))
+        (state = 'open' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NULL)
+     OR (state = 'settled' AND unknown_reason IS NULL AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0)
+     OR (state = 'unknown' AND conflict_call_ordinal IS NULL AND conflict_provider_attempt IS NULL AND conflict_fact_kind IS NULL AND conflict_stored_payload_hash IS NULL AND conflict_offered_payload_hash IS NULL AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0
+         AND unknown_reason IS NOT NULL AND unknown_reason IN ('superseded_run', 'call_without_record', 'facts_unjournalable', 'execution_ended', 'owner_retired'))
+     OR (state = 'conflicted' AND unknown_reason IS NULL AND conflict_call_ordinal IS NOT NULL AND conflict_provider_attempt IS NOT NULL AND conflict_fact_kind IS NOT NULL AND conflict_stored_payload_hash IS NOT NULL AND conflict_offered_payload_hash IS NOT NULL
+         AND conflict_call_ordinal BETWEEN 0 AND 4294967295 AND conflict_provider_attempt BETWEEN 0 AND 4294967295
+         AND conflict_fact_kind IN ('attempt', 'correction') AND resolved_at_ms IS NOT NULL AND resolved_at_ms >= 0))
 );
 CREATE INDEX IF NOT EXISTS idx_usage_runs_open_owner
     ON usage_runs(owner_kind, owner_id, admitted_at_ms) WHERE state = 'open';

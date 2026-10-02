@@ -112,14 +112,14 @@ pub(super) async fn failed_attempt_partial_usage_is_a_fact() {
     assert_eq!(
         deltas
             .iter()
-            .map(|entry| entry.usage.input_tokens)
+            .map(|entry| entry.usage().input_tokens)
             .sum::<i64>(),
         31
     );
     assert_eq!(
         deltas
             .iter()
-            .map(|entry| entry.usage.output_tokens)
+            .map(|entry| entry.usage().output_tokens)
             .sum::<i64>(),
         7
     );
@@ -221,7 +221,7 @@ pub(super) async fn all_attempts_failed_partial_usage_are_facts() {
     assert_eq!(
         deltas
             .iter()
-            .map(|entry| entry.usage.input_tokens)
+            .map(|entry| entry.usage().input_tokens)
             .sum::<i64>(),
         21
     );

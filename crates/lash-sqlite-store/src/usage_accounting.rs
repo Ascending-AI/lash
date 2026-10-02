@@ -79,103 +79,141 @@ fn decode_fact(row: &Row<'_>) -> Result<UsageFactRecord, StoreError> {
     let run: Option<String> = get!(8);
     Ok(UsageFactRecord {
         seq: unsigned(get!(0))?,
-        identity: UsageFactIdentity {
-            owner,
-            effect: effect(get!(3))?,
-            call_ordinal: ordinal(get!(4))?,
-            provider_attempt: ordinal(get!(5))?,
-            kind: match kind.as_str() {
-                "attempt" => UsageFactKind::Attempt,
-                "correction" => UsageFactKind::Correction,
-                _ => return Err(corrupt("invalid fact kind")),
-            },
-        },
-        disposition: match disposition.as_str() {
-            "reported" => UsageReporting::Reported,
-            "unreported" => UsageReporting::Unreported,
-            "reconciled" => UsageReporting::Reconciled,
-            _ => return Err(corrupt("invalid disposition")),
-        },
-        run: run.map(UsageRunId::try_from).transpose()?,
+        owner,
+        effect: effect(get!(3))?,
+        call_ordinal: ordinal(get!(4))?,
+        provider_attempt: ordinal(get!(5))?,
         llm_call_id: LlmCallId(row.get::<_, String>(9).map_err(sqlite_error)?),
         source: get!(10),
         model_key: ModelKey::new(row.get::<_, String>(11).map_err(sqlite_error)?),
         requested_model: get!(12),
         served_model: get!(13),
-        usage: TokenUsage {
-            input_tokens: get!(14),
-            output_tokens: get!(15),
-            cache_read_input_tokens: get!(16),
-            cache_write_input_tokens: get!(17),
-            reasoning_output_tokens: get!(18),
-        },
-        generation_id: get!(19),
+        body: UsageFactBody::from_stored(
+            &kind,
+            &disposition,
+            run.map(UsageRunId::try_from).transpose()?,
+            TokenUsage {
+                input_tokens: get!(14),
+                output_tokens: get!(15),
+                cache_read_input_tokens: get!(16),
+                cache_write_input_tokens: get!(17),
+                reasoning_output_tokens: get!(18),
+            },
+            get!(19),
+        )?,
         recorded_at_ms: unsigned(get!(21))?,
     })
 }
-fn decode_run(row: &Row<'_>) -> Result<UsageRunRecord, StoreError> {
+fn decode_run(row: &Row<'_>, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
     macro_rules! get {
         ($n:expr) => {
             row.get($n).map_err(sqlite_error)?
         };
     }
+    let effect = effect(get!(0))?;
+    let scope: Option<String> = get!(2);
+    let source: Option<String> = get!(3);
+    let model: Option<String> = get!(4);
+    let requested: Option<String> = get!(5);
+    let admitted: Option<i64> = get!(6);
+    let admission = match (scope, source, model, requested, admitted) {
+        (None, None, None, None, None) => None,
+        (
+            Some(execution_scope_key),
+            Some(source),
+            Some(model),
+            Some(requested_model),
+            Some(at_ms),
+        ) => Some(UsageRunDispatch {
+            execution_scope_key,
+            source,
+            model_key: ModelKey::new(model),
+            requested_model,
+            admitted_at_ms: unsigned(at_ms)?,
+        }),
+        _ => return Err(corrupt("partial usage run admission")),
+    };
+    let call: Option<i64> = get!(9);
+    let attempt: Option<i64> = get!(10);
+    let fact_kind: Option<String> = get!(11);
+    let stored: Option<String> = get!(12);
+    let offered: Option<String> = get!(13);
+    let conflict = match (call, attempt, fact_kind, stored, offered) {
+        (None, None, None, None, None) => None,
+        (
+            Some(call),
+            Some(attempt),
+            Some(kind),
+            Some(stored_payload_hash),
+            Some(offered_payload_hash),
+        ) => Some(UsageFactConflict {
+            identity: UsageFactIdentity {
+                owner: owner.clone(),
+                effect: effect.clone(),
+                call_ordinal: ordinal(call)?,
+                provider_attempt: ordinal(attempt)?,
+                kind: match kind.as_str() {
+                    "attempt" => UsageFactKind::Attempt,
+                    "correction" => UsageFactKind::Correction,
+                    _ => return Err(corrupt("invalid conflict fact kind")),
+                },
+            },
+            stored_payload_hash,
+            offered_payload_hash,
+        }),
+        _ => return Err(corrupt("partial usage run conflict")),
+    };
     let state: String = get!(7);
     let reason: Option<String> = get!(8);
-    let detail: Option<String> = get!(9);
-    let resolved: Option<i64> = get!(10);
+    let resolved: Option<i64> = get!(14);
+    let state = UsageRunState::from_stored(
+        &state,
+        reason.as_deref(),
+        conflict,
+        resolved.map(unsigned).transpose()?,
+    )?;
+    if state == UsageRunState::Open && admission.is_none() {
+        return Err(corrupt("open usage run has no admission"));
+    }
+    let run: String = get!(1);
     Ok(UsageRunRecord {
-        effect: effect(get!(0))?,
-        run: UsageRunId::try_from(row.get::<_, String>(1).map_err(sqlite_error)?)?,
-        execution_scope_key: get!(2),
-        source: get!(3),
-        model_key: ModelKey::new(row.get::<_, String>(4).map_err(sqlite_error)?),
-        requested_model: get!(5),
-        admitted_at_ms: unsigned(get!(6))?,
-        state: match state.as_str() {
-            "open" => UsageRunState::Open,
-            "settled" => UsageRunState::Settled,
-            "unknown" => UsageRunState::Unknown(UsageUnknownReason::from_stored(
-                reason
-                    .as_deref()
-                    .ok_or_else(|| corrupt("missing unknown reason"))?,
-            )?),
-            "conflicted" => UsageRunState::Conflicted {
-                detail: detail.ok_or_else(|| corrupt("missing conflict detail"))?,
-            },
-            _ => return Err(corrupt("invalid run state")),
-        },
-        resolved_at_ms: resolved.map(unsigned).transpose()?,
+        effect,
+        run: UsageRunId::try_from(run)?,
+        admission,
+        state,
     })
 }
+
 fn insert_fact(
     tx: &Transaction<'_>,
     record: &UsageFactRecord,
     hash: &str,
 ) -> Result<bool, UsageAppendError> {
-    let (kind, id) = usage_owner_columns(&record.identity.owner);
+    let (kind, id) = usage_owner_columns(&record.owner);
+    let usage = record.usage();
     let inserted = tx
         .execute(
             SQL.inserts.fact.sql(),
             params![
                 kind,
                 id,
-                record.identity.effect.as_str(),
-                i64::from(record.identity.call_ordinal),
-                i64::from(record.identity.provider_attempt),
-                record.identity.kind.as_str(),
-                record.disposition.as_str(),
-                record.run.as_ref().map(UsageRunId::as_str),
+                record.effect.as_str(),
+                i64::from(record.call_ordinal),
+                i64::from(record.provider_attempt),
+                record.body.kind().as_str(),
+                record.disposition().as_str(),
+                record.run().map(UsageRunId::as_str),
                 record.llm_call_id.0.as_str(),
                 record.source,
                 record.model_key.as_str(),
                 record.requested_model,
                 record.served_model,
-                record.usage.input_tokens,
-                record.usage.output_tokens,
-                record.usage.cache_read_input_tokens,
-                record.usage.cache_write_input_tokens,
-                record.usage.reasoning_output_tokens,
-                record.generation_id,
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_input_tokens,
+                usage.cache_write_input_tokens,
+                usage.reasoning_output_tokens,
+                record.generation_id(),
                 hash,
                 integer(record.recorded_at_ms)?
             ],
@@ -190,10 +228,10 @@ fn insert_fact(
             params![
                 kind,
                 id,
-                record.identity.effect.as_str(),
-                i64::from(record.identity.call_ordinal),
-                i64::from(record.identity.provider_attempt),
-                record.identity.kind.as_str()
+                record.effect.as_str(),
+                i64::from(record.call_ordinal),
+                i64::from(record.provider_attempt),
+                record.body.kind().as_str()
             ],
             |row| row.get(0),
         )
@@ -202,7 +240,7 @@ fn insert_fact(
         Ok(false)
     } else {
         Err(UsageAppendError::Conflict(Box::new(UsageFactConflict {
-            identity: record.identity.clone(),
+            identity: record.identity(),
             stored_payload_hash: stored,
             offered_payload_hash: hash.to_owned(),
         })))
@@ -305,7 +343,6 @@ impl UsageAccountingStore for SqliteStore {
                 }
             }
             let (state, reason) = resolution_columns(&receipt.run);
-            let first = s.facts.first();
             tx.execute(
                 SQL.inserts.run.sql(),
                 params![
@@ -313,11 +350,11 @@ impl UsageAccountingStore for SqliteStore {
                     id,
                     s.effect.as_str(),
                     s.run.as_str(),
-                    "",
-                    first.map_or("", |f| f.source.as_str()),
-                    first.map_or("", |f| f.model_key.as_str()),
-                    first.map_or("", |f| f.requested_model.as_str()),
-                    now,
+                    Option::<&str>::None,
+                    Option::<&str>::None,
+                    Option::<&str>::None,
+                    Option::<&str>::None,
+                    Option::<i64>::None,
                     state,
                     reason,
                     now
@@ -341,10 +378,10 @@ impl UsageAccountingStore for SqliteStore {
                 .query_row(
                     SQL.runs.find.sql(),
                     params![kind, id, s.effect.as_str(), s.run.as_str()],
-                    |row| Ok(decode_run(row)),
+                    |row| Ok(decode_run(row, &s.owner)),
                 )
                 .map_err(sqlite_error)??;
-            if actual.state == UsageRunState::Settled {
+            if actual.state.is_settled() {
                 receipt.run = UsageRunResolution::Settled;
             }
             receipt.superseded_runs = u32::try_from(
@@ -365,35 +402,34 @@ impl UsageAccountingStore for SqliteStore {
         conflict: &UsageFactConflict,
         now_ms: u64,
     ) -> Result<(), StoreError> {
+        if conflict.identity.owner != settlement.owner
+            || conflict.identity.effect != settlement.effect
+        {
+            return Err(corrupt("usage conflict belongs to another owner or effect"));
+        }
         let s = settlement.clone();
-        let detail = format!("{conflict:?}");
+        let conflict = conflict.clone();
         self.usage_write(move |tx| {
             let (kind, id) = usage_owner_columns(&s.owner);
             let now = integer(now_ms)?;
-            let first = s.facts.first();
-            tx.execute(
-                SQL.inserts.run.sql(),
-                params![
-                    kind,
-                    id,
-                    s.effect.as_str(),
-                    s.run.as_str(),
-                    "",
-                    first.map_or("", |f| f.source.as_str()),
-                    first.map_or("", |f| f.model_key.as_str()),
-                    first.map_or("", |f| f.requested_model.as_str()),
-                    now,
-                    "open",
-                    Option::<&str>::None,
-                    Option::<i64>::None
-                ],
-            )
-            .map_err(sqlite_error)?;
-            tx.execute(
-                SQL.runs.conflict.sql(),
-                params![kind, id, s.effect.as_str(), s.run.as_str(), detail, now],
-            )
-            .map_err(sqlite_error)?;
+            for statement in [SQL.runs.insert_conflict.sql(), SQL.runs.conflict.sql()] {
+                tx.execute(
+                    statement,
+                    params![
+                        kind,
+                        id,
+                        s.effect.as_str(),
+                        s.run.as_str(),
+                        i64::from(conflict.identity.call_ordinal),
+                        i64::from(conflict.identity.provider_attempt),
+                        conflict.identity.kind.as_str(),
+                        conflict.stored_payload_hash,
+                        conflict.offered_payload_hash,
+                        now
+                    ],
+                )
+                .map_err(sqlite_error)?;
+            }
             Ok(())
         })
         .await
@@ -439,15 +475,14 @@ impl UsageAccountingStore for SqliteStore {
                 let Some(mut record) = target else {
                     return Err(UsageAppendError::CorrectionTargetMissing { identity });
                 };
-                if record.disposition != UsageReporting::Unreported {
+                if record.disposition() != UsageReporting::Unreported {
                     return Err(UsageAppendError::CorrectionTargetReported { identity });
                 }
                 let hash = usage_correction_payload_hash(correction, &record);
-                record.identity.kind = UsageFactKind::Correction;
-                record.disposition = UsageReporting::Reconciled;
-                record.run = None;
-                record.usage = correction.usage.clone();
-                record.generation_id = Some(correction.generation_id.clone());
+                record.body = UsageFactBody::Correction {
+                    usage: correction.usage.clone(),
+                    generation_id: correction.generation_id.clone(),
+                };
                 record.recorded_at_ms = now_ms;
                 if insert_fact(tx, &record, &hash)? {
                     receipt.inserted += 1;
@@ -696,7 +731,7 @@ impl UsageAccountingStore for SqliteStore {
                             after.as_ref().map_or("", |c| c.after_run().as_str()),
                             i64::from(limit.get()) + 1
                         ],
-                        |row| Ok(decode_run(row)),
+                        |row| Ok(decode_run(row, &owner)),
                     )?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 let page = || -> Result<UsageRunPage, StoreError> {

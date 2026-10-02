@@ -29,8 +29,7 @@ pub trait UsageAccountingStore: Send + Sync {
     ) -> Result<UsageSettleReceipt, UsageAppendError>;
 
     /// After `settle_usage` answered `Conflict`: the named run (and the other
-    /// open runs of the effect) become `conflicted` with the conflict rendered
-    /// into `conflict_detail`. No fact is written.
+    /// open runs of the effect) become `conflicted` with the typed fact identity and both payload hashes. No fact is written.
     async fn mark_usage_settlement_conflicted(
         &self,
         settlement: &UsageSettlement,

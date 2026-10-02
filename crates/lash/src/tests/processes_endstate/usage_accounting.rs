@@ -200,11 +200,8 @@ async fn process_usage_and_prune(backend: lash_core::Backend) -> Result<()> {
         )
         .await?;
     assert_eq!(facts.facts.len(), 2);
-    assert!(facts.facts.iter().all(|fact| fact.identity.owner == owner));
-    assert_ne!(
-        facts.facts[0].identity.effect,
-        facts.facts[1].identity.effect
-    );
+    assert!(facts.facts.iter().all(|fact| fact.owner == owner));
+    assert_ne!(facts.facts[0].effect, facts.facts[1].effect);
 
     let scope = lash_core::ExecutionScope::process(id);
     let refused = backend

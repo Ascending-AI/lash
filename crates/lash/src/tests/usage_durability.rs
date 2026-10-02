@@ -547,7 +547,7 @@ fn reconciliation_appends_one_correction() -> Result<()> {
         let corrections = page
             .facts
             .iter()
-            .filter(|fact| fact.disposition == lash_core::UsageReporting::Reconciled)
+            .filter(|fact| fact.disposition() == lash_core::UsageReporting::Reconciled)
             .count();
         assert_eq!(corrections, 1, "exactly one correction: {:#?}", page.facts);
         assert_eq!(

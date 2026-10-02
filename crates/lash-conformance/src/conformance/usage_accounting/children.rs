@@ -358,7 +358,7 @@ pub async fn tool_child_spend_counts_once_without_settlement_charging(tier: &Usa
     assert_eq!(
         facts
             .iter()
-            .filter(|fact| fact.disposition == crate::UsageReporting::Reported)
+            .filter(|fact| fact.disposition() == crate::UsageReporting::Reported)
             .count(),
         6
     );
@@ -403,7 +403,7 @@ async fn charged_children(world: &World) -> crate::OwnerUsage {
     assert_eq!(
         facts
             .iter()
-            .map(|fact| &fact.identity)
+            .map(|fact| fact.identity())
             .collect::<BTreeSet<_>>()
             .len(),
         9
@@ -411,7 +411,7 @@ async fn charged_children(world: &World) -> crate::OwnerUsage {
     assert_eq!(
         facts
             .iter()
-            .filter(|fact| fact.disposition == crate::UsageReporting::Reported)
+            .filter(|fact| fact.disposition() == crate::UsageReporting::Reported)
             .count(),
         world.returned_attempts()
     );

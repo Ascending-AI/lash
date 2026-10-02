@@ -68,11 +68,21 @@ billing evidence to conversation authority it has nothing to do with.
 - **Run.** One execution of a spending effect's body (`UsageRun`, a minted
   `UsageRunId`). It is admitted as one SQL `usage_runs` row before the body's
   first provider attempt, and never admitted if the body dispatches nothing.
+  A read records admission evidence only when admission wrote it. A settlement
+  can create a resolved row without admission, and never invents its scope,
+  source or model attribution. Its state is `Open` or
+  `Resolved { at_ms, outcome }`. A conflicted outcome keeps the typed fact
+  identity and both payload hashes in SQL columns. Repeating the same
+  resolution preserves its timestamp.
 - **Fact.** One provider attempt of one call of the recorded run, or one
   correction of such an attempt. Its identity is
   `(owner, effect, call_ordinal, provider_attempt, kind)`. `LlmCallId` rides
   on the fact as trace attribution only, because it is not unique: every
   session direct call is `"{session}:direct"`.
+  `UsageFactRecord.body` is `Attempt { run, outcome }` or
+  `Correction { usage, generation_id }`. Kind and reporting disposition derive
+  from that body. A correction keeps its attempt's attribution and replaces
+  the body as one value; it has no run and always has a generation id.
 - **Liability.** The run row. It is `open` until a settlement names it,
   `settled` when its facts land, `unknown` when it provably dispatched and no
   journaled result will ever describe it, and `conflicted` when its settlement

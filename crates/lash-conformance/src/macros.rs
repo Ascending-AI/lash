@@ -2152,6 +2152,9 @@ macro_rules! usage_ledger_store_tests {
             use super::*;
             $crate::usage_ledger_store_tests!(@register $fixture;
                 identical_settlement_retry_is_a_no_op,
+                a_settlement_without_admission_never_invents_dispatch_attribution,
+                a_run_conflict_round_trips_the_typed_fact_conflict,
+                fact_records_derive_kind_and_disposition_from_their_body,
                 conflicting_payload_is_a_typed_conflict_and_appends_nothing,
                 a_correction_has_its_own_identity,
                 each_fact_counts_once_under_any_grouping_order_and_repeat,

@@ -7,12 +7,12 @@ use lash_core_execution::UsageAccountingStore;
 use lash_core_execution::{LlmCallId, ModelKey, StoreError, TokenUsage};
 use lash_core_execution::{
     OutstandingUsageAttempt, OwnerUsage, OwnerUsageRow, UsageAdmissionError, UsageAppendError,
-    UsageAppendReceipt, UsageCompleteness, UsageCorrection, UsageEffectKey, UsageFactConflict,
-    UsageFactCursor, UsageFactIdentity, UsageFactKind, UsageFactPage, UsageFactRecord,
-    UsageOwnerRetired, UsageReporting, UsageRunAdmission, UsageRunAdmitted, UsageRunCursor,
-    UsageRunFilter, UsageRunId, UsageRunPage, UsageRunRecord, UsageRunResolution, UsageRunState,
-    UsageSettleReceipt, UsageSettlement, UsageUnknownReason, usage_correction_payload_hash,
-    usage_fact_payload_hash, usage_owner_columns,
+    UsageAppendReceipt, UsageCompleteness, UsageCorrection, UsageEffectKey, UsageFactBody,
+    UsageFactConflict, UsageFactCursor, UsageFactIdentity, UsageFactKind, UsageFactPage,
+    UsageFactRecord, UsageOwnerRetired, UsageReporting, UsageRunAdmission, UsageRunAdmitted,
+    UsageRunCursor, UsageRunDispatch, UsageRunFilter, UsageRunId, UsageRunPage, UsageRunRecord,
+    UsageRunResolution, UsageRunState, UsageSettleReceipt, UsageSettlement,
+    usage_correction_payload_hash, usage_fact_payload_hash, usage_owner_columns,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::usage::{
@@ -98,72 +98,108 @@ fn decode_fact(row: &PgRow) -> Result<UsageFactRecord, StoreError> {
     let run: Option<String> = get!(8);
     Ok(UsageFactRecord {
         seq: unsigned(get!(0))?,
-        identity: UsageFactIdentity {
-            owner,
-            effect: effect(get!(3))?,
-            call_ordinal: ordinal(get!(4))?,
-            provider_attempt: ordinal(get!(5))?,
-            kind: match kind.as_str() {
-                "attempt" => UsageFactKind::Attempt,
-                "correction" => UsageFactKind::Correction,
-                _ => return Err(corrupt("invalid fact kind")),
-            },
-        },
-        disposition: match disposition.as_str() {
-            "reported" => UsageReporting::Reported,
-            "unreported" => UsageReporting::Unreported,
-            "reconciled" => UsageReporting::Reconciled,
-            _ => return Err(corrupt("invalid disposition")),
-        },
-        run: run.map(UsageRunId::try_from).transpose()?,
+        owner,
+        effect: effect(get!(3))?,
+        call_ordinal: ordinal(get!(4))?,
+        provider_attempt: ordinal(get!(5))?,
         llm_call_id: LlmCallId(row.try_get::<String, _>(9).map_err(store_sqlx_error)?),
         source: get!(10),
         model_key: ModelKey::new(row.try_get::<String, _>(11).map_err(store_sqlx_error)?),
         requested_model: get!(12),
         served_model: get!(13),
-        usage: TokenUsage {
-            input_tokens: get!(14),
-            output_tokens: get!(15),
-            cache_read_input_tokens: get!(16),
-            cache_write_input_tokens: get!(17),
-            reasoning_output_tokens: get!(18),
-        },
-        generation_id: get!(19),
+        body: UsageFactBody::from_stored(
+            &kind,
+            &disposition,
+            run.map(UsageRunId::try_from).transpose()?,
+            TokenUsage {
+                input_tokens: get!(14),
+                output_tokens: get!(15),
+                cache_read_input_tokens: get!(16),
+                cache_write_input_tokens: get!(17),
+                reasoning_output_tokens: get!(18),
+            },
+            get!(19),
+        )?,
         recorded_at_ms: unsigned(get!(21))?,
     })
 }
-fn decode_run(row: &PgRow) -> Result<UsageRunRecord, StoreError> {
+fn decode_run(row: &PgRow, owner: &RuntimeOwner) -> Result<UsageRunRecord, StoreError> {
     macro_rules! get {
         ($n:expr) => {
             row.try_get($n).map_err(store_sqlx_error)?
         };
     }
+    let effect = effect(get!(0))?;
+    let scope: Option<String> = get!(2);
+    let source: Option<String> = get!(3);
+    let model: Option<String> = get!(4);
+    let requested: Option<String> = get!(5);
+    let admitted: Option<i64> = get!(6);
+    let admission = match (scope, source, model, requested, admitted) {
+        (None, None, None, None, None) => None,
+        (
+            Some(execution_scope_key),
+            Some(source),
+            Some(model),
+            Some(requested_model),
+            Some(at_ms),
+        ) => Some(UsageRunDispatch {
+            execution_scope_key,
+            source,
+            model_key: ModelKey::new(model),
+            requested_model,
+            admitted_at_ms: unsigned(at_ms)?,
+        }),
+        _ => return Err(corrupt("partial usage run admission")),
+    };
+    let call: Option<i64> = get!(9);
+    let attempt: Option<i64> = get!(10);
+    let fact_kind: Option<String> = get!(11);
+    let stored: Option<String> = get!(12);
+    let offered: Option<String> = get!(13);
+    let conflict = match (call, attempt, fact_kind, stored, offered) {
+        (None, None, None, None, None) => None,
+        (
+            Some(call),
+            Some(attempt),
+            Some(kind),
+            Some(stored_payload_hash),
+            Some(offered_payload_hash),
+        ) => Some(UsageFactConflict {
+            identity: UsageFactIdentity {
+                owner: owner.clone(),
+                effect: effect.clone(),
+                call_ordinal: ordinal(call)?,
+                provider_attempt: ordinal(attempt)?,
+                kind: match kind.as_str() {
+                    "attempt" => UsageFactKind::Attempt,
+                    "correction" => UsageFactKind::Correction,
+                    _ => return Err(corrupt("invalid conflict fact kind")),
+                },
+            },
+            stored_payload_hash,
+            offered_payload_hash,
+        }),
+        _ => return Err(corrupt("partial usage run conflict")),
+    };
     let state: String = get!(7);
     let reason: Option<String> = get!(8);
-    let detail: Option<String> = get!(9);
-    let resolved: Option<i64> = get!(10);
+    let resolved: Option<i64> = get!(14);
+    let state = UsageRunState::from_stored(
+        &state,
+        reason.as_deref(),
+        conflict,
+        resolved.map(unsigned).transpose()?,
+    )?;
+    if state == UsageRunState::Open && admission.is_none() {
+        return Err(corrupt("open usage run has no admission"));
+    }
+    let run: String = get!(1);
     Ok(UsageRunRecord {
-        effect: effect(get!(0))?,
-        run: UsageRunId::try_from(row.try_get::<String, _>(1).map_err(store_sqlx_error)?)?,
-        execution_scope_key: get!(2),
-        source: get!(3),
-        model_key: ModelKey::new(row.try_get::<String, _>(4).map_err(store_sqlx_error)?),
-        requested_model: get!(5),
-        admitted_at_ms: unsigned(get!(6))?,
-        state: match state.as_str() {
-            "open" => UsageRunState::Open,
-            "settled" => UsageRunState::Settled,
-            "unknown" => UsageRunState::Unknown(UsageUnknownReason::from_stored(
-                reason
-                    .as_deref()
-                    .ok_or_else(|| corrupt("missing unknown reason"))?,
-            )?),
-            "conflicted" => UsageRunState::Conflicted {
-                detail: detail.ok_or_else(|| corrupt("missing conflict detail"))?,
-            },
-            _ => return Err(corrupt("invalid run state")),
-        },
-        resolved_at_ms: resolved.map(unsigned).transpose()?,
+        effect,
+        run: UsageRunId::try_from(run)?,
+        admission,
+        state,
     })
 }
 
@@ -189,27 +225,28 @@ async fn insert_fact(
     record: &UsageFactRecord,
     hash: &str,
 ) -> Result<bool, UsageAppendError> {
-    let (kind, id) = usage_owner_columns(&record.identity.owner);
+    let (kind, id) = usage_owner_columns(&record.owner);
+    let usage = record.usage();
     let inserted: Option<i64> = sqlx::query_scalar(SQL.inserts.fact.sql())
         .bind(kind)
         .bind(id)
-        .bind(record.identity.effect.as_str())
-        .bind(i64::from(record.identity.call_ordinal))
-        .bind(i64::from(record.identity.provider_attempt))
-        .bind(record.identity.kind.as_str())
-        .bind(record.disposition.as_str())
-        .bind(record.run.as_ref().map(UsageRunId::as_str))
+        .bind(record.effect.as_str())
+        .bind(i64::from(record.call_ordinal))
+        .bind(i64::from(record.provider_attempt))
+        .bind(record.body.kind().as_str())
+        .bind(record.disposition().as_str())
+        .bind(record.run().map(UsageRunId::as_str))
         .bind(record.llm_call_id.0.as_str())
         .bind(&record.source)
         .bind(record.model_key.as_str())
         .bind(&record.requested_model)
         .bind(&record.served_model)
-        .bind(record.usage.input_tokens)
-        .bind(record.usage.output_tokens)
-        .bind(record.usage.cache_read_input_tokens)
-        .bind(record.usage.cache_write_input_tokens)
-        .bind(record.usage.reasoning_output_tokens)
-        .bind(&record.generation_id)
+        .bind(usage.input_tokens)
+        .bind(usage.output_tokens)
+        .bind(usage.cache_read_input_tokens)
+        .bind(usage.cache_write_input_tokens)
+        .bind(usage.reasoning_output_tokens)
+        .bind(record.generation_id())
         .bind(hash)
         .bind(integer(record.recorded_at_ms)?)
         .fetch_optional(&mut **tx)
@@ -221,10 +258,10 @@ async fn insert_fact(
     let stored: String = sqlx::query_scalar(SQL.facts.payload.sql())
         .bind(kind)
         .bind(id)
-        .bind(record.identity.effect.as_str())
-        .bind(i64::from(record.identity.call_ordinal))
-        .bind(i64::from(record.identity.provider_attempt))
-        .bind(record.identity.kind.as_str())
+        .bind(record.effect.as_str())
+        .bind(i64::from(record.call_ordinal))
+        .bind(i64::from(record.provider_attempt))
+        .bind(record.body.kind().as_str())
         .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -232,7 +269,7 @@ async fn insert_fact(
         Ok(false)
     } else {
         Err(UsageAppendError::Conflict(Box::new(UsageFactConflict {
-            identity: record.identity.clone(),
+            identity: record.identity(),
             stored_payload_hash: stored,
             offered_payload_hash: hash.to_owned(),
         })))
@@ -247,23 +284,21 @@ fn resolution_columns(resolution: &UsageRunResolution) -> (&'static str, Option<
 async fn ensure_settlement_run(
     tx: &mut Transaction<'_, Postgres>,
     s: &UsageSettlement,
-    now: i64,
     state: &str,
     reason: Option<&str>,
     resolved: Option<i64>,
 ) -> Result<(), StoreError> {
     let (kind, id) = usage_owner_columns(&s.owner);
-    let first = s.facts.first();
     sqlx::query(SQL.inserts.run.sql())
         .bind(kind)
         .bind(id)
         .bind(s.effect.as_str())
         .bind(s.run.as_str())
-        .bind("")
-        .bind(first.map_or("", |f| f.source.as_str()))
-        .bind(first.map_or("", |f| f.model_key.as_str()))
-        .bind(first.map_or("", |f| f.requested_model.as_str()))
-        .bind(now)
+        .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None)
+        .bind(Option::<&str>::None)
+        .bind(Option::<i64>::None)
         .bind(state)
         .bind(reason)
         .bind(resolved)
@@ -346,7 +381,7 @@ impl UsageAccountingStore for PostgresStore {
             }
         }
         let (state, reason) = resolution_columns(&receipt.run);
-        ensure_settlement_run(&mut tx, s, now, state, reason, Some(now)).await?;
+        ensure_settlement_run(&mut tx, s, state, reason, Some(now)).await?;
         sqlx::query(SQL.runs.resolve.sql())
             .bind(kind)
             .bind(id)
@@ -367,8 +402,9 @@ impl UsageAccountingStore for PostgresStore {
                 .fetch_one(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?,
+            &s.owner,
         )?;
-        if actual.state == UsageRunState::Settled {
+        if actual.state.is_settled() {
             receipt.run = UsageRunResolution::Settled;
         }
         receipt.superseded_runs = u32::try_from(
@@ -393,21 +429,29 @@ impl UsageAccountingStore for PostgresStore {
         conflict: &UsageFactConflict,
         now_ms: u64,
     ) -> Result<(), StoreError> {
+        if conflict.identity.owner != s.owner || conflict.identity.effect != s.effect {
+            return Err(corrupt("usage conflict belongs to another owner or effect"));
+        }
         let mut tx = begin_guarded(&self.pool, &self.fence).await?;
         lock_owner(&mut tx, &s.owner).await?;
         let (kind, id) = usage_owner_columns(&s.owner);
         let now = integer(now_ms)?;
-        ensure_settlement_run(&mut tx, s, now, "open", None, None).await?;
-        sqlx::query(SQL.runs.conflict.sql())
-            .bind(kind)
-            .bind(id)
-            .bind(s.effect.as_str())
-            .bind(s.run.as_str())
-            .bind(format!("{conflict:?}"))
-            .bind(now)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        for statement in [SQL.runs.insert_conflict.sql(), SQL.runs.conflict.sql()] {
+            sqlx::query(statement)
+                .bind(kind)
+                .bind(id)
+                .bind(s.effect.as_str())
+                .bind(s.run.as_str())
+                .bind(i64::from(conflict.identity.call_ordinal))
+                .bind(i64::from(conflict.identity.provider_attempt))
+                .bind(conflict.identity.kind.as_str())
+                .bind(&conflict.stored_payload_hash)
+                .bind(&conflict.offered_payload_hash)
+                .bind(now)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
         tx.commit().await.map_err(store_sqlx_error)
     }
     async fn append_usage_corrections(
@@ -445,15 +489,14 @@ impl UsageAccountingStore for PostgresStore {
                 return Err(UsageAppendError::CorrectionTargetMissing { identity });
             };
             let mut record = decode_fact(&target)?;
-            if record.disposition != UsageReporting::Unreported {
+            if record.disposition() != UsageReporting::Unreported {
                 return Err(UsageAppendError::CorrectionTargetReported { identity });
             }
             let hash = usage_correction_payload_hash(correction, &record);
-            record.identity.kind = UsageFactKind::Correction;
-            record.disposition = UsageReporting::Reconciled;
-            record.run = None;
-            record.usage = correction.usage.clone();
-            record.generation_id = Some(correction.generation_id.clone());
+            record.body = UsageFactBody::Correction {
+                usage: correction.usage.clone(),
+                generation_id: correction.generation_id.clone(),
+            };
             record.recorded_at_ms = now_ms;
             if insert_fact(&mut tx, &record, &hash).await? {
                 receipt.inserted += 1;
@@ -665,7 +708,7 @@ impl UsageAccountingStore for PostgresStore {
             .await
             .map_err(store_sqlx_error)?
             .iter()
-            .map(decode_run)
+            .map(|row| decode_run(row, owner))
             .collect::<Result<Vec<_>, _>>()?;
         let more = runs.len() > limit.get() as usize;
         runs.truncate(limit.get() as usize);

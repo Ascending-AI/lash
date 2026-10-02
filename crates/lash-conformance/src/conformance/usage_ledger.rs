@@ -138,6 +138,125 @@ pub async fn identical_settlement_retry_is_a_no_op(f: &UsageLedgerStoreFixture) 
     assert_eq!(usage.rows[0].usage.input_tokens, 21);
 }
 
+pub async fn a_settlement_without_admission_never_invents_dispatch_attribution(
+    f: &UsageLedgerStoreFixture,
+) {
+    for accounting in [
+        RunAccounting::Complete,
+        RunAccounting::CallWithoutRecord { calls: 1 },
+    ] {
+        let s = UsageSettlement {
+            owner: owner("unadmitted-owner"),
+            effect: effect("unadmitted-effect"),
+            run: UsageRunId::mint(),
+            facts: Vec::new(),
+            accounting,
+        };
+        f.accounting.settle_usage(&s, 20).await.unwrap();
+        f.accounting.settle_usage(&s, 30).await.unwrap();
+        let runs = f
+            .accounting
+            .load_usage_run_page(&s.owner, UsageRunFilter::All, None, limit(10))
+            .await
+            .unwrap()
+            .runs;
+        let run = runs.iter().find(|run| run.run == s.run).unwrap();
+        let json = serde_json::to_value(run).unwrap();
+        assert_eq!(json.get("admission"), Some(&serde_json::Value::Null));
+        assert_eq!(json["state"]["Resolved"]["at_ms"], 20);
+        assert!(!json.as_object().unwrap().contains_key("resolved_at_ms"));
+        assert!(
+            f.accounting
+                .load_owner_usage(&s.owner)
+                .await
+                .unwrap()
+                .rows
+                .is_empty()
+        );
+    }
+}
+
+pub async fn a_run_conflict_round_trips_the_typed_fact_conflict(f: &UsageLedgerStoreFixture) {
+    let s = setup(f).await;
+    f.accounting.settle_usage(&s, 20).await.unwrap();
+    let mut changed = s.clone();
+    changed.run = UsageRunId::mint();
+    let Err(UsageAppendError::Conflict(conflict)) = f.accounting.settle_usage(&changed, 30).await
+    else {
+        panic!("expected a typed conflict");
+    };
+    f.accounting
+        .mark_usage_settlement_conflicted(&changed, &conflict, 31)
+        .await
+        .unwrap();
+    f.accounting
+        .mark_usage_settlement_conflicted(&changed, &conflict, 41)
+        .await
+        .unwrap();
+    let runs = f
+        .accounting
+        .load_usage_run_page(&s.owner, UsageRunFilter::Unresolved, None, limit(10))
+        .await
+        .unwrap()
+        .runs;
+    let run = runs.iter().find(|run| run.run == changed.run).unwrap();
+    let json = serde_json::to_value(run).unwrap();
+    assert_eq!(
+        json["state"]["Resolved"]["outcome"]["Conflicted"],
+        serde_json::json!({
+            "identity": conflict.identity,
+            "stored_payload_hash": conflict.stored_payload_hash,
+            "offered_payload_hash": conflict.offered_payload_hash,
+        })
+    );
+    assert_eq!(json["state"]["Resolved"]["at_ms"], 31);
+    let round_trip: UsageRunRecord = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(&round_trip, run);
+    assert_eq!(json.get("admission"), Some(&serde_json::Value::Null));
+}
+
+pub async fn fact_records_derive_kind_and_disposition_from_their_body(f: &UsageLedgerStoreFixture) {
+    let s = setup(f).await;
+    f.accounting.settle_usage(&s, 20).await.unwrap();
+    let correction = UsageCorrection {
+        effect: s.effect.clone(),
+        call_ordinal: 1,
+        provider_attempt: 0,
+        usage: TokenUsage {
+            input_tokens: 11,
+            ..Default::default()
+        },
+        generation_id: "recovered".into(),
+    };
+    f.accounting
+        .append_usage_corrections(&s.owner, &[correction], 30)
+        .await
+        .unwrap();
+    let records = all_facts(f, &s.owner).await;
+    assert_eq!(records.len(), 5);
+    let json = serde_json::to_value(&records).unwrap();
+    for record in json.as_array().unwrap() {
+        assert!(!record.as_object().unwrap().contains_key("disposition"));
+        assert!(!record.as_object().unwrap().contains_key("identity"));
+        match record["body"]["kind"].as_str() {
+            Some("attempt") => {
+                assert_eq!(record["body"]["run"], serde_json::to_value(&s.run).unwrap());
+                assert!(matches!(
+                    record["body"]["outcome"]["kind"].as_str(),
+                    Some("reported" | "unreported")
+                ));
+            }
+            Some("correction") => {
+                assert_eq!(record["body"]["generation_id"], "recovered");
+                assert!(!record["body"].as_object().unwrap().contains_key("run"));
+            }
+            other => panic!("invalid fact body {other:?}"),
+        }
+        let round_trip: UsageFactRecord = serde_json::from_value(record.clone()).unwrap();
+        assert_eq!(serde_json::to_value(round_trip).unwrap(), *record);
+    }
+}
+
 pub async fn conflicting_payload_is_a_typed_conflict_and_appends_nothing(
     f: &UsageLedgerStoreFixture,
 ) {
@@ -180,10 +299,7 @@ pub async fn conflicting_payload_is_a_typed_conflict_and_appends_nothing(
         .await
         .unwrap()
         .runs;
-    assert!(
-        runs.iter()
-            .any(|r| r.run == s.run && r.state == UsageRunState::Settled)
-    );
+    assert!(runs.iter().any(|r| r.run == s.run && r.state.is_settled()));
     f.accounting
         .mark_usage_settlement_conflicted(&changed, &conflict, 31)
         .await
@@ -194,11 +310,9 @@ pub async fn conflicting_payload_is_a_typed_conflict_and_appends_nothing(
         .await
         .unwrap()
         .runs;
-    assert!(
-        unresolved
-            .iter()
-            .any(|r| r.run == other && matches!(r.state, UsageRunState::Conflicted { .. }))
-    );
+    assert!(unresolved.iter().any(
+        |r| r.run == other && matches!(r.state.outcome(), Some(UsageRunOutcome::Conflicted(_)))
+    ));
     assert_eq!(all_facts(f, &s.owner).await, before);
 }
 
@@ -368,8 +482,9 @@ pub async fn admission_is_idempotent_and_retirement_fences_it(f: &UsageLedgerSto
             .await
             .unwrap()
             .runs[0]
-            .state,
-        UsageRunState::Unknown(UsageUnknownReason::OwnerRetired)
+            .state
+            .outcome(),
+        Some(&UsageRunOutcome::Unknown(UsageUnknownReason::OwnerRetired))
     );
     f.accounting.settle_usage(&s, 50).await.unwrap();
     assert_eq!(
@@ -424,8 +539,8 @@ pub async fn settlement_resolves_superseded_runs_unknown(f: &UsageLedgerStoreFix
         .unwrap();
     assert_eq!(runs.runs[0].run, r1);
     assert_eq!(
-        runs.runs[0].state,
-        UsageRunState::Unknown(UsageUnknownReason::SupersededRun)
+        runs.runs[0].state.outcome(),
+        Some(&UsageRunOutcome::Unknown(UsageUnknownReason::SupersededRun))
     );
     // Execution retirement only resolves open runs in the selected scope.
     let mut other = admission(&s.owner, &effect("other"), UsageRunId::mint(), 12);
@@ -846,7 +961,13 @@ pub async fn two_model_keys_that_share_a_wire_model_are_attributed_separately(
         .unwrap()
         .runs
         .into_iter()
-        .map(|run| (run.model_key.as_str().to_owned(), run.requested_model))
+        .map(|run| {
+            let admission = run.admission.expect("dispatch admission");
+            (
+                admission.model_key.as_str().to_owned(),
+                admission.requested_model,
+            )
+        })
         .collect::<Vec<_>>();
     runs.sort();
     assert_eq!(

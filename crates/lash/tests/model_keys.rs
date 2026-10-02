@@ -1951,7 +1951,7 @@ async fn await_settled_asks(core: &LashCore, session_id: &str, first: usize, sec
                 facts
                     .iter()
                     .filter(|fact| fact.source == source)
-                    .map(|fact| fact.run.clone())
+                    .map(|fact| fact.run().cloned())
                     .collect::<std::collections::BTreeSet<_>>()
                     .len()
             };
@@ -1962,9 +1962,7 @@ async fn await_settled_asks(core: &LashCore, session_id: &str, first: usize, sec
             if of("ask-first") == first
                 && of("ask-second") == second
                 && asks == first + second
-                && runs
-                    .iter()
-                    .all(|run| run.state == lash_core::UsageRunState::Settled)
+                && runs.iter().all(|run| run.state.is_settled())
             {
                 return;
             }

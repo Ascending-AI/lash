@@ -122,8 +122,9 @@ fn core(
                                 .await
                                 .unwrap();
                             if runs.runs.iter().any(|run| {
-                                run.requested_model == "mock-model"
-                                    && run.state == lash_core::UsageRunState::Settled
+                                run.admission.as_ref().is_some_and(|admission| {
+                                    admission.requested_model == "mock-model"
+                                }) && run.state.is_settled()
                             }) {
                                 break;
                             }
@@ -246,7 +247,7 @@ async fn charged(
         facts
             .facts
             .iter()
-            .map(|fact| &fact.identity)
+            .map(|fact| fact.identity())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
         facts.facts.len()
@@ -346,8 +347,10 @@ async fn cut_before_send(kill: bool) {
             .unwrap();
         assert_eq!(liabilities.runs.len(), 1);
         assert_eq!(
-            liabilities.runs[0].state,
-            lash_core::UsageRunState::Unknown(lash_core::UsageUnknownReason::OwnerRetired)
+            liabilities.runs[0].state.outcome(),
+            Some(&lash_core::UsageRunOutcome::Unknown(
+                lash_core::UsageUnknownReason::OwnerRetired
+            ))
         );
         assert_eq!(
             factory

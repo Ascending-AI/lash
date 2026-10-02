@@ -728,7 +728,7 @@ pub(crate) async fn assert_each_returned_attempt_once(world: &World, killed_runs
     let facts = world.facts().await;
     let identities = facts
         .iter()
-        .map(|fact| fact.identity.clone())
+        .map(|fact| fact.identity())
         .collect::<BTreeSet<_>>();
     assert_eq!(
         identities.len(),
@@ -737,7 +737,7 @@ pub(crate) async fn assert_each_returned_attempt_once(world: &World, killed_runs
     );
     let reported = facts
         .iter()
-        .filter(|fact| fact.disposition == crate::UsageReporting::Reported)
+        .filter(|fact| fact.disposition() == crate::UsageReporting::Reported)
         .count();
     assert_eq!(
         reported,

@@ -205,7 +205,8 @@ pub enum UsageUnknownReason {
 }
 
 /// The typed conflict: one identity, two payloads.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UsageFactConflict {
     pub identity: UsageFactIdentity,
     pub stored_payload_hash: String,
@@ -301,20 +302,138 @@ pub struct OwnerUsage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UsageFactRecord {
     pub seq: u64,
-    pub identity: UsageFactIdentity,
+    pub owner: RuntimeOwner,
+    pub effect: UsageEffectKey,
+    pub call_ordinal: u32,
+    pub provider_attempt: u32,
     pub llm_call_id: LlmCallId,
     pub source: String,
     pub model_key: ModelKey,
     pub requested_model: String,
     /// Provider-reported only; a correction keeps its attempt's value.
     pub served_model: Option<String>,
-    pub usage: TokenUsage,
-    pub disposition: UsageReporting, // Reported | Unreported | Reconciled
-    pub run: Option<UsageRunId>,     // None for a correction
-    pub generation_id: Option<String>,
+    pub body: UsageFactBody,
     pub recorded_at_ms: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum UsageFactBody {
+    Attempt {
+        run: UsageRunId,
+        outcome: AttemptFactOutcome,
+    },
+    Correction {
+        usage: TokenUsage,
+        generation_id: String,
+    },
+}
+impl UsageFactRecord {
+    pub fn identity(&self) -> UsageFactIdentity {
+        UsageFactIdentity {
+            owner: self.owner.clone(),
+            effect: self.effect.clone(),
+            call_ordinal: self.call_ordinal,
+            provider_attempt: self.provider_attempt,
+            kind: self.body.kind(),
+        }
+    }
+    pub fn disposition(&self) -> UsageReporting {
+        self.body.disposition()
+    }
+    pub fn run(&self) -> Option<&UsageRunId> {
+        self.body.run()
+    }
+    pub fn usage(&self) -> TokenUsage {
+        self.body.usage()
+    }
+    pub fn generation_id(&self) -> Option<&str> {
+        self.body.generation_id()
+    }
+}
+impl UsageFactBody {
+    pub fn kind(&self) -> UsageFactKind {
+        match self {
+            Self::Attempt { .. } => UsageFactKind::Attempt,
+            Self::Correction { .. } => UsageFactKind::Correction,
+        }
+    }
+    pub fn disposition(&self) -> UsageReporting {
+        match self {
+            Self::Attempt {
+                outcome: AttemptFactOutcome::Reported { .. },
+                ..
+            } => UsageReporting::Reported,
+            Self::Attempt {
+                outcome: AttemptFactOutcome::Unreported { .. },
+                ..
+            } => UsageReporting::Unreported,
+            Self::Correction { .. } => UsageReporting::Reconciled,
+        }
+    }
+    pub fn run(&self) -> Option<&UsageRunId> {
+        match self {
+            Self::Attempt { run, .. } => Some(run),
+            Self::Correction { .. } => None,
+        }
+    }
+    pub fn usage(&self) -> TokenUsage {
+        match self {
+            Self::Attempt {
+                outcome: AttemptFactOutcome::Reported { usage, .. },
+                ..
+            }
+            | Self::Correction { usage, .. } => usage.clone(),
+            Self::Attempt {
+                outcome: AttemptFactOutcome::Unreported { .. },
+                ..
+            } => TokenUsage::default(),
+        }
+    }
+    pub fn generation_id(&self) -> Option<&str> {
+        match self {
+            Self::Attempt {
+                outcome:
+                    AttemptFactOutcome::Reported { generation_id, .. }
+                    | AttemptFactOutcome::Unreported { generation_id },
+                ..
+            } => generation_id.as_deref(),
+            Self::Correction { generation_id, .. } => Some(generation_id),
+        }
+    }
+    /// Decode the SQL projection, rejecting combinations no body can represent.
+    pub fn from_stored(
+        kind: &str,
+        disposition: &str,
+        run: Option<UsageRunId>,
+        usage: TokenUsage,
+        generation_id: Option<String>,
+    ) -> Result<Self, StoreError> {
+        match (kind, disposition, run, generation_id) {
+            ("attempt", "reported", Some(run), generation_id) => Ok(Self::Attempt {
+                run,
+                outcome: AttemptFactOutcome::Reported {
+                    usage,
+                    generation_id,
+                },
+            }),
+            ("attempt", "unreported", Some(run), generation_id)
+                if usage == TokenUsage::default() =>
+            {
+                Ok(Self::Attempt {
+                    run,
+                    outcome: AttemptFactOutcome::Unreported { generation_id },
+                })
+            }
+            ("correction", "reconciled", None, Some(generation_id)) => Ok(Self::Correction {
+                usage,
+                generation_id,
+            }),
+            _ => Err(corrupt("invalid usage fact body")),
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UsageReporting {
@@ -349,23 +468,78 @@ pub struct UsageFactPage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UsageRunRecord {
     pub effect: UsageEffectKey,
     pub run: UsageRunId,
+    pub admission: Option<UsageRunDispatch>,
+    pub state: UsageRunState,
+}
+/// Dispatch evidence recorded by admission, never inferred from a settlement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageRunDispatch {
     pub execution_scope_key: String,
     pub source: String,
     pub model_key: ModelKey,
     pub requested_model: String,
     pub admitted_at_ms: u64,
-    pub state: UsageRunState,
-    pub resolved_at_ms: Option<u64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum UsageRunState {
     Open,
+    Resolved {
+        at_ms: u64,
+        outcome: UsageRunOutcome,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum UsageRunOutcome {
     Settled,
     Unknown(UsageUnknownReason),
-    Conflicted { detail: String },
+    Conflicted(UsageFactConflict),
+}
+impl UsageRunState {
+    pub fn outcome(&self) -> Option<&UsageRunOutcome> {
+        match self {
+            Self::Open => None,
+            Self::Resolved { outcome, .. } => Some(outcome),
+        }
+    }
+    pub fn is_settled(&self) -> bool {
+        matches!(
+            self,
+            Self::Resolved {
+                outcome: UsageRunOutcome::Settled,
+                ..
+            }
+        )
+    }
+    pub fn from_stored(
+        state: &str,
+        reason: Option<&str>,
+        conflict: Option<UsageFactConflict>,
+        resolved_at_ms: Option<u64>,
+    ) -> Result<Self, StoreError> {
+        match (state, reason, conflict, resolved_at_ms) {
+            ("open", None, None, None) => Ok(Self::Open),
+            ("settled", None, None, Some(at_ms)) => Ok(Self::Resolved {
+                at_ms,
+                outcome: UsageRunOutcome::Settled,
+            }),
+            ("unknown", Some(reason), None, Some(at_ms)) => Ok(Self::Resolved {
+                at_ms,
+                outcome: UsageRunOutcome::Unknown(UsageUnknownReason::from_stored(reason)?),
+            }),
+            ("conflicted", None, Some(conflict), Some(at_ms)) => Ok(Self::Resolved {
+                at_ms,
+                outcome: UsageRunOutcome::Conflicted(conflict),
+            }),
+            _ => Err(corrupt("invalid usage run resolution")),
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UsageRunFilter {
@@ -691,39 +865,21 @@ impl UsageAttemptFact {
             served_model,
             outcome,
         } = self;
-        let (usage, disposition, generation_id) = match outcome {
-            AttemptFactOutcome::Reported {
-                usage,
-                generation_id,
-            } => (
-                usage.clone(),
-                UsageReporting::Reported,
-                generation_id.clone(),
-            ),
-            AttemptFactOutcome::Unreported { generation_id } => (
-                TokenUsage::default(),
-                UsageReporting::Unreported,
-                generation_id.clone(),
-            ),
-        };
         UsageFactRecord {
             seq: 0,
-            identity: UsageFactIdentity {
-                owner: owner.clone(),
-                effect: effect.clone(),
-                call_ordinal: *call_ordinal,
-                provider_attempt: *provider_attempt,
-                kind: UsageFactKind::Attempt,
-            },
+            owner: owner.clone(),
+            effect: effect.clone(),
+            call_ordinal: *call_ordinal,
+            provider_attempt: *provider_attempt,
             llm_call_id: llm_call_id.clone(),
             source: source.clone(),
             model_key: model_key.clone(),
             requested_model: requested_model.clone(),
             served_model: served_model.clone(),
-            usage,
-            disposition,
-            run: Some(run.clone()),
-            generation_id,
+            body: UsageFactBody::Attempt {
+                run: run.clone(),
+                outcome: outcome.clone(),
+            },
             recorded_at_ms: now_ms,
         }
     }
@@ -783,6 +939,79 @@ impl UsageReporting {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stored_fact_bodies_reject_every_inconsistent_kind_disposition_and_run() {
+        for kind in ["attempt", "correction"] {
+            for disposition in ["reported", "unreported", "reconciled"] {
+                for run in [None, Some(UsageRunId::mint())] {
+                    for generation_id in [None, Some("generation".to_owned())] {
+                        let valid = matches!(
+                            (kind, disposition, run.is_some(), generation_id.is_some()),
+                            ("attempt", "reported" | "unreported", true, _)
+                                | ("correction", "reconciled", false, true)
+                        );
+                        assert_eq!(
+                            UsageFactBody::from_stored(
+                                kind,
+                                disposition,
+                                run.clone(),
+                                TokenUsage::default(),
+                                generation_id
+                            )
+                            .is_ok(),
+                            valid
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            UsageFactBody::from_stored(
+                "attempt",
+                "unreported",
+                Some(UsageRunId::mint()),
+                TokenUsage {
+                    input_tokens: 1,
+                    ..Default::default()
+                },
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn run_resolution_rejects_missing_or_extraneous_state_evidence() {
+        for state in ["open", "settled", "unknown", "conflicted"] {
+            for reason in [None, Some("execution_ended")] {
+                for resolved in [None, Some(10)] {
+                    let valid = matches!(
+                        (state, reason, resolved),
+                        ("open", None, None)
+                            | ("settled", None, Some(_))
+                            | ("unknown", Some(_), Some(_))
+                    );
+                    assert_eq!(
+                        UsageRunState::from_stored(state, reason, None, resolved).is_ok(),
+                        valid
+                    );
+                }
+            }
+        }
+        assert!(
+            serde_json::from_value::<UsageRunState>(
+                serde_json::json!({"Resolved": {"outcome": "Settled"}})
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UsageFactBody>(
+                serde_json::json!({"kind": "correction", "usage": TokenUsage::default()})
+            )
+            .is_err()
+        );
+    }
+
     fn corpus() -> Vec<(String, Vec<u8>, String)> {
         let run = UsageRunId::try_from("run:00000000000040008000000000000001".to_owned())
             .expect("run id");

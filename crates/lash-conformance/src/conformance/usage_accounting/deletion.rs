@@ -107,8 +107,10 @@ pub async fn session_delete_drains_accounting_first(tier: &UsageAccountingTier) 
         .expect("read the child's liability");
     assert_eq!(runs.runs.len(), 1);
     assert_eq!(
-        runs.runs[0].state,
-        crate::UsageRunState::Unknown(crate::UsageUnknownReason::OwnerRetired)
+        runs.runs[0].state.outcome(),
+        Some(&crate::UsageRunOutcome::Unknown(
+            crate::UsageUnknownReason::OwnerRetired
+        ))
     );
     let bought = world.invocations();
     assert_eq!(bought, 2, "one opener call and one child call");

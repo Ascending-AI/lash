@@ -636,17 +636,21 @@ table lash_usage_owner_retirements
   column retired_at_ms bigint not-null
   primary-key (owner_kind, owner_id)
 table lash_usage_runs
-  column admitted_at_ms bigint not-null
-  column conflict_detail text nullable
+  column admitted_at_ms bigint nullable
+  column conflict_call_ordinal bigint nullable
+  column conflict_fact_kind text nullable
+  column conflict_offered_payload_hash text nullable
+  column conflict_provider_attempt bigint nullable
+  column conflict_stored_payload_hash text nullable
   column effect_key text not-null
-  column execution_scope_key text not-null
-  column model_key text not-null
+  column execution_scope_key text nullable
+  column model_key text nullable
   column owner_id text not-null
   column owner_kind text not-null
-  column requested_model text not-null
+  column requested_model text nullable
   column resolved_at_ms bigint nullable
   column run_id text not-null
-  column source text not-null
+  column source text nullable
   column state text not-null
   column unknown_reason text nullable
   primary-key (owner_kind, owner_id, effect_key, run_id)
