@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 import re
+import runpy
 
 import yaml
 
@@ -21,6 +22,14 @@ import ci_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+REPOSITORY_GATE_DISCOVERY = runpy.run_path(
+    str(ROOT / "scripts/ci/repository_gate_commands.py")
+)
+
+
+def discovered_repository_self_tests() -> set[str]:
+    return set(REPOSITORY_GATE_DISCOVERY["self_test_paths"](ROOT))
+
 # `CI conclusion` is the only required check on `main`, and `evaluate_conclusion`
 # reasons over a static job map that has to agree with `ci-conclusion`'s
 # `needs:`. A job that is dropped from both -- while its definition stays in
@@ -455,6 +464,7 @@ class PathClassifierTests(unittest.TestCase):
         unknown = sorted(
             path for path in listed
             if path and ci_plan.classify_path(path).kind is ci_plan.PathKind.UNKNOWN
+            and path not in discovered_repository_self_tests()
         )
         self.assertEqual([], unknown)
 
@@ -657,6 +667,7 @@ class CiMachineryTreeTests(unittest.TestCase):
             path for path in listed
             if path and path not in ci_plan.CI_GLOBAL_PATHS
             and ci_plan.classify_path(path).kind is not ci_plan.PathKind.CI
+            and path not in discovered_repository_self_tests()
         )
         self.assertEqual(
             [], unmapped,
@@ -675,7 +686,18 @@ class CiMachineryTreeTests(unittest.TestCase):
                 path for path, families in ci_plan.ci_machinery_families(str(ROOT)).items()
                 if families is None
             }
+        # The static classifier sees filename references, including exclusion
+        # data. Discovery executes its set; exclusion data executes nothing.
+        unconsumed -= discovered_repository_self_tests()
+        unconsumed |= ci_plan.UNCONSUMED_CI_PATHS.keys() & REPOSITORY_GATE_DISCOVERY["EXCLUSIONS"].keys()
         self.assertEqual(set(ci_plan.UNCONSUMED_CI_PATHS), unconsumed)
+
+    def test_discovered_self_test_diffs_always_select_repository_gates(self) -> None:
+        # A glob is invisible to the classifier's name matcher. Its fallback
+        # can widen a run but must still execute the repository self-tests.
+        for path in sorted(discovered_repository_self_tests()):
+            with self.subTest(path=path):
+                self.assertEqual("true", ci_plan.classify([("M", path)])["tooling"])
 
     def test_the_job_split_matches_a_yaml_parse(self) -> None:
         source = CI_WORKFLOW.read_text(encoding="utf-8")

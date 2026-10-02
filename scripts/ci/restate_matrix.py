@@ -46,8 +46,8 @@ def workflow_problems(workflow: dict) -> list[str]:
     if job.get("needs") != "plan" or job.get("strategy", {}).get("fail-fast") is not False:
         problems.append("Restate jobs must depend on plan and run every matrix row after failures")
     parallel = job.get("strategy", {}).get("max-parallel", 0)
-    if not 1 <= parallel <= 3:
-        problems.append("Restate jobs must fit three service-backed slots")
+    if not 1 <= parallel <= 16:
+        problems.append("Restate jobs must use between one and sixteen independent service slots")
     steps = job.get("steps", [])
     runner = next((s for s in steps if s.get("name") == "Run registered Restate leg"), {})
     if runner.get("run") != 'python3 scripts/ci/restate_matrix.py run "$SUITE" --leg "$LEG"':

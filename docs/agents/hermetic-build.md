@@ -89,7 +89,16 @@ ignored generated inputs and toolchain files beyond the planner's Git snapshot.
 `just floor` remains an explicit broad tooling checkpoint. It combines developer
 and feature tests, Clippy, formatting, schema checks and the CI repository-script
 inventory. The locally excluded launcher-reset gate is named in its result table;
-`scripts/ci/repository-gates.sh --all` includes it. `just schema-check` selects
+`scripts/ci/repository-gates.sh --all` includes it. CI and this local entrypoint
+discover `test_*.py` and `test-*.sh` in `scripts`, `tools/buck2` and
+`tools/buck2/tests`. `scripts/ci/repository_gate_commands.py` names production
+modules and live-service scripts excluded from discovery, with a reason for
+each. The workflow heredoc retains checks with other filename conventions.
+It also names the feature-coverage self-test because that checker requires a
+literal witness; both runners deduplicate it against discovery.
+New self-tests need no workflow edit; tooling edits run this discovered suite.
+The static CI classifier can conservatively widen a discovered self-test diff
+when no consumer names the file literally. `just schema-check` selects
 store-schema gates. Use one build request at a time per fork and independent
 forks for concurrent agents.
 
@@ -612,8 +621,12 @@ for other live gates, with identities and ports derived from `KILN_GATE_ID`.
 Main's hourly full-profile dispatch derives its Restate suite/leg matrix from
 `scripts/restate-suites.toml`. Registering a suite adds live and replay jobs.
 `python3 scripts/ci/restate_matrix.py check` verifies the producer, matrix,
-runner and conclusion wiring. Jobs run at most three at once, each with its own
-PostgreSQL service. A registry `ci_driver` retains specialized fixture cleanup.
+runner and conclusion wiring. Jobs run at most sixteen at once, each with its
+own runner, PostgreSQL service and Restate ports. The original three-job cap
+had no shared service constraint. With 109–134 job-minutes across 48 legs,
+sixteen slots imply about 6.8–8.4 minutes at even load instead of 36–45 minutes.
+The existing 26–29 minute jobs should then set the full-run critical path.
+A registry `ci_driver` retains specialized fixture cleanup.
 Run the same entrypoint locally through a gate:
 
 ```sh

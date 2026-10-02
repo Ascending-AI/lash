@@ -3,7 +3,7 @@
 # wall time.
 # Launcher self-tests own isolated namespaces. Every command runs to completion,
 # even after another fails, and its output is printed as one block.
-# Usage: run-gate-commands.sh [--jobs N] < commands
+# Usage: run-gate-commands.sh [--jobs N] [--discover] < extra commands
 set -uo pipefail
 
 # Self-tests must not write bytecode into the checkout: a sibling command
@@ -11,8 +11,13 @@ set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
 jobs_limit=""
+discover=0
 while (($#)); do
   case "$1" in
+    --discover)
+      discover=1
+      shift
+      ;;
     --jobs)
       if (($# < 2)); then
         printf 'run-gate-commands: --jobs requires a value\n' >&2
@@ -22,7 +27,7 @@ while (($#)); do
       shift 2
       ;;
     *)
-      printf 'usage: %s [--jobs N] < commands\n' "$0" >&2
+      printf 'usage: %s [--jobs N] [--discover] < extra commands\n' "$0" >&2
       exit 2
       ;;
   esac
@@ -47,6 +52,21 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   commands+=("$line")
 
 done
+
+if ((discover)); then
+  repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  discovered="$(python3 "$repo/scripts/ci/repository_gate_commands.py")" || exit $?
+  declare -A queued=()
+  for command in "${commands[@]}"; do
+    queued["$command"]=1
+  done
+  while IFS= read -r line; do
+    if [[ -n "$line" && -z "${queued["$line"]+present}" ]]; then
+      commands+=("$line")
+      queued["$line"]=1
+    fi
+  done <<< "$discovered"
+fi
 
 if ((${#commands[@]} == 0)); then
   printf 'run-gate-commands: no commands on stdin\n' >&2

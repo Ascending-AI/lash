@@ -39,6 +39,24 @@ class MatrixTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertEqual([], restate_matrix.workflow_problems(workflow))
 
+    def test_independent_service_jobs_allow_sixteen_slots_and_reject_overcommit(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        strategy = workflow["jobs"]["restate-suites"]["strategy"]
+        self.assertEqual(strategy["max-parallel"], 16)
+        for parallel in (1, 3, 16):
+            with self.subTest(parallel=parallel):
+                strategy["max-parallel"] = parallel
+                self.assertEqual([], restate_matrix.workflow_problems(workflow))
+        for parallel in (0, 17):
+            with self.subTest(parallel=parallel):
+                strategy["max-parallel"] = parallel
+                self.assertIn(
+                    "Restate jobs must use between one and sixteen independent service slots",
+                    restate_matrix.workflow_problems(workflow),
+                )
+
     def test_registering_a_suite_adds_both_jobs_without_other_edits(self) -> None:
         with mock.patch.object(restate_matrix, "load_registry", return_value={"new-suite": {}}):
             self.assertEqual(

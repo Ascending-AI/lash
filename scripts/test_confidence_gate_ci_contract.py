@@ -267,28 +267,19 @@ def shell_int_constant(script: str, name: str) -> int:
     return int(match.group(1))
 
 
-# Buck2 tooling keeps production modules whose names start with `test_` beside
-# its self-tests. Each is named here, so a new `tools/buck2/test_*.py` is a
-# self-test CI must run unless it is deliberately added to this set.
-BUCK2_TEST_NAMED_TOOLS = frozenset(
-    {
-        "tools/buck2/test_runner.py",
-        "tools/buck2/test_selection.py",
-        "tools/buck2/test_shard.py",
-        "tools/buck2/test_timeout.py",
-    }
+# Use CI's executable discovery while checking its coverage independently.
+REPOSITORY_GATE_DISCOVERY = runpy.run_path(
+    str(ROOT / "scripts/ci/repository_gate_commands.py")
 )
 SELF_TEST_DIRECTORIES = ("scripts", "tools/buck2", "tools/buck2/tests")
+BUCK2_TEST_NAMED_TOOLS = frozenset(
+    path for path in REPOSITORY_GATE_DISCOVERY["EXCLUSIONS"]
+    if path.startswith("tools/buck2/")
+)
 
 
 def discovered_self_tests() -> list[str]:
-    """Every Python self-test, as the repository-relative path CI must run."""
-    return sorted(
-        path.relative_to(ROOT).as_posix()
-        for directory in SELF_TEST_DIRECTORIES
-        for path in (ROOT / directory).glob("test_*.py")
-        if path.relative_to(ROOT).as_posix() not in BUCK2_TEST_NAMED_TOOLS
-    )
+    return REPOSITORY_GATE_DISCOVERY["self_test_paths"](ROOT)
 
 
 def workflow_job_block(workflow: str, job_id: str) -> str:
@@ -1539,36 +1530,87 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("retryable 429 classification", google["surviving_coverage"])
 
     def test_every_script_self_test_is_run_by_ci(self) -> None:
-        # The self-test list is enumerated by hand, so a new gate's own test can
-        # be written, pass locally, and never run again — which is exactly what
-        # happened to the judged-runbook matrix test: the parity claim rested on
-        # a gate CI did not execute. Discovering the files makes forgetting one
-        # a red test rather than a silent hole.
-        # The Buck2 tooling suites are held to the same rule: they went unrun
-        # after the migration, and `test_clippy_policy.py` carried stale counts
-        # until someone ran it by hand.
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        discovered = discovered_self_tests()
-        for directory in SELF_TEST_DIRECTORIES:
-            with self.subTest(directory=directory):
-                self.assertTrue(
-                    any(
-                        pathlib.PurePosixPath(path).parent.as_posix() == directory
-                        for path in discovered
-                    ),
-                    f"the self-test discovery found nothing in {directory}",
-                )
-        self.assertGreater(len(discovered), 5, "the self-test discovery found nothing")
-        missing = [
-            path
-            for path in discovered
-            if not re.search(rf"python3 {re.escape(path)}(?!\S)", workflow)
-        ]
+        repo_gates = workflow_job_block(workflow, "repo-gates")
+        script_step = workflow_step_block(repo_gates, "Test repository scripts")
+        self.assertIn("run-gate-commands.sh --jobs 4 --discover <<'GATES'", script_step)
+        runner = (ROOT / "scripts/ci/run-gate-commands.sh").read_text()
+        local = (ROOT / "scripts/ci/repository-gates.sh").read_text()
+        for entrypoint in (runner, local):
+            self.assertIn('python3 "$repo/scripts/ci/repository_gate_commands.py"', entrypoint)
+        candidates = {
+            path.relative_to(ROOT).as_posix()
+            for directory in SELF_TEST_DIRECTORIES
+            for pattern in ("test_*.py", "test-*.sh")
+            for path in (ROOT / directory).glob(pattern)
+            if path.is_file()
+        }
+        exclusions = REPOSITORY_GATE_DISCOVERY["EXCLUSIONS"]
+        self.assertEqual(set(discovered_self_tests()), candidates - exclusions.keys())
+        for path, reason in exclusions.items():
+            with self.subTest(exclusion=path):
+                self.assertIn(path, candidates, "stale exclusion")
+                self.assertTrue(reason.strip(), "every exclusion needs a reason")
         self.assertEqual(
-            missing,
-            [],
-            f"these self-tests exist but CI never runs them: {missing}",
+            set(exclusions) - BUCK2_TEST_NAMED_TOOLS,
+            {"scripts/test-gate-worktree-concurrency.sh", "scripts/test-mcp-catalog.sh",
+             "scripts/test-restate-workers-trace-scrub.sh"},
         )
+        self.assertGreater(len(candidates), 5, "discovery found nothing")
+
+    def test_new_self_tests_execute_without_a_workflow_edit(self) -> None:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            for directory in SELF_TEST_DIRECTORIES:
+                (root / directory).mkdir(parents=True, exist_ok=True)
+            (root / "scripts/ci").mkdir()
+            for name in ("repository_gate_commands.py", "run-gate-commands.sh", "repository-gates.sh"):
+                shutil.copyfile(ROOT / "scripts/ci" / name, root / "scripts/ci" / name)
+            (root / ".github/workflows").mkdir(parents=True)
+            (root / ".github/workflows/ci.yml").write_text(
+                "bash scripts/ci/run-gate-commands.sh --jobs 4 --discover <<'GATES'\n"
+                "python3 scripts/check_fixture.py\npython3 scripts/test_foo.py\nGATES\n"
+            )
+            (root / "scripts/check_fixture.py").write_text("print('fixture check passed')\n")
+            new_tests = [f"{directory}/test_foo.py" for directory in SELF_TEST_DIRECTORIES]
+            new_tests += ["scripts/test-foo.sh", "scripts/test-agent-workbench-dev-reset.sh"]
+            for path in new_tests:
+                (root / path).write_text(
+                    f"print('{path} executed')\n" if path.endswith(".py")
+                    else f"printf '%s\\n' '{path} executed'\n"
+                )
+            # Running a production tool by mistake must fail this fixture.
+            (root / "tools/buck2/test_runner.py").write_text("raise SystemExit(99)\n")
+            for arguments, stdin, expected in (
+                (["scripts/ci/run-gate-commands.sh", "--jobs", "4", "--discover"],
+                 "python3 scripts/check_fixture.py\npython3 scripts/test_foo.py\n", new_tests),
+                (["scripts/ci/repository-gates.sh"], "", new_tests[:-1]),
+                (["scripts/ci/repository-gates.sh", "--all"], "", new_tests),
+            ):
+                with self.subTest(entrypoint=arguments):
+                    result = subprocess.run(
+                        ["bash", *arguments], cwd=root, input=stdin, capture_output=True,
+                        text=True, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("fixture check passed", result.stdout)
+                    for path in expected:
+                        self.assertIn(f"{path} executed", result.stdout)
+                    self.assertEqual(result.stdout.count("scripts/test_foo.py executed"), 1)
+                    if "--all" not in arguments and "--discover" not in arguments:
+                        self.assertNotIn(f"{new_tests[-1]} executed", result.stdout)
+                        self.assertIn("skipped locally", result.stdout)
+            (root / "scripts/test_foo.py").write_text("raise SystemExit(7)\n")
+            failed = subprocess.run(
+                ["bash", "scripts/ci/run-gate-commands.sh", "--jobs", "4", "--discover"],
+                cwd=root, input="", capture_output=True, text=True, timeout=30,
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("python3 scripts/test_foo.py", failed.stderr)
+            # A failing discovered test does not suppress the other tests.
+            self.assertIn("tools/buck2/tests/test_foo.py executed", failed.stdout)
 
     def test_test_named_buck2_tools_are_not_self_tests(self) -> None:
         # The exemption is for production modules only. A stale entry, or a
@@ -3582,7 +3624,7 @@ derive_mutation_jobs() {{
             "repo-gates": (
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
-                "bash scripts/check-loadtest-chart.sh && python3 scripts/test_loadtest_topology.py",
+                "bash scripts/check-loadtest-chart.sh",
             ),
             "feature-lanes": (
                 "//:feature_lane_compile",
@@ -3595,29 +3637,17 @@ derive_mutation_jobs() {{
             block = workflow_job_block(workflow, job_id)
             for command in commands:
                 with self.subTest(job=job_id, command=command):
-                    self.assertIn(command, block)
+                    executable = block
+                    if job_id == "repo-gates":
+                        executable += "\n" + "\n".join(REPOSITORY_GATE_DISCOVERY["commands"](ROOT))
+                    self.assertIn(command, executable)
 
-        # The hand-enumerated script self-tests moved as a block; the discovery
-        # test above proves CI runs every one, this proves they all live in the
-        # job that took them.
+        # The owning step enables discovery after toolchain provisioning.
         repo_gates = workflow_job_block(workflow, "repo-gates")
-        discovered = discovered_self_tests()
-        self.assertGreater(len(discovered), 5, "the self-test discovery found nothing")
-        for path in discovered:
-            with self.subTest(self_test=path):
-                self.assertTrue(
-                    re.search(rf"python3 {re.escape(path)}(?!\S)", repo_gates),
-                    f"{path} does not run in the repo-gates job",
-                )
-
-        # The Buck2 tooling suites read the pinned toolchain and Cargo, so each
-        # runs after the step that provisions both; before it, the compiler
-        # fixture probes have no rustc to drive.
+        script_step = workflow_step_block(repo_gates, "Test repository scripts")
+        self.assertIn("--discover", script_step)
         provisioned = repo_gates.index("      - name: Provision pinned Buck2 tools")
-        for path in discovered:
-            if path.startswith("tools/buck2/"):
-                with self.subTest(self_test=path):
-                    self.assertLess(provisioned, repo_gates.find(f"python3 {path}"))
+        self.assertLess(provisioned, repo_gates.index("      - name: Test repository scripts"))
 
         # The `dependency-boundary` leg reads the resolved graph and compiles
         # nothing, so it moved to the Python-speed gates rather than onto the
