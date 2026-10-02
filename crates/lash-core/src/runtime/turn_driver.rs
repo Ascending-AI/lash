@@ -111,6 +111,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// effect body's emissions key under that effect's invocation replay key
     /// instead.
     pub(super) turn_observations: crate::engine::ObservationCursor,
+    /// Where this driver stands when it observes: the turn's drive, which
+    /// may emit once a step body of this attempt has really run, or, on the
+    /// copy a recorded step's body runs on, that body's live step.
+    pub(super) trace: crate::trace::TraceStanding,
     /// The turn's part in its run's segment boundaries (FIG-4739).
     pub(super) segment: TurnSegment,
 }

@@ -1,5 +1,5 @@
 use crate::SessionId;
-use lash_trace::{TraceContext, TraceLevel, TraceSink};
+use lash_trace::{TraceContext, TraceSink};
 use std::sync::Arc;
 
 use super::process::{
@@ -24,8 +24,9 @@ pub struct RuntimeHostConfig {
     pub process_engines: ProcessEngineRegistry,
     pub providers: RuntimeProviderConfig,
     pub control: RuntimeControlConfig,
-    pub tracing: RuntimeTracingConfig,
-    process_observation_sink: Option<Arc<dyn TraceSink>>,
+    /// The runtime's one trace handle: every engine path and every plugin
+    /// emits through it.
+    pub tracing: crate::trace::TraceRuntime,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     /// Injected time source. Durable timestamps and timeout/backoff logic read
     /// this rather than the OS clock directly, so replay is reproducible and
@@ -166,13 +167,6 @@ impl RuntimeControlConfig {
     }
 }
 
-#[derive(Clone)]
-pub struct RuntimeTracingConfig {
-    pub trace_sink: Option<Arc<dyn TraceSink>>,
-    pub trace_level: TraceLevel,
-    pub trace_context: TraceContext,
-}
-
 impl RuntimeHostConfig {
     /// A config over `backend`: its effect host, attachment port,
     /// process-exec-env store and clock, with the commit budget and queued-work
@@ -239,12 +233,7 @@ impl RuntimeHostConfig {
                 scope_close: Arc::new(crate::engine::NoScopeClose),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
-            tracing: RuntimeTracingConfig {
-                trace_sink: None,
-                trace_level: TraceLevel::Standard,
-                trace_context: TraceContext::default(),
-            },
-            process_observation_sink: None,
+            tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock,
         }
@@ -304,6 +293,7 @@ impl RuntimeHostConfig {
         if let Some(tool_children) = &self.control.tool_children {
             tool_children.with_clock(Arc::clone(&clock));
         }
+        self.tracing = self.tracing.with_clock(Arc::clone(&clock));
         self.clock = clock;
         self
     }
@@ -421,11 +411,11 @@ impl RuntimeHostConfig {
 /// reads from and writes to the config it installs into.
 impl RuntimeHostConfig {
     pub(crate) fn process_engine_trace_context(&self) -> &TraceContext {
-        &self.tracing.trace_context
+        self.tracing.base_context()
     }
 
     pub(crate) fn process_observation_sink(&self) -> Option<Arc<dyn TraceSink>> {
-        self.process_observation_sink.clone()
+        self.tracing.emitter().product_observer().cloned()
     }
 
     pub(crate) fn install_contributed_process_engine(
@@ -450,7 +440,7 @@ impl RuntimeHostConfig {
 
 impl RuntimeHostConfig {
     pub fn with_process_observation_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
-        self.process_observation_sink = Some(sink);
+        self.tracing = self.tracing.with_product_observer(sink);
         self
     }
     /// Replace the lease timing capability governing every durable lease and

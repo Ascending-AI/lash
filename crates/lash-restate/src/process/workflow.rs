@@ -236,8 +236,7 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     /// completes it on the stable root, and a generation lane admits only
     /// its own generation's inputs.
     route: ServiceRoute,
-    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
-    trace_context: lash_trace::TraceContext,
+    tracing: Option<lash_core::trace::TraceRuntime>,
 }
 
 /// The parent-end delivery of a test workflow with no ingress: the registry
@@ -298,8 +297,7 @@ impl<R> Clone for LashProcessWorkflowImpl<R> {
             authority_id: self.authority_id.clone(),
             build_generation: self.build_generation.clone(),
             route: self.route.clone(),
-            trace_sink: self.trace_sink.clone(),
-            trace_context: self.trace_context.clone(),
+            tracing: self.tracing.clone(),
         }
     }
 }
@@ -385,8 +383,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             authority_id,
             build_generation,
             route: namespace.stable(LashService::ProcessWorkflow),
-            trace_sink: None,
-            trace_context: lash_trace::TraceContext::default(),
+            tracing: None,
         }
     }
 
@@ -398,16 +395,11 @@ impl<R> LashProcessWorkflowImpl<R> {
         workflow
     }
 
-    /// Attach the host's live trace observer to every process-segment
-    /// controller created by this workflow.
+    /// Attach the host's trace handle to every process-segment controller
+    /// created by this workflow.
     #[cfg(test)]
-    pub(crate) fn with_trace_sink(
-        mut self,
-        sink: Arc<dyn lash_trace::TraceSink>,
-        context: lash_trace::TraceContext,
-    ) -> Self {
-        self.trace_sink = Some(sink);
-        self.trace_context = context;
+    pub(crate) fn with_tracing(mut self, tracing: lash_core::trace::TraceRuntime) -> Self {
+        self.tracing = Some(tracing);
         self
     }
 
@@ -1300,15 +1292,9 @@ where
         let controller =
             RestateRuntimeEffectController::with_options(ctx, authority, generation, options)
                 .in_namespace(self.route.namespace().clone());
-        let trace = self
-            .trace_sink
-            .as_ref()
-            .map(|sink| (Arc::clone(sink), self.trace_context.clone()))
-            .or_else(|| self.runner.trace());
-        let controller = if let Some((sink, context)) = trace {
-            controller.with_trace_sink_and_context(sink, context)
-        } else {
-            controller
+        let controller = match self.tracing.clone().or_else(|| self.runner.tracing()) {
+            Some(tracing) => controller.with_tracing(tracing),
+            None => controller,
         };
         let end = loop {
             let scoped_effect_controller = match controller.process_segment_controller(&started) {

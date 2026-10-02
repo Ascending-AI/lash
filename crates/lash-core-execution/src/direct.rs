@@ -252,19 +252,22 @@ impl DirectLlmClient {
         llm_request.stream_events =
             transport_stream_events_for_direct(&self.provider, llm_request.stream_events.take());
         let request_model = llm_request.model.wire_model().to_string();
-        let llm_call_id = if self.trace_sink.is_some() {
+        // A host-owned call made outside any journal: nothing replays it, so
+        // the call is its own live attempt, and it belongs to no admitted
+        // scope.
+        let traced = self.trace_sink.as_ref().map(|sink| {
+            let standing = crate::trace::TraceRuntime::new(Arc::clone(&self.clock))
+                .with_trace_sink(Arc::clone(sink))
+                .with_base_context(self.trace_context.clone())
+                .unreplayed(None);
             let id = uuid::Uuid::new_v4().to_string();
             crate::runtime::effect::emit_llm_trace_started(
-                &self.trace_sink,
-                &self.trace_context,
+                &standing,
                 TraceContext::default().for_llm_call(id.clone()),
                 &llm_request,
-                self.clock.as_ref(),
             );
-            Some(id)
-        } else {
-            None
-        };
+            (standing, id)
+        });
         // No lash execution owns this call: the host that made it owns its
         // billing, and lash keeps no ledger row for it (ADR 0125).
         match self
@@ -287,48 +290,42 @@ impl DirectLlmClient {
                         source,
                         result: Box::new(result),
                     };
-                    if let Some(llm_call_id) = llm_call_id {
+                    if let Some((standing, llm_call_id)) = traced {
                         let call_record = match &error {
                             DirectLlmError::InvalidResponse { result, .. } => &result.llm_call,
                             _ => unreachable!("constructed InvalidResponse above"),
                         };
                         crate::runtime::effect::emit_llm_trace_failed(
-                            &self.trace_sink,
-                            &self.trace_context,
+                            &standing,
                             TraceContext::default().for_llm_call(llm_call_id),
                             crate::runtime::effect::LlmTraceFailure::invalid_structured_output(),
                             None,
                             Some(call_record),
-                            self.clock.as_ref(),
                         );
                     }
                     return Err(error);
                 }
-                if let Some(llm_call_id) = llm_call_id {
+                if let Some((standing, llm_call_id)) = traced {
                     crate::runtime::effect::emit_llm_trace_completed(
-                        &self.trace_sink,
-                        &self.trace_context,
+                        &standing,
                         TraceContext::default().for_llm_call(llm_call_id),
                         &result.response,
                         &request_model,
                         0,
                         None,
                         Some(&result.llm_call),
-                        self.clock.as_ref(),
                     );
                 }
                 Ok(result)
             }
             Err(error) => {
-                if let Some(llm_call_id) = llm_call_id {
+                if let Some((standing, llm_call_id)) = traced {
                     crate::runtime::effect::emit_llm_trace_failed(
-                        &self.trace_sink,
-                        &self.trace_context,
+                        &standing,
                         TraceContext::default().for_llm_call(llm_call_id),
                         crate::runtime::effect::LlmTraceFailure::from(&error.error),
                         None,
                         Some(&error.call_record),
-                        self.clock.as_ref(),
                     );
                 }
                 Err(DirectLlmError::from(Box::new(error.error)))

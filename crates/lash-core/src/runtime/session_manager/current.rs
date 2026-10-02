@@ -183,12 +183,13 @@ impl CurrentOwnerCapability {
             Some(session) => context.for_session(session.session_id.clone()),
             None => context,
         };
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            context,
-            event,
-            self.host.core.clock.as_ref(),
-        );
+        // A plugin's own trace event. The plugin contract does not yet hand
+        // a plugin the permit of the body it runs in, so the event is taken
+        // as the plugin's live work wherever it was made.
+        self.host
+            .core
+            .tracing
+            .unreplayed(None)
+            .observe(|| (context, event));
     }
 }

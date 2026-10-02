@@ -268,6 +268,8 @@ where
         let live = local_executor.served_only().map(super::LiveFrontier::new);
         let live_body = live.clone();
         let live_give_up = live.clone();
+        let run_trace =
+            self.journaled_run_trace(invocation, effect_kind, local_executor.step_issue());
         let body = async move {
             if let Some(live) = &live_body {
                 return lash_core::RecordedEffectExecution {
@@ -277,7 +279,18 @@ where
                     attempt_fault: None,
                 };
             }
-            execute_restate_journaled_effect(envelope, local_executor).await
+            // This is the body the journal runs once: the run observes its
+            // own start and settlement here, never around the journal entry.
+            let run_trace = run_trace.map(super::JournaledRunTrace::started);
+            let executed = execute_restate_journaled_effect(envelope, local_executor).await;
+            if let Some(run_trace) = run_trace {
+                run_trace.settled(
+                    executed.outcome.is_ok()
+                        && executed.admission_fault.is_none()
+                        && executed.attempt_fault.is_none(),
+                );
+            }
+            executed
         };
         let run = async move {
             if engine_faults == EngineFaults::Recorded && !spending {

@@ -75,16 +75,17 @@ pub fn dispatch_attempt_may_defer(
 }
 
 /// `RuntimeExecutionTracing::emit_tool_call_completed`: the trace a completed
-/// tool call emits, which the retry-trace law reads back.
+/// tool call emits, which the retry-trace law reads back. The law calls it
+/// outside any journal, so the call is its own live attempt.
 pub fn emit_tool_call_completed(
     tracing: &crate::session::RuntimeExecutionTracing,
+    standing: &crate::trace::TraceStanding,
     record: &crate::ToolCallRecord,
     attempts: &[lash_trace::TraceRetryAttempt],
     issuing_node_id: Option<&str>,
     duration_ms: u64,
-    clock: &dyn crate::Clock,
 ) {
-    tracing.emit_tool_call_completed(record, attempts, issuing_node_id, duration_ms, clock);
+    tracing.emit_tool_call_completed(standing, record, attempts, issuing_node_id, duration_ms);
 }
 
 /// The digest-only start registration after its execution holds the environment.

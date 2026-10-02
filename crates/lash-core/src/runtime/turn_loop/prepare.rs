@@ -174,46 +174,55 @@ impl LashRuntime {
             .trace_turn_id
             .clone()
             .expect("turn id is bound from the execution scope before normalization");
-        if self.host.core.tracing.trace_sink.is_some() {
-            let mut trace_metadata = std::collections::BTreeMap::new();
-            trace_metadata.insert(
-                "input_item_count".to_string(),
-                serde_json::json!(normalized.len()),
-            );
-            // The config this physical turn runs under (FIG-3600 S6): the
-            // root's recorded config, adopted on resident state at the
-            // funnel's `ResolveTurnConfig` step.
-            trace_metadata.insert(
-                "profile_key".to_string(),
-                serde_json::json!(
-                    self.state
-                        .policy
-                        .model
-                        .as_ref()
-                        .map(|model| model.key().as_str())
-                ),
-            );
-            trace_metadata.insert(
-                "model".to_string(),
-                serde_json::json!(self.state.policy.wire_model()),
-            );
-            trace_metadata.insert(
-                "config_revision".to_string(),
-                serde_json::json!(self.state.config_revision),
-            );
-            crate::trace::emit_trace(
-                &self.host.core.tracing.trace_sink,
-                &self.host.core.tracing.trace_context,
-                lash_trace::TraceContext::default()
-                    .for_session(self.state.session_id.clone())
-                    .for_turn_index(turn_index)
-                    .for_turn(trace_turn_id.clone()),
-                lash_trace::TraceEvent::TurnStarted {
-                    metadata: trace_metadata,
-                },
-                self.host.core.clock.as_ref(),
-            );
-        }
+        // A drive that is replaying its journal reconstructs the turn's start
+        // and reports nothing. No committed boundary record reports the start
+        // as new yet, so it is observed as the work of the attempt that first
+        // reaches it rather than as a logical transition.
+        self.host
+            .core
+            .tracing
+            .turn_drive(
+                &self.state.session_id,
+                &trace_turn_id,
+                &scoped_effect_controller,
+            )
+            .observe(|| {
+                let mut trace_metadata = std::collections::BTreeMap::new();
+                trace_metadata.insert(
+                    "input_item_count".to_string(),
+                    serde_json::json!(normalized.len()),
+                );
+                // The config this physical turn runs under (FIG-3600 S6): the
+                // root's recorded config, adopted on resident state at the
+                // funnel's `ResolveTurnConfig` step.
+                trace_metadata.insert(
+                    "profile_key".to_string(),
+                    serde_json::json!(
+                        self.state
+                            .policy
+                            .model
+                            .as_ref()
+                            .map(|model| model.key().as_str())
+                    ),
+                );
+                trace_metadata.insert(
+                    "model".to_string(),
+                    serde_json::json!(self.state.policy.wire_model()),
+                );
+                trace_metadata.insert(
+                    "config_revision".to_string(),
+                    serde_json::json!(self.state.config_revision),
+                );
+                (
+                    lash_trace::TraceContext::default()
+                        .for_session(self.state.session_id.clone())
+                        .for_turn_index(turn_index)
+                        .for_turn(trace_turn_id.clone()),
+                    lash_trace::TraceEvent::TurnStarted {
+                        metadata: trace_metadata,
+                    },
+                )
+            });
 
         let mut turn_delta = Vec::new();
         let initial_turn_causes: Vec<_> = admissions

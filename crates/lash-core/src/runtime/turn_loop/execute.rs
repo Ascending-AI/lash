@@ -522,6 +522,11 @@ impl LashRuntime {
                 &trace_turn_id,
                 "drive",
             ),
+            trace: self.host.core.tracing.turn_drive(
+                &self.state.session_id,
+                &trace_turn_id,
+                &scoped_effect_controller,
+            ),
             segment,
         });
         let protocol_run_offset = 0;

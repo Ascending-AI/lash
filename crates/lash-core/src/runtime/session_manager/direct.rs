@@ -283,10 +283,9 @@ impl DirectCompletionCapability {
         } = plan;
         let tracing = &current.host.core.tracing;
         let replay_trace = crate::RuntimeEffectReplayTrace::for_divergence(
-            tracing.trace_sink.as_ref(),
-            tracing.trace_context.clone(),
+            tracing,
+            crate::trace::effect_trace_scope(&envelope.invocation, tracing.clock().timestamp_ms()),
             crate::trace::trace_context_from_effect_invocation(&envelope.invocation),
-            Arc::clone(&current.host.core.clock),
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::direct(
             binding,
@@ -296,6 +295,7 @@ impl DirectCompletionCapability {
                 accounting: current.host.core.usage_accounting(),
                 owner: current.runtime_owner(),
             },
+            tracing.clone(),
             replay_trace,
         );
         let outcome = match context.position {
@@ -311,8 +311,7 @@ impl DirectCompletionCapability {
                     .await?
             }
         };
-        super::direct_outcome::apply_direct_outcome(current, &request, caused_by.as_ref(), outcome)
-            .await
+        super::direct_outcome::apply_direct_outcome(outcome)
     }
 
     pub(in crate::runtime::session_manager) async fn invoke_direct_completion(

@@ -130,27 +130,26 @@ impl RuntimeTurnDriver<'_> {
     }
 
     fn trace_prompt_built(&self, protocol_iteration: usize, system_prompt: &str) {
-        if self.host.core.tracing.trace_sink.is_none() {
+        if !self.trace.is_observed() {
             return;
         }
         let prompt_hash = lash_trace::sha256_hex(system_prompt.as_bytes());
         let prompt_chars = system_prompt.chars().count();
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            self.trace_context(protocol_iteration),
-            lash_trace::TraceEvent::PromptBuilt {
-                prompt_hash: prompt_hash.clone(),
-                prompt_chars,
-                components: vec![lash_trace::TracePromptComponent {
-                    id: "system_prompt".to_string(),
-                    kind: "rendered_prompt".to_string(),
-                    hash: prompt_hash,
-                    chars: Some(prompt_chars),
-                }],
-            },
-            self.host.core.clock.as_ref(),
-        );
+        self.trace.observe(|| {
+            (
+                self.trace_context(protocol_iteration),
+                lash_trace::TraceEvent::PromptBuilt {
+                    prompt_hash: prompt_hash.clone(),
+                    prompt_chars,
+                    components: vec![lash_trace::TracePromptComponent {
+                        id: "system_prompt".to_string(),
+                        kind: "rendered_prompt".to_string(),
+                        hash: prompt_hash,
+                        chars: Some(prompt_chars),
+                    }],
+                },
+            )
+        });
     }
 
     /// The projector inputs derived from recorded turn state.
@@ -199,7 +198,7 @@ impl RuntimeTurnDriver<'_> {
     }
 
     pub(super) fn trace_before_llm_call(&mut self, machine: &TurnMachine, request: &LlmRequest) {
-        if self.host.core.tracing.trace_sink.is_some() {
+        if self.trace.is_observed() {
             let tool_fingerprints = self.session.composition_tool_fingerprints(&request.tools);
             let fingerprint =
                 crate::trace::trace_composition_key(request, tool_fingerprints.as_slice());
@@ -208,14 +207,13 @@ impl RuntimeTurnDriver<'_> {
                 .record_composition_trace_fingerprint(fingerprint)
             {
                 let snapshot = crate::trace::trace_composition_snapshot(request, fingerprint);
-                self.emit_trace(
-                    machine.protocol_iteration(),
+                self.emit_trace(machine.protocol_iteration(), || {
                     lash_trace::TraceEvent::CompositionChanged {
                         fingerprint: snapshot.fingerprint,
                         rendered_system_prompt: snapshot.rendered_system_prompt,
                         tool_schemas: snapshot.tool_schemas,
-                    },
-                );
+                    }
+                });
             }
         }
     }

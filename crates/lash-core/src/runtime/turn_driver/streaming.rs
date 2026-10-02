@@ -232,16 +232,14 @@ impl RuntimeTurnDriver<'_> {
             }
         };
         let request_model = request.model.wire_model().to_string();
-        let trace_enabled = self.host.core.tracing.trace_sink.is_some();
+        let trace_enabled = self.trace.is_observed();
         let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration, &invocation));
         if let Some(llm_call_id) = llm_call_id.as_ref() {
             crate::runtime::effect::emit_llm_trace_started(
-                &self.host.core.tracing.trace_sink,
-                &self.host.core.tracing.trace_context,
+                &self.trace,
                 crate::trace::trace_context_from_invocation(&invocation)
                     .for_llm_call(llm_call_id.clone()),
                 &request,
-                self.host.core.clock.as_ref(),
             );
         }
         let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();
@@ -658,8 +656,7 @@ impl RuntimeTurnDriver<'_> {
             match &result {
                 Ok(response) => {
                     crate::runtime::effect::emit_llm_trace_completed(
-                        &self.host.core.tracing.trace_sink,
-                        &self.host.core.tracing.trace_context,
+                        &self.trace,
                         crate::trace::trace_context_from_invocation(&invocation)
                             .for_llm_call(llm_call_id),
                         response,
@@ -667,19 +664,16 @@ impl RuntimeTurnDriver<'_> {
                         debug.elapsed_ms(self.host.core.clock.as_ref()),
                         Some(stream_summary.clone()),
                         call_record.as_ref(),
-                        self.host.core.clock.as_ref(),
                     );
                 }
                 Err(error) => {
                     crate::runtime::effect::emit_llm_trace_failed(
-                        &self.host.core.tracing.trace_sink,
-                        &self.host.core.tracing.trace_context,
+                        &self.trace,
                         crate::trace::trace_context_from_invocation(&invocation)
                             .for_llm_call(llm_call_id),
                         crate::runtime::effect::LlmTraceFailure::from(error),
                         Some(stream_summary.clone()),
                         call_record.as_ref(),
-                        self.host.core.clock.as_ref(),
                     );
                 }
             }
@@ -736,7 +730,7 @@ impl RuntimeTurnDriver<'_> {
     }
 
     pub(super) fn handle_log_event(&self, event: crate::sansio::LogEvent) {
-        if self.host.core.tracing.trace_sink.is_none() {
+        if !self.trace.is_observed() {
             return;
         }
 
@@ -750,36 +744,35 @@ impl RuntimeTurnDriver<'_> {
                 response_parts,
                 ..
             } => {
-                crate::trace::emit_trace(
-                    &self.host.core.tracing.trace_sink,
-                    &self.host.core.tracing.trace_context,
-                    self.trace_context(protocol_iteration)
-                        .for_session(session_id)
-                        .for_llm_call(format!(
-                            "{}:{}:{}:log",
-                            self.session_id, self.turn_index, protocol_iteration
-                        )),
-                    TraceEvent::LlmCallCompleted {
-                        response: crate::trace::trace_llm_response(
-                            response_text,
-                            0,
-                            self.policy
-                                .llm_profile_config()
-                                .model
-                                .wire_model()
-                                .to_string(),
-                            None,
-                            response_parts,
-                            None,
-                        ),
-                        usage: Some(crate::trace::trace_usage_from_session(&usage)),
-                        provider_usage,
-                        // The call's own trace carries its stream summary.
-                        stream_summary: None,
-                        attempts: None,
-                    },
-                    self.host.core.clock.as_ref(),
-                );
+                self.trace.observe(|| {
+                    (
+                        self.trace_context(protocol_iteration)
+                            .for_session(session_id)
+                            .for_llm_call(format!(
+                                "{}:{}:{}:log",
+                                self.session_id, self.turn_index, protocol_iteration
+                            )),
+                        TraceEvent::LlmCallCompleted {
+                            response: crate::trace::trace_llm_response(
+                                response_text,
+                                0,
+                                self.policy
+                                    .llm_profile_config()
+                                    .model
+                                    .wire_model()
+                                    .to_string(),
+                                None,
+                                response_parts,
+                                None,
+                            ),
+                            usage: Some(crate::trace::trace_usage_from_session(&usage)),
+                            provider_usage,
+                            // The call's own trace carries its stream summary.
+                            stream_summary: None,
+                            attempts: None,
+                        },
+                    )
+                });
             }
             crate::sansio::LogEvent::LlmError {
                 session_id,
@@ -790,34 +783,33 @@ impl RuntimeTurnDriver<'_> {
                 terminal_reason,
                 ..
             } => {
-                crate::trace::emit_trace(
-                    &self.host.core.tracing.trace_sink,
-                    &self.host.core.tracing.trace_context,
-                    self.trace_context(protocol_iteration)
-                        .for_session(session_id)
-                        .for_llm_call(format!(
-                            "{}:{}:{}:log",
-                            self.session_id, self.turn_index, protocol_iteration
-                        )),
-                    TraceEvent::LlmCallFailed {
-                        error: TraceError {
-                            retryable,
-                            terminal_reason,
-                            failure_kind: kind,
-                            code,
+                self.trace.observe(|| {
+                    (
+                        self.trace_context(protocol_iteration)
+                            .for_session(session_id)
+                            .for_llm_call(format!(
+                                "{}:{}:{}:log",
+                                self.session_id, self.turn_index, protocol_iteration
+                            )),
+                        TraceEvent::LlmCallFailed {
+                            error: TraceError {
+                                retryable,
+                                terminal_reason,
+                                failure_kind: kind,
+                                code,
+                            },
+                            // The call's own trace carries its stream summary.
+                            stream_summary: None,
+                            attempts: None,
                         },
-                        // The call's own trace carries its stream summary.
-                        stream_summary: None,
-                        attempts: None,
-                    },
-                    self.host.core.clock.as_ref(),
-                );
+                    )
+                });
             }
         }
     }
 
     fn log_llm_stream_event(&self, debug: &mut LlmStreamDebugState, log: LlmStreamEventLog<'_>) {
-        if self.host.core.tracing.trace_sink.is_none() {
+        if !self.trace.is_observed() {
             return;
         }
 
@@ -828,7 +820,7 @@ impl RuntimeTurnDriver<'_> {
                 .record_text_chunk(log.text.visible, elapsed_ms);
         }
 
-        if !self.host.core.tracing.trace_level.is_extended() {
+        if !self.trace.level().is_extended() {
             return;
         }
 
@@ -857,13 +849,12 @@ impl RuntimeTurnDriver<'_> {
             );
         }
 
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            self.trace_context(log.protocol_iteration),
-            TraceEvent::RuntimeStreamEvent { event },
-            self.host.core.clock.as_ref(),
-        );
+        self.trace.observe(|| {
+            (
+                self.trace_context(log.protocol_iteration),
+                TraceEvent::RuntimeStreamEvent { event },
+            )
+        });
     }
 
     fn provider_trace_sender(
@@ -872,15 +863,12 @@ impl RuntimeTurnDriver<'_> {
         llm_call_id: Option<String>,
         debug: &LlmStreamDebugState,
     ) -> Option<LlmProviderTraceSender> {
-        if !self.host.core.tracing.trace_level.is_extended()
-            || self.host.core.tracing.trace_sink.is_none()
-        {
+        if !self.trace.level().is_extended() || !self.trace.is_observed() {
             return None;
         }
 
         let llm_call_id = llm_call_id?;
-        let sink = self.host.core.tracing.trace_sink.clone();
-        let base_context = self.host.core.tracing.trace_context.clone();
+        let trace = self.trace.clone();
         let context = self.trace_context(protocol_iteration);
         let clock = Arc::clone(&self.host.core.clock);
         let created_at = debug.created_at;
@@ -914,13 +902,12 @@ impl RuntimeTurnDriver<'_> {
                         body_json,
                         body_json_omitted_reason,
                     };
-                    crate::trace::emit_trace(
-                        &sink,
-                        &base_context,
-                        context.clone().for_llm_call(llm_call_id.clone()),
-                        TraceEvent::ProviderRequest { event },
-                        clock.as_ref(),
-                    );
+                    trace.observe(|| {
+                        (
+                            context.clone().for_llm_call(llm_call_id.clone()),
+                            TraceEvent::ProviderRequest { event },
+                        )
+                    });
                     return;
                 }
                 let raw_json = serde_json::from_str::<serde_json::Value>(&provider_event.raw).ok();
@@ -937,13 +924,12 @@ impl RuntimeTurnDriver<'_> {
                     raw_sha256: lash_trace::sha256_hex(provider_event.raw.as_bytes()),
                     raw_json,
                 };
-                crate::trace::emit_trace(
-                    &sink,
-                    &base_context,
-                    context.clone().for_llm_call(llm_call_id.clone()),
-                    TraceEvent::ProviderStreamEvent { event },
-                    clock.as_ref(),
-                );
+                trace.observe(|| {
+                    (
+                        context.clone().for_llm_call(llm_call_id.clone()),
+                        TraceEvent::ProviderStreamEvent { event },
+                    )
+                });
             },
         ))
     }
@@ -966,13 +952,7 @@ impl RuntimeTurnDriver<'_> {
             .entry(block.id.clone())
             .or_default()
             .push_str(&text);
-        let raw_text = self
-            .host
-            .core
-            .tracing
-            .trace_sink
-            .as_ref()
-            .map(|_| text.clone());
+        let raw_text = self.trace.is_observed().then(|| text.clone());
         let outcome = self
             .transform_assistant_stream_chunk(forwarder, text)
             .await?;
@@ -1113,13 +1093,7 @@ impl RuntimeTurnDriver<'_> {
                 // content beyond what streamed as deltas may go through the
                 // plugin stream transform — a stateful chunk hook must never
                 // see the same text twice.
-                let raw_text = self
-                    .host
-                    .core
-                    .tracing
-                    .trace_sink
-                    .as_ref()
-                    .map(|_| text.clone());
+                let raw_text = self.trace.is_observed().then(|| text.clone());
                 let raw_accumulated = state
                     .block_raw_text
                     .get(&block.id)

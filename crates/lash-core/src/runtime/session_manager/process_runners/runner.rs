@@ -179,6 +179,22 @@ impl RuntimeSessionServices {
             .with_process_work(services.current.host.work.process_wiring().cloned())
             .with_opener_state(crate::session::OpenerState::default())
             .with_unrecorded_session_sources(services.current.host.core.control.open_sources);
+            // What runs in the process observes through the runtime's shared
+            // handle, under the process's scope.
+            let tracing = &services.current.host.core.tracing;
+            if tracing.is_observed() || tracing.emitter().has_product_observers() {
+                context = context.with_tracing(Some(
+                    crate::RuntimeExecutionTracing::new(
+                        tracing.clone(),
+                        Some(crate::trace::process_trace_scope(
+                            &process_id_for_runtime,
+                            tracing.clock().timestamp_ms(),
+                        )),
+                        lash_trace::TraceContext::default(),
+                    )
+                    .without_tool_lifecycle(),
+                ));
+            }
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }
@@ -219,6 +235,7 @@ impl RuntimeSessionServices {
             controller_for_context,
             handover,
             builder,
-        ))
+        )
+        .with_trace_runtime(self.current.host.core.tracing.clone()))
     }
 }

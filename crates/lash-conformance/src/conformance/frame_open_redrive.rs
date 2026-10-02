@@ -759,9 +759,15 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
             Some(FrameOpenCrash::BeforeSummary | FrameOpenCrash::AfterSummary)
         )
     {
-        parts.host.tracing.trace_sink = Some(Arc::new(followup::CompactorCrash {
-            crash: crash.expect("the crash point is present"),
-        }));
+        parts.host.tracing =
+            parts
+                .host
+                .tracing
+                .clone()
+                .with_trace_sinks([Arc::new(followup::CompactorCrash {
+                    crash: crash.expect("the crash point is present"),
+                })
+                    as Arc<dyn lash_core::facade_support::TraceSink>]);
     }
     let policy = crate::testing::mock_session_policy();
     let crash_after_summary = crash == Some(FrameOpenCrash::AfterSummary);

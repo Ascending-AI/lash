@@ -82,16 +82,15 @@ impl RuntimeTurnDriver<'_> {
         let degraded =
             crate::attachments::degrade_unmaterializable_request_attachments(&mut request);
         for notice in degraded {
-            self.emit_trace(
-                machine.protocol_iteration(),
+            self.emit_trace(machine.protocol_iteration(), || {
                 lash_trace::TraceEvent::AttachmentDegraded {
                     attachment_id: notice.attachment_id,
                     label: notice.label,
                     media_type: notice.media_type,
                     source: notice.source,
                     reason: notice.reason,
-                },
-            );
+                }
+            });
         }
         let crate::runtime::RuntimeLlmCallOutcome {
             result,
@@ -486,14 +485,11 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<(), RuntimeError> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
-        if self.host.core.tracing.trace_sink.is_some() {
-            self.emit_trace(
-                iteration,
-                lash_trace::TraceEvent::ExecCodeStarted {
-                    code: code.clone(),
-                    code_chars: code.chars().count(),
-                },
-            );
+        if self.trace.is_observed() {
+            self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeStarted {
+                code: code.clone(),
+                code_chars: code.chars().count(),
+            });
         }
         let invocation = match self.turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
         {
@@ -684,7 +680,7 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Ok(output) = &result {
-            if self.host.core.tracing.trace_sink.is_some() {
+            if self.trace.is_observed() {
                 let observations_text = join_observations(&output.observations);
                 let observation_projections = output
                     .observations
@@ -711,38 +707,31 @@ impl RuntimeTurnDriver<'_> {
                         },
                     })
                     .collect::<Vec<_>>();
-                self.emit_trace(
-                    iteration,
-                    lash_trace::TraceEvent::ExecCodeCompleted {
-                        duration_ms: cell_duration_ms,
-                        output: observations_text.clone(),
-                        output_chars: observations_text.chars().count(),
-                        observation_count: output.observations.len(),
-                        observation_projections: observation_projections.clone(),
-                        error: output.error.clone(),
-                        terminal_finish: output.terminal_finish.clone(),
-                        tool_calls,
-                    },
-                );
+                self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeCompleted {
+                    duration_ms: cell_duration_ms,
+                    output: observations_text.clone(),
+                    output_chars: observations_text.chars().count(),
+                    observation_count: output.observations.len(),
+                    observation_projections: observation_projections.clone(),
+                    error: output.error.clone(),
+                    terminal_finish: output.terminal_finish.clone(),
+                    tool_calls,
+                });
                 if !observation_projections.is_empty() {
-                    self.emit_trace(
-                        iteration,
+                    self.emit_trace(iteration, || {
                         lash_trace::TraceEvent::ObservationProjection {
                             projections: observation_projections,
-                        },
-                    );
+                        }
+                    });
                 }
             }
         } else if let Err(error) = &result
-            && self.host.core.tracing.trace_sink.is_some()
+            && self.trace.is_observed()
         {
-            self.emit_trace(
-                iteration,
-                lash_trace::TraceEvent::ExecCodeFailed {
-                    reason: error.reason,
-                    error: error.message.clone(),
-                },
-            );
+            self.emit_trace(iteration, || lash_trace::TraceEvent::ExecCodeFailed {
+                reason: error.reason,
+                error: error.message.clone(),
+            });
         }
         // Name the request that stopped code execution before the protocol
         // classifies its typed Stop response. A cell stops on the host only

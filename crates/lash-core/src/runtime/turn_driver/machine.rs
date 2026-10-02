@@ -219,7 +219,7 @@ impl RuntimeTurnDriver<'_> {
             )
             .await?;
         for event in &boundary.protocol_events {
-            self.emit_trace(protocol_iteration, protocol_step_trace_event(event));
+            self.emit_trace(protocol_iteration, || protocol_step_trace_event(event));
         }
         Ok(())
     }

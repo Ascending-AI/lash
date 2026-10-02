@@ -332,9 +332,9 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     // `RuntimeHostConfig::new` installs meet on that scope.
     let (double, mut host) = super::tests::test_host().await;
     host.providers.models = lash_core::testing::standard_test_llm_profiles(provider_handle);
-    host.tracing.trace_sink = Some(Arc::new(lash_core::facade_support::JsonlTraceSink::new(
-        trace_path.clone(),
-    )));
+    host.tracing = host.tracing.clone().with_trace_sink(Arc::new(
+        lash_core::facade_support::JsonlTraceSink::new(trace_path.clone()),
+    ));
     let tools: Arc<dyn ToolProvider> = Arc::new(DiscoveryRefusalTools {
         admitted_executions: Arc::clone(&admitted_executions),
         refused_executions: Arc::clone(&refused_executions),

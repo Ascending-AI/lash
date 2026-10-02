@@ -245,6 +245,10 @@ where
         self.inner.owns_commit_backpressure()
     }
 
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        self.inner.attempt_observation()
+    }
+
     fn hands_over_turns(&self) -> bool {
         self.inner.hands_over_turns()
     }

@@ -367,6 +367,8 @@ pub struct ProcessEngineRunContext<'run> {
     scoped_effect_controller: crate::ScopedEffectController<'run>,
     handover: Option<SegmentHandover>,
     runtime_context_builder: Option<RuntimeContextBuilder<'run>>,
+    /// The runtime's shared trace handle ([`Self::with_trace_runtime`]).
+    tracing: crate::trace::TraceRuntime,
 }
 
 impl<'run> ProcessEngineRunContext<'run> {
@@ -406,9 +408,10 @@ impl<'run> ProcessEngineRunContext<'run> {
             session_store_factory.clone(),
             Arc::clone(&queued_work),
             process_wake_delivery_policy,
-            clock,
+            Arc::clone(&clock),
         );
         Self {
+            tracing: crate::trace::TraceRuntime::new(clock),
             registration,
             process_id,
             execution_context,
@@ -425,6 +428,33 @@ impl<'run> ProcessEngineRunContext<'run> {
             handover,
             runtime_context_builder: Some(runtime_context_builder),
         }
+    }
+
+    /// Installs the runtime's shared trace handle. A context built without
+    /// one observes nothing.
+    #[must_use]
+    pub fn with_trace_runtime(mut self, tracing: crate::trace::TraceRuntime) -> Self {
+        self.tracing = tracing;
+        self
+    }
+
+    /// The runtime's shared trace handle: the same one every engine path and
+    /// every plugin emits through.
+    pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
+        &self.tracing
+    }
+
+    /// The scope this run executes under: its process's.
+    pub fn trace_scope(&self) -> lash_trace::DurableTraceScope {
+        crate::trace::process_trace_scope(&self.process_id, self.tracing.clock().timestamp_ms())
+    }
+
+    /// Where this run's drive code stands when it observes: it may emit once
+    /// a step body of this attempt has really run. The handle is cloneable
+    /// and carries the scope, the substrate attempt and the right to emit.
+    pub fn trace_standing(&self) -> crate::trace::TraceStanding {
+        self.tracing
+            .drive(Some(self.trace_scope()), &self.scoped_effect_controller)
     }
 
     /// Exposes registration to protocol and process-engine implementors while running a durable

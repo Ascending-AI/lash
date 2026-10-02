@@ -117,8 +117,7 @@ pub(crate) struct ToolRestoreContext<'a> {
     pub(crate) session_id: &'a SessionId,
     pub(crate) site: ToolRestoreSite,
     pub(crate) authority: ToolRestoreAuthority,
-    pub(crate) tracing: &'a crate::runtime::RuntimeTracingConfig,
-    pub(crate) clock: &'a dyn crate::Clock,
+    pub(crate) tracing: &'a crate::trace::TraceRuntime,
 }
 
 impl<'a> ToolRestoreContext<'a> {
@@ -126,15 +125,13 @@ impl<'a> ToolRestoreContext<'a> {
     pub(crate) fn for_open(
         session_id: &'a SessionId,
         policy: ToolSourcePolicy,
-        tracing: &'a crate::runtime::RuntimeTracingConfig,
-        clock: &'a dyn crate::Clock,
+        tracing: &'a crate::trace::TraceRuntime,
     ) -> Self {
         Self {
             session_id,
             site: ToolRestoreSite::SessionOpen,
             authority: ToolRestoreAuthority::Open(policy),
             tracing,
-            clock,
         }
     }
 
@@ -143,8 +140,7 @@ impl<'a> ToolRestoreContext<'a> {
     pub(crate) fn for_live_install(
         session_id: &'a SessionId,
         site: ToolRestoreSite,
-        tracing: &'a crate::runtime::RuntimeTracingConfig,
-        clock: &'a dyn crate::Clock,
+        tracing: &'a crate::trace::TraceRuntime,
     ) -> Self {
         debug_assert_ne!(
             site,
@@ -156,7 +152,6 @@ impl<'a> ToolRestoreContext<'a> {
             site,
             authority: ToolRestoreAuthority::LiveInstall,
             tracing,
-            clock,
         }
     }
 }
@@ -205,16 +200,17 @@ fn deliver(report: &ToolRestoreReport, context: &ToolRestoreContext<'_>) {
     if report.is_clean() {
         return;
     }
-    crate::trace::emit_trace(
-        &context.tracing.trace_sink,
-        &context.tracing.trace_context,
-        lash_trace::TraceContext::default().for_session(context.session_id.clone()),
-        lash_trace::TraceEvent::Custom {
-            name: "tool_restore.report".to_string(),
-            payload: trace_payload(report, context.site, context.authority),
-        },
-        context.clock,
-    );
+    // A restore rebuilds this process's resident tool surface: each one is
+    // its own event, whichever attempt runs it.
+    context.tracing.unreplayed(None).observe(|| {
+        (
+            lash_trace::TraceContext::default().for_session(context.session_id.clone()),
+            lash_trace::TraceEvent::Custom {
+                name: "tool_restore.report".to_string(),
+                payload: trace_payload(report, context.site, context.authority),
+            },
+        )
+    });
 }
 
 pub(crate) fn trace_payload(

@@ -294,8 +294,8 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     let context = Arc::new(RecordingContext::default());
     let sink = Arc::new(RecordingTraceSink::default());
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
-    let host =
-        RestateRuntimeEffectController::new_for_test(context.clone()).with_trace_sink(sink_dyn);
+    let host = RestateRuntimeEffectController::new_for_test(context.clone())
+        .with_tracing(lash_core::trace::TraceRuntime::default().with_trace_sink(sink_dyn));
     let registry = process_registry();
     let await_record = registry
         .register_process(external_registration())

@@ -823,9 +823,13 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
             &backend,
             Arc::new(PendingToolResolutionController),
         );
-    config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
-        trace_path.clone(),
-    )));
+    config.tracing =
+        config
+            .tracing
+            .clone()
+            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(
+                trace_path.clone(),
+            )));
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
@@ -1397,7 +1401,11 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
     .await;
 
     let mut no_sink = test_host_config(&backend);
-    no_sink.core.tracing.trace_level = lash_trace::TraceLevel::Extended;
+    no_sink.core.tracing = no_sink
+        .core
+        .tracing
+        .clone()
+        .with_level(lash_trace::TraceLevel::Extended);
     Box::pin(assert_sender_absent(
         &double,
         no_sink,

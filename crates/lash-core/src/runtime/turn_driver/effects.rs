@@ -461,20 +461,17 @@ impl RuntimeTurnDriver<'_> {
                 .as_ref()
                 .map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
                 .unwrap_or_default();
-            self.emit_trace(
-                protocol_iteration,
-                lash_trace::TraceEvent::Custom {
-                    name: "ingress.admitted".to_string(),
-                    payload: ingress_admitted_trace_payload(
-                        root,
-                        step,
-                        crate::AdmissionBoundary::ActiveTurnCheckpoint,
-                        admission.inputs.as_ref(),
-                        admission.queued.as_ref(),
-                        &causes,
-                    ),
-                },
-            );
+            self.emit_trace(protocol_iteration, || lash_trace::TraceEvent::Custom {
+                name: "ingress.admitted".to_string(),
+                payload: ingress_admitted_trace_payload(
+                    root,
+                    step,
+                    crate::AdmissionBoundary::ActiveTurnCheckpoint,
+                    admission.inputs.as_ref(),
+                    admission.queued.as_ref(),
+                    &causes,
+                ),
+            });
         }
         let crate::store::CheckpointAdmission {
             inputs: turn_input_admission,

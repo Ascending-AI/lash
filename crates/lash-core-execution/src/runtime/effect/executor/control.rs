@@ -404,6 +404,17 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         false
     }
 
+    /// The substrate attempt this controller is executing under, if the
+    /// substrate has one: the span context and invocation id its transport
+    /// delivered for the attempt now running the handler.
+    ///
+    /// Freshly emitted observations link it; it is never a parent, never a
+    /// cause and never stored. A substrate with no attempt notion keeps the
+    /// default. Forwarding wrappers forward.
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        None
+    }
+
     /// Advises an engine to end the current in-process execution segment at a
     /// quiescent point. Engines may decline when live state is not capturable,
     /// but must make progress before returning another decline. In particular,

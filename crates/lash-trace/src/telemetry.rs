@@ -1019,6 +1019,22 @@ fn valid_tracestate_value(value: &str) -> bool {
             .all(|byte| matches!(byte, 0x20..=0x7e) && !matches!(byte, b',' | b'='))
 }
 
+/// Projection of a permitted domain observation. Durable ancestry is explicit.
+///
+/// The emitter calls it once per emitted record, after the permit check, with
+/// the record already built. `scope` is the retained scope the record was made
+/// under, `attempt` the substrate attempt that made it, when the substrate
+/// reports one.
+pub trait TraceDomainProjector: Send + Sync {
+    fn project(
+        &self,
+        scope: &DurableTraceScope,
+        attempt: Option<&AttemptObservation>,
+        source: &EmissionSource,
+        record: &crate::TraceRecord,
+    );
+}
+
 #[cfg(test)]
 mod tests;
 

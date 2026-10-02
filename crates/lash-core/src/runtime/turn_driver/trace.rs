@@ -29,26 +29,28 @@ impl RuntimeTurnDriver<'_> {
         )
     }
 
-    pub(super) fn emit_trace(&self, protocol_iteration: usize, event: lash_trace::TraceEvent) {
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            self.trace_context(protocol_iteration),
-            event,
-            self.host.core.clock.as_ref(),
-        );
+    /// Observes one event of this driver's own work at `protocol_iteration`.
+    /// `event` is built only when the record will be emitted.
+    pub(super) fn emit_trace(
+        &self,
+        protocol_iteration: usize,
+        event: impl FnOnce() -> lash_trace::TraceEvent,
+    ) {
+        self.trace
+            .observe(|| (self.trace_context(protocol_iteration), event()));
     }
 
-    /// `None` when the host installed no trace sink, keeping emission a no-op.
+    /// `None` when nothing observes the runtime, externally or as a product
+    /// observer, keeping emission a no-op.
     pub(super) fn execution_tracing(
         &self,
         protocol_iteration: usize,
     ) -> Option<crate::RuntimeExecutionTracing> {
         let tracing = &self.host.core.tracing;
-        tracing.trace_sink.as_ref().map(|sink| {
+        (tracing.is_observed() || tracing.emitter().has_product_observers()).then(|| {
             crate::RuntimeExecutionTracing::new(
-                std::sync::Arc::clone(sink),
-                tracing.trace_context.clone(),
+                tracing.clone(),
+                self.trace.scope().cloned(),
                 self.trace_context(protocol_iteration),
             )
         })

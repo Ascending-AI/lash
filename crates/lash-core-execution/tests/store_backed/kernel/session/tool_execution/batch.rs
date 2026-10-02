@@ -241,16 +241,18 @@ mod tests {
         let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
         let trace_sink = Arc::new(ToolLifecycleTraceSink::default());
         let erased_trace_sink: Arc<dyn lash_trace::TraceSink> = trace_sink.clone();
+        let runtime = crate::trace::TraceRuntime::default().with_trace_sink(erased_trace_sink);
         let tracing = crate::session::RuntimeExecutionTracing::new(
-            erased_trace_sink,
-            lash_trace::TraceContext::default(),
+            runtime.clone(),
+            None,
             lash_trace::TraceContext::default(),
         );
         let context = batch_failure_context(
             Arc::new(BatchFailureEffectController),
             crate::testing::ChannelObservationSink::new(None, Some(turn_tx)),
         )
-        .with_tracing(Some(tracing));
+        .with_tracing(Some(tracing))
+        .with_trace_standing(runtime.unreplayed(None));
 
         context
             .call_tool_batch(vec![
@@ -402,12 +404,15 @@ mod tests {
             lines: Mutex::new(Vec::new()),
         });
         let trace_sink: Arc<dyn lash_trace::TraceSink> = sink.clone();
+        let runtime = crate::trace::TraceRuntime::default().with_trace_sink(trace_sink);
         let tracing = crate::session::RuntimeExecutionTracing::new(
-            trace_sink,
-            lash_trace::TraceContext::default(),
+            runtime.clone(),
+            None,
             lash_trace::TraceContext::default(),
         );
-        let context = context.with_tracing(Some(tracing));
+        let context = context
+            .with_tracing(Some(tracing))
+            .with_trace_standing(runtime.unreplayed(None));
 
         crate::emit_tool_call_started(
             &context,

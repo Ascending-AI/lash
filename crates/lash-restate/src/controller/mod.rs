@@ -32,7 +32,7 @@ use turn_cancel_request::{
 use lash_core::facade_support::trace_context_for_runtime_effect_invocation;
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::{
@@ -70,10 +70,83 @@ pub use context::{
     SignalWaitOutcome,
 };
 
+/// How a controller observes its own handling of the effects it executes.
 struct RestateTraceObserver {
-    sink: Weak<dyn lash_trace::TraceSink>,
-    base_context: lash_trace::TraceContext,
-    current_context: Mutex<Option<lash_trace::TraceContext>>,
+    tracing: lash_core::trace::TraceRuntime,
+    /// The effect this controller was handed last: what a decision it makes
+    /// between effects (a segment boundary) is attributed to.
+    current: Mutex<Option<CurrentEffectTrace>>,
+}
+
+#[derive(Clone)]
+struct CurrentEffectTrace {
+    /// What the drive that issued the effect lent it: the controller's own
+    /// records stand where that drive stands.
+    issue: lash_core::trace::StepIssue,
+    standing: lash_core::trace::TraceStanding,
+    context: lash_trace::TraceContext,
+}
+
+/// The records a journaled run makes of itself. They are made inside its
+/// recorded body, so a replay that serves the run's entry makes none.
+pub(super) struct JournaledRunTrace {
+    tracing: lash_core::trace::TraceRuntime,
+    issue: lash_core::trace::StepIssue,
+    scope: Option<lash_trace::DurableTraceScope>,
+    context: lash_trace::TraceContext,
+    effect_name: String,
+    effect_kind: String,
+}
+
+/// A journaled run whose body has started.
+pub(super) struct StartedRunTrace {
+    standing: lash_core::trace::TraceStanding,
+    context: lash_trace::TraceContext,
+    effect_name: String,
+    effect_kind: String,
+}
+
+impl JournaledRunTrace {
+    /// Called where the body starts running.
+    pub(super) fn started(self) -> StartedRunTrace {
+        let live = self.issue.begin_native();
+        let started = StartedRunTrace {
+            standing: self.tracing.body(self.scope, &live),
+            context: self.context,
+            effect_name: self.effect_name,
+            effect_kind: self.effect_kind,
+        };
+        started.standing.observe(|| {
+            (
+                started.context.clone(),
+                lash_trace::TraceEvent::JournaledEffectStarted {
+                    effect_name: started.effect_name.clone(),
+                    effect_kind: started.effect_kind.clone(),
+                },
+            )
+        });
+        started
+    }
+}
+
+impl StartedRunTrace {
+    /// Called where the body ends, with whether its outcome was a success.
+    pub(super) fn settled(self, completed: bool) {
+        self.standing.observe(|| {
+            (
+                self.context,
+                lash_trace::TraceEvent::JournaledEffectSettled {
+                    effect_name: self.effect_name,
+                    effect_kind: self.effect_kind,
+                    status: if completed {
+                        lash_trace::TraceJournaledEffectStatus::Completed
+                    } else {
+                        lash_trace::TraceJournaledEffectStatus::Failed
+                    },
+                },
+            )
+        });
+    }
 }
 
 /// Configuration for [`RestateRuntimeEffectController`].
@@ -372,30 +445,17 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         )
     }
 
-    /// Observe durable steps through a non-owning sink handle.
+    /// Observe this controller's durable steps through the runtime's trace
+    /// handle.
     ///
-    /// Trace append is deliberately best-effort and never crosses the Restate
-    /// context seam: the journal remains truth and tracing remains a live
-    /// observation that may be repeated during handler redrive.
-    pub fn with_trace_sink(mut self, sink: Arc<dyn lash_trace::TraceSink>) -> Self {
+    /// Trace emission is best-effort and never crosses the Restate context
+    /// seam: the journal remains truth. A step this controller serves from
+    /// its journal is not observed again; its records are made by the
+    /// attempt that really ran it.
+    pub fn with_tracing(mut self, tracing: lash_core::trace::TraceRuntime) -> Self {
         self.trace = Some(RestateTraceObserver {
-            sink: Arc::downgrade(&sink),
-            base_context: lash_trace::TraceContext::default(),
-            current_context: Mutex::new(None),
-        });
-        self
-    }
-
-    /// Observe durable steps while retaining the host's trace context.
-    pub fn with_trace_sink_and_context(
-        mut self,
-        sink: Arc<dyn lash_trace::TraceSink>,
-        base_context: lash_trace::TraceContext,
-    ) -> Self {
-        self.trace = Some(RestateTraceObserver {
-            sink: Arc::downgrade(&sink),
-            base_context,
-            current_context: Mutex::new(None),
+            tracing,
+            current: Mutex::new(None),
         });
         self
     }
@@ -408,51 +468,99 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         &self.options
     }
 
+    fn observer(&self) -> Option<&RestateTraceObserver> {
+        self.trace
+            .as_ref()
+            .filter(|trace| trace.tracing.is_observed())
+    }
+
+    fn effect_scope(
+        trace: &RestateTraceObserver,
+        invocation: &RuntimeEffectInvocation,
+    ) -> Option<lash_trace::DurableTraceScope> {
+        lash_core::trace::effect_trace_scope(invocation, trace.tracing.clock().timestamp_ms())
+    }
+
+    /// Observes this controller's handling of `invocation`, or, with none, a
+    /// decision it made after the effect it was handed last.
     fn emit_trace(
         &self,
         invocation: Option<&RuntimeEffectInvocation>,
         event: impl FnOnce() -> lash_trace::TraceEvent,
     ) {
-        let Some(trace) = self.trace.as_ref() else {
+        let Some(trace) = self.observer() else {
             return;
         };
-        let Some(sink) = trace.sink.upgrade() else {
+        let Some(current) = trace
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
             return;
         };
-        let context = if let Some(invocation) = invocation {
-            let context =
-                trace_context_for_runtime_effect_invocation(trace.base_context.clone(), invocation);
-            *trace
-                .current_context
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(context.clone());
-            context
-        } else {
-            trace
-                .current_context
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone()
-                .unwrap_or_else(|| trace.base_context.clone())
-        };
-        if let Err(error) = sink.append(&lash_trace::TraceRecord::new(context, event())) {
-            tracing::warn!(%error, "failed to append Restate durable-step trace record");
+        match invocation {
+            Some(invocation) => trace
+                .tracing
+                .issued(Self::effect_scope(trace, invocation), &current.issue)
+                .observe(|| {
+                    (
+                        trace_context_for_runtime_effect_invocation(
+                            lash_trace::TraceContext::default(),
+                            invocation,
+                        ),
+                        event(),
+                    )
+                }),
+            None => current
+                .standing
+                .observe(|| (current.context.clone(), event())),
         }
     }
 
-    fn remember_trace_invocation(&self, invocation: &RuntimeEffectInvocation) {
-        let Some(trace) = self.trace.as_ref() else {
+    fn remember_trace_invocation(
+        &self,
+        invocation: &RuntimeEffectInvocation,
+        issue: &lash_core::trace::StepIssue,
+    ) {
+        let Some(trace) = self.observer() else {
             return;
         };
-        if trace.sink.upgrade().is_none() {
-            return;
-        }
         *trace
-            .current_context
+            .current
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(
-            trace_context_for_runtime_effect_invocation(trace.base_context.clone(), invocation),
-        );
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CurrentEffectTrace {
+            issue: issue.clone(),
+            standing: trace
+                .tracing
+                .issued(Self::effect_scope(trace, invocation), issue),
+            context: trace_context_for_runtime_effect_invocation(
+                lash_trace::TraceContext::default(),
+                invocation,
+            ),
+        });
+    }
+
+    /// The records the journaled run of `invocation` makes of itself, when
+    /// anything observes them.
+    pub(super) fn journaled_run_trace(
+        &self,
+        invocation: &RuntimeEffectInvocation,
+        effect_kind: lash_core::RuntimeEffectKind,
+        issue: &lash_core::trace::StepIssue,
+    ) -> Option<JournaledRunTrace> {
+        let trace = self.observer()?;
+        Some(JournaledRunTrace {
+            tracing: trace.tracing.clone(),
+            issue: issue.clone(),
+            scope: Self::effect_scope(trace, invocation),
+            context: trace_context_for_runtime_effect_invocation(
+                lash_trace::TraceContext::default(),
+                invocation,
+            ),
+            effect_name: restate_effect_name(invocation),
+            effect_kind: effect_kind.as_str().to_string(),
+        })
     }
 }
 
@@ -1084,7 +1192,7 @@ where
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let execution = restate_effect_execution(envelope)?;
-        self.remember_trace_invocation(execution.invocation());
+        self.remember_trace_invocation(execution.invocation(), local_executor.step_issue());
         live_frontier::refuse_outside_a_run(&execution, &local_executor)?;
         match execution {
             RestateEffectExecution::DirectProcess {
@@ -1162,13 +1270,8 @@ where
             RestateEffectExecution::Timer { invocation, spec } => {
                 // Every sleep journals its frontier marker first, so a
                 // served-only one answers there (FIG-3779).
-                live_frontier::pass_sleep_frontier(
-                    &self.context,
-                    &invocation,
-                    local_executor.served_only().as_ref(),
-                    |terminal, fault| self.wait_step_failure(terminal, |_| fault),
-                )
-                .await?;
+                let served_only = local_executor.served_only();
+                let issue = local_executor.step_issue().clone();
                 let RuntimeSleepOptions {
                     cancellation: _,
                     observe_turn_cancel,
@@ -1181,9 +1284,32 @@ where
                         deadline_ms.saturating_sub(clock.timestamp_ms())
                     }
                 };
-                self.emit_trace(Some(&invocation), || {
-                    lash_trace::TraceEvent::DurableTimerStarted { duration_ms }
+                // The timer's start is observed inside its marker step, which
+                // the journal runs once.
+                let started = self.observer().map(|trace| {
+                    let tracing = trace.tracing.clone();
+                    let scope = Self::effect_scope(trace, &invocation);
+                    let context = trace_context_for_runtime_effect_invocation(
+                        lash_trace::TraceContext::default(),
+                        &invocation,
+                    );
+                    Box::new(move || {
+                        tracing.body(scope, &issue.begin_native()).observe(|| {
+                            (
+                                context,
+                                lash_trace::TraceEvent::DurableTimerStarted { duration_ms },
+                            )
+                        });
+                    }) as Box<dyn FnOnce() + Send>
                 });
+                live_frontier::pass_sleep_frontier(
+                    &self.context,
+                    &invocation,
+                    served_only.as_ref(),
+                    started,
+                    |terminal, fault| self.wait_step_failure(terminal, |_| fault),
+                )
+                .await?;
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
                     &self.authority_id,
                     &invocation,
@@ -1417,12 +1543,6 @@ where
                 let reconstructed_envelope = envelope.canonical_form()?;
                 let replay_trace = local_executor.replay_validation_trace().cloned();
                 let invocation = envelope.invocation.clone();
-                self.emit_trace(Some(&invocation), || {
-                    lash_trace::TraceEvent::JournaledEffectStarted {
-                        effect_name: restate_effect_name(&invocation),
-                        effect_kind: effect_kind.as_str().to_string(),
-                    }
-                });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
                 let recorded = self
                     .record_journaled_run(
@@ -1475,17 +1595,8 @@ where
                         return Err(error);
                     }
                 };
-                self.emit_trace(Some(&invocation), || {
-                    lash_trace::TraceEvent::JournaledEffectSettled {
-                        effect_name: restate_effect_name(&invocation),
-                        effect_kind: effect_kind.as_str().to_string(),
-                        status: if outcome.is_ok() {
-                            lash_trace::TraceJournaledEffectStatus::Completed
-                        } else {
-                            lash_trace::TraceJournaledEffectStatus::Failed
-                        },
-                    }
-                });
+                // The run's start and settlement were observed inside its
+                // recorded body, by the attempt that ran it.
                 outcome
             }
         }

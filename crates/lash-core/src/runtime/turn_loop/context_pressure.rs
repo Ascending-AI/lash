@@ -289,23 +289,33 @@ impl LashRuntime {
             self.invalidate_resident_session_state();
             return Err(error);
         }
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            lash_trace::TraceContext::default()
-                .for_session(self.state.session_id.clone())
-                .for_turn(write.turn_id.clone()),
-            lash_trace::TraceEvent::Custom {
-                name: "context_pressure.frame_opened".to_string(),
-                payload: serde_json::json!({
-                    "hook": write.hook_id,
-                    "plugin": write.plugin_id,
-                    "task": task,
-                    "frame_node_id": frame_node_id,
-                }),
-            },
-            self.host.core.clock.as_ref(),
-        );
+        // The frame's own commit just succeeded: this call made it, and a
+        // redrive finds the head in the new frame and opens nothing.
+        let tracing = &self.host.core.tracing;
+        if tracing.is_observed() {
+            tracing
+                .unreplayed(Some(crate::trace::turn_trace_scope(
+                    &self.state.session_id,
+                    &crate::TurnId::from(write.turn_id),
+                    tracing.clock().timestamp_ms(),
+                )))
+                .observe(|| {
+                    (
+                        lash_trace::TraceContext::default()
+                            .for_session(self.state.session_id.clone())
+                            .for_turn(write.turn_id.to_string()),
+                        lash_trace::TraceEvent::Custom {
+                            name: "context_pressure.frame_opened".to_string(),
+                            payload: serde_json::json!({
+                                "hook": write.hook_id,
+                                "plugin": write.plugin_id,
+                                "task": task,
+                                "frame_node_id": frame_node_id,
+                            }),
+                        },
+                    )
+                });
+        }
         // The open cleared the stored execution state; the live protocol
         // session restarts from the new frame's seed the same way (F5).
         self.restore_protocol_session_after_frame_open().await

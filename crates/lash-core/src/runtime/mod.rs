@@ -244,7 +244,7 @@ pub use error::{
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
     EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
-    RuntimeHostConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+    RuntimeHostConfig, RuntimeProviderConfig,
 };
 use io::normalize_input_items;
 pub use lash_core_execution::runtime::DirectCompletionClient;
@@ -254,6 +254,8 @@ pub use lash_core_execution::runtime::work::{
     ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
     WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadenceError, WorkCadencePolicy,
 };
+/// The trace handle a host config carries.
+pub use lash_core_execution::runtime::{TraceEmitter, TraceRuntime};
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,

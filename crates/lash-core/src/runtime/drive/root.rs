@@ -115,11 +115,10 @@ impl LashRuntime {
                         .as_ref()
                         .map(|session| session.plugins().host().clone()),
                     trace: AdmissionTrace {
-                        sink: self.host.core.tracing.trace_sink.clone(),
-                        base: self.host.core.tracing.trace_context.clone(),
-                        clock: Arc::clone(&self.host.core.clock),
+                        tracing: self.host.core.tracing.clone(),
                         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                         turn_index: self.state.turn_index + 1,
+                        live: None,
                     },
                 }),
                 None,
@@ -1252,10 +1251,10 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
 
 /// Trace attribution for the admission decisions the runner makes.
 struct AdmissionTrace {
-    sink: Option<Arc<dyn lash_trace::TraceSink>>,
-    base: lash_trace::TraceContext,
-    clock: Arc<dyn crate::Clock>,
+    tracing: crate::trace::TraceRuntime,
     turn_index: usize,
+    /// The admission body's live step, bound when the body really runs.
+    live: Option<Arc<crate::trace::LiveStep>>,
 }
 
 /// What the admission probe decided for the head row: either the outcome
@@ -1307,6 +1306,10 @@ struct AdmitRootRunner {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for AdmitRootRunner {
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.trace.live = Some(live);
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: crate::RuntimeEffectEnvelope,
@@ -1392,20 +1395,36 @@ impl AdmitRootRunner {
             .map_err(crate::runtime::runtime_error_from_store_commit)
     }
 
-    fn emit(&self, name: &str, payload: serde_json::Value) {
-        crate::trace::emit_trace(
-            &self.trace.sink,
-            &self.trace.base,
-            lash_trace::TraceContext::default()
-                .for_session(self.fence.session().clone())
-                .for_turn_index(self.trace.turn_index)
-                .for_turn(self.root.clone()),
-            lash_trace::TraceEvent::Custom {
-                name: name.to_string(),
-                payload,
-            },
-            self.trace.clock.as_ref(),
-        );
+    /// Observes one decision of the admission body. `payload` is built only
+    /// when the record will be emitted.
+    fn emit(&self, name: &str, payload: impl FnOnce() -> serde_json::Value) {
+        let (Some(live), tracing) = (&self.trace.live, &self.trace.tracing) else {
+            return;
+        };
+        if !tracing.is_observed() {
+            return;
+        }
+        tracing
+            .body(
+                Some(crate::trace::turn_trace_scope(
+                    self.fence.session(),
+                    &self.root,
+                    tracing.clock().timestamp_ms(),
+                )),
+                live,
+            )
+            .observe(|| {
+                (
+                    lash_trace::TraceContext::default()
+                        .for_session(self.fence.session().clone())
+                        .for_turn_index(self.trace.turn_index)
+                        .for_turn(self.root.clone()),
+                    lash_trace::TraceEvent::Custom {
+                        name: name.to_string(),
+                        payload: payload(),
+                    },
+                )
+            });
     }
 
     /// Admit the turn-lane run headed by the admitted head.
@@ -1464,8 +1483,7 @@ impl AdmitRootRunner {
                 .as_ref()
                 .map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
                 .unwrap_or_default();
-            self.emit(
-                "ingress.admitted",
+            self.emit("ingress.admitted", || {
                 crate::runtime::turn_loop::ingress_admitted_trace_payload(
                     &self.root,
                     crate::store::ROOT_ADMISSION_STEP,
@@ -1473,8 +1491,8 @@ impl AdmitRootRunner {
                     admission.inputs.as_deref(),
                     admission.queued.as_deref(),
                     &causes,
-                ),
-            );
+                )
+            });
             return Ok(RootAdmissionProbe::Answer(RootAdmissionAnswer::Admitted {
                 admission: Box::new(admission),
             }));

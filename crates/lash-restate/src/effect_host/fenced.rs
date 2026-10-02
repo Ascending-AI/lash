@@ -144,6 +144,10 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.owns_commit_backpressure()
     }
 
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        self.controller.attempt_observation()
+    }
+
     fn hands_over_turns(&self) -> bool {
         self.controller.hands_over_turns()
     }

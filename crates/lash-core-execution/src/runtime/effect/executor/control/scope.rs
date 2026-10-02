@@ -72,6 +72,12 @@ pub struct ScopedEffectController<'run> {
     /// issues the same effects, so the count at one quiet point is the same
     /// on every replay ([`Self::effects_executed`]).
     pub(in crate::runtime::effect::executor) effects: Arc<AtomicU64>,
+    /// Where the drive issuing steps through this controller stands relative
+    /// to its journal, shared by its clones. A handler re-runs from the top
+    /// on every replay with a fresh controller, so the frontier starts
+    /// uncrossed on every attempt and is crossed when a step body of this
+    /// attempt really runs ([`Self::frontier`]).
+    pub(in crate::runtime::effect::executor) frontier: crate::trace::JournalFrontier,
 }
 
 /// A replayed language command's say over the journal writes made under it
@@ -399,6 +405,7 @@ impl<'run> ScopedEffectController<'run> {
             compactions: Arc::default(),
             command_runs: Arc::default(),
             effects: Arc::default(),
+            frontier: crate::trace::JournalFrontier::new(),
         })
     }
 
@@ -418,6 +425,7 @@ impl<'run> ScopedEffectController<'run> {
             compactions: Arc::default(),
             command_runs: Arc::default(),
             effects: Arc::default(),
+            frontier: crate::trace::JournalFrontier::new(),
         })
     }
 
@@ -438,6 +446,7 @@ impl<'run> ScopedEffectController<'run> {
             compactions: Arc::default(),
             command_runs: Arc::default(),
             effects: Arc::default(),
+            frontier: crate::trace::JournalFrontier::new(),
         })
     }
 
@@ -474,6 +483,22 @@ impl<'run> ScopedEffectController<'run> {
             .await
     }
 
+    /// Where this controller's drive stands relative to its journal: crossed
+    /// once a step executed through this controller or a clone of it ran its
+    /// body, which a step served from the journal never does.
+    pub fn frontier(&self) -> &crate::trace::JournalFrontier {
+        &self.frontier
+    }
+
+    /// This controller as part of `drive`'s drive: a proxy or lent controller
+    /// that issues the same drive's steps shares its frontier, so a body run
+    /// through either moves both.
+    #[must_use]
+    pub fn in_drive_of(mut self, drive: &ScopedEffectController<'_>) -> Self {
+        self.frontier = drive.frontier.clone();
+        self
+    }
+
     /// How many effects this controller and its clones have executed.
     pub fn effects_executed(&self) -> u64 {
         self.effects.load(Ordering::SeqCst)
@@ -490,7 +515,10 @@ impl<'run> ScopedEffectController<'run> {
         envelope: &RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'executor>,
     ) -> Result<RuntimeEffectLocalExecutor<'executor>, RuntimeEffectControllerError> {
-        let mut local_executor = local_executor;
+        let mut local_executor = local_executor.issued_under(
+            self.frontier.clone(),
+            self.controller().attempt_observation(),
+        );
         if let Some(guard) = &self.journal_guard {
             guard.admit(Some(envelope.invocation.effect_replay_key()))?;
             // A wait on an external completion dispatches nothing
@@ -564,6 +592,7 @@ impl<'run> ScopedEffectController<'run> {
             compactions: Arc::clone(&self.compactions),
             command_runs: Arc::clone(&self.command_runs),
             effects: Arc::clone(&self.effects),
+            frontier: self.frontier.clone(),
         })
     }
 

@@ -600,7 +600,10 @@ pub fn test_host_config_with_trace_path(
     path: PathBuf,
 ) -> EmbeddedRuntimeHost {
     let mut config = test_runtime_host_config(backend);
-    config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path)));
+    config.tracing = config
+        .tracing
+        .clone()
+        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)));
     EmbeddedRuntimeHost::new(config)
 }
 
@@ -609,8 +612,14 @@ pub fn test_host_config_with_trace_path_and_stream_events(
     path: PathBuf,
 ) -> EmbeddedRuntimeHost {
     let mut config = test_runtime_host_config(backend);
-    config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path)));
-    config.tracing.trace_level = lash_trace::TraceLevel::Extended;
+    config.tracing = config
+        .tracing
+        .clone()
+        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)));
+    config.tracing = config
+        .tracing
+        .clone()
+        .with_level(lash_trace::TraceLevel::Extended);
     EmbeddedRuntimeHost::new(config)
 }
 

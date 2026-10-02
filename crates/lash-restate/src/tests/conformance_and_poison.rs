@@ -1329,7 +1329,7 @@ mod on_the_server_double {
 }
 
 #[tokio::test]
-pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_command() {
+pub(super) async fn durable_trace_is_observed_once_across_a_redrive_and_adds_no_journal_command() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let sink = Arc::new(RecordingTraceSink::default());
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
@@ -1337,13 +1337,22 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
         Arc::clone(&context),
         RestateEffectControllerOptions::default().segment_effect_budget(1),
     )
-    .with_trace_sink_and_context(
-        sink_dyn,
-        lash_trace::TraceContext {
-            run_id: Some("restate-host-run".to_string()),
-            ..lash_trace::TraceContext::default()
-        },
+    .with_tracing(
+        lash_core::trace::TraceRuntime::default()
+            .with_trace_sink(sink_dyn)
+            .with_base_context(lash_trace::TraceContext {
+                run_id: Some("restate-host-run".to_string()),
+                ..lash_trace::TraceContext::default()
+            }),
     );
+    // Each attempt of the handler drives through a controller of its own.
+    let attempt = || {
+        lash_core::ScopedEffectController::borrowed(
+            &controller,
+            lash_core::AdmittedScope::runtime_operation("trace-replay-session"),
+        )
+        .expect("admitted operation scope")
+    };
     let envelope = RuntimeEffectEnvelope::new(
         operation_effect_invocation(
             "trace-replay-session",
@@ -1363,8 +1372,17 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
     );
     let local_calls = Arc::new(AtomicUsize::new(0));
 
+    let boundary = || {
+        RuntimeEffectController::wants_segment_boundary(
+            &controller,
+            &lash_core::SegmentProgress {
+                effects_executed: 1,
+                journaled_bytes_estimate: Some(128),
+            },
+        )
+    };
     let first_calls = Arc::clone(&local_calls);
-    controller
+    attempt()
         .execute_effect(
             envelope.clone(),
             RuntimeEffectLocalExecutor::testing(move |_| async move {
@@ -1374,9 +1392,10 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
         )
         .await
         .expect("live journaled effect");
+    assert_eq!(boundary(), Some(lash_core::BoundaryReason::JournalBudget));
     context.start_replay();
     let replay_calls = Arc::clone(&local_calls);
-    controller
+    attempt()
         .execute_effect(
             envelope,
             RuntimeEffectLocalExecutor::testing(move |_| async move {
@@ -1387,14 +1406,9 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
         .await
         .expect("replayed journaled effect");
     assert_eq!(
-        RuntimeEffectController::wants_segment_boundary(
-            &controller,
-            &lash_core::SegmentProgress {
-                effects_executed: 1,
-                journaled_bytes_estimate: Some(128),
-            },
-        ),
-        Some(lash_core::BoundaryReason::JournalBudget)
+        boundary(),
+        Some(lash_core::BoundaryReason::JournalBudget),
+        "the redrive decides the same boundary"
     );
 
     assert_eq!(
@@ -1418,11 +1432,9 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
         vec![
             "journaled_effect_started",
             "journaled_effect_settled",
-            "journaled_effect_started",
-            "journaled_effect_settled",
             "durable_segment_boundary",
         ],
-        "redrive repetition is the benign live-observation class"
+        "the attempt that ran the effect observed it; the redrive that reads it back observes nothing"
     );
     let records = sink.records.lock_recover();
     assert!(records.iter().all(|record| {

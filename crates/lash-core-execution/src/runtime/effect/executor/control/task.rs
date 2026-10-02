@@ -214,6 +214,7 @@ pub struct EffectTaskController {
     scope: ExecutionScope,
     owns_commit_backpressure: bool,
     await_event_authority_binding_id: Option<String>,
+    attempt_observation: Option<lash_trace::AttemptObservation>,
 }
 
 /// The request stream a scoped task controller's caller hands to
@@ -237,6 +238,7 @@ impl EffectTaskController {
             scope: admitted.scope().clone(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
+            attempt_observation: controller.attempt_observation(),
         };
         Ok((
             ScopedEffectController::shared(Arc::new(proxy), admitted)?,
@@ -362,6 +364,10 @@ impl AwaitEventResolver for EffectTaskController {
 impl RuntimeEffectController for EffectTaskController {
     fn owns_commit_backpressure(&self) -> bool {
         self.owns_commit_backpressure
+    }
+
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        self.attempt_observation.clone()
     }
 
     async fn execute_effect(

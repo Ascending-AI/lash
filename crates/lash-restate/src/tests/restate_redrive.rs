@@ -1266,12 +1266,13 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
                 Arc::clone(&registry),
                 Arc::clone(&continuations),
             )
-            .with_trace_sink(
-                trace_sink_dyn,
-                lash_trace::TraceContext {
-                    run_id: Some("fig811-workflow-trace".to_string()),
-                    ..lash_trace::TraceContext::default()
-                },
+            .with_tracing(
+                lash_core::trace::TraceRuntime::default()
+                    .with_trace_sink(trace_sink_dyn)
+                    .with_base_context(lash_trace::TraceContext {
+                        run_id: Some("fig811-workflow-trace".to_string()),
+                        ..lash_trace::TraceContext::default()
+                    }),
             )
             .serve(),
         )

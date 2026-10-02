@@ -459,6 +459,26 @@ fn event_samples() -> Vec<TraceEvent> {
             stream_summary: None,
             attempts: None,
         },
+        TraceEvent::LlmAttemptCompleted {
+            attempt: lash_trace::TraceLlmAttempt {
+                ordinal: 1,
+                provider: Some("test".to_string()),
+                request_model: "m".to_string(),
+                response_model: None,
+                started_at_ms: Some(1),
+                ended_at_ms: Some(2),
+                outcome: lash_trace::TraceLlmAttemptOutcome::Completed,
+                error: None,
+                usage: None,
+            },
+        },
+        TraceEvent::DomainCompleted {
+            completion: lash_trace::TraceDomainCompletion::new(
+                lash_trace::TraceDomainOperation::Run,
+                1,
+                lash_trace::TraceDomainStatus::Completed,
+            ),
+        },
         TraceEvent::ProviderRequest {
             event: TraceProviderRequestEvent {
                 provider: "test".to_string(),
@@ -657,6 +677,8 @@ trace_event_kinds! {
     LlmCallStarted => "llm_call_started",
     LlmCallCompleted => "llm_call_completed",
     LlmCallFailed => "llm_call_failed",
+    LlmAttemptCompleted => "llm_attempt_completed",
+    DomainCompleted => "domain_completed",
     ProviderRequest => "provider_request",
     ProviderReplayDropped => "provider_replay_dropped",
     EffectEnvelopeDiff => "effect_envelope_diff",

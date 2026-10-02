@@ -26,6 +26,12 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         Some(self.driver.host.core.usage_accounting())
     }
 
+    /// A recorded step's body observes as that body's live step. A body that
+    /// replays by re-execution is bound none, and keeps the turn's standing.
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.driver.trace = self.driver.trace.in_body(&live);
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
@@ -224,10 +230,9 @@ pub(super) fn turn_effect_executor(
     body_replay_key: &str,
 ) -> crate::RuntimeEffectLocalExecutor<'static> {
     let replay_trace = crate::runtime::effect::RuntimeEffectReplayTrace::for_divergence(
-        driver.host.core.tracing.trace_sink.as_ref(),
-        driver.host.core.tracing.trace_context.clone(),
+        &driver.host.core.tracing,
+        driver.trace.scope().cloned(),
         driver.trace_context(machine.protocol_iteration()),
-        Arc::clone(&driver.host.core.clock),
     );
     let owned_driver = RuntimeTurnDriver {
         segment: Default::default(),
@@ -276,6 +281,7 @@ pub(super) fn turn_effect_executor(
         // turn cursor is the main driver's alone, and cloning it would put
         // body and driver emissions on colliding {key}#{ordinal} ids.
         turn_observations: body_observation_cursor(body_replay_key),
+        trace: driver.trace.clone(),
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {

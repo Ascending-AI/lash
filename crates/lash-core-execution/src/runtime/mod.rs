@@ -48,6 +48,8 @@ pub use vocabulary::*;
 
 pub use crate::store::QueuedWorkClass;
 
+/// The trace handle a host config carries ([`RuntimeHostConfig::tracing`]).
+pub use crate::trace::{TraceEmitter, TraceRuntime};
 pub use causal::process_event_invocation;
 pub use causal::tool_retry_sleep_invocation;
 pub use causal::{CommandReplayKey, command_invocation};
@@ -86,7 +88,7 @@ pub use effect::{
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
     EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
-    RuntimeHostConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+    RuntimeHostConfig, RuntimeProviderConfig,
 };
 pub use process::ProcessChangeSubscription;
 #[cfg(any(test, feature = "testing"))]

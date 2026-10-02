@@ -85,7 +85,10 @@ where
     let mark = FrontierMark::ProcessStart {
         start_key: start_key.clone(),
     };
-    pass_frontier(context, invocation, mark, served_only, |_, fault| fault).await
+    pass_frontier(context, invocation, mark, served_only, None, |_, fault| {
+        fault
+    })
+    .await
 }
 
 /// Journals a timer's frontier marker: a served-only sleep whose marker's
@@ -97,12 +100,16 @@ where
 /// on the redrive; the next dispatching effect of the drifted command still
 /// answers at its own frontier.
 ///
+/// `recorded` runs inside the marker's closure, which the journal runs once:
+/// the attempt that first issues the sleep observes its start there.
+///
 /// `failure` answers a marker the engine failed: the sleep's controller tells
 /// the engine's cancellation of a group child apart from a fault there.
 pub(super) async fn pass_sleep_frontier<'ctx, C>(
     context: &C,
     invocation: &RuntimeEffectInvocation,
     served_only: Option<&ServedOnly>,
+    recorded: Option<Box<dyn FnOnce() + Send>>,
     failure: impl FnOnce(TerminalError, RuntimeEffectControllerError) -> RuntimeEffectControllerError,
 ) -> Result<(), RuntimeEffectControllerError>
 where
@@ -113,6 +120,7 @@ where
         invocation,
         FrontierMark::Sleep,
         served_only,
+        recorded,
         failure,
     )
     .await
@@ -122,6 +130,8 @@ where
 /// marker whose closure runs is the live frontier: the run proposes nothing
 /// and the effect refuses. Otherwise the recorded mark must be `mark`.
 ///
+/// `recorded` runs in the marker's closure when it records the mark.
+///
 /// `failure` answers a marker step the engine failed, from the engine's
 /// terminal and the controller fault it reads as by default.
 async fn pass_frontier<'ctx, C>(
@@ -129,6 +139,7 @@ async fn pass_frontier<'ctx, C>(
     invocation: &RuntimeEffectInvocation,
     mark: FrontierMark,
     served_only: Option<&ServedOnly>,
+    recorded: Option<Box<dyn FnOnce() + Send>>,
     failure: impl FnOnce(TerminalError, RuntimeEffectControllerError) -> RuntimeEffectControllerError,
 ) -> Result<(), RuntimeEffectControllerError>
 where
@@ -141,6 +152,9 @@ where
     let run = context.run_json_send::<serde_json::Value, _>(name.clone(), None, async move {
         if let Some(live) = &closure_live {
             return live.reached().await;
+        }
+        if let Some(recorded) = recorded {
+            recorded();
         }
         entry
     });

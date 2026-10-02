@@ -28,7 +28,7 @@ impl<'run> ScopedEffectController<'run> {
                 ),
             ));
         }
-        match &self.controller {
+        let mut rescoped = match &self.controller {
             ScopedEffectControllerInner::Borrowed(controller) => {
                 ScopedEffectController::borrowed(*controller, admitted)
             }
@@ -38,7 +38,10 @@ impl<'run> ScopedEffectController<'run> {
             ScopedEffectControllerInner::Owned(controller) => {
                 ScopedEffectController::owned(controller.for_scope(admitted.clone()), admitted)
             }
-        }
+        }?;
+        // The same drive under another scope: one journal, one frontier.
+        rescoped.frontier = self.frontier.clone();
+        Ok(rescoped)
     }
 
     /// Whether this controller was built for its scope and can build itself
@@ -63,6 +66,7 @@ impl<'run> ScopedEffectController<'run> {
                 compactions: self.compactions,
                 command_runs: self.command_runs,
                 effects: self.effects,
+                frontier: self.frontier,
             }),
         }
     }

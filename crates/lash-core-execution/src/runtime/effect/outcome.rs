@@ -22,59 +22,49 @@ pub fn token_usage_from_llm(usage: &crate::llm::types::LlmUsage) -> TokenUsage {
 }
 
 pub fn emit_llm_trace_started(
-    trace_sink: &Option<Arc<dyn lash_trace::TraceSink>>,
-    base_context: &lash_trace::TraceContext,
+    standing: &crate::trace::TraceStanding,
     context: lash_trace::TraceContext,
     request: &CoreLlmRequest,
-    clock: &dyn crate::Clock,
 ) {
-    crate::trace::emit_projected_trace(
-        trace_sink,
-        base_context,
-        context,
-        lash_trace::TraceEvent::LlmCallStarted {
-            request: crate::trace::trace_llm_request(request),
-        },
-        clock,
-    );
+    standing.observe(|| {
+        (
+            context,
+            lash_trace::TraceEvent::LlmCallStarted {
+                request: crate::trace::trace_llm_request(request),
+            },
+        )
+    });
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "trace completion carries the explicit sink, scope, outcome, attempt record, and clock"
-)]
 pub fn emit_llm_trace_completed(
-    trace_sink: &Option<Arc<dyn lash_trace::TraceSink>>,
-    base_context: &lash_trace::TraceContext,
+    standing: &crate::trace::TraceStanding,
     context: lash_trace::TraceContext,
     response: &LlmResponse,
     request_model: &str,
     duration_ms: u64,
     stream_summary: Option<serde_json::Value>,
     call_record: Option<&crate::LlmCallRecord>,
-    clock: &dyn crate::Clock,
 ) {
-    super::emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
-    crate::trace::emit_projected_trace(
-        trace_sink,
-        base_context,
-        context,
-        lash_trace::TraceEvent::LlmCallCompleted {
-            response: crate::trace::trace_llm_response(
-                response.full_text(),
-                duration_ms,
-                request_model.to_string(),
-                Some(response.terminal_reason),
-                crate::trace::trace_output_parts(&response.parts),
-                response.generation_disposition,
-            ),
-            usage: Some(crate::trace::trace_usage_from_llm(&response.usage)),
-            provider_usage: response.provider_usage.clone(),
-            stream_summary,
-            attempts: crate::trace::trace_llm_attempts(call_record),
-        },
-        clock,
-    );
+    super::emit_provider_replay_drops(standing, &context, call_record);
+    standing.observe(|| {
+        (
+            context,
+            lash_trace::TraceEvent::LlmCallCompleted {
+                response: crate::trace::trace_llm_response(
+                    response.full_text(),
+                    duration_ms,
+                    request_model.to_string(),
+                    Some(response.terminal_reason),
+                    crate::trace::trace_output_parts(&response.parts),
+                    response.generation_disposition,
+                ),
+                usage: Some(crate::trace::trace_usage_from_llm(&response.usage)),
+                provider_usage: response.provider_usage.clone(),
+                stream_summary,
+                attempts: crate::trace::trace_llm_attempts(call_record),
+            },
+        )
+    });
 }
 
 pub struct LlmTraceFailure {
@@ -124,79 +114,74 @@ impl From<&LlmCallError> for LlmTraceFailure {
 }
 
 pub fn emit_llm_trace_failed(
-    trace_sink: &Option<Arc<dyn lash_trace::TraceSink>>,
-    base_context: &lash_trace::TraceContext,
+    standing: &crate::trace::TraceStanding,
     context: lash_trace::TraceContext,
     failure: LlmTraceFailure,
     stream_summary: Option<serde_json::Value>,
     call_record: Option<&crate::LlmCallRecord>,
-    clock: &dyn crate::Clock,
 ) {
-    super::emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
-    crate::trace::emit_projected_trace(
-        trace_sink,
-        base_context,
-        context,
-        lash_trace::TraceEvent::LlmCallFailed {
-            error: lash_trace::TraceError {
-                retryable: failure.retryable,
-                terminal_reason: failure.terminal_reason,
-                failure_kind: failure.kind,
-                code: failure.code,
+    super::emit_provider_replay_drops(standing, &context, call_record);
+    standing.observe(|| {
+        (
+            context,
+            lash_trace::TraceEvent::LlmCallFailed {
+                error: lash_trace::TraceError {
+                    retryable: failure.retryable,
+                    terminal_reason: failure.terminal_reason,
+                    failure_kind: failure.kind,
+                    code: failure.code,
+                },
+                stream_summary,
+                attempts: crate::trace::trace_llm_attempts(call_record),
             },
-            stream_summary,
-            attempts: crate::trace::trace_llm_attempts(call_record),
-        },
-        clock,
-    );
+        )
+    });
 }
 
 pub fn emit_provider_replay_drops(
-    trace_sink: &Option<Arc<dyn lash_trace::TraceSink>>,
-    base_context: &lash_trace::TraceContext,
+    standing: &crate::trace::TraceStanding,
     context: &lash_trace::TraceContext,
     call_record: Option<&crate::LlmCallRecord>,
-    clock: &dyn crate::Clock,
 ) {
     let Some(call_record) = call_record else {
         return;
     };
     for drop in &call_record.replay_drops {
-        let route = |route: &crate::ProviderRouteIdentity| lash_trace::TraceProviderRouteIdentity {
-            provider: route.provider.to_string(),
-            endpoint: route.endpoint.to_string(),
-            model: route.model.to_string(),
-        };
-        let event = lash_trace::TraceProviderReplayDropEvent {
-            replay_kind: match drop.kind {
-                crate::llm::types::ProviderReplayKind::ResponseText => {
-                    lash_trace::TraceProviderReplayKind::ResponseText
-                }
-                crate::llm::types::ProviderReplayKind::Reasoning => {
-                    lash_trace::TraceProviderReplayKind::Reasoning
-                }
-                crate::llm::types::ProviderReplayKind::ToolCall => {
-                    lash_trace::TraceProviderReplayKind::ToolCall
-                }
-            },
-            reason: match drop.reason {
-                crate::llm::types::ProviderReplayDropReason::Unstamped => {
-                    lash_trace::TraceProviderReplayDropReason::Unstamped
-                }
-                crate::llm::types::ProviderReplayDropReason::ForeignRoute => {
-                    lash_trace::TraceProviderReplayDropReason::ForeignRoute
-                }
-            },
-            minting_route: drop.minting_route.as_ref().map(route),
-            serving_route: route(&drop.serving_route),
-        };
-        crate::trace::emit_projected_trace(
-            trace_sink,
-            base_context,
-            context.clone(),
-            lash_trace::TraceEvent::ProviderReplayDropped { event },
-            clock,
-        );
+        standing.observe(|| {
+            let route =
+                |route: &crate::ProviderRouteIdentity| lash_trace::TraceProviderRouteIdentity {
+                    provider: route.provider.to_string(),
+                    endpoint: route.endpoint.to_string(),
+                    model: route.model.to_string(),
+                };
+            let event = lash_trace::TraceProviderReplayDropEvent {
+                replay_kind: match drop.kind {
+                    crate::llm::types::ProviderReplayKind::ResponseText => {
+                        lash_trace::TraceProviderReplayKind::ResponseText
+                    }
+                    crate::llm::types::ProviderReplayKind::Reasoning => {
+                        lash_trace::TraceProviderReplayKind::Reasoning
+                    }
+                    crate::llm::types::ProviderReplayKind::ToolCall => {
+                        lash_trace::TraceProviderReplayKind::ToolCall
+                    }
+                },
+                reason: match drop.reason {
+                    crate::llm::types::ProviderReplayDropReason::Unstamped => {
+                        lash_trace::TraceProviderReplayDropReason::Unstamped
+                    }
+                    crate::llm::types::ProviderReplayDropReason::ForeignRoute => {
+                        lash_trace::TraceProviderReplayDropReason::ForeignRoute
+                    }
+                },
+                minting_route: drop.minting_route.as_ref().map(route),
+                serving_route: route(&drop.serving_route),
+            };
+            (
+                context.clone(),
+                lash_trace::TraceEvent::ProviderReplayDropped { event },
+            )
+        });
     }
 }
 
@@ -247,6 +232,16 @@ mod tests {
             self.0.lock_recover().push(record.clone());
             Ok(())
         }
+    }
+
+    fn standing(
+        sink: Arc<dyn lash_trace::TraceSink>,
+        base: &lash_trace::TraceContext,
+    ) -> crate::trace::TraceStanding {
+        crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock))
+            .with_trace_sink(sink)
+            .with_base_context(base.clone())
+            .unreplayed(None)
     }
 
     fn request() -> crate::LlmRequest {
@@ -318,31 +313,25 @@ mod tests {
         let context = projected_context(crate::RuntimeAttribution::none(), Some(cause));
 
         super::emit_llm_trace_started(
-            &Some(Arc::clone(&sink_dyn)),
-            &base,
+            &standing(Arc::clone(&sink_dyn), &base),
             context.clone(),
             &request(),
-            &crate::SystemClock,
         );
         super::emit_llm_trace_completed(
-            &Some(Arc::clone(&sink_dyn)),
-            &base,
+            &standing(Arc::clone(&sink_dyn), &base),
             context.clone(),
             &crate::LlmResponse::default(),
             "test/model",
             1,
             None,
             None,
-            &crate::SystemClock,
         );
         super::emit_llm_trace_failed(
-            &Some(sink_dyn),
-            &base,
+            &standing(sink_dyn, &base),
             context,
             super::LlmTraceFailure::invalid_structured_output(),
             None,
             None,
-            &crate::SystemClock,
         );
 
         let records = sink.0.lock_recover();
@@ -386,8 +375,7 @@ mod tests {
         )
         .expect("valid cause address");
         super::emit_llm_trace_started(
-            &Some(Arc::clone(&sink_dyn)),
-            &lash_trace::TraceContext::default(),
+            &standing(Arc::clone(&sink_dyn), &lash_trace::TraceContext::default()),
             projected_context(
                 crate::RuntimeAttribution::for_turn("actual-session", "actual-turn", 3, 1),
                 Some(crate::CausalRef::Effect {
@@ -395,17 +383,14 @@ mod tests {
                 }),
             ),
             &request(),
-            &crate::SystemClock,
         );
         super::emit_llm_trace_started(
-            &Some(sink_dyn),
-            &lash_trace::TraceContext::default(),
+            &standing(sink_dyn, &lash_trace::TraceContext::default()),
             projected_context(
                 crate::RuntimeAttribution::for_turn("actual-session", "actual-turn", 3, 1),
                 None,
             ),
             &request(),
-            &crate::SystemClock,
         );
 
         let records = sink.0.lock_recover();
@@ -440,19 +425,16 @@ mod tests {
         };
 
         super::emit_llm_trace_started(
-            &Some(Arc::clone(&sink_dyn)),
-            &lash_trace::TraceContext::default(),
+            &standing(Arc::clone(&sink_dyn), &lash_trace::TraceContext::default()),
             super::direct_trace_context(
                 &crate::RuntimeOwner::Session(session_id.clone()),
                 Some("direct-start"),
                 Some(&effect_cause),
             ),
             &request(),
-            &crate::SystemClock,
         );
         super::emit_llm_trace_completed(
-            &Some(Arc::clone(&sink_dyn)),
-            &lash_trace::TraceContext::default(),
+            &standing(Arc::clone(&sink_dyn), &lash_trace::TraceContext::default()),
             super::direct_trace_context(
                 &crate::RuntimeOwner::Session(session_id.clone()),
                 Some("direct-completed"),
@@ -463,15 +445,13 @@ mod tests {
             1,
             None,
             None,
-            &crate::SystemClock,
         );
         let explicit_base = lash_trace::TraceContext {
             parent_graph_node_id: Some("host:explicit-parent".to_string()),
             ..Default::default()
         };
         super::emit_llm_trace_failed(
-            &Some(sink_dyn),
-            &explicit_base,
+            &standing(sink_dyn, &explicit_base),
             super::direct_trace_context(
                 &crate::RuntimeOwner::Session(session_id.clone()),
                 Some("direct-failed"),
@@ -480,7 +460,6 @@ mod tests {
             super::LlmTraceFailure::invalid_structured_output(),
             None,
             None,
-            &crate::SystemClock,
         );
 
         let records = sink.0.lock_recover();

@@ -51,6 +51,7 @@ impl super::LocalDirectEffectRunner {
     /// record, failed attempts included, as that call's facts.
     pub(super) async fn run_direct_in_usage_run(
         &mut self,
+        invocation: &crate::RuntimeEffectInvocation,
         provider: crate::ProviderHandle,
         request: crate::LlmRequest,
         usage_source: String,
@@ -62,7 +63,43 @@ impl super::LocalDirectEffectRunner {
             request.model.key().clone(),
             request.model.wire_model(),
         )?;
+        // The request is this body's own work: its records are made here,
+        // under the body's live step.
+        let traced = self
+            .live
+            .as_ref()
+            .map(|live| self.tracing.effect_body(invocation, live))
+            .filter(crate::trace::TraceStanding::is_observed)
+            .map(|standing| {
+                let context = super::super::direct_trace_context(
+                    &self.usage.owner,
+                    Some(&uuid::Uuid::new_v4().to_string()),
+                    invocation.caused_by.as_ref(),
+                );
+                super::super::emit_llm_trace_started(&standing, context.clone(), &request);
+                (standing, context, request.model.wire_model().to_string())
+            });
         let (result, call_record) = self.run_direct_llm_request(provider, request, &call).await;
+        if let Some((standing, context, request_model)) = traced {
+            match &result {
+                Ok(response) => super::super::emit_llm_trace_completed(
+                    &standing,
+                    context,
+                    response,
+                    &request_model,
+                    0,
+                    None,
+                    call_record.as_ref(),
+                ),
+                Err(error) => super::super::emit_llm_trace_failed(
+                    &standing,
+                    context,
+                    super::super::LlmTraceFailure::from(error),
+                    None,
+                    call_record.as_ref(),
+                ),
+            }
+        }
         if let Some(call_record) = &call_record {
             call.record(call_record);
         }

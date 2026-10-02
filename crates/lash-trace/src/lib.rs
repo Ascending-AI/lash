@@ -34,6 +34,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod content_block;
+mod domain;
 mod jsonl_records;
 mod language_execution;
 mod language_execution_failure;
@@ -43,6 +44,10 @@ pub mod otel;
 pub mod telemetry;
 
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
+pub use domain::{
+    TraceDomainCompletion, TraceDomainOperation, TraceDomainStatus, TraceLlmAttempt,
+    TraceRuntimeStreamEvent, TraceTokenUsage,
+};
 use jsonl_records::truncate_torn_tail;
 pub use jsonl_records::{
     JsonlTraceReadError, TraceRead, parse_jsonl_records, parse_trace_jsonl_records,
@@ -68,9 +73,9 @@ pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
     InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
     TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
-    TraceCause, TraceLinks, TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory,
-    TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
-    W3cTraceFlags, W3cTraceId, W3cTraceState,
+    TraceCause, TraceDomainProjector, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
+    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceTransitionKind,
+    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -554,6 +559,17 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<Vec<TraceRetryAttempt>>,
     },
+    /// One real provider request attempt of a model call, made by the body
+    /// that dispatched it. A call that retried reports one per attempt.
+    LlmAttemptCompleted {
+        attempt: TraceLlmAttempt,
+    },
+    /// The terminal of a durable domain operation that has no record of its
+    /// own kind: a run, a process, a process segment, a host send or a tool
+    /// intent. It is a logical record of the operation's scope.
+    DomainCompleted {
+        completion: TraceDomainCompletion,
+    },
     ProviderRequest {
         event: TraceProviderRequestEvent,
     },
@@ -868,6 +884,7 @@ impl TraceEvent {
 
     /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
     ///   [`Self::StoreErrorObserved`] always;
+    /// - [`Self::DomainCompleted`] only with [`TraceDomainStatus::Failed`];
     /// - [`Self::JournaledEffectSettled`] only with
     ///   [`TraceJournaledEffectStatus::Failed`];
     /// - [`Self::DurableTimerResolved`] only with [`TraceDurableTimerStatus::Failed`];
@@ -903,6 +920,7 @@ impl TraceEvent {
                 TraceToolCallOutcome::Success(_) | TraceToolCallOutcome::Cancelled(_) => false,
             },
             Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
+            Self::DomainCompleted { completion } => completion.status == TraceDomainStatus::Failed,
             Self::LanguageExecution { event, .. } => match &event.payload {
                 TraceLanguageExecutionPayload::NodeFailed { .. } => true,
                 TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => match status {
@@ -930,6 +948,7 @@ impl TraceEvent {
             | Self::PromptViewAttachmentsPruned { .. }
             | Self::LlmCallStarted { .. }
             | Self::LlmCallCompleted { .. }
+            | Self::LlmAttemptCompleted { .. }
             | Self::ProviderRequest { .. }
             | Self::ProviderReplayDropped { .. }
             | Self::ProviderStreamEvent { .. }
@@ -966,6 +985,8 @@ impl TraceEvent {
             Self::LlmCallStarted { .. } => "llm_call_started",
             Self::LlmCallCompleted { .. } => "llm_call_completed",
             Self::LlmCallFailed { .. } => "llm_call_failed",
+            Self::LlmAttemptCompleted { .. } => "llm_attempt_completed",
+            Self::DomainCompleted { .. } => "domain_completed",
             Self::ProviderRequest { .. } => "provider_request",
             Self::ProviderReplayDropped { .. } => "provider_replay_dropped",
             Self::EffectEnvelopeDiff { .. } => "effect_envelope_diff",
@@ -1248,43 +1269,6 @@ pub struct TraceProviderStreamEvent {
     pub raw_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_json: Option<Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceRuntimeStreamEvent {
-    pub sequence: u64,
-    pub elapsed_ms: u64,
-    pub event_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visible_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub item_id: Option<String>,
-    /// The streamed block's own identity. Several blocks can share one
-    /// `item_id` (OpenAI summary parts of one reasoning item), so block-level
-    /// granularity needs this field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub block_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_index: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_json: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TraceTokenUsage>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceTokenUsage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_input_tokens: i64,
-    pub cache_write_input_tokens: i64,
-    pub reasoning_output_tokens: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

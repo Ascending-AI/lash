@@ -356,7 +356,7 @@ impl LashRuntime {
     pub(in crate::runtime) async fn restore_resident_session_components(
         &mut self,
         durable_state: &mut crate::RuntimeSessionState,
-        tracing: &crate::runtime::RuntimeTracingConfig,
+        tracing: &crate::trace::TraceRuntime,
         clock: &dyn crate::Clock,
     ) -> Result<Option<crate::ToolRestoreReport>, (ResidentReloadStage, RuntimeError)> {
         let has_store = self
@@ -437,7 +437,6 @@ impl LashRuntime {
                     &durable_state.session_id,
                     crate::runtime::ToolRestoreSite::ResidentReload,
                     tracing,
-                    clock,
                 ),
             )
             .map_err(|err| {

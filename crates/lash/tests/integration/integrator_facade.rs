@@ -48,7 +48,7 @@ use lash::provider::{
 };
 use lash::runtime::{
     OutputState, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeNamedPhase,
-    RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhaseProbeSlot,
+    RuntimeProviderConfig, RuntimeTurnPhaseProbeSlot, TraceRuntime,
 };
 use lash::tools::{
     CompactToolContract, PreparedToolBatch, PreparedToolBatchCall, ToolBatchReplies,

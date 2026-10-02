@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceRecord, TraceRetryAttempt, TraceRetryAttemptDetail, TraceSink, TraceTokenUsage,
-    TraceToolAttemptOutcome, TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id,
-    sha256_hex, tool_node_id, turn_node_id,
+    TraceRetryAttempt, TraceRetryAttemptDetail, TraceTokenUsage, TraceToolAttemptOutcome,
+    TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id, sha256_hex, tool_node_id,
+    turn_node_id,
 };
 
 use crate::llm::types::{
@@ -37,75 +37,14 @@ pub fn composition_schema_serialization_count() -> usize {
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(std::cell::Cell::get)
 }
 
-pub fn emit_trace(
-    sink: &Option<Arc<dyn TraceSink>>,
-    base_context: &TraceContext,
-    context: TraceContext,
-    event: TraceEvent,
-    clock: &dyn crate::Clock,
-) {
-    emit_trace_at(
-        sink,
-        base_context,
-        context,
-        event,
-        clock.timestamp_datetime(),
-    );
-}
-
-pub(crate) fn emit_trace_at(
-    sink: &Option<Arc<dyn TraceSink>>,
-    base_context: &TraceContext,
-    context: TraceContext,
-    event: TraceEvent,
-    timestamp: chrono::DateTime<chrono::Utc>,
-) {
-    let Some(sink) = sink else {
-        return;
-    };
-    let mut merged = base_context.clone();
-    merge_context(&mut merged, context);
-    assign_span_identity(&mut merged, &event);
-    if let Err(err) = sink.append(&TraceRecord::new_with_timestamp(merged, event, timestamp)) {
-        tracing::warn!(error = %err, "failed to append trace record");
-    }
-}
+mod runtime;
+pub use runtime::{
+    JournalFrontier, LiveStep, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
+    effect_trace_scope, process_trace_scope, tool_trace_scope, turn_trace_scope,
+};
 
 /// Invocation-owned identity is authoritative, including absent fields; host-owned run
 /// metadata and an explicit host parent remain intact.
-pub(crate) fn emit_projected_trace(
-    sink: &Option<Arc<dyn TraceSink>>,
-    base_context: &TraceContext,
-    context: TraceContext,
-    event: TraceEvent,
-    clock: &dyn crate::Clock,
-) {
-    emit_projected_trace_at(
-        sink,
-        base_context,
-        context,
-        event,
-        clock.timestamp_datetime(),
-    );
-}
-
-fn emit_projected_trace_at(
-    sink: &Option<Arc<dyn TraceSink>>,
-    base_context: &TraceContext,
-    context: TraceContext,
-    event: TraceEvent,
-    timestamp: chrono::DateTime<chrono::Utc>,
-) {
-    let Some(sink) = sink else {
-        return;
-    };
-    let mut merged = merge_runtime_projection(base_context, context);
-    assign_span_identity(&mut merged, &event);
-    if let Err(err) = sink.append(&TraceRecord::new_with_timestamp(merged, event, timestamp)) {
-        tracing::warn!(error = %err, "failed to append trace record");
-    }
-}
-
 fn merge_runtime_projection(base: &TraceContext, projection: TraceContext) -> TraceContext {
     let explicit_parent = base.parent_graph_node_id.clone();
     let projected_parent = projection.parent_graph_node_id.clone();
@@ -135,12 +74,10 @@ fn merge_runtime_projection(base: &TraceContext, projection: TraceContext) -> Tr
 /// Emit evidence only for store failures whose typed class means persisted
 /// state is corrupt or a monotonic durable identity cannot advance.
 pub fn emit_store_error(
-    sink: &Option<Arc<dyn TraceSink>>,
-    base_context: &TraceContext,
+    standing: &TraceStanding,
     context: TraceContext,
     operation: &str,
     error: &crate::StoreError,
-    clock: &dyn crate::Clock,
 ) {
     let error_class = if let crate::StoreError::StoredDataCorrupt { .. } = error {
         lash_trace::TraceStoreErrorClass::StoredDataCorrupt
@@ -149,17 +86,16 @@ pub fn emit_store_error(
     } else {
         return;
     };
-    emit_trace(
-        sink,
-        base_context,
-        context,
-        TraceEvent::StoreErrorObserved {
-            operation: operation.to_string(),
-            error_class,
-            message: error.to_string(),
-        },
-        clock,
-    );
+    standing.observe(|| {
+        (
+            context,
+            TraceEvent::StoreErrorObserved {
+                operation: operation.to_string(),
+                error_class,
+                message: error.to_string(),
+            },
+        )
+    });
 }
 
 fn merge_context(base: &mut TraceContext, overlay: TraceContext) {
@@ -1002,8 +938,9 @@ mod span_identity_tests {
 
         let directory = tempfile::tempdir().expect("trace tempdir");
         let path = directory.path().join("llm-retry.trace.jsonl");
-        let sink: Arc<dyn TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
-        let sink = Some(sink);
+        let standing = TraceRuntime::default()
+            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)))
+            .unreplayed(None);
         let error = crate::LlmCallError {
             message: "provider attempts exhausted".to_string(),
             retryable: true,
@@ -1015,15 +952,13 @@ mod span_identity_tests {
             partial_response: None,
         };
         crate::runtime::effect::emit_llm_trace_failed(
-            &sink,
-            &TraceContext::default(),
+            &standing,
             TraceContext::default().for_session("llm-retry-session"),
             crate::runtime::effect::LlmTraceFailure::from(&error),
             None,
             Some(&record),
-            &crate::facade_support::SystemClock,
         );
-        let emitted: TraceRecord = lash_trace::parse_jsonl_records(
+        let emitted: lash_trace::TraceRecord = lash_trace::parse_jsonl_records(
             &std::fs::read_to_string(path).expect("read LLM trace"),
         )
         .expect("parse emitted LLM trace")
@@ -1070,43 +1005,37 @@ mod span_identity_tests {
     fn store_integrity_classes_emit_at_the_runtime_boundary_only() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("store.trace.jsonl");
-        let sink: Arc<dyn TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
-        let sink = Some(sink);
-        let clock = crate::facade_support::SystemClock;
+        let standing = TraceRuntime::default()
+            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)))
+            .unreplayed(None);
         let context = TraceContext::default().for_session("corrupt-session");
 
         emit_store_error(
-            &sink,
-            &TraceContext::default(),
+            &standing,
             context.clone(),
             "session_restore",
             &crate::StoreError::StoredDataCorrupt {
                 record_kind: "SessionHeadMeta",
                 message: "invalid json".to_string(),
             },
-            &clock,
         );
         emit_store_error(
-            &sink,
-            &TraceContext::default(),
+            &standing,
             context.clone(),
             "turn_commit",
             &crate::StoreError::MonotonicCounterOverflow {
                 counter: "head_revision",
                 current: i64::MAX as u64,
             },
-            &clock,
         );
         emit_store_error(
-            &sink,
-            &TraceContext::default(),
+            &standing,
             context,
             "turn_commit",
             &crate::StoreError::Backend("transient".to_string()),
-            &clock,
         );
 
-        let records = lash_trace::parse_jsonl_records::<TraceRecord>(
+        let records = lash_trace::parse_jsonl_records::<lash_trace::TraceRecord>(
             &std::fs::read_to_string(path).expect("trace file"),
         )
         .expect("trace records");

@@ -99,13 +99,12 @@ async fn bind_state_to_store_with_trace(
 ) -> Result<(), SessionError> {
     let result = bind_state_to_store(store, state).await;
     if let Err(SessionError::Store { source, .. }) = &result {
+        // A session open is a host call no journal replays.
         crate::trace::emit_store_error(
-            &host.tracing.trace_sink,
-            &host.tracing.trace_context,
+            &host.tracing.unreplayed(None),
             lash_trace::TraceContext::default().for_session(state.session_id.clone()),
             "session_store_bind",
             source,
-            host.clock.as_ref(),
         );
     }
     result
@@ -292,7 +291,6 @@ impl LashRuntime {
                     &state.session_id,
                     host.core.control.tool_source_policy,
                     &host.core.tracing,
-                    host.core.clock.as_ref(),
                 ),
             )?);
         }

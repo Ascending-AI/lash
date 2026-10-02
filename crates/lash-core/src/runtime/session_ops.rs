@@ -67,7 +67,6 @@ impl LashRuntime {
                         &state.session_id,
                         crate::runtime::ToolRestoreSite::PersistedStateInstall,
                         &self.host.core.tracing,
-                        self.host.core.clock.as_ref(),
                     ),
                 )?;
                 installed_tool_restore = Some(report);

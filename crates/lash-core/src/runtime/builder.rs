@@ -83,17 +83,17 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {
-        self.core.tracing.trace_sink = sink;
+        self.core.tracing = self.core.tracing.clone().with_trace_sinks(sink);
         self
     }
 
     pub fn with_trace_level(mut self, level: lash_trace::TraceLevel) -> Self {
-        self.core.tracing.trace_level = level;
+        self.core.tracing = self.core.tracing.clone().with_level(level);
         self
     }
 
     pub fn with_trace_context(mut self, context: lash_trace::TraceContext) -> Self {
-        self.core.tracing.trace_context = context;
+        self.core.tracing = self.core.tracing.clone().with_base_context(context);
         self
     }
 

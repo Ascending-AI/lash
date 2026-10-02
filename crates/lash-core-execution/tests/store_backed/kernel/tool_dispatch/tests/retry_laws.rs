@@ -75,19 +75,20 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     assert_eq!(outcome.attempts[1].delay_ms, None);
     let directory = tempfile::tempdir().expect("trace tempdir");
     let path = directory.path().join("tool-retry.trace.jsonl");
-    let sink: Arc<dyn lash_trace::TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
+    let runtime = crate::trace::TraceRuntime::default()
+        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
     let tracing = crate::RuntimeExecutionTracing::new(
-        sink,
-        lash_trace::TraceContext::default(),
+        runtime.clone(),
+        None,
         lash_trace::TraceContext::default().for_session("tool-retry-session"),
     );
     crate::emit_tool_call_completed(
         &tracing,
+        &runtime.unreplayed(None),
         &outcome.record,
         &outcome.attempts,
         None,
         7,
-        &crate::facade_support::SystemClock,
     );
     let emitted: lash_trace::TraceRecord =
         lash_trace::parse_jsonl_records(&std::fs::read_to_string(path).expect("read tool trace"))

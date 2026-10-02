@@ -1406,9 +1406,9 @@ pub mod runtime {
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase,
-        RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkEngine, SleepSpec, TurnCancelWait, TurnContext, TurnControlBinding,
+        RuntimeNamedPhase, RuntimeProviderConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
+        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
+        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnControlBinding,
         WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used

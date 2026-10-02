@@ -58,13 +58,13 @@ impl LashCoreBuilder {
             core.control.process_wake_delivery_policy = policy;
         }
         if let Some(sink) = self.trace_sink.take() {
-            core.tracing.trace_sink = Some(sink);
+            core.tracing = core.tracing.clone().with_trace_sink(sink);
         }
         if let Some(level) = self.trace_level.take() {
-            core.tracing.trace_level = level;
+            core.tracing = core.tracing.clone().with_level(level);
         }
         if let Some(context) = self.trace_context.take() {
-            core.tracing.trace_context = context;
+            core.tracing = core.tracing.clone().with_base_context(context);
         }
         if let Some(termination) = self.termination.take() {
             core.control.termination = termination;

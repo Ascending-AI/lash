@@ -679,6 +679,10 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.layer.owns_commit_backpressure(self.inner.as_ref())
     }
 
+    fn attempt_observation(&self) -> Option<lash_trace::AttemptObservation> {
+        self.inner.as_ref().attempt_observation()
+    }
+
     fn hands_over_turns(&self) -> bool {
         self.layer.hands_over_turns(self.inner.as_ref())
     }

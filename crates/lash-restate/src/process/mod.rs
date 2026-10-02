@@ -457,10 +457,10 @@ pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
         Ok(())
     }
 
-    /// The live trace observer and context segment controllers report to,
-    /// when the runner's worker has one. A workflow given its own sink uses
+    /// The trace handle segment controllers observe through: the runtime's
+    /// own, when the runner's worker has one. A workflow given its own uses
     /// that instead.
-    fn trace(&self) -> Option<(Arc<dyn lash_trace::TraceSink>, lash_trace::TraceContext)> {
+    fn tracing(&self) -> Option<lash_core::trace::TraceRuntime> {
         None
     }
 }
@@ -530,13 +530,9 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
             .await
     }
 
-    fn trace(&self) -> Option<(Arc<dyn lash_trace::TraceSink>, lash_trace::TraceContext)> {
+    fn tracing(&self) -> Option<lash_core::trace::TraceRuntime> {
         let worker = self.worker().ok()?;
-        let tracing = &worker.config().runtime_host.tracing;
-        tracing
-            .trace_sink
-            .clone()
-            .map(|sink| (sink, tracing.trace_context.clone()))
+        Some(worker.config().runtime_host.tracing.clone())
     }
 
     async fn run_process_segment(

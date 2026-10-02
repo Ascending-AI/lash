@@ -12,6 +12,7 @@ mod await_event_support;
 #[doc(hidden)]
 pub mod control;
 mod controller_error;
+mod conversions;
 mod process_local;
 
 mod language_runtime;
@@ -208,6 +209,11 @@ pub(super) struct LocalDirectEffectRunner {
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     /// Who the call spends for (ADR 0125).
     usage: DirectUsage,
+    /// The request is the body's own work, so its records are made inside
+    /// the body and a replay that serves the recorded completion makes none.
+    tracing: crate::trace::TraceRuntime,
+    /// The body's live step, bound when the body really runs.
+    live: Option<Arc<crate::trace::LiveStep>>,
 }
 
 /// Runs one tool attempt against a live execution context: the recorded body
@@ -260,6 +266,12 @@ pub trait RuntimeEffectLocalRunner: Send {
     fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
         None
     }
+
+    /// Hands the runner the live step of the body it is about to run: called
+    /// once, right before [`execute`](Self::execute), and only for a body the
+    /// engine records, never for one that replays by re-execution. A runner
+    /// that observes nothing ignores it.
+    fn bind_live_step(&mut self, _live: Arc<crate::trace::LiveStep>) {}
 
     /// Run the body. `usage_run` is the body's run when the envelope is a
     /// spending effect and this runner offered
@@ -461,6 +473,9 @@ pub struct RuntimeEffectLocalExecutor<'run> {
     /// Set when the effect belongs to a replayed command that must be served
     /// only from the journal (FIG-3587, FIG-3719).
     served_only: Option<ServedOnly>,
+    /// What the drive that issued this effect lends its body
+    /// ([`Self::issued_under`]).
+    issued: crate::trace::StepIssue,
 }
 
 struct AbortEffectTaskOnDrop {
@@ -496,6 +511,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -517,6 +533,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -545,6 +562,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -558,6 +576,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -576,6 +595,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -731,6 +751,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -776,6 +797,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -790,6 +812,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store, ttl)),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -816,6 +839,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -836,6 +860,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -846,6 +871,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -864,6 +890,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -884,6 +911,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         charge_safety: crate::ChargeSafetyPolicy,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
         usage: DirectUsage,
+        tracing: crate::trace::TraceRuntime,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
         Self {
@@ -893,10 +921,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     charge_safety,
                     attachment_store,
                     usage,
+                    tracing,
+                    live: None,
                 },
             ))),
             replay_trace,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -917,6 +948,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ))),
                 replay_trace,
                 served_only: None,
+                issued: crate::trace::StepIssue::default(),
             };
         }
         Self {
@@ -929,6 +961,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -951,6 +984,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ))),
                 replay_trace,
                 served_only: None,
+                issued: crate::trace::StepIssue::default(),
             };
         }
         Self {
@@ -963,6 +997,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -1028,11 +1063,28 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         envelope: RuntimeEffectEnvelope,
         usage_run: Option<crate::UsageRun>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // This is the engine's journaled-step boundary: a substrate that
+        // serves the step from its journal never reaches it. A command that
+        // replays by re-execution is no recorded step, so its body gets no
+        // live step and its drive's frontier stays where it is.
+        let mut issued = self.issued;
+        let live = if envelope.command.replays_by_reexecution() {
+            issued.unrecorded();
+            None
+        } else {
+            Some(issued.begin(usage_run.as_ref()))
+        };
         match self.state {
-            RuntimeEffectLocalExecutorState::Runner(runner) => {
+            RuntimeEffectLocalExecutorState::Runner(mut runner) => {
+                if let Some(live) = live {
+                    runner.bind_live_step(live);
+                }
                 runner.execute(envelope, usage_run).await
             }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(mut runner)) => {
+                if let Some(live) = live {
+                    runner.bind_live_step(live);
+                }
                 if !runner.uses_task_boundary(&envelope.command) {
                     return runner.execute(envelope, usage_run).await;
                 }
@@ -1144,36 +1196,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Extracts the process outcome for effect-host implementors while executing or replaying a
-    /// runtime effect.
-    pub fn into_process(self) -> Result<ProcessLocalExecution, RuntimeEffectControllerError> {
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) => {
-                Ok(execution)
-            }
-            _ => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no process executor is available for process command",
-            )),
-        }
-    }
-
-    /// Extracts the definition executor for the journaled `PublishDefinition`
-    /// / `GetDefinition` commands.
-    pub fn into_definition_execution(
-        self,
-    ) -> Result<ProcessDefinitionLocalExecution, RuntimeEffectControllerError> {
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(execution)) => {
-                Ok(execution)
-            }
-            _ => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no definition executor is available for the publish/get-definition command",
-            )),
-        }
-    }
-
     fn into_remote_execution(
         self,
     ) -> (
@@ -1188,6 +1210,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state,
             replay_trace,
             served_only,
+            issued,
         } = self;
         match state {
             RuntimeEffectLocalExecutorState::Runner(runner) => {
@@ -1199,12 +1222,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
+                        issued: crate::trace::StepIssue::default(),
                     },
                     Some((
                         RuntimeEffectLocalExecutor {
                             state: RuntimeEffectLocalExecutorState::Runner(runner),
                             replay_trace,
                             served_only: None,
+                            issued,
                         },
                         request_rx,
                     )),
@@ -1219,6 +1244,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
+                        issued: crate::trace::StepIssue::default(),
                     },
                     Some((
                         RuntimeEffectLocalExecutor {
@@ -1227,6 +1253,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                             ),
                             replay_trace,
                             served_only: None,
+                            issued,
                         },
                         request_rx,
                     )),
@@ -1237,6 +1264,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     state: RuntimeEffectLocalExecutorState::Target(target),
                     replay_trace,
                     served_only,
+                    issued,
                 },
                 None,
             ),
@@ -1280,20 +1308,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Extracts the trigger outcome for effect-host implementors while executing or replaying a
-    /// runtime effect.
-    pub fn into_trigger(self) -> Result<TriggerLocalExecution, RuntimeEffectControllerError> {
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
-                Ok(execution)
-            }
-            _ => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no trigger executor is available for trigger command",
-            )),
-        }
-    }
-
     /// Executes trigger work for effect-host implementors while executing or replaying a runtime
     /// effect.
     pub async fn execute_trigger(
@@ -1329,65 +1343,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
         }
     }
-
-    /// Extracts the await event options outcome for effect-host implementors while executing or
-    /// replaying a runtime effect.
-    pub fn into_await_event_options(
-        self,
-    ) -> Result<RuntimeAwaitEventOptions, RuntimeEffectControllerError> {
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
-                controls:
-                    WaitControls {
-                        cancellation,
-                        observe_turn_cancel,
-                        turn_cancel_scope,
-                    },
-                deadline,
-                clock,
-            }) => Ok(RuntimeAwaitEventOptions {
-                cancellation,
-                deadline,
-                clock,
-                observe_turn_cancel,
-                turn_cancel_scope,
-            }),
-            _ => Ok(RuntimeAwaitEventOptions {
-                cancellation: CancellationToken::new(),
-                deadline: None,
-                clock: Arc::new(crate::SystemClock),
-                observe_turn_cancel: false,
-                turn_cancel_scope: None,
-            }),
-        }
-    }
-
-    /// Consumes a local executor for effect-host implementors, returning sleep options only when
-    /// the effect was configured for sleep.
-    pub fn into_sleep_options(self) -> RuntimeSleepOptions {
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
-                controls:
-                    WaitControls {
-                        cancellation,
-                        observe_turn_cancel,
-                        turn_cancel_scope,
-                    },
-                clock,
-            }) => RuntimeSleepOptions {
-                cancellation,
-                observe_turn_cancel,
-                turn_cancel_scope,
-                clock,
-            },
-            _ => RuntimeSleepOptions {
-                cancellation: CancellationToken::new(),
-                observe_turn_cancel: false,
-                turn_cancel_scope: None,
-                clock: Arc::new(crate::SystemClock),
-            },
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -1409,6 +1364,10 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
 
     fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
         self.context.usage_accounting()
+    }
+
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.context.bind_live_step(live);
     }
 
     async fn execute(
@@ -1467,6 +1426,10 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
         Some(self.usage.accounting.clone())
     }
 
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.live = Some(live);
+    }
+
     async fn execute(
         mut self: Box<Self>,
         envelope: RuntimeEffectEnvelope,
@@ -1484,8 +1447,14 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                     crate::session_model::transport_stream_events(&provider, None),
                     None,
                 );
-                self.run_direct_in_usage_run(provider, request, usage_source, usage_run.as_ref())
-                    .await
+                self.run_direct_in_usage_run(
+                    &envelope.invocation,
+                    provider,
+                    request,
+                    usage_source,
+                    usage_run.as_ref(),
+                )
+                .await
             }
             RuntimeEffectCommand::Sleep { spec } => {
                 let duration_ms = sleep_duration(spec, crate::SystemClock.timestamp_ms());
@@ -1642,6 +1611,7 @@ pub fn owned_runner_executor(
         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)),
         replay_trace,
         served_only: None,
+        issued: crate::trace::StepIssue::default(),
     }
 }
 
@@ -1688,6 +1658,7 @@ mod task_boundary_tests {
             ))),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         };
         let parent = crate::task::spawn(async move {
             let parent_id = tokio::task::id();

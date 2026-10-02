@@ -552,9 +552,7 @@ impl LashCore {
     /// fsyncs the file, and for an OTel sink it is a no-op (the host still owns provider
     /// flush; see the tracing docs).
     pub fn flush_trace_sink(&self) -> Result<()> {
-        if let Some(sink) = self.env.core.tracing.trace_sink.as_ref() {
-            sink.flush()?;
-        }
+        self.env.core.tracing.flush()?;
         Ok(())
     }
 

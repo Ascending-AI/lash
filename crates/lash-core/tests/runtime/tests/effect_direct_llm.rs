@@ -30,9 +30,13 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
     let host = EmbeddedRuntimeHost::new({
         let mut config =
             runtime_host_config_with_effect_layer(&backend, Arc::new(recorder.clone()));
-        config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
-            trace_path.clone(),
-        )));
+        config.tracing =
+            config
+                .tracing
+                .clone()
+                .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(
+                    trace_path.clone(),
+                )));
         config
     });
     let runtime =

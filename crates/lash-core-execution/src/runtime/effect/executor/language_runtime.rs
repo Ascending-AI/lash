@@ -27,6 +27,7 @@ impl RuntimeEffectLocalExecutor<'_> {
             ))),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 
@@ -40,6 +41,7 @@ impl RuntimeEffectLocalExecutor<'_> {
             ))),
             replay_trace: None,
             served_only: None,
+            issued: crate::trace::StepIssue::default(),
         }
     }
 }

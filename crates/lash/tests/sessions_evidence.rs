@@ -1386,20 +1386,14 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::runtime::RuntimeProviderConfig| {
         let _ = &value.models;
     });
-    // W0445: lash::runtime::RuntimeTracingConfig [struct]
-    type_witness::<lash::runtime::RuntimeTracingConfig>();
-    // W0446: lash::runtime::RuntimeTracingConfig::trace_context [field]
-    field_witness(|value: &lash::runtime::RuntimeTracingConfig| {
-        let _ = &value.trace_context;
-    });
-    // W0447: lash::runtime::RuntimeTracingConfig::trace_level [field]
-    field_witness(|value: &lash::runtime::RuntimeTracingConfig| {
-        let _ = &value.trace_level;
-    });
-    // W0448: lash::runtime::RuntimeTracingConfig::trace_sink [field]
-    field_witness(|value: &lash::runtime::RuntimeTracingConfig| {
-        let _ = &value.trace_sink;
-    });
+    // W0445: lash::runtime::TraceRuntime [struct]
+    type_witness::<lash::runtime::TraceRuntime>();
+    // W0446: lash::runtime::TraceRuntime::base_context [function]
+    member_witness(lash::runtime::TraceRuntime::base_context);
+    // W0447: lash::runtime::TraceRuntime::level [function]
+    member_witness(lash::runtime::TraceRuntime::level);
+    // W0448: lash::runtime::TraceEmitter [struct]
+    type_witness::<lash::runtime::TraceEmitter>();
     // W0449: lash::tools::ToolInvocation [struct]
     type_witness::<lash::tools::ToolInvocation>();
     // W0450: lash::tools::ToolInvocation::args [field]

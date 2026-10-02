@@ -212,20 +212,27 @@ impl LashRuntime {
         // From here the input is durably accepted, so every abort names it: the
         // host withdraws or redrives the input by this receipt (FIG-3575).
         let aborted = |err: RuntimeError| err.with_turn_input_acceptance(acceptance.clone());
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            lash_trace::TraceContext::default()
-                .for_session(self.state.session_id.clone())
-                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                .for_turn_index(self.state.turn_index + 1)
-                .for_turn(trace_turn_id.clone()),
-            lash_trace::TraceEvent::Custom {
-                name: "turn_input.accepted".to_string(),
-                payload: serde_json::json!({ "input_id": &accepted.input_id }),
-            },
-            self.host.core.clock.as_ref(),
-        );
+        self.host
+            .core
+            .tracing
+            .turn_drive(
+                &self.state.session_id,
+                &trace_turn_id,
+                &scoped_effect_controller,
+            )
+            .observe(|| {
+                (
+                    lash_trace::TraceContext::default()
+                        .for_session(self.state.session_id.clone())
+                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                        .for_turn_index(self.state.turn_index + 1)
+                        .for_turn(trace_turn_id.clone()),
+                    lash_trace::TraceEvent::Custom {
+                        name: "turn_input.accepted".to_string(),
+                        payload: serde_json::json!({ "input_id": &accepted.input_id }),
+                    },
+                )
+            });
 
         // The accepted row is driven by the session drive, in arrival order:
         // any root admitted ahead of it runs first, and the drive stops once

@@ -89,7 +89,6 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         let tracing = self.host.core.tracing.clone();
-        let clock = Arc::clone(&self.host.core.clock);
         let session_id = self.state.session_id.clone();
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
@@ -106,7 +105,6 @@ impl LashRuntime {
                 &session_id,
                 crate::runtime::ToolRestoreSite::HostRestore,
                 &tracing,
-                clock.as_ref(),
             ),
         )?;
         session.refresh_tool_catalog().await?;

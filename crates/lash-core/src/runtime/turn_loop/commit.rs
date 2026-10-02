@@ -501,24 +501,28 @@ impl LashRuntime {
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
+        let turn_trace = self.host.core.tracing.turn_drive(
+            &self.state.session_id,
+            &trace_turn_id,
+            scoped_effect_controller,
+        );
         for diagnostic in turn_pipeline.take_projection_diagnostics() {
-            crate::trace::emit_trace(
-                &self.host.core.tracing.trace_sink,
-                &self.host.core.tracing.trace_context,
-                lash_trace::TraceContext::default()
-                    .for_session(self.state.session_id.clone())
-                    .for_turn_index(turn_index)
-                    .for_turn(trace_turn_id.clone()),
-                lash_trace::TraceEvent::Custom {
-                    name: "session_graph.read_projection".to_string(),
-                    payload: serde_json::json!({
-                        "durably_appended_messages": diagnostic.durably_appended_messages,
-                        "observation_only_messages": diagnostic.observation_only_messages,
-                        "id_mismatch_message_ids": diagnostic.id_mismatches,
-                    }),
-                },
-                self.host.core.clock.as_ref(),
-            );
+            turn_trace.observe(|| {
+                (
+                    lash_trace::TraceContext::default()
+                        .for_session(self.state.session_id.clone())
+                        .for_turn_index(turn_index)
+                        .for_turn(trace_turn_id.clone()),
+                    lash_trace::TraceEvent::Custom {
+                        name: "session_graph.read_projection".to_string(),
+                        payload: serde_json::json!({
+                            "durably_appended_messages": diagnostic.durably_appended_messages,
+                            "observation_only_messages": diagnostic.observation_only_messages,
+                            "id_mismatch_message_ids": diagnostic.id_mismatches,
+                        }),
+                    },
+                )
+            });
         }
         if !assembly.token_usage.is_zero() {
             turn_pipeline.state_mut().token_usage = assembly.token_usage.clone();
@@ -554,7 +558,12 @@ impl LashRuntime {
                 crate::runtime::observation::observation_revision(&self.state);
             self.resident_session
                 .record_committed_observation_turn(observation_revision.as_u64(), &trace_turn_id);
-            self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
+            self.emit_completed_turn_trace(
+                &turn_trace,
+                &assembled.state,
+                &assembled.outcome,
+                &trace_turn_id,
+            );
             observer.release_terminal();
             observer.published().await;
             publish_terminal_after_commit(
@@ -698,15 +707,19 @@ impl LashRuntime {
                 committed
             }
             Err(err) => {
+                // A store fault is this attempt's own evidence, whatever the
+                // attempt replayed before it met the fault.
                 crate::trace::emit_store_error(
-                    &self.host.core.tracing.trace_sink,
-                    &self.host.core.tracing.trace_context,
+                    &self
+                        .host
+                        .core
+                        .tracing
+                        .unreplayed(turn_trace.scope().cloned()),
                     lash_trace::TraceContext::default()
                         .for_session(self.state.session_id.clone())
                         .for_turn(trace_turn_id.clone()),
                     "turn_commit",
                     &err,
-                    self.host.core.clock.as_ref(),
                 );
                 // Reported here, not inside the commit: the writer's identity
                 // is already live in this future, so naming it costs nothing,
@@ -752,19 +765,18 @@ impl LashRuntime {
             delivery.post_commit_delivery_failed = true;
         }
         if let Some(settlement) = settlement_trace.filter(|settlement| !settlement.is_empty()) {
-            crate::trace::emit_trace(
-                &self.host.core.tracing.trace_sink,
-                &self.host.core.tracing.trace_context,
-                lash_trace::TraceContext::default()
-                    .for_session(delivery.turn.state.session_id.clone())
-                    .for_turn_index(delivery.turn.state.turn_index)
-                    .for_turn(trace_turn_id.clone()),
-                lash_trace::TraceEvent::Custom {
-                    name: "ingress.settled".to_string(),
-                    payload: ingress_settled_trace_payload(&settlement),
-                },
-                self.host.core.clock.as_ref(),
-            );
+            turn_trace.observe(|| {
+                (
+                    lash_trace::TraceContext::default()
+                        .for_session(delivery.turn.state.session_id.clone())
+                        .for_turn_index(delivery.turn.state.turn_index)
+                        .for_turn(trace_turn_id.clone()),
+                    lash_trace::TraceEvent::Custom {
+                        name: "ingress.settled".to_string(),
+                        payload: ingress_settled_trace_payload(&settlement),
+                    },
+                )
+            });
         }
         // The commit's observers write under its drive's fence, a final
         // commit's included (FIG-4202): they run at the root's boundary, so a
@@ -801,6 +813,7 @@ impl LashRuntime {
         self.mark_phase_end(PostCommitDelivery::RUNTIME_PHASE);
 
         self.emit_completed_turn_trace(
+            &turn_trace,
             &delivery.turn.state,
             &delivery.turn.outcome,
             &trace_turn_id,
@@ -878,31 +891,31 @@ impl LashRuntime {
         .await
     }
 
+    /// A drive that is replaying its journal reconstructs the turn's
+    /// terminal and reports nothing. The commit reports no inserted-or-existing
+    /// verdict yet, so the terminal is observed as the work of the attempt
+    /// that first reaches it rather than as a logical transition.
     fn emit_completed_turn_trace(
         &self,
+        turn_trace: &crate::trace::TraceStanding,
         state: &SessionSnapshot,
         outcome: &TurnOutcome,
         trace_turn_id: &TurnId,
     ) {
-        if self.host.core.tracing.trace_sink.is_none() {
-            return;
-        }
-
         let Some(trace_outcome) = trace_outcome(outcome) else {
             return;
         };
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            lash_trace::TraceContext::default()
-                .for_session(state.session_id.clone())
-                .for_turn_index(state.turn_index)
-                .for_turn(trace_turn_id.clone()),
-            lash_trace::TraceEvent::TurnCompleted {
-                outcome: trace_outcome,
-            },
-            self.host.core.clock.as_ref(),
-        );
+        turn_trace.observe(|| {
+            (
+                lash_trace::TraceContext::default()
+                    .for_session(state.session_id.clone())
+                    .for_turn_index(state.turn_index)
+                    .for_turn(trace_turn_id.to_string()),
+                lash_trace::TraceEvent::TurnCompleted {
+                    outcome: trace_outcome,
+                },
+            )
+        });
     }
 
     pub(in crate::runtime) async fn finish_logical_turn_error(

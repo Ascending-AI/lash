@@ -115,42 +115,39 @@ impl CanonicalRuntimeEffectEnvelope {
 
 /// Trace capability dedicated to replay-divergence diagnostics.
 ///
-/// Construction returns `None` only when no sink is configured. A divergence
-/// is rare and always actionable, so its evidence reaches a configured sink at
-/// the default standard trace level without enabling other extended events.
+/// Construction returns `None` only when nothing observes the runtime. A
+/// divergence is rare and always actionable, so its evidence reaches a
+/// configured observer at the default standard trace level without enabling
+/// other extended events. It is met while a recorded step is served, so it is
+/// a diagnostic of the attempt that met it, not a replayed lifecycle record:
+/// each attempt that meets the divergence reports it under its own identity.
 #[derive(Clone)]
 pub struct RuntimeEffectReplayTrace {
-    sink: Arc<dyn TraceSink>,
-    base_context: TraceContext,
+    standing: crate::trace::TraceStanding,
     context: TraceContext,
-    clock: Arc<dyn crate::Clock>,
 }
 
 impl RuntimeEffectReplayTrace {
     pub fn for_divergence(
-        sink: Option<&Arc<dyn TraceSink>>,
-        base_context: TraceContext,
+        tracing: &crate::trace::TraceRuntime,
+        scope: Option<lash_trace::DurableTraceScope>,
         context: TraceContext,
-        clock: Arc<dyn crate::Clock>,
     ) -> Option<Self> {
         // Deliberately bypass the ordinary extended-level gate for this one
-        // rare diagnostic; the sink remains the emission boundary.
-        Some(Self {
-            sink: Arc::clone(sink?),
-            base_context,
+        // rare diagnostic; the observer remains the emission boundary.
+        tracing.is_observed().then(|| Self {
+            standing: tracing.unreplayed(scope),
             context,
-            clock,
         })
     }
 
     fn emit(&self, event: TraceEffectEnvelopeDiffEvent) {
-        crate::trace::emit_projected_trace(
-            &Some(Arc::clone(&self.sink)),
-            &self.base_context,
-            self.context.clone(),
-            TraceEvent::EffectEnvelopeDiff { event },
-            self.clock.as_ref(),
-        );
+        self.standing.observe(|| {
+            (
+                self.context.clone(),
+                TraceEvent::EffectEnvelopeDiff { event },
+            )
+        });
     }
 }
 
@@ -570,10 +567,9 @@ mod tests {
         let sink = Arc::new(RecordingSink::default());
         let sink_dyn: Arc<dyn TraceSink> = sink.clone();
         let trace = RuntimeEffectReplayTrace::for_divergence(
-            Some(&sink_dyn),
+            &crate::trace::TraceRuntime::default().with_trace_sink(sink_dyn),
+            None,
             TraceContext::default(),
-            TraceContext::default(),
-            Arc::new(crate::SystemClock),
         )
         .expect("configured divergence trace");
         let error = validate_replayed_effect_envelope(
@@ -630,10 +626,9 @@ mod tests {
         let sink = Arc::new(RecordingSink::default());
         let sink_dyn: Arc<dyn TraceSink> = sink.clone();
         let trace = RuntimeEffectReplayTrace::for_divergence(
-            Some(&sink_dyn),
+            &crate::trace::TraceRuntime::default().with_trace_sink(sink_dyn),
+            None,
             TraceContext::default(),
-            TraceContext::default(),
-            Arc::new(crate::SystemClock),
         )
         .expect("a configured sink is sufficient under default wiring");
         let error = validate_replayed_effect_envelope(
@@ -651,10 +646,9 @@ mod tests {
 
         assert!(
             RuntimeEffectReplayTrace::for_divergence(
+                &crate::trace::TraceRuntime::default(),
                 None,
                 TraceContext::default(),
-                TraceContext::default(),
-                Arc::new(crate::SystemClock),
             )
             .is_none()
         );
@@ -686,10 +680,11 @@ mod tests {
             process_id: crate::process_id_for_test("cause-process"),
         }));
         let trace = RuntimeEffectReplayTrace::for_divergence(
-            Some(&sink_dyn),
-            base,
+            &crate::trace::TraceRuntime::default()
+                .with_trace_sink(sink_dyn)
+                .with_base_context(base),
+            None,
             crate::trace::trace_context_from_effect_invocation(&invocation),
-            Arc::new(crate::SystemClock),
         )
         .expect("configured divergence trace");
 

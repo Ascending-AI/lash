@@ -180,17 +180,17 @@ impl RuntimeEnvironmentBuilder {
     }
 
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn TraceSink>>) -> Self {
-        self.env.core.tracing.trace_sink = sink;
+        self.env.core.tracing = self.env.core.tracing.clone().with_trace_sinks(sink);
         self
     }
 
     pub fn with_trace_level(mut self, level: TraceLevel) -> Self {
-        self.env.core.tracing.trace_level = level;
+        self.env.core.tracing = self.env.core.tracing.clone().with_level(level);
         self
     }
 
     pub fn with_trace_context(mut self, context: TraceContext) -> Self {
-        self.env.core.tracing.trace_context = context;
+        self.env.core.tracing = self.env.core.tracing.clone().with_base_context(context);
         self
     }
 
@@ -271,9 +271,9 @@ mod tests {
             .with_termination(termination.clone())
             .build();
 
-        assert!(env.core.tracing.trace_sink.is_some());
-        assert_eq!(env.core.tracing.trace_level, TraceLevel::Extended);
-        assert_eq!(env.core.tracing.trace_context, trace_context);
+        assert!(env.core.tracing.is_observed());
+        assert_eq!(env.core.tracing.level(), TraceLevel::Extended);
+        assert_eq!(env.core.tracing.base_context(), &trace_context);
         assert_eq!(
             env.core.control.termination.treat_missing_done_as_failure,
             termination.treat_missing_done_as_failure
