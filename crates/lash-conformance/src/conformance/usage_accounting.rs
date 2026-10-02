@@ -515,8 +515,28 @@ impl World {
                 if world.kill.has_fired() {
                     world.recovering.cancel();
                 }
-                let driven = world.drive(scope).await;
-                let end = crate::ConformanceTurnEnd::of(&driven);
+                let mut driven = world.drive(scope).await;
+                let terminal = if let Err(error) = &driven
+                    && error.code == crate::RuntimeErrorCode::StoreCommitSuperseded
+                {
+                    match world
+                        .tier
+                        .stores
+                        .session_store_factory()
+                        .root_terminal(&world.session_id, &world.turn_id())
+                        .await
+                    {
+                        Ok(terminal) => terminal,
+                        Err(error) => {
+                            driven = Err(crate::RuntimeEffectControllerError::from(error)
+                                .into_runtime_error());
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let end = crate::ConformanceTurnEnd::of_root(&driven, terminal.as_ref());
                 let _ = report.send(driven);
                 end
             })

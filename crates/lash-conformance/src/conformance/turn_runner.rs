@@ -61,13 +61,30 @@ use std::sync::Arc;
 /// settled turn is done.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConformanceTurnEnd {
-    /// The turn settled: it finished, or it was recorded as a failed turn.
+    /// The turn settled: it finished, or its failure or refusal was recorded.
     Settled,
     /// The turn aborted without an outcome, for this cause.
     Aborted(crate::TurnFailureCause),
 }
 
 impl ConformanceTurnEnd {
+    /// How a turn ended when its root has durable terminal evidence.
+    /// A matching recorded refusal ends the root even when its error code
+    /// alone describes a redrivable operation, such as a superseded commit.
+    pub(crate) fn of_root<T>(
+        turn: &Result<T, crate::RuntimeError>,
+        terminal: Option<&crate::store::RootTerminal>,
+    ) -> Self {
+        if let Err(error) = turn
+            && let Some(terminal) = terminal
+            && let crate::store::RootTerminalCause::Refused { code, .. } = &terminal.cause
+            && code == &error.code
+        {
+            return Self::Settled;
+        }
+        Self::of(turn)
+    }
+
     /// How a turn that returned `turn` ended.
     pub fn of<T>(turn: &Result<T, crate::RuntimeError>) -> Self {
         match turn {

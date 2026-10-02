@@ -53,8 +53,6 @@ skips = [
   "tests::conformance_and_poison::declared_start_cancel_at_each_point",
   # FIG-4758: unfinished cancelled/ended work; restore after both-leg teardown is clean.
   "tests::conformance_and_poison::declared_start_discarded_retry_launches_nothing",
-  # FIG-4759: unfinished cancelled/ended work; restore after both-leg teardown is clean.
-  "tests::usage_accounting_on_the_double::live::refused_superseded_keeps_each_paid_call_once",
 ]
 shards = 3
 # The barrier laws drive width-64 tool groups (ADR 0116 §7.1) through five

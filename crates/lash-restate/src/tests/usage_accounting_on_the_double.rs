@@ -40,8 +40,16 @@ async fn usage_accounting_tier() -> (
     LiveConformanceHarness,
     lash_conformance::UsageAccountingTier,
 ) {
-    let harness =
-        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    usage_accounting_tier_on(HarnessServer::in_process()).await
+}
+
+async fn usage_accounting_tier_on(
+    target: HarnessServer,
+) -> (
+    LiveConformanceHarness,
+    lash_conformance::UsageAccountingTier,
+) {
+    let harness = LiveConformanceHarness::start_for_tool_children_on(target).await;
     let server = harness
         .server_double()
         .expect("the in-process harness runs on the server double");
@@ -56,6 +64,44 @@ async fn usage_accounting_tier() -> (
 }
 
 lash_conformance::usage_accounting_engine_tests!({ usage_accounting_tier().await });
+
+async fn superseded_usage_root_completes_probe(always_replay: bool) {
+    let (harness, tier) = usage_accounting_tier_on(HarnessServer::InProcess {
+        seed: 4759,
+        always_replay,
+    })
+    .await;
+    lash_conformance::refused_superseded_keeps_each_paid_call_once(&tier).await;
+    let server = harness
+        .server_double()
+        .expect("the probe runs on the double");
+    let invocations = server.invocations();
+    let probes: Vec<_> = invocations
+        .iter()
+        .filter(|view| view.target.starts_with("ConformanceTurnProbe/"))
+        .collect();
+    assert_eq!(probes.len(), 1, "the refused turn ran through one probe");
+    assert_eq!(
+        probes[0].status, "completed",
+        "a recorded root refusal must finish its probe: {probes:#?}"
+    );
+    assert_eq!(probes[0].retry_count, 0, "a refused root never retries");
+    assert!(probes[0].last_failure.is_none(), "{probes:#?}");
+    if always_replay {
+        assert!(probes[0].suspensions > 0, "the probe actually replayed");
+    }
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_superseded_usage_root_completes_its_probe() {
+    superseded_usage_root_completes_probe(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_superseded_usage_root_completes_its_probe_under_always_replay() {
+    superseded_usage_root_completes_probe(true).await;
+}
 
 /// E1's facade read: another core opens no runtime and borrows no controller.
 pub(super) async fn read_parked_usage_from_second_core(
