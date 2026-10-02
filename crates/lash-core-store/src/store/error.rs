@@ -1070,6 +1070,14 @@ pub enum StoreError {
         artifact_ref: String,
         to: crate::artifact_referrer::ArtifactReferrer,
     },
+    #[error("turn change cursor is below retention horizon {horizon:?}")]
+    TurnChangeCursorPruned {
+        horizon: crate::store::TurnChangeCursor,
+    },
+    #[error("turn change cursor is beyond the current position {current:?}")]
+    TurnChangeCursorAhead {
+        current: crate::store::TurnChangeCursor,
+    },
     /// A turn park feed cursor predates history `compact_turn_park_feed`
     /// removed. The consumer must perform a full relist before resuming from
     /// the reported horizon.
@@ -1233,6 +1241,8 @@ impl StoreError {
             | Self::ArtifactReferrerEnded { .. }
             | Self::ArtifactMissing { .. }
             | Self::ArtifactCarryMissing { .. }
+            | Self::TurnChangeCursorPruned { .. }
+            | Self::TurnChangeCursorAhead { .. }
             | Self::ParkFeedCursorCompacted { .. } => false,
         }
     }
@@ -1369,6 +1379,8 @@ impl StoreError {
             | Self::IncompleteCheckpointComponentSet
             | Self::ExecutionStateBodiesReleased
             | Self::ArtifactCarryMissing { .. }
+            | Self::TurnChangeCursorPruned { .. }
+            | Self::TurnChangeCursorAhead { .. }
             | Self::ParkFeedCursorCompacted { .. } => Code::StoreRefused,
         }
     }
@@ -1566,6 +1578,8 @@ impl StoreError {
             Self::ArtifactReferrerEnded { .. } => "ArtifactReferrerEnded",
             Self::ArtifactMissing { .. } => "ArtifactMissing",
             Self::ArtifactCarryMissing { .. } => "ArtifactCarryMissing",
+            Self::TurnChangeCursorPruned { .. } => "TurnChangeCursorPruned",
+            Self::TurnChangeCursorAhead { .. } => "TurnChangeCursorAhead",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::MigrationOpenElsewhere { .. } => "MigrationOpenElsewhere",
             Self::StorageFailure { .. } => "StorageFailure",

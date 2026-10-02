@@ -625,6 +625,7 @@ for (let i = 0; i < history.length; i++) {
     factory
         .reclaim_retained_evidence(lash_core::RetentionBound {
             committed_before_epoch_ms: u64::MAX,
+            turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
         })
         .await
         .expect("host prunes settled execution evidence");

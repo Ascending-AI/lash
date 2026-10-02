@@ -424,6 +424,7 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     turn_commit_hash            TEXT NOT NULL,
     result_json                 TEXT NOT NULL,
     outcome_code                TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'segment_boundary', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
+    change_seq INTEGER NOT NULL UNIQUE CONSTRAINT ck_runtime_turn_commits_change_seq CHECK (change_seq > 0),
     committed_at_ms             INTEGER NOT NULL,
     request_identity_hash       TEXT,
     requested_node_count        INTEGER,
@@ -435,6 +436,28 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
 CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_failure_evidence
     ON runtime_turn_commits(session_id, committed_at_ms, turn_id)
     WHERE failure_evidence;
+
+
+CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_change_seq
+    ON runtime_turn_commits(change_seq) WHERE outcome_code IS NOT NULL;
+
+-- Transactional clock: a cursor never overtakes an uncommitted terminal.
+CREATE TABLE IF NOT EXISTS turn_change_clock (
+    singleton INTEGER PRIMARY KEY CONSTRAINT ck_turn_change_clock_singleton CHECK (singleton = 1),
+    current_seq INTEGER NOT NULL CONSTRAINT ck_turn_change_clock_current_seq CHECK (current_seq >= 0),
+    retention_horizon INTEGER NOT NULL CONSTRAINT ck_turn_change_clock_retention_horizon CHECK (retention_horizon >= 0 AND retention_horizon <= current_seq)
+);
+INSERT OR IGNORE INTO turn_change_clock VALUES (1, 0, 0);
+
+-- Session faults outlive their standing state and the session's physical delete.
+CREATE TABLE IF NOT EXISTS session_terminal_changes (
+    change_seq INTEGER PRIMARY KEY CONSTRAINT ck_session_terminal_changes_change_seq CHECK (change_seq > 0),
+    session_id TEXT NOT NULL,
+    fault_json TEXT,
+    recorded_at_ms INTEGER NOT NULL CONSTRAINT ck_session_terminal_changes_recorded_at_ms CHECK (recorded_at_ms >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_session_terminal_changes_session
+    ON session_terminal_changes(session_id, change_seq);
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,

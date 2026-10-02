@@ -849,6 +849,7 @@ impl SqliteStore {
                                 identity.1,
                                 identity.2,
                                 !result.failure_evidence.is_empty(),
+                                crate::catalog::catalog_reads::next_turn_change_sequence(tx)?,
                             ],
                         )
                         .map_err(sqlite_error)?;

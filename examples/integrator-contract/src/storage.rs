@@ -652,6 +652,13 @@ impl DeploymentStore for Integrator {
     async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn turns_changed_since(
+        &self,
+        after: lash::persistence::TurnChangeCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash::persistence::TurnChangePage, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn list_turn_parks(&self, query: &TurnParkQuery) -> Result<Vec<TurnPark>, StoreError> {
         unreachable!("external signature witness")
     }

@@ -402,6 +402,22 @@ async fn a_missing_seed_row_is_rejected() {
     .await;
 }
 
+#[tokio::test]
+async fn a_missing_turn_change_clock_seed_is_rejected() {
+    assert_mutation_is_rejected(
+        "DELETE FROM lash_turn_change_clock",
+        &[
+            "SEED ROWS",
+            "lash_turn_change_clock: seed row is missing (transactional turn-change clock)",
+        ],
+        |finding| {
+            matches!(finding, SchemaFinding::MissingSeedRow { table, .. }
+                if table == "lash_turn_change_clock")
+        },
+    )
+    .await;
+}
+
 /// The catalog identity is a data precondition rather than a shape, so
 /// `SchemaCheck::WarnOnly` cannot relax it: without the row there is no identity
 /// to hand the session catalogs open builds.

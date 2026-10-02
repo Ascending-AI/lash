@@ -74,3 +74,15 @@ lash_conformance::turn_commit_outcome_tests!({
     let (backend, store) = catalog().await;
     (backend, store)
 });
+
+#[tokio::test]
+async fn unread_turn_terminals_survive_retention() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::unread_terminals_survive_retention(store).await;
+}
+
+#[tokio::test]
+async fn terminal_feed_is_ordered_and_replay_stable() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::terminal_feed_is_ordered_and_replay_stable(store).await;
+}

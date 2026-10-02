@@ -63,20 +63,27 @@ const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 /// data precondition no structural comparison can see. The component version
 /// stamp is seeded the same way but reported as a version mismatch instead.
 ///
-/// Each is a singleton row keyed `singleton = TRUE`, and the check queries that
+/// Each declares its singleton key, and the check queries that
 /// key rather than table non-emptiness: `CHECK (singleton)` is deliberately
 /// outside the verified scope, so a host port that omits it can hold a
 /// `singleton = FALSE` row that satisfies "the table has rows" and then fails
 /// every runtime read.
-const SEED_ROWS: [(&str, &str); 3] = [
+const SEED_ROWS: [(&str, &str, &str); 4] = [
     (
         "lash_process_change_clock",
         "transactional process-change clock",
+        "TRUE",
     ),
-    ("lash_catalog_identity", "catalog identity"),
+    ("lash_catalog_identity", "catalog identity", "TRUE"),
     (
         "lash_trigger_subscription_change_clock",
         "transactional trigger-subscription change clock",
+        "TRUE",
+    ),
+    (
+        "lash_turn_change_clock",
+        "transactional turn-change clock",
+        "1",
     ),
 ];
 

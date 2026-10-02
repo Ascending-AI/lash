@@ -35,3 +35,43 @@ older than the host's retention horizon. A cursor behind that evidence returns
 `subscriptions_snapshot()`, an atomic read of all live subscriptions and its
 continuation cursor, and removes its sources whose ids are absent. Normal
 filtered subscription listings do not supply a safe continuation cursor.
+
+
+## Turn and session terminals
+
+`LashCore::turns_changed_since(cursor, limit)` reads the deployment's durable
+turn and session terminals in one bounded snapshot. `TurnChangeCursor` is
+opaque and store-scoped. Each terminal receipt has an indexed `change_seq`.
+Its accepting transaction raises `turn_change_clock`, so a later position
+cannot commit ahead of an earlier one. Replaying a receipt raises no clock
+and creates no second change. Plain state commits consume a position but
+carry no terminal and are excluded by the partial index.
+
+`TurnChangeKind::Committed` carries the operation and the existing typed
+`TurnCommitOutcome`. `SessionFault` keeps the typed code, cause and origin of
+each newly recorded fault, including episodes subsequently cleared by an
+operator. `SessionDeleted` records physical deletion. These session records
+share the clock and transaction with their accepting mutation, and have no
+foreign key that would remove evidence when the session is deleted. They
+retain failure facts, not live output or protocol activity. No push sink,
+retry ledger or second live stream is introduced.
+
+Pages include `retained_after` and the cursor after the last returned record.
+An empty page advances to the snapshot's current clock. Cursors behind the
+retention horizon refuse as `StoreError::TurnChangeCursorPruned`; future
+positions refuse as `TurnChangeCursorAhead`. The host persists a cursor only
+after applying its page. The live session cursor remains the latency path;
+its gap triggers reconciliation through this durable record read.
+
+`RetentionBound::turn_watermark` is explicit. `UpTo(cursor)` protects every
+unacknowledged terminal; `NoProjector` is the host's deliberate opt-out.
+Reclamation requires both acknowledgement and a durably deleted session,
+and applies the exclusive timestamp horizon. Its transaction advances the
+cursor horizon to the highest terminal actually removed. Standing fault
+clears and session deletion never erase unread terminals. Permanent session
+identity tombstones remain independent of this evidence sweep.
+
+The SQL conformance laws `unread_turn_terminals_survive_retention` and
+`terminal_feed_is_ordered_and_replay_stable`, and the Restate-double law
+`a_disconnected_host_reconciles_a_failed_turn_after_live_replay_trims`, own
+this contract. Each backend runs the same store laws.

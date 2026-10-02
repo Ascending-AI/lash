@@ -27,10 +27,39 @@ pub(crate) async fn reclaim(
         .await
         .map_err(store_sqlx_error)?;
         crate::usage_accounting::lock_retention(&mut tx).await?;
+        let sql = &session_sql().turn_commits;
+        let current: i64 = sqlx::query_scalar(sql.lock_change_clock.sql())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let current = crate::support::u64_from_sql("TurnChangeClock", "current_seq", current)?;
+        let watermark = bound.turn_watermark.acknowledged_sequence(current)?;
+        let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);
+        let horizon: Option<i64> = sqlx::query_scalar(sql.removed_horizon.sql())
+            .bind(cutoff)
+            .bind(watermark)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        if let Some(horizon) = horizon {
+            sqlx::query(sql.advance_horizon.sql())
+                .bind(horizon)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        let removed_session_terminal_count = sqlx::query(sql.delete_session_terminals.sql())
+            .bind(cutoff)
+            .bind(watermark)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
         // deleted_sessions permanently protects identity reuse (FIG-754 / FIG-748).
         let removed_receipt_count =
             sqlx::query(session_sql().turn_commits_postgres.delete_retained.sql())
-                .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
+                .bind(cutoff)
+                .bind(watermark)
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?
@@ -58,6 +87,7 @@ pub(crate) async fn reclaim(
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
+            removed_session_terminal_count,
             removed_usage_fact_count,
             removed_usage_meter_count,
             removed_usage_owner_retirement_count,

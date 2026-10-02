@@ -447,6 +447,15 @@ pub trait DeploymentStore:
         query: &crate::store::TurnParkQuery,
     ) -> Result<Vec<crate::store::TurnPark>, crate::StoreError>;
 
+    /// Durable turn and session terminals strictly after `after`, in commit
+    /// order. Independent of live replay; pages return the retention horizon.
+    /// A cursor behind that horizon refuses as `TurnChangeCursorPruned`.
+    async fn turns_changed_since(
+        &self,
+        after: crate::store::TurnChangeCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<crate::store::TurnChangePage, crate::StoreError>;
+
     /// Read the durable turn park feed strictly after `after` (FIG-3659): one
     /// event per park transition, in commit order. A position below the
     /// compaction horizon fails with

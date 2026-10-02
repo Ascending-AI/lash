@@ -590,7 +590,7 @@ async fn read_seed_row_findings(
     found: &SchemaShape,
 ) -> Result<Vec<SchemaFinding>, StoreError> {
     let mut findings = Vec::new();
-    for (table, detail) in SEED_ROWS {
+    for (table, detail, key) in SEED_ROWS {
         let Some(table_oid) = resolved.get(table).map(|table| table.oid) else {
             continue;
         };
@@ -601,7 +601,7 @@ async fn read_seed_row_findings(
             continue;
         }
         let present: Option<i64> = sqlx::query_scalar(&format!(
-            "SELECT 1::BIGINT FROM {}.{table} WHERE singleton = TRUE",
+            "SELECT 1::BIGINT FROM {}.{table} WHERE singleton = {key}",
             installation.quoted_namespace
         ))
         .fetch_optional(&mut *connection)

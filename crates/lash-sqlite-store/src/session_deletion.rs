@@ -83,6 +83,12 @@ pub(super) async fn delete_session_from_catalog(
                 .map_err(sqlite_error)?
                 .is_some();
             if existed {
+                crate::catalog::catalog_reads::record_session_terminal(
+                    tx,
+                    &session_id,
+                    None,
+                    crate::clamp_epoch_ms(now_ms),
+                )?;
                 // Permanent identity evidence for every deleted session id,
                 // host-facing and runtime-internal alike. The deleted set is
                 // also the reclaim frontier for the delete arm below: a

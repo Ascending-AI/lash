@@ -893,6 +893,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         .factory
         .reclaim_retained_evidence(crate::RetentionBound {
             committed_before_epoch_ms: u64::MAX,
+            turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
         })
         .await
         .unwrap();

@@ -740,6 +740,7 @@ pub async fn retention_reclaims_only_retired_owners_before_the_horizon(
         .factory
         .reclaim_retained_evidence(RetentionBound {
             committed_before_epoch_ms: 200,
+            turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
         })
         .await
         .unwrap();
@@ -770,7 +771,8 @@ pub async fn retention_reclaims_only_retired_owners_before_the_horizon(
     assert_eq!(
         f.factory
             .reclaim_retained_evidence(RetentionBound {
-                committed_before_epoch_ms: 200
+                committed_before_epoch_ms: 200,
+                turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
             })
             .await
             .unwrap()

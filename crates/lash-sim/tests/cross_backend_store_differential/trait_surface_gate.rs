@@ -355,6 +355,7 @@ fn store_trait_surface_is_fully_gated() {
     }
 
     for method in [
+        "turns_changed_since",
         "subscriptions_changed_since",
         "list_subscriptions_with_cursor",
         "compact_subscription_tombstones",

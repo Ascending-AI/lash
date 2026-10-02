@@ -392,6 +392,7 @@ table lash_release_stamp
   column written_at_epoch_ms bigint not-null
   primary-key (singleton)
 table lash_runtime_turn_commits
+  column change_seq bigint not-null
   column committed_at_ms bigint not-null
   column failure_evidence boolean not-null
   column identity_encoding_version integer nullable
@@ -402,6 +403,7 @@ table lash_runtime_turn_commits
   column session_id text not-null
   column turn_commit_hash text not-null
   column turn_id text not-null
+  unique (change_seq)
   primary-key (session_id, turn_id)
 table lash_schema_versions
   column component text not-null
@@ -508,6 +510,12 @@ table lash_session_runs
   unique (obligation_id)
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
+table lash_session_terminal_changes
+  column change_seq bigint not-null
+  column fault_json text nullable
+  column recorded_at_ms bigint not-null
+  column session_id text not-null
+  primary-key (change_seq)
 table lash_tool_intent_submissions
   column execution_scope_id text not-null
   column intent_index bigint not-null
@@ -626,6 +634,11 @@ table lash_turn_cancellation_bindings
   column binding_id text not-null
   column session_id text not-null
   primary-key (session_id)
+table lash_turn_change_clock
+  column current_seq bigint not-null
+  column retention_horizon bigint not-null
+  column singleton integer not-null
+  primary-key (singleton)
 table lash_turn_park_clock
   column compaction_horizon bigint not-null default
   column current_seq bigint not-null default

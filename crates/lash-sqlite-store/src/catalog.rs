@@ -1,7 +1,7 @@
 use super::*;
 
 #[path = "catalog_reads.rs"]
-mod catalog_reads;
+pub(crate) mod catalog_reads;
 
 #[async_trait::async_trait]
 impl lash_core_execution::SessionCatalogStore for SqliteStore {
@@ -427,6 +427,14 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
             )
             .collect()
     }
+    async fn turns_changed_since(
+        &self,
+        after: lash_core_execution::store::TurnChangeCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash_core_execution::store::TurnChangePage, StoreError> {
+        self.read_turn_changes(after, limit).await
+    }
+
     async fn turn_park_feed(
         &self,
         after: lash_core_execution::store::ParkFeedCursor,

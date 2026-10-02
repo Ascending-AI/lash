@@ -254,13 +254,22 @@ impl ShiftEpochStore for PostgresStore {
     ) -> Result<Option<SessionFault>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-        sqlx::query(session_sql().meta.record_fault.sql())
+        let changed = sqlx::query(session_sql().meta.record_fault.sql())
             .bind(session_id.as_str())
             .bind(record.to_stored()?)
             .bind(sql_counter_value("fault_at_ms", at_ms)?)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
+        if changed.rows_affected() == 1 {
+            crate::session_factory::record_session_terminal(
+                &mut tx,
+                session_id,
+                Some(&record.to_stored()?),
+                sql_counter_value("fault_at_ms", at_ms)?,
+            )
+            .await?;
+        }
         let stored = session_fault_conn(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(stored)

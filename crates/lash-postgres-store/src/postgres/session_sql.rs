@@ -483,7 +483,7 @@ lash_store_sql::statements! {
 
         /// Drop every receipt of a deleted session older than `?1`.
         delete_retained = "DELETE FROM runtime_turn_commits AS receipt
-             WHERE receipt.committed_at_ms < ?1
+             WHERE receipt.committed_at_ms < ?1 AND receipt.change_seq <= ?2
                AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted
                            WHERE deleted.session_id = receipt.session_id)";
     }

@@ -164,7 +164,7 @@ fn the_published_ddl_seeds_every_required_row() {
         seed,
         format!("VALUES ('{SCHEMA_COMPONENT}', {SCHEMA_VERSION}, {SCHEMA_VERSION})")
     );
-    for (table, _) in SEED_ROWS {
+    for (table, _, _) in SEED_ROWS {
         assert!(
             ddl.contains(&format!("INSERT INTO {table} ")),
             "the DDL artifact must seed {table}"

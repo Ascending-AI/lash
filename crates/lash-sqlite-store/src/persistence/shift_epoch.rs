@@ -214,11 +214,20 @@ impl ShiftEpochStore for SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 commit((|| {
-                    tx.execute(
-                        session_sql().meta.record_fault.sql(),
-                        params![session_id.as_str(), fault_json, at_ms],
-                    )
-                    .map_err(sqlite_error)?;
+                    let changed = tx
+                        .execute(
+                            session_sql().meta.record_fault.sql(),
+                            params![session_id.as_str(), fault_json, at_ms],
+                        )
+                        .map_err(sqlite_error)?;
+                    if changed == 1 {
+                        crate::catalog::catalog_reads::record_session_terminal(
+                            tx,
+                            &session_id,
+                            Some(&fault_json),
+                            at_ms,
+                        )?;
+                    }
                     session_fault_conn(tx, &session_id)
                 })())
             })

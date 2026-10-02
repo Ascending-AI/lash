@@ -84,3 +84,72 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn a_disconnected_host_reconciles_a_failed_turn_after_live_replay_trims() -> Result<()> {
+    use lash_core::LiveReplayStore as _;
+    use lash_core::store::{
+        TurnChangeCursor, TurnChangeKind, TurnCommitFailureCause, TurnCommitOutcome,
+    };
+    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+        lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+            max_events_per_session: 1,
+            ..Default::default()
+        },
+    ));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("unattended-failure")
+        .complete(|_| async {
+            Err(LlmTransportError::new("unattended failure").with_output_started(true))
+        })
+        .build()
+        .into_handle();
+    let double = restate_double(0x3095).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(double.lash_backend()))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .live_replay_store(replay.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("disconnected-turn-feed")
+        .created()
+        .await
+        .open()
+        .await?;
+    let live_cursor = session.observe().current_observation().cursor;
+    let result = session
+        .send(TurnInput::text("fail unattended"))
+        .output()
+        .await?;
+    assert!(matches!(
+        result.result.outcome,
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError)
+    ));
+    assert!(matches!(
+        replay
+            .replay_after_cursor(&live_cursor)
+            .expect("replay read"),
+        lash_core::LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed)
+    ));
+    let page = core
+        .turns_changed_since(TurnChangeCursor::initial(), std::num::NonZeroUsize::MAX)
+        .await?;
+    assert_eq!(page.changes.len(), 1);
+    assert_eq!(
+        page.changes[0].session_id.as_str(),
+        "disconnected-turn-feed"
+    );
+    assert!(matches!(
+        page.changes[0].kind,
+        TurnChangeKind::Committed {
+            outcome: TurnCommitOutcome::Failed(TurnCommitFailureCause::ProviderError),
+            ..
+        }
+    ));
+    assert!(
+        core.turns_changed_since(page.next, std::num::NonZeroUsize::MAX)
+            .await?
+            .changes
+            .is_empty()
+    );
+    Ok(())
+}

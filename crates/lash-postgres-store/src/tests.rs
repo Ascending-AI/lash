@@ -254,18 +254,28 @@ async fn seed_failure_evidence_session(
         .await
         .expect("seed one failure-evidence receipt");
 
+    let mut tx = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin bad receipt splice");
+    let sequence = crate::session_factory::next_turn_change_sequence(&mut tx)
+        .await
+        .expect("allocate bad receipt sequence");
     sqlx::query(
         "INSERT INTO lash_runtime_turn_commits
-         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms, failure_evidence)
-         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1, TRUE
+         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms, failure_evidence, change_seq)
+         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1, TRUE, $3
          FROM lash_runtime_turn_commits
          WHERE session_id = $1",
     )
     .bind(session_id)
     .bind(bad_result_json)
-    .execute(storage.pool())
+    .bind(sequence)
+    .execute(&mut *tx)
     .await
     .expect("splice the bad receipt row");
+    tx.commit().await.expect("commit bad receipt splice");
     (storage, database_lock)
 }
 

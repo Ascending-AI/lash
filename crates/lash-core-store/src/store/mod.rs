@@ -184,8 +184,9 @@ pub use run::{
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, InterruptedTurnClosure,
     RUNTIME_COMMIT_RECEIPT_RECORD_KIND, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit,
-    RuntimeCommitReceipt, RuntimeTurnCommitStamp, SemanticBoundaryOperation,
-    TurnCommitFailureCause, TurnCommitOutcome, decode_runtime_commit_receipt,
+    RuntimeCommitReceipt, RuntimeTurnCommitStamp, SemanticBoundaryOperation, TurnChange,
+    TurnChangeCursor, TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
+    TurnProjectionWatermark, decode_runtime_commit_receipt,
     decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
     ensure_supported_receipt_version_for_fleet, frames_left_by_commit,
     validate_turn_commit_outcome_code,

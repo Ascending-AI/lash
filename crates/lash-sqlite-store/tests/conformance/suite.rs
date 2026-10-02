@@ -1251,8 +1251,8 @@ async fn sqlite_runtime_turn_receipt_rejects_half_populated_append_identity() {
         .execute(
             "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                request_identity_hash
-             ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash')",
+                request_identity_hash, failure_evidence, change_seq
+             ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash', 0, 1)",
             [],
         )
         .expect_err("a half-populated append identity must violate the schema CHECK");

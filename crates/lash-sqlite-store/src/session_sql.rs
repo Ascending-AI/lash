@@ -403,7 +403,7 @@ lash_store_sql::statements! {
         /// the exclusion list; they are two statements because an empty
         /// `NOT IN (...)` has no spelling and a `COALESCE`d one would scan.
         delete_retained = "DELETE FROM runtime_turn_commits AS receipt
-                 WHERE receipt.committed_at_ms < ?1
+                 WHERE receipt.committed_at_ms < ?1 AND receipt.change_seq <= ?2
                    AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted
                                WHERE deleted.session_id = receipt.session_id)";
 
@@ -411,7 +411,7 @@ lash_store_sql::statements! {
         /// operation keys in the JSON array `?2`, which are the proof a later
         /// sweep needs that their scopes were still live.
         delete_retained_except_live = "DELETE FROM runtime_turn_commits AS receipt
-                     WHERE receipt.committed_at_ms < ?1
+                     WHERE receipt.committed_at_ms < ?1 AND receipt.change_seq <= ?3
                        AND receipt.turn_id NOT IN (SELECT value FROM json_each(?2))
                        AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted
                                    WHERE deleted.session_id = receipt.session_id)";

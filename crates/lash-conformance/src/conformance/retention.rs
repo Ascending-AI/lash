@@ -35,6 +35,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         .unwrap();
     let all = crate::RetentionBound {
         committed_before_epoch_ms: u64::MAX,
+        turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
     };
     // FIG-853's regression: even the largest bound cannot erase a live receipt
     // and turn its retry into a terminal "someone else committed" conflict.
@@ -70,6 +71,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
     // Exclusive cutoff: the receipt exactly at the horizon is still retained.
     let at_horizon = crate::RetentionBound {
         committed_before_epoch_ms: committed_at_ms,
+        turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
     };
     assert_eq!(
         factory.reclaim_retained_evidence(at_horizon).await.unwrap(),
@@ -84,6 +86,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
     );
     let past_horizon = crate::RetentionBound {
         committed_before_epoch_ms: committed_at_ms + 1,
+        turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
     };
     let report = factory
         .reclaim_retained_evidence(past_horizon)
@@ -91,7 +94,11 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         .unwrap();
     assert_eq!(report.removed_receipt_count, 1);
     assert_eq!(report.removed_attachment_root_count, 0);
-    assert_eq!(crate::MaintenanceReport::reclaimed_count(&report), 1);
+    assert_eq!(
+        crate::MaintenanceReport::reclaimed_count(&report),
+        1 + report.removed_session_terminal_count
+    );
+    let removed_session_terminals = report.removed_session_terminal_count;
     assert!(
         matches!(
             store.commit_runtime_state(commit).await,
@@ -99,9 +106,11 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         ),
         "post-horizon retry is SessionDeleted, never a commit conflict or a new run"
     );
+    let last = factory.reclaim_retained_evidence(all).await.unwrap();
+    assert_eq!(last.removed_receipt_count, 0);
     assert_eq!(
-        factory.reclaim_retained_evidence(all).await.unwrap(),
-        crate::RetentionReport::default()
+        last.removed_session_terminal_count + removed_session_terminals,
+        1
     );
     assert!(
         factory.is_deleted(&request.session_id).await.unwrap(),

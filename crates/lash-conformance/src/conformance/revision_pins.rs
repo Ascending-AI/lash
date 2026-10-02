@@ -642,6 +642,7 @@ pub async fn every_reclaimer_keeps_a_pinned_turn_until_its_last_pin_is_released(
         law.factory
             .reclaim_retained_evidence(crate::RetentionBound {
                 committed_before_epoch_ms: u64::MAX,
+                turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
             })
             .await
             .expect("reclaim retained evidence");

@@ -1054,6 +1054,7 @@ impl PostgresStore {
                 .bind(columns.1)
                 .bind(columns.2)
                 .bind(!receipt.result.failure_evidence.is_empty())
+                .bind(crate::session_factory::next_turn_change_sequence(&mut tx).await?)
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;

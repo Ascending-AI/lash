@@ -827,6 +827,164 @@ impl RuntimeCommit {
     }
 }
 
+/// Opaque position in one deployment's durable turn and session terminal feed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct TurnChangeCursor(u64);
+
+impl TurnChangeCursor {
+    pub const fn initial() -> Self {
+        Self(0)
+    }
+    /// Store implementors bind a position; hosts persist the opaque cursor.
+    pub const fn from_store_sequence(sequence: u64) -> Self {
+        Self(sequence)
+    }
+    pub const fn store_sequence(self) -> u64 {
+        self.0
+    }
+
+    /// Validate a read or acknowledgement against the same snapshot's clock.
+    pub fn check(self, current: u64, horizon: u64) -> Result<(), StoreError> {
+        if self.0 < horizon {
+            return Err(StoreError::TurnChangeCursorPruned {
+                horizon: Self(horizon),
+            });
+        }
+        if self.0 > current {
+            return Err(StoreError::TurnChangeCursorAhead {
+                current: Self(current),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// The record that changed, with the existing typed terminal vocabulary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnChangeKind {
+    Committed {
+        operation: OperationId,
+        outcome: TurnCommitOutcome,
+    },
+    /// Each newly recorded fault remains evidence after an operator clears it.
+    SessionFault {
+        record: Box<super::SessionFaultRecord>,
+    },
+    SessionDeleted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnChange {
+    pub cursor: TurnChangeCursor,
+    pub session_id: SessionId,
+    pub recorded_at_ms: u64,
+    pub kind: TurnChangeKind,
+}
+
+/// A bounded, commit-ordered read, independent of the live replay buffer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnChangePage {
+    pub changes: Vec<TurnChange>,
+    pub next: TurnChangeCursor,
+    /// Reads before this retained position fail explicitly.
+    pub retained_after: TurnChangeCursor,
+}
+
+/// Explicit projector policy for terminal evidence reclamation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnProjectionWatermark {
+    UpTo(TurnChangeCursor),
+    /// The host has deliberately chosen to keep no durable projector.
+    NoProjector,
+}
+
+impl TurnProjectionWatermark {
+    /// Highest acknowledged sequence, validated before a sweep removes evidence.
+    pub fn acknowledged_sequence(self, current: u64) -> Result<i64, StoreError> {
+        let seq = match self {
+            Self::UpTo(cursor) => {
+                cursor.check(current, 0)?;
+                cursor.store_sequence()
+            }
+            Self::NoProjector => current,
+        };
+        i64::try_from(seq).map_err(|_| StoreError::StoredDataCorrupt {
+            record_kind: "TurnChangeClock",
+            message: "sequence exceeds SQL BIGINT".to_owned(),
+        })
+    }
+}
+
+impl TurnChange {
+    /// Decode a feed row after the SQL page has bounded its receipt reads.
+    pub fn from_stored(
+        sequence: i64,
+        session_id: String,
+        operation: Option<String>,
+        payload: Option<String>,
+        outcome_code: Option<String>,
+        recorded_at_ms: i64,
+        fleet: super::FleetFormat,
+    ) -> Result<Self, StoreError> {
+        let corrupt = |message: &str| StoreError::StoredDataCorrupt {
+            record_kind: "TurnChange",
+            message: message.to_owned(),
+        };
+        let session_id = SessionId::parse(session_id)?;
+        let sequence = u64::try_from(sequence).map_err(|_| corrupt("negative sequence"))?;
+        if sequence == 0 {
+            return Err(corrupt("zero sequence"));
+        }
+        let recorded_at_ms =
+            u64::try_from(recorded_at_ms).map_err(|_| corrupt("negative timestamp"))?;
+        let kind = match (operation, payload, outcome_code) {
+            (Some(operation), Some(payload), Some(code)) => {
+                let receipt = decode_runtime_commit_receipt_for_fleet(
+                    &session_id,
+                    &operation,
+                    &payload,
+                    fleet,
+                )?;
+                validate_turn_commit_outcome_code(&receipt, Some(&code))?;
+                let operation: OperationId = serde_json::from_str(&operation)
+                    .map_err(|_| corrupt("invalid operation identity"))?;
+                if operation
+                    .scope
+                    .session_id()
+                    .is_some_and(|id| id != session_id)
+                {
+                    return Err(corrupt("operation belongs to another session"));
+                }
+                TurnChangeKind::Committed {
+                    operation,
+                    outcome: receipt
+                        .outcome
+                        .ok_or_else(|| corrupt("terminal has no outcome"))?,
+                }
+            }
+            (None, Some(payload), None) => TurnChangeKind::SessionFault {
+                record: Box::new(
+                    super::SessionFault::from_stored(
+                        session_id.clone(),
+                        &payload,
+                        recorded_at_ms as i64,
+                    )?
+                    .record,
+                ),
+            },
+            (None, None, None) => TurnChangeKind::SessionDeleted,
+            _ => return Err(corrupt("invalid terminal column family")),
+        };
+        Ok(Self {
+            cursor: TurnChangeCursor(sequence),
+            session_id,
+            recorded_at_ms,
+            kind,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

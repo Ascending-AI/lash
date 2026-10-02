@@ -560,10 +560,11 @@ async fn seed_failure_evidence_session(
             conn.execute(
                 "INSERT INTO runtime_turn_commits
                  (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                  failure_evidence)
-                 VALUES (?1, 'bad-evidence-receipt', 'bad-evidence-hash', ?2, ?3, 1)",
+                  failure_evidence, change_seq)
+                 VALUES (?1, 'bad-evidence-receipt', 'bad-evidence-hash', ?2, ?3, 1, (SELECT current_seq + 1 FROM turn_change_clock))",
                 params![session_id, bad_result_json, committed_at_ms + 1],
             )?;
+            conn.execute("UPDATE turn_change_clock SET current_seq = current_seq + 1 WHERE singleton = 1", [])?;
             Ok(())
         })
         .await

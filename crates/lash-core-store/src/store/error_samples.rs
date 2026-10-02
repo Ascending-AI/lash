@@ -447,6 +447,8 @@ store_error_samples! {
         artifact_ref: "sampled-artifact".to_string(),
         to: referrer(),
     },
+    TurnChangeCursorPruned { .. } => StoreError::TurnChangeCursorPruned { horizon: super::TurnChangeCursor::initial() },
+    TurnChangeCursorAhead { .. } => StoreError::TurnChangeCursorAhead { current: super::TurnChangeCursor::initial() },
     ParkFeedCursorCompacted { .. } => StoreError::ParkFeedCursorCompacted {
         horizon: super::ParkFeedCursor::initial(),
     },

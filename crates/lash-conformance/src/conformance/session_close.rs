@@ -870,6 +870,7 @@ pub async fn a_close_interrupted_before_its_acknowledgement_is_finished_and_its_
     factory
         .reclaim_retained_evidence(lash_core::store::RetentionBound {
             committed_before_epoch_ms: u64::MAX,
+            turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
         })
         .await
         .expect("reclaim every retained evidence");

@@ -161,6 +161,8 @@ pub const TABLES: &[&str] = &[
     session::release_stamp::TABLE,
     session::revisions::TABLE,
     session::turn_commits::TABLE,
+    session::turn_commits::CLOCK_TABLE,
+    session::turn_commits::SESSION_TERMINAL_TABLE,
     session_runs::control_intents::TABLE,
     session_runs::run_inputs::TABLE,
     session_runs::runs::TABLE,

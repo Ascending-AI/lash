@@ -13,7 +13,7 @@ pub const TABLE: &str = "runtime_turn_commits";
 pub const INSERT_COLUMNS: &str =
     "session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence";
+                failure_evidence, change_seq";
 
 /// A settled turn's identity and result, as the failure-evidence and
 /// turn-input reads fold them.
@@ -60,9 +60,42 @@ crate::statements! {
         insert = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence
+                failure_evidence, change_seq
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
+        change_clock = "SELECT current_seq, retention_horizon FROM turn_change_clock WHERE singleton = 1";
+        lock_change_clock = "UPDATE turn_change_clock SET current_seq = current_seq WHERE singleton = 1 RETURNING current_seq";
+        next_change_seq = "UPDATE turn_change_clock SET current_seq = current_seq + 1
+             WHERE singleton = 1 AND current_seq < 9223372036854775807 RETURNING current_seq";
+        insert_session_terminal = "INSERT INTO session_terminal_changes
+             (change_seq, session_id, fault_json, recorded_at_ms) VALUES (?1, ?2, ?3, ?4)";
+        changes_after = "SELECT change_seq, session_id, turn_id, payload, outcome_code, recorded_at_ms FROM (
+             SELECT change_seq, session_id, turn_id, result_json AS payload, outcome_code,
+                    committed_at_ms AS recorded_at_ms
+             FROM runtime_turn_commits WHERE change_seq > ?1 AND outcome_code IS NOT NULL
+             UNION ALL
+             SELECT change_seq, session_id, NULL, fault_json, NULL, recorded_at_ms
+             FROM session_terminal_changes WHERE change_seq > ?1
+             ) AS changes ORDER BY change_seq LIMIT ?2";
+        removed_horizon = "SELECT MAX(change_seq) FROM (
+             SELECT change_seq FROM runtime_turn_commits AS receipt
+             WHERE receipt.committed_at_ms < ?1 AND receipt.change_seq <= ?2
+               AND receipt.outcome_code IS NOT NULL
+               AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted WHERE deleted.session_id = receipt.session_id)
+             UNION ALL
+             SELECT change_seq FROM session_terminal_changes AS terminal
+             WHERE terminal.recorded_at_ms < ?1 AND terminal.change_seq <= ?2
+               AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted WHERE deleted.session_id = terminal.session_id)
+             ) AS removed";
+        advance_horizon = "UPDATE turn_change_clock SET retention_horizon = ?1
+             WHERE singleton = 1 AND retention_horizon < ?1";
+        delete_session_terminals = "DELETE FROM session_terminal_changes AS terminal
+             WHERE terminal.recorded_at_ms < ?1 AND terminal.change_seq <= ?2
+               AND EXISTS (SELECT 1 FROM deleted_sessions AS deleted WHERE deleted.session_id = terminal.session_id)";
     }
 }
+
+/// Tables sharing the terminal records and their transactional clock.
+pub const CLOCK_TABLE: &str = "turn_change_clock";
+pub const SESSION_TERMINAL_TABLE: &str = "session_terminal_changes";

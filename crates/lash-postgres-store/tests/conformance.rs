@@ -728,8 +728,8 @@ async fn postgres_runtime_turn_receipt_rejects_half_populated_append_identity_wh
     let error = sqlx::query(
         "INSERT INTO lash_runtime_turn_commits (
             session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-            request_identity_hash, failure_evidence
-         ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash', FALSE)",
+            request_identity_hash, failure_evidence, change_seq
+         ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash', FALSE, 1)",
     )
     .execute(storage.pool())
     .await
@@ -2141,6 +2141,22 @@ mod session_history {
         };
         (lock, store)
     });
+
+    #[tokio::test]
+    async fn unread_turn_terminals_survive_retention() {
+        let (_lock, store, _storage) = catalog()
+            .await
+            .expect("PostgreSQL law requires its isolated database");
+        lash_conformance::unread_terminals_survive_retention(store).await;
+    }
+
+    #[tokio::test]
+    async fn terminal_feed_is_ordered_and_replay_stable() {
+        let (_lock, store, _storage) = catalog()
+            .await
+            .expect("PostgreSQL law requires its isolated database");
+        lash_conformance::terminal_feed_is_ordered_and_replay_stable(store).await;
+    }
 
     #[tokio::test]
     async fn window_is_frame_bounded() {

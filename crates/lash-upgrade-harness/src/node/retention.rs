@@ -380,6 +380,7 @@ pub async fn run(args: RetentionArgs) -> Result<()> {
             let retention = factory
                 .reclaim_retained_evidence(lash_core::store::RetentionBound {
                     committed_before_epoch_ms: stores.clock().timestamp_ms(),
+                    turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
                 })
                 .await
                 .map_err(|failure| anyhow!("the retention sweep: {failure:?}"))?;

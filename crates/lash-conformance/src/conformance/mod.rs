@@ -125,6 +125,9 @@ pub use turn_commit_outcome::{
     cancelled as turn_commit_cancelled, completed as turn_commit_completed,
     failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
 };
+pub use turn_commit_outcome::{
+    terminal_feed_is_ordered_and_replay_stable, unread_terminals_survive_retention,
+};
 mod batch_sugar;
 mod recorded_batch;
 mod revision_pins;

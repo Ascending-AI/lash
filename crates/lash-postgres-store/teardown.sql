@@ -52,6 +52,10 @@ DROP TABLE IF EXISTS lash_session_meta_pending_observer_intents CASCADE;
 
 DROP TABLE IF EXISTS lash_runtime_turn_commits CASCADE;
 
+DROP TABLE IF EXISTS lash_turn_change_clock CASCADE;
+
+DROP TABLE IF EXISTS lash_session_terminal_changes CASCADE;
+
 DROP TABLE IF EXISTS lash_turn_cancel_requests CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancel_affected_inputs CASCADE;

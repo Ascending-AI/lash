@@ -92,6 +92,7 @@ pub(super) enum SurfaceMethod {
     /// against a second recording, read alone, on the shift epoch and in the
     /// listing, then cleared once.
     SessionFault,
+    TurnsChangedSince,
     ListQueuedWork,
     ListPendingQueuedWork,
     PendingSessionWorkOrdering,
@@ -248,6 +249,7 @@ impl SurfaceMethod {
             Self::LoadUnknownNode => "surface:load_node_unknown",
             Self::ReadShiftEpoch => "surface:read_shift_epoch",
             Self::SessionFault => "surface:session_fault",
+            Self::TurnsChangedSince => "surface:turns_changed_since",
             Self::ListQueuedWork => "surface:list_queued_work",
             Self::ListPendingQueuedWork => "surface:list_open_queued_work",
             Self::PendingSessionWorkOrdering => "surface:pending_session_work_ordering",
@@ -515,6 +517,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::LoadUnknownNode),
             surface(SurfaceMethod::ReadShiftEpoch),
             surface(SurfaceMethod::SessionFault),
+            surface(SurfaceMethod::TurnsChangedSince),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
             surface(SurfaceMethod::PendingSessionWorkOrdering),
@@ -1178,6 +1181,31 @@ impl BackendRunner {
                     listed.len(),
                     after.is_some()
                 )
+            }
+            SurfaceMethod::TurnsChangedSince => {
+                let factory = self.factory();
+                let page = match factory
+                    .turns_changed_since(
+                        lash_core::store::TurnChangeCursor::initial(),
+                        std::num::NonZeroUsize::MAX,
+                    )
+                    .await
+                {
+                    // PostgreSQL retains a deployment clock across cases.
+                    Err(StoreError::TurnChangeCursorPruned { horizon }) => {
+                        factory
+                            .turns_changed_since(horizon, std::num::NonZeroUsize::MAX)
+                            .await?
+                    }
+                    result => result?,
+                };
+                let rows: Vec<_> = page
+                    .changes
+                    .into_iter()
+                    .filter(|change| change.session_id == session_id)
+                    .map(|change| format!("{:?}", change.kind))
+                    .collect();
+                format!("changes={rows:?}")
             }
             SurfaceMethod::ListQueuedWork => {
                 format!("rows={}", store.list_queued_work(&session_id).await?.len())

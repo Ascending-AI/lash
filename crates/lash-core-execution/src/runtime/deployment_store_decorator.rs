@@ -11,8 +11,8 @@ use std::sync::Arc;
 use super::DeploymentStore;
 use crate::store::{
     ControlIntent, ControlIntentId, MaintenanceResult, ParkFeedCursor, ParkFeedPage,
-    RetentionBound, RetentionReport, RunTerminal, RuntimeStoreDecorator, TurnPark, TurnParkQuery,
-    TurnParkTarget, UnsettledTurnCounts,
+    RetentionBound, RetentionReport, RunTerminal, RuntimeStoreDecorator, TurnChangeCursor,
+    TurnChangePage, TurnPark, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts,
 };
 use crate::{ExecutionScope, StoreError};
 
@@ -28,6 +28,7 @@ macro_rules! deployment_operations {
             fn artifact_frame_is_retained(&self, frame: &crate::FrameEnvironmentId) -> Result<bool, StoreError>;
             fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError>;
             fn list_turn_parks(&self, query: &TurnParkQuery) -> Result<Vec<TurnPark>, StoreError>;
+            fn turns_changed_since(&self, after: TurnChangeCursor, limit: NonZeroUsize) -> Result<TurnChangePage, StoreError>;
             fn turn_park_feed(&self, after: ParkFeedCursor, limit: NonZeroUsize) -> Result<ParkFeedPage<TurnParkTarget>, StoreError>;
             fn compact_turn_park_feed(&self, through: ParkFeedCursor) -> Result<(), StoreError>;
             fn non_terminal_runs_page(&self, after: Option<&crate::engine::RunRef>, limit: NonZeroUsize) -> Result<Vec<crate::engine::OpenRun>, StoreError>;

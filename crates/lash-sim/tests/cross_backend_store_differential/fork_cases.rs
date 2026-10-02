@@ -107,6 +107,7 @@ impl BackendRunner {
     ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
         let bound = lash_core::RetentionBound {
             committed_before_epoch_ms: u64::MAX,
+            turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
         };
         let report = self
             .factory()
@@ -316,6 +317,7 @@ pub(super) async fn prepare_retention_case(case: CaseName, runners: &[BackendRun
                 .factory()
                 .reclaim_retained_evidence(lash_core::RetentionBound {
                     committed_before_epoch_ms: u64::MAX,
+                    turn_watermark: lash_core::store::TurnProjectionWatermark::NoProjector,
                 })
                 .await
                 .expect("clear prior terminal evidence before the retention fixture");

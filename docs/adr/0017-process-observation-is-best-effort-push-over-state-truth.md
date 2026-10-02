@@ -10,6 +10,14 @@ The retained durable process event log, read through `ProcessRegistry::event_pag
 
 The decorator supplies no durable buffer or retry guarantee. Pod failure can leave a committed event undelivered, so consumers requiring completeness reconcile event pages or the record change feed under ADR 0020. Terminal waiting uses the work-driver contract under ADR 0016.
 
+## Durable-before-push law
+
+A turn, session fault or process terminal commits its durable record before
+any best-effort observation publishes that terminal. A failed transaction
+publishes no terminal. Publication failure cannot undo or fail a committed
+write. A reconnecting host reconciles the durable cursor feed under ADR 0020
+when live replay reports a gap.
+
 ## Rules and guarantees
 
 `emit` returns `()`: a sink cannot fail or roll back the committed write. The decorator awaits emission inline, so sink implementations must return promptly and offload I/O. Observers attach to the shared watched registry through `add_event_sink`. A `ProcessEventSinkRegistration` detaches its sink when dropped. Deployment wrapping can also provide an initial sink.

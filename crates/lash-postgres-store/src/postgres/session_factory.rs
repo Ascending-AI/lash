@@ -178,6 +178,53 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             .collect()
     }
 
+    async fn turns_changed_since(
+        &self,
+        after: lash_core_execution::store::TurnChangeCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash_core_execution::store::TurnChangePage, StoreError> {
+        let mut tx = crate::runtime_persistence::read_tx(self).await?;
+        let sql = &session_sql().turn_commits;
+        let (current, horizon): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let current = crate::support::u64_from_sql("TurnChangeClock", "current_seq", current)?;
+        let horizon =
+            crate::support::u64_from_sql("TurnChangeClock", "retention_horizon", horizon)?;
+        after.check(current, horizon)?;
+        let rows = sqlx::query(sql.changes_after.sql())
+            .bind(after.store_sequence() as i64)
+            .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let mut changes = Vec::with_capacity(rows.len());
+        for row in rows {
+            changes.push(lash_core_execution::store::TurnChange::from_stored(
+                row.try_get(0).map_err(store_sqlx_error)?,
+                row.try_get(1).map_err(store_sqlx_error)?,
+                row.try_get(2).map_err(store_sqlx_error)?,
+                row.try_get(3).map_err(store_sqlx_error)?,
+                row.try_get(4).map_err(store_sqlx_error)?,
+                row.try_get(5).map_err(store_sqlx_error)?,
+                self.fence.fleet(),
+            )?);
+        }
+        let next = changes.last().map_or(
+            lash_core_execution::store::TurnChangeCursor::from_store_sequence(current),
+            |change| change.cursor,
+        );
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(lash_core_execution::store::TurnChangePage {
+            changes,
+            next,
+            retained_after: lash_core_execution::store::TurnChangeCursor::from_store_sequence(
+                horizon,
+            ),
+        })
+    }
+
     async fn turn_park_feed(
         &self,
         after: lash_core_execution::store::ParkFeedCursor,
@@ -1319,5 +1366,44 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(tx, candidates, report).await
+    crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(tx, candidates, report)
+        .await?;
+    if materialized {
+        // Take the shared feed clock after the deletion's resource locks.
+        let at_ms = crate::support::postgres_transaction_epoch_ms(tx).await?;
+        record_session_terminal(tx, session_id, None, crate::support::clamp_epoch_ms(at_ms))
+            .await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn next_turn_change_sequence(
+    conn: &mut sqlx::PgConnection,
+) -> Result<i64, StoreError> {
+    sqlx::query_scalar(session_sql().turn_commits.next_change_seq.sql())
+        .fetch_optional(conn)
+        .await
+        .map_err(store_sqlx_error)?
+        .ok_or(StoreError::MonotonicCounterOverflow {
+            counter: "turn_change_sequence",
+            current: i64::MAX as u64,
+        })
+}
+
+pub(crate) async fn record_session_terminal(
+    conn: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    fault_json: Option<&str>,
+    at_ms: i64,
+) -> Result<(), StoreError> {
+    let sequence = next_turn_change_sequence(conn).await?;
+    sqlx::query(session_sql().turn_commits.insert_session_terminal.sql())
+        .bind(sequence)
+        .bind(session_id.as_str())
+        .bind(fault_json)
+        .bind(at_ms)
+        .execute(conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
 }

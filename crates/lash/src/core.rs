@@ -377,6 +377,16 @@ impl LashCore {
             .await?)
     }
 
+    /// Reconcile durable turn and session terminals after a live replay gap.
+    /// Persist the returned cursor only after applying every change in the page.
+    pub async fn turns_changed_since(
+        &self,
+        after: lash_core::store::TurnChangeCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<lash_core::store::TurnChangePage> {
+        Ok(self.store_factory.turns_changed_since(after, limit).await?)
+    }
+
     /// The standing session faults after session `after`, in session-id
     /// order, at most `limit` (ADR 0109 §9): corrupt stored data the engine
     /// met after a run's answer was published, at the run's owed scope
