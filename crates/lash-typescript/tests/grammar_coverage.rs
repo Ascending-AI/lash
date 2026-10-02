@@ -509,18 +509,21 @@ fn fuzzed_token_sequences_never_abort_the_parser() {
     }
 
     for batch in 0..BATCHES {
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "grammar_coverage::fuzzed_token_sequences_never_abort_the_parser",
                 "--exact",
                 "--nocapture",
             ])
             .env(CHILD_ENV, batch.to_string())
-            .status()
+            .output()
             .expect("fuzz child starts");
         assert!(
-            status.success(),
-            "fuzz batch {batch} did not survive the stack budget: {status}"
+            output.status.success(),
+            "fuzz batch {batch} did not survive the stack budget: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
         );
     }
 }

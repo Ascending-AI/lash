@@ -313,16 +313,22 @@ fn pool_queue_bound_refuses_typed() {
 fn worker_sees_no_parent_environment_or_descriptors() {
     const SENTINEL: &str = "LASH_PARENT_SECRET_SENTINEL";
     if std::env::var_os(SENTINEL).is_none() {
-        let status = std::process::Command::new(std::env::current_exe().expect("test binary"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
             .args([
                 "--exact",
                 "worker_sees_no_parent_environment_or_descriptors",
                 "--nocapture",
             ])
             .env(SENTINEL, "parent-only-secret")
-            .status()
+            .output()
             .expect("sentinel parent");
-        assert!(status.success());
+        assert!(
+            output.status.success(),
+            "sentinel child failed: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
         return;
     }
     let file = std::fs::File::open("/dev/null").expect("sentinel file");

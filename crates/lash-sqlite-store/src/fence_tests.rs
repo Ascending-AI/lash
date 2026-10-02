@@ -682,16 +682,18 @@ async fn sqlite_finalize_cold_reopen_completes_partial_epoch_flip() {
             })
             .collect();
         drop(set);
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
             .env(ROOT, root.path())
             .env(CUT, cut.file_name())
-            .status()
+            .output()
             .expect("run the finalizing process");
         assert_eq!(
-            status.code(),
+            output.status.code(),
             Some(77),
-            "{cut:?}: exit at the committed cut"
+            "{cut:?}: exit at the committed cut\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
         );
         for database in SqliteDatabase::ALL {
             let connection = raw(&location, database);
@@ -795,7 +797,7 @@ async fn sqlite_finalize_cold_reopen_refuses_changed_stamp_or_intent() {
         .await
         .expect("drain the retiring generation");
     drop(set);
-    let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+    let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
         .args([
             "fence_tests::sqlite_finalize_cold_reopen_completes_partial_epoch_flip",
             "--exact",
@@ -807,9 +809,15 @@ async fn sqlite_finalize_cold_reopen_refuses_changed_stamp_or_intent() {
             "LASH_SQLITE_FINALIZE_CRASH_CUT",
             SqliteDatabase::DurableCore.file_name(),
         )
-        .status()
+        .output()
         .expect("crash the finalizing process");
-    assert_eq!(status.code(), Some(77));
+    assert_eq!(
+        output.status.code(),
+        Some(77),
+        "the finalizing child must exit at the committed cut\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
     let intent_path = root.path().join("lash-finalize.json");
     let original = std::fs::read(&intent_path).expect("the authorization survived the crash");
     for fault in ["stamp", "retirement", "target", "malformed"] {

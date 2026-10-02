@@ -246,16 +246,19 @@ fn the_abort_corpus_survives_without_the_preflight() {
                     ])
                     .env(CHILD_ENV, &name)
                     .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
                     .spawn()
                     .expect("corpus child starts");
             (name, child)
         })
         .collect::<Vec<_>>();
-    for (name, mut child) in children {
-        let status = child.wait().expect("corpus child finishes");
+    for (name, child) in children {
+        let output = child.wait_with_output().expect("corpus child finishes");
         assert!(
-            status.success(),
-            "{name} did not survive without the preflight: {status}"
+            output.status.success(),
+            "{name} did not survive without the preflight: {}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 }
@@ -309,11 +312,13 @@ fn fuzzed_sources_survive_without_the_preflight() {
         std::collections::VecDeque::new();
     for batch in 0..BATCHES {
         if children.len() == BATCHES_IN_FLIGHT {
-            let (done, mut child) = children.pop_front().expect("a child in flight");
-            let status = child.wait().expect("fuzz child finishes");
+            let (done, child) = children.pop_front().expect("a child in flight");
+            let output = child.wait_with_output().expect("fuzz child finishes");
             assert!(
-                status.success(),
-                "fuzz batch {done} did not survive without the preflight: {status}"
+                output.status.success(),
+                "fuzz batch {done} did not survive without the preflight: {}\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
             );
         }
         let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
@@ -324,15 +329,18 @@ fn fuzzed_sources_survive_without_the_preflight() {
             ])
             .env(CHILD_ENV, batch.to_string())
             .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("fuzz child starts");
         children.push_back((batch, child));
     }
-    for (batch, mut child) in children {
-        let status = child.wait().expect("fuzz child finishes");
+    for (batch, child) in children {
+        let output = child.wait_with_output().expect("fuzz child finishes");
         assert!(
-            status.success(),
-            "fuzz batch {batch} did not survive without the preflight: {status}"
+            output.status.success(),
+            "fuzz batch {batch} did not survive without the preflight: {}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 }

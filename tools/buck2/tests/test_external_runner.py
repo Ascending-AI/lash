@@ -2,6 +2,7 @@ from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -694,6 +695,184 @@ class LibtestRecordTests(unittest.TestCase):
         self.assertIsNone(runner.report_mismatch(xml, FAILING_LOG, ['laws::'], True))
         xml.write_text(junit('laws::passes_quietly', 'laws::needs_a_service', 'laws::skipped'))
         self.assertIn('disagree on 2 cases', runner.report_mismatch(xml, FAILING_LOG, ['laws::'], True))
+
+
+# The accounting above reads a member's stdout as one libtest stream. A test
+# that re-runs its binary must keep the child's stream out of it:
+# `.output()`/`.wait_with_output()` capture both ends, and a `.spawn()` or
+# `.status()` must first point `.stdout()` and `.stderr()` at a pipe, a file
+# or null. An inherited descriptor writes the child's `running N tests`
+# block into the parent's stream, where an unlucky interleave loses one of
+# the parent's own records — the false mismatch the fixtures above replay.
+# The scan below flags each self-exec libtest launch left on inherited stdio.
+
+ROOT = TOOLS.parents[1]
+
+COMMAND_NEW = re.compile(r'(?<!\w)Command::new\s*\(')
+LET_BINDING = re.compile(r'let\s+(?:mut\s+)?(\w+)\s*=')
+LIBTEST_SELECTION = re.compile(
+    r'--(?:exact|nocapture|ignored|include-ignored|test-threads|list|format|report-time)\b'
+    r'|"[^"\n]*::[^"\n]*"'
+)
+TEST_ATTRIBUTE = re.compile(r'#\[(?:\w+::)*test\b|#\[cfg\(test\)\]')
+RAW_STRING = re.compile(r'(?:br|r)(#*)"')
+CHAR_LITERAL = re.compile(r"b?'(?:\\u\{[0-9A-Fa-f]+\}|\\.|[^\\'])'")
+
+
+def rust_structure(text):
+    """`text` with comment, string and char bodies blanked; positions kept.
+
+    The scan reasons about `;`-separated statements, so punctuation inside
+    literals and comments must not shape them.
+    """
+    masked = list(text)
+    limit = len(text)
+    position = 0
+    while position < limit:
+        if text.startswith('//', position):
+            end = text.find('\n', position)
+            end = limit if end < 0 else end
+        elif text.startswith('/*', position):
+            depth, end = 0, position
+            while end < limit:
+                if text.startswith('/*', end):
+                    depth, end = depth + 1, end + 2
+                elif text.startswith('*/', end):
+                    depth, end = depth - 1, end + 2
+                    if not depth:
+                        break
+                else:
+                    end += 1
+        elif text[position] == '"' or text.startswith('b"', position):
+            end = position + (text[position] == 'b') + 1
+            while end < limit:
+                if text[end] == '\\':
+                    end += 2
+                elif text[end] == '"':
+                    end += 1
+                    break
+                else:
+                    end += 1
+            end = min(end, limit)
+        elif match := RAW_STRING.match(text, position):
+            closer = '"' + match.group(1)
+            end = text.find(closer, match.end())
+            end = limit if end < 0 else end + len(closer)
+        elif match := CHAR_LITERAL.match(text, position):
+            end = match.end()
+        else:
+            position += 1
+            continue
+        for index in range(position, end):
+            if text[index] != '\n':
+                masked[index] = ' '
+        position = end
+    return ''.join(masked)
+
+
+def call_arguments(masked, found):
+    """The argument list of the call whose `(` `found` ends at, from `masked`."""
+    depth, index = 1, found.end()
+    while index < len(masked) and depth:
+        depth += (masked[index] == '(') - (masked[index] == ')')
+        index += 1
+    return masked[found.end():index - 1]
+
+
+def test_source(path, source):
+    """The file feeds a test target, so a self-exec in it runs libtest."""
+    name = path.name
+    return (
+        'tests' in path.parts
+        or name == 'tests.rs'
+        or name.startswith('test_')
+        or name.endswith(('_test.rs', '_tests.rs'))
+        or bool(TEST_ATTRIBUTE.search(source))
+    )
+
+
+def uncaptured_self_execs(source):
+    """Line numbers of self-exec launches that run libtest on inherited stdio.
+
+    A launch counts as libtest when it passes libtest flags or a `a::b` case
+    name, or passes no arguments at all (the whole suite runs). A self-exec
+    without either is some other mode of the binary — a worker role or a
+    sibling path — and this scan leaves it alone.
+    """
+    code = rust_structure(source)
+    bound = set()
+    pending = {}
+    findings = []
+    start, line = 0, 1
+
+    def launched(state):
+        if (state['libtest'] or not state['args']) and not (state['stdout'] and state['stderr']):
+            findings.append(state['line'])
+
+    def configured(state, statement):
+        state['args'] |= bool(re.search(r'\.args?\s*\(', statement))
+        for stream in ('stdout', 'stderr'):
+            for found in re.finditer(rf'\.{stream}\s*\(', statement):
+                state[stream] = 'inherit' not in call_arguments(statement, found)
+
+    for semicolon in re.finditer(';', code):
+        statement, raw = code[start:semicolon.end()], source[start:semicolon.end()]
+        start = semicolon.end()
+        for name in LET_BINDING.findall(statement):
+            pending.pop(name, None)
+            if 'current_exe' in statement and 'Command::new' not in statement:
+                bound.add(name)
+            else:
+                bound.discard(name)
+        commands = list(COMMAND_NEW.finditer(statement))
+        self_exec = bool(commands) and (
+            'current_exe' in statement
+            or any(
+                'current_exe' in call_arguments(statement, found)
+                or (head := re.fullmatch(r'&?\s*(\w+)', call_arguments(statement, found)))
+                and head.group(1) in bound
+                for found in commands
+            )
+        )
+        if self_exec:
+            state = {'args': False, 'stdout': False, 'stderr': False,
+                     'line': line + statement[:commands[0].start()].count('\n'),
+                     'libtest': bool(LIBTEST_SELECTION.search(raw))}
+            configured(state, statement)
+            if not re.search(r'\.(?:output|wait_with_output)\s*\(', statement):
+                if re.search(r'\.(?:status|spawn)\s*\(', statement):
+                    launched(state)
+                elif name := LET_BINDING.search(statement):
+                    pending[name.group(1)] = state
+        for name, state in list(pending.items()):
+            if not re.search(rf'(?<![\w.]){name}\s*\.', statement):
+                continue
+            configured(state, statement)
+            state['libtest'] |= bool(LIBTEST_SELECTION.search(raw))
+            if re.search(rf'(?<![\w.]){name}\s*\.\s*(?:output|wait_with_output)\s*\(', statement):
+                del pending[name]
+            elif re.search(rf'(?<![\w.]){name}\s*\.\s*(?:status|spawn)\s*\(', statement):
+                launched(state)
+                del pending[name]
+        line += raw.count('\n')
+    return findings
+
+
+class ChildStdioTests(unittest.TestCase):
+    """No test target launches its own binary on inherited stdout or stderr."""
+
+    def test_no_self_exec_leaks_libtest_output_into_the_parent(self):
+        findings = []
+        for base in ('crates', 'examples', 'fuzz'):
+            for path in sorted((ROOT / base).rglob('*.rs')):
+                source = path.read_text()
+                if 'current_exe' not in source or not test_source(path, source):
+                    continue
+                findings += [
+                    f'{path.relative_to(ROOT)}:{line}'
+                    for line in uncaptured_self_execs(source)
+                ]
+        self.assertEqual(findings, [])
 
 
 # A libtest double: `--list`, positional filters, `--skip`, `--exact` and

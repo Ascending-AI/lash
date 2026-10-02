@@ -235,18 +235,21 @@ fn ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort() {
     }
     let exe = std::env::current_exe().expect("test binary");
     for depth in [72usize, 96, 128] {
-        let status = std::process::Command::new(&exe)
+        let output = std::process::Command::new(&exe)
             .args([
                 "ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort",
                 "--exact",
                 "--nocapture",
             ])
             .env("LASH_STACK_BUDGET_AST_DEPTH", depth.to_string())
-            .status()
+            .output()
             .expect("spawn the child process");
         assert!(
-            status.success(),
-            "depth {depth} did not fail closed: {status}"
+            output.status.success(),
+            "depth {depth} did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
         );
     }
 }

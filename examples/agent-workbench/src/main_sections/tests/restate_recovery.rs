@@ -2116,6 +2116,14 @@ fn spawn_recovery_e2e_child(
     backend: &str,
     register: Option<&str>,
 ) -> OwnedFixtureChild {
+    // The child is a libtest binary: its output goes to a log under the data
+    // dir, never the parent's stdio, where it would interleave with the
+    // parent's own test records.
+    let child_log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(data_dir.join("recovery-e2e-child.log"))
+        .expect("open the recovery E2E child log");
     let mut command = std::process::Command::new(
         std::env::current_exe().expect("resolve workbench test executable"),
     );
@@ -2130,7 +2138,13 @@ fn spawn_recovery_e2e_child(
             "AGENT_WORKBENCH_RECOVERY_E2E_ENDPOINT_BIND",
             endpoint_bind.to_string(),
         )
-        .env("RESTATE_INGRESS_URL", ingress_url);
+        .env("RESTATE_INGRESS_URL", ingress_url)
+        .stdout(std::process::Stdio::from(
+            child_log
+                .try_clone()
+                .expect("clone the recovery E2E child log"),
+        ))
+        .stderr(std::process::Stdio::from(child_log));
     match register {
         Some(endpoint_url) => command.env("AGENT_WORKBENCH_RECOVERY_E2E_REGISTER", endpoint_url),
         None => command.env_remove("AGENT_WORKBENCH_RECOVERY_E2E_REGISTER"),

@@ -62,18 +62,21 @@ fn ten_thousand_nested_parens_return_a_named_diagnostic_without_aborting() {
         return;
     }
 
-    let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+    let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
         .args([
             "depth_guard::ten_thousand_nested_parens_return_a_named_diagnostic_without_aborting",
             "--exact",
             "--nocapture",
         ])
         .env(CHILD_ENV, "1")
-        .status()
+        .output()
         .expect("depth child starts");
     assert!(
-        status.success(),
-        "depth child did not fail closed: {status}"
+        output.status.success(),
+        "depth child did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
     );
 }
 
@@ -90,18 +93,21 @@ fn delimiter_free_nesting_returns_a_named_diagnostic_without_aborting() {
     }
 
     for shape in SHAPES {
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "depth_guard::delimiter_free_nesting_returns_a_named_diagnostic_without_aborting",
                 "--exact",
                 "--nocapture",
             ])
             .env(CHILD_ENV, shape)
-            .status()
+            .output()
             .expect("depth child starts");
         assert!(
-            status.success(),
-            "{shape} depth child did not fail closed: {status}"
+            output.status.success(),
+            "{shape} depth child did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
         );
     }
 }
@@ -548,16 +554,22 @@ fn every_recursive_production_family_rejects_without_aborting() {
     }
 
     for (family, _, _) in RECURSIVE_FAMILIES {
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "depth_guard::every_recursive_production_family_rejects_without_aborting",
                 "--exact",
                 "--nocapture",
             ])
             .env(CHILD_ENV, family)
-            .status()
+            .output()
             .expect("family child starts");
-        assert!(status.success(), "{family} did not fail closed: {status}");
+        assert!(
+            output.status.success(),
+            "{family} did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }
 
@@ -721,16 +733,22 @@ fn lexical_units_reject_without_aborting() {
     }
 
     for unit in LEXICAL_UNITS {
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "depth_guard::lexical_units_reject_without_aborting",
                 "--exact",
                 "--nocapture",
             ])
             .env(CHILD_ENV, unit)
-            .status()
+            .output()
             .expect("lexical child starts");
-        assert!(status.success(), "{unit} did not fail closed: {status}");
+        assert!(
+            output.status.success(),
+            "{unit} did not fail closed: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }
 

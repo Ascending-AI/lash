@@ -579,16 +579,18 @@ async fn a_plugin_only_finalize_survives_a_crash_between_the_database_files() {
         drop(store);
         drop(set);
 
-        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([TEST, "--exact", "--nocapture", "--test-threads=1"])
             .env(ROOT, root.path())
             .env(CUT, cut.file_name())
-            .status()
+            .output()
             .expect("run the finalizing process");
         assert_eq!(
-            status.code(),
+            output.status.code(),
             Some(77),
-            "{cut:?}: exit at the committed cut"
+            "{cut:?}: exit at the committed cut\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
         );
         assert!(
             root.path().join("lash-finalize.json").exists(),
