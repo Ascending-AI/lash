@@ -152,9 +152,7 @@ impl SessionDeleteFailure {
                 crate::drive::relay::plugin_delivery_error((**source).clone()).code
             }
             Self::Storage(failure) => match &failure.stop {
-                crate::store::MaintenanceStop::Failed(error) => {
-                    RuntimeErrorCode::of_store_error(error)
-                }
+                crate::store::MaintenanceStop::Failed(error) => error.runtime_code(),
                 crate::store::MaintenanceStop::Refused(_) => RuntimeErrorCode::RuntimeStore,
             },
         }

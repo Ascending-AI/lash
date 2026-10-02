@@ -6,36 +6,17 @@ pub use lash_core_store::runtime_error::{
     TurnFailureCause, runtime_error_from_store_commit, runtime_error_from_turn_input_admission,
 };
 
-/// The typed arm is not a convenience list: every variant here is one a host is
-/// expected to *match on* rather than log. `HeadRevisionConflict` in particular
-/// is the concurrent-append outcome the host is told to refresh and retry from,
-/// so collapsing it into `Protocol(String)` would leave string matching as the
-/// only way to tell a lost head race from an unrelated store failure.
+/// A store error met while committing, with its typed source kept: a host
+/// matches on the store's own variant, and its class is the store's
+/// ([`StoreError::runtime_code`](crate::store::StoreError::runtime_code)),
+/// never read out of a message.
 pub(super) fn session_commit_error(
     context: &str,
     source: crate::store::StoreError,
 ) -> SessionError {
-    match source {
-        source @ (crate::store::StoreError::WriterFenced { .. }
-        | crate::store::StoreError::Incompatible { .. }
-        | crate::store::StoreError::Contended
-        | crate::store::StoreError::SessionDeleted { .. }
-        | crate::store::StoreError::SessionStateVersionNewerThanRuntime { .. }
-        | crate::store::StoreError::SessionStateVersionUnsupported { .. }
-        | crate::store::StoreError::HeadRevisionConflict { .. }
-        | crate::store::StoreError::SessionHeadOwned { .. }
-        | crate::store::StoreError::AppendOperationIdentityConflict { .. }
-        | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }
-        | crate::store::StoreError::CommitNodeBudgetExceeded { .. }
-        | crate::store::StoreError::CommitByteBudgetExceeded { .. }
-        | crate::store::StoreError::CheckpointComponentEncodingVersionMismatch {
-            ..
-        }
-        | crate::store::StoreError::RecordEncodingFailed { .. }) => SessionError::Store {
-            context: context.to_string(),
-            source,
-        },
-        source => SessionError::Protocol(format!("{context}: {source}")),
+    SessionError::Store {
+        context: context.to_string(),
+        source,
     }
 }
 

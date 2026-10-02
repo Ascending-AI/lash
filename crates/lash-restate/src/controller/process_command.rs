@@ -109,13 +109,7 @@ where
     let Json(recorded) = context
         .run_json_or_retry_send::<Result<T, PluginError>, _>(
             process_command_journal_name(invocation, operation),
-            async move {
-                match work.await {
-                    Ok(value) => Ok(Ok(value)),
-                    Err(error) if error.is_retryable() => Err(error.to_string()),
-                    Err(error) => Ok(Err(error)),
-                }
-            },
+            async move { crate::process::journal_or_retry(work.await) },
         )
         .await
         .map_err(|error| process_command_journal_error(operation, error))?;
@@ -133,10 +127,14 @@ pub(super) fn process_command_journal_error(
     operation: &str,
     error: TerminalError,
 ) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        RuntimeErrorCode::EngineEffectController,
-        format!("Restate process {operation} journaling failed: {error}"),
-    )
+    crate::wire::typed_terminal(error.message()).unwrap_or_else(|| {
+        crate::wire::typed_terminal(error.message()).unwrap_or_else(|| {
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EngineEffectController,
+                format!("Restate process {operation} journaling failed: {error}"),
+            )
+        })
+    })
 }
 
 fn encode_process_command_journal_payload<T: serde::Serialize>(
@@ -217,14 +215,15 @@ where
         .run_json_or_retry_send::<Result<JournaledProcessAwait, PluginError>, _>(
             process_command_journal_name(invocation, "process-await-observation"),
             async move {
-                let record = match observation_registry.get_process(&observed_id).await {
+                let record = match crate::process::journal_or_retry(
+                    observation_registry.get_process(&observed_id).await,
+                )? {
                     Ok(Some(record)) => record,
                     Ok(None) => {
                         return Ok(Err(PluginError::ProcessUnknown {
                             process_id: observed_id,
                         }));
                     }
-                    Err(error) if error.is_retryable() => return Err(error.to_string()),
                     Err(error) => return Ok(Err(error)),
                 };
                 if record.is_terminal()
@@ -685,10 +684,7 @@ where
                         )
                         .await
                         .map_err(|err| {
-                            RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::EngineProcessAwait,
-                                err.to_string(),
-                            )
+                            crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineProcessAwait)
                         })?;
                     let await_request = crate::durable_wait::RestateDurableWaitAwaitRequest {
                         key: await_key.clone(),
@@ -711,9 +707,9 @@ where
                                 "process",
                                 lash_trace::TraceDurableWaitResolution::Failed,
                             );
-                            return Err(RuntimeEffectControllerError::new(
+                            return Err(crate::wire::lash_terminal(
+                                &err,
                                 RuntimeErrorCode::EngineProcessAwait,
-                                err.to_string(),
                             ));
                         }
                     };
@@ -797,10 +793,16 @@ where
                                     .request_process_workflow_cancel(namespace, cancel_request)
                                     .await
                                     .map_err(|err| {
-                                        PluginError::Runtime(RuntimeError::new(
-                                            RuntimeErrorCode::EngineProcessCancel,
+                                        PluginError::Runtime(
+                                            crate::wire::typed_terminal(err.message())
+                                                .unwrap_or_else(|| {
+                                                    RuntimeEffectControllerError::new(
+                                                        RuntimeErrorCode::EngineProcessCancel,
                                             format!("Restate process cancellation failed: {err}"),
-                                        ))
+                                                    )
+                                                })
+                                                .into_runtime_error(),
+                                        )
                                     })?;
                             }
                             // The race released the first wait as cancelled, so the
@@ -827,9 +829,9 @@ where
                                 )
                                 .await
                                 .map_err(|err| {
-                                    RuntimeEffectControllerError::new(
+                                    crate::wire::lash_terminal(
+                                        &err,
                                         RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
-                                        err.to_string(),
                                     )
                                 })?;
                             trace_park("process_after_turn_cancel");
@@ -857,9 +859,9 @@ where
                                         "process_after_turn_cancel",
                                         lash_trace::TraceDurableWaitResolution::Failed,
                                     );
-                                    return Err(RuntimeEffectControllerError::new(
+                                    return Err(crate::wire::lash_terminal(
+                                        &err,
                                         RuntimeErrorCode::EngineProcessAwaitAfterTurnCancel,
-                                        err.to_string(),
                                     ));
                                 }
                             }
@@ -913,10 +915,7 @@ where
                         )
                         .await
                         .map_err(|err| {
-                            RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::EngineProcessAwait,
-                                err.to_string(),
-                            )
+                            crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineProcessAwait)
                         })?;
                     ProcessEffectOutcome::AttachTerminal
                 }
@@ -992,10 +991,12 @@ where
                 )
                 .await
                 .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineProcessCancel,
-                        format!("Restate process cancellation failed: {err}"),
-                    )
+                    crate::wire::typed_terminal(err.message()).unwrap_or_else(|| {
+                        RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::EngineProcessCancel,
+                            format!("Restate process cancellation failed: {err}"),
+                        )
+                    })
                 })?;
             Ok((
                 ProcessEffectOutcome::Cancel {
@@ -1061,10 +1062,16 @@ where
                 )
                 .await
                 .map_err(|err| {
-                    PluginError::Runtime(RuntimeError::new(
-                        RuntimeErrorCode::EngineAwaitEventResolve,
-                        format!("Restate process signal resolution failed: {err}"),
-                    ))
+                    PluginError::Runtime(
+                        crate::wire::typed_terminal(err.message())
+                            .unwrap_or_else(|| {
+                                RuntimeEffectControllerError::new(
+                                    RuntimeErrorCode::EngineAwaitEventResolve,
+                                    format!("Restate process signal resolution failed: {err}"),
+                                )
+                            })
+                            .into_runtime_error(),
+                    )
                 })?;
             Ok((ProcessEffectOutcome::Signal { event }, realization))
         }

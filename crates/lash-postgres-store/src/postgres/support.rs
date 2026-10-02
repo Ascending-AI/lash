@@ -208,7 +208,7 @@ fn is_contention_sqlstate(code: &str) -> bool {
 }
 
 pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
-    PluginError::Session(err.to_string())
+    PluginError::from(store_sqlx_error(err))
 }
 
 /// A store refusal met by a registry-facing write, the writer fence's
@@ -614,8 +614,86 @@ fn decode_session_head_meta_row(
 
 #[cfg(test)]
 mod contention_tests {
-    use super::{is_contention_sqlstate, store_sqlx_error};
+    use super::{is_contention_sqlstate, plugin_sqlx_error, store_sqlx_error};
     use crate::StoreError;
+    use lash_core_execution::PluginError;
+    use lash_core_execution::store::StoreFault;
+
+    /// A database error carrying only a SQLSTATE.
+    #[derive(Debug)]
+    struct SqlState(&'static str);
+
+    impl std::fmt::Display for SqlState {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "SQLSTATE {}", self.0)
+        }
+    }
+
+    impl std::error::Error for SqlState {}
+
+    impl sqlx::error::DatabaseError for SqlState {
+        fn message(&self) -> &str {
+            "injected database error"
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some(std::borrow::Cow::Borrowed(self.0))
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    /// FIG-4649: a registry or trigger SQL fault reaches the plugin boundary
+    /// through the store's mapper, so it keeps its class: contention and a
+    /// failed substrate are retried, never a session error a recorded step
+    /// would journal as its answer.
+    #[test]
+    fn a_registry_sql_fault_is_a_retryable_store_fault_at_the_plugin_boundary() {
+        for code in ["40001", "40P01", "55P03"] {
+            let fault = plugin_sqlx_error(sqlx::Error::Database(Box::new(SqlState(code))));
+            assert!(
+                matches!(
+                    fault,
+                    PluginError::StoreUnavailable {
+                        fault: StoreFault::Contended
+                    }
+                ),
+                "{code}: {fault:?}"
+            );
+            assert!(fault.is_retryable() && !fault.is_terminal(), "{code}");
+        }
+        for error in [
+            sqlx::Error::PoolTimedOut,
+            sqlx::Error::Protocol("broken wire frame".to_string()),
+            sqlx::Error::Database(Box::new(SqlState("08006"))),
+        ] {
+            let fault = plugin_sqlx_error(error);
+            assert!(
+                matches!(
+                    &fault,
+                    PluginError::StoreUnavailable {
+                        fault: StoreFault::StorageFailure { backend, .. }
+                    } if backend == "postgres"
+                ),
+                "{fault:?}"
+            );
+            assert!(fault.is_retryable() && !fault.is_terminal(), "{fault:?}");
+        }
+    }
 
     #[test]
     fn only_retry_unchanged_sqlstates_are_contention() {

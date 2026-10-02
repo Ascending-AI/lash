@@ -61,9 +61,8 @@ pub(super) async fn an_index_of_another_stored_format_is_refused_typed() {
         &EFFECT_GROUP_STATE_FORMATS,
     );
     let context = Arc::new(RecordingContext::default());
-    *context.group_notice_answer.lock_recover() = Some(Err(TerminalError::new(
-        serde_json::to_string(&refusal).expect("encode the refusal"),
-    )));
+    *context.group_notice_answer.lock_recover() =
+        Some(Err(TerminalError::new(refusal.to_record())));
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let error = controller
         .await_group_child_drain_admission("group", 2)

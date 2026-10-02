@@ -109,11 +109,7 @@ pub(crate) enum SegmentRunEnd {
 /// A store failure a step leaves unrecorded so the invocation retries it, or
 /// a failure it records as the handler's terminal refusal.
 fn step_fault<T>(error: PluginError) -> Result<Result<T, String>, String> {
-    if error.is_retryable() {
-        Err(error.to_string())
-    } else {
-        Ok(Err(error.to_string()))
-    }
+    super::journal_or_retry(Err(error)).map(|recorded| recorded.map_err(|error| error.to_string()))
 }
 
 /// A segment failure no retry can fix, by class; each ends the process
@@ -1237,14 +1233,12 @@ where
                     .run_json_or_retry_send::<Result<lash_core::SegmentHandover, SegmentFailure>, _>(
                         RESUME_STEP.to_string(),
                         async move {
-                            let persisted = match continuations
-                                .get_segment_handover(pid, segment_ordinal)
-                                .await
-                            {
+                            let persisted = match super::journal_or_retry(
+                                continuations
+                                    .get_segment_handover(pid, segment_ordinal)
+                                    .await,
+                            )? {
                                 Ok(persisted) => persisted,
-                                Err(error) if error.is_retryable() => {
-                                    return Err(error.to_string());
-                                }
                                 Err(error) => {
                                     return Ok(Err(SegmentFailure::HandoverMissing(
                                         error.to_string(),

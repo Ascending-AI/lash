@@ -247,8 +247,8 @@ pub async fn expired_wakes_settle_without_reading_bad_sources(
         .expect("wake expiry");
     clock.set(expiry);
     let faults = Arc::new(ProcessRegistryFaults::new(Arc::clone(&registry)));
-    faults.set_process_read_error(Some(crate::PluginError::Session(
-        "source unavailable".into(),
+    faults.set_process_read_error(Some(crate::PluginError::attempt_fault(
+        "source unavailable",
     )));
     let report = drive(factory, faults.clone(), clock)
         .await
@@ -289,7 +289,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
     let faults = Arc::new(ProcessRegistryFaults::new(Arc::clone(&registry)));
     faults.set_process_read_error_after(
         0,
-        crate::PluginError::Session("connection temporarily closed".into()),
+        crate::PluginError::attempt_fault("connection temporarily closed"),
     );
     let report = drive(Arc::clone(&factory), faults.clone(), Arc::clone(&clock))
         .await
@@ -312,7 +312,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
     );
     let expiry = bad.expires_at_ms;
     clock.set(expiry - 1);
-    faults.set_process_read_error_after(0, crate::PluginError::Session("still unavailable".into()));
+    faults.set_process_read_error_after(0, crate::PluginError::attempt_fault("still unavailable"));
     let retry = drive(Arc::clone(&factory), faults.clone(), Arc::clone(&clock))
         .await
         .expect("retry near expiry");
@@ -331,9 +331,7 @@ pub async fn transient_wake_source_retries_release_claims_and_keep_expiry(
     );
     assert_eq!(bad.expires_at_ms, expiry);
     clock.set(expiry);
-    faults.set_process_read_error(Some(crate::PluginError::Session(
-        "still unavailable".into(),
-    )));
+    faults.set_process_read_error(Some(crate::PluginError::attempt_fault("still unavailable")));
     let expired = drive(factory, faults, clock)
         .await
         .expect("expire deferred source");
@@ -354,10 +352,10 @@ pub async fn wake_defer_failure_does_not_strand_claimed_siblings(
     let faults = Arc::new(ProcessRegistryFaults::new(Arc::clone(&registry)));
     faults.set_process_read_error_after(
         0,
-        crate::PluginError::Session("source read unavailable".into()),
+        crate::PluginError::attempt_fault("source read unavailable"),
     );
-    faults.set_wake_defer_error(Some(crate::PluginError::Session(
-        "defer write unavailable".into(),
+    faults.set_wake_defer_error(Some(crate::PluginError::attempt_fault(
+        "defer write unavailable",
     )));
     let report = drive(Arc::clone(&factory), faults, Arc::clone(&clock))
         .await

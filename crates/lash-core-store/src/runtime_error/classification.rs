@@ -435,14 +435,17 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectWrongOutcome => Terminal,
             // the process-local controller task closed; a restart repairs it.
             Self::RuntimeEffectControllerTaskClosed => Redrivable,
-            // store I/O failed.
+            // the store refuses this build or this session on every attempt.
             Self::WriterFenced | Self::StoreIncompatible | Self::StoreSessionMismatch => Terminal,
             // the session admitted another cancellation authority.
             Self::TurnCancelBindingMismatch => Terminal,
             Self::TurnCancelClosureOwnerReleased => Terminal,
+            // the storage substrate faulted; the identical operation is safe to make again.
             Self::RuntimeStore => Retryable,
             // durable state is corrupt or a counter is exhausted.
             Self::RuntimeStoreCorrupt => Terminal,
+            // the store answers the identical request the same way.
+            Self::StoreRefused => Terminal,
             // the session command claim is refused.
             Self::SessionCommandRun => Terminal,
             // the idempotency key is bound to a different command.

@@ -122,9 +122,9 @@ pub async fn trigger_occurrence_listing_corruption_law(
         .await
         .expect_err("an unavailable occurrence query must fail")
     {
-        crate::PluginError::Session(message) => assert!(
-            !message.starts_with("failed to decode "),
-            "backend query failure must not be reclassified as row decoding: {message}"
+        error @ crate::PluginError::StoreUnavailable { .. } => assert!(
+            error.is_retryable() && !error.to_string().contains("failed to decode "),
+            "backend query failure must not be reclassified as row decoding: {error}"
         ),
         error => panic!("occurrence query failure changed classification: {error:?}"),
     }

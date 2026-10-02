@@ -191,6 +191,87 @@ impl std::fmt::Display for StoreRefusal {
 
 impl std::error::Error for StoreRefusal {}
 
+/// A fault of the storage substrate that stays typed past the store, with
+/// the same fields as its store error. A plugin error is cloned and
+/// journaled, so it carries this rather than the store error: the identical
+/// operation may succeed when it is made again, and nothing about it is the
+/// operation's answer.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum StoreFault {
+    /// Another writer holds the backend's write authority.
+    Contended,
+    /// Another connection holds a database a whole-store migration needs.
+    MigrationOpenElsewhere {
+        database: String,
+        location: std::path::PathBuf,
+    },
+    /// The substrate failed the operation before it returned a value.
+    StorageFailure { backend: String, message: String },
+    /// A backend failure with no typed cause.
+    Backend { message: String },
+}
+
+impl StoreFault {
+    /// Copy the fault, if this store error is a fault of the substrate.
+    pub fn of_store_error(error: &StoreError) -> Option<Self> {
+        match error {
+            StoreError::Contended => Some(Self::Contended),
+            StoreError::MigrationOpenElsewhere { database, location } => {
+                Some(Self::MigrationOpenElsewhere {
+                    database: database.clone(),
+                    location: location.clone(),
+                })
+            }
+            StoreError::StorageFailure { backend, message } => Some(Self::StorageFailure {
+                backend: (*backend).to_string(),
+                message: message.clone(),
+            }),
+            StoreError::Backend(message) => Some(Self::Backend {
+                message: message.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The runtime code this fault is carried under: the code of the store
+    /// error it copies ([`StoreError::runtime_code`]).
+    pub fn code(&self) -> crate::RuntimeErrorCode {
+        match self {
+            Self::Contended => StoreError::Contended.runtime_code(),
+            Self::MigrationOpenElsewhere { .. }
+            | Self::StorageFailure { .. }
+            | Self::Backend { .. } => crate::RuntimeErrorCode::RuntimeStore,
+        }
+    }
+}
+
+impl std::fmt::Display for StoreFault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Contended => std::fmt::Display::fmt(&StoreError::Contended, formatter),
+            Self::MigrationOpenElsewhere { database, location } => std::fmt::Display::fmt(
+                &StoreError::MigrationOpenElsewhere {
+                    database: database.clone(),
+                    location: location.clone(),
+                },
+                formatter,
+            ),
+            Self::StorageFailure { backend, message } => {
+                write!(formatter, "{backend} storage failure: {message}")
+            }
+            Self::Backend { message } => {
+                std::fmt::Display::fmt(&StoreError::Backend(message.clone()), formatter)
+            }
+        }
+    }
+}
+
+impl std::error::Error for StoreFault {}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
@@ -1033,19 +1114,23 @@ impl StoreError {
         Ok(current + 1)
     }
 
-    /// Whether this is a fault of the storage substrate rather than a refusal:
-    /// the identical operation may succeed when it is made again. Every other
-    /// variant is the store's deterministic answer to the request, and making
-    /// it again is refused the same way.
+    /// Whether the identical operation may succeed when it is made again: the
+    /// storage substrate faulted, or another drive holds the session until
+    /// its own boundary. Every other variant is the store's deterministic
+    /// answer to the request, and making it again is refused the same way.
     ///
     /// The match is exhaustive for the same reason as [`Self::variant_name`]'s:
-    /// a new variant does not compile until it is classified.
+    /// a new variant does not compile until it is classified. It agrees with
+    /// [`Self::runtime_code`]: an error is transient exactly when its code is
+    /// retryable.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Contended
             | Self::MigrationOpenElsewhere { .. }
             | Self::StorageFailure { .. }
-            | Self::Backend(_) => true,
+            | Self::Backend(_)
+            | Self::SessionHeadOwned { .. }
+            | Self::UnfinishedRootConflict { .. } => true,
             Self::ExecutionStateCaptureFailed { .. }
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
@@ -1069,7 +1154,6 @@ impl StoreError {
             | Self::InvalidSessionId { .. }
             | Self::SessionDeleted { .. }
             | Self::UnsupportedStoreOperation { .. }
-            | Self::UnfinishedRootConflict { .. }
             | Self::RootHeldByAnotherExecutor { .. }
             | Self::FollowOnPending { .. }
             | Self::FollowOnFrameNotCurrent { .. }
@@ -1113,7 +1197,6 @@ impl StoreError {
             | Self::IngressSettlementUnfenced { .. }
             | Self::IngressAndSessionCommandRun { .. }
             | Self::SessionCommandWithdrawn { .. }
-            | Self::SessionHeadOwned { .. }
             | Self::StaleDriveFence { .. }
             | Self::RootAlreadyTerminal { .. }
             | Self::RootInputWithdrawn { .. }
@@ -1148,6 +1231,213 @@ impl StoreError {
             | Self::ArtifactMissing { .. }
             | Self::ArtifactCarryMissing { .. }
             | Self::ParkFeedCursorCompacted { .. } => false,
+        }
+    }
+
+    /// The code this error is carried under past the store: the one mapping
+    /// every boundary that classifies a store error reads, so a store error
+    /// is retried, redriven or terminal the same way on each of them.
+    ///
+    /// - A fault of the substrate, or a session another drive holds, is
+    ///   retryable ([`Self::is_transient`]).
+    /// - A refusal that names what superseded the attempt (a later head, a
+    ///   later drive, a new lease holder, the follow-on the session owes) is
+    ///   redrivable: the identical call is refused again, and a redrive under
+    ///   fresh authority is not.
+    /// - Every other refusal is terminal, under its own code when it has one
+    ///   and [`RuntimeErrorCode::StoreRefused`](crate::RuntimeErrorCode::StoreRefused)
+    ///   when it has none.
+    ///
+    /// The match is exhaustive: a new variant does not compile until it is
+    /// classified.
+    pub fn runtime_code(&self) -> crate::RuntimeErrorCode {
+        use crate::RuntimeErrorCode as Code;
+        match self {
+            Self::Contended => Code::StoreCommitContended,
+            Self::MigrationOpenElsewhere { .. }
+            | Self::StorageFailure { .. }
+            | Self::Backend(_) => Code::RuntimeStore,
+            Self::SessionHeadOwned { .. } => Code::SessionHeadOwned,
+            Self::UnfinishedRootConflict { .. } => Code::SessionRootPending,
+
+            Self::HeadRevisionConflict { .. }
+            | Self::TurnCancelIntentChanged { .. }
+            | Self::StaleDriveFence { .. }
+            | Self::SessionCommandWithdrawn { .. }
+            | Self::CheckpointRootMissing { .. }
+            | Self::RootHeldByAnotherExecutor { .. }
+            | Self::StaleWritePermit { .. } => Code::StoreCommitSuperseded,
+            Self::SessionExecutionLeaseExpired { .. } => Code::SessionExecutionLeaseLost,
+            Self::FollowOnPending { .. }
+            | Self::FollowOnFrameNotCurrent { .. }
+            | Self::FollowOnNotPending { .. } => Code::FollowOnPending,
+            Self::ExecutionStateCaptureFailed { .. } => Code::ExecutionStateCaptureFailed,
+            Self::TurnOutcomeMaterializationRefused { error } => error.code.clone(),
+
+            Self::Incompatible { .. } => Code::StoreIncompatible,
+            Self::WriterFenced { .. } => Code::WriterFenced,
+            Self::StoreSessionMismatch { .. } => Code::StoreSessionMismatch,
+            Self::SessionStateVersionUnsupported { .. } => Code::SessionStateVersionUnsupported,
+            Self::SessionStateVersionNewerThanRuntime { .. } => {
+                Code::SessionStateVersionNewerThanRuntime
+            }
+            Self::TurnCancelBindingMismatch { .. } => Code::TurnCancelBindingMismatch,
+            Self::TurnCancelClosureOwnerReleased { .. } => Code::TurnCancelClosureOwnerReleased,
+            Self::ReferrerKindRefused { .. } => Code::ReferrerKindRefused,
+            Self::StoredDataCorrupt { .. }
+            | Self::MonotonicCounterOverflow { .. }
+            | Self::AppendReceiptRequestedNodeCountCorrupt { .. } => Code::RuntimeStoreCorrupt,
+            Self::SessionDeleted { .. } | Self::SessionClosing { .. } => Code::SessionDeleted,
+            Self::CommitNodeBudgetExceeded { .. } => Code::StoreCommitNodeBudgetExceeded,
+            Self::CommitByteBudgetExceeded { .. } => Code::StoreCommitByteBudgetExceeded,
+            Self::CheckpointComponentEncodingVersionMismatch { .. } => {
+                Code::CheckpointComponentEncodingVersionMismatch
+            }
+            Self::RecordEncodingFailed { .. } => Code::RecordEncodingFailed,
+            Self::ArtifactReferrerEnded { .. } => Code::ArtifactReferrerEnded,
+            Self::ArtifactMissing { .. } => Code::ArtifactMissing,
+            Self::QueuedWorkRowExceedsContextWindow { .. } => {
+                Code::QueuedWorkRowExceedsContextWindow
+            }
+            Self::PendingTurnInputSourceKeyConflict { .. }
+            | Self::QueuedWorkSourceKeyConflict { .. }
+            | Self::PendingTurnInputIdConflict { .. }
+            | Self::PendingTurnInputBatchDuplicate { .. }
+            | Self::RunSpecHashCollision { .. } => Code::DurableIdentityConflict,
+            Self::PendingTurnInputRunSpecMismatch { .. } => Code::RunSpecMismatch,
+            Self::IngressTurnAddressUnknown { .. } => Code::TurnAddressUnknown,
+            Self::IngressReservedSourceKey { .. } => Code::IngressReservedSourceKey,
+
+            Self::FollowOnHeadInvariant { .. }
+            | Self::QueuedWorkActionReserveExhaustsContext { .. }
+            | Self::SessionRelationMismatch { .. }
+            | Self::SessionNotFound { .. }
+            | Self::ForeignSessionRequest { .. }
+            | Self::InvalidWindowAnchor { .. }
+            | Self::HistoryAnchorUnavailable { .. }
+            | Self::HistoryNodeTooLarge { .. }
+            | Self::CursorForeignSession { .. }
+            | Self::HistoryCursorLineageChanged { .. }
+            | Self::SessionBindingNotMaterialized { .. }
+            | Self::InvalidSessionId { .. }
+            | Self::UnsupportedStoreOperation { .. }
+            | Self::TurnCancelClosureConflict { .. }
+            | Self::TurnCancelClosureAuthorizationMismatch { .. }
+            | Self::TurnCancelClosureLifecyclePinned { .. }
+            | Self::TurnCancelClosureScopeRetired { .. }
+            | Self::UnknownAttachment { .. }
+            | Self::IncompleteEnumeration { .. }
+            | Self::RuntimeTurnCommitConflict { .. }
+            | Self::AppendOperationIdentityConflict { .. }
+            | Self::SemanticBoundaryIdentityConflict { .. }
+            | Self::TokenUsageAccountingOverflow { .. }
+            | Self::CheckpointTurnIndexOutOfRange { .. }
+            | Self::CheckpointTokenUsageOutOfRange { .. }
+            | Self::AppendAncestorNotActive { .. }
+            | Self::NodeIdDerivationMismatch { .. }
+            | Self::NodeIdCollision { .. }
+            | Self::InvalidGraphNodeId { .. }
+            | Self::GraphGenerationCollision { .. }
+            | Self::InvalidGraphLeaf { .. }
+            | Self::ForkTargetPending { .. }
+            | Self::ForkTargetUnavailable { .. }
+            | Self::ForkTargetPruned { .. }
+            | Self::TurnBaseNotRetained { .. }
+            | Self::ForkSessionAlreadyExists { .. }
+            | Self::InvalidGraphParent { .. }
+            | Self::MissingFrameOpenAncestor { .. }
+            | Self::IngressRowNotAdmitted { .. }
+            | Self::IngressSettlementDuplicate { .. }
+            | Self::IngressSettlementUnfenced { .. }
+            | Self::IngressAndSessionCommandRun { .. }
+            | Self::RootAlreadyTerminal { .. }
+            | Self::RootInputWithdrawn { .. }
+            | Self::ControlIntentUnknown { .. }
+            | Self::DriveEpochUnavailable { .. }
+            | Self::DriveFenceSessionMismatch { .. }
+            | Self::PendingTurnInputBatchForeignSession { .. }
+            | Self::RunSpecMissing { .. }
+            | Self::ProcessWakeSequenceRewound { .. }
+            | Self::UnfencedHeadPublication { .. }
+            | Self::UnsupportedRecordSchemaVersion { .. }
+            | Self::MissingRecordSchemaVersion { .. }
+            | Self::InvalidRecordSchemaVersion { .. }
+            | Self::CheckpointComponentMissing { .. }
+            | Self::IncompleteCheckpointComponentSet
+            | Self::ExecutionStateBodiesReleased
+            | Self::ArtifactCarryMissing { .. }
+            | Self::ParkFeedCursorCompacted { .. } => Code::StoreRefused,
+        }
+    }
+
+    /// The typed cause this error carries beside [`Self::runtime_code`], when
+    /// it has fields a caller past the store reads.
+    pub fn runtime_cause(&self) -> Option<crate::RuntimeErrorCause> {
+        use crate::RuntimeErrorCause as Cause;
+        if let Some(refusal) = StoreRefusal::of_store_error(self) {
+            return Some(Cause::StoreRefusal {
+                refusal: Box::new(refusal),
+            });
+        }
+        match self {
+            Self::StoredDataCorrupt {
+                record_kind,
+                message,
+            } => Some(Cause::StoredDataCorrupt {
+                corruption: Box::new(crate::runtime_error::StoredDataCorruption {
+                    record_kind: (*record_kind).to_string(),
+                    message: message.clone(),
+                }),
+            }),
+            // A closing session is past its point of no return: to a caller
+            // it is already gone.
+            Self::SessionDeleted { session_id } | Self::SessionClosing { session_id, .. } => {
+                Some(Cause::SessionDeleted {
+                    session_id: session_id.clone(),
+                })
+            }
+            Self::ArtifactReferrerEnded { referrer } => Some(Cause::ArtifactReferrerEnded {
+                referrer: Box::new(referrer.clone()),
+            }),
+            Self::IngressReservedSourceKey {
+                session_id,
+                kind,
+                source_key,
+            } => Some(Cause::IngressReservedSourceKey {
+                refusal: Box::new(crate::runtime_error::IngressReservedSourceKeyRefusal {
+                    session_id: session_id.clone(),
+                    ingress_kind: (*kind).to_owned(),
+                    source_key: source_key.clone(),
+                }),
+            }),
+            Self::TurnOutcomeMaterializationRefused { error } => error.cause.clone(),
+            _ => None,
+        }
+    }
+
+    /// This error past the store: [`Self::runtime_code`], its message and
+    /// [`Self::runtime_cause`]. A refused turn outcome hands back the runtime
+    /// refusal it carries, unchanged.
+    pub fn runtime_error(&self) -> crate::RuntimeError {
+        let code = self.runtime_code();
+        let cause = self.runtime_cause();
+        let message = match self {
+            Self::TurnOutcomeMaterializationRefused { error } => return (**error).clone(),
+            Self::Contended => {
+                "store commit is contended; retry the identical operation unchanged".to_string()
+            }
+            err @ Self::HeadRevisionConflict { .. } => format!(
+                "{err}; reload the durable head and re-establish lease and claim authority before retrying"
+            ),
+            Self::SessionExecutionLeaseExpired { session_id } => {
+                format!("session execution lease for session `{session_id}` was lost before commit")
+            }
+            err => err.to_string(),
+        };
+        let error = crate::RuntimeError::new(code, message);
+        match cause {
+            Some(cause) => error.with_cause(cause),
+            None => error,
         }
     }
 

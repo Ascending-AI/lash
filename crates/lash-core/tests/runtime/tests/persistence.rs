@@ -72,7 +72,7 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         .expect_err("the second LLM usage event must reject cumulative overflow");
     handler.close().await.expect("close the scope's handler");
 
-    assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreRefused);
     assert_eq!(
         error.message,
         "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
@@ -1098,7 +1098,7 @@ async fn ambiguous_turn_commit_does_not_double_count_usage() {
         .await
         .expect_err("the landed commit's reply is lost");
     handler.close().await.expect("close the scope's handler");
-    assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::RuntimeStore);
 
     // The call's usage is the owner's accounting, delivered with its effect
     // (ADR 0125): the lost commit reply leaves nothing to count again.

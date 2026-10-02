@@ -330,10 +330,9 @@ async fn a_retryable_delivery_is_reattempted_at_its_backoff() {
     let scope = world.parent_scope("bounds-session", "retry-parent").await;
     let _child = world.until_child("bounds-session", &scope).await;
     let _obligation = world.record_end(&scope).await;
-    world.port.fail(
-        1,
-        PluginError::Session("the engine is unreachable".to_string()),
-    );
+    world
+        .port
+        .fail(1, PluginError::attempt_fault("the engine is unreachable"));
 
     let now = world.clock.timestamp_ms();
     let pass = relay_due(
@@ -386,7 +385,7 @@ async fn retryable_failures_stall_at_the_attempt_ceiling() {
     let obligation = world.record_end(&scope).await;
     world.port.fail(
         ceiling as usize,
-        PluginError::Session("the engine stays unreachable".to_string()),
+        PluginError::attempt_fault("the engine stays unreachable"),
     );
 
     let relay = world.relay().with_policy(RelayPolicy {

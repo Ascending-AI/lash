@@ -149,10 +149,12 @@ where
         Some(live) => live.serve(run).await?,
     };
     let Json(recorded) = journaled.map_err(|terminal| {
-        let fault = RuntimeEffectControllerError::new(
-            RuntimeErrorCode::EngineEffectController,
-            format!("Restate frontier marker `{name}` failed: {terminal}"),
-        );
+        let fault = crate::wire::typed_terminal(terminal.message()).unwrap_or_else(|| {
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EngineEffectController,
+                format!("Restate frontier marker `{name}` failed: {terminal}"),
+            )
+        });
         failure(terminal, fault)
     })?;
     recorded_frontier_mark(&name, recorded, &mark)

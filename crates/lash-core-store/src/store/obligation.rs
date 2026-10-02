@@ -587,7 +587,7 @@ impl std::fmt::Display for DeliveryError {
 impl From<StoreError> for DeliveryError {
     fn from(error: StoreError) -> Self {
         Self {
-            code: crate::RuntimeErrorCode::of_store_error(&error),
+            code: error.runtime_code(),
             message: error.to_string(),
         }
     }

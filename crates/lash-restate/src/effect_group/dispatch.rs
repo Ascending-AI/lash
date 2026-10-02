@@ -1526,10 +1526,7 @@ async fn commit_child_final(
                     request.group_key, request.position
                 ),
             );
-            Err(
-                TerminalError::new(serde_json::to_string(&refusal).unwrap_or(refusal.message))
-                    .into(),
-            )
+            Err(TerminalError::new(refusal.to_record()).into())
         }
         other => Err(TerminalError::new(format!(
             "commit child protocol defect for {} child {}: {other:?}",

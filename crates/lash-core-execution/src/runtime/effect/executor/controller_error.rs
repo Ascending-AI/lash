@@ -10,14 +10,26 @@ use crate::PluginError;
 use crate::runtime::{RuntimeError, RuntimeErrorCode};
 
 impl From<PluginError> for RuntimeEffectControllerError {
+    /// The code the effect controller carries a plugin error by. Its class
+    /// is the error's own ([`PluginError::class`]): the match is exhaustive,
+    /// so a new variant does not compile until it names its code.
     fn from(err: PluginError) -> Self {
         match err {
             PluginError::Format(refusal) => refusal.into(),
+            PluginError::TriggerOperation(err) => {
+                let code = if err.is_terminal() {
+                    RuntimeErrorCode::Plugin
+                } else {
+                    RuntimeErrorCode::PluginSessionManager
+                };
+                Self::new(code, err.to_string())
+            }
             PluginError::StoredDataCorrupt {
                 record_kind,
                 message,
             } => Self::stored_data_corrupt(record_kind, message),
             PluginError::StoreRefusal(err) => err.into_store_error().into(),
+            PluginError::StoreUnavailable { fault } => Self::new(fault.code(), fault.to_string()),
             PluginError::Runtime(err) => err.into(),
             PluginError::RuntimeEffectController(err) => err,
             err @ PluginError::SessionHeadOwned { .. } => {
@@ -31,6 +43,12 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 error.cause =
                     Some(crate::RuntimeErrorCause::MissingRecordedProcessConfig { engine_kind });
                 error
+            }
+            err @ PluginError::SessionExecutionLeaseLost { .. } => {
+                Self::new(RuntimeErrorCode::SessionExecutionLeaseLost, err.to_string())
+            }
+            err @ PluginError::ProcessExecutionSuperseded { .. } => {
+                Self::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             }
             err @ PluginError::ProcessNotVisible { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
@@ -69,7 +87,43 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessNoLongerRetained { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
             }
-            err => Self::new(RuntimeErrorCode::Plugin, err.to_string()),
+            err @ (PluginError::AppendReceiptRequestedNodeCountCorrupt { .. }
+            | PluginError::MonotonicCounterOverflow { .. }) => {
+                Self::new(RuntimeErrorCode::RuntimeStoreCorrupt, err.to_string())
+            }
+            err @ (PluginError::Session(_)
+            | PluginError::Registration(_)
+            | PluginError::ConfigRegistration(_)
+            | PluginError::Invoke(_)
+            | PluginError::State(_)
+            | PluginError::InvalidTriggerTarget { .. }
+            | PluginError::InvalidToolDiscovery { .. }
+            | PluginError::InvalidBatchMaximum { .. }
+            | PluginError::ResidentToolContractUnavailable { .. }
+            | PluginError::ResidentToolDuplicateId { .. }
+            | PluginError::ResidentToolDuplicateName { .. }
+            | PluginError::ResidentToolRouteUnavailable { .. }
+            | PluginError::SessionAlreadyExists { .. }
+            | PluginError::BeforeToolCallReplacementConflict { .. }
+            | PluginError::AfterToolCallReplacementConflict { .. }
+            | PluginError::SessionInitTooLarge { .. }
+            | PluginError::MissingRecordedSessionConfig { .. }
+            | PluginError::RecordedSessionConfigConflict { .. }
+            | PluginError::AppendOperationIdentityConflict { .. }
+            | PluginError::ClockBeforeUnixEpoch { .. }
+            | PluginError::ProcessOutputAttachmentUnavailable { .. }
+            | PluginError::ProcessUnknown { .. }
+            | PluginError::ProcessChangeCursorPruned { .. }
+            | PluginError::ProcessParkFeedCursorCompacted { .. }
+            | PluginError::ProcessCallerDeparted { .. }
+            | PluginError::ProcessHandedOver { .. }
+            | PluginError::ProcessTerminalOutcomeMismatch { .. }
+            | PluginError::ReservedProcessEvent { .. }
+            | PluginError::InvalidProcessWakeIdentity { .. }
+            | PluginError::ProcessWakeDeliveryFormatVersionMismatch { .. }
+            | PluginError::ProcessRegistryCursorBackendMismatch { .. }) => {
+                Self::new(RuntimeErrorCode::Plugin, err.to_string())
+            }
         }
     }
 }
@@ -167,16 +221,22 @@ mod tests {
 
     #[test]
     fn transient_store_failures_stay_retryable_and_non_terminal() {
-        for store_error in [
-            crate::StoreError::StorageFailure {
-                backend: "sqlite",
-                message: "database is locked".to_string(),
-            },
-            crate::StoreError::Contended,
+        for (store_error, code) in [
+            (
+                crate::StoreError::StorageFailure {
+                    backend: "sqlite",
+                    message: "database is locked".to_string(),
+                },
+                crate::RuntimeErrorCode::RuntimeStore,
+            ),
+            (
+                crate::StoreError::Contended,
+                crate::RuntimeErrorCode::StoreCommitContended,
+            ),
         ] {
             let controller_error = RuntimeEffectControllerError::from(store_error);
             let runtime_error = controller_error.into_runtime_error();
-            assert_eq!(runtime_error.code, crate::RuntimeErrorCode::RuntimeStore);
+            assert_eq!(runtime_error.code, code);
             assert!(runtime_error.is_retryable());
             assert!(!runtime_error.is_terminal());
         }

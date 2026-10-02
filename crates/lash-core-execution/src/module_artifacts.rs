@@ -154,7 +154,9 @@ impl From<ArtifactStoreError> for crate::PluginError {
                 crate::StoreError::Incompatible { refusal }.into()
             }
             // The store did not answer: a fact about this attempt.
-            ArtifactStoreError::Backend(_) => crate::PluginError::Session(error.to_string()),
+            ArtifactStoreError::Backend(message) => crate::PluginError::StoreUnavailable {
+                fault: crate::store::StoreFault::Backend { message },
+            },
             // What the store holds refuses the write or the read: every retry
             // by this build meets it again.
             ArtifactStoreError::Encode(_)

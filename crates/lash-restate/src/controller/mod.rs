@@ -224,8 +224,10 @@ pub enum RestateEffectError {
 impl From<RestateEffectError> for RuntimeEffectControllerError {
     fn from(error: RestateEffectError) -> Self {
         match error {
-            RestateEffectError::Terminal { .. } => {
-                Self::new(RuntimeErrorCode::EngineEffectController, error.to_string())
+            RestateEffectError::Terminal { ref terminal, .. } => {
+                crate::wire::typed_terminal(terminal.message()).unwrap_or_else(|| {
+                    Self::new(RuntimeErrorCode::EngineEffectController, error.to_string())
+                })
             }
             RestateEffectError::Refused(refusal) => refusal,
         }
@@ -251,10 +253,8 @@ where
         )
         .await
         .map_err(|err| {
-            RuntimeError::new(
-                lash_core::RuntimeErrorCode::EngineEffectController,
-                err.to_string(),
-            )
+            crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
+                .into_runtime_error()
         })?
         .into_result()
 }
@@ -537,10 +537,8 @@ where
             )
             .await
             .map_err(|err| {
-                RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
+                crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
+                    .into_runtime_error()
             })
     }
 
@@ -563,19 +561,15 @@ where
         )
         .await
         .map_err(|err| {
-            RuntimeError::new(
-                lash_core::RuntimeErrorCode::EngineEffectController,
-                err.to_string(),
-            )
+            crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
+                .into_runtime_error()
         })?;
         self.context
             .await_event(&self.namespace, request, replay_key, cancel)
             .await
             .map_err(|err| {
-                RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
+                crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
+                    .into_runtime_error()
             })
     }
 
@@ -591,10 +585,8 @@ where
             )
             .await
             .map_err(|err| {
-                RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
+                crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
+                    .into_runtime_error()
             })
     }
 
@@ -610,10 +602,8 @@ where
             )
             .await
             .map_err(|err| {
-                RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
+                crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
+                    .into_runtime_error()
             })
     }
 }
@@ -707,10 +697,7 @@ where
                         resolution: lash_trace::TraceDurableWaitResolution::Failed,
                     }
                 });
-                RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
+                crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
             })?;
         match outcome {
             RestateTurnCancelRaceOutcome::Completed(context::SignalWaitOutcome::Resolved(
@@ -1039,10 +1026,7 @@ where
                 .peek_process_cancel_requested()
                 .await
                 .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineProcessCancel,
-                        err.to_string(),
-                    )
+                    crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineProcessCancel)
                 }),
         }
     }
@@ -1067,18 +1051,11 @@ where
         let Json(recorded) = self
             .context
             .run_json_or_retry_send::<Result<(), PluginError>, _>(name, async move {
-                match step.await {
-                    Ok(()) => Ok(Ok(())),
-                    Err(error) if error.is_retryable() => Err(error.to_string()),
-                    Err(error) => Ok(Err(error)),
-                }
+                crate::process::journal_or_retry(step.await)
             })
             .await
             .map_err(|err| {
-                RuntimeEffectControllerError::new(
-                    RuntimeErrorCode::EngineEffectController,
-                    err.to_string(),
-                )
+                crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
             })?;
         recorded.map_err(RuntimeEffectControllerError::from)
     }
@@ -1254,9 +1231,9 @@ where
                             }
                         });
                         tracing_sleep_error(&invocation, &err);
-                        return Err(RuntimeEffectControllerError::new(
+                        return Err(crate::wire::lash_terminal(
+                            &err,
                             RuntimeErrorCode::EngineEffectController,
-                            err.to_string(),
                         ));
                     }
                 }
@@ -1281,10 +1258,7 @@ where
                 // A group child cancelled before it parks meets the engine's
                 // cancellation at one of the steps ahead of its wait.
                 let engine_fault = |err: TerminalError| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::EngineEffectController,
-                        err.to_string(),
-                    )
+                    crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController)
                 };
                 if self
                     .session_revoked(key.scope.session_id())
@@ -1425,9 +1399,9 @@ where
                                 resolution: lash_trace::TraceDurableWaitResolution::Failed,
                             }
                         });
-                        Err(RuntimeEffectControllerError::new(
+                        Err(crate::wire::lash_terminal(
+                            &err,
                             RuntimeErrorCode::EngineEffectController,
-                            err.to_string(),
                         ))
                     }
                 }
@@ -1524,8 +1498,8 @@ fn effect_group_engine_error(
     operation: &str,
     error: TerminalError,
 ) -> RuntimeEffectControllerError {
-    if let Some(refusal) = crate::object_state::stored_format_error_in(error.message()) {
-        return refusal;
+    if let Some(typed) = crate::wire::typed_terminal(error.message()) {
+        return typed;
     }
     group_shape_error(format!(
         "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"

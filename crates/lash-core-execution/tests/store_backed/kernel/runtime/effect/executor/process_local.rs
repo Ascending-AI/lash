@@ -550,8 +550,8 @@ mod tests {
             _record: &crate::ProcessRecord,
         ) -> Result<(), crate::PluginError> {
             self.pokes.fetch_add(1, Ordering::SeqCst);
-            Err(crate::PluginError::Invoke(
-                "start delivery unavailable".into(),
+            Err(crate::PluginError::attempt_fault(
+                "start delivery unavailable",
             ))
         }
 

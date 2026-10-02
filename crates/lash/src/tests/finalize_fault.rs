@@ -107,7 +107,7 @@ fn failing_after_turn(
 
 /// An opaque plugin-session failure: a store blip behind a plugin service.
 fn session_blip() -> lash_core::PluginError {
-    lash_core::PluginError::Session("plugin session store unavailable".to_string())
+    lash_core::PluginError::attempt_fault("plugin session store unavailable".to_string())
 }
 
 /// A live fault under a plugin-minted code: the plugin classes it
@@ -392,7 +392,7 @@ async fn a_journaled_failure_settles_the_root_failed_after_a_live_finalize_fault
                 let checkpoint_calls = Arc::clone(&checkpoint_calls);
                 Box::pin(async move {
                     checkpoint_calls.fetch_add(1, Ordering::SeqCst);
-                    Err(lash_core::PluginError::Session(
+                    Err(lash_core::PluginError::attempt_fault(
                         "checkpoint store unavailable".to_string(),
                     ))
                 })

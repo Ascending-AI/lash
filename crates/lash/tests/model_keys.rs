@@ -1522,9 +1522,13 @@ async fn a_direct_completion_bind_fault_seals_nothing_and_recovers_after_the_par
     // The tool's group child is the invocation the engine stopped retrying.
     // Its failure carries the fault's typed record, which is what a park of
     // exhausted retries decodes its model key from.
-    let record = serde_json::json!({"fault": "lash.model_unavailable", "model_key": KIMI});
-    assert!(
-        failure.contains(&record.to_string()),
+    let fault = lash_core::RuntimeEffectControllerError::in_text(&failure);
+    assert_eq!(
+        fault
+            .as_ref()
+            .and_then(|fault| fault.model_key())
+            .map(|key| key.as_str()),
+        Some(KIMI),
         "the parked attempt's failure carries the unbindable key typed: {failure}"
     );
     assert_eq!(

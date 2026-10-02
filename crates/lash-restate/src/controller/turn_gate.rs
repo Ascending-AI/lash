@@ -24,8 +24,8 @@ pub(super) fn is_turn_cancel_gate(key: &AwaitEventKey) -> bool {
     )
 }
 
-fn engine_error(err: impl std::fmt::Display) -> RuntimeError {
-    RuntimeError::new(RuntimeErrorCode::EngineEffectController, err.to_string())
+fn engine_error(err: restate_sdk::errors::TerminalError) -> RuntimeError {
+    crate::wire::lash_terminal(&err, RuntimeErrorCode::EngineEffectController).into_runtime_error()
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>

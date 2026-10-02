@@ -224,7 +224,7 @@ fn assert_state_error(error: &PluginError, mode: usize) {
         other => panic!("wrong state fields: {other:?}"),
     }
     assert!(!error.is_retryable());
-    assert_eq!(error.is_terminal(), mode != 4);
+    assert!(error.is_terminal());
 }
 
 #[test]
@@ -310,7 +310,7 @@ async fn state_law(postgres: bool) -> Result<()> {
             };
             assert_state_error(plugin, mode);
             assert!(!error.is_retryable());
-            assert_eq!(error.is_terminal(), mode != 4);
+            assert!(error.is_terminal());
         }
     }
     Ok(())

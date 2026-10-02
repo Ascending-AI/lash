@@ -945,7 +945,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn park_commit_keeps_a_transient_backend_failure_as_protocol() {
+    async fn park_commit_keeps_a_transient_backend_failure_typed() {
         use crate::runtime::tests::helpers::{
             EmptyTools, plugin_session_with_tools, standard_test_policy, test_host_config,
         };
@@ -1007,15 +1007,20 @@ mod tests {
             Err(refused) => *refused.error,
         };
 
-        assert!(matches!(
-            &error,
-            SessionError::Protocol(message)
-                if message
-                    == "failed to persist runtime state: store backend error: temporary park backend outage"
-        ));
+        // The store's own variant survives, so the host reads the fault's
+        // class from it instead of from a message.
         assert_eq!(
             error.to_string(),
-            "protocol error: failed to persist runtime state: store backend error: temporary park backend outage"
+            "failed to persist runtime state: store backend error: temporary park backend outage"
         );
+        let SessionError::Store { source, .. } = &error else {
+            panic!("a commit fault keeps its typed store source: {error:?}");
+        };
+        assert!(
+            matches!(source, crate::StoreError::Backend(_)),
+            "{source:?}"
+        );
+        assert!(source.is_transient());
+        assert!(source.runtime_code().is_retryable());
     }
 }

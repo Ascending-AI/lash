@@ -198,19 +198,15 @@ pub(crate) fn declared_start_fault(
         {
             Some(error.clone())
         }
-        crate::PluginError::SessionExecutionLeaseLost { .. } => {
-            Some(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
-                error.to_string(),
-            ))
-        }
-        crate::PluginError::Session(_) | crate::PluginError::ProcessExecutionSuperseded { .. } => {
-            Some(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::PluginSessionManager,
-                error.to_string(),
-            ))
-        }
-        _ => None,
+        crate::PluginError::RuntimeEffectController(_) => None,
+        // A store that did not answer, a lost lease, a superseded execution:
+        // the attempt's, under the code the controller carries it by.
+        error => match error.class() {
+            crate::PluginErrorClass::Retryable | crate::PluginErrorClass::Redrivable => {
+                Some(crate::RuntimeEffectControllerError::from(error.clone()))
+            }
+            crate::PluginErrorClass::Terminal => None,
+        },
     }
 }
 

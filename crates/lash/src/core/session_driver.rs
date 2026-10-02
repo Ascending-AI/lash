@@ -275,17 +275,11 @@ impl OpenFailure {
                 lash_core::RuntimeErrorCode::StoreCommitContended,
                 "the session's runtime is contended; the drive is retried",
             )),
-            error if error.is_transient() => Self::Retry(
-                lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
-            ),
-            error if lash_core::RuntimeErrorCode::of_store_error(&error).is_terminal() => {
-                Self::StoreRefused(
-                    lash_core::RuntimeEffectControllerError::from(error).into_runtime_error(),
-                )
+            error if error.is_transient() => Self::Retry(error.runtime_error()),
+            error if error.runtime_code().is_terminal() => {
+                Self::StoreRefused(error.runtime_error())
             }
-            error => Self::Terminal(lash_core::PluginError::Session(
-                crate::EmbedError::Store(error).to_string(),
-            )),
+            error => Self::Terminal(lash_core::PluginError::from(error)),
         }
     }
 

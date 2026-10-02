@@ -27,8 +27,8 @@ fn head_cas_supersession_requires_reload_before_retry() {
     let unknown = runtime_error_from_store_commit(StoreError::Backend(
         "unclassified storage failure".to_string(),
     ));
-    assert_eq!(unknown.code, RuntimeErrorCode::StoreCommitFailed);
-    assert!(!unknown.is_retryable());
+    assert_eq!(unknown.code, RuntimeErrorCode::RuntimeStore);
+    assert!(unknown.is_retryable());
     assert!(!unknown.is_terminal());
 }
 

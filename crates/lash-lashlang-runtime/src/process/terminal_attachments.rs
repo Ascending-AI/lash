@@ -26,7 +26,7 @@ pub(super) async fn adopt_held_attachments(
         .claims_held_by_process_record(claims)
         .await
         .map_err(|error| {
-            lash_core::ProcessInfraError::new(lash_core::PluginError::Session(format!(
+            lash_core::ProcessInfraError::new(lash_core::PluginError::attempt_fault(format!(
                 "reading which attachments process `{}` holds for its terminal failed: {error}",
                 host.process_id
             )))

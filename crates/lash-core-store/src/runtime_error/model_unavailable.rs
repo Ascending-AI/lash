@@ -1,6 +1,6 @@
 //! The typed fault of a recorded model a worker cannot bind (FIG-4404): its
-//! constructor, its accessors, and the record that carries it through an
-//! engine that keeps only a failed attempt's text.
+//! constructor and its accessors, and the one record that carries a typed
+//! error through an engine that keeps only text.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,7 @@ impl RuntimeErrorCause {
             Self::ModelUnavailable { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::IngressReservedSourceKey { .. }
+            | Self::Compat { .. }
             | Self::StoreRefusal { .. }
             | Self::StoredDataCorrupt { .. }
             | Self::ModuleArtifactRefused { .. }
@@ -62,7 +63,7 @@ impl RuntimeError {
     /// that ends its attempt as a runtime error.
     #[must_use]
     pub fn attempt_failure_text(&self) -> String {
-        AttemptFault::failure_text(self, self.model_key())
+        RuntimeEffectControllerError::from(self.clone()).attempt_failure_text()
     }
 }
 
@@ -96,13 +97,40 @@ impl RuntimeEffectControllerError {
     }
 
     /// The text an engine fails a retried attempt with: this error's display
-    /// and, for a fault that carries typed facts, their record
-    /// ([`AttemptFault`]). An engine keeps only the text of a failed attempt,
-    /// so the record is how the typed fault reaches the park the engine's
-    /// exhausted retries become ([`AttemptFault::in_failure`]).
+    /// and, for a fault that carries a typed cause, its record
+    /// ([`Self::to_record`]). An engine keeps only the text of a failed
+    /// attempt, so the record is how the typed fault reaches the park the
+    /// engine's exhausted retries become ([`Self::in_text`]).
     #[must_use]
     pub fn attempt_failure_text(&self) -> String {
-        AttemptFault::failure_text(self, self.model_key())
+        if self.cause.is_some() {
+            format!("{self} {}", self.to_record())
+        } else {
+            self.to_string()
+        }
+    }
+
+    /// This error as the one record a typed Lash error travels as through an
+    /// engine that keeps only text: a handler's terminal error message, or a
+    /// failed attempt's failure. [`Self::in_text`] reads it back.
+    #[must_use]
+    pub fn to_record(&self) -> String {
+        serde_json::to_string(&ErrorRecord {
+            error: std::borrow::Cow::Borrowed(self),
+        })
+        .unwrap_or_else(|_| self.to_string())
+    }
+
+    /// The error `text` carries as a record ([`Self::to_record`]), found
+    /// where it starts: an engine prefixes the text with its own words.
+    #[must_use]
+    pub fn in_text(text: &str) -> Option<Self> {
+        let record = text.get(text.find(ERROR_RECORD_PREFIX)?..)?;
+        serde_json::Deserializer::from_str(record)
+            .into_iter::<ErrorRecord<'static>>()
+            .next()?
+            .ok()
+            .map(|record| record.error.into_owned())
     }
 
     /// The recorded model key this error could not bind, when it is the
@@ -113,42 +141,13 @@ impl RuntimeEffectControllerError {
     }
 }
 
-/// The typed facts of an attempt's fault, as the JSON record an engine's
-/// failure text carries beside the message
-/// ([`RuntimeEffectControllerError::attempt_failure_text`]). A park written
-/// from the engine's exhausted retries decodes it, so the fault stays typed
-/// across the engine instead of being read back out of prose.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "fault")]
-pub(crate) enum AttemptFault {
-    /// A recorded model the worker could not bind (FIG-4404).
-    #[serde(rename = "lash.model_unavailable")]
-    ModelUnavailable { model_key: crate::ModelKey },
-}
+/// How a record starts: the tag no other text an engine keeps begins with.
+const ERROR_RECORD_PREFIX: &str = r#"{"lash.error":"#;
 
-impl AttemptFault {
-    /// `error`'s display and, when it could not bind `model_key`, the
-    /// record of that key.
-    fn failure_text(error: &dyn std::fmt::Display, model_key: Option<&crate::ModelKey>) -> String {
-        let record = model_key.and_then(|model_key| {
-            serde_json::to_string(&Self::ModelUnavailable {
-                model_key: model_key.clone(),
-            })
-            .ok()
-        });
-        match record {
-            Some(record) => format!("{error} {record}"),
-            None => error.to_string(),
-        }
-    }
-
-    /// The record `failure` carries, found where it starts: an engine
-    /// prefixes the text with its own words.
-    pub(crate) fn in_failure(failure: &str) -> Option<Self> {
-        let record = failure.get(failure.find(r#"{"fault":"lash."#)?..)?;
-        serde_json::Deserializer::from_str(record)
-            .into_iter::<Self>()
-            .next()?
-            .ok()
-    }
+/// The one tagged record of a typed Lash error in text
+/// ([`RuntimeEffectControllerError::to_record`]).
+#[derive(Serialize, Deserialize)]
+struct ErrorRecord<'a> {
+    #[serde(rename = "lash.error")]
+    error: std::borrow::Cow<'a, RuntimeEffectControllerError>,
 }

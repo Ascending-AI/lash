@@ -615,8 +615,7 @@ fn ingress_error_classification_distinguishes_availability_from_definitive_answe
         lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported,
         "stored format is unsupported",
     );
-    let body =
-        serde_json::json!({"message": serde_json::to_string(&refusal).expect("typed refusal")});
+    let body = serde_json::json!({"message": refusal.to_record()});
     assert_eq!(
         status_error(500, &body.to_string()).classification(),
         Terminal

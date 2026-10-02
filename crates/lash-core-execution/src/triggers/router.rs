@@ -1157,20 +1157,18 @@ fn recorded_store_fault(error: PluginError) -> crate::RuntimeEffectControllerErr
 /// A store fault inside an emission's recorded ingest or bind (FIG-4519,
 /// FIG-4513).
 ///
-/// A store that did not answer reports an opaque session error, which names
-/// no cause. It is the attempt's, under the live code a plugin hook's opaque
-/// failure settles as. Recorded, every replay would serve the outage as the
-/// step's refusal: nothing would ever write the occurrence, and a delivery
-/// whose process started would answer as failed for good. A typed refusal
-/// is still the step's recorded outcome.
+/// A store that did not answer is the attempt's fault
+/// ([`PluginError::class`]), under the code the effect controller carries it
+/// by. Recorded, every replay would serve the outage as the step's refusal:
+/// nothing would ever write the occurrence, and a delivery whose process
+/// started would answer as failed for good. A terminal refusal is still the
+/// step's recorded outcome.
 fn attempt_store_fault(error: PluginError) -> crate::RuntimeEffectControllerError {
-    match error {
-        error @ PluginError::Session(_) => crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::PluginSessionManager,
-            error.to_string(),
-        )
-        .retryable_uncommitted_derivation(),
-        error => recorded_store_fault(error),
+    match error.class() {
+        crate::PluginErrorClass::Retryable | crate::PluginErrorClass::Redrivable => {
+            crate::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
+        }
+        crate::PluginErrorClass::Terminal => recorded_store_fault(error),
     }
 }
 

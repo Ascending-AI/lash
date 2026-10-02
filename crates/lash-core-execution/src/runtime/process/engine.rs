@@ -116,7 +116,16 @@ pub struct ProcessInfraError {
 impl ProcessInfraError {
     /// Constructs a `ProcessInfraError` for protocol and process-engine implementors while running
     /// a durable process.
+    ///
+    /// An opaque session error names no cause. Met while running a process it
+    /// is the infrastructure's, so it is carried as the attempt's fault
+    /// ([`PluginError::attempt_fault`](crate::PluginError::attempt_fault)):
+    /// never the process's terminal. A typed error keeps its own class.
     pub fn new(source: crate::PluginError) -> Self {
+        let source = match source {
+            crate::PluginError::Session(message) => crate::PluginError::attempt_fault(message),
+            typed => typed,
+        };
         Self { source }
     }
 

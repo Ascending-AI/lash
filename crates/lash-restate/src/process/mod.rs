@@ -131,6 +131,27 @@ pub(crate) fn handler_error_from_plugin(error: PluginError) -> HandlerError {
     }
 }
 
+/// The one decision a recorded step makes of a plugin operation's result
+/// (FIG-4649). A step's journaled answer is final: every replay answers it.
+/// A value is journaled, and so is a terminal failure, which is the
+/// operation's answer on every attempt. A fault of the attempt (the store did
+/// not answer, a lease was lost, an opaque infrastructure failure) is never
+/// an answer: the attempt ends with nothing recorded, and the engine runs the
+/// step again.
+pub(crate) fn journal_or_retry<T>(
+    result: Result<T, PluginError>,
+) -> Result<Result<T, PluginError>, String> {
+    match result {
+        Ok(value) => Ok(Ok(value)),
+        Err(error) => match error.class() {
+            lash_core::PluginErrorClass::Terminal => Ok(Err(error)),
+            lash_core::PluginErrorClass::Retryable | lash_core::PluginErrorClass::Redrivable => {
+                Err(error.attempt_failure_text())
+            }
+        },
+    }
+}
+
 fn is_replay_mismatch(error: &PluginError) -> bool {
     match error {
         PluginError::Runtime(error) => error.code.is_replay_mismatch(),
@@ -206,7 +227,7 @@ mod runner_failure_tests {
                 RuntimeErrorCode::StoreCommitFailed,
                 "store I/O",
             )),
-            PluginError::Session("unavailable infrastructure".into()),
+            PluginError::attempt_fault("unavailable infrastructure"),
         ] {
             assert!(!is_terminal_runner_error(&plugin, true));
             assert!(!is_terminal_runner_error(&plugin, false));
@@ -462,10 +483,9 @@ impl RestateCoreProcessRunner {
         match &self.worker {
             ProcessWorkerSource::Ready(worker) => Ok(worker.clone()),
             ProcessWorkerSource::Slot(slot) => slot.installed().ok_or_else(|| {
-                PluginError::Invoke(
+                PluginError::attempt_fault(
                     "no process worker is installed in this deployment's \
-                     RestateProcessWorkerSlot yet"
-                        .to_owned(),
+                     RestateProcessWorkerSlot yet",
                 )
             }),
         }

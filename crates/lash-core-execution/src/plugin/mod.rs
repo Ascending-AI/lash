@@ -12,6 +12,8 @@ pub use lash_sansio::{CheckpointKind, PluginMessage, PluginRuntimeEvent, ToolCat
 mod actions;
 pub mod config;
 mod error;
+#[cfg(test)]
+mod error_class_tests;
 pub(crate) mod history;
 mod hooks;
 pub(crate) mod protocol;
@@ -48,8 +50,9 @@ pub use config::{
     NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use error::{
-    PluginError, ToolIntentCommandFailure, ToolIntentRuntimeFailure, durable_identity_conflict,
-    is_durable_identity_conflict, is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
+    PluginError, PluginErrorClass, ToolIntentCommandFailure, ToolIntentRuntimeFailure,
+    durable_identity_conflict, is_durable_identity_conflict, is_trigger_occurrence_reclaimed,
+    trigger_occurrence_reclaimed,
 };
 pub use history::{
     CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,

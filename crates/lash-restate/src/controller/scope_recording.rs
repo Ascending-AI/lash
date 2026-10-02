@@ -94,10 +94,12 @@ where
     }
 
     fn record_error(operation: &str, error: TerminalError) -> RuntimeEffectControllerError {
-        RuntimeEffectControllerError::from(RuntimeError::new(
-            lash_core::RuntimeErrorCode::EngineEffectController,
-            format!("LashDurableWaitIndex/{operation} failed: {error}"),
-        ))
+        crate::wire::typed_terminal(error.message()).unwrap_or_else(|| {
+            RuntimeEffectControllerError::from(RuntimeError::new(
+                lash_core::RuntimeErrorCode::EngineEffectController,
+                format!("LashDurableWaitIndex/{operation} failed: {error}"),
+            ))
+        })
     }
 }
 

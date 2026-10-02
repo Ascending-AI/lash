@@ -23,6 +23,10 @@ pub mod commit_budget;
 mod commit_identity;
 mod enumeration;
 mod error;
+#[cfg(test)]
+mod error_class_tests;
+#[cfg(any(test, feature = "testing"))]
+mod error_samples;
 pub mod fencing;
 #[cfg(test)]
 mod fencing_tests;
@@ -114,7 +118,7 @@ pub use drive_fence::{
     InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, close_admission,
     current_drive_fence, decide_drive_epoch_seal, require_current_drive_fence,
 };
-pub use error::{AnchorUnavailable, StoreError, StoreRefusal, WindowAnchorViolation};
+pub use error::{AnchorUnavailable, StoreError, StoreFault, StoreRefusal, WindowAnchorViolation};
 pub use fencing::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
     WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, fenced_write_applied,

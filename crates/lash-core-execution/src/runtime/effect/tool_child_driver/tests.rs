@@ -804,7 +804,7 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
             .is_retryable_derivation()
     };
 
-    // Store I/O: an opaque session-seam error is a live fault.
+    // Store I/O: a store that did not answer is a live fault.
     let timed_out = settle(
         &request,
         Arc::new(FailingEnvStore(|| {

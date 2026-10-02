@@ -26,7 +26,7 @@ mod tests {
     impl ProcessWorkSubstrate for FailingStarts {
         async fn deliver_process_start(&self, _record: &ProcessRecord) -> Result<(), PluginError> {
             self.deliveries.fetch_add(1, Ordering::SeqCst);
-            Err(PluginError::Invoke("the engine's ingress is down".into()))
+            Err(PluginError::attempt_fault("the engine's ingress is down"))
         }
 
         async fn await_process_terminal(
@@ -201,7 +201,7 @@ mod tests {
                 .last_error
                 .as_ref()
                 .map(|error| error.message.as_str()),
-            Some("plugin invoke error: the engine's ingress is down"),
+            Some("plugin_session_manager: the engine's ingress is down"),
             "the row carries the last delivery's error for the operator"
         );
 

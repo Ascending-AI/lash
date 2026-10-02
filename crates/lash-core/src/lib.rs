@@ -637,14 +637,15 @@ pub use plugin::{
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
     AppendSessionNodesRequest, FormatNamespace, FormatRefusal, FormatVersion, FrameNodeId,
-    FrameNodeIdError, KeyRejection, PluginConfigNamespace, PluginError, PluginExtensions,
-    PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit, PluginStateError,
-    PluginStateStore, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
-    ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService, SessionLineage,
-    SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionStateService, SessionToolAccess, SessionToolAccessError,
-    SubagentSessionContext, UnstatedSessionConfig, durable_identity_conflict,
-    is_durable_identity_conflict, is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
+    FrameNodeIdError, KeyRejection, PluginConfigNamespace, PluginError, PluginErrorClass,
+    PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
+    PluginStateError, PluginStateStore, ProcessEngineContributionContext,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
+    SessionLineage, SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation,
+    SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
+    SessionToolAccessError, SubagentSessionContext, UnstatedSessionConfig,
+    durable_identity_conflict, is_durable_identity_conflict, is_trigger_occurrence_reclaimed,
+    trigger_occurrence_reclaimed,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 

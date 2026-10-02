@@ -225,9 +225,7 @@ fn redrive_refusal(error: &lash::ParkVerbRefused) -> Result<HostRefusalCode, Str
         lash::ParkVerbRefused::SessionClosing => {
             HostRefusalCode::Redrive(RedriveRefusal::SessionClosing)
         }
-        lash::ParkVerbRefused::Store(error) => {
-            HostRefusalCode::Runtime(lash_core::RuntimeErrorCode::of_store_error(error))
-        }
+        lash::ParkVerbRefused::Store(error) => HostRefusalCode::Runtime(error.runtime_code()),
         lash::ParkVerbRefused::SubstrateRefused { code, .. } => {
             HostRefusalCode::Runtime(code.clone())
         }

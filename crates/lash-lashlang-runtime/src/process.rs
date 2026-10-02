@@ -408,7 +408,9 @@ pub async fn run_lashlang_process(
         .begin_execution_from(&ledger.scope(context.process_id()), ledger.totals)
         .await
         .map_err(|error| {
-            lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+            lash_core::ProcessInfraError::new(lash_core::PluginError::attempt_fault(
+                error.to_string(),
+            ))
         })?;
     engine.workers = recovery.service().clone();
     let result = Box::pin(run_lashlang_process_scoped(
@@ -416,7 +418,7 @@ pub async fn run_lashlang_process(
     ))
     .await;
     recovery.settle().await.map_err(|error| {
-        lash_core::ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
+        lash_core::ProcessInfraError::new(lash_core::PluginError::attempt_fault(error.to_string()))
     })?;
     result
 }
@@ -768,7 +770,7 @@ async fn execute_lashlang(
     segment: (Option<LashlangSegmentState>, String),
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
     let infra = |message: String| {
-        lash_core::ProcessInfraError::new(lash_core::PluginError::Session(message))
+        lash_core::ProcessInfraError::new(lash_core::PluginError::attempt_fault(message))
     };
     let (segment_state, program_hash) = segment;
     let owner = segment_continuation_owner(&host.process_id);

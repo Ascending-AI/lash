@@ -1315,7 +1315,9 @@ async fn a_session_turn_key_this_worker_does_not_serve_retries_typed() {
     );
     let ended = format!("{:?}", handler_error_from_plugin(error));
     assert!(
-        ended.contains("Retryable") && ended.contains("lash.model_unavailable"),
+        ended.contains("Retryable")
+            && ended.contains("lash.error")
+            && ended.contains("model_unavailable"),
         "the handler ends the attempt retryably, with the fault's record: {ended}"
     );
 

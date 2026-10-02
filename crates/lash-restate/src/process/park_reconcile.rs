@@ -147,7 +147,7 @@ pub(crate) async fn reconcile_process_group_work(
         admin
             .kill_invocation(&invocation.invocation_id())
             .await
-            .map_err(|error| PluginError::Session(error.to_string()))?;
+            .map_err(|error| engine_fault(error.to_string()))?;
         return Ok(ProcessParkReconcileReport {
             released: vec![process.clone()],
             ..Default::default()
@@ -201,7 +201,7 @@ async fn reconcile_process_work(
         && !admin
             .invocation_status(&invocation.invocation_id())
             .await
-            .map_err(|error| PluginError::Session(error.to_string()))?
+            .map_err(|error| engine_fault(error.to_string()))?
             .is_some_and(|status| {
                 status.status == crate::ingress::RestateInvocationLifecycle::Paused
             })
@@ -498,7 +498,7 @@ async fn release_terminal_segment(
         .kill_invocation(&invocation.invocation_id())
         .await
         .map_err(|error| {
-            PluginError::Session(format!(
+            engine_fault(format!(
                 "kill terminal process `{}`'s paused invocation `{}`: {error}",
                 record.id, invocation.id
             ))
@@ -561,7 +561,7 @@ pub(crate) async fn resume_process_invocation(
     if !admin
         .invocation_status(&invocation)
         .await
-        .map_err(|error| PluginError::Session(error.to_string()))?
+        .map_err(|error| engine_fault(error.to_string()))?
         .is_some_and(|status| status.status == crate::ingress::RestateInvocationLifecycle::Paused)
     {
         return Ok(None);
@@ -570,7 +570,7 @@ pub(crate) async fn resume_process_invocation(
         .resume_invocation(&invocation)
         .await
         .map_err(|error| {
-            PluginError::Session(format!(
+            engine_fault(format!(
                 "resume process `{}`'s invocation `{invocation}`: {error}",
                 record.id
             ))
@@ -588,7 +588,7 @@ async fn paused_invocation_of(
         .paused_invocations(&namespace.stable(LashService::ProcessWorkflow).name())
         .await
         .map_err(|error| {
-            PluginError::Session(format!(
+            engine_fault(format!(
                 "read paused process invocations from Restate: {error}"
             ))
         })?;
@@ -710,6 +710,15 @@ pub(crate) fn exhausted_reason(invocation: &RestatePausedInvocation) -> ParkReas
             .clone()
             .unwrap_or_else(|| format!("the engine stopped retrying after {attempts} attempts")),
     )
+}
+
+/// The engine's admin API did not answer: the pass's fault, which its next
+/// run repairs, never a refusal of the process it was reconciling.
+fn engine_fault(message: String) -> PluginError {
+    PluginError::Runtime(lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::EngineEffectController,
+        message,
+    ))
 }
 
 #[cfg(test)]

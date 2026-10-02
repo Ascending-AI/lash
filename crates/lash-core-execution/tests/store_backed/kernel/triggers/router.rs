@@ -1161,8 +1161,10 @@ mod tests {
             process_id: &crate::ProcessId,
         ) -> Result<(), crate::PluginError> {
             if !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                return Err(crate::PluginError::Session(
-                    "the delivery's bind was lost".to_string(),
+                return Err(crate::PluginError::from(
+                    crate::store::StoreFault::Backend {
+                        message: "the delivery's bind was lost".to_string(),
+                    },
                 ));
             }
             self.inner

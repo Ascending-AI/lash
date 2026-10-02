@@ -576,8 +576,9 @@ pub(crate) async fn upgrade_object(
 }
 
 /// The typed refusal of object state carrying a stamp this build does not
-/// read. It travels as the terminal error's serialized message so callers
-/// past a service boundary can recover it with [`stored_format_error_in`].
+/// read. It travels as the terminal error's message, as the error's record,
+/// so callers past a service boundary recover it with
+/// [`typed_terminal`](crate::wire::typed_terminal).
 pub(crate) fn stored_format_error(
     what: &str,
     key: &str,
@@ -603,24 +604,14 @@ pub(crate) fn stored_format_terminal(
     stamped: Option<u64>,
     formats: &StoredValueFormats,
 ) -> TerminalError {
-    let error = stored_format_error(formats.what, key, stamped, formats);
-    TerminalError::new(serde_json::to_string(&error).unwrap_or_else(|_| error.message.clone()))
+    TerminalError::new(stored_format_error(formats.what, key, stamped, formats).to_record())
 }
 
 /// The typed stored-format refusal a handler's terminal error carries, if
 /// that is what `message` is: a stored value's stamp this build does not
 /// read, or an object whose `_compat` record refuses it (ADR 0115).
 pub(crate) fn stored_format_error_in(message: &str) -> Option<RuntimeEffectControllerError> {
-    if let Some(crate::wire::RestateCompatError::Incompatible { refusal }) =
-        crate::wire::restate_compat_error_in(message)
-    {
-        return Some(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::EngineObjectStateFormatUnsupported,
-            refusal.to_string(),
-        ));
-    }
-    serde_json::from_str::<RuntimeEffectControllerError>(message)
-        .ok()
+    crate::wire::typed_terminal(message)
         .filter(|error| error.code == RuntimeErrorCode::EngineObjectStateFormatUnsupported)
 }
 

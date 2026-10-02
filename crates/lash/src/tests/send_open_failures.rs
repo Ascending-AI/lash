@@ -317,9 +317,10 @@ async fn a_send_whose_open_meets_an_untyped_store_refusal_is_answered_naming_it(
             .await?;
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::PluginSessionManager,
+        lash_core::RuntimeErrorCode::StoreRefused,
         "{error:?}"
     );
+    assert!(error.is_terminal(), "{error:?}");
     assert!(
         error.message.contains("lookup_session"),
         "the refusal names the store's own: {error:?}"

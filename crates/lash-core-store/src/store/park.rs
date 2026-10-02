@@ -451,12 +451,8 @@ impl ParkReason {
         last_failure_code: Option<String>,
         message: String,
     ) -> Self {
-        let model_key = crate::runtime_error::model_unavailable::AttemptFault::in_failure(&message)
-            .map(
-                |crate::runtime_error::model_unavailable::AttemptFault::ModelUnavailable {
-                     model_key,
-                 }| model_key,
-            );
+        let model_key = crate::runtime_error::RuntimeEffectControllerError::in_text(&message)
+            .and_then(|fault| fault.model_key().cloned());
         Self::EngineRetryExhausted {
             attempts,
             last_failure_code,

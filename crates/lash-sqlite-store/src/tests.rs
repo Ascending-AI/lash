@@ -1053,3 +1053,44 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
         ));
     }
 }
+
+/// FIG-4649: a registry or trigger SQL fault reaches the plugin boundary
+/// through the store's mapper, so it keeps its class: a busy or locked
+/// database and a failed substrate are retried, never a session error a
+/// recorded step would journal as its answer.
+#[test]
+fn a_registry_sql_fault_is_a_retryable_store_fault_at_the_plugin_boundary() {
+    use lash_core_execution::PluginError;
+    use lash_core_execution::store::StoreFault;
+
+    for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+        let fault = process_sqlite_error(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            Some("database is locked".to_string()),
+        ));
+        assert!(
+            matches!(
+                fault,
+                PluginError::StoreUnavailable {
+                    fault: StoreFault::Contended
+                }
+            ),
+            "{code}: {fault:?}"
+        );
+        assert!(fault.is_retryable() && !fault.is_terminal(), "{code}");
+    }
+    let fault = process_sqlite_error(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR),
+        Some("disk I/O error".to_string()),
+    ));
+    assert!(
+        matches!(
+            &fault,
+            PluginError::StoreUnavailable {
+                fault: StoreFault::StorageFailure { backend, .. }
+            } if backend == "sqlite"
+        ),
+        "{fault:?}"
+    );
+    assert!(fault.is_retryable() && !fault.is_terminal(), "{fault:?}");
+}

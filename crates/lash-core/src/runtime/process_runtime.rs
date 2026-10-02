@@ -177,12 +177,12 @@ impl crate::runtime::effect::ProcessRunner for ProcessRuntimeContext {
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         if admitted.process_id != self.process_id {
-            return Err(crate::ProcessInfraError::new(crate::PluginError::Session(
-                format!(
+            return Err(crate::ProcessInfraError::new(
+                crate::PluginError::attempt_fault(format!(
                     "the runtime of process `{}` cannot run process `{}`",
                     self.process_id, admitted.process_id
-                ),
-            )));
+                )),
+            ));
         }
         self.services
             .run_admitted_process(

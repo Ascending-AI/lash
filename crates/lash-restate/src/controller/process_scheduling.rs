@@ -243,12 +243,14 @@ where
                     )
                     .await
                     .map_err(|error| {
-                        RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::EngineProcessCancel,
+                        crate::wire::typed_terminal(error.message()).unwrap_or_else(|| {
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::EngineProcessCancel,
                             format!(
                                 "delivering process `{process_id}`'s start-failed cancel to its run failed: {error}"
                             ),
-                        )
+                            )
+                        })
                     })?;
             }
             // The claim settles with the verdict the row ended at: the
@@ -315,11 +317,10 @@ where
                     .await
                     .map_or_else(
                         |error| {
-                            if error.is_terminal() {
-                                Ok(Err(RuntimeEffectControllerError::from(error)))
-                            } else {
-                                Err(error.to_string())
-                            }
+                            crate::process::journal_or_retry::<lash_core::ProcessRecord>(Err(error))
+                                .map(|recorded| {
+                                    recorded.map_err(RuntimeEffectControllerError::from)
+                                })
                         },
                         |record| Ok(Ok(record)),
                     )

@@ -1830,7 +1830,7 @@ impl TriggerStore for BindCrashesOnce {
         process_id: &ProcessId,
     ) -> Result<(), crate::PluginError> {
         if !self.crashed.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            return Err(crate::PluginError::Session(
+            return Err(crate::PluginError::attempt_fault(
                 "the deployment crashed before the delivery's bind".to_string(),
             ));
         }

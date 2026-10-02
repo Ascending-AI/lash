@@ -547,6 +547,9 @@ pub enum RuntimeErrorCode {
     /// Durable state is corrupt or an authoritative monotonic counter has
     /// exhausted its representable domain. Retrying unchanged cannot heal it.
     RuntimeStoreCorrupt,
+    /// The store's deterministic answer to a request, where the refusal has
+    /// no code of its own: the identical request is refused the same way.
+    StoreRefused,
     SessionCommandRun,
     SessionCommandIdempotencyKey,
     SessionCommandPostDriveRefresh,
@@ -586,136 +589,16 @@ pub enum RuntimeErrorCode {
     #[non_exhaustive]
     ForeignCode(String),
 }
-/// Map a turn-input admission failure to the host's error vocabulary.
-///
-/// A source-key conflict is the host's own contract violation (the same key
-/// with a different submission), so it surfaces typed as
-/// [`RuntimeErrorCode::DurableIdentityConflict`]; a closing or deleted
-/// session's refusal surfaces as [`RuntimeErrorCode::SessionDeleted`] with its
-/// cause (ADR 0109 §4); a superseded drive fence surfaces as
-/// [`RuntimeErrorCode::StoreCommitSuperseded`]; every other admission failure
-/// is a store commit failure.
+/// A turn-input admission failure in the host's error vocabulary: the store
+/// error's one classification ([`StoreError::runtime_error`](crate::StoreError::runtime_error)).
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
-    match err {
-        err @ crate::store::StoreError::StoredDataCorrupt { .. } => {
-            RuntimeEffectControllerError::from(err).into_runtime_error()
-        }
-        err if crate::store::StoreRefusal::of_store_error(&err).is_some() => {
-            RuntimeEffectControllerError::from(err).into_runtime_error()
-        }
-        err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
-        | crate::store::StoreError::QueuedWorkSourceKeyConflict { .. }
-        | crate::store::StoreError::PendingTurnInputIdConflict { .. }
-        | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
-        | crate::store::StoreError::RunSpecHashCollision { .. }) => {
-            RuntimeError::new(RuntimeErrorCode::DurableIdentityConflict, err.to_string())
-        }
-        err @ crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. } => {
-            RuntimeError::new(RuntimeErrorCode::RunSpecMismatch, err.to_string())
-        }
-        err @ crate::store::StoreError::IngressTurnAddressUnknown { .. } => {
-            RuntimeError::new(RuntimeErrorCode::TurnAddressUnknown, err.to_string())
-        }
-        ref err @ crate::store::StoreError::IngressReservedSourceKey {
-            ref session_id,
-            kind,
-            ref source_key,
-        } => RuntimeError::new(RuntimeErrorCode::IngressReservedSourceKey, err.to_string())
-            .with_cause(RuntimeErrorCause::IngressReservedSourceKey {
-                refusal: Box::new(IngressReservedSourceKeyRefusal {
-                    session_id: session_id.clone(),
-                    ingress_kind: kind.to_owned(),
-                    source_key: source_key.clone(),
-                }),
-            }),
-        err @ (crate::store::StoreError::SessionClosing { .. }
-        | crate::store::StoreError::SessionDeleted { .. }
-        | crate::store::StoreError::StaleDriveFence { .. }) => runtime_error_from_store_commit(err),
-        err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
-    }
+    err.runtime_error()
 }
 
+/// A commit failure in the host's error vocabulary: the store error's one
+/// classification ([`StoreError::runtime_error`](crate::StoreError::runtime_error)).
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
-    match err {
-        err @ crate::store::StoreError::StoredDataCorrupt { .. } => {
-            RuntimeEffectControllerError::from(err).into_runtime_error()
-        }
-        err if crate::store::StoreRefusal::of_store_error(&err).is_some() => {
-            RuntimeEffectControllerError::from(err).into_runtime_error()
-        }
-        err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
-        | crate::store::StoreError::QueuedWorkSourceKeyConflict { .. }
-        | crate::store::StoreError::PendingTurnInputIdConflict { .. }
-        | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
-        | crate::store::StoreError::RunSpecHashCollision { .. }
-        | crate::store::StoreError::PendingTurnInputRunSpecMismatch { .. }
-        | crate::store::StoreError::IngressTurnAddressUnknown { .. }
-        | crate::store::StoreError::IngressReservedSourceKey { .. }) => {
-            runtime_error_from_turn_input_admission(err)
-        }
-        crate::store::StoreError::Contended => RuntimeError::new(
-            RuntimeErrorCode::StoreCommitContended,
-            "store commit is contended; retry the identical operation unchanged",
-        ),
-        err @ crate::store::StoreError::HeadRevisionConflict { .. } => RuntimeError::new(
-            RuntimeErrorCode::StoreCommitSuperseded,
-            format!(
-                "{err}; reload the durable head and re-establish lease and claim authority before retrying"
-            ),
-        ),
-        // A stale drive fence never commits again: a later drive owns the session (ADR 0105 §9).
-        err @ (crate::store::StoreError::TurnCancelIntentChanged { .. }
-        | crate::store::StoreError::StaleDriveFence { .. }) => {
-            RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, err.to_string())
-        }
-        ref err @ crate::store::StoreError::SessionDeleted { ref session_id } => {
-            RuntimeError::new(RuntimeErrorCode::SessionDeleted, err.to_string()).with_cause(
-                RuntimeErrorCause::SessionDeleted {
-                    session_id: session_id.clone(),
-                },
-            )
-        }
-        // A closing session is past its point of no return: to a caller it is already gone.
-        ref err @ crate::store::StoreError::SessionClosing { ref session_id, .. } => {
-            RuntimeError::new(RuntimeErrorCode::SessionDeleted, err.to_string()).with_cause(
-                RuntimeErrorCause::SessionDeleted {
-                    session_id: session_id.clone(),
-                },
-            )
-        }
-        err @ crate::store::StoreError::CommitNodeBudgetExceeded { .. } => RuntimeError::new(
-            RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
-            err.to_string(),
-        ),
-        err @ crate::store::StoreError::CommitByteBudgetExceeded { .. } => RuntimeError::new(
-            RuntimeErrorCode::StoreCommitByteBudgetExceeded,
-            err.to_string(),
-        ),
-        err @ crate::store::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
-            RuntimeError::new(
-                RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch,
-                err.to_string(),
-            )
-        }
-        err @ crate::store::StoreError::RecordEncodingFailed { .. } => {
-            RuntimeError::new(RuntimeErrorCode::RecordEncodingFailed, err.to_string())
-        }
-        crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
-            RuntimeErrorCode::SessionExecutionLeaseLost,
-            format!("session execution lease for session `{session_id}` was lost before commit"),
-        ),
-        crate::store::StoreError::ExecutionStateCaptureFailed { message } => RuntimeError::new(
-            RuntimeErrorCode::ExecutionStateCaptureFailed,
-            format!("failed to snapshot dirty execution state: {message}"),
-        ),
-        crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
-        ref err @ (crate::store::StoreError::FollowOnPending { .. }
-        | crate::store::StoreError::FollowOnFrameNotCurrent { .. }
-        | crate::store::StoreError::FollowOnNotPending { .. }) => {
-            RuntimeError::new(RuntimeErrorCode::FollowOnPending, err.to_string())
-        }
-        err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
-    }
+    err.runtime_error()
 }
 impl RuntimeErrorCode {
     /// Provides the canonical str view to store, effect-host, and protocol implementors while
@@ -950,6 +833,7 @@ impl RuntimeErrorCode {
             Self::StoreSessionMismatch => "store_session_mismatch",
             Self::RuntimeStore => "runtime_store",
             Self::RuntimeStoreCorrupt => "runtime_store_corrupt",
+            Self::StoreRefused => "store_refused",
             Self::SessionCommandRun => "session_command_run",
             Self::SessionCommandIdempotencyKey => "session_command_idempotency_key",
             Self::SessionCommandPostDriveRefresh => "session_command_post_drive_refresh",
@@ -1246,6 +1130,7 @@ impl RuntimeErrorCode {
             "store_session_mismatch" => Self::StoreSessionMismatch,
             "runtime_store" => Self::RuntimeStore,
             "runtime_store_corrupt" => Self::RuntimeStoreCorrupt,
+            "store_refused" => Self::StoreRefused,
             "session_command_run" => Self::SessionCommandRun,
             "session_command_idempotency_key" => Self::SessionCommandIdempotencyKey,
             "session_command_post_drive_refresh" => Self::SessionCommandPostDriveRefresh,
@@ -1564,6 +1449,7 @@ impl RuntimeError {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::VmWorker { .. }
             | RuntimeErrorCause::ArtifactReferrerEnded { .. }
+            | RuntimeErrorCause::Compat { .. }
             | RuntimeErrorCause::EffectGroupChildUnroutable { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
             | RuntimeErrorCause::ModelUnavailable { .. }
@@ -1983,44 +1869,6 @@ impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
     }
 }
 
-impl RuntimeErrorCode {
-    /// The code a store error is carried under past the store: the one
-    /// mapping every boundary that classifies a store error reads, so a store
-    /// error is terminal, or not, the same way on each of them.
-    pub fn of_store_error(err: &crate::StoreError) -> Self {
-        if let Some(refusal) = crate::store::StoreRefusal::of_store_error(err) {
-            return refusal.code();
-        }
-        match err {
-            crate::StoreError::StoredDataCorrupt { .. }
-            | crate::StoreError::MonotonicCounterOverflow { .. } => {
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt
-            }
-            crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
-            crate::StoreError::HeadRevisionConflict { .. } => {
-                crate::RuntimeErrorCode::StoreCommitSuperseded
-            }
-            crate::StoreError::CommitNodeBudgetExceeded { .. } => {
-                crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-            }
-            crate::StoreError::CommitByteBudgetExceeded { .. } => {
-                crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
-            }
-            crate::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
-                crate::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
-            }
-            crate::StoreError::RecordEncodingFailed { .. } => {
-                crate::RuntimeErrorCode::RecordEncodingFailed
-            }
-            crate::StoreError::ArtifactReferrerEnded { .. } => {
-                crate::RuntimeErrorCode::ArtifactReferrerEnded
-            }
-            crate::StoreError::ArtifactMissing { .. } => crate::RuntimeErrorCode::ArtifactMissing,
-            _ => crate::RuntimeErrorCode::RuntimeStore,
-        }
-    }
-}
-
 impl From<crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: crate::StoreError) -> Self {
         Self::from(&err)
@@ -2029,43 +1877,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
 
 impl From<&crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: &crate::StoreError) -> Self {
-        if let crate::StoreError::StoredDataCorrupt {
-            record_kind,
-            message,
-        } = err
-        {
-            return Self::stored_data_corrupt(*record_kind, message.clone());
-        }
-        let refusal = crate::store::StoreRefusal::of_store_error(err);
-        let cause = match err {
-            crate::StoreError::SessionDeleted { session_id } => {
-                Some(crate::RuntimeErrorCause::SessionDeleted {
-                    session_id: session_id.clone(),
-                })
-            }
-            crate::StoreError::ArtifactReferrerEnded { referrer } => {
-                Some(crate::RuntimeErrorCause::ArtifactReferrerEnded {
-                    referrer: Box::new(referrer.clone()),
-                })
-            }
-            _ => None,
-        };
-        let cause = refusal
-            .as_ref()
-            .map(|refusal| RuntimeErrorCause::StoreRefusal {
-                refusal: Box::new(refusal.clone()),
-            })
-            .or(cause);
-        let code = RuntimeErrorCode::of_store_error(err);
-        Self {
-            journal_disposition: EffectErrorJournalPolicy::Terminal,
-            code,
-            message: err.to_string(),
-            summary: None,
-            cause,
-            journaled: false,
-            foreign_cause: None,
-        }
+        err.runtime_error().into()
     }
 }
 

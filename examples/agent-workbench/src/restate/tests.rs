@@ -527,7 +527,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
         ),
         (
             "ambiguous backend failure",
-            lash::plugins::PluginError::Session("temporary trigger-store outage".to_string()),
+            lash::plugins::PluginError::attempt_fault("temporary trigger-store outage"),
             false,
         ),
     ];

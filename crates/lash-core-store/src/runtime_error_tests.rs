@@ -222,6 +222,7 @@ first_party_codes! {
         Self::TurnCancelClosureOwnerReleased,
         Self::RuntimeStore,
         Self::RuntimeStoreCorrupt,
+        Self::StoreRefused,
         Self::SessionCommandRun,
         Self::SessionCommandIdempotencyKey,
         Self::SessionCommandPostDriveRefresh,
@@ -520,7 +521,7 @@ fn turn_input_source_key_conflict_is_a_typed_identity_conflict() {
             crate::store::StoreError::Backend("disk".to_string())
         )
         .code,
-        RuntimeErrorCode::StoreCommitFailed
+        RuntimeErrorCode::RuntimeStore
     );
 }
 

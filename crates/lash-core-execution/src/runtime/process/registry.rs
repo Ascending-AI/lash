@@ -820,9 +820,10 @@ async fn prepare_pruned_trigger_delivery_reconciliation(
                 .lookup_session(&session_id)
                 .await
                 .map_err(|error| {
-                    PluginError::Session(format!(
-                        "failed to read deleted-session frontier for `{session_id}`: {error}"
-                    ))
+                    PluginError::of_store_error(
+                        format!("failed to read deleted-session frontier for `{session_id}`"),
+                        error,
+                    )
                 })?
                 == crate::store::SessionLookup::Deleted
             {

@@ -12,6 +12,7 @@
 //! answers the other.
 
 use bytes::Bytes;
+use lash_core::{RuntimeEffectControllerError, RuntimeErrorCode};
 use lash_core_store::compat::CompatRefusal;
 pub use lash_sansio::json_decode::{JsonDecodeError, JsonDecodeLimits};
 use restate_sdk::errors::TerminalError;
@@ -62,6 +63,39 @@ pub(crate) fn restate_compat_error_in(message: &str) -> Option<RestateCompatErro
         .into_iter::<RestateCompatError>()
         .next()?
         .ok()
+}
+
+/// The typed Lash error a handler's terminal error message carries, on
+/// whichever service the call reached: the one decoder every boundary that
+/// meets a terminal error reads (FIG-4649). It is the error's record
+/// ([`RuntimeEffectControllerError::to_record`]) or, for the frozen wire
+/// refusal of an object whose `_compat` refuses this build, that refusal as
+/// its typed cause.
+pub(crate) fn typed_terminal(message: &str) -> Option<RuntimeEffectControllerError> {
+    // A terminal error carries a refusal. The record of an attempt's fault in
+    // its text is some other attempt's, and a terminal is never retried.
+    if let Some(error) = RuntimeEffectControllerError::in_text(message)
+        .filter(RuntimeEffectControllerError::is_terminal)
+    {
+        return Some(error);
+    }
+    match restate_compat_error_in(message)? {
+        RestateCompatError::Incompatible { refusal } => {
+            Some(RuntimeEffectControllerError::compat_refused(refusal))
+        }
+        RestateCompatError::WireUnsupported { .. } => None,
+    }
+}
+
+/// A handler's terminal error at a controller boundary: the typed error it
+/// carries ([`typed_terminal`]), so its class is the error's own on every
+/// path, or `untyped` with the terminal's text when it carries none.
+pub(crate) fn lash_terminal(
+    error: &TerminalError,
+    untyped: RuntimeErrorCode,
+) -> RuntimeEffectControllerError {
+    typed_terminal(error.message())
+        .unwrap_or_else(|| RuntimeEffectControllerError::new(untyped, error.to_string()))
 }
 
 /// The terminal refusal of a call whose range `peer` holds no version this

@@ -1426,7 +1426,7 @@ fn refusal_code(error: &lash::EmbedError) -> Result<HostRefusalCode, String> {
     let code = match error {
         lash::EmbedError::Runtime(error)
         | lash::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => error.code.clone(),
-        lash::EmbedError::Store(error) => lash_core::RuntimeErrorCode::of_store_error(error),
+        lash::EmbedError::Store(error) => error.runtime_code(),
         lash::EmbedError::UnknownSession { .. } => return Ok(HostRefusalCode::UnknownSession),
         lash::EmbedError::SessionCreationUnrecorded { .. } => {
             lash_core::RuntimeErrorCode::SessionCreationUnrecorded

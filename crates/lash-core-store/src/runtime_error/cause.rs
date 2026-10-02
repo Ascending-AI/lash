@@ -53,6 +53,13 @@ pub enum RuntimeErrorCause {
     MissingRecordedProcessConfig {
         engine_kind: String,
     },
+    /// A Lash object's compatibility record, or its absence, refuses this
+    /// build (ADR 0115 §3.2): the typed half of
+    /// [`RuntimeErrorCode::EngineObjectStateFormatUnsupported`] when the
+    /// refusal is the object's, not one stored value's.
+    Compat {
+        refusal: Box<crate::compat::CompatRefusal>,
+    },
     SessionDeleted {
         session_id: SessionId,
     },
@@ -146,6 +153,29 @@ impl std::fmt::Display for GroupChildCapability {
 }
 
 impl RuntimeEffectControllerError {
+    /// The typed refusal of a Lash object whose compatibility record refuses
+    /// this build: terminal by its cause on every path that carries it.
+    #[must_use]
+    pub fn compat_refused(refusal: crate::compat::CompatRefusal) -> Self {
+        let mut error = Self::new(
+            RuntimeErrorCode::EngineObjectStateFormatUnsupported,
+            refusal.to_string(),
+        );
+        error.cause = Some(RuntimeErrorCause::Compat {
+            refusal: Box::new(refusal),
+        });
+        error
+    }
+
+    /// The compatibility refusal this error carries, if it is one.
+    #[must_use]
+    pub fn compat_refusal(&self) -> Option<&crate::compat::CompatRefusal> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::Compat { refusal } => Some(refusal),
+            _ => None,
+        }
+    }
+
     /// The typed refusal of an effect-group child that the deployment serving
     /// its lane can never execute, naming the capability it lacks (FIG-4550).
     pub fn group_child_unroutable(

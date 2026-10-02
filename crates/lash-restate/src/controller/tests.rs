@@ -149,8 +149,8 @@ fn a_model_bind_fault_stays_typed_across_the_engine_and_plugin_boundaries() {
     for message in [
         format!("Handler failed with retryable error: {failure}"),
         "model_unavailable: model fast is unavailable".to_string(),
-        r#"failed {"fault":"lash.model_unavailable","model_key":null}"#.to_string(),
-        r#"failed {"fault":"lash.unknown","model_key":"fast"}"#.to_string(),
+        r#"failed {"lash.error":{"code":"model_unavailable","message":"unbound"}}"#.to_string(),
+        r#"failed {"lash.error":{"code":"model_unavailable"}}"#.to_string(),
     ] {
         let error = RestateEffectError::Terminal {
             effect: "other-effect".into(),
@@ -208,4 +208,141 @@ fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
         Some("host:explicit-parent")
     );
     assert_eq!(explicit.run_id.as_deref(), Some("restate-host-run"));
+}
+
+/// FIG-4649: a typed refusal a handler's terminal error carries has one
+/// class, whichever service the controller called. An object whose `_compat`
+/// record refuses this build, and a stored value whose stamp it does not
+/// read, are terminal with their typed cause on the effect-group path, the
+/// journaled-effect path, the durable-wait path and the process-command path
+/// alike.
+#[test]
+fn a_typed_terminal_refusal_has_one_class_on_every_controller_path() {
+    let refusal = lash_core_store::compat::CompatRefusal::Unstamped {
+        component: "effect-group index".to_string(),
+        writing_release: None,
+    };
+    let stamp = crate::object_state::stored_format_error(
+        "effect group",
+        "group",
+        Some(u64::from(crate::effect_group::EFFECT_GROUP_STATE_FORMAT_VERSION) + 1),
+        &crate::effect_group::EFFECT_GROUP_STATE_FORMATS,
+    );
+    type MakeTerminal = Box<dyn Fn() -> TerminalError>;
+    let terminals: [(&str, MakeTerminal); 2] = [
+        (
+            "object _compat refusal",
+            Box::new({
+                let refusal = refusal.clone();
+                move || crate::wire::incompatible(refusal.clone())
+            }),
+        ),
+        (
+            "stored value stamp refusal",
+            Box::new({
+                let stamp = stamp.clone();
+                move || TerminalError::new(stamp.to_record())
+            }),
+        ),
+    ];
+    for (name, terminal) in terminals {
+        // The engine prefixes a handler's message with its own words.
+        let prefixed =
+            || TerminalError::new(format!("[500] handler failed: {}", terminal().message()));
+        let paths = [
+            (
+                "effect group",
+                effect_group_engine_error("EffectGroupIndex/open", terminal()),
+            ),
+            (
+                "journaled effect",
+                RuntimeEffectControllerError::from(RestateEffectError::Terminal {
+                    effect: "effect".into(),
+                    terminal: terminal(),
+                }),
+            ),
+            (
+                "durable wait",
+                crate::wire::lash_terminal(&terminal(), RuntimeErrorCode::EngineEffectController),
+            ),
+            (
+                "process command",
+                process_command::process_command_journal_error("await control", terminal()),
+            ),
+            (
+                "prefixed by the engine",
+                crate::wire::lash_terminal(&prefixed(), RuntimeErrorCode::EngineEffectController),
+            ),
+        ];
+        for (path, error) in paths {
+            assert_eq!(
+                error.code,
+                RuntimeErrorCode::EngineObjectStateFormatUnsupported,
+                "{name} on the {path} path: {error:?}"
+            );
+            assert!(
+                error.is_terminal() && !error.code.is_retryable(),
+                "{name} on the {path} path: {error:?}"
+            );
+            let runtime = error.into_runtime_error();
+            assert!(
+                runtime.is_terminal() && !runtime.is_retryable(),
+                "{name} on the {path} path: {runtime:?}"
+            );
+        }
+    }
+    let typed = crate::wire::lash_terminal(
+        &crate::wire::incompatible(refusal.clone()),
+        RuntimeErrorCode::EngineEffectController,
+    );
+    assert_eq!(typed.compat_refusal(), Some(&refusal));
+    let replayed: RuntimeEffectControllerError =
+        serde_json::from_value(serde_json::to_value(&typed).expect("encode")).expect("decode");
+    assert_eq!(replayed.compat_refusal(), Some(&refusal));
+
+    // A terminal with no typed refusal keeps each path's own code.
+    let untyped = || TerminalError::new("the service is not registered");
+    assert_eq!(
+        crate::wire::lash_terminal(&untyped(), RuntimeErrorCode::EngineEffectController).code,
+        RuntimeErrorCode::EngineEffectController
+    );
+    assert_eq!(
+        effect_group_engine_error("EffectGroupIndex/open", untyped()).code,
+        RuntimeErrorCode::RuntimeEffectGroupShape
+    );
+}
+
+/// FIG-4649: a recorded step journals a plugin operation's failure exactly
+/// when the failure is terminal. Every store error is asked: a fault of the
+/// substrate, or any other fact of the attempt, ends the attempt with nothing
+/// recorded.
+#[test]
+fn a_recorded_step_journals_a_store_error_only_when_it_is_terminal() {
+    let mut journaled_faults = Vec::new();
+    for index in 0..lash_core::StoreError::samples_for_testing().len() {
+        let sample = || lash_core::StoreError::samples_for_testing().swap_remove(index);
+        let name = sample().variant_name();
+        let transient = sample().is_transient();
+        let terminal = sample().runtime_error().is_terminal();
+        let step = crate::process::journal_or_retry::<()>(Err(PluginError::from(sample())));
+        match step {
+            Ok(Err(recorded)) => {
+                if transient || !terminal {
+                    journaled_faults.push(format!("{name} journaled as {recorded:?}"));
+                }
+            }
+            Err(_) => {
+                if terminal {
+                    journaled_faults.push(format!("{name} is terminal and was retried"));
+                }
+            }
+            Ok(Ok(())) => unreachable!("the step failed"),
+        }
+    }
+    assert!(
+        journaled_faults.is_empty(),
+        "{} disagreements:\n{}",
+        journaled_faults.len(),
+        journaled_faults.join("\n")
+    );
 }

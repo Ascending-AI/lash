@@ -6,7 +6,7 @@ pub(super) async fn hold_segment_definitions(
         return Ok(());
     }
     let infra = |message: String| {
-        lash_core::ProcessInfraError::new(lash_core::PluginError::Session(message))
+        lash_core::ProcessInfraError::new(lash_core::PluginError::attempt_fault(message))
     };
     let engines = ctx.definition_engines();
     let ports = engines

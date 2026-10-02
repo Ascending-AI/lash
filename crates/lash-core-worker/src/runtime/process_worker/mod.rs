@@ -354,7 +354,7 @@ impl DurableProcessWorker {
         ))
         .await
         .map_err(|err| {
-            PluginError::Session(format!(
+            PluginError::attempt_fault(format!(
                 "failed to build the runtime of process `{process_id}`: {err}"
             ))
         })?;

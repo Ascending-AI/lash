@@ -468,6 +468,17 @@ define_plugin_errors! {
         => Self::StoreRefusal(source)
         => source.code().as_str().to_string()
         => crate::ToolFailureClass::Internal;
+/// The storage substrate faulted under a plugin-facing port: the identical
+    /// operation may succeed when it is made again, and nothing about the
+    /// fault is the operation's answer.
+    #[error("{fault}")]
+    StoreUnavailable { fault: crate::store::StoreFault }
+        => PluginError::StoreUnavailable { fault }
+        => { fault: crate::store::StoreFault }
+        => Self::StoreUnavailable { fault: fault.clone() }
+        => Self::StoreUnavailable { fault }
+        => fault.code().as_str().to_string()
+        => crate::ToolFailureClass::Unavailable;
 /// A captured plugin init payload exceeded the durable-request bound.
     #[error("captured session init payload is {bytes} bytes, exceeding the {limit}-byte bound")]
     SessionInitTooLarge { bytes: usize, limit: usize }
@@ -845,13 +856,24 @@ impl From<crate::AttachmentStoreError> for PluginError {
 }
 
 impl From<crate::StoreError> for PluginError {
+    /// A store error at a plugin-facing port, with its class
+    /// ([`StoreError::runtime_code`](crate::StoreError::runtime_code)) kept:
+    /// a fault of the substrate is [`Self::StoreUnavailable`], a refusal with
+    /// a typed twin here is that twin, and every other refusal travels as
+    /// the runtime error the store classifies it as.
     fn from(error: crate::StoreError) -> Self {
+        if let Some(fault) = crate::store::StoreFault::of_store_error(&error) {
+            return Self::StoreUnavailable { fault };
+        }
+        if let Some(refusal) = crate::store::StoreRefusal::of_store_error(&error) {
+            return Self::StoreRefusal(refusal);
+        }
         match error {
             crate::StoreError::SessionHeadOwned { session_id, owner } => {
                 Self::SessionHeadOwned { session_id, owner }
             }
             // Bytes the store cannot decode stay undecodable: typed and
-            // terminal, never a session-seam failure a redrive repeats.
+            // terminal, never a failure a redrive repeats.
             crate::StoreError::StoredDataCorrupt {
                 record_kind,
                 message,
@@ -859,120 +881,145 @@ impl From<crate::StoreError> for PluginError {
                 record_kind: record_kind.to_string(),
                 message,
             },
-            error => match crate::store::StoreRefusal::of_store_error(&error) {
-                Some(refusal) => Self::StoreRefusal(refusal),
-                None => Self::Session(error.to_string()),
+            crate::StoreError::AppendOperationIdentityConflict {
+                session_id,
+                operation_key,
+            } => Self::AppendOperationIdentityConflict {
+                session_id,
+                operation_key,
             },
+            crate::StoreError::AppendReceiptRequestedNodeCountCorrupt {
+                session_id,
+                operation_key,
+                stored,
+                attempted,
+            } => Self::AppendReceiptRequestedNodeCountCorrupt {
+                session_id,
+                operation_key,
+                stored,
+                attempted,
+            },
+            crate::StoreError::MonotonicCounterOverflow { counter, current } => {
+                Self::MonotonicCounterOverflow {
+                    counter: counter.to_string(),
+                    current,
+                }
+            }
+            crate::StoreError::SessionExecutionLeaseExpired { session_id } => {
+                Self::SessionExecutionLeaseLost { session_id }
+            }
+            error => Self::Runtime(error.runtime_error()),
         }
     }
 }
 
+impl From<crate::store::StoreFault> for PluginError {
+    fn from(fault: crate::store::StoreFault) -> Self {
+        Self::StoreUnavailable { fault }
+    }
+}
+
 impl PluginError {
+    /// A failure of the infrastructure behind a plugin service that names no
+    /// typed cause: the attempt's, never the operation's answer. It travels
+    /// under the live code a session-seam failure settles as, so a redrive
+    /// repairs it and nothing records it.
+    pub fn attempt_fault(message: impl Into<String>) -> Self {
+        Self::Runtime(crate::RuntimeError::new(
+            crate::RuntimeErrorCode::PluginSessionManager,
+            message,
+        ))
+    }
+
     /// A store error met while doing `context`, classified as
-    /// [`From<StoreError>`](Self::from) classifies it: a typed refusal and
-    /// corrupt stored data keep their type and are terminal; every other
-    /// failure is the session seam's, named with `context`, and recoverable.
+    /// [`From<StoreError>`](Self::from) classifies it. A typed variant keeps
+    /// its fields; a refusal carried as a runtime error names `context`.
     pub fn of_store_error(context: impl std::fmt::Display, error: crate::StoreError) -> Self {
         match Self::from(error) {
-            Self::Session(message) => Self::Session(format!("{context}: {message}")),
+            Self::Runtime(mut error) => {
+                error.message = format!("{context}: {}", error.message);
+                Self::Runtime(error)
+            }
             typed => typed,
         }
     }
 }
 
+/// The decided posture of a [`PluginError`]: the one classification its
+/// retry projections, its turn failure and its effect-controller error read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginErrorClass {
+    /// Retrying the identical plugin operation is explicitly safe.
+    Retryable,
+    /// A fact about this attempt: the identical call is refused again, and a
+    /// redrive under fresh authority is not.
+    Redrivable,
+    /// Retrying cannot succeed without changing input, durable state,
+    /// configuration, or wiring.
+    Terminal,
+}
+
 impl PluginError {
-    /// Settles a plugin hook's failure by its cause (FIG-3575).
+    /// The decided posture of this error.
     ///
-    /// A live fault the hook ran into aborts the turn under a live code, so a
-    /// redrive repairs it: a carried runtime or controller error keeps its own
-    /// code, a lost session lease is `SessionExecutionLeaseLost`, and an opaque
-    /// session-seam failure (store I/O behind a plugin service) or a lost
-    /// process execution failure is `PluginSessionManager`. A carried session retirement
-    /// keeps its own error and cause, so the caller aborts on it (FIG-3630).
-    /// Every other variant is a
-    /// deliberate refusal over the turn's inputs or durable state: an outcome
-    /// spelled as `refusal`, recorded or settled once instead of retried.
-    pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
+    /// This is the single classification site: the match is exhaustive, so a
+    /// new variant does not compile until it is deliberately classified.
+    pub fn class(&self) -> PluginErrorClass {
+        use PluginErrorClass::{Redrivable, Retryable, Terminal};
         match self {
-            error @ Self::Format(_) => {
-                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            // the substrate faulted, or the owning drive releases the head
+            // at its boundary.
+            Self::StoreUnavailable { .. } | Self::SessionHeadOwned { .. } => Retryable,
+            Self::Runtime(error) => {
+                if error.is_retryable() {
+                    Retryable
+                } else if error.is_terminal() {
+                    Terminal
+                } else {
+                    Redrivable
+                }
             }
-            error @ Self::StoredDataCorrupt { .. } => {
-                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            Self::RuntimeEffectController(error) => {
+                if error.is_terminal() {
+                    Terminal
+                } else if error.code.is_retryable() {
+                    Retryable
+                } else {
+                    Redrivable
+                }
             }
-            Self::StoreRefusal(error) => {
-                crate::RuntimeEffectControllerError::from(error.into_store_error())
-                    .into_runtime_error()
+            // a trigger operation the store did not carry out names no cause a
+            // retry of the identical request is known to clear.
+            Self::TriggerOperation(error) => {
+                if error.is_terminal() {
+                    Terminal
+                } else {
+                    Redrivable
+                }
             }
-            Self::Runtime(error)
-                if error.turn_failure_cause().aborts_invocation()
-                    || matches!(
-                        error.cause.as_ref(),
-                        Some(crate::RuntimeErrorCause::ModuleArtifactRefused { .. })
-                    )
-                    || error.is_session_retirement()
-                    || error.store_refusal().is_some()
-                    || matches!(
-                        error.cause.as_ref(),
-                        Some(crate::RuntimeErrorCause::PluginFormat { .. })
-                    )
-                    || matches!(
-                        error.code,
-                        crate::RuntimeErrorCode::RuntimeStoreCorrupt
-                            | crate::RuntimeErrorCode::UsageOwnerRetired
-                            | crate::RuntimeErrorCode::RecordedTerminationUnavailable
-                            | crate::RuntimeErrorCode::MissingRecordedProcessConfig
-                    ) =>
-            {
-                error
+            // a successor holds the lane or the process; this execution's
+            // authority is gone and a redrive under a new one proceeds.
+            Self::SessionExecutionLeaseLost { .. } | Self::ProcessExecutionSuperseded { .. } => {
+                Redrivable
             }
-            Self::RuntimeEffectController(error)
-                if error.turn_failure_cause().aborts_invocation()
-                    || matches!(
-                        error.cause.as_ref(),
-                        Some(crate::RuntimeErrorCause::ModuleArtifactRefused { .. })
-                    )
-                    || error.is_session_retirement()
-                    || error.store_refusal().is_some()
-                    || matches!(
-                        error.cause.as_ref(),
-                        Some(crate::RuntimeErrorCause::PluginFormat { .. })
-                    )
-                    || matches!(
-                        error.code,
-                        crate::RuntimeErrorCode::RuntimeStoreCorrupt
-                            | crate::RuntimeErrorCode::UsageOwnerRetired
-                            | crate::RuntimeErrorCode::RecordedTerminationUnavailable
-                            | crate::RuntimeErrorCode::MissingRecordedProcessConfig
-                    ) =>
-            {
-                error.into_runtime_error()
-            }
-            error @ Self::MissingRecordedProcessConfig { .. } => {
-                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
-            }
-            error @ Self::SessionHeadOwned { .. } => crate::RuntimeError::new(
-                crate::RuntimeErrorCode::SessionHeadOwned,
-                error.to_string(),
-            ),
-            error @ Self::SessionExecutionLeaseLost { .. } => crate::RuntimeError::new(
-                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
-                error.to_string(),
-            ),
-            error @ (Self::Session(_)
-            | Self::SessionAlreadyExists { .. }
-            | Self::ProcessExecutionSuperseded { .. }) => crate::RuntimeError::new(
-                crate::RuntimeErrorCode::PluginSessionManager,
-                error.to_string(),
-            ),
-            refused @ (Self::TriggerOperation(_)
-            | Self::Runtime(_)
-            | Self::RuntimeEffectController(_)
-            | Self::ProcessCancelConflict { .. }
+            // a deliberate refusal over the operation's inputs, the durable
+            // state it met, or the deployment's wiring. A store that did not
+            // answer is `StoreUnavailable`, and infrastructure that did not
+            // is an attempt fault ([`Self::attempt_fault`]): neither is a
+            // session, registration or invoke error.
+            Self::Session(_)
+            | Self::Registration(_)
+            | Self::ConfigRegistration(_)
+            | Self::Invoke(_)
+            | Self::State(_)
+            | Self::Format(_)
+            | Self::StoreRefusal(_)
+            | Self::StoredDataCorrupt { .. }
+            | Self::MissingRecordedProcessConfig { .. }
             | Self::InvalidTriggerTarget { .. }
+            | Self::ProcessCancelConflict { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
-            | Self::State(_)
             | Self::TriggerDeliveryBound { .. }
             | Self::TriggerDeliveryRetired { .. }
             | Self::InvalidToolDiscovery { .. }
@@ -981,9 +1028,7 @@ impl PluginError {
             | Self::ResidentToolDuplicateId { .. }
             | Self::ResidentToolDuplicateName { .. }
             | Self::ResidentToolRouteUnavailable { .. }
-            | Self::Registration(_)
-            | Self::ConfigRegistration(_)
-            | Self::Invoke(_)
+            | Self::SessionAlreadyExists { .. }
             | Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
             | Self::SessionInitTooLarge { .. }
@@ -1001,15 +1046,51 @@ impl PluginError {
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
-            | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessHandedOver { .. }
+            | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }
             | Self::InvalidProcessWakeIdentity { .. }
             | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
-            | Self::ProcessRegistryCursorBackendMismatch { .. }) => {
+            | Self::ProcessRegistryCursorBackendMismatch { .. } => Terminal,
+        }
+    }
+
+    /// Settles a plugin hook's failure by its class (FIG-3575).
+    ///
+    /// A live fault the hook ran into aborts the turn under the code the
+    /// effect controller carries it by, so a redrive repairs it. A terminal
+    /// error that carries a runtime code of its own (a store refusal, corrupt
+    /// stored data, a carried runtime error a turn does not record) keeps it.
+    /// Every other terminal error is a deliberate refusal over the turn's
+    /// inputs or durable state: an outcome spelled as `refusal`, recorded or
+    /// settled once instead of retried.
+    pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
+        match self {
+            Self::Runtime(error) if keeps_its_code(&error) => error,
+            Self::RuntimeEffectController(error)
+                if error.turn_failure_cause().aborts_invocation()
+                    || keeps_its_code(&error.clone().into_runtime_error()) =>
+            {
+                error.into_runtime_error()
+            }
+            refused @ (Self::Runtime(_) | Self::RuntimeEffectController(_)) => {
                 crate::RuntimeError::new(refusal, refused.to_string())
             }
+            error => match error.class() {
+                PluginErrorClass::Retryable | PluginErrorClass::Redrivable => {
+                    crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+                }
+                PluginErrorClass::Terminal => {
+                    let carried = crate::RuntimeEffectControllerError::from(error.clone())
+                        .into_runtime_error();
+                    if keeps_its_code(&carried) {
+                        carried
+                    } else {
+                        crate::RuntimeError::new(refusal, error.to_string())
+                    }
+                }
+            },
         }
     }
 
@@ -1041,63 +1122,38 @@ impl PluginError {
 
     /// Whether retrying the identical plugin operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
-        match self {
-            Self::SessionHeadOwned { .. } => true,
-            Self::Runtime(error) => error.is_retryable(),
-            Self::RuntimeEffectController(error) => {
-                error
-                    .cause
-                    .as_ref()
-                    .is_none_or(|cause| !cause.is_terminal())
-                    && error.code.is_retryable()
-            }
-            _ => false,
-        }
+        self.class() == PluginErrorClass::Retryable
     }
 
     /// Whether retrying the identical plugin operation cannot succeed without
     /// changing durable state, configuration, or wiring.
     pub fn is_terminal(&self) -> bool {
-        match self {
-            Self::TriggerOperation(error) => error.is_terminal(),
-            Self::StoreRefusal(_) => true,
-            Self::Format(_) => true,
-            Self::State(error) => error.is_terminal(),
-            Self::Runtime(error) => error.is_terminal(),
-            Self::RuntimeEffectController(error) => error.is_terminal(),
-            Self::BeforeToolCallReplacementConflict { .. }
-            | Self::AfterToolCallReplacementConflict { .. }
-            | Self::MissingRecordedSessionConfig { .. }
-            | Self::MissingRecordedProcessConfig { .. }
-            | Self::RecordedSessionConfigConflict { .. }
-            | Self::AppendOperationIdentityConflict { .. }
-            | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
-            | Self::StoredDataCorrupt { .. }
-            | Self::ClockBeforeUnixEpoch { .. }
-            | Self::MonotonicCounterOverflow { .. }
-            | Self::ProcessChangeCursorPruned { .. }
-            | Self::ProcessParkFeedCursorCompacted { .. }
-            | Self::ProcessNoLongerRetained { .. }
-            | Self::ProcessCallerDeparted { .. }
-            | Self::ProcessAlreadyTerminal { .. }
-            | Self::ProcessHandedOver { .. }
-            | Self::NotASessionRuntime { .. }
-            | Self::ProcessOutputAttachmentUnavailable { .. }
-            | Self::InvalidTriggerTarget { .. }
-            | Self::ParentEnded { .. }
-            | Self::StartKeyConflict { .. }
-            | Self::TriggerDeliveryBound { .. }
-            | Self::TriggerDeliveryRetired { .. }
-            | Self::SessionAlreadyExists { .. }
-            | Self::ProcessCancelConflict { .. }
-            | Self::ProcessTerminalOutcomeMismatch { .. }
-            | Self::ReservedProcessEvent { .. }
-            | Self::InvalidProcessWakeIdentity { .. }
-            | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
-            | Self::ProcessRegistryCursorBackendMismatch { .. } => true,
-            _ => false,
-        }
+        self.class() == PluginErrorClass::Terminal
     }
+}
+
+/// Whether a failed turn carries `error` under its own code instead of the
+/// failing hook's: it aborts the invocation, or its code names a fact of the
+/// store or the deployment that a host reads.
+fn keeps_its_code(error: &crate::RuntimeError) -> bool {
+    error.turn_failure_cause().aborts_invocation()
+        || matches!(
+            error.cause.as_ref(),
+            Some(
+                crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
+                    | crate::RuntimeErrorCause::PluginFormat { .. }
+            )
+        )
+        || error.is_session_retirement()
+        || error.store_refusal().is_some()
+        || matches!(
+            error.code,
+            crate::RuntimeErrorCode::RuntimeStoreCorrupt
+                | crate::RuntimeErrorCode::StoreRefused
+                | crate::RuntimeErrorCode::UsageOwnerRetired
+                | crate::RuntimeErrorCode::RecordedTerminationUnavailable
+                | crate::RuntimeErrorCode::MissingRecordedProcessConfig
+        )
 }
 
 #[cfg(test)]
@@ -1280,7 +1336,7 @@ mod classification_tests {
     }
 
     #[test]
-    fn deterministic_corrupt_state_is_terminal_but_opaque_infrastructure_is_unknown() {
+    fn corrupt_state_is_terminal_and_a_substrate_fault_is_retried() {
         let corrupt = PluginError::StoredDataCorrupt {
             record_kind: "process_event".to_string(),
             message: "negative sequence".to_string(),
@@ -1288,8 +1344,12 @@ mod classification_tests {
         assert!(corrupt.is_terminal());
         assert!(!corrupt.is_retryable());
 
-        let opaque = PluginError::Session("database connection closed".to_string());
-        assert!(!opaque.is_terminal());
-        assert!(!opaque.is_retryable());
+        let fault = PluginError::from(crate::StoreError::StorageFailure {
+            backend: "sqlite",
+            message: "database connection closed".to_string(),
+        });
+        assert!(matches!(fault, PluginError::StoreUnavailable { .. }));
+        assert!(!fault.is_terminal());
+        assert!(fault.is_retryable());
     }
 }

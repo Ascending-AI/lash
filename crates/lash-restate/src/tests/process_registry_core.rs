@@ -1061,7 +1061,7 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let stores = memory_process_stores().await;
     let registry = Arc::clone(&stores.registry);
-    registry.fail_next_external_ref_write(PluginError::Session(
+    registry.fail_next_external_ref_write(PluginError::attempt_fault(
         "injected external-ref write failure".to_string(),
     ));
     let env_store = Arc::clone(&stores.env_store);
@@ -1195,7 +1195,7 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     // external-reference write fails, so the row it leaves is nonterminal with
     // no reference — exactly the shape the second attempt's compensation would
     // find terminalisable.
-    registry.fail_next_external_ref_write(PluginError::Session(
+    registry.fail_next_external_ref_write(PluginError::attempt_fault(
         "injected external-ref write failure".to_string(),
     ));
     let ended = context

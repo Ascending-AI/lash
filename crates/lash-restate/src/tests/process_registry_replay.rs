@@ -968,7 +968,7 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(PluginError::Session(
+            return Err(PluginError::attempt_fault(
                 "process infrastructure became unavailable".to_string(),
             ));
         }
@@ -1154,7 +1154,7 @@ impl RestateProcessRunner for CancellationAwareRunner {
         self.started.notify_one();
         tokio::select! {
             _ = cancellation.cancelled() => match self.failure_after_cancel {
-                Some(message) => Err(PluginError::Session(message.to_string())),
+                Some(message) => Err(PluginError::attempt_fault(message.to_string())),
                 None => Ok(process_cancellation("cancel signal observed", None).into()),
             },
             _ = self.finish_successfully.notified() =>

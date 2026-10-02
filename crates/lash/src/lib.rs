@@ -544,7 +544,7 @@ pub mod persistence {
     };
     pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
     pub use lash_core_store::store::{
-        EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreRefusal,
+        EnumerationSource, FollowOnRecovery, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
         StoredRootTerminal, SurfaceFormat, WriterPin,
     };
     /// The protocol-generic form [`SessionHistoryRecord`] specializes.
@@ -897,12 +897,12 @@ pub mod plugins {
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};
     pub use lash_core::{
-        PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,
-        facade_support::PluginHost, facade_support::PluginRegistrar, facade_support::PluginSession,
-        facade_support::PluginSessionContext, facade_support::PluginSpec,
-        facade_support::PluginSpecFactory, facade_support::SessionPlugin,
-        facade_support::ToolCatalogContribution, facade_support::TurnHookContext,
-        facade_support::TurnResultHookContext,
+        PluginError, PluginErrorClass, PluginMessage, PluginRuntimeEvent, ToolCatalog,
+        facade_support::PluginFactory, facade_support::PluginHost, facade_support::PluginRegistrar,
+        facade_support::PluginSession, facade_support::PluginSessionContext,
+        facade_support::PluginSpec, facade_support::PluginSpecFactory,
+        facade_support::SessionPlugin, facade_support::ToolCatalogContribution,
+        facade_support::TurnHookContext, facade_support::TurnResultHookContext,
     };
     /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
     /// once durable session state has advanced, and the contexts each event

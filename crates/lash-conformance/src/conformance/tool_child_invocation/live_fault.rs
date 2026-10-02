@@ -29,7 +29,7 @@ use super::*;
 enum EnvRead {
     /// The inner store answers.
     Healthy,
-    /// An opaque session-seam error: what the SQL stores report for a
+    /// A fault of the substrate: what the SQL stores report for a
     /// pool-acquire timeout or a lost connection.
     StoreFault,
     /// Nothing is stored under the reference.

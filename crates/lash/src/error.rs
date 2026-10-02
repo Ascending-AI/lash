@@ -436,15 +436,11 @@ impl EmbedError {
 }
 
 /// A store error is terminal at the facade exactly when the engine ends a
-/// drive on it: it is no fault of the storage substrate, and the code the
-/// engine carries it under
-/// ([`RuntimeErrorCode::of_store_error`](lash_core::RuntimeErrorCode::of_store_error))
-/// is terminal. A relation conflict has no code of its own and is refused
-/// the same way on every call.
+/// drive on it: the code the engine carries it under
+/// ([`StoreError::runtime_code`](lash_core::StoreError::runtime_code)) is
+/// terminal.
 fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
-    !error.is_transient()
-        && (lash_core::RuntimeErrorCode::of_store_error(error).is_terminal()
-            || matches!(error, lash_core::StoreError::SessionRelationMismatch { .. }))
+    error.runtime_code().is_terminal()
 }
 
 /// Result type returned by Lash facade operations.

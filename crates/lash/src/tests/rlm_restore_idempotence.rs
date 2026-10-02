@@ -1146,8 +1146,8 @@ impl lash_core::facade_support::SessionPlugin for FailFirstTurnPersisted {
                     lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(_)
                 ) && deliveries.fetch_add(1, Ordering::SeqCst) == 0
                 {
-                    return Err(lash_core::PluginError::Session(
-                        "injected post-commit delivery failure (FIG-2521)".into(),
+                    return Err(lash_core::PluginError::attempt_fault(
+                        "injected post-commit delivery failure (FIG-2521)",
                     ));
                 }
                 Ok(())
@@ -1317,7 +1317,7 @@ fn refuse_second_turn_finalize() -> Arc<dyn PluginFactory> {
             let calls = Arc::clone(&calls);
             Box::pin(async move {
                 if calls.fetch_add(1, Ordering::SeqCst) == 1 {
-                    Err(lash_core::PluginError::Session(
+                    Err(lash_core::PluginError::attempt_fault(
                         "injected pre-commit finalize failure".to_string(),
                     ))
                 } else {
@@ -1508,8 +1508,8 @@ async fn rlm_cold_replay_preserves_terminal_payload_and_zero_exec_usage() {
                         let fail = Arc::clone(&fail);
                         Box::pin(async move {
                             if fail.fetch_add(1, Ordering::SeqCst) == 0 {
-                                return Err(lash_core::PluginError::Session(
-                                    "lose the resident runtime before commit".into(),
+                                return Err(lash_core::PluginError::attempt_fault(
+                                    "lose the resident runtime before commit",
                                 ));
                             }
                             Ok(Vec::new())
