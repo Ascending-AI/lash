@@ -538,21 +538,29 @@ impl PluginDeclaration {
 }
 
 /// Why a factory's [`PluginDeclaration`] is refused.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum PluginDeclarationError {
     /// The declaration names another plugin than the factory that gave it.
     #[error("plugin factory `{factory}` declares itself as `{declared}`")]
-    IdMismatch {
-        factory: PluginId,
-        declared: PluginId,
-    },
+    IdMismatch { factory: String, declared: String },
     /// The plugin cannot write the format it reads natively.
     #[error(
         "plugin `{plugin}` reads format {format_version} natively and does not declare it writable"
     )]
     NativeFormatNotWritable {
-        plugin: PluginId,
+        plugin: String,
+        #[schemars(with = "std::num::NonZeroU32")]
         format_version: FormatVersion,
     },
 }
@@ -579,8 +587,8 @@ impl PluginComposition {
             let factory_id = PluginId::new(factory.id());
             if declaration.id != factory_id {
                 return Err(PluginDeclarationError::IdMismatch {
-                    factory: factory_id,
-                    declared: declaration.id,
+                    factory: factory.id().to_owned(),
+                    declared: declaration.id.as_str().to_owned(),
                 });
             }
             if !declaration
@@ -588,7 +596,7 @@ impl PluginComposition {
                 .contains(&declaration.format_version)
             {
                 return Err(PluginDeclarationError::NativeFormatNotWritable {
-                    plugin: declaration.id,
+                    plugin: declaration.id.as_str().to_owned(),
                     format_version: declaration.format_version,
                 });
             }

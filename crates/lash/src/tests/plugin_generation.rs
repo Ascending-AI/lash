@@ -33,7 +33,7 @@ use super::*;
 
 use lash_core::engine::{BuildGeneration, GenerationUnbound, ShiftRequestId, ShiftStop};
 use lash_core::plugin::{
-    BehaviorRevision, FormatVersion, PluginDeclaration, PluginDeclarationError, PluginId,
+    BehaviorRevision, FormatVersion, PluginDeclaration, PluginDeclarationError,
 };
 
 const SEED: u64 = 0x4744_91a3;
@@ -240,8 +240,8 @@ async fn a_refused_declaration_builds_no_core_and_binds_no_generation() {
                 declared: PluginDeclaration::initial("another"),
             },
             PluginDeclarationError::IdMismatch {
-                factory: PluginId::new("registered"),
-                declared: PluginId::new("another"),
+                factory: "registered".to_owned(),
+                declared: "another".to_owned(),
             },
         ),
         (
@@ -250,7 +250,7 @@ async fn a_refused_declaration_builds_no_core_and_binds_no_generation() {
                 declared: unwritable,
             },
             PluginDeclarationError::NativeFormatNotWritable {
-                plugin: PluginId::new("stateful"),
+                plugin: "stateful".to_owned(),
                 format_version: second,
             },
         ),
@@ -501,6 +501,194 @@ in_flight_laws! {
     in_flight_segments_finish_on_the_old_build_sqlite_file: Storage::SqliteFile;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
     in_flight_segments_finish_on_the_old_build_postgres: Storage::Postgres;
+}
+
+/// The plugin that records its own id after each turn, in hook order, into
+/// `ran`.
+fn ordered(
+    id: &'static str,
+    ran: &Arc<std::sync::Mutex<Vec<&'static str>>>,
+) -> Arc<dyn PluginFactory> {
+    let ran = Arc::clone(ran);
+    Arc::new(StaticPluginFactory::new(
+        PluginDeclaration::initial(id),
+        lash_core::plugin::PluginSpec::new().with_after_turn(Arc::new(move |_| {
+            let ran = Arc::clone(&ran);
+            Box::pin(async move {
+                ran.lock_recover().push(id);
+                Ok(Vec::new())
+            })
+        })),
+    ))
+}
+
+/// L3 (FIG-4859): the plugin installation order changed after a session's
+/// creation does not rewrite its in-flight or recorded executions. The Run
+/// in flight at the roll redrives under the composition its admission
+/// recorded — `[order-a, order-b]` — while work admitted under the successor
+/// runs the new `[order-b, order-a]` order. The store answers each Run's
+/// recorded admission, in the order it was admitted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn in_flight_work_keeps_its_recorded_hook_order_across_an_order_change() -> Result<()> {
+    let storage = Storage::SqliteMemory;
+    let ran = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let old_generation = generation_of(vec![
+        ordered("order-a", &Arc::default()),
+        ordered("order-b", &Arc::default()),
+    ])
+    .await;
+    let next_generation = generation_of(vec![
+        ordered("order-b", &Arc::default()),
+        ordered("order-a", &Arc::default()),
+    ])
+    .await;
+    assert_ne!(
+        old_generation, next_generation,
+        "installation order is part of the generation"
+    );
+
+    let (opening, _keep) = prepare(storage).await;
+    let double = lash_restate_test::backend_with_store_set(
+        SEED,
+        lash_restate_test::ServerConfig {
+            build_generation: old_generation.clone(),
+            ..lash_restate_test::ServerConfig::default()
+        },
+        lash_restate_test::DeploymentHooks::default(),
+        |clock| async move {
+            open(opening, clock, DrainLever::default())
+                .await
+                .map_err(lash_restate_test::BackendError::Stores)
+        },
+    )
+    .await
+    .expect("the Restate double over the law's stores");
+    let model = Arc::new(Model::holding(1));
+    let old_core = deployed(
+        double.lash_backend(),
+        double.explicit_reconcile_session_work(),
+        vec![ordered("order-a", &ran), ordered("order-b", &ran)],
+        &model,
+    );
+    assert_eq!(old_core.build_generation(), &old_generation);
+
+    let session = "plugin-order";
+    let _handle = old_core.session(session).created().await.open().await?;
+    let session_id = lash_core::SessionId::from(session);
+    let store = lash_core::runtime::live_session_view(&old_core.store_factory, &session_id)
+        .await?
+        .expect("an opened session has a store");
+    for index in 0..RUNS {
+        store
+            .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+                session_id.clone(),
+                lash_core::TurnInputIngress::NextTurn,
+                TurnInput::text(format!("question {index}")),
+            ))
+            .await
+            .expect("enqueue the input");
+    }
+
+    // The shift starts on N, the only build, and its first run reaches its
+    // model call.
+    let port = old_core.substrate_slot.ports().await.queued;
+    let request = ShiftRequestId::new("plugin-order");
+    port.schedule_shift(&session_id, request.clone());
+    tokio::time::timeout(WEDGE, model.reached.notified())
+        .await
+        .expect("the shift's first run reaches its model call");
+    assert!(
+        ran.lock_recover().is_empty(),
+        "no turn has ended while the first run is in its model call"
+    );
+
+    // The roll: N+1 registers with the plugins installed in the opposite
+    // order — a different composition, so a generation and deployment of
+    // its own — and the operator marks N draining.
+    let next = double
+        .add_separate_build(
+            next_generation.clone(),
+            "next",
+            lash_restate_test::DeploymentHooks::default(),
+        )
+        .await
+        .expect("register build N+1 on the double");
+    let next_core = deployed(
+        next.lash_backend(),
+        next.explicit_reconcile_session_work(),
+        vec![ordered("order-b", &ran), ordered("order-a", &ran)],
+        &model,
+    );
+    assert_eq!(next_core.build_generation(), &next_generation);
+    assert!(
+        double
+            .lash_backend()
+            .generation_drain()
+            .mark_draining(&old_generation, 1)
+            .await
+            .expect("mark build N draining"),
+        "the law's mark is N's first"
+    );
+    model.release.notify_one();
+
+    let outcome = tokio::time::timeout(WEDGE, port.await_shift(&session_id, &request))
+        .await
+        .expect("the shift chain ends")
+        .expect("the shift is not refused");
+    assert_eq!(outcome.stop, ShiftStop::Idle, "{outcome:?}");
+    assert_eq!(outcome.ran.len(), RUNS, "{outcome:?}");
+
+    // The run in flight at the roll ran its hooks in creation order; every
+    // run after it ran them in the successor's order.
+    assert_eq!(
+        *ran.lock_recover(),
+        [
+            "order-a", "order-b", "order-b", "order-a", "order-b", "order-a"
+        ],
+        "hook order follows each run's admitted composition"
+    );
+
+    // Each Run's recorded admission names the composition in the order it
+    // was admitted under, and the store answers it to a later admission.
+    let fence = lash_core::testing::store_fixtures::seal_shift_fence_for_test(
+        store.store(),
+        &session_id,
+        "plugin-order",
+    )
+    .await;
+    let mut recorded = Vec::new();
+    for ran in &outcome.ran {
+        let admission = store
+            .admit_run(
+                &lash_core::testing::store_fixtures::admit_run_request_for_test(
+                    &fence,
+                    ran.run(),
+                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
+                ),
+            )
+            .await
+            .expect("read the Run's admission back")
+            .expect("the Run's admission is recorded");
+        let tail: Vec<String> = admission
+            .plugins
+            .plugins()
+            .iter()
+            .map(|admitted| admitted.plugin.as_str().to_owned())
+            .collect();
+        recorded.push((tail[tail.len() - 2].clone(), tail[tail.len() - 1].clone()));
+    }
+    assert_eq!(
+        recorded,
+        [
+            ("order-a".to_owned(), "order-b".to_owned()),
+            ("order-b".to_owned(), "order-a".to_owned()),
+            ("order-b".to_owned(), "order-a".to_owned())
+        ],
+        "the recorded participating set keeps its admitted hook order"
+    );
+    drop(next_core);
+    drop(old_core);
+    Ok(())
 }
 
 /// The namespace of the config law's owner: how much its reducers added.

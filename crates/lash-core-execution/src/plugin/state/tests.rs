@@ -292,6 +292,257 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     assert_eq!(rmp_serde::to_vec_named(&config).unwrap(), config_bytes);
 }
 
+/// A factory whose declared [`crate::plugin::PluginDeclaration`] names
+/// another plugin id than its own [`PluginFactory::id`](crate::PluginFactory::id).
+#[derive(Clone)]
+struct DeclaredAs {
+    declared: &'static str,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl crate::PluginFactory for DeclaredAs {
+    fn id(&self) -> &'static str {
+        "registered"
+    }
+
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        crate::plugin::PluginDeclaration::initial(self.declared)
+    }
+
+    fn build(
+        &self,
+        _: &crate::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::SessionPlugin for DeclaredAs {
+    fn id(&self) -> &'static str {
+        "registered"
+    }
+
+    fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn session_ready(
+        &self,
+        _: crate::plugin::SessionReadyContext,
+    ) -> Result<(), crate::PluginError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// A readable writer at its native format with no converter: it can admit
+/// and write old stamps, but nothing migrates them to what it reads.
+#[derive(Clone)]
+struct NoMigrateProbe(Arc<std::sync::atomic::AtomicUsize>);
+
+impl crate::PluginFactory for NoMigrateProbe {
+    fn id(&self) -> &'static str {
+        "no-migrate"
+    }
+
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        let mut declaration = crate::plugin::PluginDeclaration::initial(self.id());
+        declaration.format_version = crate::FormatVersion::new(2).unwrap();
+        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration
+    }
+
+    fn build(
+        &self,
+        _: &crate::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::SessionPlugin for NoMigrateProbe {
+    fn id(&self) -> &'static str {
+        "no-migrate"
+    }
+
+    fn register(&self, _: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn session_ready(
+        &self,
+        _: crate::plugin::SessionReadyContext,
+    ) -> Result<(), crate::PluginError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// The remaining negative legs of the materialization boundary (FIG-4859):
+/// every corrupt or misowned record is refused by its own typed outcome
+/// before a single factory build, registration or readiness callback runs.
+#[test]
+fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
+    let calls = || Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let inactive =
+        serde_json::json!({"generation": 7, "format_version": 99, "values": {"opaque": 5}});
+
+    // A missing or zero format stamp never produces a `PluginState`: the
+    // component codec refuses the body as corrupt durable data, before any
+    // host exists to run callbacks.
+    for body in [
+        serde_json::json!({"format-probe": {"generation": 7, "values": {"native": 17}}}),
+        serde_json::json!({"format-probe": {"generation": 7, "format_version": 0, "values": {"native": 17}}}),
+    ] {
+        let mut checkpoint = crate::HydratedSessionCheckpoint::default();
+        checkpoint.components.insert(
+            crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.into(),
+            crate::HydratedCheckpointComponent::changed(rmp_serde::to_vec_named(&body).unwrap()),
+        );
+        let error = checkpoint
+            .decode_component::<PluginState>(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+            .expect_err("a namespace without a readable stamp is corrupt");
+        assert!(
+            matches!(error, crate::StoreError::StoredDataCorrupt { .. }),
+            "missing and zero stamps refuse typed: {error}"
+        );
+        assert_eq!(
+            checkpoint.component_body(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT),
+            Some(&*rmp_serde::to_vec_named(&body).unwrap()),
+            "the stored body is not rewritten on refusal"
+        );
+    }
+
+    // A payload that deserializes but violates the store's invariants is
+    // `PluginError::State` at any stamp the plugin admits — including its
+    // native one, whose path ran no value validation before.
+    let calls_probe = calls();
+    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(calls_probe.clone()))]);
+    for stamp in [1_u32, 2] {
+        for malformed in [
+            serde_json::json!({"bad/key": 1}),
+            serde_json::json!({"wide": "x".repeat(VALUE_LIMIT + 1)}),
+        ] {
+            let snapshot: PluginState = serde_json::from_value(serde_json::json!({
+                "format-probe": {"generation": 7, "format_version": stamp, "values": malformed},
+                "inactive": inactive,
+            }))
+            .unwrap();
+            let bytes = rmp_serde::to_vec_named(&snapshot).unwrap();
+            let result = host.build_session(PluginSessionRequest::rematerialization(
+                "malformed",
+                &snapshot,
+                Default::default(),
+            ));
+            assert!(
+                matches!(result, Err(crate::PluginError::State(_))),
+                "a malformed payload at stamp {stamp} refuses typed: {:?}",
+                result.err()
+            );
+            assert_eq!(calls_probe.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert_eq!(
+                rmp_serde::to_vec_named(&snapshot).unwrap(),
+                bytes,
+                "the stored bytes are preserved"
+            );
+            assert_eq!(snapshot.plugins["inactive"].format_version.get(), 99);
+        }
+    }
+
+    // A recorded stamp the plugin can write but has no converter for is
+    // `PluginError::Format`: distinct from a too-new stamp only by
+    // direction, and refused before the factory builds.
+    let calls_no_migrate = calls();
+    let host = crate::PluginHost::new(vec![Arc::new(NoMigrateProbe(calls_no_migrate.clone()))]);
+    let snapshot: PluginState = serde_json::from_value(serde_json::json!({
+        "no-migrate": {"generation": 7, "format_version": 1, "values": {"old": 17}},
+        "inactive": inactive,
+    }))
+    .unwrap();
+    let bytes = rmp_serde::to_vec_named(&snapshot).unwrap();
+    let result = host.build_session(PluginSessionRequest::rematerialization(
+        "unreadable-past",
+        &snapshot,
+        Default::default(),
+    ));
+    let Err(crate::PluginError::Format(refusal)) = result else {
+        panic!("a missing converter is a typed format refusal");
+    };
+    assert_eq!(refusal.plugin, "no-migrate");
+    assert_eq!(refusal.namespace, crate::FormatNamespace::State);
+    assert_eq!(refusal.stored.get(), 1);
+    assert_eq!(refusal.readable.get(), 2);
+    let mut config = crate::PluginConfig::default();
+    config.insert_versioned(
+        "no-migrate",
+        crate::FormatVersion::ONE,
+        serde_json::json!({"old": 17}),
+    );
+    let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
+    let result = host.build_session(PluginSessionRequest::creation(
+        "unreadable-config",
+        crate::plugin::SessionAuthorityContext {
+            plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
+            ..Default::default()
+        },
+    ));
+    assert!(
+        matches!(
+            result,
+            Err(crate::PluginError::Format(crate::FormatRefusal {
+                namespace: crate::FormatNamespace::Config,
+                ..
+            }))
+        ),
+        "config faces the same typed refusal: {:?}",
+        result.err()
+    );
+    assert_eq!(
+        calls_no_migrate.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(rmp_serde::to_vec_named(&snapshot).unwrap(), bytes);
+    assert_eq!(rmp_serde::to_vec_named(&config).unwrap(), config_bytes);
+
+    // A factory whose declaration names another owner is `PluginError::
+    // Declaration` before its build, registration or readiness runs.
+    let calls_owner = calls();
+    let host = crate::PluginHost::new(vec![Arc::new(DeclaredAs {
+        declared: "another",
+        calls: calls_owner.clone(),
+    })]);
+    let snapshot: PluginState = serde_json::from_value(serde_json::json!({
+        "registered": {"generation": 7, "format_version": 1, "values": {"value": 1}},
+        "inactive": inactive,
+    }))
+    .unwrap();
+    let bytes = rmp_serde::to_vec_named(&snapshot).unwrap();
+    for request in [
+        PluginSessionRequest::creation("wrong-owner-create", Default::default()),
+        PluginSessionRequest::rematerialization(
+            "wrong-owner-reopen",
+            &snapshot,
+            Default::default(),
+        ),
+    ] {
+        let result = host.build_session(request);
+        let Err(crate::PluginError::Declaration(
+            crate::plugin::PluginDeclarationError::IdMismatch { factory, declared },
+        )) = result
+        else {
+            panic!("a wrong plugin owner is a typed declaration refusal");
+        };
+        assert_eq!(factory, "registered");
+        assert_eq!(declared, "another");
+    }
+    assert_eq!(calls_owner.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(rmp_serde::to_vec_named(&snapshot).unwrap(), bytes);
+}
+
 #[test]
 fn plugin_formats_migrate_on_decode_and_replay_identically() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));

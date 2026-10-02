@@ -349,6 +349,10 @@ impl PluginHost {
                 false,
             ),
         };
+        // A factory that misstates its declared owner or format set is refused
+        // before any decode, factory build or callback: the session runs under
+        // the declared composition or not at all.
+        self.composition()?;
         self.validate_config_formats(&authority.plugin_config.config)?;
         if let Some(snapshot) = snapshot {
             self.validate_state_formats(snapshot)?;

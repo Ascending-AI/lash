@@ -118,6 +118,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ConfigRegistration(_)
             | PluginError::Invoke(_)
             | PluginError::State(_)
+            | PluginError::Declaration(_)
             | PluginError::InvalidTriggerTarget { .. }
             | PluginError::InvalidToolDiscovery { .. }
             | PluginError::InvalidBatchMaximum { .. }

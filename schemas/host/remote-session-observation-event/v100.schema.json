@@ -2875,6 +2875,57 @@
       ],
       "type": "object"
     },
+    "PluginDeclarationError": {
+      "description": "Why a factory's [`PluginDeclaration`] is refused.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The declaration names another plugin than the factory that gave it.",
+          "properties": {
+            "declared": {
+              "type": "string"
+            },
+            "factory": {
+              "type": "string"
+            },
+            "reason": {
+              "const": "id_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "factory",
+            "declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The plugin cannot write the format it reads natively.",
+          "properties": {
+            "format_version": {
+              "format": "uint32",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "plugin": {
+              "type": "string"
+            },
+            "reason": {
+              "const": "native_format_not_writable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "plugin",
+            "format_version"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "PluginExecutionRefusal": {
       "description": "Recorded executable requirements this build cannot fulfill.",
       "properties": {
@@ -11504,6 +11555,24 @@
             },
             "type": {
               "const": "state",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A factory's [`super::PluginDeclaration`] failed the composition's owner\nand format checks (FIG-4732): a session cannot materialize under a\nplugin set that misstates itself, before any plugin callback runs.",
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/PluginDeclarationError"
+            },
+            "type": {
+              "const": "declaration",
               "type": "string"
             }
           },

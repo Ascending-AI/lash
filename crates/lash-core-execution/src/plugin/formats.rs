@@ -64,6 +64,10 @@ impl PluginHost {
         let Some(factory) = self.factories().iter().find(|factory| factory.id() == id) else {
             return Ok(namespace);
         };
+        // A namespace this plugin owns must satisfy the store's invariants
+        // as recorded, at whatever stamp: a malformed payload is refused
+        // before the converter or any callback sees it.
+        super::state::validate_namespace(&namespace.values)?;
         let native = factory.declaration().format_version;
         if namespace.format_version == native {
             return Ok(namespace);

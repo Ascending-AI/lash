@@ -475,6 +475,17 @@ define_plugin_errors! {
             super::PluginStateError::EffectOwnerMismatch | super::PluginStateError::EffectReplayMismatch { .. } | super::PluginStateError::Encode { .. } | super::PluginStateError::Decode { .. } => crate::ToolFailureClass::Internal,
             super::PluginStateError::GenerationConflict { .. } => crate::ToolFailureClass::Unavailable,
         };
+/// A factory's [`super::PluginDeclaration`] failed the composition's owner
+    /// and format checks (FIG-4732): a session cannot materialize under a
+    /// plugin set that misstates itself, before any plugin callback runs.
+    #[error(transparent)]
+    Declaration (#[from] super::PluginDeclarationError)
+        => PluginError::Declaration(source)
+        => (#[from] super::PluginDeclarationError)
+        => Self::Declaration(source.clone())
+        => Self::Declaration(_)
+        => "declaration"
+        => crate::ToolFailureClass::Internal;
     #[error(transparent)]
     Format (#[from] super::FormatRefusal)
         => PluginError::Format(source)
@@ -1087,6 +1098,7 @@ impl PluginError {
             | Self::ConfigRegistration(_)
             | Self::Invoke(_)
             | Self::State(_)
+            | Self::Declaration(_)
             | Self::Format(_)
             | Self::StoreRefusal(_)
             | Self::StoredDataCorrupt { .. }

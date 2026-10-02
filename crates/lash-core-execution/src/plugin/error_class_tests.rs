@@ -125,6 +125,12 @@ plugin_error_samples! {
             message: "sampled".to_string(),
         },
     )),
+    Declaration(_) => PluginError::Declaration(
+        crate::plugin::PluginDeclarationError::IdMismatch {
+            factory: "sampled".to_string(),
+            declared: "other".to_string(),
+        },
+    ),
     Format(_) => PluginError::Format(crate::FormatRefusal {
         plugin: "sampled".to_string(),
         namespace: crate::FormatNamespace::State,

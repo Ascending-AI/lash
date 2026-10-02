@@ -514,6 +514,189 @@ fn fleet_of(location: &SqliteLocation, database: SqliteDatabase) -> i64 {
     fleet(location, database)
 }
 
+fn registration_for(plugin: &str, native: u32, writable: &[u32]) -> PluginWriterRegistration {
+    PluginWriterRegistration {
+        plugin: plugin.to_owned(),
+        native: version(native),
+        writable: writable.iter().copied().map(version).collect(),
+    }
+}
+
+/// A plugin the finalizing build no longer registers keeps its recorded
+/// writer range across the finalize (FIG-4859/L12): the fleet record is the
+/// only durable memory of what an inactive plugin may write, so the move of
+/// `F` must not drop it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_deregistered_plugins_writer_entry_survives_finalize() {
+    let (_run, set) = file_set().await;
+    let location = set.location().clone();
+    let store = store(&set);
+    let writable = FleetFormat::writable();
+    let next = writable.max() + 1;
+    let successor = VersionRange::new(writable.min(), next).expect("writable range");
+    let retired = BuildGeneration::for_test("deregistered-entry-old");
+
+    // The retiring build's plugin wrote its first format; the successor's
+    // plugin joins it.
+    store
+        .admit_session(&root_session_request(&SessionId::from("inactive")))
+        .await
+        .expect("admit the session");
+    let mut state = state("inactive");
+    state.set_plugin_state(Some(plugin_state(1, 1)));
+    commit(&store, &mut state)
+        .await
+        .expect("the first format commits");
+    store
+        .provision_plugin_writers(&[registration_for("other-plugin", 1, &[1, 2])])
+        .await
+        .expect("provision the surviving plugin");
+    assert_eq!(recorded_range(&location), Some((1, 1)));
+
+    // The successor finalizes naming only its own plugin: nothing
+    // deregisters the retiring plugin's entry.
+    set.generation_drain()
+        .mark_draining(&retired, 1)
+        .await
+        .expect("mark the retired generation draining");
+    set.finalize_as(
+        &retired,
+        &NoDeployments,
+        &[registration_for("other-plugin", 2, &[1, 2])],
+        5,
+        successor,
+    )
+    .await
+    .expect("finalize");
+    let ranges = store.plugin_writers().await.expect("read the ranges");
+    assert_eq!(
+        ranges
+            .permitted_writer(PLUGIN)
+            .ok()
+            .map(|range| (i64::from(range.min()), i64::from(range.max()))),
+        Some((1, 1)),
+        "the deregistered plugin's entry survives the finalize"
+    );
+    assert_eq!(
+        ranges
+            .permitted_writer("other-plugin")
+            .ok()
+            .map(|range| (i64::from(range.min()), i64::from(range.max()))),
+        Some((1, 2)),
+        "the registered plugin's range moved with `F`"
+    );
+    assert_eq!(
+        fleet_of(&location, SqliteDatabase::DurableCore),
+        i64::from(next)
+    );
+}
+
+/// Deleting a plugin's writer entry un-provisions it (FIG-4859/L12): a write
+/// at a stamp the deleted range had permitted is refused typed and publishes
+/// nothing, on every write path. The record's bootstrap rule still applies:
+/// a first-format write by a plugin the record does not name provisions
+/// `[1, 1]` — a deletion followed by one is a fresh provision, visibly
+/// narrower than the deleted range.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
+    let (_run, set) = file_set().await;
+    let location = set.location().clone();
+    let store = store(&set);
+
+    // The plugin's entry recorded [1, 2], as a finalize that admitted its
+    // native format would leave it.
+    raw(&location, SqliteDatabase::DurableCore)
+        .execute(
+            "INSERT INTO lash_plugin_writers (plugin_id, min_format, max_format) VALUES (?1, 1, 2)",
+            [PLUGIN],
+        )
+        .expect("record the plugin's range");
+    raw(&location, SqliteDatabase::DurableCore)
+        .execute(
+            "DELETE FROM lash_plugin_writers WHERE plugin_id = ?1",
+            [PLUGIN],
+        )
+        .expect("delete the entry, as an out-of-band mutation would");
+    assert_eq!(recorded_range(&location), None);
+    assert!(
+        store
+            .plugin_writers()
+            .await
+            .expect("read the ranges")
+            .is_empty()
+    );
+
+    let unprovisioned = |error: &StoreError| {
+        assert!(
+            matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: CompatRefusal::PluginWriterUnprovisioned { plugin }
+                } if plugin == PLUGIN
+            ),
+            "a write against the deleted entry refuses typed: {error:?}"
+        );
+    };
+
+    // Session creation carrying the deleted range's headroom.
+    let mut request = root_session_request(&SessionId::from("deleted-entry"));
+    request.config.plugin_config.insert_versioned(
+        PLUGIN,
+        version(2),
+        serde_json::json!({"count": 1}),
+    );
+    let before = published(&location);
+    let error = store
+        .admit_session(&request)
+        .await
+        .expect_err("creation at the deleted range's stamp must refuse");
+    unprovisioned(&error);
+    assert_eq!(published(&location), before);
+
+    // A commit's plugin state at the same stamp.
+    store
+        .admit_session(&root_session_request(&SessionId::from("deleted-commit")))
+        .await
+        .expect("admit a session without plugin stamps");
+    let admitted = published(&location);
+    let mut state = state("deleted-commit");
+    state.set_plugin_state(Some(plugin_state(2, 2)));
+    let error = commit(&store, &mut state)
+        .await
+        .expect_err("plugin state at the deleted range's stamp must refuse");
+    unprovisioned(&error);
+    assert_eq!(published(&location), admitted);
+
+    // A process execution environment at the same stamp.
+    let error = publish_env(&set, 2)
+        .await
+        .expect_err("an environment at the deleted range's stamp must refuse");
+    unprovisioned(&error);
+    assert_eq!(published(&location), admitted);
+    assert_eq!(recorded_range(&location), None);
+
+    // A first-format write after the deletion provisions [1, 1] — the
+    // bootstrap any unprovisioned plugin gets — and never the deleted
+    // range's headroom.
+    state.set_plugin_state(Some(plugin_state(1, 3)));
+    commit(&store, &mut state)
+        .await
+        .expect("the first format still bootstraps");
+    assert_eq!(recorded_range(&location), Some((1, 1)));
+    let error = publish_env(&set, 2)
+        .await
+        .expect_err("the deleted headroom stays refused");
+    assert!(
+        matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::PluginWriterOutsideRange { .. }
+            }
+        ),
+        "{error:?}"
+    );
+}
+
 /// A finalize that crashes between the database files is completed by the
 /// next open from the sealed intent alone: the opening process holds no
 /// plugin registrations, and the plugin's range still lands with `F`.
