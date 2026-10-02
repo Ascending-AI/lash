@@ -179,6 +179,7 @@ pub struct SegmentStarted {
     authority: ProcessExecutionWriteAuthority,
     generation: Option<Box<lash_core::ExecutableGeneration>>,
     build_generation: Option<Box<lash_core::engine::BuildGeneration>>,
+    plugins: Option<Box<lash_core::store::plugin_writers::PluginAdmission>>,
 }
 
 impl SegmentStarted {
@@ -188,6 +189,7 @@ impl SegmentStarted {
         execution_id: String,
         generation: Option<lash_core::ExecutableGeneration>,
         build_generation: Option<lash_core::engine::BuildGeneration>,
+        plugins: Option<lash_core::store::plugin_writers::PluginAdmission>,
     ) -> Self {
         let authority =
             ProcessExecutionWriteAuthority::invocation(process_id.clone(), execution_id);
@@ -197,7 +199,17 @@ impl SegmentStarted {
             authority,
             generation: generation.map(Box::new),
             build_generation: build_generation.map(Box::new),
+            plugins: plugins.map(Box::new),
         }
+    }
+
+    /// The plugin admission the segment's start recorded (FIG-4747): the
+    /// composition it was admitted under and the writer format chosen for
+    /// each plugin then. The segment writes plugin namespaces in these
+    /// formats on every execution, never in what the fleet record permits
+    /// when it is retried.
+    pub fn plugins(&self) -> Option<&lash_core::store::plugin_writers::PluginAdmission> {
+        self.plugins.as_deref()
     }
 
     /// The executable generation the process's start record names: what
@@ -248,6 +260,7 @@ impl SegmentStarted {
             }),
             generation: None,
             build_generation: None,
+            plugins: None,
         }
     }
 }
@@ -310,6 +323,11 @@ enum StartOutcome {
         /// build now executing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         build_generation: Option<lash_core::engine::BuildGeneration>,
+        /// The plugin admission the segment's start recorded (FIG-4747),
+        /// journaled with the start so a replay writes plugin namespaces in
+        /// the formats chosen at the admission.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plugins: Option<lash_core::store::plugin_writers::PluginAdmission>,
     },
     SubstrateLost {
         lost: ProcessStarted,
@@ -372,6 +390,19 @@ pub(crate) enum SegmentAdmission {
     Invariant { message: String },
 }
 
+/// What a segment admission's plugin choice answers: the admitting build's
+/// composition and writers, or `None` for a runner that carries no plugins.
+pub(crate) type PluginAdmissionFuture = std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = Result<
+                    Option<lash_core::store::plugin_writers::PluginAdmission>,
+                    PluginError,
+                >,
+            > + Send,
+    >,
+>;
+
 fn store_fault(error: PluginError) -> HandlerError {
     // Every store read and write here is idempotent, so a fault is retried
     // by Restate rather than failing the invocation.
@@ -423,6 +454,13 @@ async fn read_record(
 /// so the returned proof carries the recorded stamp, never the executing
 /// build's own.
 ///
+/// `plugins` admits the build's plugin composition against the fleet record
+/// (FIG-4747). The start step calls it and records the answer on the marker
+/// it writes: segment 0's on the process's start record, a later segment's
+/// on its own marker, so a child process and a successor each adopt the
+/// plugins and writer formats of the build and fleet that admit them. A
+/// retry of the step reads the recorded answer back.
+///
 /// `generation_lane` is the service name this admission runs under when that
 /// is a generation lane (FIG-4750): a later segment that starts there is a
 /// successor the drain re-sent after the newest build refused it, and its
@@ -438,9 +476,11 @@ pub(crate) async fn admit_segment(
     generation: Option<lash_core::ExecutableGeneration>,
     build_generation: lash_core::engine::BuildGeneration,
     generation_lane: Option<String>,
+    plugins: impl Fn() -> PluginAdmissionFuture + Send + Sync + 'static,
     effect_budget: impl Fn() -> u64 + Send + Sync + 'static,
 ) -> Result<SegmentAdmission, HandlerError> {
     let effect_budget = Arc::new(effect_budget);
+    let plugins = Arc::new(plugins);
     let Json(verdict) = {
         let registry = Arc::clone(registry);
         let continuations = Arc::clone(continuations);
@@ -557,6 +597,7 @@ pub(crate) async fn admit_segment(
             let continuations = Arc::clone(&continuations);
             let process_id = process_id.clone();
             let nonce = nonce.clone();
+            let plugins = Arc::clone(&plugins);
             async move {
                 if segment_ordinal == 0 {
                     start_root_segment(
@@ -565,6 +606,7 @@ pub(crate) async fn admit_segment(
                         nonce,
                         generation.clone(),
                         build_generation.clone(),
+                        plugins.as_ref(),
                     )
                     .await
                 } else {
@@ -576,6 +618,7 @@ pub(crate) async fn admit_segment(
                         nonce,
                         build_generation.clone(),
                         generation_lane.as_deref(),
+                        plugins.as_ref(),
                     )
                     .await
                 }
@@ -591,6 +634,7 @@ pub(crate) async fn admit_segment(
             process_id,
             generation,
             build_generation,
+            plugins,
         } => Ok(SegmentAdmission::Started(Box::new(AdmittedSegment {
             started: SegmentStarted::new(
                 process_id,
@@ -598,6 +642,7 @@ pub(crate) async fn admit_segment(
                 execution_id,
                 generation,
                 build_generation,
+                plugins,
             ),
             handover,
             policy,
@@ -617,6 +662,7 @@ async fn start_root_segment(
     nonce: String,
     generation: Option<lash_core::ExecutableGeneration>,
     build_generation: lash_core::engine::BuildGeneration,
+    plugins: &(impl Fn() -> PluginAdmissionFuture + ?Sized),
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     if record.input.is_externally_owned() {
@@ -639,6 +685,7 @@ async fn start_root_segment(
                     process_id: record.id.clone(),
                     generation: existing.generation.clone(),
                     build_generation: existing.build_generation.clone(),
+                    plugins: existing.plugins.clone(),
                 }
             } else {
                 StartOutcome::SubstrateLost {
@@ -657,6 +704,11 @@ async fn start_root_segment(
     started.started_at_ms = super::restate_now_ms();
     started.generation = generation.clone();
     started.build_generation = Some(build_generation.clone());
+    // The process's start is an adoption point (FIG-4747): a child started
+    // after a plugin bump records the admitting build's composition and the
+    // writer formats the fleet record permits now.
+    let plugins = plugins().await.map_err(store_fault)?;
+    started.plugins = plugins.clone();
     registry
         .record_first_started_with_authority(process_id, started, &authority)
         .await
@@ -666,9 +718,11 @@ async fn start_root_segment(
         process_id: record.id.clone(),
         generation,
         build_generation: Some(build_generation),
+        plugins,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_later_segment(
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn lash_core::ProcessContinuationStore>,
@@ -677,6 +731,7 @@ async fn start_later_segment(
     nonce: String,
     build_generation: lash_core::engine::BuildGeneration,
     generation_lane: Option<&str>,
+    plugins: &(impl Fn() -> PluginAdmissionFuture + ?Sized),
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     let root = match retained_start(&record, segment_ordinal) {
@@ -704,6 +759,11 @@ async fn start_later_segment(
             .await
             .map_err(store_fault)?;
     }
+    // A successor's admission is an adoption point (FIG-4747): it records
+    // the admitting build's composition and the writer formats the fleet
+    // record permits now. The marker is set-if-absent, so a retry of this
+    // step reads the first execution's choice back below.
+    let plugins = plugins().await.map_err(store_fault)?;
     // The marker is refused on an ended process in the transaction that
     // writes it, so no terminal lands between the check and the start
     // (FIG-3819). A terminal is permanent: the record read after the refusal
@@ -715,6 +775,7 @@ async fn start_later_segment(
                 nonce: nonce.clone(),
                 started_at_ms: super::restate_now_ms(),
                 build_generation: Some(build_generation.clone()),
+                plugins,
             },
         )
         .await
@@ -744,6 +805,7 @@ async fn start_later_segment(
             // The recorded marker's stamp, not the executing build's: a
             // redrive returns the same proof the first execution journaled.
             build_generation: recorded.build_generation,
+            plugins: recorded.plugins,
         }
     } else {
         StartOutcome::SubstrateLost { lost: root }

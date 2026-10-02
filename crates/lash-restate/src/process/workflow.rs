@@ -1090,6 +1090,7 @@ where
         let selector = Arc::clone(&self.segment_effect_budget);
         let registration = input.registration.clone();
         let current_generation = self.runner.executable_generation(&input.registration);
+        let plugin_runner = Arc::clone(&self.runner);
         let (started, handover_digest_recorded, policy, writer) = match admit_segment(
             &ctx,
             &self.registry,
@@ -1099,6 +1100,10 @@ where
             current_generation.clone(),
             self.build_generation.clone(),
             self.route.generation_lane_name(),
+            move || {
+                let runner = Arc::clone(&plugin_runner);
+                Box::pin(async move { runner.admit_plugins().await })
+            },
             move || selector(&registration),
         )
         .await?

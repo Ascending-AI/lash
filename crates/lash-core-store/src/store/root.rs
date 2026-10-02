@@ -634,6 +634,11 @@ pub struct RootAdmission {
     /// The execution that runs the root (FIG-4403): recovery judges the
     /// root by it, never by the root's name.
     pub executor: RootExecutor,
+    /// The plugin composition the root runs and the writer format chosen for
+    /// each plugin at its admission (FIG-4747). Every execution of the root
+    /// writes plugin namespaces in these formats, whatever the fleet record
+    /// permits by then.
+    pub plugins: super::plugin_writers::PluginAdmission,
 }
 
 /// The execution that runs an admitted root, recorded with its admission
@@ -813,7 +818,7 @@ pub enum RootAdmissionRefusal {
 /// resident head the root is admitted on; the store replaces its
 /// `generation` with the durable state generation it reads inside the
 /// admission transaction. `turn_index` and `generation` are recorded as
-/// given, and so is `executor`.
+/// given, and so are `executor` and `plugins`.
 #[derive(Clone, Debug)]
 pub struct AdmitRootRequest {
     /// The fence of the drive admission the root runs under: the one
@@ -829,6 +834,9 @@ pub struct AdmitRootRequest {
     pub admitted_generation: crate::build_generation::BuildGeneration,
     /// The execution that runs the root, recorded as given.
     pub executor: RootExecutor,
+    /// The admitting build's plugin composition and the writer chosen for
+    /// each plugin, recorded as given by the first admission.
+    pub plugins: super::plugin_writers::PluginAdmission,
 }
 
 impl AdmitRootRequest {

@@ -693,6 +693,7 @@ async fn law_session_recording(
         &crate::PluginOptions::default(),
         None,
         true,
+        &crate::store::plugin_writers::PluginAdmission::default(),
     )
     .expect("the law's plugin set resolves its creation plugin config");
     let store =

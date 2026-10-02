@@ -435,6 +435,17 @@ pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
         registration: &ProcessRegistration,
     ) -> Option<lash_core::ExecutableGeneration>;
 
+    /// Admit the runner's plugin composition against the fleet record
+    /// (FIG-4747): the composition a segment starting now runs and the
+    /// writer format chosen for each plugin. A segment's start step calls it
+    /// once and records the answer. A runner whose segments carry no plugins
+    /// answers `None`.
+    async fn admit_plugins(
+        &self,
+    ) -> Result<Option<lash_core::store::plugin_writers::PluginAdmission>, PluginError> {
+        Ok(None)
+    }
+
     /// Ask the child turn a `SessionTurn` process drives to stop now, as a
     /// durable request on the turn's gate (FIG-3673). A runner whose
     /// processes drive no child turn answers `Ok`.
@@ -503,6 +514,12 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
             .and_then(|worker| worker.executable_generation(registration))
     }
 
+    async fn admit_plugins(
+        &self,
+    ) -> Result<Option<lash_core::store::plugin_writers::PluginAdmission>, PluginError> {
+        self.worker()?.admit_plugins().await.map(Some)
+    }
+
     async fn stop_child_turn(
         &self,
         record: &lash_core::ProcessRecord,
@@ -534,6 +551,9 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         let worker = self.worker()?;
         let execution_write_authority = started.write_authority().clone();
+        // The segment writes plugin namespaces in the formats its start
+        // recorded (FIG-4747), on this execution and on every retry.
+        let execution_context = execution_context.with_plugin_admission(started.plugins().cloned());
         Box::pin(worker.run_process_segment_with_scoped_effect_controller(
             process_id,
             registration,

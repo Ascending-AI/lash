@@ -1050,6 +1050,20 @@ pub enum CompatRefusal {
          store is refused unchanged. Restore it from a backup"
     )]
     PluginWriterRangeMalformed { plugin: String, detail: String },
+    /// A plugin writes no format the fleet record permits it (FIG-4747): an
+    /// admission chooses each plugin's writer inside its range, and this
+    /// plugin has none there. Nothing was admitted.
+    #[error(
+        "plugin `{plugin}` writes formats {writable:?}, none of which is inside the writer range \
+         {permitted} the fleet record permits, so it cannot run here. Nothing was admitted; run \
+         a build whose plugin writes a permitted format, or finalize the release that \
+         introduced its formats with `lashctl finalize`"
+    )]
+    PluginWriterUnwritable {
+        plugin: String,
+        writable: Vec<u32>,
+        permitted: VersionRange,
+    },
 }
 
 impl CompatRefusal {
@@ -1094,7 +1108,8 @@ impl CompatRefusal {
             | Self::UnknownVocabulary { .. }
             | Self::PluginWriterOutsideRange { .. }
             | Self::PluginWriterUnprovisioned { .. }
-            | Self::PluginWriterRangeMalformed { .. } => {}
+            | Self::PluginWriterRangeMalformed { .. }
+            | Self::PluginWriterUnwritable { .. } => {}
         }
         self
     }

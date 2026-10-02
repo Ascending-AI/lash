@@ -572,6 +572,7 @@ async fn a_child_created_before_its_parents_prompt_changed_keeps_its_own(
         &lash_core::PluginOptions::default(),
         Some(&parent_config.plugin_config),
         false,
+        &lash_core::store::plugin_writers::PluginAdmission::default(),
     )
     .expect("the child's owners create its namespaces");
     lash_core::runtime::admit_session_view(

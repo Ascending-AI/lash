@@ -662,6 +662,7 @@ mod tests {
                 .expect("options"),
                 None,
                 true,
+                &lash_core::store::plugin_writers::PluginAdmission::default(),
             )
             .expect("creation");
         let recorded = |config: &lash_core::PersistedSessionConfig| {
@@ -685,7 +686,12 @@ mod tests {
                 )
                 .expect("admitted");
             let outcome = registry
-                .resolve(config, &record, &lash_core::EmptyLlmProfiles)
+                .resolve(
+                    config,
+                    &record,
+                    &lash_core::EmptyLlmProfiles,
+                    &lash_core::store::plugin_writers::PluginAdmission::default(),
+                )
                 .expect("the recorded config reads")
                 .publish(config);
             assert!(
@@ -939,6 +945,7 @@ mod tests {
                 &lash_core::PluginOptions::default(),
                 None,
                 true,
+                &lash_core::store::plugin_writers::PluginAdmission::default(),
             )
             .expect("creation");
         let recorded = |config: &lash_core::PersistedSessionConfig| {
@@ -966,7 +973,12 @@ mod tests {
                 )
                 .expect("admitted");
             let outcome = registry
-                .resolve(config, &record, &lash_core::EmptyLlmProfiles)
+                .resolve(
+                    config,
+                    &record,
+                    &lash_core::EmptyLlmProfiles,
+                    &lash_core::store::plugin_writers::PluginAdmission::default(),
+                )
                 .expect("the recorded config reads")
                 .publish(config);
             assert!(

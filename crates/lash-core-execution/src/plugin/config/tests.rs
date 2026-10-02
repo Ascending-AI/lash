@@ -204,7 +204,13 @@ fn head(registry: &ConfigRegistry, revision: u64) -> crate::PersistedSessionConf
         crate::MaxToolCalls::new(1024),
     );
     config.plugin_config = registry
-        .resolve_creation(None, &PluginOptions::default(), None, true)
+        .resolve_creation(
+            None,
+            &PluginOptions::default(),
+            None,
+            true,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("creation config");
     config.config_revision = revision;
     config
@@ -227,6 +233,7 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
             &PluginOptions::typed("first", serde_json::json!({ "count": 3 })).expect("options"),
             None,
             true,
+            &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("root config");
     assert_eq!(root.protocol_plugin_id(), Some("first"));
@@ -240,7 +247,13 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
         "an owner asked with nothing stated records its defaults"
     );
     let child = registry
-        .resolve_creation(None, &PluginOptions::default(), Some(&root), false)
+        .resolve_creation(
+            None,
+            &PluginOptions::default(),
+            Some(&root),
+            false,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("child config");
     assert_eq!(
         child.get("first"),
@@ -254,6 +267,7 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
             &PluginOptions::typed("nobody", serde_json::json!({})).expect("options"),
             None,
             true,
+            &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect_err("an unowned namespace is refused");
     assert_eq!(
@@ -271,6 +285,7 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
                 .expect("options"),
             None,
             true,
+            &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect_err("creation input the owner does not accept is refused");
     assert!(
@@ -339,7 +354,12 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
         .admit("t", 3, vec![increment("first", 1, 10)])
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
+        .resolve(
+            &base,
+            &transaction,
+            &crate::EmptyLlmProfiles,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("the recorded config reads");
     assert_eq!(
         resolution.result,
@@ -376,7 +396,12 @@ fn ordered_commands_of_two_owners_publish_together_with_one_revision_step() {
         )
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
+        .resolve(
+            &base,
+            &transaction,
+            &crate::EmptyLlmProfiles,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("the recorded config reads");
     let mut published = base.clone();
     assert_eq!(
@@ -414,7 +439,12 @@ fn a_refused_member_refuses_the_whole_transaction() {
         )
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
+        .resolve(
+            &base,
+            &transaction,
+            &crate::EmptyLlmProfiles,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("the recorded config reads");
     let mut published = base.clone();
     let ConfigTransactionOutcome::Refused { refusal } = resolution.publish(&mut published) else {
@@ -455,7 +485,12 @@ fn the_final_candidate_is_validated_by_every_touched_owner() {
         )
         .expect("admitted");
     let resolution = registry
-        .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
+        .resolve(
+            &base,
+            &transaction,
+            &crate::EmptyLlmProfiles,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the final candidate is refused");
@@ -479,7 +514,12 @@ fn refused_over(
         entries: vec![entry],
     };
     let resolution = registry
-        .resolve(base, &transaction, &crate::EmptyLlmProfiles)
+        .resolve(
+            base,
+            &transaction,
+            &crate::EmptyLlmProfiles,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("the recorded config reads");
     let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
         panic!("the transaction is refused: {resolution:?}");
@@ -609,7 +649,12 @@ fn an_unreadable_recorded_namespace_is_corruption_and_refuses_nothing() {
         let transaction = registry.admit("t", 0, vec![entry]).expect("admitted");
         corrupt(
             registry
-                .resolve(&base, &transaction, &crate::EmptyLlmProfiles)
+                .resolve(
+                    &base,
+                    &transaction,
+                    &crate::EmptyLlmProfiles,
+                    &crate::store::plugin_writers::PluginAdmission::default(),
+                )
                 .expect_err(what),
         );
     }
@@ -640,6 +685,7 @@ fn an_unreadable_recorded_namespace_is_corruption_and_refuses_nothing() {
         &PluginOptions::default(),
         Some(&base.plugin_config),
         false,
+        &crate::store::plugin_writers::PluginAdmission::default(),
     ) {
         Err(ConfigFault::RecordedCorrupt(error)) => corrupt(error),
         other => panic!("a child of a corrupt parent: {other:?}"),
@@ -817,7 +863,12 @@ fn resolve_core(
     let entries = registry.entries(&transaction).expect("entries");
     let transaction = registry.admit("t", 0, entries).expect("admitted");
     registry
-        .resolve(base, &transaction, models)
+        .resolve(
+            base,
+            &transaction,
+            models,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .expect("the recorded config reads")
 }
 
@@ -1066,4 +1117,155 @@ fn registrations_that_cannot_stand_are_refused() {
         })),
         Err(ConfigRegistrationError::ForeignCommand { .. })
     ));
+}
+
+/// A counter plugin that reads format 2 natively and still writes format 1,
+/// which spells the count `tally`.
+struct FormattedCounter(CounterFactory);
+
+impl FormattedCounter {
+    const ID: &'static str = "formatted";
+
+    fn rename(mut value: serde_json::Value, from: &str, to: &str) -> serde_json::Value {
+        if let Some(object) = value.as_object_mut()
+            && let Some(count) = object.remove(from)
+        {
+            object.insert(to.to_string(), count);
+        }
+        value
+    }
+}
+
+impl PluginFactory for FormattedCounter {
+    fn id(&self) -> &'static str {
+        Self::ID
+    }
+
+    fn declaration(&self) -> crate::plugin::PluginDeclaration {
+        let mut declaration = crate::plugin::PluginDeclaration::initial(Self::ID);
+        declaration.format_version = crate::FormatVersion::new(2).expect("a format version");
+        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration
+    }
+
+    fn migrate_format(
+        &self,
+        from: crate::FormatVersion,
+        _namespace: crate::FormatNamespace,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, crate::FormatRefusal> {
+        Ok(if from == crate::FormatVersion::ONE {
+            Self::rename(value, "tally", "count")
+        } else {
+            value
+        })
+    }
+
+    fn encode_format(
+        &self,
+        to: crate::FormatVersion,
+        _namespace: crate::FormatNamespace,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, crate::FormatRefusal> {
+        Ok(if to == crate::FormatVersion::ONE {
+            Self::rename(value.clone(), "count", "tally")
+        } else {
+            value.clone()
+        })
+    }
+
+    fn build(
+        &self,
+        ctx: &crate::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, crate::PluginError> {
+        self.0.build(ctx)
+    }
+
+    fn register_config(&self, reg: &mut ConfigRegistrar) -> Result<(), ConfigRegistrationError> {
+        self.0.register_config(reg)
+    }
+}
+
+/// The admission of [`FormattedCounter`] that chose `writer`.
+fn formatted_admission(writer: u32) -> crate::store::plugin_writers::PluginAdmission {
+    crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
+        crate::store::plugin_writers::AdmittedPlugin {
+            plugin: FormattedCounter::ID.to_string(),
+            behavior_revision: crate::plugin::BehaviorRevision::ONE,
+            writer: crate::FormatVersion::new(writer).expect("a format version"),
+        },
+    ])
+}
+
+/// FIG-4747: creation and a transaction write a namespace in the format the
+/// admission recorded for its plugin, and a later admission's wider choice
+/// changes what it writes, never what the earlier one wrote.
+#[test]
+fn config_namespaces_are_written_in_the_admissions_recorded_format() {
+    let registry = registry(vec![Arc::new(FormattedCounter(CounterFactory::new(
+        FormattedCounter::ID,
+    )))]);
+    let stamp = |config: &crate::PluginConfig| {
+        let namespace = config
+            .namespace(FormattedCounter::ID)
+            .expect("the namespace is recorded");
+        (namespace.format_version.get(), namespace.value.clone())
+    };
+    let create = |writers: &crate::store::plugin_writers::PluginAdmission| {
+        registry
+            .resolve_creation(None, &PluginOptions::default(), None, true, writers)
+            .expect("creation config")
+    };
+
+    // Inside the window the admission chose format 1.
+    let window = formatted_admission(1);
+    let created = create(&window);
+    assert_eq!(
+        stamp(&created),
+        (1, serde_json::json!({ "tally": 0, "label": "root" }))
+    );
+    // An admission that names no writer for the plugin writes its native one.
+    assert_eq!(
+        stamp(&create(
+            &crate::store::plugin_writers::PluginAdmission::default()
+        )),
+        (2, serde_json::json!({ "count": 0, "label": "root" }))
+    );
+
+    let mut base = crate::PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1024),
+    );
+    base.plugin_config = created;
+    base.config_revision = 7;
+    let transaction = registry
+        .admit("t", 7, vec![increment(FormattedCounter::ID, 2, 10)])
+        .expect("admitted");
+    let publish = |writers: &crate::store::plugin_writers::PluginAdmission| {
+        let resolution = registry
+            .resolve(&base, &transaction, &crate::EmptyLlmProfiles, writers)
+            .expect("the recorded config reads");
+        let mut published = base.clone();
+        assert!(matches!(
+            resolution.publish(&mut published),
+            ConfigTransactionOutcome::Applied { .. }
+        ));
+        (
+            stamp(&published.plugin_config),
+            serde_json::to_vec(&resolution).expect("encode the resolution"),
+        )
+    };
+    let (recorded, first) = publish(&window);
+    assert_eq!(
+        recorded,
+        (1, serde_json::json!({ "tally": 2, "label": "root" })),
+        "the format 1 base is migrated, reduced and written back in format 1"
+    );
+    // The same recorded admission resolves to the same bytes again.
+    assert_eq!(publish(&window).1, first);
+    // An admission made after the range widened writes the native format.
+    assert_eq!(
+        publish(&formatted_admission(2)).0,
+        (2, serde_json::json!({ "count": 2, "label": "root" }))
+    );
 }

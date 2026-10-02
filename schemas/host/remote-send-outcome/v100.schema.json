@@ -1306,6 +1306,36 @@
             "detail"
           ],
           "type": "object"
+        },
+        {
+          "description": "A plugin writes no format the fleet record permits it (FIG-4747): an\nadmission chooses each plugin's writer inside its range, and this\nplugin has none there. Nothing was admitted.",
+          "properties": {
+            "permitted": {
+              "$ref": "#/$defs/VersionRange"
+            },
+            "plugin": {
+              "type": "string"
+            },
+            "refusal": {
+              "const": "plugin_writer_unwritable",
+              "type": "string"
+            },
+            "writable": {
+              "items": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "refusal",
+            "plugin",
+            "writable",
+            "permitted"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3490,6 +3520,31 @@
       ],
       "type": "string"
     },
+    "RemoteAdmittedPlugin": {
+      "additionalProperties": false,
+      "description": "Wire mirror of one plugin of a recorded plugin admission.",
+      "properties": {
+        "behavior_revision": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "writer": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "plugin",
+        "behavior_revision",
+        "writer"
+      ],
+      "type": "object"
+    },
     "RemoteAssistantOutput": {
       "properties": {
         "raw_text": {
@@ -5601,6 +5656,16 @@
         },
         "owner": {
           "$ref": "#/$defs/RemoteLeaseOwnerIdentity"
+        },
+        "plugins": {
+          "description": "The plugin composition the incarnation started under, in hook order,\nwith the writer format chosen for each plugin (FIG-4747).",
+          "items": {
+            "$ref": "#/$defs/RemoteAdmittedPlugin"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "started_at_ms": {
           "format": "uint64",

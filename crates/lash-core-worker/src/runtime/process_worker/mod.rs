@@ -143,6 +143,24 @@ impl DurableProcessWorker {
             .expect("the work cadence was validated when the worker was built")
     }
 
+    /// Admit this worker's plugin composition against the fleet record
+    /// (FIG-4747): the plugins a process segment starting now runs and the
+    /// writer format chosen for each. A durable substrate records the answer
+    /// on the segment's start, and the segment then runs under that record.
+    ///
+    /// # Errors
+    /// The store's typed refusal for a plugin that writes no format the
+    /// fleet record permits, and any fault reading the record.
+    pub async fn admit_plugins(
+        &self,
+    ) -> Result<crate::store::plugin_writers::PluginAdmission, PluginError> {
+        Ok(self
+            .config
+            .plugin_host
+            .admit_plugins(self.config.session_store_factory().as_ref())
+            .await?)
+    }
+
     /// The executable generation `registration`'s engine runs it as
     /// (FIG-3571): what the incarnation's start record must name. A durable
     /// substrate that records the start itself, before this worker runs the
@@ -242,6 +260,15 @@ impl DurableProcessWorker {
             Some(started) => started.generation.clone(),
             None => current_generation.clone(),
         };
+        // The plugin admission the segment runs under (FIG-4747): the one
+        // its substrate recorded on the segment's start, or for a start this
+        // worker records itself, the one it chooses now and records with it.
+        let segment_plugins = execution_context.plugin_admission.clone();
+        let started_plugins = match (&segment_plugins, current.first_started.is_some()) {
+            (Some(plugins), _) => Some(plugins.clone()),
+            (None, true) => None,
+            (None, false) => Some(self.admit_plugins().await?),
+        };
         // A durable substrate admits a segment in its own journal before the
         // worker runs it (FIG-3588): the start record it wrote is read here,
         // never written again. A second write on every redrive would be live
@@ -261,12 +288,19 @@ impl DurableProcessWorker {
                         started_at_ms: self.now_ms(),
                         build_generation: None,
                         generation,
+                        plugins: started_plugins,
                     },
                     &execution_write_authority,
                 )
                 .await?
                 .into_record(),
         };
+        let plugin_admission = segment_plugins.or_else(|| {
+            admitted
+                .first_started
+                .as_deref()
+                .and_then(|started| started.plugins.clone())
+        });
         // The authority CAS above is the admission: the controller must
         // already be admitted for the process it returned (ADR 0099 §1).
         let cas_admission = crate::AdmittedScope::process(admitted.id.clone());
@@ -358,6 +392,9 @@ impl DurableProcessWorker {
                 "failed to build the runtime of process `{process_id}`: {err}"
             ))
         })?;
+        if let Some(plugins) = plugin_admission {
+            runtime.adopt_plugin_admission(plugins);
+        }
         let result = runtime
             .run_process(
                 admitted,

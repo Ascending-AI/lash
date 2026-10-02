@@ -361,6 +361,7 @@ async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Doubl
         &lash_core::PluginOptions::default(),
         None,
         true,
+        &lash_core::store::plugin_writers::PluginAdmission::default(),
     )
     .expect("the parent's deployment records the RLM namespace");
     let mut child: lash_core::PersistedSessionConfig = policy().into();
@@ -373,6 +374,7 @@ async fn a_child_session_runs_under_its_parents_recorded_behaviour(double: Doubl
         &lash_core::PluginOptions::default(),
         Some(&parent.plugin_config),
         false,
+        &lash_core::store::plugin_writers::PluginAdmission::default(),
     )
     .expect("the child's creating host records the RLM namespace");
     let recorded = child
@@ -924,6 +926,7 @@ async fn process_settings_have_one_recorded_engine_shape(double: Double, _name: 
             &lash_core::PluginOptions::default(),
             None,
             true,
+            &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .unwrap();
     let env = ProcessExecutionEnvSpec::new(

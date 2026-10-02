@@ -278,6 +278,7 @@ pub(super) async fn signal_admission_retains_its_identity_and_selected_wait(
                 started_at_ms: record.created_at_ms,
                 generation: None,
                 build_generation: None,
+                plugins: None,
             },
         )
         .await

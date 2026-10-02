@@ -181,8 +181,15 @@ impl LashRuntime {
         next.take_root_view();
         let base = crate::store::persisted_session_config_from_state(&next);
         let registry = self.config_registry()?;
+        // A storeless runtime has no fleet record: each plugin writes its
+        // native format.
         let resolution = registry
-            .resolve(&base, &record, self.host.core.providers.models.as_ref())
+            .resolve(
+                &base,
+                &record,
+                self.host.core.providers.models.as_ref(),
+                &crate::store::plugin_writers::PluginAdmission::default(),
+            )
             .map_err(|corrupt| {
                 crate::RuntimeEffectControllerError::from(corrupt.into_store_error())
                     .into_runtime_error()
@@ -314,6 +321,14 @@ impl LashRuntime {
         );
         let runner = ResolveConfigTransactionRunner {
             registry,
+            plugin_host: self
+                .session
+                .as_ref()
+                .map(|session| session.plugins().host().clone()),
+            store: self
+                .session
+                .as_ref()
+                .and_then(|session| session.history_store()),
             base: crate::store::persisted_session_config_from_state(&self.state),
             transaction: transaction.clone(),
             models: Arc::clone(&self.host.core.providers.models),
@@ -368,6 +383,11 @@ fn publish_config_resolution(
 /// session and the transaction.
 struct ResolveConfigTransactionRunner {
     registry: Arc<crate::ConfigRegistry>,
+    /// The plugins whose writer formats the step chooses from the fleet
+    /// record (FIG-4747). The choice is part of the recorded resolution, so
+    /// a replay publishes the formats the first execution chose.
+    plugin_host: Option<crate::plugin::PluginHost>,
+    store: Option<crate::store::SessionStore>,
     base: crate::PersistedSessionConfig,
     transaction: crate::ConfigTransactionRecord,
     /// The host's models a model command mints its key's binding through.
@@ -404,9 +424,21 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
         }
         // A recorded namespace its owner cannot read is corruption of the
         // session's config, never this transaction's refusal.
+        let writers = match (&self.plugin_host, &self.store) {
+            (Some(host), Some(store)) => host
+                .admit_plugins(store.store().as_ref())
+                .await
+                .map_err(crate::runtime::runtime_error_from_store_commit)?,
+            _ => crate::store::plugin_writers::PluginAdmission::default(),
+        };
         let resolution = self
             .registry
-            .resolve(&self.base, &self.transaction, self.models.as_ref())
+            .resolve(
+                &self.base,
+                &self.transaction,
+                self.models.as_ref(),
+                &writers,
+            )
             .map_err(crate::RecordedNamespaceCorrupt::into_store_error)?;
         Ok(crate::RuntimeEffectOutcome::ResolveConfigTransaction {
             resolution: Box::new(resolution),

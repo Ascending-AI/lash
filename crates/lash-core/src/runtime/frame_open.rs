@@ -63,7 +63,7 @@ impl LashRuntime {
             self.host.core.clock.as_ref(),
         )?;
         if result.opened {
-            self.stamp_live_plugin_state();
+            self.stamp_live_plugin_state()?;
         }
         Ok(OpenedFrame {
             result,

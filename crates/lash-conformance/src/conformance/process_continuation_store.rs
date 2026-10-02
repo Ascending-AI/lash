@@ -184,6 +184,7 @@ pub async fn process_continuation_store(
         nonce: "nonce-first".to_string(),
         started_at_ms: 10,
         build_generation: Some(lash_core::engine::BuildGeneration::for_test("conformance")),
+        plugins: None,
     };
     assert_eq!(
         store
@@ -207,6 +208,7 @@ pub async fn process_continuation_store(
                     nonce: "nonce-other".to_string(),
                     started_at_ms: 20,
                     build_generation: None,
+                    plugins: None,
                 },
             )
             .await
@@ -226,6 +228,7 @@ pub async fn process_continuation_store(
                     nonce: "nonce-unretained".to_string(),
                     started_at_ms: 30,
                     build_generation: None,
+                    plugins: None,
                 },
             )
             .await
@@ -341,6 +344,7 @@ pub async fn process_continuation_store(
                 nonce: "nonce-after-terminal".to_string(),
                 started_at_ms: 40,
                 build_generation: None,
+                plugins: None,
             },
         )
         .await;

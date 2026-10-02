@@ -204,6 +204,11 @@ pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
     pub(in crate::runtime::session_manager) plugin_config: crate::AdmittedPluginConfig,
     pub(in crate::runtime::session_manager) plugin_host: &'a crate::PluginHost,
     pub(in crate::runtime::session_manager) protocol_plugin_id: &'a str,
+    /// The plugin admission the starter runs under (FIG-4747): a session it
+    /// creates records its namespaces in the same formats. Empty when the
+    /// starter adopted none, and each plugin then writes its native format.
+    pub(in crate::runtime::session_manager) plugin_admission:
+        crate::store::plugin_writers::PluginAdmission,
     /// Mints the binding of a model key the create request names.
     pub(in crate::runtime::session_manager) models: &'a dyn crate::LlmProfiles,
 }
@@ -216,6 +221,7 @@ impl<'a> StarterFacts<'a> {
             plugin_config: current.plugins.admitted_plugin_config(),
             plugin_host: current.plugins.host(),
             protocol_plugin_id: current.plugins.protocol_plugin_id(),
+            plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
             models: current.host.core.providers.models.as_ref(),
         }
     }
@@ -299,6 +305,7 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
             &request.plugin_options,
             is_child.then_some(starter.plugin_config.config.as_ref()),
             !is_child,
+            &starter.plugin_admission,
         )
         .map_err(|error| match error {
             crate::CreationConfigError::Format(refusal) => crate::PluginError::Format(refusal),
@@ -335,6 +342,7 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
         plugin_config: environment.plugin_config.clone(),
         plugin_host: current.plugins.host(),
         protocol_plugin_id: current.plugins.protocol_plugin_id(),
+        plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
         models: current.host.core.providers.models.as_ref(),
     };
     // A child whose request names no session takes the id the worker
@@ -1604,6 +1612,7 @@ mod tests {
                 plugin_config: crate::AdmittedPluginConfig::default(),
                 plugin_host: &plugin_host,
                 protocol_plugin_id: "test_protocol",
+                plugin_admission: crate::store::plugin_writers::PluginAdmission::default(),
                 models: models.as_ref(),
             },
             request,

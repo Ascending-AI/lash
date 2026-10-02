@@ -972,7 +972,9 @@ pub async fn tool_restore_policy_survives_every_rebuild_and_rollback(tier: ToolC
             );
         }
         let mut runtime = runtime.lock().await;
-        runtime.stamp_live_plugin_state();
+        runtime
+            .stamp_live_plugin_state()
+            .expect("the live plugin state is captured");
         assert!(
             runtime.state().preserve_tool_state_snapshot,
             "phase {phase}"

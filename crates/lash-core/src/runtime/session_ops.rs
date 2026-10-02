@@ -137,7 +137,8 @@ impl LashRuntime {
                 )
                 .await?;
         }
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
             leaf_node_id: self
@@ -456,7 +457,8 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
         Ok(owned_events)
     }
 }

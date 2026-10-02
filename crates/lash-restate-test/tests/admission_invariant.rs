@@ -132,6 +132,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
                     nonce: "an-earlier-execution".to_string(),
                     started_at_ms: 1,
                     build_generation: None,
+                    plugins: None,
                 },
             )
             .await

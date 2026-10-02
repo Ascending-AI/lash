@@ -1107,6 +1107,7 @@ impl LawSession {
                 &crate::PluginOptions::default(),
                 None,
                 true,
+                &crate::store::plugin_writers::PluginAdmission::default(),
             )
             .expect("the law protocol's creation plugin config resolves");
         let store =

@@ -322,6 +322,7 @@ pub fn admit_root_request_for_test(
         generation: None,
         admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
         executor: crate::store::RootExecutor::Root,
+        plugins: Default::default(),
     }
 }
 

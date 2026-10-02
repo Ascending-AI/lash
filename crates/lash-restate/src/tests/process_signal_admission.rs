@@ -55,6 +55,7 @@ async fn parked_signal_target(registry: &Arc<dyn ProcessRegistry>) -> ProcessId 
                 started_at_ms: 1,
                 generation: None,
                 build_generation: None,
+                plugins: None,
             },
         )
         .await

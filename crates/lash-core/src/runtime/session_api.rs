@@ -49,7 +49,12 @@ impl LashRuntime {
         Ok(())
     }
 
-    pub fn stamp_live_plugin_state(&mut self) {
+    /// Stamp the live tool and plugin state onto the resident state.
+    ///
+    /// # Errors
+    /// The typed refusal of a plugin namespace that cannot be written in
+    /// the format its admission recorded (FIG-4747).
+    pub fn stamp_live_plugin_state(&mut self) -> Result<(), RuntimeError> {
         // Whole-state replacements (resident reload, append-receipt replay)
         // rebuild `self.state`; reassert the per-open claim before the flag
         // is consulted so the durable snapshot is never lost in the gap.
@@ -63,11 +68,12 @@ impl LashRuntime {
                 let snapshot = session.plugins().tool_registry().export_state();
                 self.state.set_tool_state_snapshot(Some(snapshot));
             }
-            self.state.capture_plugin_states(session.plugins());
+            self.state.capture_plugin_states(session.plugins())?;
         } else {
             self.state.set_tool_state_snapshot(None);
             self.state.set_plugin_state(None);
         }
+        Ok(())
     }
 
     /// Make `state` the resident runtime state. Every whole-state swap goes
@@ -256,7 +262,7 @@ impl LashRuntime {
                 let snapshot = session.plugins().tool_registry().export_state();
                 state.set_tool_state_snapshot(Some(snapshot));
             }
-            state.capture_plugin_states(session.plugins());
+            state.capture_plugin_states(session.plugins())?;
         }
         Ok(state)
     }
@@ -1401,7 +1407,7 @@ impl LashRuntime {
         let fleet_format = self.fleet_format();
         let commit_state = &mut self.state;
         if let Some(session) = self.session.as_ref() {
-            commit_state.capture_plugin_states(session.plugins());
+            commit_state.capture_plugin_states(session.plugins())?;
         }
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(

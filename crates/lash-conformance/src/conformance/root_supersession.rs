@@ -382,6 +382,7 @@ pub async fn inconsistent_divergence_still_parks(
             generation: None,
             admitted_generation: lash_core::engine::BuildGeneration::for_test("conformance-law"),
             executor: lash_core::store::RootExecutor::Root,
+            plugins: Default::default(),
         })
         .await
         .expect("record the root's admission")

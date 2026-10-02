@@ -288,7 +288,11 @@ impl TurnBoundary {
         state.policy = policy;
         state.turn_index = turn_index;
         if let Some(plugins) = plugins.as_ref() {
-            state.capture_plugin_states(plugins.as_ref());
+            state
+                .capture_plugin_states(plugins.as_ref())
+                .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
+                    error: Box::new(error),
+                })?;
         }
         Ok(())
     }
@@ -352,7 +356,7 @@ impl TurnBoundary {
                 .apply(state)
                 .map_err(super::runtime_error_from_store_commit)?;
             if let Some(plugins) = plugins {
-                state.capture_plugin_states(plugins);
+                state.capture_plugin_states(plugins)?;
             }
         }
         let protocol_events = self.apply_event_delta(event_delta);
@@ -606,7 +610,11 @@ impl TurnBoundary {
         // §3). A store-less session keeps the same fact resident.
         state.pending_follow_on = pending_follow_on.map(Box::new);
         if let Some(plugins) = plugins {
-            state.capture_plugin_states(plugins);
+            state.capture_plugin_states(plugins).map_err(|error| {
+                StoreError::TurnOutcomeMaterializationRefused {
+                    error: Box::new(error),
+                }
+            })?;
         }
         // The frame the turn was admitted on, which a switch this commit
         // opens ends (ADR 0113 §3.1), and what the switch carries out of it.

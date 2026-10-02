@@ -105,6 +105,9 @@ impl PluginHost {
                     stored: namespace.format_version,
                     readable: factory.declaration().format_version,
                 })?;
+            if to == namespace.format_version {
+                continue;
+            }
             let value = serde_json::to_value(&namespace.values).map_err(|error| {
                 PluginError::StoredDataCorrupt {
                     record_kind: "plugin_state".into(),
@@ -143,6 +146,9 @@ impl PluginHost {
                     stored: namespace.format_version,
                     readable: factory.declaration().format_version,
                 })?;
+            if to == namespace.format_version {
+                continue;
+            }
             encoded.insert_versioned(
                 factory.id(),
                 to,

@@ -281,6 +281,13 @@ impl SessionBuilder {
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
         )?;
+        // Creation is an adoption point of its own (FIG-4747): the created
+        // head's namespaces are written in the formats the fleet record
+        // permits now.
+        let admission = plugin_host
+            .admit_plugins(self.core.store_factory.as_ref())
+            .await
+            .map_err(EmbedError::Store)?;
         config.plugin_config = plugin_host
             .resolve_creation_plugin_config(
                 self.core
@@ -290,6 +297,7 @@ impl SessionBuilder {
                 &plugin_options,
                 None,
                 parent.is_none(),
+                &admission,
             )
             .map_err(lash_core::SessionError::from)?;
         let request = SessionStoreCreateRequest {

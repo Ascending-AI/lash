@@ -46,7 +46,9 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                         assert!(session.export_state().plugins.is_empty());
                         let mut exported =
                             crate::RuntimeSessionState::new(crate::testing::mock_session_policy());
-                        exported.refresh_plugin_states(&session);
+                        exported
+                            .refresh_plugin_states(&session)
+                            .expect("the live plugin state is captured");
                         assert!(
                             exported
                                 .plugin_state()
@@ -160,7 +162,9 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
     ));
-    runtime_state.capture_plugin_states(&child);
+    runtime_state
+        .capture_plugin_states(&child)
+        .expect("the live plugin state is captured");
     assert!(
         runtime_state.plugin_state().unwrap().plugins["neighbor-secret-key"]
             .values

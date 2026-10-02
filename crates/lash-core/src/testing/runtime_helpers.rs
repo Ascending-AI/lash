@@ -946,7 +946,13 @@ impl TestRuntime {
         // The fixture session records what a creator records: each installed
         // owner's namespace from its defaults (FIG-4379).
         initial_state.authority.plugin_config = plugin_host
-            .resolve_creation_plugin_config(None, &crate::PluginOptions::default(), None, true)
+            .resolve_creation_plugin_config(
+                None,
+                &crate::PluginOptions::default(),
+                None,
+                true,
+                &crate::store::plugin_writers::PluginAdmission::default(),
+            )
             .unwrap_or_else(|refusal| {
                 panic!("the installed owners refuse their defaults: {refusal}")
             });
@@ -1416,7 +1422,13 @@ pub fn record_creation_plugin_config(
         plugins: state.authority.plugin_config.namespaces().clone(),
     };
     state.authority.plugin_config = host
-        .resolve_creation_plugin_config(Some(protocol_plugin_id), &requested, None, true)
+        .resolve_creation_plugin_config(
+            Some(protocol_plugin_id),
+            &requested,
+            None,
+            true,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .unwrap_or_else(|refusal| {
             panic!("the installed owners refuse the stated config: {refusal}")
         });

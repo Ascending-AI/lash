@@ -291,6 +291,7 @@ impl DriveParts {
             generation: None,
             admitted_generation: crate::engine::BuildGeneration::for_test(admitted_generation),
             executor: crate::store::RootExecutor::Root,
+            plugins: Default::default(),
         }
     }
 }

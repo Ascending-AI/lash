@@ -357,7 +357,9 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     )
     .await
     .expect("initial authority runtime");
-    runtime.stamp_live_plugin_state();
+    runtime
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     let parked = Box::pin(runtime.park())
         .await
         .expect("persist authority runtime");
@@ -427,7 +429,9 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
         "the live session-open authority must start narrower"
     );
 
-    runtime.stamp_live_plugin_state();
+    runtime
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     runtime.edit_resident_state_for_test(|state| *state.authority = Default::default());
     let parked = Box::pin(runtime.park())
         .await
@@ -1814,7 +1818,9 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
             .is_member(),
         "authority hiding must not become persisted curation"
     );
-    runtime.stamp_live_plugin_state();
+    runtime
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     drop(
         Box::pin(runtime.park())
             .await
@@ -1895,7 +1901,9 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
         .apply_tool_state(curated)
         .await
         .expect("apply original opt-out");
-    runtime.stamp_live_plugin_state();
+    runtime
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     let parked = Box::pin(runtime.park())
         .await
         .expect("persist original source");

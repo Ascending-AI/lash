@@ -2078,7 +2078,12 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let mut config = crate::PersistedSessionConfig::from(&policy);
     assert!(matches!(
         registry
-            .resolve(&config, &transaction, models.as_ref())
+            .resolve(
+                &config,
+                &transaction,
+                models.as_ref(),
+                &crate::store::plugin_writers::PluginAdmission::default()
+            )
             .expect("the recorded config reads")
             .publish(&mut config),
         crate::ConfigTransactionOutcome::Applied { .. }

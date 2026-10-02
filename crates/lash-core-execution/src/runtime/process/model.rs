@@ -473,6 +473,7 @@ impl ProcessStartOptions {
         ProcessExecutionContext {
             causal_invocation: scope.parent_invocation.clone(),
             execution_write_authority: None,
+            plugin_admission: None,
         }
     }
 }

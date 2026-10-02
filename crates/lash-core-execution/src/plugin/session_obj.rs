@@ -218,8 +218,78 @@ pub struct PluginSession {
     /// Whether the session's plugins were seeded from a parent session's
     /// capture rather than built fresh or rematerialized from their own.
     pub(super) forked: bool,
+    /// The plugin admission the session's work was last admitted under
+    /// (FIG-4747): the writer formats its commits encode plugin namespaces
+    /// in. `None` until an admission is adopted; the session then writes
+    /// each plugin's native format.
+    pub(super) admission:
+        Arc<std::sync::Mutex<Option<crate::store::plugin_writers::PluginAdmission>>>,
 }
 impl PluginSession {
+    /// Adopt `admission` as the one this session's commits write under: the
+    /// record of the Run or process segment that runs now. A retry or replay
+    /// adopts the same record, so it writes the same formats whatever the
+    /// fleet record permits by then.
+    pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
+        *self.admission.lock_recover() = Some(admission);
+    }
+
+    /// The plugin admission this session writes under, if it adopted one.
+    pub fn plugin_admission(&self) -> Option<crate::store::plugin_writers::PluginAdmission> {
+        self.admission.lock_recover().clone()
+    }
+
+    /// The writer of every plugin of this session under the adopted
+    /// admission, or `None` when each one is its plugin's native format: no
+    /// admission is adopted, or it chose the native format throughout. A
+    /// plugin the admission does not name keeps its native format: the
+    /// fleet record's check at the commit decides it.
+    fn recorded_writers(&self) -> Option<BTreeMap<String, FormatVersion>> {
+        let mut writers = self.plugin_admission()?.writers();
+        let mut native = true;
+        for factory in self.host.factories() {
+            let declared = factory.declaration().format_version;
+            native &= *writers.entry(factory.id().to_owned()).or_insert(declared) == declared;
+        }
+        (!native).then_some(writers)
+    }
+
+    /// `state`, a native capture, in the formats the adopted admission
+    /// recorded.
+    fn in_recorded_formats(&self, state: PluginState) -> Result<PluginState, PluginError> {
+        match self.recorded_writers() {
+            Some(writers) => self.host.encode_state(&state, &writers),
+            None => Ok(state),
+        }
+    }
+
+    /// `config` in the formats the adopted admission recorded, or `None`
+    /// when it is already written in them.
+    pub fn committed_plugin_config(
+        &self,
+        config: &PluginConfig,
+    ) -> Result<Option<PluginConfig>, FormatRefusal> {
+        let Some(writers) = self.recorded_writers() else {
+            return Ok(None);
+        };
+        let encoded = self.host.encode_config(config, &writers)?;
+        Ok((encoded != *config).then_some(encoded))
+    }
+
+    /// Whether `snapshot` is what this session would commit now: its live
+    /// state in the adopted admission's formats. A head written in an older
+    /// format than the plugin's native one decodes to another generation
+    /// than the live state it was captured from, so identity is judged on
+    /// the written form.
+    fn is_committed_form(&self, snapshot: &PluginState) -> bool {
+        // Written natively, the committed form is the live state itself,
+        // which the hydration check already compares.
+        self.recorded_writers().is_some_and(|writers| {
+            self.host
+                .encode_state(&self.capture_state(), &writers)
+                .is_ok_and(|committed| committed == *snapshot)
+        })
+    }
     /// Who this plugin session was built for.
     pub fn owner(&self) -> &crate::RuntimeOwner {
         &self.owner
@@ -863,6 +933,12 @@ impl PluginSession {
         }
     }
 
+    /// The state a commit records: every namespace, in the formats the
+    /// adopted admission recorded (FIG-4747).
+    pub fn committed_state(&self) -> Result<PluginState, PluginError> {
+        self.in_recorded_formats(self.capture_state())
+    }
+
     pub fn require_runtime_owner(&self) -> Result<(), PluginError> {
         if self.host.export_plugin_namespaces {
             Ok(())
@@ -892,6 +968,9 @@ impl PluginSession {
     }
 
     pub fn require_hydrated_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+        if self.is_committed_form(snapshot) {
+            return Ok(());
+        }
         let snapshot = self.host.decode_state(snapshot)?;
         if self.state.lock_recover().was_hydrated_from(&snapshot) {
             Ok(())
@@ -904,6 +983,9 @@ impl PluginSession {
     /// an accepted write the head does not carry is dropped, as a cold
     /// rebuild from that head drops it (FIG-4392).
     pub fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
+        if self.is_committed_form(snapshot) {
+            return Ok(());
+        }
         let snapshot = self.host.decode_state(snapshot)?;
         let mut live = self.state.lock_recover();
         live.hydrate_live(&snapshot);
@@ -1127,12 +1209,36 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
         self.state_generations()
     }
 
-    fn export_plugin_state(&self) -> PluginState {
-        self.export_state()
+    fn plugin_state_formats(&self) -> BTreeMap<String, FormatVersion> {
+        let recorded = self.plugin_admission();
+        self.host
+            .factories()
+            .iter()
+            .map(|factory| {
+                let format = recorded
+                    .as_ref()
+                    .and_then(|admission| admission.writer(factory.id()))
+                    .unwrap_or_else(|| factory.declaration().format_version);
+                (factory.id().to_owned(), format)
+            })
+            .collect()
     }
 
-    fn capture_plugin_state(&self) -> PluginState {
-        self.capture_state()
+    fn export_plugin_state(&self) -> Result<PluginState, crate::RuntimeError> {
+        self.in_recorded_formats(self.export_state())
+            .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+    }
+
+    fn capture_plugin_state(&self) -> Result<PluginState, crate::RuntimeError> {
+        self.committed_state()
+            .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+    }
+
+    fn committed_plugin_config(
+        &self,
+        config: &PluginConfig,
+    ) -> Result<Option<PluginConfig>, crate::RuntimeError> {
+        Ok(PluginSession::committed_plugin_config(self, config)?)
     }
 }
 

@@ -189,7 +189,9 @@ pub async fn plugin_state_boundary_trace(
             crate::MaxToolCalls::new(1024),
         ))
     };
-    state.refresh_plugin_states(&plugins);
+    state
+        .refresh_plugin_states(&plugins)
+        .expect("the live plugin state is captured");
     commit(&store, &mut state).await;
     let before = state.plugin_state_ref().cloned();
     assert_eq!(handle.set("counter", serde_json::json!(1)).unwrap(), 1);
@@ -233,7 +235,9 @@ pub async fn plugin_state_boundary_trace(
         "uncommitted tail is lost on rebuild"
     );
     drop(rebuilt);
-    state.refresh_plugin_states(&plugins);
+    state
+        .refresh_plugin_states(&plugins)
+        .expect("the live plugin state is captured");
     let changed = RuntimeCommit::persisted_state_for_test(&state);
     assert!(
         matches!(
@@ -244,7 +248,9 @@ pub async fn plugin_state_boundary_trace(
     );
     commit(&store, &mut state).await;
     assert_ne!(state.plugin_state_ref(), before.as_ref());
-    state.refresh_plugin_states(&plugins);
+    state
+        .refresh_plugin_states(&plugins)
+        .expect("the live plugin state is captured");
     let unchanged = RuntimeCommit::persisted_state_for_test(&state);
     assert!(
         matches!(
@@ -300,7 +306,9 @@ pub async fn plugin_state_boundary_trace(
             crate::MaxToolCalls::new(1024),
         ))
     };
-    child_state.refresh_plugin_states(&child);
+    child_state
+        .refresh_plugin_states(&child)
+        .expect("the live plugin state is captured");
     commit(&child_store, &mut child_state).await;
     let child_durable =
         crate::conformance::helpers::load_window_state(&child_store, &SessionId::from(child_id))
@@ -486,7 +494,7 @@ async fn registration_state_law(
             crate::MaxToolCalls::new(1024),
         ))
     };
-    state.refresh_plugin_states(&plugins);
+    state.refresh_plugin_states(&plugins).unwrap();
     commit(&store, &mut state).await;
     drop(plugins);
     let mut durable = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
@@ -506,7 +514,7 @@ async fn registration_state_law(
         ))
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), 6);
-    durable.refresh_plugin_states(&plugins);
+    durable.refresh_plugin_states(&plugins).unwrap();
     commit(&store, &mut durable).await;
     let final_state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
         .await
@@ -757,7 +765,7 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
         rmp_serde::to_vec_named(before_commit.plugin_state().unwrap()).unwrap(),
         bytes
     );
-    durable.refresh_plugin_states(&decoded);
+    durable.refresh_plugin_states(&decoded).unwrap();
     let pending = RuntimeCommit::persisted_state_for_test(&durable);
     assert!(matches!(
         pending.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],
@@ -766,11 +774,40 @@ async fn plugin_format_boundary(store: Arc<dyn RuntimeStore>, session_id: &str, 
     durable.authority.plugin_config = decoded.admitted_plugin_config().config.as_ref().clone();
     if !permitted.contains(2) {
         // Inside a rollback window the migrated namespace cannot be written
-        // back in the plugin's native format: the stored bytes stay as they
-        // were until finalize moves the range.
+        // back in the plugin's native format.
         assert_plugin_write_refused(&store, &durable, session_id).await;
+        // A session admitted inside the window writes the format its
+        // admission chose from the fleet record (FIG-4747): the oldest one,
+        // which the build beside it still reads. The commit lands, in the
+        // stored shape.
+        let admission = host.admit_plugins(store.as_ref()).await.unwrap();
+        assert_eq!(admission.writer("format-state").unwrap().get(), 1);
+        decoded.adopt_plugin_admission(admission);
+        durable.refresh_plugin_states(&decoded).unwrap();
+        commit(&store, &mut durable).await;
+        let after =
+            crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))
+                .await
+                .unwrap()
+                .unwrap();
+        let namespace = &after.plugin_state().unwrap().plugins["format-state"];
+        assert_eq!(namespace.format_version.get(), 1);
+        assert_eq!(namespace.values["count"], serde_json::json!(17));
+        let config = after
+            .authority
+            .plugin_config
+            .namespace("format-state")
+            .unwrap();
+        assert_eq!(config.format_version.get(), 1);
+        assert_eq!(config.value["count"], serde_json::json!(17));
         return;
     }
+    // A finalized fleet admits the native format, and the admission chooses
+    // it.
+    let admission = host.admit_plugins(store.as_ref()).await.unwrap();
+    assert_eq!(admission.writer("format-state").unwrap().get(), 2);
+    decoded.adopt_plugin_admission(admission);
+    durable.refresh_plugin_states(&decoded).unwrap();
     commit(&store, &mut durable).await;
     let after =
         crate::conformance::helpers::load_window_state(&store, &SessionId::from(session_id))

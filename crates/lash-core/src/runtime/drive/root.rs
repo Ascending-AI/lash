@@ -110,6 +110,10 @@ impl LashRuntime {
                     generation: crate::runtime::turn_loop::generation_fence::current(self),
                     admitted_generation: admitted.admitted_generation().clone(),
                     executor,
+                    plugin_host: self
+                        .session
+                        .as_ref()
+                        .map(|session| session.plugins().host().clone()),
                     trace: AdmissionTrace {
                         sink: self.host.core.tracing.trace_sink.clone(),
                         base: self.host.core.tracing.trace_context.clone(),
@@ -152,6 +156,7 @@ impl LashRuntime {
                             base: &admission.base,
                             turn_index: admission.turn_index,
                             generation: admission.generation.as_ref(),
+                            plugins: &admission.plugins,
                             root: &root,
                         },
                         verdict,
@@ -487,11 +492,18 @@ impl LashRuntime {
             base,
             turn_index,
             generation,
+            plugins,
             root: turn_id,
         } = admitted;
         // The root runs only under the executable generation its admission
         // recorded (FIG-3571), checked before anything else of it runs.
         crate::runtime::turn_loop::generation_fence::admit(self, generation)?;
+        // Every commit of the root writes plugin namespaces in the formats
+        // its admission recorded (FIG-4747), on this execution and on every
+        // retry of it, whatever the fleet record permits by then.
+        if let Some(session) = self.session.as_ref() {
+            session.plugins().adopt_plugin_admission(plugins.clone());
+        }
         // The verdict is the one `drive-head` recorded, honoured at every
         // position (FIG-4058). Its live check, a head that moved from the
         // admission's base with no commit of this root behind it, is the
@@ -1078,6 +1090,7 @@ struct AdmittedTurn<'a> {
     base: &'a crate::store::SessionHeadRef,
     turn_index: u64,
     generation: Option<&'a crate::ExecutableGeneration>,
+    plugins: &'a crate::store::plugin_writers::PluginAdmission,
     root: &'a TurnId,
 }
 
@@ -1249,6 +1262,9 @@ struct AdmitRootRunner {
     /// The execution that runs the root, which the admission records
     /// (FIG-4403).
     executor: crate::store::RootExecutor,
+    /// The plugins the root runs, whose composition and writer formats the
+    /// admission records (FIG-4747). `None` for a runtime with no session.
+    plugin_host: Option<crate::plugin::PluginHost>,
     trace: AdmissionTrace,
 }
 
@@ -1372,6 +1388,15 @@ impl AdmitRootRunner {
     /// admission raced, so the step asks to run again rather than record a
     /// refusal. Nothing here ever drops, withdraws, or re-admits a row.
     async fn admit(self) -> Result<RootAdmissionProbe, crate::StoreError> {
+        // The admission is the adoption point (FIG-4747): this build's
+        // composition, and each plugin's writer chosen from the fleet record
+        // as it stands now. The store records the first admission's choice
+        // and answers it to every later one, so the record is read here and
+        // nowhere after.
+        let plugins = match &self.plugin_host {
+            Some(host) => host.admit_plugins(self.store.store().as_ref()).await?,
+            None => crate::store::plugin_writers::PluginAdmission::default(),
+        };
         let request = crate::store::AdmitRootRequest {
             fence: self.fence.clone(),
             root: self.root.clone(),
@@ -1383,6 +1408,7 @@ impl AdmitRootRunner {
             generation: self.generation.clone(),
             admitted_generation: self.admitted_generation.clone(),
             executor: self.executor.clone(),
+            plugins,
         };
         let admission = match self.store.admit_root(&request).await {
             // The record decides (FIG-4765): the root is run by the executor

@@ -262,6 +262,35 @@ would change a range while `F` already is the build's epoch refuses
 carries the moved ranges, so the open that completes a crashed finalize needs
 no registrations.
 
+#### 2.6 Segment admissions record the plugin composition and writers
+
+Every segment admission is a plugin adoption point and records its choice
+(`PluginAdmission`, in `crates/lash-core-store/src/store/plugin_writers.rs`):
+the admitting build's plugins in hook order, each with its behaviour revision
+and the writer format chosen for it. The writer is the highest format in both
+the plugin's writable set and the range the fleet record permits when the
+admission is made. A plugin that writes no permitted format refuses
+`PluginWriterUnwritable` and nothing is admitted. This is the one place the
+fleet record is read to choose a writer.
+
+Three records carry it. A Run's admission records it on the root
+(`RootAdmission.plugins`): the store keeps the first admission's choice and
+answers it to every later admission of the root. A process's start records it
+on `ProcessStarted.plugins`, and each later process segment on its
+`SegmentStartMarker.plugins`, written by the segment's journaled start step.
+A process child and a segment successor therefore adopt the plugins of the
+build that admits them and the ranges of the fleet at that moment.
+
+Work admitted under a record writes plugin namespaces in the recorded
+formats. A plugin session adopts the record, and a commit captures plugin
+state, the session's sticky config and the running view's config in those
+formats; a config transaction and a session creation choose the same way in
+their own recorded step. A retry, replay or redrive reads the record back, so
+a finalize that widens a range changes what the next admission chooses and
+never what a recorded one writes. A session that has adopted no admission
+writes each plugin's native format, which the guarded transaction still
+checks against the range.
+
 ### 3. Restate
 
 SQL cannot fence a Restate invocation atomically. Restate compatibility uses

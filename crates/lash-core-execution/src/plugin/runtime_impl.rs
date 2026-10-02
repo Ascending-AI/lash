@@ -176,6 +176,39 @@ impl PluginHost {
         super::PluginComposition::of(self.factories())
     }
 
+    /// Admit this host's composition against the fleet record `store`
+    /// carries (FIG-4747): the one place a writer format is chosen. A
+    /// segment admission calls it once and records the answer; nothing that
+    /// runs under the admission reads the fleet record again.
+    ///
+    /// A plugin the record does not name is provisioned from its
+    /// declaration first.
+    ///
+    /// # Errors
+    /// The store's typed refusal for a plugin that writes no format the
+    /// fleet record permits, and any fault reading the record.
+    pub async fn admit_plugins(
+        &self,
+        store: &(impl crate::store::FleetFormatStore + ?Sized),
+    ) -> Result<crate::store::plugin_writers::PluginAdmission, crate::StoreError> {
+        // A core validates its composition when it is built, so a
+        // declaration refused here is a host assembled without one.
+        let composition = self
+            .composition()
+            .map_err(|error| crate::StoreError::Backend(error.to_string()))?;
+        let registrations = composition.writer_registrations();
+        let mut ranges = store.plugin_writers().await?;
+        if registrations
+            .iter()
+            .any(|registration| ranges.permitted_writer(&registration.plugin).is_err())
+        {
+            ranges = store.provision_plugin_writers(&registrations).await?;
+        }
+        composition
+            .admission(&ranges)
+            .map_err(|refusal| crate::StoreError::Incompatible { refusal })
+    }
+
     /// Every config registration of this host's plugins, and the core
     /// owner's (FIG-4379): the one list config creation, command ingress,
     /// resolution and the command catalog are generated from. A factory's
@@ -190,13 +223,16 @@ impl PluginHost {
 
     /// The recorded plugin configuration of a session created on this host
     /// (FIG-4379): every registered owner creates its namespace from
-    /// `requested`, and `protocol_plugin_id` names the protocol owner.
+    /// `requested`, and `protocol_plugin_id` names the protocol owner. Each
+    /// namespace is written in the format `writers` records for its plugin
+    /// ([`Self::admit_plugins`]).
     pub fn resolve_creation_plugin_config(
         &self,
         protocol_plugin_id: Option<&str>,
         requested: &crate::PluginOptions,
         parent: Option<&super::PluginConfig>,
         is_root_session: bool,
+        writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<super::PluginConfig, super::CreationConfigError> {
         let options = super::PluginConfig::from_recorded_parts(None, requested.plugins.clone());
         self.decode_config(&options)?;
@@ -208,6 +244,7 @@ impl PluginHost {
             requested,
             parent,
             is_root_session,
+            writers,
         )?)
     }
 
@@ -326,6 +363,7 @@ impl PluginHost {
             )),
             contributions,
             forked,
+            admission: Arc::new(std::sync::Mutex::new(None)),
         });
         self.register_session(&owner, &session)?;
         for plugin in &session.plugins {

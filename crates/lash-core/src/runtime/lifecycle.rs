@@ -654,7 +654,8 @@ impl LashRuntime {
             .await
             .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         let store = self.park_store()?;
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         // Under the settled-state contract every durable mutation commits at
         // its own boundary (turn final commit, session commands), so a runtime
         // between boundaries already equals its last commit. Flushing is only

@@ -43,9 +43,11 @@ pub(crate) enum AcceptedExecutionRetention {
 }
 
 mod checkpoint_component;
+mod plugin_source;
 use checkpoint_component::{
     PendingCheckpointComponentBody, ResidentCheckpointComponent, ResidentCheckpointComponentBody,
 };
+pub use plugin_source::SessionPluginStateSource;
 
 /// Runtime-owned checkpoint component listing with an explicit completeness proof.
 ///
@@ -1091,19 +1093,35 @@ impl RuntimeSessionState {
 
     /// Refreshes exported plugin state while respecting the session handle's
     /// namespace permissions. Plugin-facing handles expose no namespaces.
-    pub fn refresh_plugin_states(&mut self, plugins: &dyn SessionPluginStateSource) {
-        self.refresh_plugin_states_with(plugins, |source| source.export_plugin_state());
+    ///
+    /// # Errors
+    /// The source's typed refusal when a namespace cannot be written in the
+    /// format its admission recorded; the state keeps its last capture.
+    pub fn refresh_plugin_states(
+        &mut self,
+        plugins: &dyn SessionPluginStateSource,
+    ) -> Result<(), crate::RuntimeError> {
+        self.refresh_plugin_states_with(plugins, |source| source.export_plugin_state())
     }
 
-    pub fn capture_plugin_states(&mut self, plugins: &dyn SessionPluginStateSource) {
-        self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state());
+    /// Captures every plugin namespace as the runtime commits it.
+    ///
+    /// # Errors
+    /// As [`Self::refresh_plugin_states`].
+    pub fn capture_plugin_states(
+        &mut self,
+        plugins: &dyn SessionPluginStateSource,
+    ) -> Result<(), crate::RuntimeError> {
+        self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state())
     }
 
     fn refresh_plugin_states_with(
         &mut self,
         plugins: &dyn SessionPluginStateSource,
-        capture: fn(&dyn SessionPluginStateSource) -> crate::PluginState,
-    ) {
+        capture: fn(
+            &dyn SessionPluginStateSource,
+        ) -> Result<crate::PluginState, crate::RuntimeError>,
+    ) -> Result<(), crate::RuntimeError> {
         // A `PreservePersisted` open (FIG-3353) never reconciled its registry,
         // so refreshing tool state here would overwrite the durable surface
         // with whatever the sources happen to advertise. The loaded snapshot
@@ -1118,11 +1136,39 @@ impl RuntimeSessionState {
 
         let generations = plugins.plugin_state_generations();
         let captured = self.checkpoint_components.plugin_generations();
+        // A capture still resident was taken under the formats of its time:
+        // one the source no longer writes (it adopted an admission since) is
+        // captured again, in the recorded formats (FIG-4747).
+        let formats = plugins.plugin_state_formats();
+        let outdated = self
+            .checkpoint_components
+            .plugin_state()
+            .is_some_and(|resident| {
+                formats.iter().any(|(plugin, format)| {
+                    resident
+                        .plugins
+                        .get(plugin)
+                        .is_some_and(|namespace| namespace.format_version != *format)
+                })
+            });
         if !generations.is_empty()
-            && (self.plugin_state_ref().is_none() || captured != Some(&generations))
+            && (self.plugin_state_ref().is_none() || captured != Some(&generations) || outdated)
         {
-            self.set_plugin_state(Some(capture(plugins)));
+            self.set_plugin_state(Some(capture(plugins)?));
         }
+        // The config a commit writes is the recorded one too (FIG-4747): the
+        // sticky config under a root view and the view the state runs under
+        // are written in the formats the source's admission recorded, never
+        // in the native format a load decoded them to.
+        if let Some(config) = plugins.committed_plugin_config(&self.authority.plugin_config)? {
+            self.authority.plugin_config = config;
+        }
+        if let Some(view) = self.authority.root_view.as_deref_mut()
+            && let Some(config) = plugins.committed_plugin_config(&view.sticky.plugin_config)?
+        {
+            view.sticky.plugin_config = config;
+        }
+        Ok(())
     }
 }
 
@@ -1783,50 +1829,4 @@ fn plugin_generations(state: &crate::PluginState) -> std::collections::BTreeMap<
         .iter()
         .map(|(id, namespace)| (id.clone(), namespace.generation))
         .collect()
-}
-
-/// The plugin-side facts durable session state refreshes itself from.
-///
-/// `lash-core`'s `PluginSession` is the sole implementor; the trait exists so
-/// the durable state struct does not need the plugin host to describe itself.
-pub trait SessionPluginStateSource {
-    /// Current tool-registry generation.
-    fn tool_state_generation(&self) -> u64;
-
-    /// Snapshot of the tool registry at the current generation.
-    fn export_tool_state(&self) -> crate::ToolState;
-
-    /// Per-plugin state generations, keyed by plugin id.
-    fn plugin_state_generations(&self) -> std::collections::BTreeMap<String, u64>;
-
-    /// Namespace-filtered export, as a plugin-facing handle sees it.
-    fn export_plugin_state(&self) -> crate::PluginState;
-
-    /// Unfiltered capture, as the runtime commits it.
-    fn capture_plugin_state(&self) -> crate::PluginState;
-}
-
-impl<T> SessionPluginStateSource for std::sync::Arc<T>
-where
-    T: SessionPluginStateSource + ?Sized,
-{
-    fn tool_state_generation(&self) -> u64 {
-        T::tool_state_generation(self)
-    }
-
-    fn export_tool_state(&self) -> crate::ToolState {
-        T::export_tool_state(self)
-    }
-
-    fn plugin_state_generations(&self) -> std::collections::BTreeMap<String, u64> {
-        T::plugin_state_generations(self)
-    }
-
-    fn export_plugin_state(&self) -> crate::PluginState {
-        T::export_plugin_state(self)
-    }
-
-    fn capture_plugin_state(&self) -> crate::PluginState {
-        T::capture_plugin_state(self)
-    }
 }

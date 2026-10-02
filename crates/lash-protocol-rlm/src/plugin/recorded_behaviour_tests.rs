@@ -216,6 +216,7 @@ async fn a_redriven_root_runs_under_its_recorded_behaviour(
             &lash_core::PluginOptions::default(),
             None,
             true,
+            &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("the creating deployment records the RLM namespace");
     let store = lash_core::runtime::admit_session_view(

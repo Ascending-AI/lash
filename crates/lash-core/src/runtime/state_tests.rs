@@ -232,7 +232,9 @@ fn reconciled_generation_forces_next_plugin_state_export() {
         .expect("live surface restore");
     assert_eq!(report.generation, persisted_generation + 1);
 
-    state.refresh_plugin_states(&plugins);
+    state
+        .refresh_plugin_states(&plugins)
+        .expect("the live plugin state is captured");
     let refreshed = state
         .tool_state_snapshot()
         .expect("generation change re-exports the tool snapshot");

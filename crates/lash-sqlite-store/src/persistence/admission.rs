@@ -163,6 +163,7 @@ pub(crate) async fn admit_root_sqlite(
                     turn_index: request.turn_index,
                     generation: request.generation.clone(),
                     executor: request.executor.clone(),
+                    plugins: request.plugins.clone(),
                 };
                 crate::session_roots::bind_root_inputs_conn(
                     tx,

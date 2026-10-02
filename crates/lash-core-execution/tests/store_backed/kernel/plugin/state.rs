@@ -54,7 +54,9 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
             ))
         };
-        state.refresh_plugin_states(&plugins);
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
         let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
             &store,
             crate::RuntimeCommit::persisted_state_for_test(&state),
@@ -63,7 +65,9 @@ mod tests {
         .await
         .unwrap();
         state.apply_persisted_commit_result(receipt);
-        state.refresh_plugin_states(&plugins);
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
         assert!(matches!(
             crate::RuntimeCommit::persisted_state_for_test(&state)
                 .checkpoint
@@ -71,7 +75,9 @@ mod tests {
             crate::HydratedCheckpointComponent::Unchanged { .. }
         ));
         handle.set("value", serde_json::json!(1)).unwrap();
-        state.refresh_plugin_states(&plugins);
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
         assert!(
             matches!(
                 crate::RuntimeCommit::persisted_state_for_test(&state)
@@ -101,7 +107,9 @@ mod tests {
             ))
         };
         handle.set("value", serde_json::json!(1)).unwrap();
-        state.refresh_plugin_states(&plugins);
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
         let captured = crate::RuntimeCommit::persisted_state_for_test(&state);
         handle.set("value", serde_json::json!(2)).unwrap();
         let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
@@ -117,7 +125,9 @@ mod tests {
             loaded.plugin_state().unwrap().plugins["mock"].values["value"],
             serde_json::json!(1)
         );
-        state.refresh_plugin_states(&plugins);
+        state
+            .refresh_plugin_states(&plugins)
+            .expect("the live plugin state is captured");
         let next = crate::RuntimeCommit::persisted_state_for_test(&state);
         assert!(matches!(
             next.checkpoint.components[crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT],

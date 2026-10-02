@@ -28,6 +28,7 @@ fn creation(
             &options,
             parent,
             parent.is_none(),
+            &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("standard prompt creation is accepted")
 }

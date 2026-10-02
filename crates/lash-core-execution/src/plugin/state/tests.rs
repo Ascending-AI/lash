@@ -176,7 +176,13 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
         plugins: config.namespaces().clone(),
     };
     let error = host
-        .resolve_creation_plugin_config(None, &options, None, true)
+        .resolve_creation_plugin_config(
+            None,
+            &options,
+            None,
+            true,
+            &crate::store::plugin_writers::PluginAdmission::default(),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -1043,4 +1049,148 @@ fn hydration_law_generations_never_reuse_a_guard_token() {
         );
         assert_eq!(state.apply_guarded(adopted, vec![]).unwrap(), adopted + 1);
     }
+}
+
+/// A fleet record a law moves the way a finalize would.
+struct FleetRecord(std::sync::Mutex<crate::store::plugin_writers::PluginWriterRanges>);
+
+impl FleetRecord {
+    fn permitting(min: u32, max: u32) -> Self {
+        Self(std::sync::Mutex::new(Self::ranges(min, max)))
+    }
+
+    fn ranges(min: u32, max: u32) -> crate::store::plugin_writers::PluginWriterRanges {
+        crate::store::plugin_writers::PluginWriterRanges::from_rows([(
+            "format-probe".to_string(),
+            i64::from(min),
+            i64::from(max),
+        )])
+        .unwrap()
+    }
+
+    /// Move the probe's range, keeping every other plugin's.
+    fn finalize(&self, min: u32, max: u32) {
+        let mut ranges = self.0.lock_recover();
+        let moved = Self::ranges(min, max)
+            .iter()
+            .map(|(plugin, range)| (plugin.to_string(), range))
+            .collect();
+        *ranges = ranges.clone().with(moved);
+    }
+}
+
+impl crate::store::FleetFormatStore for FleetRecord {
+    fn fleet_format(&self) -> crate::store::FleetFormat {
+        crate::store::FleetFormat::current()
+    }
+
+    fn plugin_writers(&self) -> crate::store::PluginWriterRangesFuture<'_> {
+        let ranges = self.0.lock_recover().clone();
+        Box::pin(async move { Ok(ranges) })
+    }
+
+    fn provision_plugin_writers<'a>(
+        &'a self,
+        registrations: &'a [crate::store::plugin_writers::PluginWriterRegistration],
+    ) -> crate::store::PluginWriterRangesFuture<'a> {
+        let mut ranges = self.0.lock_recover();
+        let provisioned = ranges.provisioned(registrations, false);
+        *ranges = ranges.clone().with(provisioned);
+        let ranges = ranges.clone();
+        Box::pin(async move { Ok(ranges) })
+    }
+}
+
+/// FIG-4747: a session writes plugin state in the format its admission
+/// recorded. A finalize that widens the fleet's range changes what the next
+/// admission chooses; a retry that adopts the recorded admission again
+/// writes the bytes it wrote before.
+#[tokio::test]
+async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_finalize() {
+    let host = crate::PluginHost::new(vec![Arc::new(FormatProbe(Arc::new(
+        std::sync::atomic::AtomicUsize::new(0),
+    )))]);
+    let fleet = FleetRecord::permitting(1, 1);
+    let stored: PluginState = serde_json::from_value(serde_json::json!({
+        "format-probe": {"generation": 7, "format_version": 1, "values": {"old": 17}}
+    }))
+    .unwrap();
+    let session = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::rematerialization(
+            "admitted",
+            &stored,
+            Default::default(),
+        ))
+        .unwrap();
+    let native = session.export_state();
+    assert_eq!(native.plugins["format-probe"].format_version.get(), 2);
+    // No admission adopted: the native format, as before any Run.
+    assert_eq!(session.committed_state().unwrap(), native);
+
+    // Admitted inside the window: the fleet permits format 1 only.
+    let recorded = host.admit_plugins(&fleet).await.unwrap();
+    // The record is the whole composition in hook order, the host's own
+    // plugins first, each with its revision and chosen writer.
+    assert_eq!(
+        recorded
+            .plugins()
+            .iter()
+            .map(|plugin| plugin.plugin.as_str())
+            .collect::<Vec<_>>(),
+        host.factories()
+            .iter()
+            .map(|factory| factory.id())
+            .collect::<Vec<_>>()
+    );
+    let probe = recorded.plugins().last().unwrap();
+    assert_eq!(
+        (
+            probe.plugin.as_str(),
+            probe.behavior_revision.get(),
+            probe.writer.get()
+        ),
+        ("format-probe", 1, 1)
+    );
+    session.adopt_plugin_admission(recorded.clone());
+    let before = session.committed_state().unwrap();
+    assert_eq!(before.plugins["format-probe"].format_version.get(), 1);
+    assert_eq!(
+        before.plugins["format-probe"].values,
+        BTreeMap::from([("old".to_string(), serde_json::json!(17))])
+    );
+    // The committed form is the live state: adopting it back changes nothing.
+    session.require_hydrated_state(&before).unwrap();
+    session.hydrate_state(&before).unwrap();
+    assert_eq!(session.export_state(), native);
+
+    // Finalize widens the range. A new admission chooses the native format.
+    fleet.finalize(1, 2);
+    let after = host.admit_plugins(&fleet).await.unwrap();
+    assert_eq!(after.writer("format-probe").unwrap().get(), 2);
+
+    // A retry of the admitted work adopts its record again and writes the
+    // same bytes, whatever the fleet permits now.
+    session.adopt_plugin_admission(recorded);
+    assert_eq!(
+        rmp_serde::to_vec_named(&session.committed_state().unwrap()).unwrap(),
+        rmp_serde::to_vec_named(&before).unwrap()
+    );
+
+    // Work admitted after the finalize writes the native format.
+    session.adopt_plugin_admission(after);
+    assert_eq!(session.committed_state().unwrap(), native);
+
+    // A plugin that writes nothing the fleet permits is not admitted.
+    fleet.finalize(3, 3);
+    let refused = host.admit_plugins(&fleet).await.unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            crate::StoreError::Incompatible {
+                refusal: crate::compat::CompatRefusal::PluginWriterUnwritable { ref plugin, .. }
+            } if plugin == "format-probe"
+        ),
+        "{refused:?}"
+    );
 }

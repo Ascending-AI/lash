@@ -384,6 +384,15 @@ impl ProcessCapability {
 }
 
 impl RuntimeSessionServices {
+    /// Adopt `admission` as the plugin admission the owner's plugins write
+    /// under (FIG-4747).
+    pub(in crate::runtime) fn adopt_plugin_admission(
+        &self,
+        admission: crate::store::plugin_writers::PluginAdmission,
+    ) {
+        self.current.plugins.adopt_plugin_admission(admission);
+    }
+
     pub(in crate::runtime) fn state_service(
         self: &Arc<Self>,
     ) -> Arc<dyn crate::plugin::SessionStateService> {

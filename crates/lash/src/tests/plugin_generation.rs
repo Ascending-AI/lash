@@ -6,6 +6,9 @@
 //!   same `G`.
 //! - An engine has no `G` until a core registers its plugins over it, and
 //!   serves one composition: a core with another is refused, typed.
+//! - Every Run's admission records the composition it was admitted under
+//!   (FIG-4747): the Run in flight at the roll records build N's revision of
+//!   the plugin, and each Run admitted after the bump records N+1's.
 //! - In-flight segments finish on the old build. A session's drive starts on
 //!   build N; while its first root is in its model call, build N+1 registers
 //!   with the plugin's revision bumped, as a deployment of its own with its
@@ -428,6 +431,53 @@ async fn in_flight_segments_finish_on_the_old_build(storage: Storage) -> Result<
         handle.durable().turn_input_applications().await?.len(),
         ROOTS,
         "every input was applied once"
+    );
+    // Each Run's admission recorded the composition it was admitted under
+    // (FIG-4747): the Run in flight at the roll records N's revision of the
+    // plugin, and the Runs admitted after the bump record N+1's. The store
+    // answers a root's recorded admission to any later admission of it.
+    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        store.store(),
+        &session_id,
+        "plugin-generation",
+    )
+    .await;
+    let mut recorded = Vec::new();
+    for ran in &outcome.ran {
+        let admission = store
+            .admit_root(
+                &lash_core::testing::store_fixtures::admit_root_request_for_test(
+                    &fence,
+                    ran.root(),
+                    lash_core::store::AdmittedHead::Input(lash_core::InputId::from("recorded")),
+                ),
+            )
+            .await
+            .expect("read the Run's admission back")
+            .expect("the Run's admission is recorded");
+        let composition: Vec<&str> = admission
+            .plugins
+            .plugins()
+            .iter()
+            .map(|admitted| admitted.plugin.as_str())
+            .collect();
+        assert_eq!(
+            composition.last(),
+            Some(&PLUGIN),
+            "the record is the whole composition in hook order: {composition:?}"
+        );
+        let admitted = admission
+            .plugins
+            .plugins()
+            .last()
+            .expect("the admission names the law's plugin");
+        assert_eq!(admitted.writer, FormatVersion::ONE);
+        recorded.push(admitted.behavior_revision.get());
+    }
+    assert_eq!(
+        recorded,
+        [1, 2, 2],
+        "a Run admitted after the bump adopts the new composition, and its record shows it"
     );
     drop(next_core);
     drop(old_core);

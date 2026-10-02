@@ -84,6 +84,18 @@ impl BehaviorRevision {
     }
 }
 
+impl From<std::num::NonZeroU32> for BehaviorRevision {
+    fn from(value: std::num::NonZeroU32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<BehaviorRevision> for std::num::NonZeroU32 {
+    fn from(value: BehaviorRevision) -> Self {
+        value.0
+    }
+}
+
 impl std::fmt::Display for BehaviorRevision {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)

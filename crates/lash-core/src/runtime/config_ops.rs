@@ -24,7 +24,8 @@ impl LashRuntime {
             .refresh_sources()
             .map_err(|err| SessionError::Protocol(format!("tool refresh failed: {err}")))?;
         session.refresh_tool_catalog().await?;
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(())
     }
 
@@ -45,7 +46,8 @@ impl LashRuntime {
             .apply_state(snapshot)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
         session.refresh_tool_catalog().await?;
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(generation)
     }
 
@@ -109,7 +111,8 @@ impl LashRuntime {
         )?;
         session.refresh_tool_catalog().await?;
         self.tool_restore_report = Some(report.clone());
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(report)
     }
 }

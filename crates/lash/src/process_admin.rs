@@ -498,6 +498,8 @@ impl Processes {
             &create_request.plugin_options,
             is_child.then_some(environment.plugin_config.config.as_ref()),
             !is_child,
+            // The resolution only validates the request: nothing is written.
+            &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .map_err(lash_core::SessionError::from)?;
         Ok(environment)

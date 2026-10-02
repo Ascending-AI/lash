@@ -527,6 +527,45 @@ impl PluginComposition {
     pub fn declarations(&self) -> &[PluginDeclaration] {
         &self.declarations
     }
+
+    /// What each plugin declares about the formats it writes, in hook
+    /// order: what the fleet record's writer ranges are provisioned from.
+    pub fn writer_registrations(
+        &self,
+    ) -> Vec<crate::store::plugin_writers::PluginWriterRegistration> {
+        self.declarations
+            .iter()
+            .map(
+                |declaration| crate::store::plugin_writers::PluginWriterRegistration {
+                    plugin: declaration.id.as_str().to_owned(),
+                    native: declaration.format_version,
+                    writable: declaration.writable_formats.clone(),
+                },
+            )
+            .collect()
+    }
+
+    /// The admission of this composition under `ranges` (FIG-4747): every
+    /// plugin in hook order with its behaviour revision and the highest
+    /// format it writes that the fleet record permits.
+    ///
+    /// # Errors
+    /// [`CompatRefusal`](crate::compat::CompatRefusal) for a plugin the
+    /// record does not name or that writes no permitted format.
+    pub fn admission(
+        &self,
+        ranges: &crate::store::plugin_writers::PluginWriterRanges,
+    ) -> Result<crate::store::plugin_writers::PluginAdmission, crate::compat::CompatRefusal> {
+        let registrations = self.writer_registrations();
+        crate::store::plugin_writers::PluginAdmission::choose(
+            registrations.iter().zip(
+                self.declarations
+                    .iter()
+                    .map(|declaration| declaration.behavior_revision),
+            ),
+            ranges,
+        )
+    }
 }
 
 pub trait SessionPlugin: Send + Sync {

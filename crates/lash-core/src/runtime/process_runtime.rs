@@ -143,6 +143,13 @@ impl ProcessRuntimeContext {
         })
     }
 
+    /// Adopt `admission`, the plugin admission the running segment's start
+    /// recorded (FIG-4747): what the process writes, and every session it
+    /// creates, records plugin namespaces in those formats.
+    pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
+        self.services.adopt_plugin_admission(admission);
+    }
+
     /// The dispatch context of a group tool child this process opened, its
     /// controller slots filled by `lent_controller` until the driver rebinds
     /// them to the child's own.

@@ -69,6 +69,8 @@ pub(super) async fn execute_drive(
                                     "blake3:live-{live_generation}"
                                 ))),
                                 executor: lash_core::store::RootExecutor::Root,
+                                plugins: lash_core::store::plugin_writers::PluginAdmission::default(
+                                ),
                             }),
                         },
                     })

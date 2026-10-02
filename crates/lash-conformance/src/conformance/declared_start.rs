@@ -911,6 +911,7 @@ impl World {
                     &crate::PluginOptions::default(),
                     None,
                     true,
+                    &crate::store::plugin_writers::PluginAdmission::default(),
                 )
                 .expect("resolve the parent session's recorded plugin config");
         Box::pin(

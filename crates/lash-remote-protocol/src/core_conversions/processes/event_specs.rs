@@ -255,6 +255,7 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             started_at_ms,
             generation,
             build_generation,
+            plugins,
         } = value;
         Ok(Self {
             owner: owner.into(),
@@ -262,6 +263,17 @@ impl TryFrom<lash_core::ProcessStarted> for RemoteProcessStarted {
             started_at_ms,
             generation: generation.map(|generation| generation.as_str().to_owned()),
             build_generation: build_generation.map(|generation| generation.as_str().to_owned()),
+            plugins: plugins.map(|admission| {
+                admission
+                    .plugins()
+                    .iter()
+                    .map(|admitted| RemoteAdmittedPlugin {
+                        plugin: admitted.plugin.clone(),
+                        behavior_revision: admitted.behavior_revision.into(),
+                        writer: admitted.writer.into(),
+                    })
+                    .collect()
+            }),
         })
     }
 }
@@ -276,6 +288,7 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             started_at_ms,
             generation,
             build_generation,
+            plugins,
         } = value;
         let build_generation = build_generation
             .map(|text| {
@@ -293,6 +306,20 @@ impl TryFrom<RemoteProcessStarted> for lash_core::ProcessStarted {
             started_at_ms,
             generation: generation.map(lash_core::ExecutableGeneration::new),
             build_generation,
+            plugins: plugins.map(|plugins| {
+                lash_core::store::plugin_writers::PluginAdmission::from_plugins(
+                    plugins
+                        .into_iter()
+                        .map(
+                            |admitted| lash_core::store::plugin_writers::AdmittedPlugin {
+                                plugin: admitted.plugin,
+                                behavior_revision: admitted.behavior_revision.into(),
+                                writer: admitted.writer.into(),
+                            },
+                        )
+                        .collect(),
+                )
+            }),
         })
     }
 }

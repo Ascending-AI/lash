@@ -60,6 +60,28 @@ struct SegmentRun {
 
 type SegmentLog = Arc<Mutex<Vec<SegmentRun>>>;
 
+/// The plugin admission each entry of a runner into a segment was handed:
+/// the build, the process, the segment and what its start recorded.
+type PluginLog = Arc<
+    Mutex<
+        Vec<(
+            &'static str,
+            ProcessId,
+            u64,
+            Option<lash_core::store::plugin_writers::PluginAdmission>,
+        )>,
+    >,
+>;
+
+/// The plugins a build's runner admits segments with (FIG-4747): its
+/// composition, the fleet record it chooses writers from and the log of the
+/// admission each segment entry ran under.
+struct BuildPlugins {
+    host: lash_core::facade_support::PluginHost,
+    fleet: Arc<dyn lash_core::DeploymentStore>,
+    seen: PluginLog,
+}
+
 /// A build's process runner: segments before the last cross a boundary, the
 /// last ends the process with the build's name (or, for the cancel law,
 /// waits for its cancellation). A one-shot hook may run inside a segment's
@@ -71,6 +93,7 @@ struct BuildRunner {
     log: SegmentLog,
     resumptions: Mutex<Vec<(u64, Option<lash_core::SegmentHandover>)>>,
     hooks: Mutex<HashMap<u64, BoxFuture>>,
+    plugins: Mutex<Option<Arc<BuildPlugins>>>,
 }
 
 impl BuildRunner {
@@ -82,7 +105,14 @@ impl BuildRunner {
             log,
             resumptions: Mutex::default(),
             hooks: Mutex::default(),
+            plugins: Mutex::default(),
         }
+    }
+
+    /// Give the build plugins: its segments are admitted with them from then
+    /// on.
+    fn install_plugins(&self, plugins: BuildPlugins) {
+        *self.plugins.lock_recover() = Some(Arc::new(plugins));
     }
 
     fn on_segment(&self, ordinal: u64, hook: BoxFuture) {
@@ -99,10 +129,21 @@ impl RestateProcessRunner for BuildRunner {
         Some(self.executable.clone())
     }
 
+    async fn admit_plugins(
+        &self,
+    ) -> Result<Option<lash_core::store::plugin_writers::PluginAdmission>, PluginError> {
+        let Some(plugins) = self.plugins.lock_recover().clone() else {
+            return Ok(None);
+        };
+        Ok(Some(
+            plugins.host.admit_plugins(plugins.fleet.as_ref()).await?,
+        ))
+    }
+
     async fn run_process_segment(
         &self,
         started: &crate::SegmentStarted,
-        _process_id: ProcessId,
+        process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: ScopedEffectController<'_>,
@@ -110,6 +151,14 @@ impl RestateProcessRunner for BuildRunner {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         let ordinal = started.segment_ordinal();
+        if let Some(plugins) = self.plugins.lock_recover().clone() {
+            plugins.seen.lock_recover().push((
+                self.build,
+                process_id,
+                ordinal,
+                started.plugins().cloned(),
+            ));
+        }
         self.resumptions.lock_recover().push((ordinal, handover));
         self.log.lock_recover().push(SegmentRun {
             build: self.build,
@@ -342,6 +391,8 @@ struct Roll {
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     gated: Arc<GatedContinuations>,
     runner_n: Arc<BuildRunner>,
+    runner_next: Arc<BuildRunner>,
+    sessions: Arc<dyn lash_core::DeploymentStore>,
     log: SegmentLog,
     endpoint_next: Arc<Mutex<Option<Endpoint>>>,
     deployment_n: DeploymentId,
@@ -431,7 +482,7 @@ impl Roll {
             Arc::clone(&gated) as Arc<dyn lash_core::ProcessContinuationStore>,
             "N",
         );
-        let endpoint_next = endpoint(runner_next, Arc::clone(&continuations), "N+1");
+        let endpoint_next = endpoint(Arc::clone(&runner_next), Arc::clone(&continuations), "N+1");
         let served: Arc<Mutex<Vec<(String, AttemptDispatch)>>> = Arc::default();
         let deployment_n = server
             .register_with(endpoint_n, "build-N", Self::recording("N", &served))
@@ -445,6 +496,8 @@ impl Roll {
             continuations,
             gated,
             runner_n,
+            runner_next,
+            sessions,
             log,
             endpoint_next: Arc::new(Mutex::new(Some(endpoint_next))),
             deployment_n,
@@ -1372,4 +1425,5 @@ async fn l5_a_forced_stable_redrive_after_the_reroute_adds_no_effects() {
 }
 
 mod crash_cuts;
+mod plugin_admission;
 mod refused_successor_drain;

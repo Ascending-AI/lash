@@ -70,7 +70,9 @@ impl CurrentOwnerCapability {
             .leaf_node_id()
             .cloned()
             .unwrap_or_else(|| crate::NodeId::new(String::new()));
-        state.capture_plugin_states(&self.plugins);
+        state
+            .capture_plugin_states(&self.plugins)
+            .map_err(crate::PluginError::Runtime)?;
         let mut commit =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
                 &state,

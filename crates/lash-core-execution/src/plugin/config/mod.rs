@@ -791,12 +791,17 @@ impl ConfigRegistry {
     /// owner. A stated namespace no owner registers is refused typed, the
     /// first in key order. A parent's recorded namespace its owner cannot
     /// read is corruption.
+    ///
+    /// Each namespace is written in the format `writers` records for its
+    /// plugin (FIG-4747), and in the plugin's native format when the
+    /// admission does not name it.
     pub fn resolve_creation(
         &self,
         protocol_plugin_id: Option<&str>,
         requested: &PluginOptions,
         parent: Option<&PluginConfig>,
         is_root_session: bool,
+        writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<PluginConfig, ConfigFault> {
         if let Some(unknown) = requested.plugins.keys().find(|plugin_id| {
             plugin_id.as_str() == CORE_CONFIG_OWNER || !self.owners.contains_key(plugin_id.as_str())
@@ -837,7 +842,9 @@ impl ConfigRegistry {
                         ConfigRefusalReason::UnknownOwner,
                     ));
                 };
-                let writer = factory.declaration().format_version;
+                let writer = writers
+                    .writer(plugin_id)
+                    .unwrap_or_else(|| factory.declaration().format_version);
                 let encoded = factory
                     .encode_format(writer, super::FormatNamespace::Config, &value)
                     .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
@@ -955,15 +962,20 @@ impl ConfigRegistry {
     ///
     /// A recorded namespace its owner cannot read resolves nothing: it is
     /// corruption of the session's config, never the transaction's refusal.
+    ///
+    /// A namespace the transaction changes is written in the format
+    /// `writers` records for its plugin (FIG-4747): the resolution is the
+    /// recorded step, so a replay publishes the same formats.
     pub fn resolve(
         &self,
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::LlmProfiles,
+        writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<ConfigResolution, RecordedNamespaceCorrupt> {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
-            match self.reduce(base, transaction, models) {
+            match self.reduce(base, transaction, models, writers) {
                 Ok(applied) => applied,
                 Err(ConfigFault::Refused(refusal)) => ConfigResolutionDecision::Refused { refusal },
                 Err(ConfigFault::RecordedCorrupt(corrupt)) => return Err(corrupt),
@@ -987,6 +999,7 @@ impl ConfigRegistry {
         base: &crate::PersistedSessionConfig,
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::LlmProfiles,
+        writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<ConfigResolutionDecision, ConfigFault> {
         let mut decoded_base = base.clone();
         decoded_base.plugin_config =
@@ -1093,7 +1106,9 @@ impl ConfigRegistry {
             {
                 continue;
             }
-            let writer = factory.declaration().format_version;
+            let writer = writers
+                .writer(id)
+                .unwrap_or_else(|| factory.declaration().format_version);
             let value = factory
                 .encode_format(writer, super::FormatNamespace::Config, value)
                 .map_err(|refusal| format_fault(refusal, RefusalSite::Candidate))?;

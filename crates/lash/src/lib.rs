@@ -634,7 +634,8 @@ pub mod persistence {
     pub use lash_core::session_graph::WindowAnchor;
     pub use lash_core::store::PluginWriterRangesFuture;
     pub use lash_core::store::plugin_writers::{
-        PluginPublication, PluginWriterRanges, PluginWriterRegistration, PluginWriterStamp,
+        AdmittedPlugin, PluginAdmission, PluginPublication, PluginWriterRanges,
+        PluginWriterRegistration, PluginWriterStamp,
     };
     /// The drive epoch a session drive's seal raises (FIG-3600): one segment
     /// of [`RuntimeStore`], implemented by every store a runtime drives,
@@ -1065,12 +1066,12 @@ pub mod remote {
         pub use lash_remote_protocol::RemoteToolIntentIdentity;
 
         pub use lash_remote_protocol::processes::{
-            RemoteAbandonEvidence, RemoteAbandonWriter, RemoteChargeSafetyPolicy,
-            RemoteDeclaredProcessIdentity, RemoteEffectOpener, RemoteLeaseOwnerIdentity,
-            RemoteLifetimeDecision, RemoteLlmProfileMetadata, RemoteModelConfig,
-            RemoteNoProgressBudget, RemoteObservedProcess, RemoteObservedProcessEvent,
-            RemoteObservedProcessFailure, RemoteObservedWorkItemState, RemoteParkReason,
-            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+            RemoteAbandonEvidence, RemoteAbandonWriter, RemoteAdmittedPlugin,
+            RemoteChargeSafetyPolicy, RemoteDeclaredProcessIdentity, RemoteEffectOpener,
+            RemoteLeaseOwnerIdentity, RemoteLifetimeDecision, RemoteLlmProfileMetadata,
+            RemoteModelConfig, RemoteNoProgressBudget, RemoteObservedProcess,
+            RemoteObservedProcessEvent, RemoteObservedProcessFailure, RemoteObservedWorkItemState,
+            RemoteParkReason, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
             RemotePluginConfigNamespace, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
             RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinition, RemoteProcessEvent, RemoteProcessEventSemantics,

@@ -294,7 +294,9 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     // Step 3: commit in that grantless state. A host append is a real durable
     // commit taken while every tool is orphaned — FIG-3353's exact question.
     let mut grantless = grantless;
-    grantless.stamp_live_plugin_state();
+    grantless
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     Box::pin(crate::runtime_support::apply_host_append(
         &mut grantless,
         &double,
@@ -489,7 +491,9 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
 
     // Step 3: enqueue pending input — a real durable commit taken on the
     // grantless open.
-    enqueue_only.stamp_live_plugin_state();
+    enqueue_only
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     Box::pin(crate::runtime_support::apply_host_append(
         &mut enqueue_only,
         &double,
@@ -668,7 +672,9 @@ async fn preserve_persisted_open_survives_resident_reload() {
     // Invalidate the resident session so the next operation takes the durable
     // reload path — a wholesale `self.state` replacement.
     lash_core::testing::invalidate_resident_session_state_for_testing(&mut enqueue_only);
-    enqueue_only.stamp_live_plugin_state();
+    enqueue_only
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     Box::pin(crate::runtime_support::apply_host_append(
         &mut enqueue_only,
         &double,
@@ -1008,7 +1014,9 @@ async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member(
     .expect("parent runtime");
     set_runtime_provider(&mut runtime, mock_provider(Vec::new()).into_handle());
     // The parent's snapshot records the tool while its source is live.
-    runtime.stamp_live_plugin_state();
+    runtime
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     assert!(
         runtime
             .state()
@@ -1106,7 +1114,9 @@ async fn live_require_runtime(
     )
     .await
     .expect("the open itself has nothing to lose yet");
-    runtime.stamp_live_plugin_state();
+    runtime
+        .stamp_live_plugin_state()
+        .expect("the live plugin state is captured");
     let snapshot = runtime.tool_state().expect("live tool state");
     assert!(
         snapshot.contains(&lash_core::ToolId::from(ALPHA_ID)),

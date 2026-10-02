@@ -419,6 +419,7 @@ mod tests {
                     started_at_ms: 1,
                     generation: None,
                     build_generation: None,
+                    plugins: None,
                 },
             )
             .await

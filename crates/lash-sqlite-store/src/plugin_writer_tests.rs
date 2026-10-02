@@ -642,3 +642,221 @@ async fn a_plugin_only_finalize_survives_a_crash_between_the_database_files() {
             .expect("format 2 commits once the range moved");
     }
 }
+
+/// A plugin that reads format 2 natively and still writes format 1.
+#[cfg(feature = "synthetic-next")]
+struct WindowPlugin;
+
+#[cfg(feature = "synthetic-next")]
+impl lash_core_execution::facade_support::PluginFactory for WindowPlugin {
+    fn id(&self) -> &'static str {
+        PLUGIN
+    }
+
+    fn declaration(&self) -> lash_core_execution::plugin::PluginDeclaration {
+        let mut declaration = lash_core_execution::plugin::PluginDeclaration::initial(PLUGIN);
+        declaration.format_version = version(2);
+        declaration.writable_formats = vec![version(1), version(2)];
+        declaration
+    }
+
+    fn migrate_format(
+        &self,
+        _from: FormatVersion,
+        _namespace: FormatNamespace,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, lash_core_execution::FormatRefusal> {
+        Ok(value)
+    }
+
+    fn encode_format(
+        &self,
+        _to: FormatVersion,
+        _namespace: FormatNamespace,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, lash_core_execution::FormatRefusal> {
+        Ok(value.clone())
+    }
+
+    fn build(
+        &self,
+        ctx: &lash_core_execution::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn lash_core_execution::plugin::SessionPlugin>, lash_core_execution::PluginError>
+    {
+        lash_core_execution::plugin::StaticPluginFactory::new(
+            self.declaration(),
+            lash_core_execution::plugin::PluginSpec::new(),
+        )
+        .build(ctx)
+    }
+}
+
+/// A Run of `session` as its drive admits it: the session, a sealed drive
+/// fence, a head input and the root's admission recording `plugins`.
+#[cfg(feature = "synthetic-next")]
+async fn admit_run(
+    store: &Arc<dyn RuntimeStore>,
+    session: &str,
+    plugins: &lash_core_execution::store::plugin_writers::PluginAdmission,
+) -> (
+    lash_core_execution::store::AdmitRootRequest,
+    lash_core_execution::store::RootAdmission,
+) {
+    use lash_core_execution::testing::store_fixtures::{
+        admit_root_request_for_test, seal_drive_fence_for_test,
+    };
+    let session_id = SessionId::from(session);
+    let fence = seal_drive_fence_for_test(store, &session_id, "plugin-admission-law").await;
+    let head = store
+        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
+            session_id,
+            lash_core_execution::TurnInputIngress::NextTurn,
+            lash_core_execution::TurnInput::text("question"),
+        ))
+        .await
+        .expect("enqueue the Run's head");
+    let mut request = admit_root_request_for_test(
+        &fence,
+        &lash_core_execution::TurnId::from(format!("{session}-run")),
+        lash_core_execution::store::AdmittedHead::Input(head.input_id),
+    );
+    request.plugins = plugins.clone();
+    let admission = store
+        .admit_root(&request)
+        .await
+        .expect("admit the Run")
+        .expect("the admission reaches its head");
+    (request, admission)
+}
+
+/// FIG-4747: the writer a Run's admission chose is the Run's for good. A
+/// Run admitted inside the window records format 1; the successor
+/// finalizes, which widens the range to format 2; a retry of the Run
+/// re-admits, is answered its recorded admission and commits format 1,
+/// while a Run admitted after the finalize records and commits format 2.
+#[cfg(feature = "synthetic-next")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_run_admitted_before_finalize_and_retried_after_it_keeps_its_recorded_writer() {
+    use lash_core_execution::plugin::PluginSessionRequest;
+
+    let (_root, set) = file_set().await;
+    let location = set.location().clone();
+    let store = store(&set);
+    let mut factories = lash_core_execution::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(WindowPlugin));
+    let host = lash_core_execution::facade_support::PluginHost::new(factories);
+    let retired = BuildGeneration::for_test("plugin-admission-old");
+    let writer = |admission: &lash_core_execution::store::plugin_writers::PluginAdmission| {
+        admission
+            .writer(PLUGIN)
+            .expect("the admission names the plugin")
+            .get()
+    };
+    // What a session admitted under `admission` commits, and that the store
+    // takes it.
+    let commit_under =
+        |session: &'static str,
+         admission: lash_core_execution::store::plugin_writers::PluginAdmission,
+         store: Arc<dyn RuntimeStore>,
+         host: lash_core_execution::facade_support::PluginHost| async move {
+            let plugins = host
+                .isolated_registry()
+                .build_session(PluginSessionRequest::creation(session, Default::default()))
+                .expect("build the plugin session");
+            plugins.adopt_plugin_admission(admission);
+            let mut state = state(session);
+            state
+                .capture_plugin_states(&plugins)
+                .expect("capture the plugin state");
+            let committed = state
+                .plugin_state()
+                .expect("the capture is resident")
+                .plugins[PLUGIN]
+                .format_version
+                .get();
+            commit(&store, &mut state).await.map(|()| committed)
+        };
+
+    // Inside the window the fleet permits the plugin's oldest format only,
+    // and the Run's admission records it with the composition.
+    let chosen = host
+        .admit_plugins(store.as_ref())
+        .await
+        .expect("admit the plugins inside the window");
+    assert_eq!(writer(&chosen), 1);
+    assert_eq!(recorded_range(&location), Some((1, 1)));
+    let (request, admission) = admit_run(&store, "before", &chosen).await;
+    assert_eq!(admission.plugins, chosen);
+    assert_eq!(
+        admission
+            .plugins
+            .plugins()
+            .iter()
+            .map(|plugin| plugin.plugin.as_str())
+            .collect::<Vec<_>>(),
+        host.factories()
+            .iter()
+            .map(|factory| factory.id())
+            .collect::<Vec<_>>(),
+        "the record is the composition in hook order"
+    );
+    assert_eq!(
+        commit_under(
+            "before",
+            admission.plugins.clone(),
+            store.clone(),
+            host.clone()
+        )
+        .await
+        .expect("the Run's format 1 commits inside the window"),
+        1
+    );
+
+    // The successor finalizes: the range reaches the plugin's native format.
+    set.generation_drain()
+        .mark_draining(&retired, 1)
+        .await
+        .expect("mark the retired generation draining");
+    let registrations = host
+        .composition()
+        .expect("a valid composition")
+        .writer_registrations();
+    let flip = set
+        .finalize(&retired, &NoDeployments, &registrations, 5)
+        .await
+        .expect("finalize");
+    assert!(matches!(flip, FleetEpochFlip::Finalized { .. }), "{flip:?}");
+    assert_eq!(recorded_range(&location), Some((1, 2)));
+
+    // A retry of the Run chooses again, as its first execution did, and is
+    // answered the admission the store recorded: format 1, which it commits.
+    let fresh = host
+        .admit_plugins(store.as_ref())
+        .await
+        .expect("admit the plugins after the finalize");
+    assert_eq!(writer(&fresh), 2);
+    let mut retry = request.clone();
+    retry.plugins = fresh.clone();
+    let replayed = store
+        .admit_root(&retry)
+        .await
+        .expect("re-admit the Run")
+        .expect("the recorded admission");
+    assert_eq!(replayed.plugins, chosen, "the record, never the live range");
+    assert_eq!(
+        commit_under("before", replayed.plugins, store.clone(), host.clone())
+            .await
+            .expect("the retried Run's format 1 commits after the finalize"),
+        1
+    );
+
+    // A Run admitted after the finalize records and commits format 2.
+    let (_, admitted_after) = admit_run(&store, "after", &fresh).await;
+    assert_eq!(writer(&admitted_after.plugins), 2);
+    assert_eq!(
+        commit_under("after", admitted_after.plugins, store.clone(), host.clone())
+            .await
+            .expect("the new Run's format 2 commits"),
+        2
+    );
+}

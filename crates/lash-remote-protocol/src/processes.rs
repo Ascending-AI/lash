@@ -1137,6 +1137,19 @@ pub struct RemoteProcessStarted {
     /// (FIG-3795 S1), spelled as the store holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_generation: Option<String>,
+    /// The plugin composition the incarnation started under, in hook order,
+    /// with the writer format chosen for each plugin (FIG-4747).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<Vec<RemoteAdmittedPlugin>>,
+}
+
+/// Wire mirror of one plugin of a recorded plugin admission.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteAdmittedPlugin {
+    pub plugin: String,
+    pub behavior_revision: std::num::NonZeroU32,
+    pub writer: std::num::NonZeroU32,
 }
 
 const fn remote_first_process_attempt() -> u32 {

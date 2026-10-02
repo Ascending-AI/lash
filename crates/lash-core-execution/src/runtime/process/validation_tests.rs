@@ -583,6 +583,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
                 started_at_ms: 2,
                 build_generation: None,
                 generation: None,
+                plugins: None,
             },
         ),
         ProcessEventAppendRequest::wait_entered(&record.id, &wait),

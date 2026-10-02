@@ -326,6 +326,106 @@ impl PluginWriterRanges {
     }
 }
 
+/// One plugin of an admission's composition: its place in hook order, the
+/// behaviour revision it ran as and the format its namespaces are written in.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AdmittedPlugin {
+    pub plugin: String,
+    pub behavior_revision: lash_core_ids::BehaviorRevision,
+    /// The format the admission chose for this plugin's state and config
+    /// namespaces: the highest one the plugin writes that the fleet record
+    /// permitted when the admission was recorded.
+    pub writer: FormatVersion,
+}
+
+/// What a segment admission records about its plugins (FIG-4747): the
+/// ordered composition it runs and the writer format chosen for each plugin.
+///
+/// A Run's admission, a process's start and every later process segment's
+/// start record one. The choice is made once, from the fleet record's ranges
+/// at the admission, and every retry, replay and redrive of the admitted
+/// work encodes with the recorded choice: a finalize that widens a range
+/// changes what the next admission chooses, never what a recorded one writes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct PluginAdmission {
+    plugins: Vec<AdmittedPlugin>,
+}
+
+impl PluginAdmission {
+    /// Choose each plugin's writer from `ranges`: the highest format in both
+    /// its writable set and the range the fleet record permits it.
+    /// `composition` is the admitting build's plugins in hook order, each
+    /// with its behaviour revision. A plugin that writes no permitted format
+    /// is refused typed, and so is one the record does not name.
+    pub fn choose<'a>(
+        composition: impl IntoIterator<
+            Item = (
+                &'a PluginWriterRegistration,
+                lash_core_ids::BehaviorRevision,
+            ),
+        >,
+        ranges: &PluginWriterRanges,
+    ) -> Result<Self, CompatRefusal> {
+        let mut plugins = Vec::new();
+        for (registration, behavior_revision) in composition {
+            let permitted = ranges.permitted_writer(&registration.plugin)?;
+            let writer = registration
+                .writable
+                .iter()
+                .copied()
+                .filter(|writable| permitted.contains(writable.get()))
+                .max()
+                .ok_or_else(|| CompatRefusal::PluginWriterUnwritable {
+                    plugin: registration.plugin.clone(),
+                    writable: registration
+                        .writable
+                        .iter()
+                        .map(|writable| writable.get())
+                        .collect(),
+                    permitted,
+                })?;
+            plugins.push(AdmittedPlugin {
+                plugin: registration.plugin.clone(),
+                behavior_revision,
+                writer,
+            });
+        }
+        Ok(Self { plugins })
+    }
+
+    /// An admission read back from its recorded plugins, in hook order.
+    pub fn from_plugins(plugins: Vec<AdmittedPlugin>) -> Self {
+        Self { plugins }
+    }
+
+    /// The admitted plugins, in hook order.
+    pub fn plugins(&self) -> &[AdmittedPlugin] {
+        &self.plugins
+    }
+
+    /// Whether the admission names no plugin.
+    pub fn is_empty(&self) -> bool {
+        self.plugins.is_empty()
+    }
+
+    /// The writer the admission recorded for `plugin`, if it names it.
+    pub fn writer(&self, plugin: &str) -> Option<FormatVersion> {
+        self.plugins
+            .iter()
+            .find(|admitted| admitted.plugin == plugin)
+            .map(|admitted| admitted.writer)
+    }
+
+    /// The recorded writer of every admitted plugin, by plugin id.
+    pub fn writers(&self) -> BTreeMap<String, FormatVersion> {
+        self.plugins
+            .iter()
+            .map(|admitted| (admitted.plugin.clone(), admitted.writer))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,5 +601,60 @@ mod tests {
         let mut found = PluginPublication::default();
         found.add_config(&config);
         assert_eq!(found, publication(&[("probe", FormatNamespace::Config, 3)]));
+    }
+
+    #[test]
+    fn an_admission_chooses_the_highest_permitted_writable_format() {
+        let probe = registration("probe", 3, &[1, 2, 3]);
+        let other = registration("other", 1, &[1]);
+        let revision = lash_core_ids::BehaviorRevision::new(7).expect("a revision");
+        let composition = [
+            (&probe, revision),
+            (&other, lash_core_ids::BehaviorRevision::ONE),
+        ];
+        let window = ranges(&[("probe", 1, 2), ("other", 1, 1)]);
+        let admitted = PluginAdmission::choose(composition, &window).expect("admitted");
+        assert_eq!(
+            admitted
+                .plugins()
+                .iter()
+                .map(|plugin| (
+                    plugin.plugin.as_str(),
+                    plugin.behavior_revision.get(),
+                    plugin.writer.get()
+                ))
+                .collect::<Vec<_>>(),
+            vec![("probe", 7, 2), ("other", 1, 1)]
+        );
+        assert_eq!(admitted.writer("probe"), Some(version(2)));
+        assert_eq!(admitted.writer("absent"), None);
+
+        let finalized = ranges(&[("probe", 1, 3), ("other", 1, 1)]);
+        assert_eq!(
+            PluginAdmission::choose(composition, &finalized)
+                .expect("admitted")
+                .writer("probe"),
+            Some(version(3))
+        );
+    }
+
+    #[test]
+    fn an_admission_refuses_a_plugin_with_no_permitted_writer() {
+        let probe = registration("probe", 3, &[3]);
+        let composition = [(&probe, lash_core_ids::BehaviorRevision::ONE)];
+        assert_eq!(
+            PluginAdmission::choose(composition, &ranges(&[("probe", 1, 2)])),
+            Err(CompatRefusal::PluginWriterUnwritable {
+                plugin: "probe".into(),
+                writable: vec![3],
+                permitted: VersionRange::between(1, 2),
+            })
+        );
+        assert_eq!(
+            PluginAdmission::choose(composition, &PluginWriterRanges::default()),
+            Err(CompatRefusal::PluginWriterUnprovisioned {
+                plugin: "probe".into()
+            })
+        );
     }
 }

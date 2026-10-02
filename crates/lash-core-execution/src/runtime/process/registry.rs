@@ -539,6 +539,13 @@ pub struct SegmentStartMarker {
     /// is never derived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_generation: Option<crate::engine::BuildGeneration>,
+    /// The plugin composition the segment was admitted under and the writer
+    /// format chosen for each plugin (FIG-4747): a successor adopts the
+    /// admitting build's plugins and the fleet record's ranges as they stood
+    /// at its admission, and every retry of it reads this record back.
+    /// `None` for a substrate whose segments carry no plugins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<crate::store::plugin_writers::PluginAdmission>,
 }
 
 /// Substrate-scoped durable continuation storage. This is not part of the

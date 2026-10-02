@@ -157,7 +157,7 @@ impl LashRuntime {
                 return Ok(!matches!(committed, CommandCommit::Withdrawn));
             }
         }
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()?;
         let committed = Box::pin(self.commit_host_command(
             &completion,
             drive_fence,
@@ -447,7 +447,8 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
-        self.stamp_live_plugin_state();
+        self.stamp_live_plugin_state()
+            .map_err(|error| PluginOperationInvokeError::Failed(error.to_string()))?;
         // A queued turn lands before the settlement names it. A turn with no
         // source key takes one from the command, so a redrive of the
         // unsettled command enqueues the same turn once.
@@ -672,7 +673,7 @@ impl LashRuntime {
             |stamp| stamp.operation.clone(),
         );
         if let Some(session) = self.session.as_ref() {
-            self.state.capture_plugin_states(session.plugins());
+            self.state.capture_plugin_states(session.plugins())?;
         }
         let fleet_format = self.fleet_format();
         let (mut commit, persisted_node_ids) =
