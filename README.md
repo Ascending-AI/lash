@@ -13,7 +13,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 - **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs model-authored TypeScript, lowered into the `lashlang` IR, in resettable worker processes where every effect crosses the host. Language limits bound guest authority and processes contain native crashes; OS confinement belongs to the host.
 - **Tool providers and plugins** — ordinary host operations are `ToolProvider`s, delivered at least once and keyed for idempotency on the `call_id()` lash mints for each call; plugins add runtime/session behavior such as prompts, planning, memory, subagents, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed.
 - **Provider portability** — Anthropic, OpenAI Responses, any OpenAI-compatible Chat Completions endpoint, OpenAI Codex, and Google Gemini / Code Assist. MCP servers attach through `lash-plugin-mcp`.
-- **Tracing as a first-class sink** — attach a `TraceSink` for structured turn, tool, LLM, prompt, and usage records. Bundled JSONL sink; optional OpenTelemetry export.
+- **Tracing as a first-class sink** — attach a `TraceSink` for structured turn, tool, LLM, prompt, and usage records. Bundled JSONL sink; optional OpenTelemetry export through a host-installed `OtelTelemetry` adapter (`lash::tracing`), whose span, attribute and metric contract is published in `crates/lash/docs/instrumentation-contract.md`.
 
 ## Examples
 

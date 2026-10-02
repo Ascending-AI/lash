@@ -1473,6 +1473,11 @@ pub mod tracing {
     #[cfg(feature = "otel-trace")]
     pub use lash_trace::otel::api as otel;
     #[cfg(feature = "otel-trace")]
+    pub use lash_trace::otel::registry::{
+        GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
+        contract_markdown,
+    };
+    #[cfg(feature = "otel-trace")]
     pub use lash_trace::otel::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, OtelTelemetry};
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a

@@ -419,11 +419,19 @@ fn telemetry_types_are_nameable(
     telemetry: lash::tracing::OtelTelemetry,
     builder: lash::LashCoreBuilder,
 ) -> lash::LashCoreBuilder {
-    use lash::tracing::{OtelOptions, OtelPayloadExport, OtelSpanEnricher, TelemetryMetrics, otel};
+    use lash::tracing::{
+        GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
+        OtelOptions, OtelPayloadExport, OtelSpanEnricher, TelemetryMetrics, contract_markdown,
+        otel,
+    };
     let _: &OtelOptions = telemetry.options();
     let _: &TelemetryMetrics = telemetry.metrics();
     let _: OtelPayloadExport = OtelPayloadExport::Off;
     let _: Option<Arc<dyn OtelSpanEnricher>> = None;
     let _: Option<otel::trace::SpanContext> = None;
+    let _: fn() -> String = contract_markdown;
+    let _: &str = LASH_INSTRUMENTATION_NAME;
+    let _: &str = LASH_INSTRUMENTATION_CONTRACT;
+    let _: &str = GEN_AI_SEMCONV_SNAPSHOT;
     builder.telemetry(telemetry)
 }
