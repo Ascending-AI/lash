@@ -148,6 +148,7 @@ def is_content_input(relative: str) -> bool:
             "rust-toolchain.toml",
             "scripts/feature-coverage.toml",
             "tools/buck2/action-sizes.json",
+            "tools/buck2/clippy-sizes.json",
             "tools/buck2/clippy_policy.py",
             "tools/buck2/feature_variants.py",
             "tools/buck2/generate_model.py",
@@ -752,6 +753,11 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
     def output_label(label: str, kind: str) -> str:
         return label + "[static]" if kind == "lib" else label
 
+    def clippy_label(label: str) -> str:
+        # The Clippy twin lash_rust.bzl declares beside every Rust target: the
+        # same rule on its own execution platform, sized for Clippy.
+        return label + "__clippy[clippy.txt]"
+
     kinds: dict[str, str] = {}
     for package in result["packages"]:
         for target in package["targets"]:
@@ -760,7 +766,7 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
                 if target["kind"] == "lib":
                     target["doc_label"] = target["label"] + "[doc]"
                 if target["kind"] != "custom-build":
-                    target["clippy_label"] = target["label"] + "[clippy.txt]"
+                    target["clippy_label"] = clippy_label(target["label"])
                 if target["kind"] != "custom-build":
                     target["check_label"] = target["label"] + "[check]"
                 kinds[target["label"]] = target["kind"]
@@ -769,7 +775,7 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
         if unit["kind"] == "lib":
             unit["doc_label"] = unit["label"] + "[doc]"
         unit["check_label"] = unit["label"] + "[check]"
-        unit["clippy_label"] = unit["label"] + "[clippy.txt]"
+        unit["clippy_label"] = clippy_label(unit["label"])
         kinds[unit["label"]] = unit["kind"]
     result["workspace_build_targets"] = [
         output_label(label, kinds.get(label, ""))
@@ -794,10 +800,10 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
         label + "[check]" for label in result["feature_lane_compile_targets"]
     ]
     result["workspace_clippy_build_targets"] = [
-        label + "[clippy.txt]" for label in result["workspace_clippy_targets"]
+        clippy_label(label) for label in result["workspace_clippy_targets"]
     ]
     result["feature_lane_clippy_build_targets"] = [
-        label + "[clippy.txt]" for label in result["feature_lane_clippy_targets"]
+        clippy_label(label) for label in result["feature_lane_clippy_targets"]
     ]
     return result
 

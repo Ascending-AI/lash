@@ -4,6 +4,7 @@ load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load(":buildscript_manifest.bzl", "buildscript_manifest", "buildscript_sources")
 load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LINT_FLAGS", "first_party_clippy_configuration")
 load(":deps.bzl", "PACKAGE_DEPS")
+load(":exec_sizes.bzl", "HELPER_BUDGET")
 load(":platforms.bzl", "MEMORY_SCALE", "pool_constraint")
 load(":profile.bzl", "FIRST_PARTY_OPT_LEVELS")
 load(":source_tree.bzl", "lash_rust_source_tree")
@@ -102,6 +103,33 @@ def _resource_attrs(exec_properties):
         for key, value in dev.items()
     }
 
+def _clippy_attrs(exec_properties):
+    """The Clippy twin's request: its crate's measured Clippy row, else the
+    target's own compile request."""
+    if "clippy.cpu_count" not in exec_properties:
+        return _resource_attrs(exec_properties)
+    return _pool(
+        int(exec_properties["clippy.cpu_count"]),
+        int(exec_properties["clippy.memory_kb"]) * MEMORY_SCALE,
+    )
+
+def _rust_rule(rule, name, clippy_name, exec_properties, **attrs):
+    """Declares a Rust target and its Clippy twin, `clippy_name`.
+
+    Buck2 resolves one execution platform per target, so every action a
+    target runs reserves its compile request, Clippy included, though Clippy
+    holds a fraction of a compile's memory. The twin is the same rule with the
+    same attributes on a platform sized for Clippy (`clippy-sizes.json`); its
+    `[clippy.txt]` is what `kiln clippy` and `//:workspace_clippy` build. It
+    shares the target's dependencies and source tree, so building it runs
+    Clippy's own action and nothing the target has not already built.
+    """
+    rule(name = name, **(attrs | _resource_attrs(exec_properties)))
+    twin = dict(attrs)
+    twin.update(_clippy_attrs(exec_properties))
+    twin["visibility"] = ["PUBLIC"]
+    rule(name = clippy_name, **twin)
+
 def _named_deps(package_name, include_dev = False, build = False):
     groups = PACKAGE_DEPS[package_name]
     result = dict(groups["build"] if build else groups["normal"])
@@ -195,16 +223,18 @@ def lash_rust_build_script(
         package_srcs = ["Cargo.toml"] + data,
         workspace_srcs = extra_data,
     )
-    source_attrs = _resource_attrs({})
-    source_attrs.update(_source_attrs(
+    source_attrs = _source_attrs(
         binary,
         manifest_dir,
         "build.rs",
         _srcs("build.rs", ["build/**/*.rs"]) + data,
         extra_srcs,
-    ))
-    native.rust_binary(
-        name = binary,
+    )
+    _rust_rule(
+        native.rust_binary,
+        binary,
+        binary + "__clippy",
+        {},
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = "build_script_build",
         edition = "2024",
@@ -216,7 +246,8 @@ def lash_rust_build_script(
         visibility = ["PUBLIC"],
         **source_attrs
     )
-    cpu, memory = _request({})
+    # Running a build script is a helper action, sized as one.
+    cpu, memory = HELPER_BUDGET
     env = dict(build_script_env)
     env.update({
         "KILN_ACTION_CPU_COUNT": str(cpu),
@@ -256,16 +287,18 @@ def lash_rust_library(
         _rustc_flags(package_name, declared_features),
     )
     package_compile_data = _data(compile_data_patterns)
-    source_attrs = _resource_attrs(exec_properties)
-    source_attrs.update(_source_attrs(
+    source_attrs = _source_attrs(
         name,
         manifest_dir,
         "src/lib.rs",
         glob(["src/**/*.rs", "shared/**/*.rs"], exclude = _IGNORED + test_srcs) + package_compile_data,
         extra_compile_data,
-    ))
-    native.rust_library(
-        name = name,
+    )
+    _rust_rule(
+        native.rust_library,
+        name,
+        name + "__clippy",
+        exec_properties,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
         edition = "2024",
@@ -300,16 +333,18 @@ def lash_rust_binary(
     if library:
         deps[library_crate_name] = library
     package_compile_data = _data(compile_data_patterns, data_exclude)
-    source_attrs = _resource_attrs(exec_properties)
-    source_attrs.update(_source_attrs(
+    source_attrs = _source_attrs(
         name,
         manifest_dir,
         crate_root,
         _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + package_compile_data,
         extra_compile_data,
-    ))
-    native.rust_binary(
-        name = name,
+    )
+    _rust_rule(
+        native.rust_binary,
+        name,
+        name + "__clippy",
+        exec_properties,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
         edition = "2024",
@@ -357,16 +392,18 @@ def _rust_test(
     )
     package_files = glob(["**"], exclude = _IGNORED + data_exclude)
     package_data = _data(["**"], data_exclude)
-    source_attrs = _resource_attrs(exec_properties)
-    source_attrs.update(_source_attrs(
+    source_attrs = _source_attrs(
         binary,
         manifest_dir,
         crate_root,
         _srcs(crate_root, srcs_patterns) + package_data,
         extra_compile_data,
-    ))
-    native.rust_test(
-        name = binary,
+    )
+    _rust_rule(
+        native.rust_test,
+        binary,
+        name + "__clippy",
+        exec_properties,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
         edition = "2024",
@@ -502,16 +539,18 @@ def lash_rust_feature_library(
         _rustc_flags(package_name, declared_features),
     )
     package_compile_data = _data(compile_data_patterns)
-    source_attrs = _resource_attrs(exec_properties)
-    source_attrs.update(_source_attrs(
+    source_attrs = _source_attrs(
         name,
         manifest_dir,
         "src/lib.rs",
         glob(["src/**/*.rs", "shared/**/*.rs"], exclude = _IGNORED + test_srcs) + package_compile_data,
         extra_compile_data,
-    ))
-    native.rust_library(
-        name = name,
+    )
+    _rust_rule(
+        native.rust_library,
+        name,
+        name + "__clippy",
+        exec_properties,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
         edition = "2024",
@@ -554,16 +593,18 @@ def _feature_binary(name, package_name, named_deps, **kwargs):
     compile_data_patterns = kwargs.pop("compile_data_patterns", [])
     data_exclude = kwargs.pop("data_exclude", [])
     package_compile_data = _data(compile_data_patterns, data_exclude)
-    source_attrs = _resource_attrs(exec_properties)
-    source_attrs.update(_source_attrs(
+    source_attrs = _source_attrs(
         name,
         manifest_dir,
         crate_root,
         _srcs(crate_root, ["src/**/*.rs", "examples/**/*.rs", "benches/**/*.rs", "shared/**/*.rs"]) + package_compile_data,
         extra_compile_data,
-    ))
-    native.rust_binary(
-        name = name,
+    )
+    _rust_rule(
+        native.rust_binary,
+        name,
+        name + "__clippy",
+        exec_properties,
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = crate_name,
         edition = "2024",

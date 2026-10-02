@@ -53,6 +53,16 @@ TARGET_KINDS = ("target", "test")
 # select it on the profile constraint, so a dev build's requests -- and action
 # keys -- do not depend on it.
 OPTIMIZED_SIZES_PATH = ROOT / "tools/buck2/optimized-sizes.json"
+# Every generated Rust target has a Clippy twin, `<label>__clippy`: the same
+# rule and attributes on a platform of its own (Buck2 gives a target one), so
+# Clippy no longer reserves the compile request. This table carries its
+# measured request, keyed `<package>/<crate>`; a crate without a row keeps
+# its compile request for Clippy. `action_sizes_from_log.py` documents the
+# rule.
+CLIPPY_SIZES_PATH = ROOT / "tools/buck2/clippy-sizes.json"
+# The least a Clippy row asks for. Must match `CLIPPY_FLOOR_KB` in
+# `tools/buck2/action_sizes_from_log.py`.
+CLIPPY_FLOOR_KB = 512 * 1024
 # Must match the default execution platform in `tools/buck2/platforms.bzl` and
 # `DEFAULT_MEMORY_KB` in `tools/buck2/action_sizes_from_log.py`.
 DEFAULT_MEMORY_KB = 1572864
@@ -88,18 +98,38 @@ PINNED_TEST_RUNS = PACKAGE_POLICY["test_runs"].get("pinned", {})
 # per distinct compile request; test runs and batches state their request to
 # the test executor directly and need no platform.
 UNSIZED_ACTION_BUDGET = (1, 1048576)
-FIXED_POOL_BUDGETS = [(DEFAULT_CPU_COUNT, DEFAULT_MEMORY_KB), (2, 3145728)]
+# The request of a helper target: a first-party build-script run
+# (`buildscript`) and the schema actions. Build-script runs peaked at 233 MiB
+# and the schema actions at 25 MiB over 3 days to 2026-10-02 on the pool; the
+# largest peak x 1.25, rounded up to 256 MiB, is 512 MiB. A third-party
+# build-script run keeps the default request (see `third_party.bzl`). It is also `CLIPPY_FLOOR_KB`, so the
+# smallest Clippy rows add no platform of their own.
+HELPER_ACTION_BUDGET = (1, 524288)
+FIXED_POOL_BUDGETS = [
+    (DEFAULT_CPU_COUNT, DEFAULT_MEMORY_KB),
+    (2, 3145728),
+    HELPER_ACTION_BUDGET,
+]
 # Where every remote action category of the graph gets its request. Buck2
 # resolves one execution platform per target, so a category is sized through
 # the target that runs it:
 #
 #   compile   the owning Rust target's row: its kind's in
 #             `target-kind-sizes.json`, else its crate's in
-#             `action-sizes.json`, else the default request. Its helpers
-#             (`deps`, `failure_filter`, ...) run on that same platform for
-#             well under a second.
-#   default   the default request, stated by the rule that declares the action
-#             (`third_party.bzl`, `schema_checks.bzl`, the build-script macro).
+#             `action-sizes.json`, else the default request. Its remaining
+#             helpers (`failure_filter`, which leaves the daemon only after a
+#             failed compile, ...) run on that same platform for well under a
+#             second.
+#   clippy    the Rust target's Clippy twin, `<label>__clippy`: its crate's
+#             row in `clippy-sizes.json`, else the compile request.
+#   helper    `HELPER_ACTION_BUDGET` for the schema actions and first-party
+#             build-script runs (`schema_checks.bzl`, `lash_rust.bzl`); a
+#             third-party build-script run states the default request
+#             (`third_party.bzl`), which the category check below allows.
+#   daemon    no remote action at all: the overlay lays it out in the daemon
+#             (`deps`, the dependency directories; see `prelude_overlay.py`).
+#             The pool still records it until those logs age out, and no rule
+#             may declare it again.
 #   probe     the request `runtime_probe` is given.
 #   unsized   a prelude helper target that names no budget and resolves to
 #             `UNSIZED_ACTION_BUDGET`.
@@ -111,10 +141,10 @@ FIXED_POOL_BUDGETS = [(DEFAULT_CPU_COUNT, DEFAULT_MEMORY_KB), (2, 3145728)]
 # action no row sizes peaked above the request named here for its category.
 ACTION_CATEGORY_SIZES = {
     "analyze_llvm_lines": "compile",
-    "buildscript": "default",
-    "clippy": "compile",
+    "buildscript": "helper",
+    "clippy": "clippy",
     "clippy_toml_merge": "compile",
-    "deps": "compile",
+    "deps": "daemon",
     "failure_filter": "compile",
     "find_profdata": "compile",
     "http_archive": "unsized",
@@ -129,8 +159,8 @@ ACTION_CATEGORY_SIZES = {
     "rustdoc": "compile",
     "rustdoc_coverage": "compile",
     "rustdoc_json": "compile",
-    "schema_check": "default",
-    "schema_generate": "default",
+    "schema_check": "helper",
+    "schema_generate": "helper",
 }
 # Members a `:test_batch` runs at once. An unmeasured batch reserves the sum
 # of its largest BATCH_JOBS members' requests and the runner reads the same
@@ -166,6 +196,7 @@ def action_sizes() -> dict[str, dict[str, int]]:
 
 ACTION_SIZES = action_sizes()
 TARGET_KIND_SIZES = json.loads(TARGET_KIND_SIZES_PATH.read_text(encoding="utf-8"))
+CLIPPY_SIZES = json.loads(CLIPPY_SIZES_PATH.read_text(encoding="utf-8"))
 OPTIMIZED_SIZES = json.loads(OPTIMIZED_SIZES_PATH.read_text(encoding="utf-8"))
 TEST_RUN_SIZES = json.loads(TEST_RUN_SIZES_PATH.read_text(encoding="utf-8"))
 
@@ -332,12 +363,18 @@ def exec_sizes_bzl() -> str:
         for key in sorted(OPTIMIZED_SIZES)
     }
     optimized_requests = {key: kinds for key, kinds in optimized_requests.items() if kinds}
+    clippy_requests = {
+        key: {"cpu_count": row["cpu_count"], "memory_kb": row["memory_kb"]}
+        for key, row in sorted(CLIPPY_SIZES.items())
+    }
     pool_budgets = [UNSIZED_ACTION_BUDGET] + sorted(
         (
             set(FIXED_POOL_BUDGETS)
             | {
                 (request["cpu_count"], request["memory_kb"])
-                for requests in list(compile_requests.values()) + list(optimized_requests.values())
+                for requests in list(compile_requests.values())
+                + list(optimized_requests.values())
+                + [clippy_requests]
                 for request in requests.values()
             }
         )
@@ -370,11 +407,13 @@ def exec_sizes_bzl() -> str:
         f'    "cpu_count": {unmeasured_batch["cpu_count"]},\n',
         f'    "memory_kb": {unmeasured_batch["memory_kb"]},\n',
         "}\n\n",
-        "# One execution platform per compile request. The first is what a\n",
-        "# target that names no budget resolves to.\n",
+        "# One execution platform per compile and Clippy request. The first is\n",
+        "# what a target that names no budget resolves to.\n",
         "POOL_BUDGETS = [\n",
         "".join(f"    ({cpu}, {memory_kb}),\n" for cpu, memory_kb in pool_budgets),
         "]\n\n",
+        "# What a helper target (a build-script run, the schema actions) asks for.\n",
+        f"HELPER_BUDGET = ({HELPER_ACTION_BUDGET[0]}, {HELPER_ACTION_BUDGET[1]})\n\n",
         "COMPILE_REQUESTS = {\n",
         "".join(
             f"    {quote(key)}: {{"
@@ -411,6 +450,16 @@ def exec_sizes_bzl() -> str:
             for key, kinds in optimized_requests.items()
         ),
         "}\n\n",
+        "# What a crate's Clippy twin asks for, where it was measured.\n",
+        "CLIPPY_REQUESTS = {\n",
+        "".join(
+            f"    {quote(key)}: {{"
+            f'"cpu_count": {request["cpu_count"]}, '
+            f'"memory_kb": {request["memory_kb"]}'
+            "},\n"
+            for key, request in clippy_requests.items()
+        ),
+        "}\n\n",
         "TEST_RUN_REQUESTS = {\n",
         "".join(
             f"    {quote(label)}: {{"
@@ -432,7 +481,8 @@ def exec_sizes_bzl() -> str:
         "def sized_exec_properties(package_name, crate_name, test_label = None):\n",
         '    """The target\'s remote requests: its crate\'s compile row, plus'
         ' the run\'s, scoped to the `test` exec group, for a test; `optimized.`'
-        ' keys carry the compile request of an optimized configuration."""\n',
+        ' keys carry the compile request of an optimized configuration and'
+        ' `clippy.` keys its Clippy twin\'s."""\n',
         '    crate = package_name + "/" + crate_name\n',
         "    request = COMPILE_REQUESTS.get(crate, {})\n",
         "    if test_label != None:\n",
@@ -442,6 +492,8 @@ def exec_sizes_bzl() -> str:
         "    optimized = OPTIMIZED_COMPILE_REQUESTS.get(crate, {}).get(kind, {})\n",
         "    for key, value in optimized.items():\n",
         '        properties["optimized." + key] = str(value)\n',
+        "    for key, value in CLIPPY_REQUESTS.get(crate, {}).items():\n",
+        '        properties["clippy." + key] = str(value)\n',
         "    if test_label != None:\n",
         "        run = TEST_RUN_REQUESTS.get(\n",
         "            test_label,\n",

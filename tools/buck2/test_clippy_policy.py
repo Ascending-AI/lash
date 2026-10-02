@@ -143,8 +143,10 @@ class ClippyPolicyTests(unittest.TestCase):
             environment["KILN_RELATIVE_CARGO_MANIFEST_DIR"], "crates/package"
         )
 
+        # Every Rust target is declared through `_rust_rule`, which declares
+        # its Clippy twin with the same attributes.
         native_rules = re.findall(
-            r"native\.rust_(?:binary|library|test)\(\n(?P<body>.*?)(?=^    \))",
+            r"_rust_rule\(\n        native\.rust_(?:binary|library|test),\n(?P<body>.*?)(?=^    \))",
             source,
             re.MULTILINE | re.DOTALL,
         )
@@ -165,12 +167,12 @@ class ClippyPolicyTests(unittest.TestCase):
         # selects the repository-rooted source tree.
         self.assertEqual(
             source.count(
-                " + package_compile_data,\n        extra_compile_data,\n    ))"
+                " + package_compile_data,\n        extra_compile_data,\n    )\n"
             ),
             4,
         )
         self.assertIn(
-            "_srcs(crate_root, srcs_patterns) + package_data,\n        extra_compile_data,\n    ))",
+            "_srcs(crate_root, srcs_patterns) + package_data,\n        extra_compile_data,\n    )\n",
             source,
         )
         self.assertIn(
@@ -181,7 +183,7 @@ class ClippyPolicyTests(unittest.TestCase):
             "resources = _resources(package_files, extra_compile_data + extra_data)", source
         )
         self.assertIn(
-            '_srcs("build.rs", ["build/**/*.rs"]) + data,\n        extra_srcs,\n    ))',
+            '_srcs("build.rs", ["build/**/*.rs"]) + data,\n        extra_srcs,\n    )\n',
             source,
         )
         build_script = native_rules[0]

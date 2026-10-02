@@ -2,55 +2,55 @@
   "buildscript": {
     "p99_peak_bytes": 191111168,
     "peak_bytes": 244113408,
-    "samples": 119,
+    "samples": 163,
     "unsized_peak_bytes": 244113408
   },
   "clippy": {
-    "p99_peak_bytes": 1967702016,
-    "peak_bytes": 2328879104,
-    "samples": 22614,
-    "unsized_peak_bytes": 59588608
+    "p99_peak_bytes": 1481330688,
+    "peak_bytes": 2365784064,
+    "samples": 39720,
+    "unsized_peak_bytes": 64204800
   },
   "deps": {
-    "p99_peak_bytes": 19603456,
+    "p99_peak_bytes": 19554304,
     "peak_bytes": 22224896,
-    "samples": 62326,
+    "samples": 129634,
     "unsized_peak_bytes": 22224896
   },
   "failure_filter": {
-    "p99_peak_bytes": 18178048,
-    "peak_bytes": 18178048,
-    "samples": 91,
-    "unsized_peak_bytes": 18178048
+    "p99_peak_bytes": 18100224,
+    "peak_bytes": 18526208,
+    "samples": 412,
+    "unsized_peak_bytes": 18526208
   },
   "http_archive": {
     "p99_peak_bytes": 27910144,
-    "peak_bytes": 90791936,
-    "samples": 474,
-    "unsized_peak_bytes": 90791936
+    "peak_bytes": 84611072,
+    "samples": 380,
+    "unsized_peak_bytes": 84611072
   },
   "rustc": {
-    "p99_peak_bytes": 3110150144,
-    "peak_bytes": 5013770240,
-    "samples": 52726,
-    "unsized_peak_bytes": 763801600
+    "p99_peak_bytes": 3083759616,
+    "peak_bytes": 5185740800,
+    "samples": 109851,
+    "unsized_peak_bytes": 1387737088
   },
   "rustdoc_json": {
-    "p99_peak_bytes": 1099173888,
-    "peak_bytes": 1149800448,
-    "samples": 668,
+    "p99_peak_bytes": 1111965696,
+    "peak_bytes": 1226665984,
+    "samples": 1654,
     "unsized_peak_bytes": 0
   },
   "schema_check": {
-    "p99_peak_bytes": 18034688,
-    "peak_bytes": 18034688,
-    "samples": 11,
-    "unsized_peak_bytes": 18034688
+    "p99_peak_bytes": 18743296,
+    "peak_bytes": 18743296,
+    "samples": 39,
+    "unsized_peak_bytes": 18743296
   },
   "schema_generate": {
-    "p99_peak_bytes": 24698880,
-    "peak_bytes": 24698880,
-    "samples": 52,
-    "unsized_peak_bytes": 24698880
+    "p99_peak_bytes": 25538560,
+    "peak_bytes": 26591232,
+    "samples": 202,
+    "unsized_peak_bytes": 26591232
   }
 }

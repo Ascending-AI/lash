@@ -252,6 +252,65 @@ class TableTest(unittest.TestCase):
                 )
 
 
+def clippy_record(peak_bytes: int, cores: float = 1.0, requested_kb: int = 4194304) -> str:
+    """A Clippy action's record: a compile record whose category is `clippy`."""
+    return record(peak_bytes=peak_bytes, cores=cores, requested_kb=requested_kb) + "\tcategory=clippy"
+
+
+class ClippyTableTest(unittest.TestCase):
+    """Clippy runs on a twin target of its own and is sized from its own records."""
+
+    def test_clippy_records_are_not_compile_samples(self) -> None:
+        lines = [record(peak_bytes=GIB)] * 20 + [clippy_record(peak_bytes=3 * GIB)] * 20
+        compile_samples = sizes.collect(lines, CRATES)
+        clippy_samples = sizes.collect(lines, CRATES, clippy=True)
+        self.assertEqual(compile_samples["lash-internal-core/lash_core"].peak_bytes(), GIB)
+        self.assertEqual(clippy_samples["lash-internal-core/lash_core"].peak_bytes(), 3 * GIB)
+        self.assertEqual(len(clippy_samples["lash-internal-core/lash_core"].records), 20)
+
+    def test_a_small_clippy_asks_for_the_floor_not_the_compile_default(self) -> None:
+        lines = [clippy_record(peak_bytes=90 * 1024 * 1024)] * 20
+        rows = sizes.clippy_table(sizes.collect(lines, CRATES, clippy=True))
+        row = rows["lash-internal-core/lash_core"]
+        self.assertEqual((row["cpu_count"], row["memory_kb"]), (1, sizes.CLIPPY_FLOOR_KB))
+        self.assertLess(sizes.CLIPPY_FLOOR_KB, sizes.DEFAULT_MEMORY_KB)
+
+    def test_a_clippy_row_covers_its_largest_peak(self) -> None:
+        lines = [clippy_record(peak_bytes=300 * 1024 * 1024)] * 19
+        lines += [clippy_record(peak_bytes=2200 * 1024 * 1024)]
+        row = sizes.clippy_table(sizes.collect(lines, CRATES, clippy=True))["lash-internal-core/lash_core"]
+        self.assertGreaterEqual(row["memory_kb"] * 1024, 2200 * 1024 * 1024)
+        self.assertEqual(row["memory_kb"] % sizes.MEMORY_GRANULARITY_KB, 0)
+
+    def test_too_few_samples_keep_the_row_in_force_or_make_none(self) -> None:
+        lines = [clippy_record(peak_bytes=90 * 1024 * 1024)] * 19
+        measured = sizes.collect(lines, CRATES, clippy=True)
+        self.assertEqual(sizes.clippy_table(measured), {})
+        kept = {"cpu_count": 1, "memory_kb": 786432, "samples": 40}
+        self.assertEqual(
+            sizes.clippy_table(measured, {"lash-internal-core/lash_core": kept}),
+            {"lash-internal-core/lash_core": kept},
+        )
+
+    def test_a_row_in_force_moves_only_past_the_hysteresis(self) -> None:
+        lines = [clippy_record(peak_bytes=90 * 1024 * 1024)] * 20
+        in_force = {"lash-internal-core/lash_core": {"cpu_count": 1, "memory_kb": 786432}}
+        row = sizes.clippy_table(sizes.collect(lines, CRATES, clippy=True), in_force)
+        self.assertEqual(row["lash-internal-core/lash_core"]["memory_kb"], 786432)
+
+    def test_the_checked_in_table_names_first_party_crates_at_the_floor_or_above(self) -> None:
+        checked_in = json.loads(
+            (ROOT / "tools/buck2/clippy-sizes.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(checked_in)
+        for key, entry in checked_in.items():
+            with self.subTest(key=key):
+                self.assertGreaterEqual(entry["memory_kb"], sizes.CLIPPY_FLOOR_KB)
+                self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["peak_bytes"])
+                self.assertGreaterEqual(entry["samples"], sizes.MIN_SAMPLES)
+                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"]))
+
+
 def run_record(
     label: str = "//crates/lash-core:runtime_turns__test",
     role: str = "run",

@@ -78,6 +78,10 @@ def third_party_rust_binary(name, platform = {}, **kwargs):
     )
 
 def third_party_buildscript_run(name, package_name, env = {}, **kwargs):
+    # A third-party build-script run keeps the default request, unlike a
+    # first-party one (`HELPER_BUDGET`): the request is part of its action
+    # key, and `ring`, `aws-lc-sys` and `rustix` do not rebuild to the same
+    # bytes, so a re-keyed run would relink everything that links them.
     action_env = dict(env)
     action_env.update({
         "KILN_ACTION_CPU_COUNT": _DEFAULT_CPU,

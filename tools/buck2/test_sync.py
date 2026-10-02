@@ -241,6 +241,30 @@ def check_sizing() -> None:
         assert actual["cpu_count"] >= measured["cpu_count"]
         assert actual["memory_kb"] >= measured["memory_kb"]
 
+    # A Clippy twin asks for its crate's Clippy row: never below the floor,
+    # never below the largest Clippy peak recorded for the crate (the cgroup
+    # kills at the request above the slot share), and only with enough
+    # samples to price it.
+    clippy_requests = bzl_value(text, "CLIPPY_REQUESTS")
+    measured_clippy = load_json("clippy-sizes.json")
+    import generate_model as model
+
+    assert sizes.CLIPPY_FLOOR_KB == model.CLIPPY_FLOOR_KB
+    helper = ast.literal_eval(re.search(r"(?m)^HELPER_BUDGET = (\(\d+, \d+\))$", text).group(1))
+    assert helper == model.HELPER_ACTION_BUDGET, helper
+    assert clippy_requests == {key: request(row) for key, row in measured_clippy.items()}
+    crates = {
+        f"{package['package']}/{target['cargo'].replace('-', '_')}"
+        for package in load_json("target-inventory.json")["packages"]
+        for target in package["targets"]
+        if target.get("cargo")
+    }
+    for key, row in measured_clippy.items():
+        assert key in crates, f"Clippy row for no first-party crate: {key}"
+        assert row["samples"] >= sizes.MIN_SAMPLES, key
+        assert row["memory_kb"] >= sizes.CLIPPY_FLOOR_KB, key
+        assert row["peak_bytes"] <= row["memory_kb"] * 1024, key
+
     # Compile requests resolve through one registered platform each; a test
     # run or batch states its request to the test executor directly.
     budgets = [tuple(budget) for budget in bzl_value(text, "POOL_BUDGETS")]
@@ -249,12 +273,15 @@ def check_sizing() -> None:
         (value["cpu_count"], value["memory_kb"])
         for value in list(compile_requests.values())
         + list(test_compile_requests.values())
+        + list(clippy_requests.values())
         + [request for kinds in optimized_requests.values() for request in kinds.values()]
-    } | {(1, 1572864), (2, 3145728)}
+    } | {(1, 1572864), (2, 3145728), helper}
     assert requested <= set(budgets), f"unregistered pool budgets: {sorted(requested - set(budgets))}"
     # A target that names no budget takes the first platform: it must stay the
-    # smallest request, not whichever row sorts first.
-    assert budgets[0] == min(budgets) == (1, 1048576), budgets[0]
+    # unsized request, not whichever row sorts first. Helper and Clippy
+    # requests may be smaller; a target names those.
+    assert budgets[0] == (1, 1048576), budgets[0]
+    assert budgets[1:] == sorted(budgets[1:]), budgets
     assert 'load(":exec_sizes.bzl", "POOL_BUDGETS")' in (HERE / "platforms.bzl").read_text(
         encoding="utf-8"
     )
@@ -284,9 +311,12 @@ def check_action_categories() -> None:
     import generate_model as model
 
     sized = model.ACTION_CATEGORY_SIZES
-    assert set(sized.values()) <= {"compile", "default", "probe", "unsized"}
+    assert set(sized.values()) <= {"clippy", "compile", "daemon", "default", "helper", "probe", "unsized"}
+    assert sized["clippy"] == "clippy" and sized["deps"] == "daemon"
     assert model.UNSIZED_ACTION_BUDGET == (1, 1048576)
     assert (model.DEFAULT_CPU_COUNT, model.DEFAULT_MEMORY_KB) in model.FIXED_POOL_BUDGETS
+    assert model.HELPER_ACTION_BUDGET in model.FIXED_POOL_BUDGETS
+    assert model.HELPER_ACTION_BUDGET[1] == model.CLIPPY_FLOOR_KB
 
     sources = sorted(HERE.glob("*.bzl")) + [HERE / "prelude_overlay.py"]
     # The checkout's prelude, when bootstrap has installed it: the Rust rules
@@ -304,13 +334,32 @@ def check_action_categories() -> None:
             declared.setdefault(category, path)
     unsized = {category: str(path) for category, path in declared.items() if category not in sized}
     assert not unsized, f"action categories without a deliberate size: {unsized}"
+    # A category the daemon lays out never runs as a remote action again: no
+    # rule of ours and no file of the overlaid prelude declares it. The
+    # overlay script itself names it only in the stock text it replaces.
+    remote = {
+        category: str(path)
+        for path in sources
+        if path.name != "prelude_overlay.py"
+        for category in re.findall(r'category = "([a-z0-9_]+)"', path.read_text(encoding="utf-8"))
+        if sized.get(category) == "daemon"
+    }
+    assert not remote, f"daemon-side categories declared as actions again: {remote}"
+    sys.path.insert(0, str(HERE))
+    import prelude_overlay
+
+    assert "ctx.actions.run(" not in prelude_overlay.DAEMON_DEPENDENCY_DIRS
+    assert 'category = "deps"' in prelude_overlay.STOCK_DEPENDENCY_DIRS
 
     # What the pool recorded. A category the workers ran is sized here, and an
     # action no row sizes -- a helper, a build script, a third-party compile --
     # never held more than the smallest request its category can run under.
     smallest = {
+        "clippy": model.CLIPPY_FLOOR_KB,
         "compile": model.DEFAULT_MEMORY_KB,
+        "daemon": model.DEFAULT_MEMORY_KB,
         "default": model.DEFAULT_MEMORY_KB,
+        "helper": model.HELPER_ACTION_BUDGET[1],
         "probe": model.DEFAULT_MEMORY_KB,
         "unsized": model.UNSIZED_ACTION_BUDGET[1],
     }
@@ -333,8 +382,28 @@ def check_action_categories() -> None:
         assert "pool_constraint(" in text, name
     third_party = (HERE / "third_party.bzl").read_text(encoding="utf-8")
     assert '_DEFAULT_CONSTRAINT = "//tools/buck2:pool_1_1572864"' in third_party
+    # First-party build-script runs and the schema actions are helpers, on
+    # the helper budget. A third-party build-script run keeps the default:
+    # three of them are not reproducible, so re-keying them relinks the
+    # workspace.
+    assert "exec_sizes.bzl" not in third_party
+    assert "pool_constraint(*HELPER_BUDGET)" in (HERE / "schema_checks.bzl").read_text(encoding="utf-8")
     rust = (HERE / "lash_rust.bzl").read_text(encoding="utf-8")
+    assert rust.count("cpu, memory = HELPER_BUDGET") == 1
     assert '"exec_compatible_with": [pool_constraint(cpu, memory)]' in rust
+    # Every Rust target the macros declare has its Clippy twin: no rule is
+    # called but through `_rust_rule`, which declares both.
+    assert not re.search(r"native\.rust_\w+\(", rust), "a Rust target declared without its Clippy twin"
+    assert "    rule(name = clippy_name, **twin)\n" in rust
+    inventory = load_json("target-inventory.json")
+    clippy_labels = [
+        target["clippy_label"]
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if "clippy_label" in target
+    ] + [unit["clippy_label"] for unit in inventory["feature_lane_units"]]
+    clippy_labels += inventory["workspace_clippy_build_targets"] + inventory["feature_lane_clippy_build_targets"]
+    assert clippy_labels and all(label.endswith("__clippy[clippy.txt]") for label in clippy_labels)
     # The optimized request is selected on the profile constraints alone, with
     # the dev request as the default branch, and only for a target that has
     # one: a dev configuration's action keys never depend on the select.
@@ -348,7 +417,7 @@ def check_action_categories() -> None:
     platforms = (HERE / "platforms.bzl").read_text(encoding="utf-8")
     assert 'MEMORY_SCALE = int(read_root_config("kiln", "memory_scale", "1"))' in platforms
     assert "if MEMORY_SCALE > 1 and (cpu, memory_kb * MEMORY_SCALE) not in POOL_BUDGETS" in platforms
-    assert rust.count("* MEMORY_SCALE") == 2
+    assert rust.count("* MEMORY_SCALE") == 3
     assert "memory_scale" not in (ROOT / ".buckconfig").read_text(encoding="utf-8")
     assert "exec_compatible_with = [pool_constraint(cpu, memory)]" in rust
 

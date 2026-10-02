@@ -23,7 +23,8 @@ and refresh every size file with one command:
 
 That rewrites `tools/buck2/action-sizes.json`,
 `tools/buck2/target-kind-sizes.json`, `tools/buck2/optimized-sizes.json`,
-`tools/buck2/category-sizes.json` and `tools/buck2/test-run-sizes.json` and runs `tools/buck2/sync.py`, which
+`tools/buck2/clippy-sizes.json`, `tools/buck2/category-sizes.json` and
+`tools/buck2/test-run-sizes.json` and runs `tools/buck2/sync.py`, which
 regenerates `tools/buck2/exec_sizes.bzl` (requests and pool budgets) from them.
 Compile rows read only the Buck2 action shape (`tool=python3`), so older logs
 from the Bazel era add nothing to them; `--since <unix seconds>` drops older
@@ -46,9 +47,11 @@ What counts as a sample:
 
 Rows are keyed `<package>/<crate>`, not by kind. The `kind` field cannot key
 them: the compiler wrapper and argument files hide `--crate-type` from the
-supervisor, so records may say `kind=-`. The compile, metadata and Clippy actions
+supervisor, so records may say `kind=-`. The compile and metadata actions
 share the Cargo identity and compile reservation. One row per crate matches the
-generator's sizing key.
+generator's sizing key. Clippy runs on a target of its own and is sized apart
+(see "Clippy" below), so a record of category `clippy` is never a compile
+sample.
 
 The rule, per `<package>/<crate>`:
 
@@ -117,6 +120,20 @@ dev build's requests do not depend on it. The rule is `optimized_table`'s: a row
 evidence, and a dev request that a refresh lowers leaves the optimized
 request where it was until 20 optimized samples say otherwise.
 
+Clippy
+------
+
+Every generated Rust target has a Clippy twin, `<label>__clippy`: the same
+rule and attributes on an execution platform of its own, because Buck2 gives a
+target one platform and Clippy needs a fraction of a compile's memory.
+`tools/buck2/clippy-sizes.json` carries its request, keyed `<package>/<crate>`
+from the records of category `clippy` (a library's and its unit-test binary's
+Clippy share the identity, so the row covers the heavier). The rule is the
+compile rule above with a 512 MiB floor (`CLIPPY_FLOOR_KB`) in place of the
+1.5 GiB default. A crate without a row keeps its compile request for Clippy.
+A refresh adds a row for every crate with at least 20 samples, and a row in
+force moves only as a compile row does.
+
 Categories
 ----------
 
@@ -184,6 +201,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Must match the default request in platforms.bzl and the Rust rule macros.
 DEFAULT_MEMORY_KB = 1572864
 DEFAULT_CPU_COUNT = 1
+# The least a measured Clippy row asks for: Clippy's median peak is under
+# 100 MiB, and a smaller floor would only register more execution platforms.
+# Must match `CLIPPY_FLOOR_KB` in `tools/buck2/generate_model.py`.
+CLIPPY_FLOOR_KB = 512 * 1024
 
 COMPILE_TOOLS = {"python3", "rustdoc"}
 MIN_WALL_MS = 1000
@@ -365,13 +386,18 @@ def parse_record(line: str) -> dict[str, str] | None:
 
 
 def collect(
-    lines, crates: set[tuple[str, str]], optimized_ops: frozenset[str] = frozenset()
+    lines,
+    crates: set[tuple[str, str]],
+    optimized_ops: frozenset[str] = frozenset(),
+    clippy: bool = False,
 ) -> dict[str, Samples]:
     """Keeps the Lash compile samples; every other record is skipped.
 
     `optimized_ops` names the operations the event logs showed to be
     optimized-configuration compiles. They are sized by their own table and
-    would otherwise price the dev row at an optimized peak.
+    would otherwise price the dev row at an optimized peak. Clippy runs on its
+    own target: `clippy=True` keeps only its records, otherwise they are
+    skipped.
 
     The log is append-only from many actions at once, so a torn or unknown line
     is skipped rather than fatal: the table is a measurement, not a ledger.
@@ -383,6 +409,8 @@ def collect(
             continue
         pair = (record.get("pkg", ""), record.get("crate", ""))
         if pair not in crates or record.get("op", "-") in optimized_ops:
+            continue
+        if (record.get("category") == "clippy") != clippy:
             continue
         observe_compile(measured[f"{pair[0]}/{pair[1]}"], record)
     return {key: samples for key, samples in measured.items() if samples.records}
@@ -416,7 +444,9 @@ def collect_kinds(labelled, shared: set[str]) -> dict[tuple[str, str], Samples]:
     from action_categories_from_events import TARGET_KINDS
 
     measured: dict[tuple[str, str], Samples] = collections.defaultdict(Samples)
-    for key, kind, _category, _emit, optimized, record in labelled:
+    for key, kind, category, _emit, optimized, record in labelled:
+        if category == "clippy":
+            continue
         if key in shared and kind in TARGET_KINDS and not optimized:
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
     return {group: samples for group, samples in measured.items() if samples.records}
@@ -427,8 +457,8 @@ def collect_optimized(labelled) -> dict[tuple[str, str], Samples]:
     from action_categories_from_events import TARGET_KINDS
 
     measured: dict[tuple[str, str], Samples] = collections.defaultdict(Samples)
-    for key, kind, _category, _emit, optimized, record in labelled:
-        if optimized and kind in TARGET_KINDS:
+    for key, kind, category, _emit, optimized, record in labelled:
+        if optimized and kind in TARGET_KINDS and category != "clippy":
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
     return {group: samples for group, samples in measured.items() if samples.records}
 
@@ -620,13 +650,16 @@ def request_of(row: dict | None) -> tuple[int, int]:
 
 
 def compile_row(
-    samples: Samples, current: tuple[int, int], minimum: int = 0
+    samples: Samples,
+    current: tuple[int, int],
+    minimum: int = 0,
+    floor_kb: int = DEFAULT_MEMORY_KB,
 ) -> dict[str, float | int]:
     """The row the compile rule gives `samples`, settled against `current`."""
     p95 = percentile(samples.cpu_basis(), CPU_PERCENTILE) if samples.records else 0.0
     peak_bytes = samples.peak_bytes() if samples.records else 0
     memory_kb = max(
-        memory_kb_for(samples.needs, floor_bytes=peak_bytes) if samples.records else 0,
+        memory_kb_for(samples.needs, floor_kb, peak_bytes) if samples.records else 0,
         minimum,
     )
     cpu_count, memory_kb = settled(
@@ -666,6 +699,28 @@ def table(
             continue
         sizes[key] = row
     return dict(sorted(sizes.items()))
+
+
+def clippy_table(
+    measured: dict[str, Samples], current: dict[str, dict] | None = None
+) -> dict[str, dict[str, float | int]]:
+    """The Clippy rows: the compile rule over Clippy records, 512 MiB at least.
+
+    A crate without a row runs Clippy at its compile request, so its first row
+    is not settled against anything; a row in force moves as a compile row
+    does. An unmeasured row is kept, as in `table`.
+    """
+    current = current or {}
+    sizes = {}
+    for key in sorted(set(measured) | set(current)):
+        samples = measured.get(key, Samples())
+        if len(samples.records) < MIN_SAMPLES:
+            if key in current:
+                sizes[key] = current[key]
+            continue
+        in_force = request_of(current[key]) if key in current else (0, 0)
+        sizes[key] = compile_row(samples, in_force, floor_kb=CLIPPY_FLOOR_KB)
+    return sizes
 
 
 def kind_table(
@@ -935,6 +990,10 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         lambda key, kind: resolved_request(key, kind, *previous),
         optimized_current,
     )
+    clippy_rows = clippy_table(
+        collect(lines, crates, optimized_ops, clippy=True),
+        {key: row for key, row in stored("clippy-sizes.json").items() if key in keys},
+    )
     test_rows = test_run_table(
         collect_test_runs(lines, labels),
         {label: row for label, row in stored("test-run-sizes.json").items() if label in labels},
@@ -943,6 +1002,7 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         ("action-sizes.json", crate_rows),
         ("target-kind-sizes.json", kind_rows),
         ("optimized-sizes.json", optimized_rows),
+        ("clippy-sizes.json", clippy_rows),
         ("category-sizes.json", category_table(lines, crates)),
         ("test-run-sizes.json", test_rows),
     ):

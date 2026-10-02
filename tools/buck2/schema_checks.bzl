@@ -1,9 +1,11 @@
 """Hermetic schema generation and drift checks on the pinned executor."""
 
+load(":exec_sizes.bzl", "HELPER_BUDGET")
 load(":platforms.bzl", "pool_constraint")
 
-_CPU = "1"
-_MEMORY_KB = "1572864"
+# Schema generation and checks are helper actions, sized as one.
+_CPU = str(HELPER_BUDGET[0])
+_MEMORY_KB = str(HELPER_BUDGET[1])
 
 def _action_env():
     return {
@@ -32,7 +34,7 @@ _schema_documents = rule(
 def schema_documents(name, **kwargs):
     _schema_documents(
         name = name,
-        exec_compatible_with = [pool_constraint(1, 1572864)],
+        exec_compatible_with = [pool_constraint(*HELPER_BUDGET)],
         visibility = ["PUBLIC"],
         **kwargs
     )
@@ -67,7 +69,7 @@ _schema_check = rule(
 def schema_check(name, **kwargs):
     _schema_check(
         name = name,
-        exec_compatible_with = [pool_constraint(1, 1572864)],
+        exec_compatible_with = [pool_constraint(*HELPER_BUDGET)],
         visibility = ["PUBLIC"],
         **kwargs
     )

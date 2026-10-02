@@ -43,7 +43,7 @@ INPUT_SHA256 = {
 # invocation a full verification, rather than trusting an on-disk receipt.
 OUTPUT_SHA256 = {
     "decls/rust_rules.bzl": "89ee8309c0f24763adb0bc0276243c022640f489c17223f0597152e188c07885",
-    "rust/build.bzl": "1d3247772f5cc9bda40326086dedd78692307066f369d984a120d0ba0055a74d",
+    "rust/build.bzl": "ae771a2c0dab138cb63a4d37e6fb7a7efe29076ed83c9b45c990a698cf1577ba",
     "rust/cargo_buildscript.bzl": "ff69fa677037ce6414d80b326f0565168ced5e0a916d0e7f456df4cfc07420a8",
     "rust/clippy_configuration.bzl": "9f7db7c7c8e0f34d65e0a71f1eebfb36ffd8749e6061123cab71a46d548d16a2",
     "rust/failure_filter.bzl": "a4b818d0f799a4a32d5ffd3aab5753cd61956e3471e0faa687cc2e46470bd0a3",
@@ -67,6 +67,7 @@ PREVIOUS_OUTPUT_SHA256 = {
         "97769fd0b4afced56705a34fd4f3e8404f8da78997d57fa161678b79c4ed82bc",
     },
     "rust/build.bzl": {
+        "1d3247772f5cc9bda40326086dedd78692307066f369d984a120d0ba0055a74d",
         "3bed58d24563a0e9c4274d5c5530a9c18c600ee1b3e8e7f6bcddd3a482be16fa",
         "ac1bbf9c1a7084a9756af83edf8dfbbedb47269010d54149187cf1b1b6f56b34",
         "51f2f65902b39bb78ebe818d4484f959b6e6a95ce6a8f65ba1e844ebe34d28e6",
@@ -673,6 +674,104 @@ DAEMON_FAILURE_FILTER = '''    toolchain_info = compile_ctx.toolchain_info
 '''
 
 
+# The prelude lays out each compile's `-Ldependency` directory with a remote
+# action (category `deps`): a Python tool that symlinks every transitive
+# dependency under its file name. The tool is needed only for `crate_dynamic`,
+# whose crate name is known at build time, and no Lash crate uses it. As a
+# remote action it ran once per compile variant, about a quarter of the pool's
+# actions, each reserving the whole compile request of its target, because
+# Buck2 gives a target one execution platform. The daemon builds the same tree
+# instead with `ctx.actions.assembled_dir`: the same `<n>/<file>` relative
+# symlinks in the same name-collision order, and the same `dirs` flag file as
+# a regular file. A consumer's input tree is therefore unchanged, and so are
+# its action digest and cache entry. Nothing is materialized locally.
+STOCK_DEPENDENCY_DIRS = """    artifacts = transitive_deps.project_as_json("artifacts")
+
+    # Pass the list of rlibs to transitive_dependency_symlinks.py through a file
+    # because there can be a lot of them. This avoids running out of command
+    # line length, particularly on Windows.
+    artifacts_json = ctx.actions.write_json(
+        "{}-symlinked_dirs.json".format(prefix),
+        artifacts,
+        pretty = True,
+        has_content_based_path = getattr(ctx.attrs, "use_content_based_paths", False),
+    )
+
+    arguments = [
+        internal_tools_info.transitive_dependency_symlinks_tool,
+        cmd_args(ctx.label.name, format = "--name={}"),
+        cmd_args(transitive_dependency_dir.as_output(), format = "--out-dir={}"),
+        cmd_args(
+            artifacts_json,
+            format = "--artifacts={}",
+            # Don't take a dependency on all the artifacts in here, just the dynamic names; the
+            # rmetas/rlibs we only want to create symlinks to, so there's no need for them to
+            # actually be available
+            hidden = transitive_deps.project_as_args("dynamic_name_args"),
+        ),
+    ]
+
+    if cwd:
+        arguments.append(
+            cmd_args(
+                transitive_dependency_dir.as_output(),
+                format = "--out-dir-relative-to-cwd={}",
+                relative_to = cwd,
+            )
+        )
+
+    ctx.actions.run(
+        arguments,
+        category = "deps",
+        identifier = str(len(transitive_dependency_dirs)),
+    env = kiln_action_env(ctx),
+    )
+"""
+
+DAEMON_DEPENDENCY_DIRS = """    # Lash: laid out by the daemon, not a remote `deps` action. This mirrors
+    # transitive_dependency_symlinks.py: the json projection's order, a new
+    # numbered directory whenever a file name repeats, relative symlinks, and
+    # a `dirs` file of one `-Ldependency=` line per directory.
+    deps_dirs = [{}]
+    for dep in transitive_deps.traverse():
+        if dep.crate.dynamic:
+            fail("Lash lays out dependency directories in the daemon and supports no crate_dynamic: {}".format(ctx.label))
+        filename = dep.artifact.basename
+        if filename in deps_dirs[-1]:
+            deps_dirs.append({})
+        deps_dirs[-1][filename] = dep.artifact
+
+    contents = {}
+    flags = []
+    for index, srcs in enumerate(deps_dirs):
+        if not srcs:
+            continue
+        for filename, artifact in srcs.items():
+            contents["{}/{}".format(index, filename)] = assembled_dir.symlink(artifact)
+        flags.append(cmd_args(
+            transitive_dependency_dir,
+            format = "-Ldependency={}/" + str(index),
+            relative_to = cwd,
+            ignore_artifacts = True,
+        ) if cwd else cmd_args(
+            transitive_dependency_dir,
+            format = "-Ldependency={}/" + str(index),
+            ignore_artifacts = True,
+        ))
+
+    # The tool ends every line with a newline; `write` only separates them.
+    contents["dirs"] = assembled_dir.copy(ctx.actions.write(
+        "{}-symlinked_dirs.flags".format(prefix),
+        flags + [""] if flags else "",
+    ))
+    ctx.actions.assembled_dir(transitive_dependency_dir, contents = contents)
+"""
+
+
+def lay_out_dependency_dirs_in_daemon(text: str) -> str:
+    return replace_once(text, STOCK_DEPENDENCY_DIRS, DAEMON_DEPENDENCY_DIRS, "dependency directory action")
+
+
 def filter_failures_in_daemon(text: str) -> str:
     return replace_once(text, STOCK_FAILURE_FILTER, DAEMON_FAILURE_FILTER, "failure filter action")
 
@@ -784,6 +883,7 @@ def transform(relative: str, text: str) -> str:
             raise ValueError("Clippy cache policy changed")
         text = text.replace(old_cache, new_cache, 1)
         text = add_rustdoc_json_action(text)
+        text = lay_out_dependency_dirs_in_daemon(text)
     if relative == "rust/cargo_buildscript.bzl":
         text = add_attrs(text, '        "buildscript": attrs.exec_dep(providers = [RunInfo]),\n')
         text = text.replace(
@@ -830,7 +930,7 @@ def upgrade_previous(relative: str, text: str) -> str:
     if relative == "decls/rust_rules.bzl":
         return add_repo_rooted_srcs_attr(text)
     if relative == "rust/build.bzl":
-        return add_rustdoc_json_action(remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_binary_env(preserve_relative_manifest_dir(text)))))
+        return lay_out_dependency_dirs_in_daemon(add_rustdoc_json_action(remap_repo_rooted_sources(narrow_transitive_source_inputs(preserve_relative_binary_env(preserve_relative_manifest_dir(text))))))
     if relative == "rust/rust_library.bzl":
         return add_rustdoc_json_subtarget(text)
     if relative == "rust/failure_filter.bzl":

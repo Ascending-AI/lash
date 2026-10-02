@@ -280,10 +280,18 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   compile row never drops below its largest recorded peak or the 1.5 GiB
   default; a test row never drops below 1 GiB.
 - Buck2 resolves one execution platform per target, so a request covers every
-  category the target runs: a library's metadata, rlib, Clippy and Rustdoc
-  actions share one, as do a test binary's check, Clippy and link. The split
-  that is possible is between targets. A library and its unit-test binary
-  share a crate name and so a crate row, but the test binary's link peaks
+  category the target runs: a library's metadata, rlib and Rustdoc actions
+  share one, as do a test binary's check and link. The split that is possible
+  is between targets. Clippy takes it: every generated Rust target has a
+  Clippy twin, `<label>__clippy`, the same rule and attributes on a platform
+  of its own, and `kiln clippy` builds the twin's `[clippy.txt]`. Its request
+  is the crate's row in `tools/buck2/clippy-sizes.json` (the compile rule
+  over Clippy's own records, at least 512 MiB), else the compile request.
+  First-party build-script runs and the schema actions are helper targets
+  and request 512 MiB (`HELPER_ACTION_BUDGET`); a third-party build-script
+  run keeps the default, because `ring`, `aws-lc-sys` and `rustix` do not
+  rebuild to the same bytes and a new key would relink their dependents.
+  A library and its unit-test binary share a crate name and so a crate row, but the test binary's link peaks
   several times higher than anything the library runs; where Buck2's event
   logs told the two apart at least 20 times, each has its own row in
   `target-kind-sizes.json`, and a kind without one keeps the crate row.
@@ -306,7 +314,7 @@ capacity and an undersized one is a throttled or killed action. The rule, in
 
 Refresh the sizes from the workers' usage logs
 (`/workspace/kiln-executor/usage/actions.log*` on each pool box) with one
-command, then commit the three files it rewrites:
+command, then commit the files it rewrites:
 
 ```sh
 python3 tools/buck2/action_sizes_from_log.py --refresh --since <unix seconds> \
@@ -315,7 +323,8 @@ python3 tools/buck2/action_sizes_from_log.py --report --since <unix seconds> usa
 ```
 
 `--refresh` rewrites `action-sizes.json`, `target-kind-sizes.json`,
-`optimized-sizes.json`, `category-sizes.json` and `test-run-sizes.json` and runs `sync.py`, which
+`optimized-sizes.json`, `clippy-sizes.json`, `category-sizes.json` and
+`test-run-sizes.json` and runs `sync.py`, which
 regenerates `exec_sizes.bzl`, including the execution platforms. `--report`
 prints reserved against used CPU and memory per Buck2 category. The usage log
 names an action's category and crate but not its target or what it emitted,
@@ -373,8 +382,12 @@ the compile's build status: a passing compile's output is re-exposed by a
 declared copy, with no second remote action and nothing materialized, and a
 failing compile runs the stock remote `failure_filter`, so the error names the
 same action and diagnostics. Source trees, argument files and that copy are
-daemon-internal actions. The transitive-dependency symlink tree (`deps`) remains
-a remote action; it reruns only when a target's dependency set changes.
+daemon-internal actions. So is each compile's transitive-dependency directory
+(the prelude's remote `deps` action, a Python tool that only symlinks files):
+the overlay builds the same tree with `ctx.actions.assembled_dir`, the same
+`<n>/<file>` relative symlinks and the same `dirs` flag file, so a consumer's
+input tree, action digest and cache entry are unchanged. It needs no
+`crate_dynamic`, which no Lash crate uses, and the overlay refuses one.
 
 Buck2's `notify` watcher follows directory symlinks when the daemon starts, and
 the pinned release has no setting that stops it (`buck2.file_watcher` selects
