@@ -1427,7 +1427,14 @@ pub mod runtime {
 pub mod tracing {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
-    pub use lash_trace::TraceLashlangNodeRetention;
+    pub use lash_trace::{
+        AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
+        InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
+        TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
+        TraceCause, TraceLashlangNodeRetention, TraceLinks, TraceRecordIdentity,
+        TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner,
+        TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    };
 
     #[cfg(feature = "otel-trace")]
     pub use lash_core::{OtelTraceOptions, OtelTraceSink};
