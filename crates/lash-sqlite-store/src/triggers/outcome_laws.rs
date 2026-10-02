@@ -52,7 +52,7 @@ async fn retention_uses_columns(store: Arc<SqliteTriggerStore>) {
 }
 
 #[tokio::test]
-async fn retention_uses_typed_outcomes_in_memory() {
+async fn retention_uses_typed_outcomes_on_sqlite_memory() {
     retention_uses_columns(
         crate::SqliteStoreSet::memory()
             .await
@@ -89,10 +89,10 @@ async fn dropped_occurrences_cannot_be_reclaimed_or_have_deliveries() {
         .await
         .expect("dropped occurrence")
         .occurrence;
-    store.conn.call(move |conn| {
-        assert!(conn.execute("UPDATE trigger_occurrences SET reclaimable_at_ms = 0 WHERE occurrence_id = ?1", params![record.occurrence_id]).is_err(), "dropped rows cannot arm reclamation");
-        assert!(conn.execute("INSERT INTO trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms) VALUES (?1, 'sub', 'incarnation', 1, '{}', 0)", params![record.occurrence_id]).is_err(), "dropped rows cannot reserve a delivery");
-        assert!(conn.execute("UPDATE trigger_occurrences SET outcome_kind = 'unknown'", []).is_err(), "outcome vocabulary is closed");
+    store.conn.write(move |tx| {
+        assert!(tx.execute("UPDATE trigger_occurrences SET reclaimable_at_ms = 0 WHERE occurrence_id = ?1", params![record.occurrence_id]).is_err(), "dropped rows cannot arm reclamation");
+        assert!(tx.execute("INSERT INTO trigger_deliveries (occurrence_id, subscription_id, subscription_incarnation, subscription_revision, subscription_snapshot_json, created_at_ms) VALUES (?1, 'sub', 'incarnation', 1, '{}', 0)", params![record.occurrence_id]).is_err(), "dropped rows cannot reserve a delivery");
+        assert!(tx.execute("UPDATE trigger_occurrences SET outcome_kind = 'unknown'", []).is_err(), "outcome vocabulary is closed");
         Ok(())
     }).await.expect("schema rejects impossible states");
 }

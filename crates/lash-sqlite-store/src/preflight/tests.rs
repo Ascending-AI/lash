@@ -178,7 +178,7 @@ async fn every_database_of_the_set_is_reported_in_open_order() {
 }
 
 #[tokio::test]
-async fn a_memory_store_set_preflights_through_its_location() {
+async fn a_sqlite_memory_store_set_preflights_through_its_location() {
     // `SqliteLocation::Memory` names the same three databases the open pinned;
     // the probe reads them while the set's handles hold the anchors.
     let set = crate::SqliteStoreSet::memory()
