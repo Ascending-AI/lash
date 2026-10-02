@@ -4,14 +4,19 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod service_journals;
+use service_journals::HandlerJournals;
 
 const CORPUS_ROOT_ENV: &str = "LASH_REPLAY_CORPUS_ROOT";
 const REGENERATE_ENV: &str = "LASH_REGENERATE";
 const FORMAT_NOTE: &str =
     "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names";
+const SERVICE_FORMAT_NOTE: &str = "lash-restate service handler journals v1; per handler, each distinct ordered command \
+     sequence its invocations wrote on the server double, minted ids elided as #";
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct ReplayCorpusFixture {
@@ -23,6 +28,18 @@ struct ReplayCorpusFixture {
     records: BTreeMap<String, RecordedRuntimeEffect>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     process_command_facts: BTreeMap<String, serde_json::Value>,
+}
+
+/// One lash Restate service's journals, recorded from its real handlers on
+/// the server double (FIG-4805).
+#[derive(Debug, Serialize, serde::Deserialize)]
+struct ServiceJournalFixture {
+    scenario: String,
+    service: String,
+    recorded_at_git_sha: String,
+    format: String,
+    journal_logic_epoch: u32,
+    handlers: HandlerJournals,
 }
 
 #[derive(Clone, Copy)]
@@ -42,13 +59,201 @@ const SCENARIOS: &[Scenario] = &[
     },
 ];
 
+/// The stable name of every service lash serves: the corpus holds one
+/// scenario for each.
+fn lash_service_names() -> BTreeSet<String> {
+    crate::services::LASH_SERVICES
+        .iter()
+        .map(|service| service.base_name().to_string())
+        .collect()
+}
+
+fn service_scenario_name(service: &str) -> String {
+    format!("service-{service}")
+}
+
+/// Every scenario the corpus owes a fixture: the controller scenarios and
+/// one per lash service.
+fn registered_scenario_names() -> Vec<String> {
+    let mut names = SCENARIOS
+        .iter()
+        .map(|scenario| scenario.name.to_string())
+        .chain(
+            lash_service_names()
+                .iter()
+                .map(|service| service_scenario_name(service)),
+        )
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+/// The registered name of every `#[restate_sdk::object]` and
+/// `#[restate_sdk::workflow]` the crate declares outside its tests: the
+/// trait's `#[name]`, or the trait's own name.
+fn restate_services_declared_in_the_source() -> BTreeSet<String> {
+    fn visit(directory: &Path, tests: &Path, services: &mut BTreeSet<String>) {
+        let mut entries = std::fs::read_dir(directory)
+            .expect("read a source directory")
+            .map(|entry| entry.expect("read a source entry").path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            if path == tests || path == tests.with_extension("rs") {
+                continue;
+            }
+            if path.is_dir() {
+                visit(&path, tests, services);
+                continue;
+            }
+            if path.extension().is_none_or(|extension| extension != "rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read a source file");
+            let mut lines = source.lines().map(str::trim);
+            while let Some(line) = lines.next() {
+                if !line.starts_with("#[restate_sdk::object")
+                    && !line.starts_with("#[restate_sdk::workflow")
+                {
+                    continue;
+                }
+                let name = lines
+                    .by_ref()
+                    .find_map(|line| {
+                        if let Some(named) = line.strip_prefix("#[name = \"") {
+                            return named.split('"').next();
+                        }
+                        let (_, declared) = line.split_once("trait ")?;
+                        declared.split([' ', '{', '<', ':']).next()
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("{}: a service macro names no trait", path.display())
+                    });
+                assert!(
+                    services.insert(name.to_string()),
+                    "{}: a second service named `{name}`",
+                    path.display()
+                );
+            }
+        }
+    }
+    let source = crate_dir().join("src");
+    let mut services = BTreeSet::new();
+    visit(&source, &source.join("tests"), &mut services);
+    services
+}
+
+/// The corpus's service list is derived, never hand-kept (FIG-4805): every
+/// `#[restate_sdk::object|workflow]` the crate declares is a lash service,
+/// and every lash service has a recorded scenario.
+#[test]
+fn every_restate_service_in_the_source_has_a_recorded_scenario() {
+    assert_eq!(
+        restate_services_declared_in_the_source(),
+        lash_service_names(),
+        "the services the source declares are the services lash serves"
+    );
+    let fixtures = fixture_scenario_names();
+    for service in lash_service_names() {
+        assert!(
+            fixtures.contains(&service_scenario_name(&service)),
+            "Restate service `{service}` has no replay corpus scenario: record one with \
+             {REGENERATE_ENV}=1 (crates/lash-restate/testdata/README.md)"
+        );
+        let fixture = read_service_fixture(&service);
+        assert_eq!(fixture.service, service);
+        assert_eq!(fixture.scenario, service_scenario_name(&service));
+        assert_eq!(fixture.format, SERVICE_FORMAT_NOTE);
+        assert!(
+            !fixture.recorded_at_git_sha.is_empty(),
+            "{service} must name the commit it was recorded from"
+        );
+    }
+}
+
+/// Every lash service's recorded journals against what its real handlers
+/// write now, on the server double over SQLite memory: a step added to,
+/// removed from or reordered in a handler diverges here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replay_corpus_service_journals_match_the_real_handlers() {
+    let recorded = Box::pin(service_journals::record()).await;
+    assert_eq!(
+        recorded.served,
+        lash_service_names(),
+        "the workload's deployment serves every lash service"
+    );
+    for service in lash_service_names() {
+        let current = recorded
+            .journals
+            .get(&service)
+            .unwrap_or_else(|| panic!("the workload ran no handler of `{service}`"));
+        let result = replay_service_fixture(
+            read_service_fixture(&service),
+            current,
+            crate::JOURNAL_LOGIC_EPOCH,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "{error}: {}",
+                std::error::Error::source(&error).expect("a divergence names its cause")
+            )
+        });
+        match result {
+            ReplayComparison::Compared => println!("{service}: handler journals compared"),
+            ReplayComparison::DifferentGeneration { recorded, current } => println!(
+                "{service}: different generation, not compared (recorded epoch {recorded}, current {current})",
+            ),
+        }
+    }
+    println!(
+        "release journal replay: {} service scenarios",
+        lash_service_names().len()
+    );
+}
+
+fn replay_service_fixture(
+    fixture: ServiceJournalFixture,
+    current: &HandlerJournals,
+    current_epoch: u32,
+) -> Result<ReplayComparison, ReplayDivergence> {
+    assert_ne!(
+        fixture.journal_logic_epoch, 0,
+        "capture epoch must be positive"
+    );
+    if fixture.journal_logic_epoch != current_epoch {
+        return Ok(ReplayComparison::DifferentGeneration {
+            recorded: fixture.journal_logic_epoch,
+            current: current_epoch,
+        });
+    }
+    let differing = fixture
+        .handlers
+        .keys()
+        .chain(current.keys())
+        .filter(|handler| fixture.handlers.get(*handler) != current.get(*handler))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if differing.is_empty() {
+        return Ok(ReplayComparison::Compared);
+    }
+    let only = |journals: &HandlerJournals| {
+        journals
+            .iter()
+            .filter(|(handler, _)| differing.contains(*handler))
+            .map(|(handler, journals)| (handler.clone(), journals.clone()))
+            .collect()
+    };
+    Err(ReplayDivergence(ReplayFailure::ServiceJournals {
+        service: fixture.service,
+        recorded: only(&fixture.handlers),
+        current: only(current),
+    }))
+}
+
 #[tokio::test]
 async fn replay_corpus_fixtures_match_current_controller() {
     let fixture_names = fixture_scenario_names();
-    let registered_names = SCENARIOS
-        .iter()
-        .map(|scenario| scenario.name.to_string())
-        .collect::<Vec<_>>();
+    let registered_names = registered_scenario_names();
     assert_eq!(
         fixture_names, registered_names,
         "every committed replay fixture must have exactly one registered scenario"
@@ -101,6 +306,12 @@ enum ReplayFailure {
     },
     #[error("missing recorded effect `{0}`")]
     MissingEffect(String),
+    #[error("service `{service}` handlers recorded {recorded:#?}, current {current:#?}")]
+    ServiceJournals {
+        service: String,
+        recorded: HandlerJournals,
+        current: HandlerJournals,
+    },
 }
 
 async fn replay_fixture(
@@ -194,6 +405,59 @@ async fn an_epoch_bump_does_not_compare_the_added_step_journal() {
     );
 }
 
+/// A service fixture and the journals of a build whose `drive` handler
+/// journals one more step than the fixture recorded.
+fn service_fixture_and_an_added_step() -> (ServiceJournalFixture, HandlerJournals) {
+    let journal = |steps: &[&str]| {
+        BTreeMap::from([(
+            "drive".to_string(),
+            BTreeSet::from([steps
+                .iter()
+                .map(|step| step.to_string())
+                .collect::<Vec<_>>()]),
+        )])
+    };
+    let fixture = ServiceJournalFixture {
+        scenario: service_scenario_name("LashSession"),
+        service: "LashSession".to_string(),
+        recorded_at_git_sha: "self-test".to_string(),
+        format: SERVICE_FORMAT_NOTE.to_string(),
+        journal_logic_epoch: crate::JOURNAL_LOGIC_EPOCH,
+        handlers: journal(&["InputCommand", "RunCommand lash.drive.leg", "OutputCommand"]),
+    };
+    let current = journal(&[
+        "InputCommand",
+        "RunCommand lash.drive.leg",
+        "RunCommand lash:release-journal-added-step",
+        "OutputCommand",
+    ]);
+    (fixture, current)
+}
+
+#[test]
+fn an_added_handler_step_with_unchanged_epoch_requires_the_exact_bump_message() {
+    let (fixture, current) = service_fixture_and_an_added_step();
+    let error = replay_service_fixture(fixture, &current, crate::JOURNAL_LOGIC_EPOCH)
+        .expect_err("an added ctx.run step must diverge");
+    assert_eq!(
+        error.to_string(),
+        "journal logic changed: bump JOURNAL_LOGIC_EPOCH"
+    );
+}
+
+#[test]
+fn an_epoch_bump_does_not_compare_the_added_handler_step() {
+    let (fixture, current) = service_fixture_and_an_added_step();
+    assert_eq!(
+        replay_service_fixture(fixture, &current, crate::JOURNAL_LOGIC_EPOCH + 1)
+            .expect("another generation is routed separately"),
+        ReplayComparison::DifferentGeneration {
+            recorded: crate::JOURNAL_LOGIC_EPOCH,
+            current: crate::JOURNAL_LOGIC_EPOCH + 1,
+        },
+    );
+}
+
 #[test]
 fn every_replay_fixture_records_its_capture_epoch_and_step_order() {
     for scenario in SCENARIOS {
@@ -210,6 +474,17 @@ fn every_replay_fixture_records_its_capture_epoch_and_step_order() {
             fixture["journal_steps"]
                 .as_array()
                 .is_some_and(|steps| !steps.is_empty())
+        );
+    }
+    for service in lash_service_names() {
+        let fixture = read_service_fixture(&service);
+        assert!(fixture.journal_logic_epoch > 0);
+        assert!(
+            !fixture.handlers.is_empty()
+                && fixture.handlers.values().all(|journals| {
+                    !journals.is_empty() && journals.iter().all(|steps| !steps.is_empty())
+                }),
+            "{service} records the steps of every handler it ran"
         );
     }
 }
@@ -242,7 +517,7 @@ fn replay_corpus_root_uses_the_selected_directory() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "regenerates crates/lash-restate/testdata/replay-corpus"]
 async fn regenerate_replay_corpus_fixtures() {
     assert_eq!(
@@ -267,6 +542,25 @@ async fn regenerate_replay_corpus_fixtures() {
             process_command_facts: context.recorded_process_command_facts(),
         };
         let path = fixture_path(*scenario);
+        std::fs::create_dir_all(path.parent().expect("fixture parent"))
+            .expect("create replay corpus scenario directory");
+        std::fs::write(path, json_with_newline(&fixture)).expect("write replay corpus fixture");
+    }
+
+    let mut recorded = Box::pin(service_journals::record()).await;
+    for service in lash_service_names() {
+        let fixture = ServiceJournalFixture {
+            scenario: service_scenario_name(&service),
+            recorded_at_git_sha: git_sha.clone(),
+            format: SERVICE_FORMAT_NOTE.to_string(),
+            journal_logic_epoch: crate::JOURNAL_LOGIC_EPOCH,
+            handlers: recorded
+                .journals
+                .remove(&service)
+                .unwrap_or_else(|| panic!("the workload ran no handler of `{service}`")),
+            service: service.clone(),
+        };
+        let path = service_fixture_path(&service);
         std::fs::create_dir_all(path.parent().expect("fixture parent"))
             .expect("create replay corpus scenario directory");
         std::fs::write(path, json_with_newline(&fixture)).expect("write replay corpus fixture");
@@ -453,6 +747,23 @@ fn read_fixture(scenario: Scenario) -> ReplayCorpusFixture {
         &std::fs::read(fixture_path(scenario)).expect("read committed replay corpus fixture"),
     )
     .expect("decode committed replay corpus fixture")
+}
+
+fn read_service_fixture(service: &str) -> ServiceJournalFixture {
+    let path = service_fixture_path(service);
+    serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "Restate service `{service}` has no replay corpus scenario at {}: {error}",
+            path.display()
+        )
+    }))
+    .expect("decode committed service journal fixture")
+}
+
+fn service_fixture_path(service: &str) -> PathBuf {
+    fixture_root()
+        .join(service_scenario_name(service))
+        .join("journal.json")
 }
 
 fn fixture_scenario_names() -> Vec<String> {

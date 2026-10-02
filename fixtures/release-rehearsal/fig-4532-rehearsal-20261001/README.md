@@ -12,3 +12,8 @@ records and process-command facts are identical to the captured journals;
 the recorded source commit stays unchanged. Epoch 1 is the default
 `JOURNAL_LOGIC_EPOCH` at that source commit. The full tagged release corpus,
 its verifier and its read-back gate remain owned by FIG-4495 at the cut.
+
+FIG-4805 adds the eleven `service-<Service>` handler journals beside them,
+recorded at `6b665cd0a405d3abe245d6473eb5085ab2d79add` from the real handlers
+on the server double. They are not part of the FIG-4532 capture; the cut
+regenerates the whole corpus.

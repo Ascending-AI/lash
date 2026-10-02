@@ -1,0 +1,144 @@
+{
+  "scenario": "service-EffectGroupIndex",
+  "service": "EffectGroupIndex",
+  "recorded_at_git_sha": "6b665cd0a405d3abe245d6473eb5085ab2d79add",
+  "format": "lash-restate service handler journals v1; per handler, each distinct ordered command sequence its invocations wrote on the server double, minted ids elided as #",
+  "journal_logic_epoch": 1,
+  "handlers": {
+    "admit_child": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "admit_semantic": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "await_notice": [
+      [
+        "InputCommand",
+        "CallCommand EffectGroupIndex/subscribe",
+        "OutputCommand"
+      ]
+    ],
+    "child_cancel": [
+      [
+        "InputCommand",
+        "GetLazyStateKeysCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "close": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "SetStateCommand effect-group/v1/state",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "commit_child": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "CallCommand EffectGroupDrainIndex/register",
+        "SetStateCommand effect-group/v1/state",
+        "SetStateCommand effect-group/v1/committed-final/0",
+        "OutputCommand"
+      ]
+    ],
+    "open": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateKeysCommand",
+        "SetStateCommand _compat",
+        "GetLazyStateCommand",
+        "SetStateCommand effect-group/v1/membership",
+        "SetStateCommand effect-group/v1/state",
+        "OutputCommand"
+      ]
+    ],
+    "probe": [
+      [
+        "InputCommand",
+        "GetLazyStateKeysCommand",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "probe_and_adopt": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "SetStateCommand effect-group/v1/state",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "read_rank": [
+      [
+        "InputCommand",
+        "GetLazyStateKeysCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "CallCommand EffectGroupPayload/get",
+        "OutputCommand"
+      ],
+      [
+        "InputCommand",
+        "GetLazyStateKeysCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "OutputCommand"
+      ]
+    ],
+    "record_settlement": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "SetStateCommand effect-group/v1/state",
+        "GetLazyStateCommand",
+        "ClearStateCommand effect-group/v1/subscriptions",
+        "CompleteAwakeableCommand",
+        "CompleteAwakeableCommand",
+        "OutputCommand"
+      ]
+    ],
+    "register_dispatch": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "SetStateCommand effect-group/v1/state",
+        "GetLazyStateCommand",
+        "ClearStateCommand effect-group/v1/subscriptions",
+        "CompleteAwakeableCommand",
+        "OutputCommand"
+      ]
+    ],
+    "subscribe": [
+      [
+        "InputCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "GetLazyStateCommand",
+        "SetStateCommand effect-group/v1/subscriptions",
+        "OutputCommand"
+      ]
+    ]
+  }
+}

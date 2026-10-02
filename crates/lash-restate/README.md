@@ -217,7 +217,11 @@ Without the variable it reads `testdata/replay-corpus`.
 Each capture records `journal_logic_epoch` and the ordered `journal_steps`.
 The capture manifest records the epoch read from those journals. When the
 current `JOURNAL_LOGIC_EPOCH` matches, replay checks the envelopes and exact
-step sequence. A divergence fails with
+step sequence. It also runs one workload through the real handlers on the
+server double and checks each lash service's handler journals against its
+`service-<Service>` scenario, so a `ctx.run` added to a handler diverges. A
+law derives the service list from the source and fails when a service has no
+scenario. A divergence fails with
 `journal logic changed: bump JOURNAL_LOGIC_EPOCH`. A different epoch returns
 `DifferentGeneration` and prints `different generation, not compared`.
 The added-step self-test proves the unchanged-epoch failure and the distinct
