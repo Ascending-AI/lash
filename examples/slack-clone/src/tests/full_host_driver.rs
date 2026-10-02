@@ -13,7 +13,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::bot::runtime::{PRIOR_STORE_LAYOUT, SESSIONS_ROOT, open_stores};
+use crate::bot::runtime::{SESSIONS_ROOT, open_stores};
 
 /// The driver as checked in, read as data.
 const DRIVER: &str = include_str!("../../../../scripts/slack-clone-full-host-e2e.py");
@@ -153,17 +153,6 @@ async fn the_driver_reads_usage_with_separate_model_identities_from_the_bot_stor
              "served_model": null, "input_tokens": 7, "output_tokens": 3},
         ])
     );
-}
-
-#[test]
-fn the_driver_reads_no_store_the_bot_refuses_as_an_earlier_layout() {
-    for entry in PRIOR_STORE_LAYOUT {
-        assert!(
-            !DRIVER.contains(&format!("\"{entry}\"")),
-            "the full-host driver reads `{entry}`, which the bot refuses as a store from an \
-             earlier data layout; read that data where the bot's backend now keeps it"
-        );
-    }
 }
 
 #[tokio::test]

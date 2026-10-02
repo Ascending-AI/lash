@@ -158,17 +158,11 @@ pub fn drive_owner(incarnation: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque("slack-clone-bot", incarnation)
 }
 
-/// Entries directly under the bot's data directory that an earlier store
-/// layout wrote and this build no longer reads: the process environment and
-/// attachment bytes now live in the SQLite store set's session catalog.
-pub(crate) const PRIOR_STORE_LAYOUT: &[&str] = &["process-env.db", "attachments"];
-
 /// The directory under the bot's data directory that holds the SQLite
 /// store set.
 pub(crate) const SESSIONS_ROOT: &str = "lash-sessions";
 
-/// Open the bot's one SQLite store set under `data_dir`, refusing a data
-/// directory an earlier store layout wrote.
+/// Open the bot's one SQLite store set under `data_dir`.
 ///
 /// The store set is storage only: the committed transcript, queued turn input
 /// and attachments survive a restart here, while the engine that runs turns
@@ -176,7 +170,6 @@ pub(crate) const SESSIONS_ROOT: &str = "lash-sessions";
 pub async fn open_stores(data_dir: &Path) -> Result<lash_sqlite_store::SqliteStoreSet> {
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
-    crate::prior_store_layout::refuse_prior_store_layout(data_dir, PRIOR_STORE_LAYOUT)?;
     lash_sqlite_store::SqliteStoreSet::open(data_dir.join(SESSIONS_ROOT))
         .await
         .map_err(|error| anyhow::anyhow!("open the bot's SQLite store set: {error}"))
@@ -425,36 +418,16 @@ fn fresh_incarnation() -> String {
 }
 
 fn slack_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
-    use lash::provider::{
-        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource,
-    };
-    // This example host owns its model catalogue and revision. Existing sessions
-    // retain the opening snapshot when this catalogue changes.
-    AttachmentCapabilitySnapshot {
-        revision: "slack-attachments-1".into(),
-        acceptors: ["OpenAI Chat Completions"]
-            .into_iter()
-            .map(|provider| AttachmentAcceptor {
-                provider: provider.into(),
-                rules: [
-                    AttachmentMimeSource::Inline,
-                    AttachmentMimeSource::Stored,
-                    AttachmentMimeSource::ExternalUrl,
-                ]
-                .into_iter()
-                .map(|source| AttachmentAcceptanceRule::Mime {
-                    source,
-                    media_types: ["image/jpeg", "image/png", "image/gif", "image/webp"]
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                    media_families: Vec::new(),
-                })
-                .collect(),
-            })
-            .collect(),
-    }
+    use lash::provider::AttachmentMimeSource;
+    crate::attachment_acceptance::snapshot(
+        "slack-attachments-1",
+        &[
+            AttachmentMimeSource::Inline,
+            AttachmentMimeSource::Stored,
+            AttachmentMimeSource::ExternalUrl,
+        ],
+        &["image/jpeg", "image/png", "image/gif", "image/webp"],
+    )
 }
 
 #[cfg(test)]

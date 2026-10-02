@@ -2,6 +2,8 @@
 mod ndjson;
 use ndjson::ndjson_response;
 mod approvals;
+#[path = "../../shared/attachment_acceptance.rs"]
+mod attachment_acceptance;
 mod deferred_tools;
 mod execution_graphs;
 mod failure_provider;
@@ -9,8 +11,6 @@ mod failure_provider;
 #[path = "../../shared/local_restate.rs"]
 mod local_restate;
 mod mail;
-#[path = "../../shared/prior_store_layout.rs"]
-mod prior_store_layout;
 mod restate;
 mod restate_ingress;
 #[path = "../../shared/shutdown_marker.rs"]
