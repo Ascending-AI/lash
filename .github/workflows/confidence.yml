@@ -114,6 +114,15 @@ jobs:
     steps:
       - *checkout
 
+      # This runner holds the whole build and then its archive. The build was
+      # 29.7 GB on 2026-09-20 and run 36294879308 ran out of disk packing it,
+      # so the floor is twice that plus the registry and toolchain, although
+      # the archive is now compressed.
+      - name: Reclaim runner disk
+        env:
+          CI_RECLAIM_MIN_FREE_KIB: "83886080"
+        run: bash scripts/ci-reclaim-disk.sh
+
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
         with:
@@ -137,16 +146,13 @@ jobs:
         run: bash scripts/confidence-gate.sh full
 
       - name: Pack shared build
-        run: |
-          mkdir -p target/confidence-tools
-          cp "$HOME/.cargo/bin/cargo-mutants" "$HOME/.cargo/bin/cargo-llvm-cov" target/confidence-tools/
-          tar -cf "${RUNNER_TEMP}/build.tar" target
+        run: bash scripts/ci/confidence-shared-build.sh pack "${RUNNER_TEMP}/build.tar.zst"
 
       - name: Upload shared build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: confidence-build-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/build.tar
+          path: ${{ runner.temp }}/build.tar.zst
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -177,10 +183,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run harnesses
         env:
@@ -226,10 +229,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run generated
         env:
@@ -272,10 +272,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run minimizer
         env:
@@ -317,10 +314,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run backends
         env:
@@ -362,10 +356,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run coverage
         env:
@@ -407,10 +398,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run mutation-core
         env:
@@ -458,10 +446,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run mutation-sim
         env:
@@ -507,10 +492,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run mutation-authority
         env:
@@ -619,10 +601,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run mutation-packages-rotating
         env:
@@ -679,10 +658,7 @@ jobs:
           path: ${{ runner.temp }}/confidence-build
 
       - name: Restore shared build
-        run: |
-          tar -xmf "${RUNNER_TEMP}/confidence-build/build.tar" -C "$GITHUB_WORKSPACE"
-          mkdir -p "$HOME/.cargo/bin"
-          cp target/confidence-tools/* "$HOME/.cargo/bin/"
+        run: bash scripts/ci/confidence-shared-build.sh restore "${RUNNER_TEMP}/confidence-build/build.tar.zst"
 
       - name: Run sim-search
         env:
