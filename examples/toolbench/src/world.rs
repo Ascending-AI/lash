@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
     ToolDefinition, ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
@@ -164,7 +163,7 @@ impl SharedWorld {
     }
 }
 
-#[async_trait]
+#[lash::async_trait]
 impl StaticToolExecute for SharedWorld {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {

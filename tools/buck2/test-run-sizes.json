@@ -2015,7 +2015,7 @@
     "peak_bytes": 615264256,
     "samples": 162
   },
-  "//examples/transcript-contract:transcript-contract__unit_test": {
+  "//crates/transcript-contract:transcript-contract__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.06,

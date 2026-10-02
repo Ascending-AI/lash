@@ -23,7 +23,6 @@ ignored = ["restate-sdk"]
 axum = "0.8"
 futures-util = { workspace = true }
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dotenvy = "0.15"
 lash = { workspace = true, features = ["restate", "rlm", "sqlite"] }

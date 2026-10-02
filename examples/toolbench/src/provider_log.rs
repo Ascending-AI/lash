@@ -79,7 +79,7 @@ impl std::fmt::Debug for LoggedProvider {
     }
 }
 
-#[async_trait::async_trait]
+#[lash::async_trait]
 impl Provider for LoggedProvider {
     fn kind(&self) -> &'static str {
         self.inner.kind()

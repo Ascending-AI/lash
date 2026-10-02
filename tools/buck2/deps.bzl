@@ -1326,7 +1326,6 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "anyhow": "//third-party/rust:p0011",
-            "async_trait": "//third-party/rust:p0015",
             "axum": "//third-party/rust:p0021",
             "clap": "//third-party/rust:p0052",
             "dotenvy": "//third-party/rust:p0101",

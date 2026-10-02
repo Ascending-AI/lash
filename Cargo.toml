@@ -53,7 +53,7 @@ members = [
     "examples/slack-clone",
     "examples/workflow-graph-roundtrip",
     "examples/integrator-contract",
-    "examples/transcript-contract",
+    "crates/transcript-contract",
     "runbooks/restate-postgres-workers",
     "runbooks/rlm-smoke",
 ]

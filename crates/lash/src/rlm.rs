@@ -136,6 +136,11 @@ pub use lash_lashlang_runtime::{
 pub use lash_lashlang_runtime::{
     LashlangProcessAdmissionRefusal, LashlangRuntimeError, ToolBindingError,
 };
+/// The typed read of a recorded RLM protocol event: a host decodes the
+/// [`ProtocolEvent`](crate::persistence::ProtocolEvent) envelope a session's
+/// history stores into the variant it commits, instead of walking the
+/// payload's serialized keys.
+pub use lash_protocol_rlm::decode_rlm_protocol_event;
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
     MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,
@@ -172,6 +177,13 @@ pub use lash_protocol_rlm::{
 /// runtime configuration; durable session seeds use [`RlmSeed`].
 pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projection_extension};
 pub use lash_render::{RenderParams, RenderParamsPatch};
+/// The committed RLM event variants [`decode_rlm_protocol_event`] returns and
+/// the record types their fields name.
+pub use lash_rlm_types::{
+    CellOutcome, HistoryCellOutcome, RlmAssistantContent, RlmDiagnosticEvent, RlmExecutedCall,
+    RlmExecutedCallOutcome, RlmGlobalsPatchPluginBody, RlmPrint, RlmProtocolEvent,
+    RlmTrajectoryEntry,
+};
 pub use lash_rlm_types::{
     RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig, RlmTermination,
     RlmTurnOptions,

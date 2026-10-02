@@ -5527,7 +5527,6 @@ name = "toolbench"
 version = "0.0.0-dev"
 dependencies = [
  "anyhow",
- "async-trait",
  "axum",
  "clap",
  "dotenvy",

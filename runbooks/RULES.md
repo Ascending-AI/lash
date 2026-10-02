@@ -35,9 +35,10 @@ judged. **Manual judged** is the semantic browser or artifact-judgment runbook l
 | `workflow-graph-roundtrip` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. The frontend-asset integration tests are Cargo-owned and run inside `workflow-graph-integration-verify`; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
 Directories under `examples/` with no row: `shared` is a library the hosts import, not
-a runnable host; `integrator-contract` and `transcript-contract` are compile-only
-signature witnesses, not examples a host would read; `typescript-host-flows` is a
-collection of TypeScript cells exercised by its own judged row.
+a runnable host; `integrator-contract` is a compile-only signature witness, not an
+example a host would read; `typescript-host-flows` is a collection of TypeScript
+cells exercised by its own judged row. The sibling witness `transcript-contract`
+lives under `crates/`, beside the file it checks.
 
 ## One judged row per scenario, served in TypeScript today
 

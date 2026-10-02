@@ -10,7 +10,7 @@ pub(crate) struct Telemetry {
     submit_calls: std::sync::atomic::AtomicUsize,
     malformed_submits: std::sync::atomic::AtomicUsize,
 }
-#[async_trait::async_trait]
+#[lash::async_trait]
 impl TurnActivitySink for Telemetry {
     #[expect(
         clippy::expect_used,

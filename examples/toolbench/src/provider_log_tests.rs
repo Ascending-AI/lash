@@ -8,7 +8,7 @@ struct Scripted {
     options: ProviderOptions,
     replies: VecDeque<Result<LlmResponse, LlmTransportError>>,
 }
-#[async_trait::async_trait]
+#[lash::async_trait]
 impl Provider for Scripted {
     fn kind(&self) -> &'static str {
         "scripted"

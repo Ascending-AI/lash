@@ -1,4 +1,4 @@
-# Codemode examples
+# TypeScript host flows
 
 These are the flagship host flows as RLM cells. They are source examples, not
 language tutorials: the host API and lifecycle are the point.

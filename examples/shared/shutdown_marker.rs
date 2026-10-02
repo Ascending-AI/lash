@@ -30,7 +30,7 @@ struct ShutdownMarkerFactory {
     path: PathBuf,
 }
 
-#[async_trait::async_trait]
+#[lash::async_trait]
 impl PluginFactory for ShutdownMarkerFactory {
     fn id(&self) -> &'static str {
         "host_shutdown_marker"

@@ -4,7 +4,7 @@
     clippy::expect_used,
     reason = "shared test renderer: broken fixture assumptions abort the test"
 )]
-#[path = "../../../crates/lash-core-execution/src/testing/behavior_transcript.rs"]
+#[path = "../../lash-core-execution/src/testing/behavior_transcript.rs"]
 pub mod behavior_transcript;
 
 #[test]

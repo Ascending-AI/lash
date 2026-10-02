@@ -300,29 +300,7 @@ async fn run_turn(
         .output_into(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
-    let decisions = session
-        .read_view()
-        .active_events()
-        .iter()
-        .filter_map(|record| {
-            let lash::persistence::SessionHistoryRecord::Protocol(event) = record else {
-                return None;
-            };
-            if event.plugin_id != lash::rlm::RLM_PROTOCOL_PLUGIN_ID {
-                return None;
-            }
-            let diagnostic = event.payload.get("RlmDiagnostic")?;
-            let phase = diagnostic.get("phase")?.as_str()?;
-            if !["llm_extraction", "native_extraction"].contains(&phase) {
-                return None;
-            }
-            diagnostic
-                .get("payload")?
-                .get("decision")?
-                .as_str()
-                .map(str::to_string)
-        })
-        .collect();
+    let decisions = rlm_extraction_decisions(session.read_view().active_events());
     Ok((
         lash::TurnOutput {
             result,
@@ -330,6 +308,40 @@ async fn run_turn(
         },
         decisions,
     ))
+}
+
+/// The extraction decisions a turn's committed RLM diagnostics recorded, in
+/// order. The event envelope and its variant decode typed; the diagnostic's
+/// per-phase payload is declared shape, deserialized rather than key-walked.
+fn rlm_extraction_decisions(records: &[lash::persistence::SessionHistoryRecord]) -> Vec<String> {
+    records
+        .iter()
+        .filter_map(|record| {
+            let lash::persistence::SessionHistoryRecord::Protocol(event) = record else {
+                return None;
+            };
+            let Some(lash::rlm::RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
+                lash::rlm::decode_rlm_protocol_event(event)
+            else {
+                return None;
+            };
+            if !matches!(
+                diagnostic.phase.as_str(),
+                "llm_extraction" | "native_extraction"
+            ) {
+                return None;
+            }
+            serde_json::from_value::<ExtractionDecision>(diagnostic.payload)
+                .ok()
+                .map(|payload| payload.decision)
+        })
+        .collect()
+}
+
+/// The one field toolbench reads from an extraction diagnostic's payload.
+#[derive(serde::Deserialize)]
+struct ExtractionDecision {
+    decision: String,
 }
 
 /// A run's engine: lash-restate's engine over a fresh SQLite memory store
@@ -637,7 +649,7 @@ mod tests {
         called: Arc<AtomicBool>,
     }
 
-    #[async_trait::async_trait]
+    #[lash::async_trait]
     impl lash::plugins::PluginFactory for ShutdownWitness {
         fn id(&self) -> &'static str {
             "toolbench_timeout_shutdown_witness"
@@ -785,6 +797,38 @@ mod tests {
         assert_eq!(
             super::reasoning(ReasoningEffort::None),
             ReasoningSelection::ProviderDefault
+        );
+    }
+
+    #[test]
+    fn extraction_decisions_read_the_typed_diagnostic_variant() {
+        let diagnostic = |phase: &str, decision: &str| {
+            lash::persistence::SessionHistoryRecord::Protocol(
+                lash::persistence::ProtocolEvent::typed(
+                    lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    lash::rlm::RlmProtocolEvent::RlmDiagnostic(lash::rlm::RlmDiagnosticEvent {
+                        phase: phase.to_string(),
+                        payload: serde_json::json!({"decision": decision}),
+                    }),
+                )
+                .expect("test diagnostic serializes"),
+            )
+        };
+        let records = vec![
+            diagnostic("llm_extraction", "cell"),
+            diagnostic("native_extraction", "prose_only"),
+            diagnostic("no_progress_budget", "stop_no_progress"),
+            lash::persistence::SessionHistoryRecord::Protocol(
+                lash::persistence::ProtocolEvent::typed(
+                    "some_other_plugin",
+                    serde_json::json!({"RlmDiagnostic": {"phase": "llm_extraction", "payload": {"decision": "not_rlm"}}}),
+                )
+                .expect("test event serializes"),
+            ),
+        ];
+        assert_eq!(
+            super::rlm_extraction_decisions(&records),
+            vec!["cell".to_string(), "prose_only".to_string()]
         );
     }
 
