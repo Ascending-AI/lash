@@ -193,7 +193,6 @@ struct DirectEffectPlan {
     /// binds it, and only when the completion is unjournaled (FIG-4404).
     binding: crate::LlmProfileBinding,
     envelope: crate::RuntimeEffectEnvelope,
-    request: Box<crate::LlmRequest>,
 }
 
 #[derive(Clone, Copy)]
@@ -258,11 +257,7 @@ impl DirectCompletionCapability {
                 usage_source,
             },
         );
-        Ok(DirectEffectPlan {
-            binding,
-            envelope,
-            request: Box::new(request),
-        })
+        Ok(DirectEffectPlan { binding, envelope })
     }
 
     /// Runs a planned direct effect across the journal/controller boundary and
@@ -272,15 +267,10 @@ impl DirectCompletionCapability {
         &self,
         context: &DirectInvocationContext<'_>,
         plan: DirectEffectPlan,
-        caused_by: Option<crate::CausalRef>,
     ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
     {
         let current = context.current;
-        let DirectEffectPlan {
-            binding,
-            envelope,
-            request,
-        } = plan;
+        let DirectEffectPlan { binding, envelope } = plan;
         let tracing = &current.host.core.tracing;
         let replay_trace = crate::RuntimeEffectReplayTrace::for_divergence(
             tracing,
@@ -360,7 +350,7 @@ impl DirectCompletionCapability {
                 },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(&context, plan, caused_by).await?;
+        let (response, usage, llm_call) = self.run_direct_effect(&context, plan).await?;
         Ok(crate::DirectCompletion {
             text: response.full_text(),
             usage,
@@ -401,7 +391,7 @@ impl DirectCompletionCapability {
                 },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(&context, plan, caused_by).await?;
+        let (response, usage, llm_call) = self.run_direct_effect(&context, plan).await?;
         Ok(crate::DirectLlmCompletion {
             response,
             usage,

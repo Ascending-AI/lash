@@ -4,7 +4,6 @@
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`.
 
 use crate::SessionError;
-use std::sync::Arc;
 
 use super::LashRuntime;
 

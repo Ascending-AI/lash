@@ -6,8 +6,6 @@ const LASH_COMPOSITION_TOOL_DOMAIN_VERSION: &str = "lash-composition-tool/v2";
 /// version_guard(items(LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION, trace_composition_key))
 const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-composition/v3";
 
-use std::sync::Arc;
-
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
     TraceRetryAttempt, TraceRetryAttemptDetail, TraceTokenUsage, TraceToolAttemptOutcome,
@@ -663,6 +661,7 @@ pub(crate) fn trace_output_parts(parts: &[LlmOutputPart]) -> Option<serde_json::
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod span_identity_tests {
     use super::*;
+    use std::sync::Arc;
 
     fn turn_context() -> TraceContext {
         TraceContext::default()

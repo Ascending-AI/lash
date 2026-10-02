@@ -1191,6 +1191,111 @@
       },
       "type": "object"
     },
+    "TraceDomainCompletion": {
+      "description": "The terminal of one durable domain operation.",
+      "properties": {
+        "error_code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The typed failure code of a failed operation."
+        },
+        "intent_kind": {
+          "description": "The typed kind of a tool intent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operation": {
+          "$ref": "#/$defs/TraceDomainOperation"
+        },
+        "provider": {
+          "description": "The provider the operation's work was served by, when it has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at_ms": {
+          "description": "Wall-clock epoch milliseconds the operation's scope retained as its\nstart.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TraceDomainStatus"
+        },
+        "tool_call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceTokenUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "operation",
+        "started_at_ms",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TraceDomainOperation": {
+      "description": "The durable domain operation a [`TraceEvent::DomainCompleted`] ends.",
+      "enum": [
+        "run",
+        "process",
+        "process_segment",
+        "send",
+        "tool_intent"
+      ],
+      "type": "string"
+    },
+    "TraceDomainStatus": {
+      "description": "How a durable domain operation ended.",
+      "oneOf": [
+        {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "yielded",
+          "description": "The operation ended without finishing its work here: a segment that\nyielded to a wait or handed over, a send that was reused.",
+          "type": "string"
+        }
+      ]
+    },
     "TraceDurableTimerStatus": {
       "description": "How a durable timer left its sleep.",
       "oneOf": [
@@ -2032,6 +2137,83 @@
         "cancelled"
       ],
       "type": "string"
+    },
+    "TraceLlmAttempt": {
+      "description": "One provider request attempt, as the provider seam reported it.",
+      "properties": {
+        "ended_at_ms": {
+          "description": "Wall-clock epoch milliseconds the attempt ended, when the provider\nseam timed it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalizedError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordinal": {
+          "description": "The attempt's ordinal within its call, from 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outcome": {
+          "$ref": "#/$defs/AttemptOutcome"
+        },
+        "provider": {
+          "description": "The provider that served the attempt, when the provider seam named it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_model": {
+          "description": "The model the request named.",
+          "type": "string"
+        },
+        "response_model": {
+          "description": "The model the response named, when it named one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at_ms": {
+          "description": "Wall-clock epoch milliseconds the attempt was dispatched, when the\nprovider seam timed it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceTokenUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provider-reported usage only. Absence is not zero usage."
+        }
+      },
+      "required": [
+        "ordinal",
+        "request_model",
+        "outcome"
+      ],
+      "type": "object"
     },
     "TraceLlmMessage": {
       "properties": {
@@ -3653,6 +3835,40 @@
       "required": [
         "type",
         "error"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One real provider request attempt of a model call, made by the body\nthat dispatched it. A call that retried reports one per attempt.",
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/TraceLlmAttempt"
+        },
+        "type": {
+          "const": "llm_attempt_completed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "attempt"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The terminal of a durable domain operation that has no record of its\nown kind: a run, a process, a process segment, a host send or a tool\nintent. It is a logical record of the operation's scope.",
+      "properties": {
+        "completion": {
+          "$ref": "#/$defs/TraceDomainCompletion"
+        },
+        "type": {
+          "const": "domain_completed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "completion"
       ],
       "type": "object"
     },

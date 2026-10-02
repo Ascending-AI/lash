@@ -37,6 +37,19 @@ impl Clone for ScopedEffectControllerInner<'_> {
     }
 }
 
+/// The per-run ordinals of a [`ScopedEffectController`].
+#[derive(Debug, Default)]
+pub(in crate::runtime::effect::executor) struct ReplayOrdinals {
+    /// Keyless host starts keyed ([`ScopedEffectController::next_keyless_start_key`]).
+    keyless_starts: AtomicU32,
+    /// Administrative compactions run
+    /// ([`ScopedEffectController::next_compaction_ordinal`]).
+    compactions: AtomicU32,
+    /// Reads of the session's command lane recorded
+    /// ([`ScopedEffectController::next_command_run_ordinal`]).
+    command_runs: AtomicU32,
+}
+
 /// Scoped low-level controller plus the admitted execution scope it is
 /// serving.
 #[derive(Clone)]
@@ -51,21 +64,10 @@ pub struct ScopedEffectController<'run> {
     /// serves, when it serves one (FIG-3586). Every journal write made
     /// through this controller asks it first.
     pub(in crate::runtime::effect::executor) journal_guard: Option<Arc<CommandJournalGuard>>,
-    /// How many keyless host starts this controller has keyed, shared by its
-    /// clones. A handler re-runs from the top on every replay with a fresh
-    /// controller, so the nth keyless start of one run is keyed the same on
-    /// every replay ([`Self::next_keyless_start_key`]).
-    pub(in crate::runtime::effect::executor) keyless_starts: Arc<AtomicU32>,
-    /// How many administrative compactions this controller has run, shared
-    /// by its clones, so the nth compaction of one run records its base
-    /// under the same key on every replay
-    /// ([`Self::next_compaction_ordinal`]).
-    pub(in crate::runtime::effect::executor) compactions: Arc<AtomicU32>,
-    /// How many reads of the session's command lane this controller has
-    /// recorded, shared by its clones, so the nth read of one command root
-    /// replays under the same key on every replay
-    /// ([`Self::next_command_run_ordinal`]).
-    pub(in crate::runtime::effect::executor) command_runs: Arc<AtomicU32>,
+    /// The ordinals this controller has handed out, shared by its clones. A
+    /// handler re-runs from the top on every replay with a fresh controller,
+    /// so the nth of each kind in one run is keyed the same on every replay.
+    pub(in crate::runtime::effect::executor) ordinals: Arc<ReplayOrdinals>,
     /// How many effects this controller has executed, shared by its clones:
     /// what a turn weighs against its invocation's journal budget at a quiet
     /// point (FIG-4739). A handler re-runs from the top on every replay and
@@ -361,7 +363,7 @@ impl<'run> ScopedEffectController<'run> {
     /// replay of the run issues the same starts under the same keys and is
     /// returned the processes they registered.
     pub(crate) fn next_keyless_start_key(&self) -> crate::StartKey {
-        let ordinal = self.keyless_starts.fetch_add(1, Ordering::SeqCst);
+        let ordinal = self.ordinals.keyless_starts.fetch_add(1, Ordering::SeqCst);
         crate::StartKeyDerivation::LASH_START_PATHS.for_keyless_host(self.admitted.scope(), ordinal)
     }
 
@@ -373,7 +375,7 @@ impl<'run> ScopedEffectController<'run> {
     /// execution drew and replays the base it recorded, while a second
     /// compaction in the same run draws the next one and records its own.
     pub fn next_compaction_ordinal(&self) -> u32 {
-        self.compactions.fetch_add(1, Ordering::SeqCst)
+        self.ordinals.compactions.fetch_add(1, Ordering::SeqCst)
     }
 
     /// The ordinal of the next read of the session's command lane recorded
@@ -384,7 +386,7 @@ impl<'run> ScopedEffectController<'run> {
     /// execution read at each ordinal and applies it again, meeting the
     /// receipts of the commits that landed.
     pub fn next_command_run_ordinal(&self) -> u32 {
-        self.command_runs.fetch_add(1, Ordering::SeqCst)
+        self.ordinals.command_runs.fetch_add(1, Ordering::SeqCst)
     }
 
     /// The process this controller's scope is, when it is one.
@@ -401,9 +403,7 @@ impl<'run> ScopedEffectController<'run> {
             controller: ScopedEffectControllerInner::Borrowed(controller),
             admitted,
             journal_guard: None,
-            keyless_starts: Arc::default(),
-            compactions: Arc::default(),
-            command_runs: Arc::default(),
+            ordinals: Arc::default(),
             effects: Arc::default(),
             frontier: crate::trace::JournalFrontier::new(),
         })
@@ -421,9 +421,7 @@ impl<'run> ScopedEffectController<'run> {
             controller: ScopedEffectControllerInner::Shared(controller),
             admitted,
             journal_guard: None,
-            keyless_starts: Arc::default(),
-            compactions: Arc::default(),
-            command_runs: Arc::default(),
+            ordinals: Arc::default(),
             effects: Arc::default(),
             frontier: crate::trace::JournalFrontier::new(),
         })
@@ -442,9 +440,7 @@ impl<'run> ScopedEffectController<'run> {
             controller: ScopedEffectControllerInner::Owned(controller),
             admitted,
             journal_guard: None,
-            keyless_starts: Arc::default(),
-            compactions: Arc::default(),
-            command_runs: Arc::default(),
+            ordinals: Arc::default(),
             effects: Arc::default(),
             frontier: crate::trace::JournalFrontier::new(),
         })
@@ -588,9 +584,7 @@ impl<'run> ScopedEffectController<'run> {
             controller: ScopedEffectControllerInner::Shared(Arc::clone(controller)),
             admitted: self.admitted.clone(),
             journal_guard: self.journal_guard.clone(),
-            keyless_starts: Arc::clone(&self.keyless_starts),
-            compactions: Arc::clone(&self.compactions),
-            command_runs: Arc::clone(&self.command_runs),
+            ordinals: Arc::clone(&self.ordinals),
             effects: Arc::clone(&self.effects),
             frontier: self.frontier.clone(),
         })

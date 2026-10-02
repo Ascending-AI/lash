@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 fn recorded_model() -> crate::LlmProfileConfig {
     crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(

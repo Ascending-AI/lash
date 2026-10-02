@@ -4,11 +4,10 @@ const LASH_RUNTIME_EFFECT_ENVELOPE_DOMAIN_VERSION: &str = "lash-runtime-effect-e
 
 pub use lash_core_store::runtime_error::*;
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use lash_trace::{
     TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceEvent, TraceSink,
+    TraceEffectEnvelopeDiffValue, TraceEvent,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -331,6 +330,7 @@ mod tests {
 
     use super::*;
     use crate::{RuntimeEffectCommand, RuntimeEffectInvocation};
+    use std::sync::Arc;
 
     #[derive(Default)]
     struct RecordingSink {

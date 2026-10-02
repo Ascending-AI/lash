@@ -357,7 +357,6 @@ impl LashRuntime {
         &mut self,
         durable_state: &mut crate::RuntimeSessionState,
         tracing: &crate::trace::TraceRuntime,
-        clock: &dyn crate::Clock,
     ) -> Result<Option<crate::ToolRestoreReport>, (ResidentReloadStage, RuntimeError)> {
         let has_store = self
             .session
@@ -538,7 +537,6 @@ impl LashRuntime {
         let mut durable_state = self.state.clone();
         let mut durable_head_revision = durable_state.head_revision;
         let tracing = self.host.core.tracing.clone();
-        let clock = Arc::clone(&self.host.core.clock);
         let mut reloaded_tool_restore = None;
         let reload_result: Result<(), (ResidentReloadStage, RuntimeError)> = async {
             if let Some(store) = store.as_ref() {
@@ -574,12 +572,9 @@ impl LashRuntime {
                 durable_head_revision = durable_state.head_revision;
             }
 
-            reloaded_tool_restore = Box::pin(self.restore_resident_session_components(
-                &mut durable_state,
-                &tracing,
-                clock.as_ref(),
-            ))
-            .await?;
+            reloaded_tool_restore =
+                Box::pin(self.restore_resident_session_components(&mut durable_state, &tracing))
+                    .await?;
             // The durable reload replaced the whole resident state; the
             // install reasserts the per-open `PreservePersisted` claim from
             // host configuration so later stamps keep the loaded snapshot

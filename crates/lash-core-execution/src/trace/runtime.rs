@@ -14,13 +14,13 @@
 //! only when a step body the engine handed over runs.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_trace::{
     AttemptObservation, DurableTraceScope, EmissionPermit, TraceAnchor, TraceAttemptId, TraceCause,
     TraceContext, TraceDomainProjector, TraceEvent, TraceLevel, TraceRecord, TraceRecordIdentity,
     TraceScopeFactory, TraceScopeId, TraceScopeOwner, TraceSink, TraceTransitionKind,
-    UntracedScopes,
+    UntracedScopes, telemetry::metrics::TelemetryMetrics,
 };
 
 /// The runtime's shared trace handle: the scope factory, the clock, the
@@ -28,59 +28,84 @@ use lash_trace::{
 /// is handed this same value.
 #[derive(Clone)]
 pub struct TraceRuntime {
+    /// One allocation, so every holder carries a pointer.
+    parts: Arc<TraceRuntimeParts>,
+}
+
+#[derive(Clone)]
+struct TraceRuntimeParts {
     scopes: Arc<dyn TraceScopeFactory>,
     clock: Arc<dyn crate::Clock>,
     emitter: TraceEmitter,
     level: TraceLevel,
     base_context: TraceContext,
+    metrics: TelemetryMetrics,
 }
 
 impl TraceRuntime {
     /// A runtime with no observer: untraced scopes, no sink.
     pub fn new(clock: Arc<dyn crate::Clock>) -> Self {
         Self {
-            scopes: Arc::new(UntracedScopes),
-            clock,
-            emitter: TraceEmitter::default(),
-            level: TraceLevel::Standard,
-            base_context: TraceContext::default(),
+            parts: Arc::new(TraceRuntimeParts {
+                scopes: Arc::new(UntracedScopes),
+                clock,
+                emitter: TraceEmitter::default(),
+                level: TraceLevel::Standard,
+                base_context: TraceContext::default(),
+                metrics: TelemetryMetrics::default(),
+            }),
         }
+    }
+
+    /// The runtime's injected metric instruments: no-op handles unless the
+    /// host installed its own.
+    pub fn metrics(&self) -> &TelemetryMetrics {
+        &self.parts.metrics
+    }
+
+    /// Installs the host's metric instruments.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: TelemetryMetrics) -> Self {
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.metrics = metrics;
+        self
     }
 
     /// The identity-producing scope factory: [`UntracedScopes`] unless the
     /// host installed an adapter.
     pub fn scopes(&self) -> &Arc<dyn TraceScopeFactory> {
-        &self.scopes
+        &self.parts.scopes
     }
 
     /// The runtime's injected clock.
     pub fn clock(&self) -> &Arc<dyn crate::Clock> {
-        &self.clock
+        &self.parts.clock
     }
 
     pub fn emitter(&self) -> &TraceEmitter {
-        &self.emitter
+        &self.parts.emitter
     }
 
     pub fn level(&self) -> TraceLevel {
-        self.level
+        self.parts.level
     }
 
     /// The host's run metadata, merged under every record's own context.
     pub fn base_context(&self) -> &TraceContext {
-        &self.base_context
+        &self.parts.base_context
     }
 
     /// Whether any record sink or domain projector observes this runtime.
     /// Sites test it before they build anything a record would hold.
     pub fn is_observed(&self) -> bool {
-        self.emitter.has_external_observers()
+        self.parts.emitter.has_external_observers()
     }
 
     /// Adds one passive record sink.
     #[must_use]
     pub fn with_trace_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
-        self.emitter.sinks = self
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.emitter.sinks = parts
             .emitter
             .sinks
             .iter()
@@ -93,21 +118,24 @@ impl TraceRuntime {
     /// Replaces the passive record sinks with `sinks`.
     #[must_use]
     pub fn with_trace_sinks(mut self, sinks: impl IntoIterator<Item = Arc<dyn TraceSink>>) -> Self {
-        self.emitter.sinks = sinks.into_iter().collect();
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.emitter.sinks = sinks.into_iter().collect();
         self
     }
 
     /// Installs the runtime's one identity-producing adapter half.
     #[must_use]
     pub fn with_scopes(mut self, scopes: Arc<dyn TraceScopeFactory>) -> Self {
-        self.scopes = scopes;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.scopes = scopes;
         self
     }
 
     /// Installs the adapter's projection half.
     #[must_use]
     pub fn with_projector(mut self, projector: Arc<dyn TraceDomainProjector>) -> Self {
-        self.emitter.projector = Some(projector);
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.emitter.projector = Some(projector);
         self
     }
 
@@ -115,32 +143,36 @@ impl TraceRuntime {
     /// ([`TraceEmitter::observe_product`]).
     #[must_use]
     pub fn with_product_observer(mut self, observer: Arc<dyn TraceSink>) -> Self {
-        self.emitter.product = Some(observer);
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.emitter.product = Some(observer);
         self
     }
 
     #[must_use]
     pub fn with_level(mut self, level: TraceLevel) -> Self {
-        self.level = level;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.level = level;
         self
     }
 
     #[must_use]
     pub fn with_base_context(mut self, context: TraceContext) -> Self {
-        self.base_context = context;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.base_context = context;
         self
     }
 
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
-        self.clock = clock;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.clock = clock;
         self
     }
 
     /// Flushes the passive record sinks. An adapter's provider is the host's
     /// to flush.
     pub fn flush(&self) -> Result<(), lash_trace::TraceSinkError> {
-        for sink in self.emitter.sinks.iter() {
+        for sink in self.parts.emitter.sinks.iter() {
             sink.flush()?;
         }
         Ok(())
@@ -186,7 +218,7 @@ impl TraceRuntime {
     ) -> TraceStanding {
         let scope = self
             .is_observed()
-            .then(|| turn_trace_scope(session_id, turn_id, self.clock.timestamp_ms()));
+            .then(|| turn_trace_scope(session_id, turn_id, self.parts.clock.timestamp_ms()));
         self.drive(scope, controller)
     }
 
@@ -199,7 +231,7 @@ impl TraceRuntime {
     ) -> TraceStanding {
         let scope = self
             .is_observed()
-            .then(|| effect_trace_scope(invocation, self.clock.timestamp_ms()))
+            .then(|| effect_trace_scope(invocation, self.parts.clock.timestamp_ms()))
             .flatten();
         self.body(scope, live)
     }
@@ -237,7 +269,7 @@ impl Default for TraceRuntime {
 impl std::fmt::Debug for TraceRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceRuntime")
-            .field("level", &self.level)
+            .field("level", &self.parts.level)
             .field("observed", &self.is_observed())
             .finish_non_exhaustive()
     }
@@ -669,7 +701,7 @@ impl TraceStanding {
     }
 
     pub fn level(&self) -> TraceLevel {
-        self.runtime.level
+        self.runtime.parts.level
     }
 
     pub fn scope(&self) -> Option<&DurableTraceScope> {
@@ -720,7 +752,7 @@ impl TraceStanding {
         if !self.runtime.is_observed() {
             return;
         }
-        let at_ms = self.runtime.clock.timestamp_ms();
+        let at_ms = self.runtime.parts.clock.timestamp_ms();
         match &self.right {
             EmissionRight::Body(live) => self.emit_live(
                 live.permit(),
@@ -754,11 +786,12 @@ impl TraceStanding {
     ) {
         let Some(scope) = self.scope.as_deref() else {
             self.runtime
+                .parts
                 .emitter
                 .emit_unscoped(Some(permit), at_ms, || self.project(record()));
             return;
         };
-        self.runtime.emitter.emit(
+        self.runtime.parts.emitter.emit(
             Some(permit),
             scope,
             self.attempt_observation(),
@@ -782,11 +815,12 @@ impl TraceStanding {
     ) {
         let Some(scope) = self.scope.as_deref() else {
             self.runtime
+                .parts
                 .emitter
                 .emit_unscoped(Some(permit), at_ms, || record);
             return;
         };
-        self.runtime.emitter.emit(
+        self.runtime.parts.emitter.emit(
             Some(permit),
             scope,
             self.attempt_observation(),
@@ -842,11 +876,12 @@ impl TraceStanding {
         }
         let Some(scope) = self.scope.as_deref() else {
             self.runtime
+                .parts
                 .emitter
                 .emit_unscoped(Some(receipt), at_ms, || self.project(record()));
             return;
         };
-        self.runtime.emitter.emit(
+        self.runtime.parts.emitter.emit(
             Some(receipt),
             scope,
             self.attempt_observation(),
@@ -863,7 +898,7 @@ impl TraceStanding {
     /// The record's context under the host's run metadata, with its span
     /// identity assigned.
     fn project(&self, (context, event): (TraceContext, TraceEvent)) -> (TraceContext, TraceEvent) {
-        let mut merged = super::merge_runtime_projection(&self.runtime.base_context, context);
+        let mut merged = super::merge_runtime_projection(&self.runtime.parts.base_context, context);
         super::assign_span_identity(&mut merged, &event);
         (merged, event)
     }

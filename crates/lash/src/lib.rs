@@ -1426,14 +1426,28 @@ pub mod runtime {
 /// Trace context, events, and sink configuration.
 pub mod tracing {
     // The vocabulary this module's signatures name (the facade-completeness rule).
+    /// Where engine code stands when it observes, and the journaled-step
+    /// boundary that grants the right to.
+    pub use lash_core::trace::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
     pub use lash_sansio::{AttachmentMaterializationReason, AttachmentMaterializationSource};
+    /// The scope, cause, permit and identity vocabulary the trace runtime's
+    /// signatures name.
+    pub use lash_trace::telemetry::metrics::{
+        GenerationDrainMetrics, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
+        TelemetryMetrics, ToolIntentMetrics,
+    };
     pub use lash_trace::{
         AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
-        InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
-        TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
-        TraceCause, TraceLashlangNodeRetention, TraceLinks, TraceRecordIdentity,
-        TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner,
-        TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+        InvalidTraceLinks, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId,
+        TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainCompletion,
+        TraceDomainOperation, TraceDomainProjector, TraceDomainStatus, TraceLinks, TraceLlmAttempt,
+        TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
+        TraceScopeOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
+        W3cTraceState,
+    };
+    pub use lash_trace::{
+        TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
+        TraceLashlangNodeRetention,
     };
 
     #[cfg(feature = "otel-trace")]

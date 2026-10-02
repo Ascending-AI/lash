@@ -583,25 +583,21 @@ impl LashRuntime {
         mut adopted: crate::RuntimeSessionState,
     ) -> Result<(), SessionError> {
         let tracing = self.host.core.tracing.clone();
-        let clock = Arc::clone(&self.host.core.clock);
-        let tool_restore = Box::pin(self.restore_resident_session_components(
-            &mut adopted,
-            &tracing,
-            clock.as_ref(),
-        ))
-        .await
-        .map_err(|(_stage, error)| {
-            if matches!(
-                error.cause.as_ref(),
-                Some(crate::RuntimeErrorCause::PluginFormat { .. })
-            ) {
-                SessionError::Plugin(crate::PluginError::Runtime(error))
-            } else {
-                SessionError::Protocol(format!(
-                    "failed to restore the adopted session head: {error}"
-                ))
-            }
-        })?;
+        let tool_restore =
+            Box::pin(self.restore_resident_session_components(&mut adopted, &tracing))
+                .await
+                .map_err(|(_stage, error)| {
+                    if matches!(
+                        error.cause.as_ref(),
+                        Some(crate::RuntimeErrorCause::PluginFormat { .. })
+                    ) {
+                        SessionError::Plugin(crate::PluginError::Runtime(error))
+                    } else {
+                        SessionError::Protocol(format!(
+                            "failed to restore the adopted session head: {error}"
+                        ))
+                    }
+                })?;
         self.install_resident_state(adopted)?;
         if tool_restore.is_some() {
             self.tool_restore_report = tool_restore;
