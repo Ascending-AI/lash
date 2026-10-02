@@ -302,8 +302,11 @@ impl Fixture {
         let backend = self.parts.host.backend();
         let ingress = backend.obligation_ledger(ObligationKind::Ingress);
         let ttl_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
-        let obligation =
-            lash_core::store::ingress_obligation::ingress_obligation_id(input.as_str());
+        let obligation = lash_core::store::ObligationKey::Ingress {
+            session_id: self.parts.session_id.clone(),
+            item_id: input.as_str().to_string(),
+        }
+        .id();
         let lapsed = ingress
             .claim_due(
                 backend.clock().timestamp_ms().saturating_add(ttl_ms),
