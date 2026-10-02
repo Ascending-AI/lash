@@ -31,6 +31,20 @@ impl LoadOperation {
             Self::CronSetup { .. } => "load_cron_setup",
         }
     }
+    fn admission_text(&self) -> String {
+        let (marker, value) = match self {
+            Self::Turn { key, .. } => (TURN_MARKER, key),
+            Self::Queued { key, .. } => (QUEUED_MARKER, key),
+            Self::CronSetup { run, .. } => (CRON_SETUP_MARKER, run),
+        };
+        format!("{marker}{value} {WORKLOAD_MARKER}{}\n", self.workload())
+    }
+}
+const ADMISSION_OPEN: &str = "<load-admission>\n";
+const ADMISSION_CLOSE: &str = "</load-admission>\n";
+
+fn admission_prefix(text: &str) -> String {
+    format!("{ADMISSION_OPEN}{text}{ADMISSION_CLOSE}")
 }
 fn marker_value(text: &str, marker: &str) -> Option<String> {
     let start = text.find(marker)? + marker.len();
@@ -81,21 +95,41 @@ pub(super) fn load_operations_text(text: &str) -> Vec<LoadOperation> {
         })
         .collect()
 }
-/// Historical inputs stop at the previous assistant response. Every user
-/// message of the currently admitted prefix contributes its plan.
+/// New inputs follow the last assistant response. An unfinished RLM cell
+/// carries its admission into later iterations; iteration one never inherits
+/// an earlier root's admission, including a root that failed without an answer.
 fn admitted_user_texts(request: &Value) -> Vec<String> {
     let Some(messages) = request["messages"].as_array() else {
         return vec![];
     };
-    let start = messages
+    let assistant = messages
         .iter()
-        .rposition(|message| message["role"] == "assistant")
-        .map_or(0, |index| index + 1);
-    messages[start..]
-        .iter()
-        .filter(|message| message["role"] == "user")
-        .map(message_content_text)
-        .collect()
+        .rposition(|message| message["role"] == "assistant");
+    let continuing = messages.last().is_some_and(|message| {
+        message["role"] == "user"
+            && message_content_text(message)
+                .split_once("=== CURRENT ITERATION: ")
+                .and_then(|(_, tail)| tail.split_once(" ==="))
+                .and_then(|(iteration, _)| iteration.parse::<usize>().ok())
+                .is_some_and(|iteration| iteration > 1)
+    });
+    let mut texts = Vec::new();
+    if continuing && let Some(index) = assistant {
+        let content = message_content_text(&messages[index]);
+        if let Some((admission, _)) = content
+            .strip_prefix(ADMISSION_OPEN)
+            .and_then(|tail| tail.split_once(ADMISSION_CLOSE))
+        {
+            texts.push(admission.to_owned());
+        }
+    }
+    texts.extend(
+        messages[assistant.map_or(0, |index| index + 1)..]
+            .iter()
+            .filter(|message| message["role"] == "user")
+            .map(message_content_text),
+    );
+    texts
 }
 fn admitted_behavior_text(request: &Value) -> Option<String> {
     admitted_user_texts(request)
@@ -158,7 +192,7 @@ pub(super) async fn completion(
     let first_attempt: bool=sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM unnest($1::text[]) AS input(key) WHERE NOT EXISTS (SELECT 1 FROM witness_provider_receipts WHERE workflow_id=input.key AND scenario IN ('load_turn','load_retryable')))")
         .bind(&retry_keys).fetch_one(&state.witness).await.map_err(internal)?;
     let attempt = if first_attempt { 1 } else { 2 };
-    let response = match first {
+    let mut response = match first {
         LoadOperation::CronSetup { run, .. } => load
             .generator(run)
             .map_err(internal)?
@@ -194,6 +228,15 @@ pub(super) async fn completion(
             Json(body),
         )
             .into_response());
+    }
+    let admission = operations
+        .iter()
+        .map(LoadOperation::admission_text)
+        .collect::<String>();
+    let prefix = admission_prefix(&admission);
+    response.text.insert_str(0, &prefix);
+    if let Some(chunk) = response.chunks.first_mut() {
+        chunk.text.insert_str(0, &prefix);
     }
     let body = chat(request_id, model, &response.text, 17);
     for operation in &operations {
@@ -320,6 +363,8 @@ pub(super) async fn behavior_completion(
         .ok_or_else(|| internal("behavior has no workload"))?;
     load.require_workload(&workload).map_err(internal)?;
     let script = behavior::script(run, phase).map_err(internal)?;
+    let admission = format!("{}{value} {WORKLOAD_MARKER}{workload}\n", behavior::MARKER);
+    let script = format!("{}{script}", admission_prefix(&admission));
     let response = chat(
         id,
         request["model"].as_str().unwrap_or("unknown"),
@@ -347,6 +392,162 @@ pub(super) async fn behavior_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn admitted_load_inputs_survive_an_unfinished_cell() {
+        use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmResponse, LlmRole};
+        use std::sync::Mutex;
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let calls = Arc::clone(&seen);
+        let provider = lash_core::testing::TestProvider::builder()
+            .kind("load-admission")
+            .complete(move |request| {
+                let messages: Vec<_> = request
+                    .messages
+                    .iter()
+                    .map(|message| {
+                        let content: Vec<_> = message
+                            .blocks
+                            .iter()
+                            .filter_map(|block| match block {
+                                LlmContentBlock::Text { text, .. } => {
+                                    Some(json!({"type":"text","text":text}))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let role = match message.role {
+                            LlmRole::User => "user",
+                            LlmRole::Assistant => "assistant",
+                            LlmRole::System => "system",
+                        };
+                        json!({"role":role,"content":content})
+                    })
+                    .collect();
+                let request = json!({"messages":messages});
+                let operations = admitted_operations(&request);
+                let keys: Vec<_> = operations.iter().map(LoadOperation::key).collect();
+                let mut calls = calls.lock().unwrap();
+                calls.push(keys.clone());
+                // Fail before updating the previous turn's retained variable.
+                let text = if calls.len() == 2 {
+                    "<typescript>throw new Error(\"retry the load cell\");</typescript>".to_owned()
+                } else {
+                    let key = keys.last().map(String::as_str).unwrap_or("fallback");
+                    format!(
+                        "<typescript>const op={};finish({{synthetic:true,operation:op}});</typescript>",
+                        serde_json::to_string(key).unwrap()
+                    )
+                };
+                let admission = operations
+                    .iter()
+                    .map(LoadOperation::admission_text)
+                    .collect::<String>();
+                let text = format!("{}{text}", admission_prefix(&admission));
+                async move {
+                    Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text,
+                            response_meta: None,
+                        }],
+                        ..Default::default()
+                    })
+                }
+            })
+            .build();
+        let restate = lash_restate_test::backend(4722, Default::default())
+            .await
+            .unwrap();
+        let backend = restate.lash_backend();
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash_protocol_rlm::RlmChannel::Cell)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            Arc::new(lash_protocol_rlm::TypescriptDialect),
+            &backend,
+        );
+        let core = lash::LashCore::rlm_builder(
+            backend,
+            lash::TurnBudget::bounded(3),
+            lash::MaxToolCalls::new(16),
+            factory,
+        )
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_model(
+            provider.into_handle(),
+            lash::ModelMetadata::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .unwrap(),
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "load-admission",
+            "law",
+        ))
+        .unwrap();
+        core.session("load-admission")
+            .create(lash::SessionCreation::default())
+            .await
+            .unwrap();
+        let session = core.session("load-admission").open().await.unwrap();
+        for ordinal in [28, 29] {
+            let key = format!("smoke-v1-20261001205043/2/{ordinal}");
+            let input = format!(
+                "Run the synthetic load turn. load_turn={key} load_workload={}\n{{\"payload\":\"oak\"}}\n## Synthetic load context\n\n{}",
+                "a".repeat(64),
+                "oak ".repeat(32_768),
+            );
+            let output = session
+                .send(lash::TurnInput::text(input))
+                .output()
+                .await
+                .unwrap();
+            assert_eq!(
+                output.final_value(),
+                Some(&json!({"synthetic":true,"operation":key})),
+                "the admitted turn must keep its operation on every model iteration: {:?}",
+                *seen.lock().unwrap(),
+            );
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                vec!["smoke-v1-20261001205043/2/28".to_owned()],
+                vec!["smoke-v1-20261001205043/2/29".to_owned()],
+                vec!["smoke-v1-20261001205043/2/29".to_owned()],
+            ],
+        );
+    }
+
+    #[test]
+    fn admitted_continuation_merges_inputs_and_excludes_failed_history() {
+        let mut request = json!({"messages":[
+            {"role":"user","content":"load_turn=r/0/0 load_workload=w"},
+            {"role":"assistant","content":"<load-admission>\nload_turn=r/0/0 load_workload=w\n</load-admission>\n<typescript>throw new Error('old failed root');</typescript>"},
+            {"role":"user","content":"load_turn=r/0/1 load_workload=w"},
+            {"role":"assistant","content":"<load-admission>\nload_turn=r/0/1 load_workload=w\nload_queued=r/0/1/queued/0 load_workload=w\n</load-admission>\n<typescript>throw new Error('active root');</typescript>"},
+            {"role":"user","content":"history[3].error: active root"},
+            {"role":"user","content":"load_queued=r/0/1/queued/1 load_workload=w"},
+            {"role":"user","content":"=== CURRENT ITERATION: 2 ==="}
+        ]});
+        let keys = |request: &Value| {
+            admitted_operations(request)
+                .iter()
+                .map(LoadOperation::key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            keys(&request),
+            ["r/0/1", "r/0/1/queued/0", "r/0/1/queued/1"]
+        );
+        request["messages"][6]["content"] = json!("=== CURRENT ITERATION: 1 ===");
+        assert_eq!(keys(&request), ["r/0/1/queued/1"]);
+    }
+
     #[test]
     fn admitted_prefix_excludes_history_and_includes_every_batched_input() {
         let request = json!({"messages":[{"role":"user","content":"load_turn=r/0/0 load_workload=w"},{"role":"assistant","content":"old answer"},{"role":"user","content":"load_turn=r/0/1 load_workload=w"},{"role":"user","content":"load_queued=r/0/0/queued/0 load_workload=w"}]});
