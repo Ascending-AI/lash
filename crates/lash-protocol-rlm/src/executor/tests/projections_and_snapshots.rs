@@ -674,9 +674,9 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
             "RLM_SNAPSHOT_BUDGET initial={} changed={}",
             initial_budget.checkpoint_bytes, changed_budget.checkpoint_bytes
         );
-        // Pin the captured root and changed leaves; tool outcomes stay in the journal.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_000);
-        assert_eq!(changed_budget.checkpoint_bytes, 13_430);
+        // Pin serializer measurements for the counter-only header and list-owned holes.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_028);
+        assert_eq!(changed_budget.checkpoint_bytes, 13_381);
     });
 }
 
@@ -908,10 +908,10 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        assert_eq!(full_state_bytes, 136_711);
-        // Pin the measured root and changed leaves; tool outcomes stay in the journal.
-        assert_eq!(minimum, 19_597);
-        assert_eq!(maximum, 19_599);
+        assert_eq!(full_state_bytes, 136_767);
+        // Pin serializer measurements for the counter-only header and list-owned holes.
+        assert_eq!(minimum, 19_548);
+        assert_eq!(maximum, 19_550);
     });
 }
 
@@ -999,7 +999,7 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             .bytes()
             .expect("canonical worker state")
             .len();
-        assert_eq!(full_state_bytes, 1_104_953);
+        assert_eq!(full_state_bytes, 1_106_995);
         let _initial = state
             .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("initial snapshot");
@@ -1050,9 +1050,9 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        // Pin the measured root and changed leaves; tool outcomes stay in the journal.
-        assert_eq!(minimum, 94_532);
-        assert_eq!(maximum, 94_534);
+        // Pin serializer measurements for the counter-only header and list-owned holes.
+        assert_eq!(minimum, 94_481);
+        assert_eq!(maximum, 94_483);
     });
 }
 

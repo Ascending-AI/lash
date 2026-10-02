@@ -804,7 +804,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Value::List(items) | Value::Tuple(items) => items.len() as f64,
             Value::String(value) => value.encode_utf16().count() as f64,
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(items) | HeapObject::Tuple(items) => items.len() as f64,
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => items.len() as f64,
                 HeapObject::RegExpMatch(result) => result.items.len() as f64,
                 _ => {
                     let value =
@@ -1175,7 +1175,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let elements = match elements {
                     Value::List(elements) => elements.to_vec(),
                     Value::Ref(id) => match self.heap.get(*id)? {
-                        HeapObject::List(elements) => elements.clone(),
+                        HeapObject::List {
+                            items: elements, ..
+                        } => elements.clone(),
                         _ => {
                             return Err(js_stdlib_error(
                                 "Lash.SparseArray expects an element list and a hole-index list",
@@ -1191,7 +1193,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let holes = match holes {
                     Value::List(holes) => holes.to_vec(),
                     Value::Ref(id) => match self.heap.get(*id)? {
-                        HeapObject::List(holes) => holes.clone(),
+                        HeapObject::List { items: holes, .. } => holes.clone(),
                         _ => {
                             return Err(js_stdlib_error(
                                 "Lash.SparseArray expects an element list and a hole-index list",
@@ -1240,7 +1242,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // the time `arguments` is mentioned the argv is a heap
                     // `List` reference.
                     Some(Value::Ref(id)) => match self.heap.get(*id)? {
-                        HeapObject::List(argv) => argv.clone(),
+                        HeapObject::List { items: argv, .. } => argv.clone(),
                         _ => Vec::new(),
                     },
                     _ => Vec::new(),
@@ -1307,7 +1309,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .collect(),
             ),
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(elements) | HeapObject::Tuple(elements) => Some(elements.clone()),
+                HeapObject::List {
+                    items: elements, ..
+                }
+                | HeapObject::Tuple(elements) => Some(elements.clone()),
                 HeapObject::Set(set) => Some(set.values.clone()),
                 HeapObject::Map(map) => Some(
                     map.entries
@@ -1417,7 +1422,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         _ => unreachable!(),
                     }
                 }
-                HeapObject::List(items) => {
+                HeapObject::List { items, .. } => {
                     // A hole is not an own property: `Object.*` skip it, as
                     // Node does on a sparse array.
                     let present = |index: usize| !self.heap.is_list_hole(*receiver, index);

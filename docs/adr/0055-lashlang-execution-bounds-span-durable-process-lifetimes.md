@@ -58,7 +58,7 @@ defaults or another recorded home.
 
 ### Heap accounting
 
-The VM meters logical bytes under its registered heap-size schedule rather
+The VM meters logical bytes from heap objects rather
 than allocator or RSS measurements. In the current production schedule, an
 object header costs 16 bytes, a value slot costs 64 bytes plus its scalar
 payload, and a record field additionally costs 8 bytes plus its UTF-8 key.

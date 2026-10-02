@@ -4,14 +4,14 @@ use super::*;
 fn swept_storage_gets_a_fresh_monotonic_identity() {
     let mut heap = Heap::default();
     let Value::Ref(first) = heap
-        .allocate(HeapObject::List(Vec::new()))
+        .allocate(HeapObject::list(Vec::new()))
         .expect("first allocation")
     else {
         unreachable!()
     };
     heap.collect(std::iter::empty());
     let Value::Ref(second) = heap
-        .allocate(HeapObject::List(Vec::new()))
+        .allocate(HeapObject::list(Vec::new()))
         .expect("second allocation")
     else {
         unreachable!()
@@ -27,12 +27,12 @@ fn swept_storage_gets_a_fresh_monotonic_identity() {
 fn isolation_preserves_cycles_with_fresh_ids() {
     let mut heap = Heap::default();
     let Value::Ref(original) = heap
-        .allocate(HeapObject::List(Vec::new()))
+        .allocate(HeapObject::list(Vec::new()))
         .expect("original")
     else {
         unreachable!()
     };
-    heap.replace_object(original, HeapObject::List(vec![Value::Ref(original)]))
+    heap.replace_object(original, HeapObject::list(vec![Value::Ref(original)]))
         .expect("cycle");
     let Value::Ref(copy) = heap
         .isolate_value(&Value::Ref(original))
@@ -43,7 +43,7 @@ fn isolation_preserves_cycles_with_fresh_ids() {
     assert_ne!(copy, original);
     assert_eq!(
         heap.get(copy),
-        Ok(&HeapObject::List(vec![Value::Ref(copy)]))
+        Ok(&HeapObject::list(vec![Value::Ref(copy)]))
     );
 }
 
@@ -51,7 +51,7 @@ fn isolation_preserves_cycles_with_fresh_ids() {
 fn sparse_object_bookkeeping_stays_bounded_by_live_objects() {
     let mut heap = Heap::default();
     for _ in 0..5_000 {
-        heap.allocate(HeapObject::List(Vec::new()))
+        heap.allocate(HeapObject::list(Vec::new()))
             .expect("allocate transient object");
         heap.collect(std::iter::empty());
     }
@@ -72,10 +72,10 @@ fn sparse_object_bookkeeping_stays_bounded_by_live_objects() {
 fn allocation_across_a_sweep_is_byte_identical_to_allocation_without_one() {
     let mut swept = Heap::default();
     let garbage = swept
-        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .allocate(HeapObject::list(vec![Value::Number(1.0)]))
         .expect("allocate garbage");
     let kept = swept
-        .allocate(HeapObject::List(vec![Value::String("kept".into())]))
+        .allocate(HeapObject::list(vec![Value::String("kept".into())]))
         .expect("allocate kept");
     swept.collect([Value::Number(0.0), kept.clone()].iter());
     assert!(matches!(
@@ -91,7 +91,7 @@ fn allocation_across_a_sweep_is_byte_identical_to_allocation_without_one() {
 
     let mut clean = Heap::default();
     let skipped = clean
-        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .allocate(HeapObject::list(vec![Value::Number(1.0)]))
         .expect("allocate the same first id");
     let Value::Ref(skipped_id) = skipped else {
         unreachable!()
@@ -99,7 +99,7 @@ fn allocation_across_a_sweep_is_byte_identical_to_allocation_without_one() {
     let entry = clean.entries.remove(&skipped_id).expect("remove it");
     clean.live_logical_bytes -= entry.logical_bytes;
     let clean_kept = clean
-        .allocate(HeapObject::List(vec![Value::String("kept".into())]))
+        .allocate(HeapObject::list(vec![Value::String("kept".into())]))
         .expect("allocate kept");
     let clean_after = clean
         .allocate(HeapObject::Tuple(vec![Value::Bool(true)]))
@@ -124,10 +124,10 @@ fn allocation_across_a_sweep_is_byte_identical_to_allocation_without_one() {
 fn child_mutation_invalidates_materialized_ancestor_cache() {
     let mut heap = Heap::default();
     let child = heap
-        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .allocate(HeapObject::list(vec![Value::Number(1.0)]))
         .expect("allocate child");
     let parent = heap
-        .allocate(HeapObject::List(vec![child.clone()]))
+        .allocate(HeapObject::list(vec![child.clone()]))
         .expect("allocate parent");
 
     assert_eq!(
@@ -373,7 +373,7 @@ fn value_slot_bytes_covers_the_real_value_slot() {
 fn the_list_pre_charge_matches_what_the_committed_list_is_charged() {
     let mut heap = Heap::default();
     for len in [0_usize, 1, 7, 64] {
-        let committed = HeapObject::List(vec![Value::Undefined; len]).logical_bytes();
+        let committed = HeapObject::list(vec![Value::Undefined; len]).logical_bytes();
         let limit = heap.live_logical_bytes().saturating_add(committed);
         heap.set_limit(limit);
         heap.ensure_list_allocation_len(len)
@@ -389,11 +389,11 @@ fn the_list_pre_charge_matches_what_the_committed_list_is_charged() {
 /// A chain of `refs` heap objects, innermost holding a scalar leaf.
 fn ref_chain(heap: &mut Heap, refs: usize) -> Value {
     let mut value = heap
-        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .allocate(HeapObject::list(vec![Value::Number(1.0)]))
         .expect("allocate the innermost link");
     for _ in 1..refs {
         value = heap
-            .allocate(HeapObject::List(vec![value]))
+            .allocate(HeapObject::list(vec![value]))
             .expect("allocate a chain link");
     }
     value

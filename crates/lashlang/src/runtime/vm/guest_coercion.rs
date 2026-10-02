@@ -425,7 +425,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 array_method_parameters(&method)
             }
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(items) | HeapObject::Tuple(items) => {
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => {
                     if items.is_empty()
                         && matches!(method.as_str(), "indexOf" | "lastIndexOf" | "includes")
                     {
@@ -510,7 +510,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let items = match &values[1] {
             Value::List(items) | Value::Tuple(items) => items.to_vec(),
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(items) | HeapObject::Tuple(items) => items.clone(),
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => items.clone(),
                 _ => return Ok(()),
             },
             _ => return Ok(()),

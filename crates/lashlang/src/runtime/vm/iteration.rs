@@ -98,7 +98,7 @@ impl IterCursor {
                     return Ok(None);
                 };
                 let value = match heap.get(*id)? {
-                    HeapObject::List(values) => values.get(*index).cloned(),
+                    HeapObject::List { items: values, .. } => values.get(*index).cloned(),
                     HeapObject::UrlSearchParams(params) => {
                         params.entries.get(*index).map(|(name, value)| {
                             Value::List(
@@ -136,7 +136,7 @@ impl IterCursor {
                 source: Value::Ref(id),
                 index,
             } => match heap.get(*id)? {
-                HeapObject::List(values) => *index < values.len(),
+                HeapObject::List { items: values, .. } => *index < values.len(),
                 HeapObject::UrlSearchParams(params) => *index < params.entries.len(),
                 _ => false,
             },
@@ -239,7 +239,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn iteration_cursor(&mut self, iterable: Value) -> Result<IterCursor, RuntimeError> {
         if let Value::Ref(id) = iterable {
             let pending = match self.heap.get(id)? {
-                HeapObject::List(_) | HeapObject::UrlSearchParams(_) => {
+                HeapObject::List { .. } | HeapObject::UrlSearchParams(_) => {
                     return Ok(IterCursor::Live {
                         source: iterable,
                         index: 0,

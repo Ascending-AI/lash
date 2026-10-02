@@ -543,13 +543,6 @@ description = "durable-read fixture databases, dumps, and expectations captured 
 outside_manifest = "versions captured test fixtures, not bytes a lash build writes"
 
 [[surface]]
-constant = "HEAP_SIZE_SCHEDULE_VERSION"
-constant_path = "crates/lashlang/src/runtime/heap.rs"
-upgrade = "migrate"
-description = "byte-charge schedule a persisted Lashlang heap's live_logical_bytes was computed under"
-manifest = "HeapSizeSchedule"
-
-[[surface]]
 constant = "SCOPE_STORAGE_PAYLOAD_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"
 upgrade = "migrate"

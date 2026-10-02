@@ -120,7 +120,7 @@ impl<'a> ContinuationValidator<'a> {
         object: &HeapObject,
     ) -> Result<(), ContinuationError> {
         match object {
-            HeapObject::Tuple(values) | HeapObject::List(values) => {
+            HeapObject::Tuple(values) | HeapObject::List { items: values, .. } => {
                 self.validate_heap_values(values, &format!("heap object {}", id.get()))
             }
             HeapObject::Record(record) => self.validate_heap_record(id, record),
@@ -524,24 +524,10 @@ pub(super) fn validate_continuation(
     }
     let validator = ContinuationValidator::new(continuation);
     validator.validate_stack_and_last()?;
-    for value in continuation.pending_tools.values().flatten() {
-        validate_value(value, "pending tool")?;
-        validate_heap_references(validator.heap, std::slice::from_ref(value))?;
-        let index = |value: &Value| matches!(value, Value::Number(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0);
-        // A tool request is `[operation, site, receiver, args...]`; a timer is
-        // `["timer", site, duration]` (ADR 0099 §11: one pending-operation map
-        // for tools and timers).
-        let tool = |call: &[Value]| call.len() >= 3 && call[..2].iter().all(index);
-        let timer = |call: &[Value]| {
-            call.len() == 3
-                && matches!(&call[0], Value::String(tag) if &**tag == super::super::pending_tools::PENDING_TIMER_TAG)
-                && index(&call[1])
-        };
-        if !matches!(value, Value::List(call) if tool(call) || timer(call)) {
-            return Err(ContinuationError::UnserializableValue {
-                location: "pending tool".into(),
-                variant: "invalid pending tool call",
-            });
+    for pending in continuation.pending_tools.values().flatten() {
+        for value in pending.values() {
+            validate_value(value, "pending operation")?;
+            validate_heap_references(validator.heap, std::slice::from_ref(value))?;
         }
     }
     validator.validate_slots()?;

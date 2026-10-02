@@ -101,16 +101,16 @@ pub use runtime::{
     ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
     LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION,
-    LinkedProgramCache, LinkedProgramCacheError, ListValue, ProcessEvent, ProcessEventKind,
-    ProcessSignal, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
-    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
-    RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError, State,
-    StringValue, UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete,
-    VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt,
-    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked,
+    LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation, PendingOperationMap,
+    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
+    ProjectedReadResponse, ProjectedValue, Record, ResourceHandle, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
+    SnapshotDecodeError, State, StringValue, UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION,
+    Value, Vm, VmComplete, VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance,
+    VmInterrupt, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
     VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended, VmSuspendedOperation,
     cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
@@ -123,9 +123,7 @@ pub use runtime::{
     TypeScriptRegExpValidationError, validate_canonical_messagepack_structure,
     validate_typescript_regexp, validate_typescript_regexp_shape,
 };
-pub use runtime::{
-    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
-};
+pub use runtime::{DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL};
 pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 pub use span::Span;
 pub use value_refs::referenced_definition_ids;

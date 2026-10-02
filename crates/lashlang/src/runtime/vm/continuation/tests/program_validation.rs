@@ -213,7 +213,7 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
         })))
         .expect("allocate nested record");
     let nested_list = nested_heap
-        .allocate(HeapObject::List(vec![nested_record]))
+        .allocate(HeapObject::list(vec![nested_record]))
         .expect("allocate nested list");
     expect_capture_count_error(
         &program,

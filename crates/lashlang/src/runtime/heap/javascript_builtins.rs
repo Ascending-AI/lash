@@ -847,7 +847,7 @@ impl Heap {
             Value::Record(_) => Some("Object".to_string()),
             Value::Ref(id) => match self.get(*id)? {
                 HeapObject::Record(_) => Some("Object".to_string()),
-                HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+                HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
                     Some("Array".to_string())
                 }
                 HeapObject::Closure { .. } => Some("Function".to_string()),
@@ -929,7 +929,6 @@ impl Heap {
 
     /// Drop the side-table rows whose objects were swept.
     pub(crate) fn sweep_builtin_side_state(&mut self, marked: &BTreeSet<HeapId>) {
-        self.list_holes.retain(|id, _| marked.contains(id));
         self.builtin_expandos.retain(|id, _| marked.contains(id));
         self.builtin_deleted.retain(|id, _| marked.contains(id));
         self.builtin_enumerable.retain(|id, _| marked.contains(id));

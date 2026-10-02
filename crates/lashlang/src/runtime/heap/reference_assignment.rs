@@ -143,7 +143,7 @@ impl Heap {
             }
             "cause" => error.cause = Some(value),
             "errors" if error.kind == ErrorKind::AggregateError => {
-                if !matches!(&value, Value::Ref(id) if matches!(self.get(*id), Ok(HeapObject::List(_))))
+                if !matches!(&value, Value::Ref(id) if matches!(self.get(*id), Ok(HeapObject::List { .. })))
                 {
                     return Err(unassignable());
                 }
@@ -195,7 +195,10 @@ impl Heap {
                 "errors" => error.errors.take().is_some(),
                 _ => false,
             },
-            HeapObject::List(values) => {
+            HeapObject::List {
+                items: values,
+                holes,
+            } => {
                 // `length` and tuple members are non-configurable: a strict
                 // `delete` raises TypeError.
                 if key == "length" {
@@ -210,13 +213,11 @@ impl Heap {
                     // property to remove. Deleting a stored element empties
                     // the slot: the placeholder stays in the vector and the
                     // hole set records that `i in a` no longer answers.
-                    if self.is_list_hole(*target_id, index) {
+                    if holes.contains(&index) {
                         return Ok(true);
                     }
                     values[index] = Value::Undefined;
-                    let mut holes = self.list_holes.get(target_id).cloned().unwrap_or_default();
                     holes.insert(index);
-                    self.mark_list_holes(*target_id, holes);
                     return self.commit_javascript_delete(*target_id, old_object, new_object);
                 }
                 false
@@ -358,7 +359,7 @@ impl Heap {
                     .ok_or_else(|| RuntimeError::MissingAssignmentField {
                         field: names[field].text.to_string(),
                     })?,
-                (HeapObject::List(values), CompiledAssignPathStep::Index) => {
+                (HeapObject::List { items: values, .. }, CompiledAssignPathStep::Index) => {
                     let key =
                         self.next_javascript_assignment_index_key(indexes, &mut index_cursor)?;
                     let index = decode_javascript_array_index(key)?;
@@ -486,7 +487,7 @@ impl Heap {
         if matches!(*leaf, CompiledAssignPathStep::Index)
             && let Some(key) = leaf_key.as_deref()
             && let Some(index) = javascript_array_index_key(key)
-            && matches!(self.get(target_id)?, HeapObject::List(values) if index == values.len())
+            && matches!(self.get(target_id)?, HeapObject::List { items: values, .. } if index == values.len())
         {
             // The rebuild priced a one-slot growth against the object before
             // touching it. Keep that refusal, and keep its wording, so the
@@ -517,9 +518,13 @@ impl Heap {
             (HeapObject::Record(record), CompiledAssignPathStep::Field(field)) => {
                 record.insert_symbolized(&names[field].symbol, imported);
             }
-            (HeapObject::List(values), CompiledAssignPathStep::Field(field))
-                if names[field].text.as_ref() == "length" =>
-            {
+            (
+                HeapObject::List {
+                    items: values,
+                    holes,
+                },
+                CompiledAssignPathStep::Field(field),
+            ) if names[field].text.as_ref() == "length" => {
                 let length = crate::runtime::javascript_to_number(&imported);
                 if !length.is_finite()
                     || length < 0.0
@@ -538,14 +543,15 @@ impl Heap {
                     });
                 }
                 values.truncate(length);
-                if let Some(holes) = self.list_holes.get_mut(&target_id) {
-                    holes.retain(|index| *index < length);
-                    if holes.is_empty() {
-                        self.list_holes.remove(&target_id);
-                    }
-                }
+                holes.retain(|index| *index < length);
             }
-            (HeapObject::List(values), CompiledAssignPathStep::Index) => {
+            (
+                HeapObject::List {
+                    items: values,
+                    holes,
+                },
+                CompiledAssignPathStep::Index,
+            ) => {
                 let key = self
                     .javascript_assignment_index_key(indexes, index_cursor)?
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
@@ -574,7 +580,7 @@ impl Heap {
                 values[index] = imported;
                 // A store to a hole position fills it: the index is a real
                 // own element now.
-                self.clear_list_hole(target_id, index);
+                holes.remove(&index);
             }
             (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
                 let key = self
@@ -657,7 +663,7 @@ pub(crate) fn unwritable_member(object: &HeapObject, key: &str) -> RuntimeError 
             )),
             _ => function_expando_refusal(key),
         },
-        HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+        HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
             RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported {
                 key: key.to_string(),
             }

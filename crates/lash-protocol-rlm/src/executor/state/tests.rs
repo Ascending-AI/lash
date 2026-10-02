@@ -278,11 +278,9 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
         "FIG1257_LARGE_SCALAR retained_bytes={retained_bytes} changed_commit_bytes={changed_bytes} initial_leaves={initial_leaves} changed_bodies={changed_bodies}"
     );
 
-    // The seeded state is heap-backed from its first host write (FIG-3605),
-    // so the retained snapshot carries the heap form's counters and roots.
-    assert_eq!(retained_bytes, 5_122_708);
-    // The encoded root includes trigger metadata; tool outcomes stay in the journal.
-    assert_eq!(changed_bytes, 117_977);
+    // Pin the heap-backed state and single changed leaf for the current wire shape.
+    assert_eq!(retained_bytes, 5_122_656);
+    assert_eq!(changed_bytes, 117_925);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }

@@ -53,7 +53,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             projected_refresh::refresh_value(value, bindings);
         }
         for entry in self.pending_tools.values_mut().flatten() {
-            projected_refresh::refresh_value(entry, bindings);
+            for value in entry.values_mut() {
+                projected_refresh::refresh_value(value, bindings);
+            }
         }
         self.slots.refresh_projected(
             match self.active_function {

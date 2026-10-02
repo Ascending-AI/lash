@@ -1180,7 +1180,9 @@ fn regexp_sequence(heap: &Heap, value: &Value) -> Option<Vec<Value>> {
     match value {
         Value::List(values) | Value::Tuple(values) => Some(values.to_vec()),
         Value::Ref(id) => match heap.get(*id).ok()? {
-            HeapObject::List(values) | HeapObject::Tuple(values) => Some(values.clone()),
+            HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+                Some(values.clone())
+            }
             _ => None,
         },
         _ => None,

@@ -349,7 +349,7 @@ fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> R
                 && !matches!(
                     errors,
                     Value::Ref(errors_id)
-                        if matches!(heap.get(*errors_id), Ok(HeapObject::List(_)))
+                        if matches!(heap.get(*errors_id), Ok(HeapObject::List { .. }))
                 )
             {
                 return Err(format!(
@@ -450,18 +450,18 @@ mod tests {
     fn depth_measurement_terminates_on_a_cycle() {
         let mut heap = Heap::default();
         let Value::Ref(first) = heap
-            .allocate(HeapObject::List(Vec::new()))
+            .allocate(HeapObject::list(Vec::new()))
             .expect("allocate first")
         else {
             unreachable!()
         };
         let Value::Ref(second) = heap
-            .allocate(HeapObject::List(vec![Value::Ref(first)]))
+            .allocate(HeapObject::list(vec![Value::Ref(first)]))
             .expect("allocate second")
         else {
             unreachable!()
         };
-        heap.replace_object(first, HeapObject::List(vec![Value::Ref(second)]))
+        heap.replace_object(first, HeapObject::list(vec![Value::Ref(second)]))
             .expect("close the cycle");
 
         let root = Value::Ref(first);

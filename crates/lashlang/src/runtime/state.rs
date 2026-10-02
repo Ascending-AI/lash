@@ -578,11 +578,7 @@ impl Snapshot {
                 found: recorded_version,
             });
         }
-        let recorded = SnapshotStamps::recorded(
-            recorded_version,
-            wire.heap.as_ref().map(|heap| heap.size_schedule_version),
-            fleet_format,
-        )?;
+        let recorded = SnapshotStamps::recorded(wire.version);
         let snapshot: Self = wire.try_into()?;
         let canonical = snapshot
             .to_canonical_bytes_stamped(recorded)
@@ -627,16 +623,13 @@ struct CanonicalSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CanonicalHeap {
     reference_semantics: bool,
-    next_id: u64,
-    allocation_counter: u64,
-    live_logical_bytes: u64,
-    size_schedule_version: u32,
+    #[serde(flatten)]
+    header: crate::runtime::heap::HeapHeaderWire,
     roots: Vec<CanonicalBinding>,
     objects: Vec<CanonicalHeapEntry>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    list_holes: Vec<(HeapId, Vec<usize>)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -743,11 +736,9 @@ impl CanonicalSnapshot {
             globals: None,
             heap: Some(CanonicalHeap {
                 reference_semantics,
-                list_holes: heap.list_holes_to_wire(),
-                next_id: heap.next_id,
-                allocation_counter: heap.allocations(),
-                live_logical_bytes: heap.live_logical_bytes(),
-                size_schedule_version: stamps.heap_schedule,
+                header: crate::runtime::heap::HeapHeaderWire {
+                    allocation_counter: heap.allocations(),
+                },
                 roots: roots
                     .into_iter()
                     .map(|(name, value)| {
@@ -789,15 +780,9 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
             (None, Some(heap_wire)) => {
                 let CanonicalHeap {
                     reference_semantics,
-                    next_id,
-                    allocation_counter,
-                    live_logical_bytes,
-                    // Admitted by the fleet-aware decoder that read the wire;
-                    // its heap is charged alike under every admitted schedule.
-                    size_schedule_version: _,
+                    header,
                     roots,
                     objects,
-                    list_holes,
                 } = heap_wire;
                 let runtime_globals = bindings_into_record(roots, "heap.roots", true)?;
                 let objects = objects
@@ -805,17 +790,10 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     .map(|entry| entry.object.into_runtime().map(|object| (entry.id, object)))
                     .collect::<Result<_, _>>()?;
                 let mut heap = Heap::from_wire(
-                    HeapRestoreWire {
-                        next_id,
-                        allocation_counter,
-                        live_logical_bytes,
-                        objects,
-                    },
+                    HeapRestoreWire { header, objects },
                     &runtime_globals.values().cloned().collect::<Vec<_>>(),
                 )
                 .map_err(SnapshotDecodeError::InvalidEncoding)?;
-                heap.restore_list_holes(list_holes)
-                    .map_err(SnapshotDecodeError::InvalidEncoding)?;
                 let mut forest_roots = PersistedRoots::default();
                 forest_roots.durable_all(runtime_globals.iter());
                 let validation = if reference_semantics {
@@ -978,13 +956,9 @@ fn validate_canonical_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeErro
 const SNAPSHOT_FIELDS: &[&str] = &["version", "globals", "heap", "expired_functions"];
 const HEAP_FIELDS: &[&str] = &[
     "reference_semantics",
-    "next_id",
     "allocation_counter",
-    "live_logical_bytes",
-    "size_schedule_version",
     "roots",
     "objects",
-    "list_holes",
 ];
 const BINDING_FIELDS: &[&str] = &["name", "value"];
 const HEAP_ENTRY_FIELDS: &[&str] = &["id", "object"];
@@ -992,6 +966,7 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "kind",
     "value",
     "items",
+    "holes",
     "index",
     "input",
     "groups",

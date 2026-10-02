@@ -1,4 +1,68 @@
 use super::*;
+use lash_sansio::handle::HandleId;
+
+/// The suspended execution's live tool requests, keyed by the handle the cell
+/// holds (ADR 0095).
+///
+/// A consumed request stays in the map as `None` rather than leaving it: the
+/// entry is what tells a handle awaited twice from a handle this execution
+/// never minted, and the two get different repair text. Keying by handle makes
+/// the serialized order a function of the handle ids alone, so two runs of the
+/// same program from the same state still produce byte-identical
+/// continuations.
+pub type PendingOperationMap = std::collections::BTreeMap<HandleId, Option<PendingOperation>>;
+
+/// Captured operands of the pending instruction at `site`.
+/// Operation identity and argument count belong to that instruction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PendingOperation {
+    Tool {
+        site: usize,
+        #[serde(
+            serialize_with = "continuation_serde::serialize_value",
+            deserialize_with = "continuation_serde::deserialize_value"
+        )]
+        receiver: Value,
+        #[serde(
+            serialize_with = "continuation_serde::serialize_values",
+            deserialize_with = "continuation_serde::deserialize_values"
+        )]
+        args: Vec<Value>,
+    },
+    Timer {
+        site: usize,
+        #[serde(
+            serialize_with = "continuation_serde::serialize_value",
+            deserialize_with = "continuation_serde::deserialize_value"
+        )]
+        duration: Value,
+    },
+}
+
+impl PendingOperation {
+    pub(crate) fn site(&self) -> usize {
+        match self {
+            Self::Tool { site, .. } | Self::Timer { site, .. } => *site,
+        }
+    }
+
+    pub(crate) fn values(&self) -> impl Iterator<Item = &Value> {
+        let (first, rest) = match self {
+            Self::Tool { receiver, args, .. } => (receiver, args.as_slice()),
+            Self::Timer { duration, .. } => (duration, &[][..]),
+        };
+        std::iter::once(first).chain(rest)
+    }
+
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
+        let (first, rest) = match self {
+            Self::Tool { receiver, args, .. } => (receiver, args.as_mut_slice()),
+            Self::Timer { duration, .. } => (duration, &mut [][..]),
+        };
+        std::iter::once(first).chain(rest)
+    }
+}
 
 impl VmContinuation {
     /// The continuation's wire bytes: what a worker hands its parent as
@@ -52,8 +116,7 @@ impl VmContinuation {
             active_function: Option<u32>,
             #[serde(deserialize_with = "continuation_serde::deserialize_values")]
             operand_stack: Vec<Value>,
-            #[serde(deserialize_with = "continuation_serde::deserialize_pending_tools")]
-            pending_tools: super::PendingToolMap,
+            pending_tools: super::PendingOperationMap,
             execution_nonce: u64,
             #[serde(deserialize_with = "continuation_serde::deserialize_optional_value")]
             last_value: Option<Value>,

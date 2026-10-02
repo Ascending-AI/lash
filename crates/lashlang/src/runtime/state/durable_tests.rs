@@ -643,7 +643,7 @@ fn the_dropped_functions_survive_a_reload() {
     let mut heap = Heap::default();
     let helper = closure(&mut heap);
     let list = heap
-        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .allocate(HeapObject::list(vec![Value::Number(1.0)]))
         .expect("allocate a list");
     let state = install(vec![("helper", helper), ("items", list)], heap);
     let parts = complete(&state);

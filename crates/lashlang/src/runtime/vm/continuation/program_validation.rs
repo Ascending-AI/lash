@@ -25,26 +25,19 @@ pub(super) fn validate_program_continuation(
     continuation: &VmContinuation,
     chunk: &Chunk,
 ) -> Result<(), ContinuationError> {
-    for value in continuation.pending_tools.values().flatten() {
-        let Value::List(call) = value else {
-            unreachable!("structural validation runs first")
-        };
-        let Value::Number(site) = call[1] else {
-            unreachable!()
-        };
-        let matches_instruction = match call[0] {
-            Value::Number(operation) => {
-                matches!(chunk.code.get(site as usize), Some(Instruction::PendingTool { operation: index, argc }) if *index == operation as usize && *argc == call.len() - 3)
+    for pending in continuation.pending_tools.values().flatten() {
+        let matches_instruction = match pending {
+            PendingOperation::Tool { site, args, .. } => {
+                matches!(chunk.code.get(*site), Some(Instruction::PendingTool { argc, .. }) if *argc == args.len())
             }
-            _ => matches!(
-                chunk.code.get(site as usize),
-                Some(Instruction::PendingTimer)
-            ),
+            PendingOperation::Timer { site, .. } => {
+                matches!(chunk.code.get(*site), Some(Instruction::PendingTimer))
+            }
         };
         if !matches_instruction {
             return Err(ContinuationError::UnserializableValue {
-                location: "pending tool".into(),
-                variant: "pending tool does not match its instruction",
+                location: "pending operation".into(),
+                variant: "pending operation does not match its instruction",
             });
         }
     }

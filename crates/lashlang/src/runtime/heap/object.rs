@@ -3,7 +3,10 @@ use super::*;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HeapObject {
     Tuple(Vec<Value>),
-    List(Vec<Value>),
+    List {
+        items: Vec<Value>,
+        holes: BTreeSet<usize>,
+    },
     Record(Box<Record>),
     Closure {
         function: u32,
@@ -129,12 +132,35 @@ pub(crate) const HEAP_OBJECT_KINDS: [&str; 14] = [
 ];
 
 impl HeapObject {
+    pub(crate) fn list(items: Vec<Value>) -> Self {
+        Self::List {
+            items,
+            holes: BTreeSet::new(),
+        }
+    }
+
+    pub(crate) fn sparse_list(items: Vec<Value>, holes: Vec<usize>) -> Result<Self, &'static str> {
+        if holes.windows(2).any(|pair| pair[0] >= pair[1])
+            || holes
+                .iter()
+                .any(|index| !matches!(items.get(*index), Some(Value::Undefined)))
+        {
+            return Err(
+                "sparse array holes must be sorted, unique undefined slots inside the list",
+            );
+        }
+        Ok(Self::List {
+            items,
+            holes: holes.into_iter().collect(),
+        })
+    }
+
     /// The object's kind in [`HEAP_OBJECT_KINDS`]. The match is exhaustive,
     /// so a new variant names its kind there before it compiles.
     pub(crate) fn kind(&self) -> &'static str {
         match self {
             Self::Tuple(_) => HEAP_OBJECT_KINDS[0],
-            Self::List(_) => HEAP_OBJECT_KINDS[1],
+            Self::List { .. } => HEAP_OBJECT_KINDS[1],
             Self::Record(_) => HEAP_OBJECT_KINDS[2],
             Self::Closure { .. } => HEAP_OBJECT_KINDS[3],
             Self::BuiltinFunction(_) => HEAP_OBJECT_KINDS[4],
@@ -171,7 +197,7 @@ impl HeapObject {
 
     pub(crate) fn logical_bytes(&self) -> u64 {
         let payload = match self {
-            Self::Tuple(values) | Self::List(values) => values
+            Self::Tuple(values) | Self::List { items: values, .. } => values
                 .iter()
                 .map(value_logical_bytes)
                 .fold(0_u64, u64::saturating_add),
@@ -256,7 +282,7 @@ impl HeapObject {
 
     pub(crate) fn values(&self) -> Box<dyn Iterator<Item = &Value> + '_> {
         match self {
-            Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
+            Self::Tuple(values) | Self::List { items: values, .. } => Box::new(values.iter()),
             Self::Record(record) => Box::new(record.values()),
             Self::Closure {
                 captures,

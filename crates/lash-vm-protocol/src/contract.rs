@@ -12,7 +12,6 @@ pub enum VmContractComponent {
     Continuation,
     Snapshot,
     Accounting,
-    Heap,
     Abi,
 }
 
@@ -23,7 +22,6 @@ impl std::fmt::Display for VmContractComponent {
             Self::Continuation => "continuation",
             Self::Snapshot => "snapshot",
             Self::Accounting => "accounting",
-            Self::Heap => "heap",
             Self::Abi => "abi",
         })
     }
@@ -37,7 +35,6 @@ pub struct VmContract {
     pub continuation: u32,
     pub snapshot: u32,
     pub accounting: u32,
-    pub heap: u32,
     pub abi: u32,
 }
 
@@ -49,7 +46,6 @@ impl VmContract {
             continuation: VersionRange::exactly(self.continuation),
             snapshot: VersionRange::exactly(self.snapshot),
             accounting: VersionRange::exactly(self.accounting),
-            heap: VersionRange::exactly(self.heap),
             abi: VersionRange::exactly(self.abi),
         }
     }
@@ -62,7 +58,6 @@ pub struct VmContractReads {
     pub continuation: VersionRange,
     pub snapshot: VersionRange,
     pub accounting: VersionRange,
-    pub heap: VersionRange,
     pub abi: VersionRange,
 }
 
@@ -79,7 +74,6 @@ impl VmContractReads {
             ),
             (Component::Snapshot, contract.snapshot, self.snapshot),
             (Component::Accounting, contract.accounting, self.accounting),
-            (Component::Heap, contract.heap, self.heap),
             (Component::Abi, contract.abi, self.abi),
         ] {
             if !reads.contains(found) {

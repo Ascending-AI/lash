@@ -30,7 +30,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         let arguments = match arguments {
             Value::Ref(id) => match self.heap.get(id)? {
-                HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+                    values.clone()
+                }
                 object => {
                     return Err(RuntimeError::ShapingListRequired {
                         builtin: "dynamic call".into(),
@@ -61,7 +63,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let receiver = self.pop_stack()?;
         let items = match &receiver {
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+                    values.clone()
+                }
                 object => {
                     return Err(RuntimeError::ShapingListRequired {
                         builtin: "async map".into(),
@@ -426,7 +430,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
 fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError> {
     Ok(match value {
         Value::Ref(id) => match heap.get(*id)? {
-            HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+            HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => values.clone(),
             // A `Set` iterates its values: `new Set(set)` copies one, and
             // `new Map(set)` reads each value as an entry pair.
             HeapObject::Set(set) => set.values.clone(),
@@ -466,7 +470,7 @@ fn url_search_params_initial(
                 .into_iter()
                 .map(|(name, value)| Ok((name.to_string(), heap.javascript_to_string(value)?)))
                 .collect(),
-            HeapObject::List(_) | HeapObject::Tuple(_) => {
+            HeapObject::List { .. } | HeapObject::Tuple(_) => {
                 url_search_params_pairs(heap, heap_sequence(heap, initial)?)
             }
             _ => {
@@ -571,7 +575,7 @@ fn json_property_whitelist(
 ) -> Result<Option<Vec<String>>, RuntimeError> {
     let values = match value {
         Value::Ref(id) => match heap.get(*id)? {
-            HeapObject::List(values) | HeapObject::Tuple(values) => values.as_slice(),
+            HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => values.as_slice(),
             object if object.is_function() => {
                 return Err(js_stdlib_error(
                     "TS_JSON_REPLACER_FUNCTION_INTERNAL: function replacers must stay in the VM",
@@ -637,7 +641,7 @@ fn javascript_json_stringify_with_errors(
                 }),
                 HeapObject::Url(url) => serde_json::to_string(&url.href)
                     .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
-                HeapObject::List(values) | HeapObject::Tuple(values) => {
+                HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
                     let values = values
                         .iter()
                         .map(|value| {
@@ -902,7 +906,7 @@ fn write_console_heap_object(
     out: &mut String,
 ) -> Result<(), RuntimeError> {
     match heap.get(id)? {
-        HeapObject::List(values) | HeapObject::Tuple(values) => {
+        HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
             write_console_sequence(heap, values, active, depth, out)
         }
         HeapObject::RegExpMatch(result) => {

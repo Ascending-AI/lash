@@ -428,11 +428,6 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::History { floor: 1 },
     },
     GuardedSurface {
-        constant: "HEAP_SIZE_SCHEDULE_VERSION",
-        owner: "lashlang",
-        reads: SurfaceReads::History { floor: 1 },
-    },
-    GuardedSurface {
         constant: "WORKFLOW_GRAPH_SCHEMA_VERSION",
         owner: "lashlang",
         reads: SurfaceReads::Derived,

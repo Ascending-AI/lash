@@ -24,8 +24,6 @@ pub(crate) struct DurablePartition {
     /// It is exactly the question `validate_persisted_forest` answers, asked of
     /// the live graph without collecting it first.
     pub(crate) reference_semantics: bool,
-    /// The logical bytes of the live objects: what a collected heap would count.
-    pub(crate) live_logical_bytes: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -49,7 +47,6 @@ impl Heap {
         let mut ownership_edges = FxHashMap::<HeapId, u32>::default();
         let mut owned = Vec::new();
         let mut reference_semantics = false;
-        let mut live_logical_bytes = 0_u64;
         for root in roots {
             let mut carried = Vec::new();
             let refs = value_refs(root);
@@ -79,7 +76,6 @@ impl Heap {
                     .ok_or_else(|| format!("dangling heap reference {}", id.get()))?;
                 visits.insert(id, Visit::OnPath);
                 carried.push(id);
-                live_logical_bytes = live_logical_bytes.saturating_add(entry.logical_bytes);
                 reference_semantics |= is_typescript_exotic(&entry.object);
                 stack.push((id, true));
                 for child in entry.object.child_refs().into_iter().rev() {
@@ -93,7 +89,6 @@ impl Heap {
         Ok(DurablePartition {
             owned,
             reference_semantics,
-            live_logical_bytes,
         })
     }
 }

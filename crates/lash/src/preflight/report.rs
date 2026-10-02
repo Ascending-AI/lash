@@ -820,14 +820,14 @@ mod tests {
         // The honest limit made machine-readable: a gate can tell a directly
         // probed row from one whose boundary is enforced by an envelope.
         let row = FormatTally::default().into_row(
-            DurableFormat::HeapSizeSchedule,
+            DurableFormat::LashlangSnapshot,
             FormatVersion::Counter(2),
             FormatProbe::Comparable,
-            FormatEvidence::CarriedBy(DurableFormat::VmContinuation.name()),
+            FormatEvidence::CarriedBy(DurableFormat::RlmSnapshotEnvelope.name()),
         );
         let json = serde_json::to_value(row).expect("the row serializes");
         assert_eq!(json["evidence"]["kind"], "carried_by");
-        assert_eq!(json["evidence"]["carrier"], "VM continuation");
+        assert_eq!(json["evidence"]["carrier"], "RLM snapshot envelope");
         assert!(json.get("format_key").is_none());
     }
 

@@ -84,21 +84,18 @@ impl RootFingerprint {
 pub(super) struct CanonicalDurableHeader {
     version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) heap: Option<CanonicalHeapCounters>,
+    pub(super) heap: Option<CanonicalHeapHeader>,
     /// [`State::expired_functions`], strictly sorted; absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     expired_functions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct CanonicalHeapCounters {
+#[serde(deny_unknown_fields)]
+pub(super) struct CanonicalHeapHeader {
     reference_semantics: bool,
-    next_id: u64,
-    allocation_counter: u64,
-    live_logical_bytes: u64,
-    pub(super) size_schedule_version: u32,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    list_holes: Vec<(HeapId, Vec<usize>)>,
+    #[serde(flatten)]
+    header: crate::runtime::heap::HeapHeaderWire,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -123,8 +120,7 @@ impl State {
     /// from `since`.
     ///
     /// `fleet_format` is the `F` the bound writer's store recorded: the header
-    /// stamps the fleet's writer versions for the `LASHLANG_SNAPSHOT_VERSION`
-    /// and `HEAP_SIZE_SCHEDULE_VERSION` surfaces (FIG-3796, FIG-4262); the
+    /// stamps the fleet's writer version for `LASHLANG_SNAPSHOT_VERSION`; the
     /// fixed-point read re-encodes at the stamps the recorded header carried.
     pub fn durable_parts(
         &self,
@@ -159,17 +155,11 @@ impl State {
             version: stamps.snapshot,
             heap: heap
                 .zip(partition.as_ref())
-                .map(|(heap, partition)| CanonicalHeapCounters {
+                .map(|(heap, partition)| CanonicalHeapHeader {
                     reference_semantics: partition.reference_semantics,
-                    next_id: heap.next_id,
-                    allocation_counter: heap.allocations(),
-                    live_logical_bytes: partition.live_logical_bytes,
-                    size_schedule_version: stamps.heap_schedule,
-                    list_holes: heap
-                        .list_holes_to_wire()
-                        .into_iter()
-                        .filter(|(id, _)| partition.owned.iter().any(|owned| owned.contains(id)))
-                        .collect(),
+                    header: crate::runtime::heap::HeapHeaderWire {
+                        allocation_counter: heap.allocations(),
+                    },
                 }),
             expired_functions: self.expired_functions.iter().cloned().collect(),
         };
@@ -238,14 +228,7 @@ impl State {
                 found: decoded_header.version,
             });
         }
-        let recorded = SnapshotStamps::recorded(
-            decoded_header.version,
-            decoded_header
-                .heap
-                .as_ref()
-                .map(|counters| counters.size_schedule_version),
-            fleet_format,
-        )?;
+        let recorded = SnapshotStamps::recorded(decoded_header.version);
         let fragments = fragments.into_iter().collect::<BTreeMap<_, _>>();
         let mut roots = Vec::with_capacity(fragments.len());
         let mut objects = Vec::new();
@@ -281,11 +264,7 @@ impl State {
                 globals: None,
                 heap: Some(CanonicalHeap {
                     reference_semantics: counters.reference_semantics,
-                    list_holes: counters.list_holes,
-                    next_id: counters.next_id,
-                    allocation_counter: counters.allocation_counter,
-                    live_logical_bytes: counters.live_logical_bytes,
-                    size_schedule_version: counters.size_schedule_version,
+                    header: counters.header,
                     roots,
                     objects,
                 }),

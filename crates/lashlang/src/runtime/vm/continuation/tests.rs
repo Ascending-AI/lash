@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::HeapId;
+use lash_sansio::handle::HandleId;
 
 fn empty_continuation(heap: Heap) -> VmContinuation {
     VmContinuation {
@@ -167,13 +168,13 @@ fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
     // it has an owner no root can account for.
     let mut cyclic = Heap::default();
     let Value::Ref(root) = cyclic
-        .allocate(HeapObject::List(Vec::new()))
+        .allocate(HeapObject::list(Vec::new()))
         .expect("allocate cyclic root")
     else {
         unreachable!()
     };
     cyclic
-        .replace_object(root, HeapObject::List(vec![Value::Ref(root)]))
+        .replace_object(root, HeapObject::list(vec![Value::Ref(root)]))
         .expect("close cycle");
     let mut continuation = empty_continuation(cyclic);
     continuation.slots = vec![Some(Value::Ref(root))];
@@ -188,7 +189,7 @@ fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
     // all.
     let mut heap = Heap::default();
     let Value::Ref(id) = heap
-        .allocate(HeapObject::List(vec![Value::Number(-0.0)]))
+        .allocate(HeapObject::list(vec![Value::Number(-0.0)]))
         .expect("allocate root")
     else {
         unreachable!()
@@ -199,7 +200,8 @@ fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
     let bytes = serde_json::to_vec(&continuation).expect("serialize heap");
     let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore heap");
     assert_eq!(serde_json::to_vec(&restored).expect("redump heap"), bytes);
-    let HeapObject::List(values) = restored.heap.heap.get(id).expect("restored root") else {
+    let HeapObject::List { items: values, .. } = restored.heap.heap.get(id).expect("restored root")
+    else {
         panic!("root should remain a list")
     };
     let Value::Number(number) = values[0] else {
@@ -300,8 +302,8 @@ fn continuation_numbers_canonicalize_nan_and_preserve_negative_zero() {
 #[test]
 fn continuation_decode_rejects_descending_counters_and_dangling_refs() {
     let mut heap = Heap::default();
-    heap.allocate(HeapObject::List(Vec::new())).expect("first");
-    heap.allocate(HeapObject::List(Vec::new())).expect("second");
+    heap.allocate(HeapObject::list(Vec::new())).expect("first");
+    heap.allocate(HeapObject::list(Vec::new())).expect("second");
     let continuation = empty_continuation(heap);
     let mut descending = serde_json::to_value(&continuation).expect("wire");
     descending["heap"]["objects"]
@@ -316,12 +318,12 @@ fn continuation_decode_rejects_descending_counters_and_dangling_refs() {
     );
 
     let mut counter = serde_json::to_value(&continuation).expect("wire");
-    counter["heap"]["next_id"] = serde_json::json!(1000);
+    counter["heap"]["allocation_counter"] = serde_json::json!(u64::MAX);
     assert!(
         serde_json::from_value::<VmContinuation>(counter)
             .expect_err("counter mismatch must fail")
             .to_string()
-            .contains("allocation counter plus one")
+            .contains("allocation counter cannot advance")
     );
 
     let mut dangling = empty_continuation(Heap::default());
@@ -429,4 +431,149 @@ fn regexp_last_index_continuation_rejects_unsupported_durable_projection() {
             .contains("projection reference beyond the snapshot depth limit"),
         "{error}"
     );
+}
+
+#[test]
+fn heap_header_law_stores_only_the_allocation_counter() {
+    let mut heap = Heap::default();
+    let root = heap.allocate_list(vec![Value::Bool(true)]).expect("list");
+    let mut continuation = empty_continuation(heap.clone());
+    continuation.slots.push(Some(root.clone()));
+    let wire = serde_json::to_value(&continuation).expect("wire");
+    let mut header = wire["heap"].as_object().expect("heap").clone();
+    header.remove("objects");
+    assert_eq!(
+        header,
+        serde_json::json!({"allocation_counter": 1})
+            .as_object()
+            .expect("header")
+            .clone()
+    );
+    let mut state = crate::runtime::State::new();
+    state
+        .install_runtime([("a".into(), root)].into_iter().collect(), heap)
+        .expect("state");
+    let snapshot: serde_json::Value =
+        rmp_serde::from_slice(&state.snapshot().to_canonical_bytes().expect("snapshot"))
+            .expect("snapshot wire");
+    for field in [
+        "next_id",
+        "live_logical_bytes",
+        "size_schedule_version",
+        "list_holes",
+    ] {
+        assert!(
+            snapshot["heap"].get(field).is_none(),
+            "snapshot repeats {field}"
+        );
+    }
+    let parts = state
+        .durable_parts(
+            &crate::runtime::DurableBaseline::default(),
+            lash_core_execution::FleetFormat::current(),
+        )
+        .expect("parts");
+    let header: serde_json::Value = rmp_serde::from_slice(&parts.header).expect("header");
+    assert_eq!(
+        header["heap"],
+        serde_json::json!({"reference_semantics":false,"allocation_counter":1})
+    );
+    let mut legacy_snapshot = snapshot;
+    legacy_snapshot["heap"]["live_logical_bytes"] = serde_json::json!(1);
+    assert!(
+        crate::runtime::Snapshot::from_canonical_bytes(
+            &rmp_serde::to_vec_named(&legacy_snapshot).expect("legacy snapshot")
+        )
+        .is_err()
+    );
+    let mut legacy_header = header;
+    legacy_header["heap"]["size_schedule_version"] = serde_json::json!(1);
+    assert!(
+        crate::runtime::State::from_durable_parts(
+            &rmp_serde::to_vec_named(&legacy_header).expect("legacy header"),
+            std::iter::empty(),
+            lash_core_execution::FleetFormat::current(),
+        )
+        .is_err()
+    );
+    let mut legacy = wire.clone();
+    legacy["heap"]["next_id"] = serde_json::json!(2);
+    assert!(
+        serde_json::from_value::<VmContinuation>(legacy).is_err(),
+        "the old heap shape is refused"
+    );
+    let restored: VmContinuation = serde_json::from_value(wire).expect("restore");
+    assert_eq!(restored.heap.heap.next_id, 2);
+    assert_eq!(
+        restored.heap.live_logical_bytes(),
+        continuation.heap.live_logical_bytes()
+    );
+}
+
+#[test]
+fn sparse_list_law_owns_its_holes_on_the_wire() {
+    let mut heap = Heap::default();
+    let Value::Ref(id) = heap
+        .allocate_list(vec![Value::Undefined, Value::Undefined])
+        .expect("list")
+    else {
+        panic!("reference")
+    };
+    heap.mark_list_holes(id, [0].into_iter().collect());
+    let mut continuation = empty_continuation(heap);
+    continuation.slots.push(Some(Value::Ref(id)));
+    let wire = serde_json::to_value(&continuation).expect("wire");
+    assert_eq!(
+        wire["heap"]["objects"][0]["object"]["holes"],
+        serde_json::json!([0])
+    );
+    assert!(wire["heap"].get("list_holes").is_none());
+    let restored: VmContinuation = serde_json::from_value(wire.clone()).expect("restore");
+    assert!(restored.heap.heap.is_list_hole(id, 0));
+    assert!(!restored.heap.heap.is_list_hole(id, 1));
+    for holes in [serde_json::json!([0, 0]), serde_json::json!([2])] {
+        let mut invalid = wire.clone();
+        invalid["heap"]["objects"][0]["object"]["holes"] = holes;
+        assert!(serde_json::from_value::<VmContinuation>(invalid).is_err());
+    }
+}
+
+#[test]
+fn pending_operation_law_has_a_tagged_site_and_operands() {
+    let mut continuation = empty_continuation(Heap::default());
+    let tool = HandleId::tool(0, 0);
+    let timer = HandleId::tool(0, 1);
+    continuation.pending_tools.insert(
+        tool.clone(),
+        Some(PendingOperation::Tool {
+            site: 3,
+            receiver: Value::Null,
+            args: vec![Value::Bool(true)],
+        }),
+    );
+    continuation.pending_tools.insert(
+        timer.clone(),
+        Some(PendingOperation::Timer {
+            site: 4,
+            duration: Value::Number(10.0),
+        }),
+    );
+    let wire = serde_json::to_value(&continuation).expect("wire");
+    assert_eq!(
+        wire["pending_tools"][tool.as_str()],
+        serde_json::json!({"kind":"tool","site":3,"receiver":{"kind":"null"},"args":[{"kind":"bool","value":true}]})
+    );
+    assert_eq!(wire["pending_tools"][timer.as_str()]["kind"], "timer");
+    assert_eq!(wire["pending_tools"][timer.as_str()]["site"], 4);
+    let restored: VmContinuation = serde_json::from_value(wire.clone()).expect("restore");
+    assert_eq!(restored.pending_tools, continuation.pending_tools);
+    for invalid in [
+        serde_json::json!({"kind":"tool","site":3.5,"receiver":{"kind":"null"},"args":[]}),
+        serde_json::json!({"kind":"tool","site":3,"receiver":{"kind":"null"},"args":[],"operation":7}),
+        serde_json::json!({"kind":"set","value":{"kind":"list","value":[]}}),
+    ] {
+        let mut corrupted = wire.clone();
+        corrupted["pending_tools"][tool.as_str()] = invalid;
+        assert!(serde_json::from_value::<VmContinuation>(corrupted).is_err());
+    }
 }

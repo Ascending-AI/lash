@@ -644,7 +644,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             // A loop over an array reads the array itself, so
                             // it sees what its body changes (FIG-3625).
                             || matches!(instruction, super::Instruction::BeginIter(_))
-                                && matches!(self.heap.get(*id)?, crate::runtime::heap::HeapObject::List(_))
+                                && matches!(self.heap.get(*id)?, crate::runtime::heap::HeapObject::List { .. })
                     ) {
                         self.stack[index].clone()
                     } else {
@@ -1190,11 +1190,11 @@ mod tests {
                 let mut vm = holder_test_vm(&chunk, &host);
                 let child = vm
                     .heap
-                    .allocate(HeapObject::List(vec![Value::Number(37.0)]))
+                    .allocate(HeapObject::list(vec![Value::Number(37.0)]))
                     .expect("child");
                 let root = vm
                     .heap
-                    .allocate(HeapObject::List(vec![child.clone()]))
+                    .allocate(HeapObject::list(vec![child.clone()]))
                     .expect("root");
                 let mut frame = CallFrame {
                     return_ip: 0,
@@ -1214,15 +1214,11 @@ mod tests {
                     "pending" => {
                         vm.pending_tools.insert(
                             lash_sansio::handle::HandleId::tool(0, 0),
-                            Some(Value::List(
-                                vec![
-                                    Value::Number(0.0),
-                                    Value::Number(0.0),
-                                    Value::Null,
-                                    root.clone(),
-                                ]
-                                .into(),
-                            )),
+                            Some(crate::PendingOperation::Tool {
+                                site: 0,
+                                receiver: Value::Null,
+                                args: vec![root.clone()],
+                            }),
                         );
                     }
                     "finally" => vm.finally_stack.push(FinallyState {
@@ -1320,12 +1316,12 @@ mod tests {
                 }
                 let garbage = vm
                     .heap
-                    .allocate(HeapObject::List(vec![Value::Number(99.0)]))
+                    .allocate(HeapObject::list(vec![Value::Number(99.0)]))
                     .expect("garbage");
                 if boundary == "interval" {
                     for _ in vm.heap.allocations()..1_024 {
                         vm.heap
-                            .allocate(HeapObject::List(vec![]))
+                            .allocate(HeapObject::list(vec![]))
                             .expect("interval allocation");
                     }
                     assert!(vm.heap.needs_collection());

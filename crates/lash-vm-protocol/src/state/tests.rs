@@ -5,7 +5,6 @@ const CONTRACT: VmContract = VmContract {
     continuation: 29,
     snapshot: 14,
     accounting: 3,
-    heap: 3,
     abi: 14,
 };
 const READS: VmContractReads = CONTRACT.exact_reads();
@@ -102,7 +101,7 @@ fn json_carries_the_bytes_as_base64_and_the_facts_readably() {
     assert_eq!(json["kind"], "continuation");
     assert_eq!(
         json["vm_contract"],
-        serde_json::json!({"bytecode":30,"continuation":29,"snapshot":14,"accounting":3,"heap":3,"abi":14})
+        serde_json::json!({"bytecode":30,"continuation":29,"snapshot":14,"accounting":3,"abi":14})
     );
     assert_eq!(json["bytes"], "Y29udGludWF0aW9uIGJ5dGVz");
     let back: OpaqueVmState = serde_json::from_value(json).unwrap();
@@ -129,7 +128,6 @@ fn every_component_is_checked_against_both_range_bounds() {
         continuation: VersionRange::between(29, 30),
         snapshot: VersionRange::between(14, 15),
         accounting: VersionRange::between(3, 4),
-        heap: VersionRange::between(3, 4),
         abi: VersionRange::between(14, 15),
     };
     assert_eq!(widened.admit(CONTRACT), Ok(()));
@@ -139,7 +137,6 @@ fn every_component_is_checked_against_both_range_bounds() {
             continuation: 30,
             snapshot: 15,
             accounting: 4,
-            heap: 4,
             abi: 15
         }),
         Ok(())
@@ -149,7 +146,6 @@ fn every_component_is_checked_against_both_range_bounds() {
         (VmContractComponent::Continuation, 29, 30),
         (VmContractComponent::Snapshot, 14, 15),
         (VmContractComponent::Accounting, 3, 4),
-        (VmContractComponent::Heap, 3, 4),
         (VmContractComponent::Abi, 14, 15),
     ] {
         for found in [min - 1, max + 1] {
@@ -159,7 +155,6 @@ fn every_component_is_checked_against_both_range_bounds() {
                 VmContractComponent::Continuation => contract.continuation = found,
                 VmContractComponent::Snapshot => contract.snapshot = found,
                 VmContractComponent::Accounting => contract.accounting = found,
-                VmContractComponent::Heap => contract.heap = found,
                 VmContractComponent::Abi => contract.abi = found,
             }
             assert_eq!(

@@ -208,7 +208,7 @@ pub(crate) fn heap_inherited_builtin(object: &HeapObject, key: &str) -> Option<B
     let prototype = match object {
         HeapObject::Record(record) if record.get(key).is_none() => BuiltinPrototype::Object,
         HeapObject::Record(_) => return None,
-        HeapObject::Tuple(_) | HeapObject::List(_) | HeapObject::RegExpMatch(_) => {
+        HeapObject::Tuple(_) | HeapObject::List { .. } | HeapObject::RegExpMatch(_) => {
             BuiltinPrototype::Array
         }
         HeapObject::Closure { .. } => BuiltinPrototype::Function,
@@ -640,7 +640,7 @@ pub(crate) fn javascript_heap_has_property(
         return Ok(true);
     }
     Ok(match heap.get(id)? {
-        HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+        HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
             is_array_prototype_key(key) || is_object_prototype_key(key)
         }
         HeapObject::RegExp(_) => {
@@ -681,7 +681,7 @@ pub(crate) fn javascript_heap_has_own(
     }
     Ok(match heap.get(id)? {
         HeapObject::Record(record) => record.get(key).is_some(),
-        HeapObject::List(values) => {
+        HeapObject::List { items: values, .. } => {
             javascript_array_index_key(key)
                 .is_some_and(|index| index < values.len() && !heap.is_list_hole(id, index))
                 || key == "length"
@@ -756,7 +756,9 @@ pub(crate) fn read_javascript_heap_field(
         {
             return Err(super::heap::restricted_function_property());
         }
-        HeapObject::List(values) | HeapObject::Tuple(values) if field.text.as_ref() == "length" => {
+        HeapObject::List { items: values, .. } | HeapObject::Tuple(values)
+            if field.text.as_ref() == "length" =>
+        {
             Value::Number(values.len() as f64)
         }
         HeapObject::RegExp(regexp) => match field.text.as_ref() {
@@ -829,12 +831,14 @@ pub(crate) fn read_javascript_heap_index(
         return Err(error);
     }
     Ok(match heap.get(id)? {
-        HeapObject::List(values) | HeapObject::Tuple(values) if key == "length" => {
+        HeapObject::List { items: values, .. } | HeapObject::Tuple(values) if key == "length" => {
             Value::Number(values.len() as f64)
         }
-        HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
-            .and_then(|index| values.get(index).cloned())
-            .unwrap_or(Value::Undefined),
+        HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+            javascript_array_index_key(&key)
+                .and_then(|index| values.get(index).cloned())
+                .unwrap_or(Value::Undefined)
+        }
         HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_)
             if matches!(key.as_str(), "caller" | "arguments") =>
         {

@@ -4,8 +4,8 @@ use lash_sansio::VersionRange;
 use lash_vm_protocol::{VmContract, VmContractReads};
 
 use crate::{
-    BYTECODE_FORMAT_VERSION, HEAP_SIZE_SCHEDULE_VERSION, INSTRUCTION_ACCOUNTING_VERSION,
-    LASHLANG_SNAPSHOT_VERSION, LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION,
+    BYTECODE_FORMAT_VERSION, INSTRUCTION_ACCOUNTING_VERSION, LASHLANG_SNAPSHOT_VERSION,
+    LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION,
 };
 
 /// The range both opaque-state admission and the continuation decoder use.
@@ -31,7 +31,6 @@ pub fn vm_contract_versions() -> VmContract {
         continuation: VM_CONTINUATION_FORMAT_VERSION,
         snapshot: LASHLANG_SNAPSHOT_VERSION,
         accounting: INSTRUCTION_ACCOUNTING_VERSION,
-        heap: HEAP_SIZE_SCHEDULE_VERSION,
         abi: LASHLANG_VM_ABI_VERSION
             .strip_prefix("lashlang-vm-abi-v")
             .and_then(|version| version.parse().ok())
@@ -40,20 +39,13 @@ pub fn vm_contract_versions() -> VmContract {
 }
 
 /// The versions the VM decodes, independent of the fleet's writer epoch.
-/// The snapshot and the heap size schedule use their FIG-3802 guarded
-/// windows and lift tables: the same windows their decoders admit
-/// (FIG-4262).
+/// The snapshot range follows the guarded window its decoder admits.
 pub fn vm_contract_reads() -> VmContractReads {
     VmContractReads {
         continuation: VM_CONTINUATION_READ_RANGE,
         snapshot: lash_core_execution::FleetFormat::current()
             .read_window(lash_core_execution::surface_format!(
                 LASHLANG_SNAPSHOT_VERSION
-            ))
-            .supported(),
-        heap: lash_core_execution::FleetFormat::current()
-            .read_window(lash_core_execution::surface_format!(
-                HEAP_SIZE_SCHEDULE_VERSION
             ))
             .supported(),
         ..vm_contract_versions().exact_reads()

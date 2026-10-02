@@ -46,7 +46,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
         args: &[Value],
     ) -> Result<bool, RuntimeError> {
-        let HeapObject::List(current) = self.heap.get(receiver)? else {
+        let HeapObject::List { items: current, .. } = self.heap.get(receiver)? else {
             return Ok(false);
         };
         // The search trio only read the vector, so they run on the live heap
@@ -411,12 +411,16 @@ pub(super) fn append_flat_map_by_reference(
     output: HeapId,
     value: &Value,
 ) -> Result<Option<Value>, RuntimeError> {
-    let (HeapObject::List(existing) | HeapObject::Tuple(existing)) = heap.get(output)? else {
+    let (HeapObject::List {
+        items: existing, ..
+    }
+    | HeapObject::Tuple(existing)) = heap.get(output)?
+    else {
         return Ok(None);
     };
     let spread = match value {
         Value::Ref(id) => match heap.get(*id)? {
-            HeapObject::List(values) | HeapObject::Tuple(values) => values.as_slice(),
+            HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => values.as_slice(),
             HeapObject::RegExpMatch(_) => return Ok(None),
             _ => std::slice::from_ref(value),
         },
@@ -443,7 +447,7 @@ pub(super) fn array_iteration_source(
         return Ok(None);
     }
     if let [_, Value::Ref(source)] = &*values
-        && matches!(heap.get(*source)?, HeapObject::List(_))
+        && matches!(heap.get(*source)?, HeapObject::List { .. })
     {
         return Ok(Some(Value::Ref(*source)));
     }

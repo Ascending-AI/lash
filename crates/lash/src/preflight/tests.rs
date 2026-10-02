@@ -195,7 +195,6 @@ fn segment_item(process: &str, session: &str, segment: u32, continuation: u32) -
         "version": segment,
         "vm": {"vm_contract": {
             "continuation": continuation,
-            "heap": crate::formats::HEAP_SIZE_SCHEDULE_VERSION,
         }},
     }))
     .expect("the fixture encodes");
@@ -415,10 +414,6 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope),
         ),
         (
-            DurableFormat::HeapSizeSchedule,
-            SurfaceRelation::CarriedBy(DurableFormat::VmContinuation),
-        ),
-        (
             DurableFormat::LashlangSegmentHandover,
             SurfaceRelation::Walk {
                 surface: DurableSurface::ParkedSegment,
@@ -475,7 +470,10 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         })
         .collect();
 
-    assert_eq!(relations.len() + engine_relations.len(), 41);
+    assert_eq!(
+        relations.len() + engine_relations.len(),
+        durable_formats().count()
+    );
     for (format, expected) in relations.iter().copied().chain(engine_relations) {
         assert_eq!(
             format_surface(format),
@@ -1094,10 +1092,6 @@ async fn a_carried_format_inherits_its_carriers_verdict_in_both_directions() {
         component(&refused, DurableFormat::LashlangSnapshot).verdict,
         ComponentVerdict::Refused,
         "a refused carrier refuses everything it carries"
-    );
-    assert_eq!(
-        component(&refused, DurableFormat::HeapSizeSchedule).evidence,
-        FormatEvidence::CarriedBy(DurableFormat::VmContinuation.name())
     );
 }
 

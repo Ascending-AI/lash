@@ -1,4 +1,3 @@
-use lash_sansio::handle::HandleId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
@@ -11,9 +10,10 @@ use super::*;
 mod types;
 pub(crate) use types::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use types::{
-    ContinuationError, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmSuspendedOperation,
+    ContinuationError, PendingOperation, PendingOperationMap, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint,
+    VmSuspendedOperation,
 };
 
 use super::exceptions::PendingErrorOrigin;
@@ -133,7 +133,7 @@ use super::exceptions::PendingErrorOrigin;
 ///     shapes(
 ///         path = "crates/lashlang/src/runtime/vm/continuation.rs",
 ///         path = "crates/lashlang/src/runtime/vm/continuation/types.rs",
-///         cover(VmContinuation, HeapWire, HeapObjectWire, ValueWire, VmHandlerContinuation),
+///         cover(VmContinuation, PendingOperation, HeapWire, HeapObjectWire, ValueWire, VmHandlerContinuation),
 ///     ),
 ///     shapes(
 ///         path = "crates/lashlang/src/runtime/projected_wire.rs",
@@ -153,17 +153,6 @@ pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 29;
 /// and routes to N+1's generation (ADR 0115 §3.5).
 #[cfg(feature = "synthetic-next")]
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 30;
-
-/// The suspended execution's live tool requests, keyed by the handle the cell
-/// holds (ADR 0095).
-///
-/// A consumed request stays in the map as `None` rather than leaving it: the
-/// entry is what tells a handle awaited twice from a handle this execution
-/// never minted, and the two get different repair text. Keying by handle makes
-/// the serialized order a function of the handle ids alone, so two runs of the
-/// same program from the same state still produce byte-identical
-/// continuations.
-pub type PendingToolMap = std::collections::BTreeMap<HandleId, Option<Value>>;
 
 /// The execution identity pending-tool handles carry.
 ///
@@ -239,11 +228,7 @@ pub struct VmContinuation {
         deserialize_with = "continuation_serde::deserialize_values"
     )]
     pub operand_stack: Vec<Value>,
-    #[serde(
-        serialize_with = "continuation_serde::serialize_pending_tools",
-        deserialize_with = "continuation_serde::deserialize_pending_tools"
-    )]
-    pub pending_tools: PendingToolMap,
+    pub pending_tools: PendingOperationMap,
     /// The suspended execution's identity; every pending-tool handle it minted
     /// carries it, and the resumed VM keeps accepting exactly those handles.
     pub execution_nonce: u64,
@@ -602,14 +587,11 @@ mod continuation_serde {
     }
 
     #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct HeapWire {
-        next_id: u64,
-        allocation_counter: u64,
-        live_logical_bytes: u64,
-        size_schedule_version: u32,
+        #[serde(flatten)]
+        header: crate::runtime::heap::HeapHeaderWire,
         objects: Vec<HeapEntryWire>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        list_holes: Vec<(HeapId, Vec<usize>)>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -626,6 +608,7 @@ mod continuation_serde {
         },
         List {
             items: Vec<ValueWire>,
+            holes: Vec<usize>,
         },
         Record {
             fields: Vec<(String, ValueWire)>,
@@ -766,8 +749,12 @@ mod continuation_serde {
             HeapObject::Tuple(values) => HeapObjectWire::Tuple {
                 items: values.iter().map(value_to_wire).collect::<Result<_, _>>()?,
             },
-            HeapObject::List(values) => HeapObjectWire::List {
+            HeapObject::List {
+                items: values,
+                holes,
+            } => HeapObjectWire::List {
                 items: values.iter().map(value_to_wire).collect::<Result<_, _>>()?,
+                holes: holes.iter().copied().collect(),
             },
             HeapObject::Record(record) => HeapObjectWire::Record {
                 fields: record_to_wire(record)?,
@@ -849,12 +836,13 @@ mod continuation_serde {
                     .map(value_from_wire)
                     .collect::<Result<_, _>>()?,
             ),
-            HeapObjectWire::List { items } => HeapObject::List(
+            HeapObjectWire::List { items, holes } => HeapObject::sparse_list(
                 items
                     .into_iter()
                     .map(value_from_wire)
                     .collect::<Result<_, _>>()?,
-            ),
+                holes,
+            )?,
             HeapObjectWire::Record { fields } => {
                 HeapObject::Record(Box::new(record_from_wire(fields)?))
             }
@@ -980,16 +968,10 @@ mod continuation_serde {
             .collect::<Result<Vec<_>, &'static str>>()
             .map_err(serde::ser::Error::custom)?;
         HeapWire {
-            next_id: heap.next_id,
-            allocation_counter: heap.allocations(),
-            live_logical_bytes: heap.live_logical_bytes(),
-            // A continuation resumes on the generation that parked it (ADR
-            // 0115 §3.5), so it carries its own epoch's schedule.
-            size_schedule_version: crate::runtime::heap::size_schedule_writer(
-                lash_core_execution::FleetFormat::current(),
-            ),
+            header: crate::runtime::heap::HeapHeaderWire {
+                allocation_counter: heap.allocations(),
+            },
             objects,
-            list_holes: heap.list_holes_to_wire(),
         }
         .serialize(serializer)
     }
@@ -999,29 +981,20 @@ mod continuation_serde {
         D: Deserializer<'de>,
     {
         let wire = HeapWire::deserialize(deserializer)?;
-        crate::runtime::heap::admit_size_schedule(
-            wire.size_schedule_version,
-            lash_core_execution::FleetFormat::current(),
-        )
-        .map_err(serde::de::Error::custom)?;
         let objects = wire
             .objects
             .into_iter()
             .map(|entry| object_from_wire(entry.object).map(|object| (entry.id, object)))
             .collect::<Result<_, _>>()
             .map_err(serde::de::Error::custom)?;
-        let mut heap = Heap::from_wire(
+        let heap = Heap::from_wire(
             HeapRestoreWire {
-                next_id: wire.next_id,
-                allocation_counter: wire.allocation_counter,
-                live_logical_bytes: wire.live_logical_bytes,
+                header: wire.header,
                 objects,
             },
             &[],
         )
         .map_err(serde::de::Error::custom)?;
-        heap.restore_list_holes(wire.list_holes)
-            .map_err(serde::de::Error::custom)?;
         Ok(VmHeapContinuation::new(heap))
     }
 
@@ -1084,37 +1057,6 @@ mod continuation_serde {
     {
         OptionalValueWire::deserialize(deserializer)
             .and_then(|value| optional_from_wire(value).map_err(serde::de::Error::custom))
-    }
-
-    pub(super) fn serialize_pending_tools<S>(
-        pending: &PendingToolMap,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        pending
-            .iter()
-            .map(|(id, value)| optional_to_wire(value).map(|wire| (id.clone(), wire)))
-            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()
-            .map_err(serde::ser::Error::custom)?
-            .serialize(serializer)
-    }
-
-    pub(super) fn deserialize_pending_tools<'de, D>(
-        deserializer: D,
-    ) -> Result<PendingToolMap, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        std::collections::BTreeMap::<HandleId, OptionalValueWire>::deserialize(deserializer)
-            .and_then(|pending| {
-                pending
-                    .into_iter()
-                    .map(|(id, wire)| optional_from_wire(wire).map(|value| (id, value)))
-                    .collect::<Result<_, _>>()
-                    .map_err(serde::de::Error::custom)
-            })
     }
 
     pub(super) fn serialize_slots<S>(
@@ -1345,7 +1287,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             instructions_executed: 0,
             heap: Self::new_heap(host),
             heap_initialized: false,
-            pending_tools: PendingToolMap::new(),
+            pending_tools: PendingOperationMap::new(),
             execution_nonce: mint_execution_nonce(0),
             resume_point: VmResumePoint::NextInstruction,
             resume_loop_phase: None,

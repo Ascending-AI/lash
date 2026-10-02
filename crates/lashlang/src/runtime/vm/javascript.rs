@@ -225,7 +225,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             let kind = match value {
                 Value::Ref(id) => match self.heap.get(*id)? {
-                    HeapObject::List(_) | HeapObject::Tuple(_) => "array",
+                    HeapObject::List { .. } | HeapObject::Tuple(_) => "array",
                     HeapObject::Record(_) => "record",
                     _ => "opaque",
                 },
@@ -259,7 +259,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), Value::Ref(list)] = values.as_slice()
             && method.as_str() == "__singleCallbackResult"
         {
-            let (HeapObject::List(values) | HeapObject::Tuple(values)) = self.heap.get(*list)?
+            let (HeapObject::List { items: values, .. } | HeapObject::Tuple(values)) =
+                self.heap.get(*list)?
             else {
                 return Err(js_stdlib_error(
                     "callback result container must be an array",
@@ -297,7 +298,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), Value::Ref(active), needle] = values.as_slice()
             && method.as_str() == "__jsonActiveContains"
         {
-            let HeapObject::List(values) = self.heap.get(*active)? else {
+            let HeapObject::List { items: values, .. } = self.heap.get(*active)? else {
                 return Err(js_stdlib_error(
                     "JSON stringify active stack must be an array",
                 ));
@@ -360,7 +361,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             let is_array = matches!(
                 self.heap.get(*receiver)?,
-                HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_)
+                HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_)
             ) || self
                 .heap
                 .builtin_name(*receiver)
@@ -379,7 +380,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
             && !method.contains('.')
-            && matches!(self.heap.get(*receiver)?, HeapObject::List(_))
+            && matches!(self.heap.get(*receiver)?, HeapObject::List { .. })
             && self.execute_javascript_array_heap_method(method, *receiver, args)?
         {
             return Ok(());
@@ -462,7 +463,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 // Array.from does; exporting the array would copy its
                 // elements, and could not carry an element that holds a
                 // function.
-                HeapObject::List(items) | HeapObject::Tuple(items) => Some(items.clone()),
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => Some(items.clone()),
                 HeapObject::RegExpMatch(result) => Some(result.items.clone()),
                 _ => None,
             };
@@ -543,7 +544,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let arguments = match values.pop() {
             Some(Value::List(items) | Value::Tuple(items)) => items.to_vec(),
             Some(Value::Ref(id)) => match self.heap.get(id)? {
-                HeapObject::List(items) | HeapObject::Tuple(items) => items.clone(),
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => items.clone(),
                 _ => Vec::new(),
             },
             _ => Vec::new(),
@@ -838,7 +839,9 @@ fn javascript_json_has_cycle(
         return Ok(false);
     }
     let children: Vec<&Value> = match heap.get(*id)? {
-        HeapObject::List(values) | HeapObject::Tuple(values) => values.iter().collect(),
+        HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+            values.iter().collect()
+        }
         HeapObject::RegExpMatch(result) => result
             .items
             .iter()

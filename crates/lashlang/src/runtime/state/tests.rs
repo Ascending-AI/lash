@@ -1,6 +1,5 @@
 use super::*;
 use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
-use crate::runtime::HEAP_SIZE_SCHEDULE_VERSION;
 use crate::runtime::entry_points::compile_program_internal;
 use crate::runtime::{ProjectedBindings, ProjectedValue};
 
@@ -726,21 +725,15 @@ fn canonical_decode_accepts_every_max_depth_encode_shape() {
 pub(super) fn canonical_heap_with(
     roots: Vec<CanonicalBinding>,
     objects: Vec<CanonicalHeapEntry>,
-    next_id: u64,
     allocation_counter: u64,
-    live_logical_bytes: u64,
 ) -> CanonicalSnapshot {
     CanonicalSnapshot {
         expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: None,
         heap: Some(CanonicalHeap {
-            list_holes: Vec::new(),
             reference_semantics: false,
-            next_id,
-            allocation_counter,
-            live_logical_bytes,
-            size_schedule_version: HEAP_SIZE_SCHEDULE_VERSION,
+            header: crate::runtime::heap::HeapHeaderWire { allocation_counter },
             roots,
             objects,
         }),
@@ -968,16 +961,20 @@ fn canonical_decode_rejects_descending_heap_ids() {
         vec![
             CanonicalHeapEntry {
                 id: HeapId::from_counter(2),
-                object: CanonicalHeapObject::List { items: Vec::new() },
+                object: CanonicalHeapObject::List {
+                    holes: Vec::new(),
+                    items: Vec::new(),
+                },
             },
             CanonicalHeapEntry {
                 id: HeapId::from_counter(1),
-                object: CanonicalHeapObject::List { items: Vec::new() },
+                object: CanonicalHeapObject::List {
+                    holes: Vec::new(),
+                    items: Vec::new(),
+                },
             },
         ],
-        3,
         2,
-        2 * super::super::heap::HeapObject::List(Vec::new()).logical_bytes(),
     );
 
     let error = Snapshot::from_canonical_bytes(&named_bytes(&wire))
@@ -995,29 +992,24 @@ fn canonical_decode_rejects_dangling_root_and_nested_references() {
             },
         }],
         Vec::new(),
-        1,
-        0,
         0,
     );
     let error = Snapshot::from_canonical_bytes(&named_bytes(&dangling_root))
         .expect_err("dangling root must be rejected");
     assert!(error.to_string().contains("dangling heap reference 99"));
 
-    let member_object =
-        super::super::heap::HeapObject::List(vec![Value::Ref(HeapId::from_counter(99))]);
     let dangling_member = canonical_heap_with(
         Vec::new(),
         vec![CanonicalHeapEntry {
             id: HeapId::from_counter(1),
             object: CanonicalHeapObject::List {
+                holes: Vec::new(),
                 items: vec![CanonicalValue::Ref {
                     value: HeapId::from_counter(99),
                 }],
             },
         }],
-        2,
         1,
-        member_object.logical_bytes(),
     );
     let error = Snapshot::from_canonical_bytes(&named_bytes(&dangling_member))
         .expect_err("dangling member ref must be rejected");
@@ -1025,14 +1017,12 @@ fn canonical_decode_rejects_dangling_root_and_nested_references() {
 
     // An inline compound inside a heap object is rejected outright, so a
     // reference can never hide below the member level in an accepted wire.
-    let nested_object = super::super::heap::HeapObject::List(vec![Value::List(
-        vec![Value::Ref(HeapId::from_counter(99))].into(),
-    )]);
     let inline_compound_member = canonical_heap_with(
         Vec::new(),
         vec![CanonicalHeapEntry {
             id: HeapId::from_counter(1),
             object: CanonicalHeapObject::List {
+                holes: Vec::new(),
                 items: vec![CanonicalValue::List {
                     items: vec![CanonicalValue::Ref {
                         value: HeapId::from_counter(99),
@@ -1040,9 +1030,7 @@ fn canonical_decode_rejects_dangling_root_and_nested_references() {
                 }],
             },
         }],
-        2,
         1,
-        nested_object.logical_bytes(),
     );
     let error = Snapshot::from_canonical_bytes(&named_bytes(&inline_compound_member))
         .expect_err("inline compound members must be rejected");
@@ -1054,43 +1042,7 @@ fn canonical_decode_rejects_dangling_root_and_nested_references() {
 }
 
 #[test]
-fn canonical_decode_rejects_counter_accounting_schedule_and_root_order() {
-    let empty_object_bytes = super::super::heap::HeapObject::List(Vec::new()).logical_bytes();
-    let object = CanonicalHeapEntry {
-        id: HeapId::from_counter(1),
-        object: CanonicalHeapObject::List { items: Vec::new() },
-    };
-    let counter = canonical_heap_with(
-        Vec::new(),
-        vec![object.clone()],
-        1000,
-        1,
-        empty_object_bytes,
-    );
-    assert!(
-        Snapshot::from_canonical_bytes(&named_bytes(&counter))
-            .expect_err("counter mismatch")
-            .to_string()
-            .contains("allocation counter plus one")
-    );
-
-    let accounting = canonical_heap_with(Vec::new(), vec![object.clone()], 2, 1, 0);
-    assert!(
-        Snapshot::from_canonical_bytes(&named_bytes(&accounting))
-            .expect_err("accounting mismatch")
-            .to_string()
-            .contains("logical byte counter")
-    );
-
-    let mut schedule = canonical_heap_with(Vec::new(), vec![object], 2, 1, empty_object_bytes);
-    schedule.heap.as_mut().expect("heap").size_schedule_version += 1;
-    assert!(
-        Snapshot::from_canonical_bytes(&named_bytes(&schedule))
-            .expect_err("schedule mismatch")
-            .to_string()
-            .contains("size schedule version")
-    );
-
+fn canonical_decode_rejects_root_order() {
     let roots = vec![
         CanonicalBinding {
             name: "z".to_string(),
@@ -1101,7 +1053,7 @@ fn canonical_decode_rejects_counter_accounting_schedule_and_root_order() {
             value: CanonicalValue::Null {},
         },
     ];
-    let root_order = canonical_heap_with(roots, Vec::new(), 1, 0, 0);
+    let root_order = canonical_heap_with(roots, Vec::new(), 0);
     assert!(matches!(
         Snapshot::from_canonical_bytes(&named_bytes(&root_order)),
         Err(SnapshotDecodeError::NonCanonicalEncoding { location, .. })
@@ -1112,7 +1064,6 @@ fn canonical_decode_rejects_counter_accounting_schedule_and_root_order() {
 #[test]
 fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
     let id = HeapId::from_counter(1);
-    let empty_bytes = super::super::heap::HeapObject::List(Vec::new()).logical_bytes();
     let shared = canonical_heap_with(
         vec![
             CanonicalBinding {
@@ -1126,11 +1077,12 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
         ],
         vec![CanonicalHeapEntry {
             id,
-            object: CanonicalHeapObject::List { items: Vec::new() },
+            object: CanonicalHeapObject::List {
+                holes: Vec::new(),
+                items: Vec::new(),
+            },
         }],
-        2,
         1,
-        empty_bytes,
     );
     assert!(
         Snapshot::from_canonical_bytes(&named_bytes(&shared))
@@ -1139,7 +1091,6 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
             .contains("must have one owner")
     );
 
-    let cyclic_object = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
     let cycle = canonical_heap_with(
         vec![CanonicalBinding {
             name: "root".to_string(),
@@ -1148,12 +1099,11 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
         vec![CanonicalHeapEntry {
             id,
             object: CanonicalHeapObject::List {
+                holes: Vec::new(),
                 items: vec![CanonicalValue::Ref { value: id }],
             },
         }],
-        2,
         1,
-        cyclic_object.logical_bytes(),
     );
     // A rooted self-cycle is refused as a second owner: the root holds the
     // object and so does the object itself.
@@ -1167,27 +1117,25 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
     // A cycle no root names has one owner per object and still must not
     // decode: nothing outside the cycle holds it up.
     let second = HeapId::from_counter(2);
-    let ring_first = super::super::heap::HeapObject::List(vec![Value::Ref(second)]);
-    let ring_second = super::super::heap::HeapObject::List(vec![Value::Ref(id)]);
     let ring = canonical_heap_with(
         Vec::new(),
         vec![
             CanonicalHeapEntry {
                 id,
                 object: CanonicalHeapObject::List {
+                    holes: Vec::new(),
                     items: vec![CanonicalValue::Ref { value: second }],
                 },
             },
             CanonicalHeapEntry {
                 id: second,
                 object: CanonicalHeapObject::List {
+                    holes: Vec::new(),
                     items: vec![CanonicalValue::Ref { value: id }],
                 },
             },
         ],
-        3,
         2,
-        ring_first.logical_bytes() + ring_second.logical_bytes(),
     );
     assert!(
         Snapshot::from_canonical_bytes(&named_bytes(&ring))
@@ -1198,9 +1146,6 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
 
     // A repeated reference inside one root is a DAG, not a tree, and is
     // refused even though only one root names it.
-    let diamond_child = super::super::heap::HeapObject::List(Vec::new());
-    let diamond_root =
-        super::super::heap::HeapObject::List(vec![Value::Ref(second), Value::Ref(second)]);
     let diamond = canonical_heap_with(
         vec![CanonicalBinding {
             name: "root".to_string(),
@@ -1210,6 +1155,7 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
             CanonicalHeapEntry {
                 id,
                 object: CanonicalHeapObject::List {
+                    holes: Vec::new(),
                     items: vec![
                         CanonicalValue::Ref { value: second },
                         CanonicalValue::Ref { value: second },
@@ -1218,12 +1164,13 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
             },
             CanonicalHeapEntry {
                 id: second,
-                object: CanonicalHeapObject::List { items: Vec::new() },
+                object: CanonicalHeapObject::List {
+                    holes: Vec::new(),
+                    items: Vec::new(),
+                },
             },
         ],
-        3,
         2,
-        diamond_root.logical_bytes() + diamond_child.logical_bytes(),
     );
     assert!(
         Snapshot::from_canonical_bytes(&named_bytes(&diamond))
@@ -1236,11 +1183,12 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
         Vec::new(),
         vec![CanonicalHeapEntry {
             id,
-            object: CanonicalHeapObject::List { items: Vec::new() },
+            object: CanonicalHeapObject::List {
+                holes: Vec::new(),
+                items: Vec::new(),
+            },
         }],
-        2,
         1,
-        empty_bytes,
     );
     assert!(
         Snapshot::from_canonical_bytes(&named_bytes(&unreachable))
@@ -1261,25 +1209,18 @@ fn canonical_decode_rejects_shared_roots_cycles_and_unreachable_objects() {
 fn canonical_decode_rejects_a_heap_chain_deeper_than_the_value_limit() {
     fn chain_snapshot(depth: usize) -> Vec<u8> {
         let mut objects = Vec::new();
-        let mut bytes = 0;
         for index in 0..depth {
             let id = HeapId::from_counter((index + 1) as u64);
-            let object = if index + 1 == depth {
-                super::super::heap::HeapObject::List(vec![Value::Number(0.0)])
-            } else {
-                super::super::heap::HeapObject::List(vec![Value::Ref(HeapId::from_counter(
-                    (index + 2) as u64,
-                ))])
-            };
-            bytes += object.logical_bytes();
             objects.push(CanonicalHeapEntry {
                 id,
                 object: if index + 1 == depth {
                     CanonicalHeapObject::List {
+                        holes: Vec::new(),
                         items: vec![CanonicalValue::Number { value: 0.0 }],
                     }
                 } else {
                     CanonicalHeapObject::List {
+                        holes: Vec::new(),
                         items: vec![CanonicalValue::Ref {
                             value: HeapId::from_counter((index + 2) as u64),
                         }],
@@ -1295,9 +1236,7 @@ fn canonical_decode_rejects_a_heap_chain_deeper_than_the_value_limit() {
                 },
             }],
             objects,
-            depth as u64 + 1,
             depth as u64,
-            bytes,
         ))
     }
 
@@ -1720,7 +1659,7 @@ fn a_state_whose_host_view_omits_a_binding_round_trips_through_the_wire() {
 /// state a snapshot restores is still the state that was captured.
 #[test]
 fn a_host_write_the_view_cannot_carry_leaves_the_view_a_projection() {
-    let (mut state, _) = state_rooting("anchor", HeapObject::List(Vec::new()));
+    let (mut state, _) = state_rooting("anchor", HeapObject::list(Vec::new()));
     let replaced = state
         .insert_global(
             "pending",
@@ -1995,7 +1934,7 @@ fn a_snapshot_round_trips_a_binding_cell_and_its_sharing() {
     let mut heap = Heap::default();
     let cell = heap.allocate_cell(Value::Number(3.0)).expect("allocate");
     let holder = heap
-        .allocate(HeapObject::List(vec![cell.clone(), cell.clone()]))
+        .allocate(HeapObject::list(vec![cell.clone(), cell.clone()]))
         .expect("allocate");
     let mut runtime_globals = Record::new();
     runtime_globals.insert("holder".to_string(), holder);
@@ -2029,7 +1968,7 @@ fn a_snapshot_round_trips_a_binding_cell_and_its_sharing() {
     let Some(Value::Ref(holder)) = backed.runtime_globals.get("holder") else {
         panic!("the holder restores as a heap reference");
     };
-    let HeapObject::List(members) = backed.heap.get(*holder).expect("holder") else {
+    let HeapObject::List { items: members, .. } = backed.heap.get(*holder).expect("holder") else {
         panic!("the holder restores as a list");
     };
     assert_eq!(members[0], members[1], "one cell stays one cell");
@@ -2040,40 +1979,28 @@ fn a_snapshot_round_trips_a_binding_cell_and_its_sharing() {
 }
 
 #[test]
-fn sparse_hole_wire_refuses_invalid_owners_and_indexes() {
+fn sparse_hole_wire_refuses_invalid_indexes() {
+    fn fill_hole(heap: &mut Heap, id: HeapId) {
+        let mut object = heap.get(id).expect("list").clone();
+        let HeapObject::List { holes, .. } = &mut object else {
+            panic!("list")
+        };
+        assert!(holes.remove(&0));
+        heap.commit_object_update(id, object).expect("fill hole");
+    }
+    let items = vec![Value::Undefined, Value::Number(2.0)];
+    for holes in [vec![0, 0], vec![1], vec![2], vec![1, 0]] {
+        assert!(HeapObject::sparse_list(items.clone(), holes).is_err());
+    }
     let mut heap = Heap::default();
     let Value::Ref(id) = heap
-        .allocate_list(vec![Value::Undefined, Value::Number(2.0)])
+        .allocate(HeapObject::sparse_list(items, vec![0]).expect("valid hole"))
         .expect("list")
     else {
-        panic!("heap reference")
+        panic!("reference")
     };
-    let Value::Ref(other) = heap.allocate_record(Record::new()).expect("record") else {
-        panic!("heap reference")
-    };
-    for rows in [
-        vec![(id, vec![])],
-        vec![(id, vec![0, 0])],
-        vec![(id, vec![1])],
-        vec![(id, vec![2])],
-        vec![(other, vec![0])],
-        vec![(id, vec![0]), (id, vec![0])],
-    ] {
-        assert!(
-            heap.clone().restore_list_holes(rows).is_err(),
-            "malformed hole metadata must refuse"
-        );
-    }
-    let revision = heap.revision(id);
-    heap.restore_list_holes(vec![(id, vec![0])])
-        .expect("valid hole");
     assert!(heap.is_list_hole(id, 0));
-    assert_eq!(
-        heap.revision(id),
-        revision,
-        "restoration does not mutate the saved write stamp"
-    );
-    assert_eq!(heap.list_holes_to_wire(), vec![(id, vec![0])]);
+    let revision = heap.revision(id);
     let mut state = State::new();
     state
         .install_runtime(
@@ -2100,7 +2027,7 @@ fn sparse_hole_wire_refuses_invalid_owners_and_indexes() {
     .expect("sparse fragmented restore");
     let (globals, mut restored_heap) = restored.take_runtime();
     assert!(restored_heap.is_list_hole(id, 0));
-    restored_heap.clear_list_hole(id, 0);
+    fill_hole(&mut restored_heap, id);
     restored
         .install_runtime(globals, restored_heap)
         .expect("filled hole root");
@@ -2111,11 +2038,11 @@ fn sparse_hole_wire_refuses_invalid_owners_and_indexes() {
         matches!(updated.fragments["a"], DurableFragment::Changed(_)),
         "a hole-only change invalidates its owner"
     );
-    assert_ne!(
+    assert_eq!(
         updated.header, parts.header,
-        "the changed hole table is persisted"
+        "hole metadata belongs to the fragment"
     );
-    heap.clear_list_hole(id, 0);
+    fill_hole(&mut heap, id);
     assert!(!heap.is_list_hole(id, 0));
     assert_ne!(
         heap.revision(id),

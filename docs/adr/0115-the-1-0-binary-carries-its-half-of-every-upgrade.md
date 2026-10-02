@@ -315,9 +315,9 @@ execution (`crates/lash-restate/src/services.rs:44`,
 Builds sharing `G` must replay the same journal steps. A change to their
 logic, order, names or effects changes `JOURNAL_LOGIC_EPOCH`; `G` is not a
 binary fingerprint. Opaque VM handover checks bytecode, continuation,
-snapshot, accounting, heap schedule and ABI against component read ranges.
+snapshot, accounting and ABI against component read ranges.
 An unsupported component refuses with its name and range before decoding
-VM bytes. Continuation, snapshot and heap ranges follow their actual decoders
+VM bytes. Continuation and snapshot ranges follow their actual decoders
 (`crates/lash-vm-protocol/src/contract.rs:60`, `:71`,
 `crates/lashlang/src/vm_contract.rs:13`, `:46`).
 Work outside a receiving build's range retains its recorded generation route.
@@ -376,13 +376,14 @@ narrow supported history or mutable reads at finalize
 Format stamps are write metadata outside request-identity preimages.
 Turn options project to their payload; checkpoint component content hashes
 remain identity inputs. The commit planner stamps turn options under the
-encoding epoch before hashing the commit. Heap writers choose their schedule
-stamp at encoding. Pinning identity to the first attempt's generation would
-require a retry to discover that generation
+encoding epoch before hashing the commit. Heap readers derive allocation
+identity and logical bytes from the allocation counter and objects. Pinning
+identity to the first attempt's generation would require a retry to discover
+that generation
 (`crates/lash-core-store/src/store/identity_projection.rs:1`,
 `crates/lash-core-store/src/store/runtime_commit_plan.rs:146`,
 `crates/lash-core-store/src/store/runtime_commit.rs:1158`,
-`crates/lashlang/src/runtime/heap.rs:57`).
+`crates/lashlang/src/runtime/heap.rs`).
 
 There is no universal unknown-field policy. Observational optional data can
 be ignored where its decoder permits it; effect, ownership and identity

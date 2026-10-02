@@ -2,7 +2,7 @@ use super::super::{
     AggregateConsumer, CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value,
     parse_handle_record, record_with_capacity, success, value_contains_tool_handle,
 };
-use super::Vm;
+use super::{Instruction, PendingOperation, Vm};
 use lash_sansio::handle::{HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget};
 use std::sync::Arc;
 
@@ -82,11 +82,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    pub(super) fn create_pending_tool(
-        &mut self,
-        operation: usize,
-        argc: usize,
-    ) -> Result<(), RuntimeError> {
+    pub(super) fn create_pending_tool(&mut self, argc: usize) -> Result<(), RuntimeError> {
         let (receiver, args) = self.drain_receiver_call(argc)?;
         ensure_no_tool_handle_arguments(&args)?;
         // Consumed requests stay in the map as `None`, so the entry count is
@@ -100,16 +96,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let id = HandleId::tool(self.execution_nonce, request);
         self.pending_tools.insert(
             id.clone(),
-            Some(Value::List(
-                [
-                    Value::Number(operation as f64),
-                    Value::Number(self.current_instruction_ip() as f64),
-                ]
-                .into_iter()
-                .chain(std::iter::once(receiver))
-                .chain(args)
-                .collect(),
-            )),
+            Some(PendingOperation::Tool {
+                site: self.current_instruction_ip(),
+                receiver,
+                args,
+            }),
         );
         let mut handle = record_with_capacity(2);
         handle.insert(HANDLE_FIELD.to_string(), Value::String(HANDLE_KIND.into()));
@@ -124,28 +115,31 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .values()
             .flatten()
             .map(|entry| {
-                let Value::List(call) = entry else {
-                    unreachable!("pending entries are captured calls or timers")
-                };
-                let Value::Number(site) = call[1] else {
-                    unreachable!("pending entries record their instruction position")
-                };
-                let call_path = match &call[0] {
-                    Value::Number(operation) => {
-                        let operation = &self.chunk.names[*operation as usize].text;
-                        match &call[2] {
+                let site = entry.site();
+                let call_path = match entry {
+                    PendingOperation::Tool { receiver, .. } => {
+                        let Some(Instruction::PendingTool { operation, .. }) =
+                            self.chunk.code.get(site)
+                        else {
+                            return Err(RuntimeError::PendingTool {
+                                problem: "pending tool does not match its instruction".into(),
+                                pending: Vec::new(),
+                            });
+                        };
+                        let operation = &self.chunk.names[*operation].text;
+                        match receiver {
                             Value::Resource(receiver) => format!("{}.{operation}", receiver.alias),
                             _ => operation.to_string(),
                         }
                     }
-                    _ => "sleep".to_string(),
+                    PendingOperation::Timer { .. } => "sleep".to_string(),
                 };
-                super::super::UnawaitedToolCall {
+                Ok(super::super::UnawaitedToolCall {
                     call_path,
-                    span: self.chunk.spans.get(site as usize).copied().flatten(),
-                }
+                    span: self.chunk.spans.get(site).copied().flatten(),
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, RuntimeError>>()?;
         if pending.is_empty() {
             Ok(())
         } else {
@@ -163,7 +157,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ///
     /// A timer is a pending operation like a tool call and shares its one
     /// handle encoding (clause 1: "One pending-operation handle for tools and
-    /// timers"). Its entry is `["timer", site, duration]`; the duration is only
+    /// timers"). Its entry captures the site and duration. The duration is only
     /// recorded here — the timer's start point is its **admission**, when the
     /// aggregate that awaits it is formed and the host records its deadline.
     pub(super) fn create_pending_timer(&mut self) -> Result<(), RuntimeError> {
@@ -177,15 +171,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let id = HandleId::tool(self.execution_nonce, request);
         self.pending_tools.insert(
             id.clone(),
-            Some(Value::List(
-                [
-                    Value::String(PENDING_TIMER_TAG.into()),
-                    Value::Number(self.current_instruction_ip() as f64),
-                    duration,
-                ]
-                .into_iter()
-                .collect(),
-            )),
+            Some(PendingOperation::Timer {
+                site: self.current_instruction_ip(),
+                duration,
+            }),
         );
         let mut handle = record_with_capacity(2);
         handle.insert(HANDLE_FIELD.to_string(), Value::String(HANDLE_KIND.into()));
@@ -241,21 +230,28 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     if !self.live_pending_request(&id) {
                         return Err(self.unsettleable_handle(&id));
                     }
-                    let Some(Some(Value::List(call))) = self.pending_tools.get_mut(&id) else {
+                    let Some(Some(call)) = self.pending_tools.get(&id) else {
                         return Err(RuntimeError::PendingTool {
                             problem: SETTLED_HANDLE.into(),
                             pending: Vec::new(),
                         });
                     };
-                    let Value::Number(site) = call[1] else {
-                        unreachable!()
-                    };
-                    let site = site as usize;
+                    let site = call.site();
                     let index = leaves.len();
                     seen.insert(id.clone(), index);
-                    let (timer, operation, argc) = match &call[0] {
-                        Value::Number(operation) => (false, *operation as usize, call.len() - 3),
-                        _ => (true, 0, 0),
+                    let (timer, operation, argc) = match call {
+                        PendingOperation::Tool { .. } => {
+                            let Some(Instruction::PendingTool { operation, argc }) =
+                                self.chunk.code.get(site)
+                            else {
+                                return Err(RuntimeError::PendingTool {
+                                    problem: "pending tool does not match its instruction".into(),
+                                    pending: Vec::new(),
+                                });
+                            };
+                            (false, *operation, *argc)
+                        }
+                        PendingOperation::Timer { .. } => (true, 0, 0),
                     };
                     leaves.push(CompiledResourceOperationBatchLeaf {
                         timer,
@@ -271,7 +267,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             .flatten(),
                         source_span: self.chunk.spans.get(site).copied().flatten(),
                     });
-                    values.extend(call[2..].iter().cloned());
+                    values.extend(call.values().cloned());
                     shape.push(CompiledAggregateAwaitShape::BatchLeaf(index));
                 }
                 AwaitedValue::Plain => {
@@ -312,10 +308,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(settled)
     }
 }
-
-/// The first element of a pending timer's entry, where a tool's entry holds
-/// its operation index.
-pub(super) const PENDING_TIMER_TAG: &str = "timer";
 
 /// A pending handle inside a tool's arguments would reach the host as its
 /// marker record and the call would run with it; refused before dispatch so the

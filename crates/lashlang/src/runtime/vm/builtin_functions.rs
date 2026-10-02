@@ -614,7 +614,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+                HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
                     "[object Array]".to_string()
                 }
                 // An `arguments` object is a record marked at construction;
@@ -653,7 +653,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         match receiver {
             Value::Ref(id) => match self.heap.get(*id)? {
                 HeapObject::Record(record) => Ok(record.get(key).is_some()),
-                HeapObject::List(items) | HeapObject::Tuple(items) => {
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => {
                     if key == "length" {
                         return Ok(true);
                     }
@@ -734,7 +734,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 HeapObject::Url(_) => prototype_name == "URL",
                 HeapObject::UrlSearchParams(_) => prototype_name == "URLSearchParams",
-                HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+                HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
                     matches!(prototype_name, "Array" | "Object")
                 }
                 HeapObject::Record(_) => prototype_name == "Object",
@@ -923,7 +923,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
         };
         Ok(match self.heap.get(*id)? {
-            HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+            HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
                 "[object Array]".to_string()
             }
             HeapObject::RegExp(_) => "[object RegExp]".to_string(),
@@ -974,7 +974,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // shallowly as `Array.from` does.
         let iterable: Option<Vec<Value>> = match &items {
             Value::Ref(id) => match self.heap.get(*id)? {
-                HeapObject::List(items) | HeapObject::Tuple(items) => Some(items.clone()),
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => Some(items.clone()),
                 HeapObject::RegExpMatch(result) => Some(result.items.clone()),
                 HeapObject::Map(map) => Some(
                     map.entries

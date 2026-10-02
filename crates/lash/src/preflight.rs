@@ -270,9 +270,6 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::LashlangSnapshot => {
             SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope)
         }
-        DurableFormat::HeapSizeSchedule => {
-            SurfaceRelation::CarriedBy(DurableFormat::VmContinuation)
-        }
         DurableFormat::LashlangSegmentHandover => SurfaceRelation::Walk {
             surface: DurableSurface::ParkedSegment,
             primary: true,

@@ -39,7 +39,7 @@ fn definition_id_survives_every_container_across_cells() {
         }))
         .expect("error");
     let errors = heap
-        .allocate(HeapObject::List(vec![tagged(5)]))
+        .allocate(HeapObject::list(vec![tagged(5)]))
         .expect("aggregate errors list");
     let aggregate = heap
         .allocate(HeapObject::Error(ErrorObject {

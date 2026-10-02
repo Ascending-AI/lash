@@ -61,8 +61,8 @@ pub(crate) use heap::{
     UrlObject, UrlSearchParamsObject, canonical_regexp_flags, regexp_source, regexp_string,
 };
 pub use heap::{
-    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
-    HeapId, is_javascript_builtin_global,
+    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HeapId,
+    is_javascript_builtin_global,
 };
 pub use host::{
     AbilityOp, AbilityOutcome, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
@@ -90,13 +90,14 @@ pub(crate) use vm::SlotState;
 pub(crate) use vm::VmParkableRun;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
-    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
-    TypeScriptRegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
-    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
-    VmSuspendedOperation, validate_typescript_regexp, validate_typescript_regexp_shape,
+    ContinuationError, PendingOperation, PendingOperationMap, TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+    TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION, TYPESCRIPT_REGEXP_MAX_NESTING,
+    TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS, TypeScriptRegExpValidationError,
+    VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation,
+    VmResumePoint, VmRunOutcome, VmSuspendedOperation, validate_typescript_regexp,
+    validate_typescript_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

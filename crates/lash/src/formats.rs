@@ -86,8 +86,8 @@ pub use lash_restate::{
 pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
 #[cfg(feature = "rlm")]
 pub use lashlang::{
-    BYTECODE_FORMAT_VERSION, HEAP_SIZE_SCHEDULE_VERSION, LASHLANG_SNAPSHOT_VERSION,
-    LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION, WORKFLOW_GRAPH_SCHEMA_VERSION,
+    BYTECODE_FORMAT_VERSION, LASHLANG_SNAPSHOT_VERSION, LASHLANG_VM_ABI_VERSION,
+    VM_CONTINUATION_FORMAT_VERSION, WORKFLOW_GRAPH_SCHEMA_VERSION,
     WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
 };
 
@@ -146,8 +146,6 @@ pub enum DurableFormat {
     VmContinuation,
     /// The canonical Lashlang execution snapshot.
     LashlangSnapshot,
-    /// The Lashlang heap size schedule, which rides in the continuation.
-    HeapSizeSchedule,
     /// The Restate Lashlang segment-handover envelope.
     LashlangSegmentHandover,
     /// The RLM snapshot envelope stored behind a checkpoint component.
@@ -218,7 +216,6 @@ impl DurableFormat {
             DurableFormat::Bytecode => "bytecode",
             DurableFormat::VmContinuation => "VM continuation",
             DurableFormat::LashlangSnapshot => "Lashlang snapshot",
-            DurableFormat::HeapSizeSchedule => "heap size schedule",
             DurableFormat::LashlangSegmentHandover => "Lashlang segment handover",
             DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
             DurableFormat::WorkflowGraphSchema => "workflow graph schema",
@@ -260,7 +257,6 @@ impl DurableFormat {
             DurableFormat::Bytecode => UpgradePolicy::Coexist,
             DurableFormat::VmContinuation => UpgradePolicy::Drain,
             DurableFormat::LashlangSnapshot => UpgradePolicy::Migrate,
-            DurableFormat::HeapSizeSchedule => UpgradePolicy::Migrate,
             DurableFormat::LashlangSegmentHandover => UpgradePolicy::Drain,
             DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::WorkflowGraphSchema => UpgradePolicy::Migrate,
@@ -483,14 +479,6 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             version: FormatVersion::Counter(LASHLANG_SNAPSHOT_VERSION),
             owning_crate: "lashlang",
             constant: "LASHLANG_SNAPSHOT_VERSION",
-            probe: FormatProbe::Comparable,
-        },
-        #[cfg(feature = "rlm")]
-        DurableFormatEntry {
-            format: DurableFormat::HeapSizeSchedule,
-            version: FormatVersion::Counter(HEAP_SIZE_SCHEDULE_VERSION),
-            owning_crate: "lashlang",
-            constant: "HEAP_SIZE_SCHEDULE_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]

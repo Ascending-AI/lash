@@ -9,6 +9,7 @@ pub(super) enum CanonicalHeapObject {
     },
     List {
         items: Vec<CanonicalValue>,
+        holes: Vec<usize>,
     },
     Record {
         fields: Vec<CanonicalBinding>,
@@ -71,8 +72,12 @@ impl CanonicalHeapObject {
             HeapObject::Tuple(values) => Self::Tuple {
                 items: canonical_items(values, &location, 0)?,
             },
-            HeapObject::List(values) => Self::List {
+            HeapObject::List {
+                items: values,
+                holes,
+            } => Self::List {
                 items: canonical_items(values, &location, 0)?,
+                holes: holes.iter().copied().collect(),
             },
             // Property order is observable, so a record's fields are written
             // in the order the object holds them, never sorted (FIG-3606).
@@ -217,12 +222,14 @@ impl CanonicalHeapObject {
                     .map(CanonicalValue::into_runtime)
                     .collect::<Result<_, _>>()?,
             ),
-            Self::List { items } => HeapObject::List(
+            Self::List { items, holes } => HeapObject::sparse_list(
                 items
                     .into_iter()
                     .map(CanonicalValue::into_runtime)
                     .collect::<Result<_, _>>()?,
-            ),
+                holes,
+            )
+            .map_err(|reason| SnapshotDecodeError::InvalidEncoding(reason.to_string()))?,
             Self::Record { fields } => HeapObject::Record(Box::new(
                 fields
                     .into_iter()

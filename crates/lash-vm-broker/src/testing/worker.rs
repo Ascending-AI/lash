@@ -24,7 +24,6 @@ pub const FAKE_VM_CONTRACT: lash_vm_protocol::VmContract = lash_vm_protocol::VmC
     continuation: FAKE_STATE_FORMAT,
     snapshot: FAKE_STATE_FORMAT,
     accounting: 1,
-    heap: 1,
     abi: 1,
 };
 

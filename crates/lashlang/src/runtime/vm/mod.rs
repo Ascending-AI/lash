@@ -38,10 +38,11 @@ pub use continuation::VM_CONTINUATION_FORMAT_VERSION;
 #[cfg(test)]
 pub(crate) use continuation::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use continuation::{
-    ContinuationError, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint,
-    VmRunOutcome, VmSuspendedOperation,
+    ContinuationError, PendingOperation, PendingOperationMap, VmContinuation,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
+    VmSuspendedOperation,
 };
 pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 pub(crate) use control::VmParkableRun;
@@ -258,7 +259,7 @@ pub struct Vm<'a, H> {
     instructions_executed: u64,
     pub(crate) heap: Heap,
     heap_initialized: bool,
-    pending_tools: std::collections::BTreeMap<lash_sansio::handle::HandleId, Option<Value>>,
+    pending_tools: continuation::PendingOperationMap,
     /// Identity of this execution, stamped into every pending-tool handle it
     /// mints and required back at await, so a handle kept from an earlier
     /// execution (or written by hand) cannot alias this execution's requests.
@@ -453,7 +454,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let items = self.pop_stack()?;
                 let items = match &items {
                     Value::Ref(id) => match self.heap.get(*id)? {
-                        HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                        HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+                            values.clone()
+                        }
                         HeapObject::RegExpMatch(result) => result.items.clone(),
                         object => {
                             return Err(RuntimeError::ShapingListRequired {
@@ -906,8 +909,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     argc,
                 }));
             }
-            Instruction::PendingTool { operation, argc } => {
-                self.create_pending_tool(operation, argc)?;
+            Instruction::PendingTool { argc, .. } => {
+                self.create_pending_tool(argc)?;
             }
             Instruction::PendingTimer => {
                 self.create_pending_timer()?;

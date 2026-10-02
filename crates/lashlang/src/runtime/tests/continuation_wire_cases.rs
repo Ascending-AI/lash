@@ -12,18 +12,18 @@ use super::*;
 /// numbers carry `{"version", "bits"}` with the bits of the IEEE-754 double; a
 /// heap object instead names its members `items` or `fields` beside its kind;
 /// optional values are `{"kind": "unset"}` or `{"kind": "set", "value": …}`;
-/// the heap carries its counters, its logical byte total, its size-schedule
-/// version, and its objects in ascending ID order. The state described here is a
+/// the heap carries its allocation counter and objects in ascending ID order.
+/// Each list object owns its sorted sparse-hole indexes. The state described here is a
 /// process-mode VM parked at instruction 3 holding one two-element list object,
 /// whose 153 logical bytes are the 16-byte object header plus a 64-byte slot
 /// and 8-byte payload for the number and a 64-byte slot and 1-byte payload for
-/// the boolean, under size schedule 3.
+/// the boolean.
 ///
 /// This exists so the encoding has an oracle that is independent of the code
 /// that produces it: if the serializer and the decoder drifted together to a
 /// different encoding, the round-trip tests would stay green and this one would
 /// not.
-const AUTHORED_CONTINUATION: &str = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":3,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[["total",{"kind":"number","value":{"version":1,"bits":4613937818241073152}}]]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":3,"heap":{"next_id":2,"allocation_counter":1,"live_logical_bytes":153,"size_schedule_version":3,"objects":[{"id":1,"object":{"kind":"list","items":[{"kind":"number","value":{"version":1,"bits":4607182418800017408}},{"kind":"bool","value":true}]}}]},"resume":{"kind":"next_instruction"}}"#;
+const AUTHORED_CONTINUATION: &str = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":3,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[["total",{"kind":"number","value":{"version":1,"bits":4613937818241073152}}]]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":3,"heap":{"allocation_counter":1,"objects":[{"id":1,"object":{"kind":"list","items":[{"kind":"number","value":{"version":1,"bits":4607182418800017408}},{"kind":"bool","value":true}],"holes":[]}}]},"resume":{"kind":"next_instruction"}}"#;
 
 #[test]
 fn snapshot_and_continuation_codecs_share_the_prototype_chain_key_guard() {
@@ -92,7 +92,7 @@ fn authored_continuation_fixture_decodes_and_re_encodes_exactly() {
 /// cell holds the binding's value, and the pair decodes and re-encodes to the
 /// same bytes.
 #[cfg(not(feature = "synthetic-next"))]
-const AUTHORED_CELL_CONTINUATION: &str = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"next_id":2,"allocation_counter":1,"live_logical_bytes":88,"size_schedule_version":3,"objects":[{"id":1,"object":{"kind":"cell","value":{"kind":"number","value":{"version":1,"bits":4613937818241073152}}}}]},"resume":{"kind":"next_instruction"}}"#;
+const AUTHORED_CELL_CONTINUATION: &str = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"allocation_counter":1,"objects":[{"id":1,"object":{"kind":"cell","value":{"kind":"number","value":{"version":1,"bits":4613937818241073152}}}}]},"resume":{"kind":"next_instruction"}}"#;
 
 // Pins N's version and bytes; the synthetic N+1 moves them.
 #[cfg(not(feature = "synthetic-next"))]
@@ -113,7 +113,7 @@ fn continuation_decode_rejects_inline_compound_heap_members() {
     // accounting are all internally consistent, so only the member-shape rule
     // rejects it. Accepting it used to cost object 2 at the next collection,
     // because tracing looked at direct members while validation recursed.
-    let nested = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"next_id":3,"allocation_counter":2,"live_logical_bytes":184,"size_schedule_version":3,"objects":[{"id":1,"object":{"kind":"list","items":[{"kind":"list","value":[{"kind":"ref","value":2}]}]}},{"id":2,"object":{"kind":"list","items":[]}}]},"resume":{"kind":"next_instruction"}}"#;
+    let nested = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"allocation_counter":2,"objects":[{"id":1,"object":{"kind":"list","items":[{"kind":"list","value":[{"kind":"ref","value":2}]}],"holes":[]}},{"id":2,"object":{"kind":"list","items":[],"holes":[]}}]},"resume":{"kind":"next_instruction"}}"#;
 
     let error = serde_json::from_str::<VmContinuation>(nested)
         .expect_err("an inline compound member must be rejected");
@@ -130,7 +130,7 @@ fn continuation_decode_rejects_an_active_function_without_a_root_frame() {
     // This is the scalar-only shape left after stripping the root frame from a
     // one-deep function call. No heap reachability accident is available to
     // reject it, so the frame-owner invariant itself must do so.
-    let wire = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":1,"active_function":0,"operand_stack":[],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":1,"heap":{"next_id":1,"allocation_counter":0,"live_logical_bytes":0,"size_schedule_version":3,"objects":[]},"resume":{"kind":"next_instruction"}}"#;
+    let wire = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":1,"active_function":0,"operand_stack":[],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"unset"},"slots":[],"globals":{"kind":"record","value":[]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":1,"heap":{"allocation_counter":0,"objects":[]},"resume":{"kind":"next_instruction"}}"#;
 
     reject_continuation(wire, "must have a root-owned bottom frame");
 }
@@ -517,9 +517,9 @@ async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
 /// the ownership rule can reject it. Sol's review authored the first two and
 /// found both accepted and resumable; an optimized append through either slot
 /// would then have been visible through the other.
-fn slots_wire(slots: &str, objects: &str, next_id: u64, counter: u64, bytes: u64) -> String {
+fn slots_wire(slots: &str, objects: &str, counter: u64) -> String {
     format!(
-        r#"{{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{{}},"execution_nonce":0,"last_value":{{"kind":"unset"}},"slots":{slots},"globals":{{"kind":"record","value":[]}},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{{}},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{{"next_id":{next_id},"allocation_counter":{counter},"live_logical_bytes":{bytes},"size_schedule_version":3,"objects":{objects}}},"resume":{{"kind":"next_instruction"}}}}"#
+        r#"{{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{{}},"execution_nonce":0,"last_value":{{"kind":"unset"}},"slots":{slots},"globals":{{"kind":"record","value":[]}},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{{}},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{{"allocation_counter":{counter},"objects":{objects}}},"resume":{{"kind":"next_instruction"}}}}"#
     )
 }
 
@@ -534,24 +534,21 @@ fn reject_continuation(wire: &str, expected: &str) {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_decode_rejects_shared_and_cyclic_durable_ownership() {
-    let empty_list = r#"[{"id":1,"object":{"kind":"list","items":[]}}]"#;
-    let empty_bytes = 16;
+    let empty_list = r#"[{"id":1,"object":{"kind":"list","items":[],"holes":[]}}]"#;
 
     // Two durable slots naming one object.
     reject_continuation(
         &slots_wire(
             r#"[{"kind":"set","value":{"kind":"ref","value":1}},{"kind":"set","value":{"kind":"ref","value":1}}]"#,
             empty_list,
-            2,
             1,
-            empty_bytes,
         ),
         "must have one owner",
     );
 
     // A slot and a global naming one object.
     let slot_and_global = format!(
-        r#"{{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{{}},"execution_nonce":0,"last_value":{{"kind":"unset"}},"slots":[{{"kind":"set","value":{{"kind":"ref","value":1}}}}],"globals":{{"kind":"record","value":[["kept",{{"kind":"ref","value":1}}]]}},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{{}},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{{"next_id":2,"allocation_counter":1,"live_logical_bytes":{empty_bytes},"size_schedule_version":3,"objects":{empty_list}}},"resume":{{"kind":"next_instruction"}}}}"#
+        r#"{{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{{}},"execution_nonce":0,"last_value":{{"kind":"unset"}},"slots":[{{"kind":"set","value":{{"kind":"ref","value":1}}}}],"globals":{{"kind":"record","value":[["kept",{{"kind":"ref","value":1}}]]}},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{{}},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{{"allocation_counter":1,"objects":{empty_list}}},"resume":{{"kind":"next_instruction"}}}}"#
     );
     reject_continuation(&slot_and_global, "must have one owner");
 
@@ -559,10 +556,8 @@ async fn continuation_decode_rejects_shared_and_cyclic_durable_ownership() {
     reject_continuation(
         &slots_wire(
             r#"[{"kind":"set","value":{"kind":"ref","value":1}},{"kind":"unset"}]"#,
-            r#"[{"id":1,"object":{"kind":"list","items":[{"kind":"ref","value":1}]}}]"#,
-            2,
+            r#"[{"id":1,"object":{"kind":"list","items":[{"kind":"ref","value":1}],"holes":[]}}]"#,
             1,
-            88,
         ),
         "must have one owner",
     );
@@ -571,10 +566,8 @@ async fn continuation_decode_rejects_shared_and_cyclic_durable_ownership() {
     reject_continuation(
         &slots_wire(
             r#"[{"kind":"set","value":{"kind":"ref","value":1}},{"kind":"unset"}]"#,
-            r#"[{"id":1,"object":{"kind":"list","items":[{"kind":"ref","value":2},{"kind":"ref","value":2}]}},{"id":2,"object":{"kind":"list","items":[]}}]"#,
-            3,
+            r#"[{"id":1,"object":{"kind":"list","items":[{"kind":"ref","value":2},{"kind":"ref","value":2}],"holes":[]}},{"id":2,"object":{"kind":"list","items":[],"holes":[]}}]"#,
             2,
-            176,
         ),
         "must have one owner",
     );
@@ -582,7 +575,7 @@ async fn continuation_decode_rejects_shared_and_cyclic_durable_ownership() {
     // A parked loop binding is durable too: it goes back into its slot when the
     // loop ends, so it cannot share with another slot.
     let restore_and_slot = format!(
-        r#"{{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{{}},"execution_nonce":0,"last_value":{{"kind":"unset"}},"slots":[{{"kind":"set","value":{{"kind":"ref","value":1}}}}],"globals":{{"kind":"record","value":[]}},"iterator_stack":[{{"cursor":{{"Range":{{"next":0,"end":1,"step":1}}}},"binding_slot":0,"restore_value":{{"kind":"set","value":{{"kind":"ref","value":1}}}}}}],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{{}},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{{"next_id":2,"allocation_counter":1,"live_logical_bytes":{empty_bytes},"size_schedule_version":3,"objects":{empty_list}}},"resume":{{"kind":"next_instruction"}}}}"#
+        r#"{{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[],"pending_tools":{{}},"execution_nonce":0,"last_value":{{"kind":"unset"}},"slots":[{{"kind":"set","value":{{"kind":"ref","value":1}}}}],"globals":{{"kind":"record","value":[]}},"iterator_stack":[{{"cursor":{{"Range":{{"next":0,"end":1,"step":1}}}},"binding_slot":0,"restore_value":{{"kind":"set","value":{{"kind":"ref","value":1}}}}}}],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{{}},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{{"allocation_counter":1,"objects":{empty_list}}},"resume":{{"kind":"next_instruction"}}}}"#
     );
     reject_continuation(&restore_and_slot, "must have one owner");
 }
@@ -592,7 +585,7 @@ async fn continuation_decode_accepts_transient_duplication() {
     // The other side of the rule: the operand stack, the last-value register
     // and an iterator cursor may all name an object a slot owns. A VM that has
     // just stored a value holds it in exactly that shape.
-    let wire = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"set","value":{"kind":"ref","value":1}},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[]},"iterator_stack":[{"cursor":{"List":{"values":[{"kind":"ref","value":1}],"next_index":0,"collection":{"kind":"unset"}}},"binding_slot":0,"restore_value":{"kind":"unset"}}],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"next_id":2,"allocation_counter":1,"live_logical_bytes":16,"size_schedule_version":3,"objects":[{"id":1,"object":{"kind":"list","items":[]}}]},"resume":{"kind":"next_instruction"}}"#;
+    let wire = r#"{"format_version":29,"executable":"unlinked","reference_semantics":false,"instruction_pointer":0,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"pending_tools":{},"execution_nonce":0,"last_value":{"kind":"set","value":{"kind":"ref","value":1}},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"globals":{"kind":"record","value":[]},"iterator_stack":[{"cursor":{"List":{"values":[{"kind":"ref","value":1}],"next_index":0,"collection":{"kind":"unset"}}},"binding_slot":0,"restore_value":{"kind":"unset"}}],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":0,"heap":{"allocation_counter":1,"objects":[{"id":1,"object":{"kind":"list","items":[],"holes":[]}}]},"resume":{"kind":"next_instruction"}}"#;
 
     let continuation: VmContinuation =
         serde_json::from_str(wire).expect("transient duplication must be accepted");

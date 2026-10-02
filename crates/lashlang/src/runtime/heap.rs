@@ -47,59 +47,8 @@ use super::{
     Value, record_with_capacity,
 };
 
-/// Which byte-charge schedule a persisted heap's `live_logical_bytes` was
-/// computed under. Version 3 charges a closure's `name`/`length` own-property
-/// values (FIG-3655); version 2 charged a measured `VALUE_SLOT_BYTES`;
-/// version 1 charged a quarter of it. A heap restored under a schedule its
-/// reader's window does not admit is refused by name rather than failing its
-/// own byte-counter cross-check.
-///
-/// The stamp is chosen where a heap is encoded, never carried by the heap:
-/// a durable writer stamps the version its store's `F` assigns the surface,
-/// and a reader admits the surface's read window (FIG-4262).
-///
-/// version_guard(
-///     items(
-///         path = "crates/lashlang/src/runtime/heap/object.rs", OBJECT_HEADER_BYTES,
-///         VALUE_SLOT_BYTES, value_logical_bytes,
-///     ),
-/// )
-#[cfg(not(feature = "synthetic-next"))]
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 3;
-
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves the schedule with version 3's
-/// charges; its registered lift reads the heaps N wrote.
-#[cfg(feature = "synthetic-next")]
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 4;
 pub const HEAP_GC_ALLOCATION_INTERVAL: u64 = 1_024;
 pub const DEFAULT_HEAP_LOGICAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
-
-/// The size schedule stamp a heap encoded under `fleet_format` carries: the
-/// version the fleet's writers emit for the surface (FIG-3796, FIG-4262).
-pub(crate) fn size_schedule_writer(fleet_format: lash_core_execution::FleetFormat) -> u32 {
-    fleet_format.writer_version(lash_core_execution::surface_format!(
-        HEAP_SIZE_SCHEDULE_VERSION
-    ))
-}
-
-/// Admits a stored heap's size schedule stamp against the surface's read
-/// window under `fleet_format`: this build's newest, each older version its
-/// registered lift reads natively, and the version `F` pins its writers to.
-pub(crate) fn admit_size_schedule(
-    version: u32,
-    fleet_format: lash_core_execution::FleetFormat,
-) -> Result<(), String> {
-    if fleet_format
-        .read_window(lash_core_execution::surface_format!(
-            HEAP_SIZE_SCHEDULE_VERSION
-        ))
-        .admits(version)
-    {
-        Ok(())
-    } else {
-        Err(format!("unsupported heap size schedule version {version}"))
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeapEntry {
@@ -158,8 +107,7 @@ pub(crate) struct Heap {
     pub(crate) guest_coercion: guest_coercion::GuestCoercionReplay,
     /// Guest expando properties written to a built-in object, held as one
     /// record per built-in. In-memory only: a wire round-trip restores the
-    /// built-in without its expandos, the same session-only treatment sparse
-    /// holes get.
+    /// built-in without its expandos, with their session-only treatment.
     builtin_expandos: FxHashMap<HeapId, HeapId>,
     /// Own names deleted off a built-in (`delete eval.length`): tombstones
     /// that hide the static surface so a read falls through to the
@@ -169,17 +117,10 @@ pub(crate) struct Heap {
     /// write shadowing a static keeps the static's non-enumerable attribute
     /// and is absent here. In-memory only.
     builtin_enumerable: FxHashMap<HeapId, Vec<String>>,
-    /// Element positions an ECMA array literal opened but never stored — the
-    /// sparse holes. The `List` itself stays dense (a hole occupies an
-    /// `Undefined` slot); this in-memory side set is what `hasOwnProperty`,
-    /// `in` and `sort` consult to distinguish a hole from a stored
-    /// `undefined`. Not durable: a wire round-trip densifies, the registered
-    /// FIG-3700 divergence.
-    list_holes: FxHashMap<HeapId, BTreeSet<usize>>,
     /// Records `Lash.Arguments` materialized for a call frame — they answer
     /// strict-mode `callee`/`caller` poison and keep `length`/`callee` off
     /// the enumerable surface. In-memory only: a wire round-trip leaves a
-    /// plain record, matching the sparse-hole treatment.
+    /// plain record.
     arguments_records: FxHashSet<HeapId>,
 }
 
@@ -189,10 +130,14 @@ fn next_revision() -> u64 {
     CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-pub(crate) struct HeapRestoreWire {
-    pub(crate) next_id: u64,
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HeapHeaderWire {
     pub(crate) allocation_counter: u64,
-    pub(crate) live_logical_bytes: u64,
+}
+
+pub(crate) struct HeapRestoreWire {
+    pub(crate) header: HeapHeaderWire,
     pub(crate) objects: Vec<(HeapId, HeapObject)>,
 }
 
@@ -218,7 +163,6 @@ impl Default for Heap {
             builtin_enumerable: FxHashMap::default(),
             builtin_expandos: FxHashMap::default(),
             builtin_deleted: FxHashMap::default(),
-            list_holes: FxHashMap::default(),
             arguments_records: FxHashSet::default(),
         }
     }
@@ -232,20 +176,17 @@ impl Heap {
         }
     }
 
-    /// Rebuilds a heap from its wire. The caller has admitted the wire's
-    /// size schedule stamp against its read window ([`admit_size_schedule`]).
+    /// Rebuilds allocation identity and logical bytes from the header and objects.
     pub(crate) fn from_wire(wire: HeapRestoreWire, roots: &[Value]) -> Result<Self, String> {
         let expected_next_id = wire
+            .header
             .allocation_counter
             .checked_add(1)
             .ok_or_else(|| "heap allocation counter cannot advance to a next ID".to_string())?;
-        if wire.next_id != expected_next_id {
-            return Err("heap next ID must equal the allocation counter plus one".to_string());
-        }
 
         let mut heap = Self {
-            next_id: wire.next_id,
-            allocations: wire.allocation_counter,
+            next_id: expected_next_id,
+            allocations: wire.header.allocation_counter,
             ..Self::default()
         };
         let mut prior_id = None;
@@ -274,9 +215,6 @@ impl Heap {
                     logical_bytes,
                 },
             );
-        }
-        if heap.live_logical_bytes != wire.live_logical_bytes {
-            return Err("heap live logical byte counter does not match its objects".to_string());
         }
         heap.index_builtin_functions()?;
         for root in roots {
@@ -479,7 +417,7 @@ impl Heap {
     }
 
     pub(crate) fn allocate_list(&mut self, values: Vec<Value>) -> Result<Value, RuntimeError> {
-        self.allocate_object(HeapObject::List(values))
+        self.allocate_object(HeapObject::list(values))
     }
 
     pub(crate) fn allocate_record(&mut self, record: Record) -> Result<Value, RuntimeError> {
@@ -623,7 +561,7 @@ impl Heap {
                     .into_iter()
                     .map(|value| self.stage_import(value, next_id, staged))
                     .collect::<Result<_, _>>()?;
-                HeapObject::List(values)
+                HeapObject::list(values)
             }
             Value::Record(record) => {
                 let mut imported = record_with_capacity(record.len());
@@ -720,7 +658,7 @@ impl Heap {
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
-            HeapObject::List(values) => Value::List(
+            HeapObject::List { items: values, .. } => Value::List(
                 values
                     .iter()
                     .map(|value| export_child(self, value, active))
@@ -933,7 +871,7 @@ impl Heap {
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
-            HeapObject::List(values) => Value::List(
+            HeapObject::List { items: values, .. } => Value::List(
                 values
                     .iter()
                     .map(|value| self.export_inner(value, active, depth + 1))
@@ -1092,12 +1030,16 @@ impl Heap {
                     .map(|value| self.stage_isolation(value, staging))
                     .collect::<Result<_, _>>()?,
             ),
-            HeapObject::List(values) => HeapObject::List(
-                values
+            HeapObject::List {
+                items: values,
+                holes,
+            } => HeapObject::List {
+                items: values
                     .iter()
                     .map(|value| self.stage_isolation(value, staging))
                     .collect::<Result<_, _>>()?,
-            ),
+                holes: holes.clone(),
+            },
             HeapObject::Record(record) => {
                 let mut copied = record_with_capacity(record.len());
                 for entry in record.entries.iter() {
@@ -1197,7 +1139,7 @@ impl Heap {
                     .map(|value| self.stage_isolation(value, staging))
                     .collect::<Result<_, _>>()?,
             ),
-            Value::List(values) => HeapObject::List(
+            Value::List(values) => HeapObject::list(
                 values
                     .iter()
                     .map(|value| self.stage_isolation(value, staging))
@@ -1247,7 +1189,7 @@ impl Heap {
             });
         }
         let entry = self.entry_mut(id)?;
-        let HeapObject::List(values) = &mut entry.object else {
+        let HeapObject::List { items: values, .. } = &mut entry.object else {
             return Err(RuntimeError::ValidationFailed {
                 reason: "TS_METHOD_UNSUPPORTED: receiver has the wrong heap kind".to_string(),
             });
@@ -1302,7 +1244,7 @@ impl Heap {
             });
         }
         let entry = self.entry_mut(*id)?;
-        let HeapObject::List(values) = &mut entry.object else {
+        let HeapObject::List { items: values, .. } = &mut entry.object else {
             return Err(RuntimeError::PushUnsupported);
         };
         values.push(item);
@@ -1460,7 +1402,6 @@ impl Clone for Heap {
             builtin_enumerable: self.builtin_enumerable.clone(),
             builtin_expandos: self.builtin_expandos.clone(),
             builtin_deleted: self.builtin_deleted.clone(),
-            list_holes: self.list_holes.clone(),
             arguments_records: self.arguments_records.clone(),
         }
     }

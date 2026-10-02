@@ -332,7 +332,7 @@ impl Heap {
         if kind == ErrorKind::AggregateError
             && !matches!(
                 &errors,
-                Some(Value::Ref(id)) if matches!(self.get(*id)?, HeapObject::List(_))
+                Some(Value::Ref(id)) if matches!(self.get(*id)?, HeapObject::List { .. })
             )
         {
             return Err(RuntimeError::ValidationFailed {
@@ -602,12 +602,16 @@ impl Heap {
     ) -> Result<(), RuntimeError> {
         // A wholesale element replacement is a guest rewrite of the slot
         // list; every recorded hole is gone with the old elements.
-        self.list_holes.remove(&id);
         self.update_object(id, |object| {
-            let HeapObject::List(current) = object else {
+            let HeapObject::List {
+                items: current,
+                holes,
+            } = object
+            else {
                 return false;
             };
             *current = values;
+            holes.clear();
             true
         })
     }
@@ -615,68 +619,20 @@ impl Heap {
     /// Whether `index` of the `List` at `id` is an array-literal hole — a
     /// slot ECMA never stored, distinct from a stored `undefined`.
     pub(crate) fn is_list_hole(&self, id: HeapId, index: usize) -> bool {
-        self.list_holes
-            .get(&id)
-            .is_some_and(|holes| holes.contains(&index))
+        matches!(self.get(id), Ok(HeapObject::List { holes, .. }) if holes.contains(&index))
     }
 
     pub(crate) fn mark_list_holes(&mut self, id: HeapId, holes: BTreeSet<usize>) {
         if holes.is_empty() {
             return;
         }
-        self.list_holes.insert(id, holes);
-        self.revisions.insert(id, next_revision());
-    }
-
-    pub(crate) fn list_holes_to_wire(&self) -> Vec<(HeapId, Vec<usize>)> {
-        let mut rows = self
-            .list_holes
-            .iter()
-            .map(|(id, holes)| (*id, holes.iter().copied().collect()))
-            .collect::<Vec<_>>();
-        rows.sort_unstable_by_key(|(id, _)| *id);
-        rows
-    }
-
-    pub(crate) fn restore_list_holes(
-        &mut self,
-        rows: Vec<(HeapId, Vec<usize>)>,
-    ) -> Result<(), String> {
-        let mut previous = None;
-        for (id, indexes) in rows {
-            if previous.is_some_and(|prior| prior >= id) {
-                return Err("sparse array owners must be sorted and unique".into());
-            }
-            previous = Some(id);
-            let HeapObject::List(items) = self.get(id).map_err(|error| error.to_string())? else {
-                return Err("sparse array owner must be a list".into());
-            };
-            if indexes.is_empty()
-                || indexes.windows(2).any(|pair| pair[0] >= pair[1])
-                || indexes
-                    .iter()
-                    .any(|index| !matches!(items.get(*index), Some(Value::Undefined)))
-            {
-                return Err(
-                    "sparse array holes must be sorted, unique undefined slots inside the list"
-                        .into(),
-                );
-            }
-            self.list_holes.insert(id, indexes.into_iter().collect());
-        }
-        Ok(())
-    }
-
-    /// A store to `index` fills the position: it is a real element now.
-    pub(crate) fn clear_list_hole(&mut self, id: HeapId, index: usize) {
-        if let Some(holes) = self.list_holes.get_mut(&id) {
-            if !holes.remove(&index) {
-                return;
-            }
+        if let Some(HeapEntry {
+            object: HeapObject::List { holes: current, .. },
+            ..
+        }) = self.entries.get_mut(&id)
+        {
+            *current = holes;
             self.revisions.insert(id, next_revision());
-            if holes.is_empty() {
-                self.list_holes.remove(&id);
-            }
         }
     }
 
@@ -883,7 +839,9 @@ impl Heap {
             Value::Projected(_) => return Ok(true),
             Value::Tuple(values) | Value::List(values) => values.as_ref(),
             Value::Ref(id) if active.insert(*id) => match self.get(*id)? {
-                HeapObject::Tuple(values) | HeapObject::List(values) => values.as_slice(),
+                HeapObject::Tuple(values) | HeapObject::List { items: values, .. } => {
+                    values.as_slice()
+                }
                 HeapObject::RegExpMatch(result) => result.items.as_slice(),
                 _ => {
                     active.remove(id);
@@ -960,10 +918,12 @@ impl Heap {
             _ => None,
         };
         let primitive = match object.map(|(_, object)| object) {
-            Some(HeapObject::Tuple(values) | HeapObject::List(values)) => Value::String(
-                self.javascript_sequence_string(values, active, depth)?
-                    .into(),
-            ),
+            Some(HeapObject::Tuple(values) | HeapObject::List { items: values, .. }) => {
+                Value::String(
+                    self.javascript_sequence_string(values, active, depth)?
+                        .into(),
+                )
+            }
             Some(HeapObject::RegExpMatch(result)) => Value::String(
                 self.javascript_sequence_string(&result.items, active, depth)?
                     .into(),

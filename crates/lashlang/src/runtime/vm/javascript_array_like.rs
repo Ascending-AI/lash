@@ -140,7 +140,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 HeapObject::Record(record) => {
                     Ok(record.get(key).cloned().unwrap_or(Value::Undefined))
                 }
-                HeapObject::List(items) | HeapObject::Tuple(items) => {
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => {
                     if key == "length" {
                         return Ok(Value::Number(items.len() as f64));
                     }
@@ -210,7 +210,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         match receiver {
             Value::Ref(id) => match self.heap.get(*id)? {
                 HeapObject::Record(record) => Ok(record.get(key).is_some()),
-                HeapObject::List(items) | HeapObject::Tuple(items) => {
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => {
                     if key == "length" {
                         return Ok(true);
                     }
@@ -281,7 +281,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 record.insert_str(key, value);
                 self.heap.commit_object_update(id, object)
             }
-            HeapObject::List(items) => {
+            HeapObject::List { items, .. } => {
                 if key == "length" {
                     let length = to_array_length(self.heap.javascript_to_number(&value)?)?;
                     return self.set_list_length(id, length as usize);
@@ -355,7 +355,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 record.remove(key);
                 self.heap.commit_object_update(id, object)
             }
-            HeapObject::List(items) => {
+            HeapObject::List { items, .. } => {
                 if key == "length" {
                     return Err(RuntimeError::type_error(
                         "Cannot delete property 'length' of array",
@@ -400,7 +400,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// resize itself; for everything else it is an ordinary `Set`.
     fn array_like_set_length(&mut self, receiver: &Value, length: u64) -> Result<(), RuntimeError> {
         if let Value::Ref(id) = receiver
-            && matches!(self.heap.get(*id)?, HeapObject::List(_))
+            && matches!(self.heap.get(*id)?, HeapObject::List { .. })
         {
             return self.set_list_length(*id, length.min(u32::MAX as u64) as usize);
         }
@@ -409,7 +409,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     /// Resize a heap list to `length`, truncating or padding with holes.
     fn set_list_length(&mut self, id: HeapId, length: usize) -> Result<(), RuntimeError> {
-        let HeapObject::List(items) = self.heap.get(id)? else {
+        let HeapObject::List { items, .. } = self.heap.get(id)? else {
             return Err(RuntimeError::ValidationFailed {
                 reason: "TS_ARRAY_LIKE_KIND: receiver is not a list".to_string(),
             });
@@ -445,7 +445,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         }
                     }
                 }
-                HeapObject::List(items) | HeapObject::Tuple(items) => {
+                HeapObject::List { items, .. } | HeapObject::Tuple(items) => {
                     for index in 0..items.len() {
                         if !self.heap.is_list_hole(*id, index) {
                             indices.push(index as u64);
@@ -541,7 +541,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let writable = match receiver {
             Value::Ref(id) => matches!(
                 self.heap.get(*id)?,
-                HeapObject::Record(_) | HeapObject::List(_) | HeapObject::BuiltinFunction(_)
+                HeapObject::Record(_) | HeapObject::List { .. } | HeapObject::BuiltinFunction(_)
             ),
             // A string's index writes throw in `array_like_set`, exactly as
             // V8's string wrapper refuses them. Every other primitive's
@@ -864,7 +864,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             items.extend(list.iter().cloned());
                         }
                         Value::Ref(id) => match self.heap.get(*id)? {
-                            HeapObject::List(list) | HeapObject::Tuple(list) => {
+                            HeapObject::List { items: list, .. } | HeapObject::Tuple(list) => {
                                 items.extend(list.iter().cloned());
                             }
                             HeapObject::RegExpMatch(result) => {
@@ -1357,7 +1357,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Value::Ref(id) => {
                 let id = *id;
                 match self.heap.get(id)? {
-                    HeapObject::List(items) | HeapObject::Tuple(items) => {
+                    HeapObject::List { items, .. } | HeapObject::Tuple(items) => {
                         // A list's indices are dense in memory: the scan is a
                         // walk over the hole set, amortized linear per call.
                         let bound = (items.len() as u64).min(walk.length);
@@ -1616,7 +1616,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Value::List(_) | Value::Tuple(_) => true,
                     Value::Ref(id) => matches!(
                         self.heap.get(*id)?,
-                        HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_)
+                        HeapObject::List { .. } | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_)
                     ),
                     _ => false,
                 };

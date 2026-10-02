@@ -38,9 +38,10 @@ The shared machine owns:
 - allocation-ordered object IDs that are not reused;
 - non-moving mark-sweep collection every 1,024 allocations and at boundaries
   that need an exact live set;
-- logical-memory charges under the registered heap-size schedule and the
+- logical-memory charges computed from the live heap objects and the
   explicit execution bounds of ADR 0055;
-- counters and heap state carried across durable continuation handovers; and
+- the allocation counter and heap objects carried across durable continuation
+  handovers; and
 - the shared AST nesting cap of 64, checked before linking and compilation.
 
 A front end must produce IR within the shared structural bound. TypeScript has
@@ -71,9 +72,8 @@ A reader need not infer ownership from a language selector.
 
 ### Format versions
 
-`lash::formats` exposes the current bytecode, continuation, ABI, snapshot and
-heap-schedule contracts. Their writers and readers use the registered fleet
-version windows. ADR 0115 owns compatibility, migration and drain rules.
+`lash::formats` exposes the current bytecode, continuation, ABI and snapshot
+contracts. Their writers and readers use the registered fleet version windows. ADR 0115 owns compatibility, migration and drain rules.
 During the pre-1.0 freeze, shapes change in place without version bumps or
 upcasters.
 

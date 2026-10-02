@@ -74,7 +74,7 @@ impl Heap {
         out: &mut String,
     ) {
         match object {
-            HeapObject::Tuple(items) | HeapObject::List(items) => {
+            HeapObject::Tuple(items) | HeapObject::List { items, .. } => {
                 self.summarize_members(
                     depth,
                     "[",

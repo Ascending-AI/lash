@@ -100,7 +100,9 @@ pub(crate) fn rebind_record(record: &mut Record, rebind: &mut Rebind<'_>) -> boo
 /// Rebinds the placeholders one heap object holds, in place.
 pub(crate) fn rebind_object(object: &mut HeapObject, rebind: &mut Rebind<'_>) -> bool {
     match object {
-        HeapObject::Tuple(values) | HeapObject::List(values) => rebind_values(values, rebind),
+        HeapObject::Tuple(values) | HeapObject::List { items: values, .. } => {
+            rebind_values(values, rebind)
+        }
         HeapObject::Record(record) => rebind_record(record, rebind),
         HeapObject::Closure {
             captures,

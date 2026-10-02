@@ -508,7 +508,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let mut bound = match bound_args {
                 Value::List(values) | Value::Tuple(values) => values.to_vec(),
                 Value::Ref(bound_id) => match self.heap.get(*bound_id)? {
-                    HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                    HeapObject::List { items: values, .. } | HeapObject::Tuple(values) => {
+                        values.clone()
+                    }
                     _ => {
                         return Err(RuntimeError::ValidationFailed {
                             reason: "invalid bound-function argument list".to_string(),
@@ -1182,7 +1184,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             if matches!(callback.completion, CallbackCompletion::FlatMap) =>
                         {
                             match self.heap.get(*id)? {
-                                HeapObject::List(values) | HeapObject::Tuple(values) => {
+                                HeapObject::List { items: values, .. }
+                                | HeapObject::Tuple(values) => {
                                     items.extend(values.iter().cloned());
                                 }
                                 _ => items.push(result.clone()),
