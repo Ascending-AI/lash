@@ -280,7 +280,7 @@ async fn operator_json_contract_postgres() {
     let (code, preflight) = run(&["preflight", "--json"], Some(&scratch_url));
     assert_eq!(code, 0);
     assert_envelope(&preflight, "preflight", true, false);
-    assert_eq!(preflight["result"]["outcome"], "done");
+    assert_eq!(preflight["result"]["outcome"], "ready");
     assert_keys(
         &preflight["result"],
         &["databases", "fleet_format", "outcome", "release"],
@@ -445,7 +445,7 @@ async fn operator_json_contract_postgres() {
     assert_eq!(code, 4);
     assert_envelope(&incompatible, "preflight", true, true);
     assert_eq!(incompatible["error"]["code"], "incompatible_store");
-    assert_eq!(incompatible["result"]["outcome"], "incompatible_store");
+    assert_eq!(incompatible["result"]["outcome"], "refused");
     assert_eq!(incompatible["result"]["databases"][0]["verdict"], "refused");
     assert_eq!(incompatible["result"]["databases"][0]["min_reader"], 2);
     assert_eq!(

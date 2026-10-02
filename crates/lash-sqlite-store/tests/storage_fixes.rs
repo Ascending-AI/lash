@@ -27,9 +27,9 @@ use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
 use lash_core_execution::{
     AttachmentReferrers, AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore,
     RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
-    StoreError, StorePreflight, StoreSchemaVerdict, ToolState,
+    StoreError, StoreSchemaVerdict, ToolState,
 };
-use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
+use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
 
 fn unique_db_path(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -470,12 +470,9 @@ async fn unsupported_compatibility_floor_reports_real_versions() {
     .expect("raise the recorded reader floor");
     drop(conn);
 
-    let status = SqliteStorePreflight::for_durable_core(&path)
-        .schema_status()
-        .await
-        .expect("inspect unsupported stamp");
+    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
     assert_eq!(
-        status.databases[0].verdict,
+        found.verdict,
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::ReaderFloorAbove {
                 component: "sqlite-core".to_owned(),
@@ -624,12 +621,9 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
         .unwrap();
     drop(conn);
-    let status = SqliteStorePreflight::for_durable_core(&path)
-        .schema_status()
-        .await
-        .expect("inspect predecessor stamp");
+    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
     assert_eq!(
-        status.databases[0].verdict,
+        found.verdict,
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::ReaderFloorAbove {
                 component: "sqlite-core".to_owned(),

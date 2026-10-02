@@ -119,6 +119,34 @@ pub struct SchemaReport {
     pub databases: Vec<SchemaDatabaseReport>,
     /// Which lash release wrote this store, when the store records one.
     pub release: ReleaseStampReport,
+    /// The fleet epoch the store's writers emit, when the store records one.
+    pub fleet_format: FleetFormatReport,
+}
+
+/// The fleet-format row the store records — or the explicit statement that
+/// it records none.
+///
+/// The three arms are kept apart for the same reason as
+/// [`ReleaseStampReport`]'s: an unrecorded row and an unreadable one are
+/// different findings, and collapsing them would report a row nobody could
+/// read as an observed absence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+#[non_exhaustive]
+pub enum FleetFormatReport {
+    /// The store records the fleet epoch its writers emit (ADR 0106 §1 `F`).
+    Recorded {
+        /// The recorded generation.
+        version: u32,
+    },
+    /// The store carries no fleet-format row: either nothing has opened it
+    /// yet, or it was last written by a build that predates the row.
+    Unrecorded,
+    /// A row is present but this build could not read it.
+    Unreadable {
+        /// The backend's own words.
+        reason: String,
+    },
 }
 
 /// Which lash release wrote the store — or the explicit statement that it
@@ -729,6 +757,7 @@ mod tests {
                 outcome: "ready",
                 databases: Vec::new(),
                 release: ReleaseStampReport::Unstamped,
+                fleet_format: FleetFormatReport::Unrecorded,
             },
             components: vec![tally.into_row(
                 DurableFormat::LashlangSegmentHandover,

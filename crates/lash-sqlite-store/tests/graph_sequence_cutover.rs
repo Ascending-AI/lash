@@ -1,6 +1,6 @@
+use lash_core_execution::StoreSchemaVerdict;
 use lash_core_execution::compat::CompatRefusal;
-use lash_core_execution::{StorePreflight, StoreSchemaVerdict};
-use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
+use lash_sqlite_store::{SqliteDatabase, SqliteStore, verify_schema_at};
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
@@ -41,12 +41,9 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         .expect("stamp a predecessor whose reader floor excludes this build");
     drop(connection);
 
-    let status = SqliteStorePreflight::for_durable_core(&path)
-        .schema_status()
-        .await
-        .expect("inspect old catalog without decoding blobs");
+    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
     assert_eq!(
-        status.databases[0].verdict,
+        found.verdict,
         StoreSchemaVerdict::Refused {
             refusal: CompatRefusal::ReaderFloorAbove {
                 component: "sqlite-core".to_owned(),
@@ -105,11 +102,8 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
         .expect("stamp an expanded catalog under this build's reader floor");
     drop(connection);
 
-    let status = SqliteStorePreflight::for_durable_core(&path)
-        .schema_status()
-        .await
-        .expect("inspect expanded graph catalog");
-    match &status.databases[0].verdict {
+    let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
+    match &found.verdict {
         StoreSchemaVerdict::Refused {
             refusal:
                 CompatRefusal::ShapeRefused {

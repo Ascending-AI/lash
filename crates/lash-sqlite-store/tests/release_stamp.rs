@@ -16,7 +16,7 @@ use lash_core_execution::{
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {
-    _root: tempfile::TempDir,
+    root: tempfile::TempDir,
     durable_core: PathBuf,
 }
 
@@ -37,7 +37,7 @@ impl ReleaseStampDeployment for SqliteBackend {
     }
 
     async fn preflight(&self) -> Result<StoreSchemaStatus, StoreError> {
-        SqliteStorePreflight::for_durable_core(&self.durable_core)
+        SqliteStorePreflight::for_store_root(self.root.path())
             .schema_status()
             .await
     }
@@ -73,10 +73,7 @@ fn raise_reader_floor_above_this_build(connection: &rusqlite::Connection) -> u32
 async fn sqlite_release_stamp_conformance() {
     let root = tempfile::tempdir().expect("scratch directory");
     let durable_core = root.path().join("durable-core.db");
-    let backend = SqliteBackend {
-        _root: root,
-        durable_core,
-    };
+    let backend = SqliteBackend { root, durable_core };
     release_stamp_conformance(&backend).await;
 }
 
@@ -95,7 +92,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
     let above = raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
-    let status = SqliteStorePreflight::for_durable_core(&path)
+    let status = SqliteStorePreflight::for_store_root(root.path())
         .schema_status()
         .await
         .expect("inspect refused store");
@@ -135,7 +132,7 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     let above = raise_reader_floor_above_this_build(&connection);
     drop(connection);
 
-    let status = SqliteStorePreflight::for_durable_core(&path)
+    let status = SqliteStorePreflight::for_store_root(root.path())
         .schema_status()
         .await
         .expect("inspect refused store");

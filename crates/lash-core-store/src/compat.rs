@@ -306,6 +306,24 @@ pub enum CompatRefusal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_release: Option<String>,
     },
+    /// A SQLite store set holds some of its databases but not all: the open
+    /// refuses a partial set rather than provisioning the missing databases
+    /// beside the survivors.
+    #[error(
+        "the store set is incomplete: {} not found beside the surviving databases. An open \
+         refuses a partial set rather than provisioning the missing databases in place; \
+         restore them from a backup, or remove the whole set and let the next open \
+         provision it fresh{}",
+        .missing.join(", "),
+        release_suffix(.writing_release)
+    )]
+    IncompleteStoreSet {
+        /// The operator-facing names of the absent databases, in store-set
+        /// order — the same names the preflight report's database rows carry.
+        missing: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
+    },
     /// The SQLite databases of one store disagree on their stamps or `F`.
     #[error(
         "the store's databases disagree on their stamps ({}): a migration or finalize stopped \
@@ -356,6 +374,9 @@ impl CompatRefusal {
                 writing_release, ..
             }
             | Self::FleetUnrecorded {
+                writing_release, ..
+            }
+            | Self::IncompleteStoreSet {
                 writing_release, ..
             }
             | Self::PartiallyAdvanced {

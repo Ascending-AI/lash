@@ -64,9 +64,9 @@ use extract::{Extraction, extract, primary_format};
 use report::{FormatTally, reads_version};
 
 pub use report::{
-    ComponentReadability, ComponentVerdict, DrainBlocker, FormatEvidence, FoundVersion, NotScanned,
-    PreflightMode, PreflightOutcome, PreflightReport, ReleaseStampComponent, ReleaseStampReport,
-    SchemaDatabaseReport, SchemaReport,
+    ComponentReadability, ComponentVerdict, DrainBlocker, FleetFormatReport, FormatEvidence,
+    FoundVersion, NotScanned, PreflightMode, PreflightOutcome, PreflightReport,
+    ReleaseStampComponent, ReleaseStampReport, SchemaDatabaseReport, SchemaReport,
 };
 
 /// How many items one page of a surface walk asks for.
@@ -583,7 +583,12 @@ fn owner(item: &DurableItem) -> String {
     }
 }
 
-fn schema_report(status: &StoreSchemaStatus) -> SchemaReport {
+/// The typed, serializable projection of a backend's [`StoreSchemaStatus`].
+///
+/// This is the one conversion between the store contract and the operator
+/// wire: `lashctl preflight --json` serializes what this returns rather than
+/// re-rendering the status by hand, so the two cannot drift.
+pub fn schema_report(status: &StoreSchemaStatus) -> SchemaReport {
     SchemaReport {
         outcome: match status.outcome() {
             StoreSchemaOutcome::Ready => "ready",
@@ -628,6 +633,23 @@ fn schema_report(status: &StoreSchemaStatus) -> SchemaReport {
             })
             .collect(),
         release: release_report(&status.release),
+        fleet_format: fleet_format_report(&status.fleet_format),
+    }
+}
+
+fn fleet_format_report(state: &lash_core::FleetFormatState) -> FleetFormatReport {
+    match state {
+        lash_core::FleetFormatState::Recorded(format) => FleetFormatReport::Recorded {
+            version: format.version(),
+        },
+        lash_core::FleetFormatState::Unrecorded => FleetFormatReport::Unrecorded,
+        lash_core::FleetFormatState::Unreadable { reason } => FleetFormatReport::Unreadable {
+            reason: reason.clone(),
+        },
+        // A state this build does not know is undecided, never an absence.
+        other => FleetFormatReport::Unreadable {
+            reason: format!("unrecognised fleet-format state: {other}"),
+        },
     }
 }
 

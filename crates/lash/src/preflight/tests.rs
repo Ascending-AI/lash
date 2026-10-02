@@ -965,6 +965,7 @@ fn an_identity_only_refusal_says_how_many_items_another_build_wrote() {
             outcome: "ready",
             databases: Vec::new(),
             release: ReleaseStampReport::Unstamped,
+            fleet_format: crate::preflight::FleetFormatReport::Unrecorded,
         },
         components: vec![ComponentReadability {
             format_key: DurableFormat::Bytecode,

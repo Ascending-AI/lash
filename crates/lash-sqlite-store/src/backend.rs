@@ -18,34 +18,6 @@ use crate::{
     SqliteTriggerStore, StoreOptions,
 };
 
-/// A file store set has some of its databases, but cannot open until all
-/// three are present. Opening it creates no missing database and migrates
-/// none of the surviving databases.
-///
-/// Returned through the open error's source chain. The
-/// `rusqlite::Error::ToSqlConversionFailure` source can be downcast to this
-/// type without parsing the refusal message.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IncompleteSqliteStoreSet {
-    /// Every absent database, in the store set's database order.
-    pub missing: Vec<SqliteDatabase>,
-}
-
-impl std::fmt::Display for IncompleteSqliteStoreSet {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("incomplete SQLite store set; missing databases: ")?;
-        for (index, database) in self.missing.iter().enumerate() {
-            if index != 0 {
-                formatter.write_str(", ")?;
-            }
-            write!(formatter, "{} ({})", database.name(), database.file_name())?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for IncompleteSqliteStoreSet {}
-
 /// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
 /// journal and so has no effect-replay options.
 #[derive(Clone, Debug, Default)]
@@ -147,7 +119,8 @@ fn system_clock() -> Arc<dyn Clock> {
 impl SqliteStoreSet {
     /// The file store set under `root`, created if all databases are absent.
     /// A root containing only some databases refuses with
-    /// [`IncompleteSqliteStoreSet`] in the error's source chain.
+    /// [`CompatRefusal::IncompleteStoreSet`](lash_core_execution::compat::CompatRefusal::IncompleteStoreSet)
+    /// in the error's source chain.
     pub async fn open(root: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
         Self::open_with_clock(root, system_clock()).await
     }
@@ -644,13 +617,23 @@ mod tests {
                 else {
                     panic!("the refusal must preserve its typed source: {error:?}");
                 };
-                let refusal = source
-                    .downcast_ref::<IncompleteSqliteStoreSet>()
-                    .unwrap_or_else(|| panic!("expected an incomplete set refusal: {error:?}"));
-                assert_eq!(refusal.missing, missing, "fixture version {version}");
+                let Some(lash_core_execution::StoreError::Incompatible {
+                    refusal:
+                        lash_core_execution::compat::CompatRefusal::IncompleteStoreSet {
+                            missing: reported,
+                            ..
+                        },
+                }) = source.downcast_ref::<lash_core_execution::StoreError>()
+                else {
+                    panic!("expected an incomplete set refusal: {error:?}");
+                };
+                let expected: Vec<String> = missing
+                    .iter()
+                    .map(|database| database.name().to_owned())
+                    .collect();
+                assert_eq!(reported, &expected, "fixture version {version}");
                 for database in missing {
                     assert!(error.to_string().contains(database.name()), "{error}");
-                    assert!(error.to_string().contains(database.file_name()), "{error}");
                     assert!(!root.path().join(database.file_name()).exists());
                 }
                 for (path, before) in surviving {

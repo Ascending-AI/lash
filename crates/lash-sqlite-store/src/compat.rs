@@ -355,11 +355,13 @@ pub(crate) fn read_fleet_state(conn: &Connection) -> rusqlite::Result<FleetForma
     }
 }
 
-/// Answer whether every database file is absent. A partially present set
-/// refuses before any migration or component installer can mutate it.
-pub(crate) fn check_set_files(location: &SqliteLocation) -> rusqlite::Result<bool> {
+/// The store set's databases whose files are absent under a file root.
+///
+/// A memory location names `memdb` databases its backend creates and pins;
+/// there are no files to miss, so the answer is empty.
+pub(crate) fn missing_files(location: &SqliteLocation) -> rusqlite::Result<Vec<SqliteDatabase>> {
     let SqliteLocation::File { root } = location else {
-        return Ok(false);
+        return Ok(Vec::new());
     };
     let mut missing = Vec::new();
     for database in SqliteDatabase::ALL {
@@ -371,14 +373,25 @@ pub(crate) fn check_set_files(location: &SqliteLocation) -> rusqlite::Result<boo
             missing.push(database);
         }
     }
+    Ok(missing)
+}
+
+/// Answer whether every database file is absent. A partially present set
+/// refuses before any migration or component installer can mutate it.
+pub(crate) fn check_set_files(location: &SqliteLocation) -> rusqlite::Result<bool> {
+    let missing = missing_files(location)?;
     if missing.is_empty() {
         Ok(false)
     } else if missing.len() == SqliteDatabase::ALL.len() {
         Ok(true)
     } else {
-        Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-            crate::IncompleteSqliteStoreSet { missing },
-        )))
+        Err(incompatible(CompatRefusal::IncompleteStoreSet {
+            missing: missing
+                .iter()
+                .map(|database| database.name().to_owned())
+                .collect(),
+            writing_release: None,
+        }))
     }
 }
 

@@ -12,19 +12,19 @@ use lash_core_store::store::fleet_finalize::{
     FinalizeError, FinalizeHold, FinalizeMode, FinalizeRefusal,
 };
 use lash_core_store::store::{
-    FLEET_WRITABLE_RANGE, FleetFormatState, StorePreflight, StoreReleaseState, StoreSchemaOutcome,
-    StoreSchemaVerdict,
+    FLEET_WRITABLE_RANGE, StorePreflight, StoreSchemaOutcome, StoreSchemaStatus,
 };
 use lash_core_store::store::{ObligationKey, ObligationKind, StalledObligation, StoreError};
 use lash_postgres_store::{
     FinalizeReport, MigrateError, MigrationPhase, MigrationReport, MigrationStep,
-    PostgresConnectionBudget, PostgresStorage, PostgresStoreConfig, PostgresStorePreflight,
+    PostgresConnectionBudget, PostgresConnectionBudgetReport, PostgresStorage, PostgresStoreConfig,
+    PostgresStorePreflight,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 /// version_guard(
-///     shapes(cover(StepDto)),
+///     shapes(cover(StepDto, PreflightJson)),
 ///     roots(Exit, CliError),
 ///     roots(path = "crates/lash-core-store/src/store/fleet_finalize.rs", FinalizeRefusal),
 ///     roots(path = "crates/lash-postgres-store/src/postgres/migrate.rs", MigrationRefusal),
@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 ///     items(
 ///         name, from, run, output, error_json, objects_preflight_result, objects_sweep_result,
 ///         finalize_result, hold_result, migration_result, stalled_row, stalled_result,
-///         drain_status_result, version_result,
+///         drain_status_result, version_result, preflight_result,
 ///     ),
 ///     shapes(
 ///         path = "crates/lash-postgres-store/src/connection_budget.rs",
@@ -492,6 +492,32 @@ fn objects_sweep_result(report: &lash_restate::SweepReport) -> Value {
     })
 }
 
+/// `preflight`'s result body: the facade's typed schema report, with the
+/// PostgreSQL-only connection-budget answer appended when the caller asked
+/// for one.
+///
+/// The schema fields serialize from [`lash::preflight::SchemaReport`], the
+/// same projection `probe_store` reports: one conversion from
+/// `StoreSchemaStatus` exists, so this wire cannot drift from the facade's.
+#[derive(Serialize)]
+struct PreflightJson<'a> {
+    #[serde(flatten)]
+    schema: lash::preflight::SchemaReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_budget: Option<&'a PostgresConnectionBudgetReport>,
+}
+
+fn preflight_result(
+    status: &StoreSchemaStatus,
+    connection_budget: Option<&PostgresConnectionBudgetReport>,
+) -> Value {
+    serde_json::to_value(PreflightJson {
+        schema: lash::preflight::schema_report(status),
+        connection_budget,
+    })
+    .expect("the typed preflight report serializes")
+}
+
 #[derive(Serialize)]
 struct StepDto<'a> {
     phase: &'a str,
@@ -786,51 +812,13 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
             let status = probe.schema_status().await.map_err(CliError::store);
             probe.close().await;
             let status = status?;
-            let outcome = status.outcome();
-            let databases = status.databases.iter().map(|database| {
-                let (verdict, found, refusal, reason) = match &database.verdict {
-                    StoreSchemaVerdict::Matches => ("matches", None, None, None),
-                    StoreSchemaVerdict::Expanded { found } => ("expanded", Some(*found), None, None),
-                    StoreSchemaVerdict::Refused { refusal } => ("refused", None, Some(refusal), None),
-                    StoreSchemaVerdict::Migratable { found } => ("migratable", Some(*found), None, None),
-                    StoreSchemaVerdict::Mismatch { found } => ("mismatch", Some(*found), None, None),
-                    StoreSchemaVerdict::Absent => ("absent", None, None, None),
-                    StoreSchemaVerdict::Unreadable { reason } => ("unreadable", None, None, Some(reason.as_str())),
-                    _ => ("unknown", None, None, None),
-                };
-                json!({"name":database.name,"location":database.location,"expected":database.expected,"min_reader":database.min_reader,"verdict":verdict,"found":found,"refusal":refusal,"reason":reason})
-            }).collect::<Vec<_>>();
-            let release = match &status.release {
-                StoreReleaseState::Stamped(stamp) => {
-                    json!({"state":"stamped","release":stamp.release,"written_at_ms":stamp.written_at_epoch_ms})
-                }
-                StoreReleaseState::Unstamped => json!({"state":"unstamped"}),
-                StoreReleaseState::Unreadable { reason } => {
-                    json!({"state":"unreadable","reason":reason})
-                }
-                _ => json!({"state":"unknown"}),
-            };
-            let fleet = match &status.fleet_format {
-                FleetFormatState::Recorded(value) => {
-                    json!({"state":"recorded","version":value.version()})
-                }
-                FleetFormatState::Unrecorded => json!({"state":"unrecorded"}),
-                FleetFormatState::Unreadable { reason } => {
-                    json!({"state":"unreadable","reason":reason})
-                }
-                _ => json!({"state":"unknown"}),
-            };
-            let exit = match outcome {
+            let exit = match status.outcome() {
                 StoreSchemaOutcome::Ready => Exit::Done,
                 StoreSchemaOutcome::Refused => Exit::Incompatible,
                 StoreSchemaOutcome::Undecided => Exit::Refused,
                 _ => Exit::Refused,
             };
-            let mut result = json!({"outcome":exit.name(),"databases":databases,"release":release,"fleet_format":fleet});
-            if let Some(capacity) = capacity {
-                result["connection_budget"] = json!(capacity);
-            }
-            (result, exit)
+            (preflight_result(&status, capacity.as_ref()), exit)
         }
         Command::Drain { generation }
         | Command::EndDrain { generation }

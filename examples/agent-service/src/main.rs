@@ -154,15 +154,7 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 /// version bump. The report names what it skipped, so the exit code is never
 /// justified by a silence.
 async fn preflight_or_exit(session_store_root: &std::path::Path) -> anyhow_like::Result<()> {
-    let handle =
-        lash_sqlite_store::SqliteStorePreflight::for_session_store_root(session_store_root)
-            .with_process_registry(
-                session_store_root
-                    .join(lash_sqlite_store::SqliteDatabase::ProcessRegistry.file_name()),
-            )
-            .with_trigger_store(
-                session_store_root.join(lash_sqlite_store::SqliteDatabase::Triggers.file_name()),
-            );
+    let handle = lash_sqlite_store::SqliteStorePreflight::for_store_root(session_store_root);
     let report =
         lash::preflight::probe_store(&handle, lash::preflight::PreflightOptions::summary())
             .await

@@ -12,7 +12,7 @@ use lash_core_execution::{
 use lash_sqlite_store::{SqliteStore, SqliteStorePreflight};
 
 struct SqliteBackend {
-    _root: tempfile::TempDir,
+    root: tempfile::TempDir,
     durable_core: PathBuf,
 }
 
@@ -46,7 +46,7 @@ impl FleetFormatDeployment for SqliteBackend {
     }
 
     async fn preflight(&self) -> Result<StoreSchemaStatus, StoreError> {
-        SqliteStorePreflight::for_durable_core(&self.durable_core)
+        SqliteStorePreflight::for_store_root(self.root.path())
             .schema_status()
             .await
     }
@@ -56,10 +56,7 @@ impl FleetFormatDeployment for SqliteBackend {
 async fn sqlite_fleet_format_conformance() {
     let root = tempfile::tempdir().expect("scratch directory");
     let durable_core = root.path().join("durable-core.db");
-    let backend = SqliteBackend {
-        _root: root,
-        durable_core,
-    };
+    let backend = SqliteBackend { root, durable_core };
     fleet_format_conformance(&backend).await;
 }
 

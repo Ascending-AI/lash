@@ -43,7 +43,6 @@
 //! reads "nobody looked" instead of mistaking silence for "nothing here".
 
 use lash_sansio::SessionId;
-use std::path::Path;
 
 use lash_core_execution::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
@@ -53,6 +52,8 @@ use rusqlite::{Connection, params};
 
 use super::SqliteStorePreflight;
 use crate::conn::SqliteConnection;
+use crate::location::DatabaseTarget;
+use crate::schema::SqliteDatabase;
 
 /// Never returns `Err`: every failure this path can reach is attributable to a
 /// database (reported as [`ScanCoverage::NotScanned`]) or to an item (reported
@@ -63,25 +64,17 @@ pub(super) async fn scan_durable(
     preflight: &SqliteStorePreflight,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let path: &Path = match scan.surface {
+    let target: DatabaseTarget = match scan.surface {
         DurableSurface::ParkedSegment
         | DurableSurface::PendingWake
         | DurableSurface::StartedProcess => {
-            let Some(path) = preflight.process_registry.as_deref() else {
-                // Not an empty page. A deployment that never declared a process
-                // registry has a registry nobody looked at, and the difference
-                // between that and "the registry holds nothing" is the whole
-                // reason `ScanCoverage` exists.
-                return Ok(not_scanned(format!(
-                    "this deployment declared no process registry, so {} were not read",
-                    scan.surface.name()
-                )));
-            };
-            path
+            preflight.location.target(SqliteDatabase::ProcessRegistry)
         }
         DurableSurface::ModuleArtifact
         | DurableSurface::SessionCheckpoint
-        | DurableSurface::SessionExecutionState => preflight.durable_core.as_path(),
+        | DurableSurface::SessionExecutionState => {
+            preflight.location.target(SqliteDatabase::DurableCore)
+        }
         // `DurableSurface` is `#[non_exhaustive]`: a surface added upstream
         // before this backend learns to walk it must report that nobody looked,
         // never an empty page that reads as "nothing parked here".
@@ -93,9 +86,9 @@ pub(super) async fn scan_durable(
         }
     };
 
-    if !path.exists() {
-        // A declared database that was never provisioned is *scanned*: nothing
-        // is parked in a file that does not exist, and the walk reached that
+    if !target.exists() {
+        // A set member that was never provisioned is *scanned*: nothing is
+        // parked in a database that does not exist, and the walk reached that
         // conclusion by looking. Reporting it as unscanned would put a
         // deployment with genuinely nothing to drain on the "investigate this"
         // list forever.
@@ -104,11 +97,7 @@ pub(super) async fn scan_durable(
 
     // A failed read-only open is a database nobody could read, never a reason to reach for a
     // connection that can write.
-    let conn = match SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(
-        path.to_path_buf(),
-    ))
-    .await
-    {
+    let conn = match SqliteConnection::open_readonly(&target).await {
         Ok(conn) => conn,
         Err(error) => return Ok(not_scanned(error.to_string())),
     };
