@@ -36,7 +36,8 @@ pub struct GenerationWork {
     pub live_processes: u64,
     /// Parked processes whose parked checkpoint the generation wrote: they
     /// resume only on a build of the generation, or are resolved by an
-    /// operator.
+    /// operator. A successor the newest build refused counts here until the
+    /// drain's re-send runs it on the generation's build (FIG-4750).
     pub parked_processes: u64,
     /// Parked turns whose parked checkpoint the generation wrote.
     pub parked_turns: u64,
@@ -93,9 +94,11 @@ pub trait GenerationDrainStore: Send + Sync {
 /// turns whose checkpoint it wrote, and the turns its drives admitted that
 /// have not settled (FIG-3884). The recovery leader wakes the live
 /// processes, each hands its open wait to a successor on the newest build,
-/// and the count runs down. Parked work does not move by itself: an
-/// operator redrives it on a build of the generation, cancels it, or forks
-/// it. Nor is a drain finished while a session is closing: its close ended
+/// and the count runs down. A process parked because the newest build
+/// refused its successor is sent back to the generation's build by the same
+/// pass and runs there until it ends (FIG-4750). Other parked work does not
+/// move by itself: an operator redrives it on a build of the generation,
+/// cancels it, or forks it. Nor is a drain finished while a session is closing: its close ended
 /// its roots, but each root's turn-control waits stay registered with the
 /// engine, on whichever build ran the root, until the session's physical
 /// delete revokes them (ADR 0109 §4).

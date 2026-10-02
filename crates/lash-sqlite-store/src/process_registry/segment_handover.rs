@@ -70,6 +70,54 @@ impl SqliteProcessRegistry {
         Ok(())
     }
 
+    pub(super) async fn record_segment_handover_route_impl(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+        route: &str,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        let process_id = process_id.clone();
+        let route = route.to_owned();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let existing: Option<String> = tx
+                        .query_row(
+                            process_sql().handover.select_by_ordinal.sql(),
+                            params![process_id.as_str(), segment_ordinal as i64],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(process_sqlite_error)?;
+                    let Some(existing) = existing else {
+                        return Ok(());
+                    };
+                    let mut handover: PersistedSegmentHandover =
+                        serde_json::from_str(&existing).map_err(process_decode_error)?;
+                    if handover.route == route {
+                        return Ok(());
+                    }
+                    handover.route = route;
+                    let encoded = process_encode_json(&handover)?;
+                    crate::conn::cached_execute(
+                        tx,
+                        process_sql().handover.set_route.sql(),
+                        params![
+                            process_id.as_str(),
+                            segment_ordinal as i64,
+                            encoded,
+                            handover.route
+                        ],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    Ok(())
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)??;
+        Ok(())
+    }
+
     pub(super) async fn get_segment_handover_impl(
         &self,
         process_id: &ProcessId,

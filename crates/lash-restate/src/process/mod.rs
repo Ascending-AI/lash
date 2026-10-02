@@ -647,23 +647,7 @@ impl RestateProcessIngressRunner {
         let sender_generation = latest_handover
             .as_ref()
             .and_then(|handover| handover.written_generation.clone());
-        let registration = ProcessRegistration {
-            start_key: record.start_key.clone(),
-            input: record.input.clone(),
-            lifetime: record.lifetime.clone(),
-            ancestry: record.ancestry.clone(),
-            session_capability: record.session_capability.clone(),
-            identity: record.identity.clone(),
-            event_types: record.event_types.clone(),
-            provenance: record.provenance.clone(),
-            env_ref: record.env_ref.clone(),
-            wake_session_id: None,
-            // The hold and the pin live on the registry row, not in the
-            // workflow input.
-            consumer_hold: None,
-            trigger_delivery_pin: None,
-            engine_config: record.engine_config.clone(),
-        };
+        let registration = submitted_registration(record);
         let execution_context = ProcessExecutionContext::default();
         let invocation_id = self
             .ingress
@@ -698,7 +682,148 @@ impl RestateProcessIngressRunner {
     }
 }
 
+/// The registration a segment's `run` input carries for `record`'s process.
+fn submitted_registration(record: &ProcessRecord) -> ProcessRegistration {
+    ProcessRegistration {
+        start_key: record.start_key.clone(),
+        input: record.input.clone(),
+        lifetime: record.lifetime.clone(),
+        ancestry: record.ancestry.clone(),
+        session_capability: record.session_capability.clone(),
+        identity: record.identity.clone(),
+        event_types: record.event_types.clone(),
+        provenance: record.provenance.clone(),
+        env_ref: record.env_ref.clone(),
+        wake_session_id: None,
+        // The hold and the pin live on the registry row, not in the
+        // workflow input.
+        consumer_hold: None,
+        trigger_delivery_pin: None,
+        engine_config: record.engine_config.clone(),
+    }
+}
+
 impl RestateProcessIngressRunner {
+    /// The process's record when `handover`'s successor is one the newest
+    /// build refused and parked for `generation` (FIG-4750): the handover was
+    /// written by `generation`, the process is parked `RetiredGeneration`
+    /// naming it, and the successor has no start marker. A segment whose own
+    /// journal parked it has started, and is its paused invocation's to
+    /// resume, not the drain's to send.
+    async fn refused_successor(
+        &self,
+        process_id: &ProcessId,
+        handover: &lash_core::PersistedSegmentHandover,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<Option<ProcessRecord>, PluginError> {
+        if handover.written_generation.as_ref() != Some(generation) {
+            return Ok(None);
+        }
+        let Some(record) = self.registry.get_process(process_id).await? else {
+            return Ok(None);
+        };
+        let parked_for_generation = !record.is_terminal()
+            && record.park.as_deref().is_some_and(|park| {
+                matches!(
+                    park.reason,
+                    lash_core::store::ParkReason::RetiredGeneration { .. }
+                ) && park.build_generation.as_ref() == Some(generation)
+            });
+        if !parked_for_generation {
+            return Ok(None);
+        }
+        let started = self
+            .continuations
+            .segment_start(&lash_core::ProcessSegmentKey::new(
+                process_id.clone(),
+                handover.segment_ordinal,
+            ))
+            .await?;
+        Ok(started.is_none().then_some(record))
+    }
+
+    /// The drain's re-send (FIG-4750): send the successor the newest build
+    /// refused to `generation`'s lane, under the sender's own stamp, so the
+    /// lane's input check admits it and a build of the generation runs it.
+    /// The segment's start there records the lane as its handover's route
+    /// and its first fact ends the park.
+    ///
+    /// Idempotent and crash-safe: nothing is written before the send, a
+    /// repeated send coalesces on the segment's workflow key, and the park
+    /// that names the process to the drain stands until the segment runs.
+    /// When no deployment serves the lane the generation is gone: the
+    /// refusal is typed [`RuntimeErrorCode::EngineServiceUnregistered`], and
+    /// the process keeps its park and its handover for an operator.
+    async fn resend_refused_successor(
+        &self,
+        record: &ProcessRecord,
+        segment_ordinal: u64,
+        generation: &lash_core::engine::BuildGeneration,
+    ) -> Result<(), PluginError> {
+        let process_id = &record.id;
+        let lane = self
+            .namespace
+            .generation(crate::LashService::ProcessWorkflow, generation.clone());
+        let route = lane.name().into_owned();
+        let workflow_key = process_segment_workflow_key(process_id, segment_ordinal);
+        let invocation_id = self
+            .ingress
+            .send_lash_workflow(
+                route.as_str(),
+                &workflow_key,
+                "run",
+                &RestateProcessWorkflowInput {
+                    process_id: process_id.clone(),
+                    registration: submitted_registration(record),
+                    execution_context: ProcessExecutionContext::default(),
+                    segment_ordinal,
+                    sender_generation: Some(generation.clone()),
+                },
+            )
+            .await
+            .map_err(|err| {
+                if err.is_service_unregistered() {
+                    PluginError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::EngineServiceUnregistered,
+                        format!(
+                            "process `{process_id}` segment {segment_ordinal} is parked for \
+                             generation `{generation}`, whose lane no deployment serves: {}; \
+                             the process keeps its park and its handover",
+                            crate::ingress::unregistered_service_message(&route, "run", &err)
+                        ),
+                    ))
+                } else {
+                    PluginError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::EngineProcessIngressSubmit,
+                        format!(
+                            "the drain's re-send of process `{process_id}` segment \
+                             {segment_ordinal} to {route} failed: {err}"
+                        ),
+                    ))
+                }
+            })?;
+        tracing::info!(
+            event = "process.successor_resent",
+            process_id = process_id.as_str(),
+            segment_ordinal,
+            generation = generation.as_str(),
+            route = route.as_str(),
+            "the drain re-sent a refused successor to its sender's generation lane"
+        );
+        self.registry
+            .set_external_ref(
+                process_id,
+                ProcessExternalRef {
+                    backend: "restate".to_string(),
+                    id: format!("{route}/{workflow_key}"),
+                    metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
+                    segment_ordinal: Some(segment_ordinal),
+                },
+            )
+            .await
+            .map(|_| ())
+    }
+
     pub(crate) async fn await_terminal_wait(
         &self,
         process_id: &ProcessId,
@@ -800,20 +925,59 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         .await
     }
 
-    /// The drain's wake (FIG-3799): a one-way send to the live segment's
-    /// `deliver_hand_over` handler, under the route its handover recorded,
-    /// keyed by generation and segment so a repeated wake names the first
-    /// invocation. The handler resolves the segment's hand-over promise.
+    /// What the drain of `generation` does to one of its live processes.
+    ///
+    /// - A successor the newest build refused, parked for `generation`
+    ///   (FIG-4750), is re-sent to the generation's lane
+    ///   ([`resend_refused_successor`](Self::resend_refused_successor)).
+    /// - A segment that runs on a generation lane is one the newest build
+    ///   already refused: it is left to finish there, since a hand-over
+    ///   would only be refused again.
+    /// - Any other live segment is woken (FIG-3799): a one-way send to its
+    ///   `deliver_hand_over` handler, under the route its handover recorded,
+    ///   keyed by generation and segment so a repeated wake names the first
+    ///   invocation. The handler resolves the segment's hand-over promise.
     async fn deliver_hand_over(
         &self,
         process_id: &ProcessId,
         generation: &lash_core::engine::BuildGeneration,
     ) -> Result<(), PluginError> {
+        let latest = self
+            .continuations
+            .latest_segment_handover(process_id)
+            .await?
+            .filter(|handover| handover.segment_ordinal > 0);
+        let Some(handover) = latest else {
+            let root = self.namespace.stable(crate::LashService::ProcessWorkflow);
+            return deliver_process_hand_over(
+                &self.ingress,
+                &root.name(),
+                process_id,
+                0,
+                generation,
+            )
+            .await;
+        };
+        if let Some(record) = self
+            .refused_successor(process_id, &handover, generation)
+            .await?
+        {
+            return self
+                .resend_refused_successor(&record, handover.segment_ordinal, generation)
+                .await;
+        }
+        let on_generation_lane = self
+            .namespace
+            .parse(&handover.route)
+            .is_some_and(|route| matches!(route.lane(), crate::services::Lane::Generation(_)));
+        if on_generation_lane {
+            return Ok(());
+        }
         deliver_process_hand_over(
             &self.ingress,
-            &self.namespace,
-            self.continuations.as_ref(),
+            &handover.route,
             process_id,
+            handover.segment_ordinal,
             generation,
         )
         .await
@@ -835,32 +999,21 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
     }
 }
 
-/// Wake `process_id`'s live segment to hand its wait over from `generation`
-/// ([`ProcessWorkSubstrate::deliver_hand_over`] on Restate). The live segment
-/// is the latest handover's successor under the route recorded with it
+/// Wake `process_id`'s live segment `segment_ordinal` to hand its wait over
+/// from `generation` ([`ProcessWorkSubstrate::deliver_hand_over`] on
+/// Restate), under `route`: the route recorded with the latest handover
 /// (FIG-3795 S3), or the root on the stable lane when nothing was handed
 /// over yet.
-pub(crate) async fn deliver_process_hand_over(
+async fn deliver_process_hand_over(
     ingress: &RestateIngressClient,
-    namespace: &crate::RestateNamespace,
-    continuations: &dyn lash_core::ProcessContinuationStore,
+    route: &str,
     process_id: &ProcessId,
+    segment_ordinal: u64,
     generation: &lash_core::engine::BuildGeneration,
 ) -> Result<(), PluginError> {
-    let (segment_ordinal, route) = match continuations.latest_segment_handover(process_id).await? {
-        Some(handover) if handover.segment_ordinal > 0 => {
-            (handover.segment_ordinal, handover.route)
-        }
-        _ => (
-            0,
-            namespace
-                .stable(crate::LashService::ProcessWorkflow)
-                .to_string(),
-        ),
-    };
     ingress
         .send_lash_workflow_idempotent(
-            &route,
+            route,
             &process_segment_workflow_key(process_id, segment_ordinal),
             "deliver_hand_over",
             &RestateProcessHandOverRequest {

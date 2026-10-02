@@ -114,6 +114,60 @@ pub async fn process_continuation_store(
         "another writer's handover at the same ordinal must conflict"
     );
 
+    // FIG-4750: the route is re-recorded in place. The handover's other
+    // bytes stay, a repeat changes nothing, the writer's own retried put
+    // still keeps what is parked, and an ordinal with no handover stays
+    // absent.
+    let lane = "LashProcessWorkflow_gt0";
+    for _ in 0..2 {
+        store
+            .record_segment_handover_route(&process_id, 2, lane)
+            .await
+            .expect("record the segment's route");
+    }
+    let rerouted = PersistedSegmentHandover {
+        route: lane.to_string(),
+        ..written.clone()
+    };
+    assert_eq!(
+        store
+            .get_segment_handover(&process_id, 2)
+            .await
+            .expect("read the re-routed handover"),
+        Some(rerouted.clone()),
+        "only the route changed"
+    );
+    assert_eq!(
+        store
+            .latest_segment_handover(&process_id)
+            .await
+            .expect("read the latest handover"),
+        Some(rerouted.clone())
+    );
+    store
+        .put_segment_handover(&process_id, written)
+        .await
+        .expect("the writer's retried write after the re-route is idempotent");
+    assert_eq!(
+        store
+            .get_segment_handover(&process_id, 2)
+            .await
+            .expect("read the re-routed handover"),
+        Some(rerouted),
+        "the recorded route stays"
+    );
+    store
+        .record_segment_handover_route(&process_id, 9, lane)
+        .await
+        .expect("a route for no handover is a no-op");
+    assert_eq!(
+        store
+            .get_segment_handover(&process_id, 9)
+            .await
+            .expect("read the absent handover"),
+        None
+    );
+
     // FIG-3588: a retained handover carries its segment's start marker,
     // written set-if-absent. The first nonce stays; a second write reads it
     // back unchanged, which is how a different execution learns it lost.

@@ -45,8 +45,10 @@
 //!   hands to the newest build, and under its **generation** name
 //!   (`LashProcessWorkflow_g<G>`, [`Lane::Generation`]), which only builds of
 //!   drain generation `G` serve. Work that must reach the build that started
-//!   it — an effect group's children, a redrive, a successor the newest
-//!   build refused — is sent to the generation name.
+//!   it is sent to the generation name: an effect group's children by their
+//!   opener, a redrive by the recorded route, and a process successor the
+//!   newest build refused by the drain of its sender's generation
+//!   (FIG-4750), whose start there records the lane as its route.
 //!   `EffectGroupDispatch` binds only its generation name: every opener
 //!   records its build's lane, so no call needs a stable dispatcher binding.
 //! - A **shared** service holds state every build reads and writes: the
@@ -419,6 +421,11 @@ impl ServiceRoute {
 
     pub(crate) fn lane(&self) -> &Lane {
         &self.lane
+    }
+
+    /// The route's service name when it is a generation lane.
+    pub(crate) fn generation_lane_name(&self) -> Option<String> {
+        matches!(self.lane, Lane::Generation(_)).then(|| self.name().into_owned())
     }
 
     /// The namespace the route names its service in.

@@ -654,10 +654,13 @@ impl HandOff {
 
     /// The drain's wake of `process_id` for build N's generation.
     async fn wake(&self, process_id: &ProcessId) {
-        crate::process::deliver_process_hand_over(
-            &self.ingress,
-            &crate::services::DEFAULT_NAMESPACE,
-            self.continuations.as_ref(),
+        crate::process::RestateProcessIngressRunner::over_ingress(
+            self.ingress.clone(),
+            crate::RestateNamespace::default(),
+            Arc::clone(&self.registry),
+            Arc::clone(&self.continuations),
+        )
+        .deliver_hand_over(
             process_id,
             &lash_core::engine::BuildGeneration::for_test("N"),
         )

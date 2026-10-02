@@ -416,6 +416,12 @@ async fn read_record(
 /// runs under (FIG-3795 S1): the marker stamps it, and the start journals it
 /// so the returned proof carries the recorded stamp, never the executing
 /// build's own.
+///
+/// `generation_lane` is the service name this admission runs under when that
+/// is a generation lane (FIG-4750): a later segment that starts there is a
+/// successor the drain re-sent after the newest build refused it, and its
+/// start records the lane on its handover before its marker, so every later
+/// cancel, redrive and drain pass addresses the lane the segment runs on.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn admit_segment(
     ctx: &WorkflowContext<'_>,
@@ -425,6 +431,7 @@ pub(crate) async fn admit_segment(
     segment_ordinal: u64,
     generation: Option<lash_core::ExecutableGeneration>,
     build_generation: lash_core::engine::BuildGeneration,
+    generation_lane: Option<String>,
     effect_budget: impl Fn() -> u64 + Send + Sync + 'static,
 ) -> Result<SegmentAdmission, HandlerError> {
     let effect_budget = Arc::new(effect_budget);
@@ -562,6 +569,7 @@ pub(crate) async fn admit_segment(
                         segment_ordinal,
                         nonce,
                         build_generation.clone(),
+                        generation_lane.as_deref(),
                     )
                     .await
                 }
@@ -662,6 +670,7 @@ async fn start_later_segment(
     segment_ordinal: u64,
     nonce: String,
     build_generation: lash_core::engine::BuildGeneration,
+    generation_lane: Option<&str>,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     let root = match retained_start(&record, segment_ordinal) {
@@ -679,6 +688,16 @@ async fn start_later_segment(
             ),
         });
     };
+    // A segment starting on a generation lane records the lane as its
+    // handover's route first (FIG-4750): once the marker says it started,
+    // the recorded route already names where it runs. A retry of this step
+    // records the same route again.
+    if let Some(lane) = generation_lane {
+        continuations
+            .record_segment_handover_route(process_id, segment_ordinal, lane)
+            .await
+            .map_err(store_fault)?;
+    }
     // The marker is refused on an ended process in the transaction that
     // writes it, so no terminal lands between the check and the start
     // (FIG-3819). A terminal is permanent: the record read after the refusal

@@ -346,6 +346,11 @@ pub(crate) async fn end_lost_process_runs(
             return Ok(pass);
         }
     };
+    // Failed runs under a route their segment's handover no longer records:
+    // the newest build's refusal of a successor the drain re-sent to its
+    // sender's generation lane (FIG-4750). Such a run is not the segment's,
+    // so it neither ends the process nor counts as Restate holding its run.
+    let mut off_route = Vec::new();
     for run in runs.iter().filter(|run| run.completed_with_failure()) {
         match crate::session_control::recovery_request(
             deadline,
@@ -353,7 +358,8 @@ pub(crate) async fn end_lost_process_runs(
         )
         .await
         {
-            Ok(Some(process_id)) => {
+            Ok(LostRun::OffRoute) => off_route.push(run.id.as_str()),
+            Ok(LostRun::Ended(process_id)) => {
                 // The lost segment's open usage runs can never settle
                 // (ADR 0125).
                 if let Err(error) = crate::session_control::recovery_request(
@@ -367,14 +373,15 @@ pub(crate) async fn end_lost_process_runs(
                 }
                 pass.ended.push(process_id)
             }
-            Ok(None) => pass.unchanged += 1,
+            Ok(LostRun::Unchanged) => pass.unchanged += 1,
             Err(error) => pass.failed.push((run.id.clone(), error.to_string())),
         }
     }
     for (key, record) in segments {
-        let held = runs
-            .iter()
-            .any(|run| run.target_service_key.as_deref() == Some(key.as_str()));
+        let held = runs.iter().any(|run| {
+            run.target_service_key.as_deref() == Some(key.as_str())
+                && !off_route.contains(&run.id.as_str())
+        });
         if held {
             continue;
         }
@@ -387,30 +394,52 @@ pub(crate) async fn end_lost_process_runs(
     Ok(pass)
 }
 
+/// What [`end_lost_run`] made of one failed run.
+enum LostRun {
+    /// The run was its process's current segment: the process ended
+    /// `SubstrateLost`.
+    Ended(ProcessId),
+    /// The process is gone, terminal, refusing in its park, or carried by a
+    /// later segment.
+    Unchanged,
+    /// The run is under a route the segment's handover does not record: the
+    /// segment runs elsewhere, and this run is not its.
+    OffRoute,
+}
+
 /// End the process of failed segment `run`, when the run was its current
-/// segment and it is still live. The process it ended, if any.
+/// segment and it is still live.
 async fn end_lost_run(
     registry: &Arc<dyn ProcessRegistry>,
     continuations: &Arc<dyn ProcessContinuationStore>,
     run: &RestateInvocationStatus,
-) -> Result<Option<ProcessId>, PluginError> {
+) -> Result<LostRun, PluginError> {
     let Some((record, segment_ordinal)) =
         segment_process_of_key(registry, run.target_service_key.as_deref()).await?
     else {
-        return Ok(None);
+        return Ok(LostRun::Unchanged);
     };
     // A refusing park's run failed by design: the park holds the process
     // until the drain's re-send or an operator's verb resumes it.
     if record.is_terminal() || record.is_refusing_park() {
-        return Ok(None);
+        return Ok(LostRun::Unchanged);
     }
     // A segment that handed over is carried by its successor's run.
-    let latest = continuations
-        .latest_segment_handover(&record.id)
-        .await?
-        .map_or(0, |handover| handover.segment_ordinal);
-    if latest > segment_ordinal {
-        return Ok(None);
+    let latest = continuations.latest_segment_handover(&record.id).await?;
+    if latest
+        .as_ref()
+        .is_some_and(|handover| handover.segment_ordinal > segment_ordinal)
+    {
+        return Ok(LostRun::Unchanged);
+    }
+    // The route is data (FIG-3795 S3): the segment's run is the one under
+    // the route its handover records. A successor the newest build refused
+    // leaves a failed run under the stable name while the drain's re-send
+    // runs the segment on its sender's generation lane (FIG-4750).
+    if latest.is_some_and(|handover| {
+        handover.segment_ordinal == segment_ordinal && handover.route != run.target_service_name
+    }) {
+        return Ok(LostRun::OffRoute);
     }
     let proposed = lash_core::ProcessAwaitOutput::Abandoned {
         evidence: Box::new(lash_core::AbandonEvidence {
@@ -442,9 +471,9 @@ async fn end_lost_run(
                 completion_failure = run.completion_failure.as_deref().unwrap_or_default(),
                 "a process segment's run ended without its terminal; the process ends substrate-lost"
             );
-            Ok(Some(record.id))
+            Ok(LostRun::Ended(record.id))
         }
-        Err(PluginError::ProcessHandedOver { .. }) => Ok(None),
+        Err(PluginError::ProcessHandedOver { .. }) => Ok(LostRun::Unchanged),
         Err(error) => Err(error),
     }
 }

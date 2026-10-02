@@ -216,6 +216,17 @@ impl lash_core::ProcessContinuationStore for GatedContinuations {
         self.inner.latest_segment_handover(process_id).await
     }
 
+    async fn record_segment_handover_route(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+        route: &str,
+    ) -> Result<(), PluginError> {
+        self.inner
+            .record_segment_handover_route(process_id, segment_ordinal, route)
+            .await
+    }
+
     async fn retire_segment_handovers_through(
         &self,
         process_id: &ProcessId,
@@ -969,8 +980,8 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
         "{case}: the refusal publishes no terminal"
     );
 
-    // The drain's re-send, which FIG-3799 automates: the sender's lane, its
-    // own generation stamped.
+    // The re-send as the drain makes it (FIG-4750, whose laws run the drain
+    // itself): the sender's lane, its own generation stamped.
     let lane = crate::services::DEFAULT_NAMESPACE
         .generation(crate::LashService::ProcessWorkflow, generation("N"));
     roll.ingress
@@ -1349,3 +1360,4 @@ async fn l5_a_forced_stable_redrive_after_the_reroute_adds_no_effects() {
 }
 
 mod crash_cuts;
+mod refused_successor_drain;

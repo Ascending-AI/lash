@@ -318,6 +318,8 @@ server-double-e2e:
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite recorded-roots --leg replay
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg live
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite drain-hand-over --leg replay
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite refused-successor-drain --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite refused-successor-drain --leg replay
 
 # The crash-point matrix (FIG-3849) with a live `restate-server` as its engine
 # (FIG-3872): every active cell of `lash_sim::crash_matrix::MATRIX` over its

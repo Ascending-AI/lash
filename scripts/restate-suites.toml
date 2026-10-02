@@ -238,6 +238,18 @@ endpoints = ["DH_A", "DH_B"]
 shards = 1
 timeout_seconds = 240
 
+# The drain's re-send of a process successor the newest build refused
+# (FIG-4750): build N and build N+1 are two endpoints of one test process
+# over one store set, so two endpoint binds per shard. The laws run one after
+# the other in one test, since each registers build N anew.
+[suites.refused-successor-drain]
+label = "//crates/lash-restate:lash-restate__unit_test"
+cwd = "crates/lash-restate"
+filters = ["tests::segment_generation_handoff::refused_successor_drain::live_restate_"]
+endpoints = ["RSD_A", "RSD_B"]
+shards = 1
+timeout_seconds = 240
+
 [suites.remote-cancellation]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"

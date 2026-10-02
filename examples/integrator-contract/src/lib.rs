@@ -610,6 +610,14 @@ impl ProcessContinuationStore for Integrator {
     ) -> Result<Option<PersistedSegmentHandover>, PluginError> {
         unreachable!("external signature witness")
     }
+    async fn record_segment_handover_route(
+        &self,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+        route: &str,
+    ) -> Result<(), PluginError> {
+        unreachable!("external signature witness")
+    }
     async fn retire_segment_handovers_through(
         &self,
         process_id: &ProcessId,

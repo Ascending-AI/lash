@@ -260,6 +260,13 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// same execution is a no-op, and a wake that lands while the execution
     /// is not waiting holds for its next wait.
     ///
+    /// A process whose next execution the newest build refused, parked for
+    /// `generation`, has no live execution to wake: an engine that routes by
+    /// generation sends that execution to a build of `generation` instead
+    /// (FIG-4750), and leaves an execution already running there to finish.
+    /// When no build of `generation` is left the call is refused typed and
+    /// the park stands.
+    ///
     /// An engine that routes no work by build generation has nothing to hand
     /// over to and refuses.
     async fn deliver_hand_over(

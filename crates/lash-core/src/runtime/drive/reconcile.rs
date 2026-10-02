@@ -22,7 +22,8 @@
 //!    settle is reported and passed over, never failing the page.
 //! 2. **Drain hand-over (FIG-3799).** Every live process of a generation an
 //!    operator marked draining is woken to hand its open wait to a successor
-//!    on the newest build: [`drain_hand_over_slot`].
+//!    on the newest build, and a successor the newest build refused is sent
+//!    back to a build of the generation (FIG-4750): [`drain_hand_over_slot`].
 //!
 //! Undriven ingress has no arm: every admitted turn input and queued batch
 //! carries an ingress obligation armed in its admission transaction, which
@@ -229,17 +230,21 @@ pub struct DrainHandOverPass {
 /// **FIG-3799 slot.** Wake the live processes of every draining generation
 /// but this deployment's own, at most `page` of them, in (generation,
 /// process id) order from `after`: each live segment hands its open wait to
-/// a successor on the newest build, which waits again.
+/// a successor on the newest build, which waits again. A process parked
+/// because the newest build refused its successor is live too, and the same
+/// call re-sends that successor to a build of its generation (FIG-4750),
+/// where the process runs on until it ends.
 ///
 /// The drain is a store fact — an operator marks a generation draining — and
 /// this slot is the leader-only duty that moves its work (ADR 0109 §1.7),
 /// run by the same tick as every other recovery. It is idempotent: a wake is
 /// keyed by generation and segment, so a repeated wake of a segment is a
 /// no-op, and one that lands while the segment is not waiting holds for its
-/// next wait. A process leaves the listing once its successor's admission
+/// next wait; a re-send is keyed by the segment, so a repeated one names
+/// the first. A process leaves the listing once its successor's admission
 /// restamps it with the newest generation, or once it ends. One failed wake
-/// is logged and counted deferred, never failing the page; the next pass
-/// that reaches it wakes it again.
+/// or re-send is logged and counted deferred, never failing the page; the
+/// next pass that reaches it tries again.
 pub async fn drain_hand_over_slot(
     processes: &ReconcileProcesses<'_>,
     after: Option<&(crate::engine::BuildGeneration, crate::ProcessId)>,

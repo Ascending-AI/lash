@@ -44,9 +44,11 @@ pub struct PersistedSegmentHandover {
     /// existed carry none; a missing stamp is never derived.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written_generation: Option<crate::engine::BuildGeneration>,
-    /// The full Restate service name the successor was sent under
-    /// (FIG-3795 S3): the recorded route a cancel, redrive or drain re-send
-    /// addresses rather than a name recomputed from the running build. Rows
+    /// The full Restate service name the successor runs under (FIG-3795
+    /// S3): the route it was sent under, or, for a successor the newest build
+    /// refused, the sender's generation lane, recorded by the segment's start
+    /// there (FIG-4750). A cancel, a redrive and the drain's wake address it
+    /// rather than a name recomputed from the running build. Rows
     /// written before the column existed decode to the stable workflow name —
     /// the only route a pre-stamp build could have sent under.
     #[serde(default = "PersistedSegmentHandover::legacy_route")]

@@ -51,6 +51,11 @@ crate::statements! {
                  WHERE process_id = ?1
                  ORDER BY segment_ordinal DESC LIMIT 1";
 
+        /// Re-record the route of the handover of `?1` at segment `?2`: `?3`
+        /// is the handover re-encoded with the route `?4` (FIG-4750).
+        set_route = "UPDATE process_segment_handovers SET handover_json = ?3, route = ?4
+                 WHERE process_id = ?1 AND segment_ordinal = ?2";
+
         /// Retire the handovers of `?1` up to and including segment `?2`.
         delete_through = "DELETE FROM process_segment_handovers
                  WHERE process_id = ?1 AND segment_ordinal <= ?2";

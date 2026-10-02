@@ -33,7 +33,8 @@ enum SuccessorWindow {
     Admitted,
     /// This build cannot run it: the process parked `RetiredGeneration`,
     /// carrying the sender's generation, before the segment's start marker
-    /// was written, so a re-send to that generation's lane admits it afresh.
+    /// was written, so the drain's re-send to that generation's lane admits
+    /// it afresh (FIG-4750).
     Refused { message: String },
 }
 
@@ -166,9 +167,14 @@ where
     /// start marker is written. A segment it cannot run — another executable
     /// generation, or an input it cannot decode — parks the process
     /// `RetiredGeneration` carrying the sender's generation, with no start
-    /// marker and zero dispatch. The drain's re-send to that generation's
-    /// lane (`LashProcessWorkflow_g<G>`) then admits and runs it there. The
-    /// format read windows that widen this check are FIG-3802's.
+    /// marker and zero dispatch. Once an operator marks that generation
+    /// draining, the recovery leader's drain pass re-sends the segment to
+    /// the generation's lane (`LashProcessWorkflow_g<G>`), which admits and
+    /// runs it there (FIG-4750,
+    /// [`ProcessWorkSubstrate::deliver_hand_over`](lash_core::ProcessWorkSubstrate::deliver_hand_over)
+    /// on Restate); while no deployment serves the lane, the re-send is
+    /// refused typed and the park stands. The format read windows that widen
+    /// this check are FIG-3802's.
     async fn successor_window(
         &self,
         ctx: &WorkflowContext<'_>,
@@ -298,7 +304,10 @@ fn undecodable(route: &ServiceRoute, process_id: Option<&ProcessId>, error: &str
 
 /// The end of a stable-lane invocation whose successor window parked its
 /// process for the sender's generation: terminal, because this build never
-/// runs the segment — the drain's re-send to the sender's lane does.
+/// runs the segment. The drain of the sender's generation re-sends it to
+/// that generation's lane under the same workflow key (FIG-4750), where it
+/// is a new invocation; this failed run stays behind under the stable name,
+/// off the route the re-sent segment records.
 fn refused_successor(message: String) -> HandlerError {
     TerminalError::new(message).into()
 }
