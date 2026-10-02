@@ -3,61 +3,9 @@
 use super::*;
 use crate::Clock;
 use lash_core::plugin::PluginSessionRequest;
+use lash_core::testing::{Script, StoreOp};
 use pretty_assertions::assert_eq;
 use std::future::Future;
-
-struct PausedConfigSettlementStore {
-    inner: Arc<dyn crate::RuntimeStore>,
-    pause_after_enqueue: std::sync::atomic::AtomicBool,
-    before_settlement_read: tokio::sync::Notify,
-    release_settlement_read: tokio::sync::Notify,
-}
-
-impl PausedConfigSettlementStore {
-    fn new(inner: Arc<dyn crate::RuntimeStore>) -> Self {
-        Self {
-            inner,
-            pause_after_enqueue: std::sync::atomic::AtomicBool::new(false),
-            before_settlement_read: tokio::sync::Notify::new(),
-            release_settlement_read: tokio::sync::Notify::new(),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
-    type Inner = dyn crate::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn enqueue_queued_work_with_outcome(
-        &self,
-        draft: crate::QueuedWorkBatchDraft,
-    ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::StoreError> {
-        let enqueued = self.inner.enqueue_queued_work_with_outcome(draft).await?;
-        if enqueued.batch().is_session_command_work() {
-            self.pause_after_enqueue
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        Ok(enqueued)
-    }
-
-    async fn list_queued_work(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, crate::StoreError> {
-        if self
-            .pause_after_enqueue
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            self.before_settlement_read.notify_one();
-            self.release_settlement_read.notified().await;
-        }
-        self.inner.list_queued_work(session_id).await
-    }
-}
 
 #[expect(
     clippy::expect_used,
@@ -825,7 +773,12 @@ where
     );
     let (backend, store) = config_settlement_store(&make, &request).await;
     hold_config_settlement_lease(store.as_ref(), &request.session_id).await;
-    let paused_store = Arc::new(PausedConfigSettlementStore::new(Arc::clone(&store)));
+    let script = Script::new();
+    let gate = script
+        .on(StoreOp::enqueue_queued_work_with_outcome)
+        .after()
+        .pause();
+    let paused_store = script.wrap("setter", Arc::clone(&store));
     let runtime = runtime_for_config_settlement(
         backend.clone(),
         Arc::clone(&paused_store) as Arc<dyn crate::RuntimeStore>,
@@ -842,7 +795,7 @@ where
 
     // Hold the setter before its settlement read. Cancellation must commit
     // before the read, so the batch state has one unambiguous ordering.
-    paused_store.before_settlement_read.notified().await;
+    gate.reached(1).await;
     let command_batch = store
         .list_queued_work(&request.session_id)
         .await
@@ -865,7 +818,7 @@ where
         "cancellation must not manufacture completion evidence"
     );
 
-    paused_store.release_settlement_read.notify_one();
+    gate.open_all();
 
     let (settlement, runtime) = setter.await.expect("cancelled setter task");
     assert!(

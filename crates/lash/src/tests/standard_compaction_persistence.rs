@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use lash_core::testing::{Script, StoreOp};
 use lash_sansio::SessionId;
 
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
@@ -650,32 +651,6 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     Ok(())
 }
 
-/// Counts `load_session_window` calls on the catalog it wraps.
-struct WindowLoads {
-    inner: Arc<dyn lash_core::DeploymentStore>,
-    loads: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl lash_core::store::RuntimeStoreDecorator for WindowLoads {
-    type Inner = dyn lash_core::DeploymentStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn load_session_window(
-        &self,
-        session_id: &SessionId,
-        selector: lash_core::store::WindowSelector,
-    ) -> std::result::Result<Option<lash_core::store::SessionWindowRead>, StoreError> {
-        self.loads.fetch_add(1, Ordering::SeqCst);
-        self.inner.load_session_window(session_id, selector).await
-    }
-}
-
-impl lash_core::DeploymentStoreDecorator for WindowLoads {}
-
 /// ADR 0112 §14.6: overflow recovery starts a new frame without a reload.
 /// After the recovered turn's commits the head, the window base and the
 /// resident state all name the recovery frame, the resident graph is that
@@ -685,14 +660,10 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
     let session_id = "standard-compaction-recovery-residency";
     let base = double_backend().await;
     let catalog = base.session_store_factory();
-    let loads = Arc::new(AtomicUsize::new(0));
-    let counted = Arc::clone(&loads);
-    let backend = DecoratedBackend::over(base).session_store_factory(move |inner| {
-        Arc::new(WindowLoads {
-            inner,
-            loads: counted,
-        })
-    });
+    let script = Arc::new(Script::new());
+    let counted = Arc::clone(&script);
+    let backend = DecoratedBackend::over(base)
+        .session_store_factory(move |inner| counted.wrap("window", inner));
     let (provider, _requests) = standard_compaction_provider_recorded(vec![
         LlmResponse {
             terminal_reason: lash_core::LlmTerminalReason::ContextOverflow,
@@ -737,7 +708,7 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         .to_snapshot()
         .current_frame_node_id
         .expect("the first frame");
-    let loads_before = loads.load(Ordering::SeqCst);
+    let loads_before = script.calls(StoreOp::load_session_window);
     assert!(
         loads_before > 0,
         "the counter sits on the open's window read"
@@ -750,7 +721,7 @@ async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
         .await?;
     assert!(recovered.result.is_success(), "{:?}", recovered.result);
     assert_eq!(
-        loads.load(Ordering::SeqCst),
+        script.calls(StoreOp::load_session_window),
         loads_before,
         "the recovery frame is adopted from its commit; nothing reloads the window"
     );
@@ -2049,37 +2020,6 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     Ok(())
 }
 
-/// Fails `commit_runtime_state` while armed so a test can inject the
-/// settlement-commit failure that used to leave a compacted resident state
-/// advanced with its usage merely staged (FIG-3374 review).
-struct FailArmedCommitFactory {
-    inner: Arc<dyn lash_core::DeploymentStore>,
-    armed: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[async_trait]
-impl lash_core::store::RuntimeStoreDecorator for FailArmedCommitFactory {
-    type Inner = dyn lash_core::DeploymentStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn commit_runtime_state(
-        &self,
-        commit: lash_core::store::RuntimeCommit,
-    ) -> std::result::Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
-        if self.armed.swap(false, Ordering::SeqCst) {
-            return Err(lash_core::StoreError::Backend(
-                "injected compaction settlement commit failure".to_string(),
-            ));
-        }
-        self.inner.commit_runtime_state(commit).await
-    }
-}
-
-impl lash_core::DeploymentStoreDecorator for FailArmedCommitFactory {}
-
 /// An administrative compaction whose commit fails once is applied on the
 /// engine's retry of its command drive: the command stays open, its
 /// journaled summary is read back rather than requested again, the summary
@@ -2089,10 +2029,10 @@ impl lash_core::DeploymentStoreDecorator for FailArmedCommitFactory {}
 async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> Result<()> {
     let session_id = "standard-compaction-commit-failure";
     let sqlite = double_backend().await;
-    let commit_failure = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let armed = Arc::clone(&commit_failure);
+    let script = Arc::new(Script::new());
+    let commits = Arc::clone(&script);
     let backend = DecoratedBackend::over(sqlite)
-        .session_store_factory(move |inner| Arc::new(FailArmedCommitFactory { inner, armed }));
+        .session_store_factory(move |inner| commits.wrap("compaction", inner));
     let (provider, provider_calls) = standard_compaction_provider_counted(vec![
         response_with_usage("first response", 1),
         response_with_usage("second response", 1),
@@ -2137,7 +2077,11 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         .output_tokens;
     let calls_before = provider_calls.load(Ordering::SeqCst);
 
-    commit_failure.store(true, Ordering::SeqCst);
+    script
+        .on(StoreOp::commit_runtime_state)
+        .nth(script.calls(StoreOp::commit_runtime_state) + 1)
+        .before()
+        .fail(|| StoreError::Backend("injected compaction settlement commit failure".to_string()));
     assert!(
         Box::pin(
             session
@@ -2149,7 +2093,10 @@ async fn admin_compaction_commit_failure_applies_once_on_the_engines_retry() -> 
         "the engine's retry applies the compaction once the injected failure clears"
     );
     assert!(
-        !commit_failure.load(Ordering::SeqCst),
+        script.trace().iter().any(|call| {
+            call.op == StoreOp::commit_runtime_state.into()
+                && matches!(call.outcome, lash_core::testing::Outcome::Failed(_))
+        }),
         "the compaction's commit met the injected failure"
     );
     let view = session.read_view();

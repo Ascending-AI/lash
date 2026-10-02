@@ -67,37 +67,19 @@ async fn a_unit_test_turn_runs_in_an_open_handler_on_the_double() {
 /// original store set remains independent of that test layer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_faulted_doubles_store_twin_sees_the_fault() {
-    struct FaultedCatalogLookup {
-        inner: Arc<dyn crate::DeploymentStore>,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::RuntimeStoreDecorator for FaultedCatalogLookup {
-        type Inner = dyn crate::DeploymentStore;
-
-        fn inner(&self) -> &Self::Inner {
-            self.inner.as_ref()
-        }
-
-        async fn lookup_session(
-            &self,
-            _session_id: &crate::SessionId,
-        ) -> Result<crate::store::SessionLookup, crate::StoreError> {
-            Err(crate::StoreError::Backend(
-                "injected catalog-lookup failure".to_string(),
-            ))
-        }
-    }
-
-    impl lash_core_execution::DeploymentStoreDecorator for FaultedCatalogLookup {}
-
+    let script = crate::testing::Script::new();
+    script
+        .on(crate::testing::StoreOp::lookup_session)
+        .from_nth(1)
+        .before()
+        .fail(|| crate::StoreError::Backend("injected catalog-lookup failure".to_string()));
     let double = lash_restate_test::backend_with(
         SEED + 1,
         lash_restate_test::ServerConfig::default(),
         |stores| {
             super::runtime_helpers::LayeredStores::over(stores)
                 .map_session_store_factory(|inner| {
-                    Arc::new(FaultedCatalogLookup { inner }) as Arc<dyn crate::DeploymentStore>
+                    script.wrap("catalog", inner) as Arc<dyn crate::DeploymentStore>
                 })
                 .into_store_set()
         },

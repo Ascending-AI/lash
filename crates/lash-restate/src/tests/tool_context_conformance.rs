@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::{Script, StoreOp};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -59,30 +60,6 @@ finish(result);
         other => panic!(
             "first-party tool `{other}` was registered without a production TypeScript fixture; add its caller path before merging"
         ),
-    }
-}
-
-/// The live pass's store refuses every commit, so its worker dies at its final commit: every effect ran and was
-/// journaled, and nothing was committed.
-struct RefusesEveryCommitStore {
-    inner: Arc<dyn lash_core::RuntimeStore>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for RefusesEveryCommitStore {
-    type Inner = dyn lash_core::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn commit_runtime_state(
-        &self,
-        _commit: lash_core::store::RuntimeCommit,
-    ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
-        Err(lash_core::StoreError::Backend(
-            "the live worker died at its final commit".to_string(),
-        ))
     }
 }
 
@@ -245,14 +222,25 @@ impl ProductionToolCell {
     }
 
     async fn run(&self, effect_host: &dyn EffectHost, start_replay: impl FnOnce()) {
+        let script = Script::new();
+        script
+            .on(StoreOp::commit_runtime_state)
+            .from_nth(1)
+            .before()
+            .fail(|| {
+                lash_core::StoreError::Backend(
+                    "the live worker died at its final commit".to_string(),
+                )
+            });
         let mut live = replay_test_runtime_with_plugins(
             &self.session_id,
             self.policy.clone(),
             self.initial_state.clone(),
             self.host.clone(),
-            decorated_view(&self.runtime_store, |inner| RefusesEveryCommitStore {
-                inner,
-            }),
+            session_view(
+                script.wrap("live", Arc::clone(self.runtime_store.store())),
+                self.session_id.clone(),
+            ),
             self.plugin_factories.clone(),
         )
         .await;

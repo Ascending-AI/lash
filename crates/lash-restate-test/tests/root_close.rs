@@ -28,6 +28,7 @@ use lash_core::store::{
     ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
     ObligationSettlement, ObligationStanding, ObligationState, SettleOutcome, StalledObligation,
 };
+use lash_core::testing::Gate;
 use lash_restate_test::{
     CrashCount, CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
 };
@@ -36,25 +37,30 @@ use lash_restate_test::{
 /// the law opens it; every other close passes. While it is closed the
 /// relay finds no scope close due, so the held close is delivered only by
 /// its own run.
-#[derive(Default)]
 struct CloseGate {
     armed: AtomicBool,
     held: Mutex<Option<ObligationId>>,
-    reached: tokio::sync::Notify,
-    open: tokio::sync::Notify,
+    claim: Gate,
     opened: AtomicBool,
     /// Claims each scope close was granted: a delivery takes exactly one.
     granted: Mutex<BTreeMap<ObligationId, usize>>,
     /// Whether the held claim is waiting at the gate now.
     waiting: AtomicUsize,
-    settlement: Mutex<Option<SettlementGate>>,
+    settlement: Mutex<Option<Arc<Gate>>>,
 }
 
-/// Hold the close after its durable settlement, before its run result can
-/// reach the server's crash rule.
-struct SettlementGate {
-    reached: tokio::sync::oneshot::Sender<()>,
-    release: tokio::sync::oneshot::Receiver<()>,
+impl Default for CloseGate {
+    fn default() -> Self {
+        Self {
+            armed: AtomicBool::new(false),
+            held: Mutex::new(None),
+            claim: Gate::new("scope-close claim"),
+            opened: AtomicBool::new(false),
+            granted: Mutex::new(BTreeMap::new()),
+            waiting: AtomicUsize::new(0),
+            settlement: Mutex::new(None),
+        }
+    }
 }
 
 impl CloseGate {
@@ -82,7 +88,7 @@ impl CloseGate {
 
     fn release(&self) {
         self.opened.store(true, Ordering::SeqCst);
-        self.open.notify_waiters();
+        self.claim.open_all();
     }
 
     fn grant(&self, claimed: &Option<ClaimedObligation>) {
@@ -100,19 +106,10 @@ impl CloseGate {
         self.granted.lock().expect("granted claims").clone()
     }
 
-    fn pause_after_settlement(
-        &self,
-    ) -> (
-        tokio::sync::oneshot::Receiver<()>,
-        tokio::sync::oneshot::Sender<()>,
-    ) {
-        let (reached, settled) = tokio::sync::oneshot::channel();
-        let (release, released) = tokio::sync::oneshot::channel();
-        *self.settlement.lock().expect("settlement gate") = Some(SettlementGate {
-            reached,
-            release: released,
-        });
-        (settled, release)
+    fn pause_after_settlement(&self) -> Arc<Gate> {
+        let gate = Arc::new(Gate::new("scope-close settlement"));
+        *self.settlement.lock().expect("settlement gate") = Some(Arc::clone(&gate));
+        gate
     }
 }
 
@@ -160,12 +157,8 @@ impl ObligationLedger for GatedScopeCloseLedger {
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
         if self.gate.holds(id) {
-            let open = self.gate.open.notified();
             self.gate.waiting.fetch_add(1, Ordering::SeqCst);
-            self.gate.reached.notify_waiters();
-            if !self.gate.opened.load(Ordering::SeqCst) {
-                open.await;
-            }
+            self.gate.claim.pass().await;
             self.gate.waiting.fetch_sub(1, Ordering::SeqCst);
         }
         let claimed = self.inner.claim(id, token, now_ms, claim_ttl_ms).await?;
@@ -190,8 +183,7 @@ impl ObligationLedger for GatedScopeCloseLedger {
             }
         };
         if let Some(pause) = pause {
-            pause.reached.send(()).expect("observe the settled close");
-            pause.release.await.expect("release the settled close");
+            pause.pass().await;
         }
         Ok(outcome)
     }
@@ -372,17 +364,7 @@ impl World {
 
 /// Wait until the first root's close is held at its claim.
 async fn held(gate: &CloseGate) {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while gate.waiting.load(Ordering::SeqCst) == 0 {
-            let reached = gate.reached.notified();
-            if gate.waiting.load(Ordering::SeqCst) > 0 {
-                break;
-            }
-            let _ = tokio::time::timeout(Duration::from_millis(20), reached).await;
-        }
-    })
-    .await
-    .expect("the first root's scope close reaches its claim");
+    gate.claim.reached(1).await;
 }
 
 /// FIG-4035: back-to-back sends. The second input's root is admitted, runs
@@ -464,24 +446,19 @@ async fn a_close_crashed_after_the_next_root_was_admitted_converges_once() {
             .handler("close")
             .key(key.clone()),
     );
-    let (settled, release_settlement) = world.gate.pause_after_settlement();
+    let settlement = world.gate.pause_after_settlement();
     world.gate.release();
 
     // Force the ordering that load exposed: durable delivery is visible
     // while the run result, and therefore the crash, is still held back.
-    tokio::time::timeout(Duration::from_secs(30), settled)
-        .await
-        .expect("the held close settles")
-        .expect("observe the held settlement");
+    settlement.reached(1).await;
     assert_eq!(world.state(&first).await, Some(ObligationState::Delivered));
     assert_eq!(
         crash_count.get(),
         0,
         "settlement does not prove the crash happened"
     );
-    release_settlement
-        .send(())
-        .expect("let the run result reach the crash rule");
+    settlement.open_all();
 
     tokio::time::timeout(Duration::from_secs(30), crash_count.wait_until(1))
         .await

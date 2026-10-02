@@ -1,37 +1,25 @@
 use super::*;
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::plugin::config::core::{SetAutonomy, SetGeneration, SetModel, SetTurnBudget};
+use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f420;
-
-struct RefuseCommandEnqueue {
-    inner: Arc<RecordingStore>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::RuntimeStoreDecorator for RefuseCommandEnqueue {
-    type Inner = dyn lash_core::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn enqueue_queued_work_with_outcome(
-        &self,
-        _batch: lash_core::runtime::QueuedWorkBatchDraft,
-    ) -> Result<lash_core::runtime::QueuedWorkEnqueueOutcome, lash_core::StoreError> {
-        Err(lash_core::StoreError::SessionStateVersionNewerThanRuntime {
-            found: 13,
-            current: 12,
-        })
-    }
-}
 
 #[tokio::test]
 async fn command_enqueue_preserves_typed_session_state_version_refusal() {
     let backend = sqlite_memory_store_backend().await;
     let inner = recording_unbound_store_on(&backend).await;
-    let store: Arc<dyn lash_core::RuntimeStore> = Arc::new(RefuseCommandEnqueue { inner });
+    let script = Script::new();
+    script
+        .on(StoreOp::enqueue_queued_work_with_outcome)
+        .before()
+        .fail(
+            || lash_core::StoreError::SessionStateVersionNewerThanRuntime {
+                found: 13,
+                current: 12,
+            },
+        );
+    let store: Arc<dyn lash_core::RuntimeStore> = script.wrap("command", inner);
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),

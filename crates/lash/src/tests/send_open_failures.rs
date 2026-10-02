@@ -30,6 +30,7 @@
 //! admission; `wrong_authority_redeploy.rs` holds that law.
 
 use super::*;
+use lash_core::testing::{Script, StoreOp};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const SEED: u64 = 0x4597_0101;
@@ -238,35 +239,6 @@ impl CatalogRefusal {
     }
 }
 
-/// A catalog whose lookup refuses once `refuse` is set.
-struct RefusingCatalog {
-    inner: Arc<dyn DeploymentStore>,
-    refusal: CatalogRefusal,
-    refuse: AtomicBool,
-}
-
-#[async_trait]
-impl lash_core::store::RuntimeStoreDecorator for RefusingCatalog {
-    type Inner = dyn DeploymentStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn lookup_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<lash_core::store::SessionLookup, StoreError> {
-        if self.refuse.load(Ordering::SeqCst) {
-            Err(self.refusal.error())
-        } else {
-            self.inner.lookup_session(session_id).await
-        }
-    }
-}
-
-impl lash_core::DeploymentStoreDecorator for RefusingCatalog {}
-
 /// The send is accepted, and then the catalog refuses the lookup the
 /// engine's open makes: the sender is answered with the drive's refusal.
 async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
@@ -274,11 +246,8 @@ async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
 ) -> Result<lash_core::RuntimeError> {
     let id = format!("catalog-refuses-{refusal:?}").to_lowercase();
     let double = restate_double(SEED).await;
-    let catalog = Arc::new(RefusingCatalog {
-        inner: double.lash_backend().session_store_factory(),
-        refusal,
-        refuse: AtomicBool::new(false),
-    });
+    let script = Script::new();
+    let catalog = script.wrap("catalog", double.lash_backend().session_store_factory());
     let backend = DecoratedBackend::over(double.lash_backend()).session_store_factory({
         let catalog = Arc::clone(&catalog);
         move |_| catalog
@@ -290,7 +259,11 @@ async fn a_send_whose_drive_meets_a_refusing_catalog_is_answered(
     // session ahead of the refusal; the facade's own acquisition was made
     // above.
     durable.pending_turn_inputs().await?;
-    catalog.refuse.store(true, Ordering::SeqCst);
+    script
+        .on(StoreOp::lookup_session)
+        .from_nth(script.calls(StoreOp::lookup_session) + 1)
+        .before()
+        .fail(move || refusal.error());
     let answer = tokio::time::timeout(ANSWERS_WITHIN, async {
         durable
             .send(TurnInput::text("accepted before the engine's open"))

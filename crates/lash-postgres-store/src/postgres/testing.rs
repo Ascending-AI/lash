@@ -144,7 +144,7 @@ struct AfterFenceState {
 #[derive(Debug)]
 struct ArmedPause {
     reached: tokio::sync::oneshot::Sender<u32>,
-    release: tokio::sync::oneshot::Receiver<()>,
+    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
 }
 
 /// One armed pause: the transaction that takes it waits after its fence
@@ -152,7 +152,7 @@ struct ArmedPause {
 #[derive(Debug)]
 pub struct FencePause {
     reached: Option<tokio::sync::oneshot::Receiver<u32>>,
-    release: Option<tokio::sync::oneshot::Sender<()>>,
+    gate: std::sync::Arc<lash_core_execution::testing::Gate>,
 }
 
 impl AfterFence {
@@ -163,14 +163,16 @@ impl AfterFence {
     /// Pause the next guarded transaction that passes its fence.
     pub fn pause_next(&self) -> FencePause {
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let gate = std::sync::Arc::new(lash_core_execution::testing::Gate::new(
+            "postgres writer fence",
+        ));
         self.lock_state().armed.push_back(ArmedPause {
             reached: reached_tx,
-            release: release_rx,
+            gate: std::sync::Arc::clone(&gate),
         });
         FencePause {
             reached: Some(reached_rx),
-            release: Some(release_tx),
+            gate,
         }
     }
 
@@ -198,7 +200,7 @@ impl AfterFence {
         };
         if let Some(armed) = armed {
             let _ = armed.reached.send(recorded);
-            let _ = armed.release.await;
+            armed.gate.pass().await;
         }
     }
 
@@ -220,6 +222,7 @@ impl FencePause {
         reason = "test-harness helper: a pause awaited twice or never reachable is a test-authoring fault"
     )]
     pub async fn reached(&mut self) -> u32 {
+        self.gate.reached(1).await;
         self.reached
             .take()
             .expect("a pause is awaited once")
@@ -228,10 +231,14 @@ impl FencePause {
     }
 
     /// Let the paused transaction continue.
-    pub fn release(mut self) {
-        if let Some(release) = self.release.take() {
-            let _ = release.send(());
-        }
+    pub fn release(self) {
+        self.gate.open_all();
+    }
+}
+
+impl Drop for FencePause {
+    fn drop(&mut self) {
+        self.gate.open_all();
     }
 }
 
@@ -456,5 +463,43 @@ mod tests {
             replace_database_name("postgres://localhost", "lash_test_1"),
             "postgres://localhost/lash_test_1"
         );
+    }
+}
+
+#[cfg(test)]
+mod fence_pause_tests {
+    use super::AfterFence;
+    use std::time::Duration;
+
+    #[tokio::test(start_paused = true)]
+    #[should_panic(expected = "gate `postgres writer fence`: 0 of 1 arrivals within 10s")]
+    async fn an_unreached_writer_pause_fails_with_its_label() {
+        let seam = AfterFence::new();
+        let mut pause = seam.pause_next();
+        tokio::time::timeout(Duration::from_secs(11), pause.reached())
+            .await
+            .expect("the writer pause left its wait unbounded");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_writer_pause_keeps_its_epoch_and_drop_releases_the_writer() {
+        let seam = AfterFence::new();
+        let mut pause = seam.pause_next();
+        let mut writer = std::pin::pin!(seam.pass(7));
+        tokio::select! {
+            biased;
+            () = &mut writer => panic!("the writer passed its closed pause"),
+            epoch = pause.reached() => assert_eq!(epoch, 7),
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), &mut writer)
+                .await
+                .is_err()
+        );
+        drop(pause);
+        tokio::time::timeout(Duration::from_secs(1), writer)
+            .await
+            .expect("dropping the pause releases its writer");
+        assert_eq!(seam.passed(), vec![7]);
     }
 }

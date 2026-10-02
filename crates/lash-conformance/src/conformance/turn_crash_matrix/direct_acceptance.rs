@@ -8,56 +8,10 @@
 //! second time.
 
 use super::*;
+use lash_core::testing::{Script, StoreOp};
 use pretty_assertions::assert_eq;
 
 const DIRECT_INPUT: &str = "direct accepted input";
-
-/// Counts acceptance bodies: the acceptance executor's store write is the one
-/// `enqueue_pending_turn_input` a direct turn makes.
-struct CountingAcceptanceStore {
-    inner: Arc<dyn RuntimeStore>,
-    enqueues: Arc<std::sync::atomic::AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for CountingAcceptanceStore {
-    type Inner = dyn RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn enqueue_pending_turn_inputs(
-        &self,
-        batch: crate::PendingTurnInputBatch,
-    ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
-        self.enqueues
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner.enqueue_pending_turn_inputs(batch).await
-    }
-
-    async fn admit_pending_turn_inputs(
-        &self,
-        batch: crate::PendingTurnInputBatch,
-        ingress_claim_ttl_ms: u64,
-    ) -> Result<crate::TurnInputAdmission, StoreError> {
-        self.enqueues
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inner
-            .admit_pending_turn_inputs(batch, ingress_claim_ttl_ms)
-            .await
-    }
-}
-
-fn counted(
-    inner: Arc<dyn RuntimeStore>,
-    enqueues: &Arc<std::sync::atomic::AtomicUsize>,
-) -> Arc<dyn RuntimeStore> {
-    Arc::new(CountingAcceptanceStore {
-        inner,
-        enqueues: Arc::clone(enqueues),
-    })
-}
 
 fn direct_input(identity: &ReferenceIdentity) -> crate::TurnInput {
     let mut input = crate::TurnInput::text(DIRECT_INPUT);
@@ -95,7 +49,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
         placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
     };
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let acceptance_bodies = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let script = Script::new();
     let control = SeamControl::default();
     control.arm(point.clone());
     let crash = crash_at_armed_point(&control);
@@ -106,7 +60,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
     >|
      -> crate::ConformanceTurnAttempt {
         let stores = Arc::clone(&stores);
-        let store = counted(make(scenario), &acceptance_bodies);
+        let store = script.wrap("acceptance", make(scenario)) as Arc<dyn RuntimeStore>;
         let host = host.clone();
         let identity = identity.clone();
         Arc::new(move |scoped| {
@@ -195,7 +149,8 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
         .unwrap_or_else(|error| panic!("the redriven acceptance commits the turn: {error}"));
 
     assert_eq!(
-        acceptance_bodies.load(std::sync::atomic::Ordering::SeqCst),
+        script.calls(StoreOp::enqueue_pending_turn_inputs)
+            + script.calls(StoreOp::admit_pending_turn_inputs),
         2,
         "the redrive re-ran the acceptance body: the adoption path was exercised, \
          not a journaled outcome"

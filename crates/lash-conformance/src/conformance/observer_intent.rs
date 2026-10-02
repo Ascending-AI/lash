@@ -5,6 +5,7 @@ use crate::{
     ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _,
     ProcessRetention as _,
 };
+use lash_core::testing::{Script, StoreOp};
 use lash_sansio::SessionId;
 
 /// A transient registry failure during fork-observer publication is best
@@ -189,14 +190,17 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
 
     // Publication committed, but the final metadata write did not: cold replay
     // must reassert the selector, including an edge removed before the clear.
-    let crash_store = CrashBeforeClear {
-        inner: store.store().clone(),
-    };
+    let script = Script::new();
+    script
+        .on(StoreOp::settle_observer_intents)
+        .before()
+        .fail(|| crate::StoreError::Backend("crash before observer intent clear".to_string()));
+    let crash_store = script.wrap("observer", store.store().clone());
     assert!(
         crate::runtime::reconcile_session_process_observer_intents(
             Some(&registry),
             &session_id,
-            crate::runtime::SessionObserverIntentSource::Persisted(&crash_store),
+            crate::runtime::SessionObserverIntentSource::Persisted(crash_store.as_ref()),
         )
         .await
         .is_err()
@@ -259,25 +263,4 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
             .pending_observer_intents
             .is_empty()
     );
-}
-
-struct CrashBeforeClear {
-    inner: std::sync::Arc<dyn crate::RuntimeStore>,
-}
-
-#[async_trait::async_trait]
-impl crate::store::RuntimeStoreDecorator for CrashBeforeClear {
-    type Inner = dyn crate::RuntimeStore;
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-    async fn settle_observer_intents(
-        &self,
-        _session_id: &SessionId,
-        _remaining: Vec<crate::SessionObserverIntent>,
-    ) -> Result<(), crate::StoreError> {
-        Err(crate::StoreError::Backend(
-            "crash before observer intent clear".to_string(),
-        ))
-    }
 }

@@ -2,6 +2,7 @@
 //! live writer (FIG-3366, ADR 0119).
 
 use super::*;
+use lash_core::testing::{Script, StoreOp};
 use lash_sansio::SessionId;
 
 const SEED: u64 = 0xd0a4_b1e5;
@@ -118,41 +119,10 @@ impl CatalogFailure {
     }
 }
 
-struct FailingCatalog {
-    inner: Arc<dyn DeploymentStore>,
-    failure: CatalogFailure,
-    enabled: std::sync::atomic::AtomicBool,
-}
-
-#[async_trait]
-impl lash_core::store::RuntimeStoreDecorator for FailingCatalog {
-    type Inner = dyn DeploymentStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn lookup_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<lash_core::store::SessionLookup, StoreError> {
-        if self.enabled.load(Ordering::SeqCst) {
-            Err(self.failure.error())
-        } else {
-            self.inner.lookup_session(session_id).await
-        }
-    }
-}
-
-impl lash_core::DeploymentStoreDecorator for FailingCatalog {}
-
 async fn catalog_failure_matrix(failure: CatalogFailure) -> Result<()> {
     let double = restate_double(SEED).await;
-    let failing = Arc::new(FailingCatalog {
-        inner: double.lash_backend().session_store_factory(),
-        failure,
-        enabled: std::sync::atomic::AtomicBool::new(false),
-    });
+    let script = Script::new();
+    let failing = script.wrap("catalog", double.lash_backend().session_store_factory());
     let (backend, counts) = counting_factory(
         &DecoratedBackend::over(double.lash_backend())
             .session_store_factory({
@@ -166,7 +136,11 @@ async fn catalog_failure_matrix(failure: CatalogFailure) -> Result<()> {
     crate::tests::create_catalog_session(&core, "catalog-failure").await?;
     counts.admissions.store(0, Ordering::SeqCst);
     counts.by_id_opens.store(0, Ordering::SeqCst);
-    failing.enabled.store(true, Ordering::SeqCst);
+    script
+        .on(StoreOp::lookup_session)
+        .from_nth(script.calls(StoreOp::lookup_session) + 1)
+        .before()
+        .fail(move || failure.error());
     let durable = core.session("catalog-failure").durable().await?;
     let results = [
         (
@@ -266,11 +240,8 @@ async fn existing_session_apis_preserve_absence_and_tombstones_without_creating(
 async fn durable_acquisition_retries_contention_once_for_clones_and_reuses_bound_stores()
 -> Result<()> {
     let double = restate_double(SEED).await;
-    let failing = Arc::new(FailingCatalog {
-        inner: double.lash_backend().session_store_factory(),
-        failure: CatalogFailure::Contended,
-        enabled: std::sync::atomic::AtomicBool::new(false),
-    });
+    let script = Script::new();
+    let failing = script.wrap("catalog", double.lash_backend().session_store_factory());
     let (backend, counts) = counting_factory(
         &DecoratedBackend::over(double.lash_backend())
             .session_store_factory({
@@ -288,7 +259,11 @@ async fn durable_acquisition_retries_contention_once_for_clones_and_reuses_bound
     let durable = core.session("retry-acquisition").durable().await?;
     counts.admissions.store(0, Ordering::SeqCst);
     counts.by_id_opens.store(0, Ordering::SeqCst);
-    failing.enabled.store(true, Ordering::SeqCst);
+    script
+        .on(StoreOp::lookup_session)
+        .nth(script.calls(StoreOp::lookup_session) + 1)
+        .before()
+        .fail(|| StoreError::Contended);
     let error = durable
         .pending_turn_inputs()
         .await
@@ -300,7 +275,6 @@ async fn durable_acquisition_retries_contention_once_for_clones_and_reuses_bound
         1,
         "bound store bypasses lookup"
     );
-    failing.enabled.store(false, Ordering::SeqCst);
     let mut tasks = Vec::new();
     for _ in 0..5 {
         let durable = durable.clone();

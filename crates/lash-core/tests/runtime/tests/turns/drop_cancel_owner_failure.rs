@@ -1,57 +1,9 @@
 use super::*;
-use lash_core::store::{QueuedWorkStore as _, RuntimeStoreDecorator, TurnInputStore as _};
+use lash_core::store::{QueuedWorkStore as _, TurnInputStore as _};
 use lash_core::testing::TestTurnDrive as _;
+use lash_core::testing::{Script, StoreOp};
 
 const SEED: u64 = 0x5_f460;
-
-struct FailCancelClosureAuthorizationStore {
-    inner: Arc<RecordingStore>,
-    calls: AtomicUsize,
-}
-
-impl FailCancelClosureAuthorizationStore {
-    fn new(inner: Arc<RecordingStore>) -> Self {
-        Self {
-            inner,
-            calls: AtomicUsize::new(0),
-        }
-    }
-
-    fn calls(&self) -> usize {
-        self.calls.load(Ordering::SeqCst)
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeStoreDecorator for FailCancelClosureAuthorizationStore {
-    type Inner = dyn lash_core::RuntimeStore;
-
-    fn inner(&self) -> &Self::Inner {
-        self.inner.as_ref()
-    }
-
-    async fn authorize_turn_cancel_closure(
-        &self,
-        lease: &lash_core::store::DriveFence,
-        authorization: &lash_core::TurnCancelClosureAuthorization,
-    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            // An outcome, not a live fault: the engine refuses the root
-            // instead of retrying it (FIG-3897), and nothing runs between
-            // the refusal and the root's end.
-            return Err(lash_core::StoreError::RecordEncodingFailed {
-                record_kind: "turn cancel closure".to_string(),
-                message: "injected finish-time cancellation authorization failure".to_string(),
-            });
-        }
-        lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
-            self.inner.as_ref(),
-            lease,
-            authorization,
-        )
-        .await
-    }
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelivery() {
@@ -61,9 +13,15 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     const TURN_ID: &str = "turn-that-cannot-finish";
 
     let inner_store = double_unbound_recording_store(&double).await;
-    let store = Arc::new(FailCancelClosureAuthorizationStore::new(Arc::clone(
-        &inner_store,
-    )));
+    let script = Script::new();
+    script
+        .on(StoreOp::authorize_turn_cancel_closure)
+        .before()
+        .fail(|| lash_core::StoreError::RecordEncodingFailed {
+            record_kind: "turn cancel closure".to_string(),
+            message: "injected finish-time cancellation authorization failure".to_string(),
+        });
+    let store = script.wrap("owner", Arc::clone(&inner_store));
     let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
@@ -191,7 +149,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             .contains("injected finish-time cancellation authorization failure")
     );
     assert_eq!(
-        store.calls(),
+        script.calls(StoreOp::authorize_turn_cancel_closure),
         1,
         "the finish-time authorization fails once and nothing authorizes after it: \
          the owner's end repairs nothing (FIG-3927 §2.6); the root's end applies the Drop"
