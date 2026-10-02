@@ -2499,7 +2499,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         self.assertIn("ref: ${{ needs.prepare-release.outputs.release_sha }}", worker_artifacts)
         self.assertIn('release_version.py stamp "${RELEASE_TAG#v}"', worker_artifacts)
         self.assertIn(
-            "cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker",
+            "kiln build --config=optimized --materializations=final",
             worker_artifacts,
         )
         self.assertIn("python3 scripts/package_vm_worker.py", worker_artifacts)
@@ -2510,7 +2510,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             release_assets["files"].splitlines(),
         )
         self.assertIn(
-            "needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
+            "needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]",
             publish_crates,
         )
         self.assertIn("runs-on: ubuntu-24.04", validate_release)
@@ -3867,12 +3867,77 @@ derive_mutation_jobs() {{
         self.assertNotIn("gh workflow run release.yml", workflow)
 
 
+class ReleaseDryRunTests(unittest.TestCase):
+    def test_dry_run_runs_validation_without_publication(self):
+        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+        inputs = workflow[True]["workflow_dispatch"]["inputs"]
+        self.assertEqual({"description": "Run release validation without publishing", "required": False,
+                          "type": "boolean", "default": False}, inputs["dry_run"])
+        jobs = workflow["jobs"]
+        validators = {"validate-release-preconditions", "validate-release-ref", "crash-matrix-restate",
+                      "latency-gate", "package-crates", "chaos-soak", "worker-artifacts"}
+        self.assertEqual(validators | {"prepare-release", "publish-crates", "publish"}, set(jobs))
+        for name in validators:
+            with self.subTest(job=name):
+                self.assertEqual("prepare-release", jobs[name]["needs"])
+                self.assertNotIn("if", jobs[name])
+                self.assertNotIn("continue-on-error", jobs[name])
+        for name in ("publish-crates", "publish"):
+            self.assertEqual("${{ !inputs.dry_run }}", jobs[name]["if"])
+        self.assertIn("validate-release-preconditions", jobs["publish-crates"]["needs"])
+        upload = next(step for step in jobs["package-crates"]["steps"] if "upload-artifact@" in step.get("uses", ""))
+        self.assertEqual("${{ always() && !inputs.dry_run }}", upload["if"])
+        resolve = jobs["prepare-release"]["steps"][-1]["run"]
+        self.assertIn('git merge-base --is-ancestor "${sha}" origin/main', resolve)
+        self.assertNotIn("gh run list", resolve)
+        preconditions = jobs["validate-release-preconditions"]["steps"][-1]["run"]
+        self.assertIn('run.get("event") == "workflow_dispatch"', preconditions)
+        self.assertIn("check_confidence", preconditions)
+        self.assertNotIn("dry_run", preconditions)
+
+    def test_linux_worker_uses_optimized_sdk_features_and_resolved_output(self):
+        job = yaml.safe_load(RELEASE_WORKFLOW.read_text())["jobs"]["worker-artifacts"]
+        self.assertEqual("ubuntu-24.04", job["runs-on"])
+        self.assertNotIn("strategy", job)
+        self.assertNotIn("macos", json.dumps(job).lower())
+        self.assertNotIn("cargo build", json.dumps(job))
+        build = next(step["run"] for step in job["steps"] if step.get("name") == "Build the matching release worker")
+        self.assertLess(build.index("release_version.py stamp"), build.index("kiln sync"))
+        self.assertIn("kiln build --config=optimized --materializations=final", build)
+        label = re.search(r"worker_label=(\S+)", build).group(1)
+        target = next(target for target in json.loads(LANE_TABLE.read_text())["feature_lane_units"]
+                      if target["label"] == label)
+        self.assertEqual([], target["features"])
+        self.assertIn("tools/buck2/outputs.py", build)
+        self.assertIn('echo "SDK_WORKER=${worker}" >> "$GITHUB_ENV"', build)
+        bundle = next(step["run"] for step in job["steps"] if step.get("name") == "Bundle helper and exact SDK source")
+        self.assertIn('--worker "$SDK_WORKER"', bundle)
+        self.assertTrue(any(step.get("if") == "always()" for step in job["steps"]))
+        upload = next(step for step in job["steps"] if "upload-artifact@" in step.get("uses", ""))
+        self.assertEqual("sdk-worker-linux", upload["with"]["name"])
+
+    def test_chaos_soak_uses_shared_builds_and_local_long_running_test(self):
+        job = yaml.safe_load(RELEASE_WORKFLOW.read_text())["jobs"]["chaos-soak"]
+        self.assertEqual("build-cache", job["environment"])
+        steps = job["steps"]
+        self.assertTrue(any(step.get("uses") == "./.github/actions/buck2-shared-cache" for step in steps))
+        run = next(step["run"] for step in steps if step.get("name") == "Run the chaos soak")
+        for argument in ("kiln test", "--local-test-execution", "--no-test-cache", "--test_timeout=6300",
+                         "--test_env=LASH_CHAOS_SOAK_DURATION", "--test_arg=chaos_soak_release",
+                         "--test_arg=--exact", "--test_arg=--ignored", "--test_arg=--nocapture",
+                         "//crates/lash-sim:chaos_soak__test"):
+            self.assertIn(argument, run)
+        self.assertNotIn("cargo test", run)
+        self.assertTrue(any(step.get("if") == "always()" and 'rm -rf -- "$RUNNER_TEMP/build-cache"' in step.get("run", "")
+                            for step in steps))
+
+
 class ReleaseConfidenceTests(unittest.TestCase):
     def setUp(self):
         from unittest.mock import patch
         workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
-        script = next(step["run"] for step in workflow["jobs"]["prepare-release"]["steps"]
-                      if step["name"] == "Resolve and validate release commit")
+        script = next(step["run"] for step in workflow["jobs"]["validate-release-preconditions"]["steps"]
+                      if step.get("name") == "Validate full-profile CI and weekly Confidence")
         source = script.split("python3 - <<'CONFIDENCE_PY'\n", 1)[1].split("\nCONFIDENCE_PY", 1)[0]
         namespace = {"__name__": "contract_test"}
         exec(compile(source, str(RELEASE_WORKFLOW), "exec"), namespace)

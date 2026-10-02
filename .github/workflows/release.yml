@@ -3,6 +3,11 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: "Run release validation without publishing"
+        required: false
+        type: boolean
+        default: false
       release_sha:
         description: "Commit on main to release (blank uses the current main head)"
         required: false
@@ -56,9 +61,7 @@ jobs:
       - name: Resolve and validate release commit
         id: release
         env:
-          GH_TOKEN: ${{ github.token }}
           REQUESTED_SHA: ${{ inputs.release_sha }}
-          CONFIDENCE_OVERRIDE_REASON: ${{ inputs.confidence_override_reason }}
         run: |
           set -euo pipefail
           git fetch --force origin main --tags
@@ -70,6 +73,44 @@ jobs:
             exit 1
           fi
 
+          git checkout --detach "${sha}"
+          tag="$(git tag --points-at "${sha}" --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "${tag}" ]; then
+            version="$(python3 scripts/release_version.py print-next)"
+            tag="v${version}"
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              echo "Computed release tag ${tag} already exists on another commit." >&2
+              exit 1
+            fi
+          fi
+
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "Validating ${sha} for ${tag}." >> "${GITHUB_STEP_SUMMARY}"
+
+  # Keep release preconditions independent so a dry run reports every
+  # validation job even when the target's CI or weekly Confidence is red.
+  validate-release-preconditions:
+    name: Validate release preconditions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: prepare-release
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate full-profile CI and weekly Confidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare-release.outputs.release_sha }}
+          CONFIDENCE_OVERRIDE_REASON: ${{ inputs.confidence_override_reason }}
+        run: |
+          set -euo pipefail
+          sha="${RELEASE_SHA}"
           runs_file="$(mktemp)"
           gh run list --workflow ci.yml --commit "${sha}" --limit 20 \
             --json conclusion,databaseId,displayTitle,event,headSha,status,url,workflowName > "${runs_file}"
@@ -162,21 +203,6 @@ jobs:
           if __name__ == "__main__":
               check_confidence(os.environ["CONFIDENCE_TARGET_SHA"], os.environ.get("CONFIDENCE_OVERRIDE_REASON", ""))
           CONFIDENCE_PY
-
-          git checkout --detach "${sha}"
-          tag="$(git tag --points-at "${sha}" --list 'v*' --sort=-v:refname | head -n 1)"
-          if [ -z "${tag}" ]; then
-            version="$(python3 scripts/release_version.py print-next)"
-            tag="v${version}"
-            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-              echo "Computed release tag ${tag} already exists on another commit." >&2
-              exit 1
-            fi
-          fi
-
-          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-          echo "Validating ${sha} for ${tag}." >> "${GITHUB_STEP_SUMMARY}"
 
   validate-release-ref:
     name: Validate release ref
@@ -485,7 +511,7 @@ jobs:
             --digests packaged-crate-digests.json
 
       - name: Upload packaged crate digests
-        if: always()
+        if: ${{ always() && !inputs.dry_run }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-packaged-crate-digests-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
@@ -501,10 +527,10 @@ jobs:
   chaos-soak:
     name: Chaos soak
     runs-on: ubuntu-24.04
-    # The 90-minute soak plus a cold release-profile build of lash-sim's
-    # test binary.
+    # The 90-minute soak plus a shared optimized build of its test binary.
     timeout-minutes: 150
     needs: prepare-release
+    environment: build-cache
 
     steps:
       - name: Check out repository
@@ -530,30 +556,33 @@ jobs:
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          # Restore-only against the cache release-cache.yml warms on main.
-          shared-key: linux-release
-          save-if: false
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
+      - name: Configure shared build cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       - name: Run the chaos soak
         env:
           LASH_CHAOS_SOAK_DURATION: 90m
         run: |
           set -euo pipefail
-          cargo test --locked --release -p lash-sim --test chaos_soak -- \
-            chaos_soak_release --exact --ignored --nocapture 2>&1 \
+          kiln() { scripts/hermetic-build.sh "$@"; }
+          kiln test --config=optimized --local-test-execution --no-test-cache \
+            --test_timeout=6300 --test_output=all \
+            --test_env=LASH_CHAOS_SOAK_DURATION \
+            --test_arg=chaos_soak_release --test_arg=--exact --test_arg=--ignored \
+            --test_arg=--nocapture //crates/lash-sim:chaos_soak__test 2>&1 \
             | tee "${RUNNER_TEMP}/chaos-soak.log"
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Publish the soak summary
         if: '!cancelled()'
@@ -576,11 +605,12 @@ jobs:
           if-no-files-found: warn
 
   publish-crates:
+    if: ${{ !inputs.dry_run }}
     name: Publish crates to crates.io
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]
+    needs: [prepare-release, validate-release-preconditions, validate-release-ref, package-crates, crash-matrix-restate, latency-gate, chaos-soak]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main
@@ -687,46 +717,57 @@ jobs:
 
 
   worker-artifacts:
-    name: Package SDK worker (${{ matrix.os }})
+    name: Package Linux SDK worker
     needs: prepare-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            os: linux
-          - runner: macos-14
-            os: macos
-    runs-on: ${{ matrix.runner }}
+    environment: build-cache
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
           persist-credentials: false
-      - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
+      - name: Configure shared build cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
       - name: Build the matching release worker
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
         run: |
+          set -euo pipefail
           python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
-          cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker
+          kiln() { scripts/hermetic-build.sh "$@"; }
+          kiln sync
+          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_7b607bb4
+          kiln build --config=optimized --materializations=final \
+            --build-report "${RUNNER_TEMP}/sdk-worker-build.json" "${worker_label}"
+          worker="$(python3 tools/buck2/outputs.py \
+            --report "${RUNNER_TEMP}/sdk-worker-build.json" --label "${worker_label}" --single)"
+          echo "SDK_WORKER=${worker}" >> "$GITHUB_ENV"
       - name: Bundle helper and exact SDK source
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
         run: |
-          python3 scripts/package_vm_worker.py --worker target/release/lash-vm-worker \
+          python3 scripts/package_vm_worker.py --worker "$SDK_WORKER" \
             --out worker-artifacts --version "${RELEASE_TAG#v}"
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: sdk-worker-${{ matrix.os }}
+          name: sdk-worker-linux
           path: worker-artifacts/*
           if-no-files-found: error
 
   publish:
+    if: ${{ !inputs.dry_run }}
     name: Publish SDK release
     runs-on: ubuntu-latest
     timeout-minutes: 10
