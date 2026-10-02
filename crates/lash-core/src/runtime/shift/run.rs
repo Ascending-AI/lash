@@ -147,6 +147,14 @@ impl LashRuntime {
                 )
                 .await?
                 .map_err(abort)?;
+                crate::runtime::turn_loop::generation_fence::admit(
+                    self,
+                    admission.generation.as_ref(),
+                )
+                .map_err(abort)?;
+                let transition = self
+                    .record_plugin_transition(run_controller, admitted, &admission)
+                    .await?;
                 if let Err(error) = self
                     .adopt_admitted_turn(
                         AdmittedTurn {
@@ -162,6 +170,21 @@ impl LashRuntime {
                 {
                     self.record_turn_park_after_abort(&error, &run, None).await;
                     return Err(abort(error));
+                }
+                if let Some(record) = transition {
+                    let plugins = &self.services.plugins;
+                    plugins.adopt_plugin_transition(&record).map_err(|error| {
+                        abort(crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+                    })?;
+                    self.state.authority.plugin_config = record
+                        .candidate()
+                        .map_err(|error| {
+                            abort(
+                                crate::RuntimeEffectControllerError::from(error)
+                                    .into_runtime_error(),
+                            )
+                        })?
+                        .1;
                 }
                 *admission
             }
@@ -497,6 +520,57 @@ impl LashRuntime {
     /// parks it.
     ///
     /// A base the store no longer retains parks the run too.
+    async fn record_plugin_transition(
+        &self,
+        controller: &ScopedEffectController<'_>,
+        admitted: &Admitted,
+        admission: &crate::store::RunAdmission,
+    ) -> Result<Option<crate::plugin::PluginTransitionRecord>, ShiftAbort> {
+        let invocation = run_step_invocation(controller, admitted, "plugin-transition")?;
+        let request = crate::plugin::PluginTransitionRequest {
+            id: crate::plugin::PluginTransitionId(invocation.address().clone()),
+            owner: crate::RuntimeOwner::Session(admitted.session().clone()),
+            base: admission.base.clone(),
+            target: admission.plugins.clone(),
+        };
+        let runner = PluginTransitionRunner {
+            host: self.services.plugins.host().clone(),
+            store: self.shift_store()?,
+            initial: self.state.clone(),
+        };
+        let outcome = controller
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::TransitionPlugins {
+                        request: Box::new(request),
+                    },
+                ),
+                lash_core_execution::core_internal::owned_runner_executor(Box::new(runner), None),
+            )
+            .await
+            .map_err(|error| shift_abort(Some(admitted.run()), error.into_runtime_error()))?;
+        match outcome {
+            crate::RuntimeEffectOutcome::TransitionPlugins { record } => {
+                record.candidate().map_err(|error| {
+                    shift_abort(
+                        Some(admitted.run()),
+                        crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                    )
+                })?;
+                Ok(Some(*record))
+            }
+            other => Err(shift_abort(
+                Some(admitted.run()),
+                crate::RuntimeEffectControllerError::wrong_outcome(
+                    crate::RuntimeEffectKind::TransitionPlugins,
+                    other.kind(),
+                )
+                .into_runtime_error(),
+            )),
+        }
+    }
+
     async fn adopt_admitted_turn(
         &mut self,
         admitted: AdmittedTurn<'_>,
@@ -1519,6 +1593,58 @@ impl AdmitRunRunner {
             RunAdmissionProbe::Answer(RunAdmissionAnswer::Refused {
                 refusal: RunAdmissionRefusal::HeadGone,
             })
+        })
+    }
+}
+
+struct PluginTransitionRunner {
+    host: crate::PluginHost,
+    store: crate::store::SessionStore,
+    initial: crate::RuntimeSessionState,
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for PluginTransitionRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+        _usage: Option<crate::UsageMeter>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::TransitionPlugins { request } = envelope.command else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "plugin transition requires its recorded request",
+            ));
+        };
+        let state = if request.base.revision == 0 {
+            self.initial
+        } else {
+            crate::store::load_session_window_state(
+                &self.store,
+                crate::store::WindowSelector::Admitted(request.base.clone()),
+            )
+            .await
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(
+                    crate::runtime::runtime_error_from_store_commit(error),
+                )
+                .retryable_uncommitted_derivation()
+            })?
+            .ok_or_else(|| {
+                crate::runtime::runtime_error_from_store_commit(
+                    crate::StoreError::TurnBaseNotRetained {
+                        revision: request.base.revision,
+                    },
+                )
+            })?
+            .state
+        };
+        let plugins = state.plugin_state().cloned().unwrap_or_default();
+        let record =
+            self.host
+                .transition_plugins(*request, &plugins, &state.authority.plugin_config);
+        Ok(crate::RuntimeEffectOutcome::TransitionPlugins {
+            record: Box::new(record),
         })
     }
 }

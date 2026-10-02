@@ -16,6 +16,23 @@ impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
         match err {
             PluginError::Format(refusal) => refusal.into(),
+            PluginError::State(crate::PluginStateError::EffectOwnerMismatch) => {
+                let mut error = Self::new(
+                    RuntimeErrorCode::EffectReplayDivergence,
+                    "recorded callback state belongs to another runtime owner",
+                );
+                error.cause = Some(crate::RuntimeErrorCause::PluginStateEffectOwnerMismatch);
+                error
+            }
+            PluginError::State(crate::PluginStateError::EffectReplayMismatch { plugin }) => {
+                let mut error = Self::new(
+                    RuntimeErrorCode::EffectReplayDivergence,
+                    format!("plugin `{plugin}` does not match the recorded callback state base"),
+                );
+                error.cause =
+                    Some(crate::RuntimeErrorCause::PluginStateEffectReplayMismatch { plugin });
+                error
+            }
             PluginError::TriggerOperation(err) => {
                 let code = if err.is_terminal() {
                     RuntimeErrorCode::Plugin

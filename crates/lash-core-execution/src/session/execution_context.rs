@@ -558,6 +558,10 @@ impl<'run> RuntimeExecutionContext<'run> {
             .insert(process_id.clone());
     }
 
+    pub(crate) fn plugin_state_session(&self) -> Arc<crate::PluginSession> {
+        Arc::clone(&self.dispatch.plugins)
+    }
+
     pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
         self.dispatch.session_graph.as_ref()
     }

@@ -220,6 +220,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::AdmitShift { .. }
         | RuntimeEffectCommand::SealShiftAdmission { .. }
+        | RuntimeEffectCommand::TransitionPlugins { .. }
         | RuntimeEffectCommand::AdmitRun { .. }
         | RuntimeEffectCommand::InspectAdmittedHead { .. }
         | RuntimeEffectCommand::ObserveDrainMark { .. }

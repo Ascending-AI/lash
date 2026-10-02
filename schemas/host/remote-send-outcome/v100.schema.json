@@ -2864,6 +2864,34 @@
       "oneOf": [
         {
           "properties": {
+            "type": {
+              "const": "effect_owner_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "plugin": {
+              "type": "string"
+            },
+            "type": {
+              "const": "effect_replay_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plugin"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "key": {
               "type": "string"
             },
@@ -10041,6 +10069,36 @@
     "RuntimeErrorCause": {
       "description": "Typed cause retained when a controller-owned runtime effect must abort\nthrough the generic runtime error boundary.\n\nAttachment retention and worker causes keep their source's retry class.\nOther causes are terminal except for an unavailable recorded model.",
       "oneOf": [
+        {
+          "description": "A recorded callback's accepted state belongs to another owner.",
+          "properties": {
+            "kind": {
+              "const": "plugin_state_effect_owner_mismatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Replay cannot install an accepted batch over a different namespace.",
+          "properties": {
+            "kind": {
+              "const": "plugin_state_effect_replay_mismatch",
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin"
+          ],
+          "type": "object"
+        },
         {
           "description": "A typed worker failure retained through protocol and host errors.",
           "properties": {

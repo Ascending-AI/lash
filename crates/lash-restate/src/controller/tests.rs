@@ -363,3 +363,49 @@ fn a_recorded_step_journals_a_store_error_only_when_it_is_terminal() {
         journaled_faults.join("\n")
     );
 }
+
+#[test]
+fn plugin_transition_is_journaled_with_attempt_faults_retried() {
+    let scope = lash_core::ExecutionScope::turn("transition-owner", "run");
+    let address = lash_core::EffectAddress::new(scope, "plugin-transition").unwrap();
+    let request = lash_core::plugin::PluginTransitionRequest {
+        id: lash_core::plugin::PluginTransitionId(address.clone()),
+        owner: lash_core::RuntimeOwner::Session("transition-owner".into()),
+        base: lash_core::store::SessionHeadRef {
+            generation: 0,
+            revision: 0,
+            leaf: None,
+            checkpoint: None,
+        },
+        target: Default::default(),
+    };
+    let envelope = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            address,
+            lash_core::RuntimeAttribution::for_session("transition-owner"),
+            "transition",
+        ),
+        RuntimeEffectCommand::TransitionPlugins {
+            request: Box::new(request),
+        },
+    );
+    let canonical = envelope.stable_hash().unwrap();
+    let execution::RestateEffectExecution::JournaledRun {
+        envelope,
+        engine_faults: EngineFaults::Retried,
+    } = execution::restate_effect_execution(envelope).unwrap()
+    else {
+        panic!("transition must record its result and retry attempt faults");
+    };
+    assert_eq!(envelope.stable_hash().unwrap(), canonical);
+    let fault = RuntimeEffectControllerError::new(
+        RuntimeErrorCode::PluginSessionManager,
+        "store unavailable",
+    )
+    .retryable_uncommitted_derivation();
+    assert!(
+        fault
+            .journal_disposition(lash_core::RuntimeEffectKind::TransitionPlugins)
+            .is_retryable_derivation()
+    );
+}

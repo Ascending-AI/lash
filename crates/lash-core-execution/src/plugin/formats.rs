@@ -44,41 +44,53 @@ impl PluginHost {
     /// retain their original format and values.
     pub fn decode_state(&self, state: &PluginState) -> Result<PluginState, PluginError> {
         self.validate_state_formats(state)?;
-        let mut decoded = state.clone();
-        for factory in self.factories() {
-            let Some(namespace) = decoded.plugins.get_mut(factory.id()) else {
-                continue;
-            };
-            let native = factory.declaration().format_version;
-            if namespace.format_version == native {
-                continue;
-            }
-            let value = serde_json::to_value(&namespace.values).map_err(|error| {
-                PluginError::StoredDataCorrupt {
-                    record_kind: "plugin_state".into(),
-                    message: error.to_string(),
-                }
-            })?;
-            let value =
-                factory.migrate_format(namespace.format_version, FormatNamespace::State, value)?;
-            let values =
-                serde_json::from_value(value).map_err(|error| PluginError::StoredDataCorrupt {
-                    record_kind: "plugin_state".into(),
-                    message: error.to_string(),
-                })?;
-            super::state::validate_namespace(&values)?;
-            namespace.values = values;
-            namespace.format_version = native;
-            // Representation changes participate in the same capture identity as
-            // mediated writes, even when no ordinary callback changes a value.
-            namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
-                PluginError::MonotonicCounterOverflow {
-                    counter: format!("plugin {} migration generation", factory.id()),
-                    current: namespace.generation,
-                }
-            })?;
+        let plugins = state
+            .plugins
+            .iter()
+            .map(|(id, namespace)| {
+                self.decode_namespace(id, namespace)
+                    .map(|decoded| (id.clone(), decoded))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(PluginState { plugins })
+    }
+
+    pub(super) fn decode_namespace(
+        &self,
+        id: &str,
+        original: &super::PluginNamespaceState,
+    ) -> Result<super::PluginNamespaceState, PluginError> {
+        let mut namespace = original.clone();
+        let Some(factory) = self.factories().iter().find(|factory| factory.id() == id) else {
+            return Ok(namespace);
+        };
+        let native = factory.declaration().format_version;
+        if namespace.format_version == native {
+            return Ok(namespace);
         }
-        Ok(decoded)
+        let value = serde_json::to_value(&namespace.values).map_err(|error| {
+            PluginError::StoredDataCorrupt {
+                record_kind: "plugin_state".into(),
+                message: error.to_string(),
+            }
+        })?;
+        let value =
+            factory.migrate_format(namespace.format_version, FormatNamespace::State, value)?;
+        let values =
+            serde_json::from_value(value).map_err(|error| PluginError::StoredDataCorrupt {
+                record_kind: "plugin_state".into(),
+                message: error.to_string(),
+            })?;
+        super::state::validate_namespace(&values)?;
+        namespace.values = values;
+        namespace.format_version = native;
+        namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
+            PluginError::MonotonicCounterOverflow {
+                counter: format!("plugin {} migration generation", factory.id()),
+                current: namespace.generation,
+            }
+        })?;
+        Ok(namespace)
     }
 
     pub fn decode_config(&self, config: &PluginConfig) -> Result<PluginConfig, FormatRefusal> {

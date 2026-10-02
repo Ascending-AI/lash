@@ -1,6 +1,8 @@
 mod formats;
+mod transition;
 use std::future::Future;
 use std::sync::Arc;
+pub use transition::{PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest};
 
 use crate::runtime::AssembledTurn;
 use crate::{MessageRole, SessionPolicy, ToolManifest, ToolOutcome, ToolProvider};
@@ -25,7 +27,7 @@ mod services;
 pub mod session_obj;
 pub use session_obj::{ResolvedToolSurface, plugin_lifecycle_hook_issue};
 pub(crate) mod session_types;
-mod state;
+pub(crate) mod state;
 use state::PluginStateRegistry;
 mod tool_catalog;
 mod trigger_registry;
@@ -114,8 +116,8 @@ pub use session_types::{
     SubagentSessionContext, UnstatedSessionConfig,
 };
 pub use state::{
-    KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,
-    PluginStateStore,
+    KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateEffect,
+    PluginStateError, PluginStateMutation, PluginStateStore,
 };
 pub use tool_catalog::{
     AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,

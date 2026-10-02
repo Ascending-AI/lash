@@ -16,7 +16,9 @@ mod conversions;
 mod process_local;
 
 mod language_runtime;
+mod plugin_state;
 pub use language_runtime::RUN_SEAL_OPERATION;
+use plugin_state::record_plugin_state;
 mod scoped;
 mod served_only;
 pub use served_only::ServedOnly;
@@ -235,10 +237,18 @@ struct RemoteEffectRunner {
     /// The forwarded runner's binding, so the proxying controller begins the
     /// body's run where it records it.
     usage: Option<crate::UsageAccountingBinding>,
+    plugins: Option<Arc<crate::PluginSession>>,
 }
 
 #[async_trait::async_trait]
 pub trait RuntimeEffectLocalRunner: Send {
+    /// The session whose accepted state edits this callback body owns.
+    /// An engine records these edits with the body result and restores them
+    /// before it serves a completed result on replay.
+    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+        None
+    }
+
     fn uses_task_boundary(&self, _command: &RuntimeEffectCommand) -> bool {
         false
     }
@@ -1047,6 +1057,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         // serves the step from its journal never reaches it. A command that
         // replays by re-execution is no recorded step, so its body gets no
         // live step and its shift's frontier stays where it is.
+        let plugins = if envelope.command.replays_by_reexecution() {
+            None
+        } else {
+            self.plugin_state_session()
+        };
+        let kind = envelope.command.kind();
+        let address = envelope.invocation.address().clone();
         let mut issued = self.issued;
         let live = if envelope.command.replays_by_reexecution() {
             issued.unrecorded();
@@ -1059,20 +1076,37 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 if let Some(live) = live {
                     runner.bind_live_step(live);
                 }
-                runner.execute(envelope, usage_meter).await
+                record_plugin_state(
+                    plugins,
+                    kind,
+                    address,
+                    runner.execute(envelope, usage_meter),
+                )
+                .await
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(mut runner)) => {
                 if let Some(live) = live {
                     runner.bind_live_step(live);
                 }
                 if !runner.uses_task_boundary(&envelope.command) {
-                    return runner.execute(envelope, usage_meter).await;
+                    return record_plugin_state(
+                        plugins,
+                        kind,
+                        address,
+                        runner.execute(envelope, usage_meter),
+                    )
+                    .await;
                 }
                 let panic_call = match &envelope.command {
                     RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.clone()),
                     _ => None,
                 };
-                let task = crate::task::spawn(runner.execute(envelope, usage_meter));
+                let task = crate::task::spawn(record_plugin_state(
+                    plugins,
+                    kind,
+                    address,
+                    runner.execute(envelope, usage_meter),
+                ));
                 let mut abort = AbortEffectTaskOnDrop::new(task.abort_handle());
                 let result = match task.await {
                     Ok(result) => result,
@@ -1140,7 +1174,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 })
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(execution)) => {
-                execution.execute(envelope).await
+                record_plugin_state(plugins, kind, address, execution.execute(envelope)).await
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::ExecutionEnvLoad(execution)) => {
                 execution.execute(envelope).await
@@ -1186,6 +1220,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         )>,
     ) {
         let usage = self.usage_accounting();
+        let plugins = self.plugin_state_session();
         let RuntimeEffectLocalExecutor {
             state,
             replay_trace,
@@ -1198,7 +1233,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 (
                     RuntimeEffectLocalExecutor {
                         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner { requests, usage }),
+                            Box::new(RemoteEffectRunner {
+                                requests,
+                                usage,
+                                plugins,
+                            }),
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
@@ -1220,7 +1259,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 (
                     RuntimeEffectLocalExecutor {
                         state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
-                            Box::new(RemoteEffectRunner { requests, usage }),
+                            Box::new(RemoteEffectRunner {
+                                requests,
+                                usage,
+                                plugins,
+                            }),
                         )),
                         replay_trace: replay_trace.clone(),
                         served_only: served_only.clone(),
@@ -1338,6 +1381,10 @@ impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
+    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+        Some(self.context.plugin_state_session())
+    }
+
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
         matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }
@@ -1459,6 +1506,10 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for RemoteEffectRunner {
+    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+        self.plugins.clone()
+    }
+
     fn usage_accounting(&self) -> Option<crate::UsageAccountingBinding> {
         self.usage.clone()
     }

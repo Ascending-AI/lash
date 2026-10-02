@@ -29,6 +29,8 @@ impl RuntimeErrorCause {
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
             | Self::MaxToolCallsExceeded { .. }
+            | Self::PluginStateEffectOwnerMismatch
+            | Self::PluginStateEffectReplayMismatch { .. }
             | Self::PluginFormat { .. }
             | Self::ProcessParentEnded { .. }
             | Self::ProcessStartKeyConflict { .. }

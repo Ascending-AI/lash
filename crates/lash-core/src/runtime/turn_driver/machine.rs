@@ -106,7 +106,7 @@ impl RuntimeTurnDriver<'_> {
             Ok(prepared) => prepared,
             Err((messages, iteration)) => return Ok((messages, iteration)),
         };
-        self.run_machine(machine, event_tx, run_offset).await
+        Box::pin(self.run_machine(machine, event_tx, run_offset)).await
     }
 
     async fn run_machine(

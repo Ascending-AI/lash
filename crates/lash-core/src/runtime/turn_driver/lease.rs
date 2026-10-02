@@ -65,7 +65,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             )
             .await
         };
-        let outcome = outcome?;
+        let outcome = self.session.plugins().restore_effect_state(outcome?)?;
         decode(outcome)
     }
 }

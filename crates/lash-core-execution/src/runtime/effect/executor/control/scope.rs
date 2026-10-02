@@ -474,9 +474,15 @@ impl<'run> ScopedEffectController<'run> {
         self.validate_envelope_scope(&envelope)?;
         let local_executor = self.guard_local_executor(&envelope, local_executor)?;
         self.effects.fetch_add(1, Ordering::SeqCst);
-        self.controller()
+        let plugins = local_executor.plugin_state_session();
+        let outcome = self
+            .controller()
             .execute_effect(envelope, local_executor)
-            .await
+            .await?;
+        match plugins {
+            Some(plugins) => plugins.restore_effect_state(outcome),
+            None => Ok(outcome),
+        }
     }
 
     /// Where this controller's shift stands relative to its journal: crossed

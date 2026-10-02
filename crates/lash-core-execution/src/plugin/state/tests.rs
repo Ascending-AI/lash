@@ -1212,3 +1212,359 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
         "{refused:?}"
     );
 }
+
+#[tokio::test]
+async fn recorded_effect_state_is_atomic_owner_checked_and_idempotent() {
+    let host = crate::PluginHost::empty();
+    let session = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::creation(
+            "effect-owner",
+            Default::default(),
+        ))
+        .unwrap();
+    let first = PluginStateStore::bind(&session.owner, "first", Arc::clone(&session.state));
+    let second = PluginStateStore::bind(&session.owner, "second", Arc::clone(&session.state));
+    let base = session.export_state();
+    let effect = super::effect::record_effect(
+        Arc::clone(&session),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn("effect-owner", "run"),
+            "state-effect",
+        )
+        .unwrap(),
+        async {
+            first.set("a", serde_json::json!(1)).unwrap();
+            first.set("b", serde_json::json!(2)).unwrap();
+            second.set("c", serde_json::json!(3)).unwrap();
+            assert!(first.set("invalid key", Value::Null).is_err());
+            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+        },
+    )
+    .await
+    .unwrap();
+    let after = session.export_state();
+    let bytes = rmp_serde::to_vec_named(&effect).unwrap();
+    let effect: crate::RuntimeEffectOutcome = rmp_serde::from_slice(&bytes).unwrap();
+    let cold = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::rematerialization(
+            "effect-owner",
+            &base,
+            Default::default(),
+        ))
+        .unwrap();
+    cold.restore_effect_state(effect.clone()).unwrap();
+    assert_eq!(cold.export_state(), after);
+    cold.restore_effect_state(effect.clone()).unwrap();
+    assert_eq!(
+        cold.export_state(),
+        after,
+        "duplicate delivery advances nothing"
+    );
+
+    let later = PluginStateStore::bind(&cold.owner, "first", Arc::clone(&cold.state));
+    later.set("later", Value::Bool(true)).unwrap();
+    let with_later = cold.export_state();
+    cold.restore_effect_state(effect.clone()).unwrap();
+    assert_eq!(
+        cold.export_state(),
+        with_later,
+        "duplicate delivery preserves subsequent writes"
+    );
+
+    let other = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::rematerialization(
+            "another-owner",
+            &base,
+            Default::default(),
+        ))
+        .unwrap();
+    let refusal = other.restore_effect_state(effect.clone()).unwrap_err();
+    assert_eq!(
+        refusal.cause,
+        Some(crate::RuntimeErrorCause::PluginStateEffectOwnerMismatch)
+    );
+    assert_eq!(other.export_state(), base);
+
+    let divergent = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::rematerialization(
+            "effect-owner",
+            &base,
+            Default::default(),
+        ))
+        .unwrap();
+    PluginStateStore::bind(&divergent.owner, "second", Arc::clone(&divergent.state))
+        .set("other", Value::Bool(true))
+        .unwrap();
+    let before_refusal = divergent.export_state();
+    let refusal = divergent.restore_effect_state(effect).unwrap_err();
+    assert_eq!(
+        refusal.cause,
+        Some(crate::RuntimeErrorCause::PluginStateEffectReplayMismatch {
+            plugin: "second".into(),
+        })
+    );
+    assert_eq!(
+        divergent.export_state(),
+        before_refusal,
+        "first namespace must not publish alone"
+    );
+    let wire: crate::RuntimeError = rmp_serde::from_slice(
+        &rmp_serde::to_vec_named(&refusal.clone().into_runtime_error()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(wire.cause, refusal.cause);
+}
+
+#[tokio::test]
+async fn recorded_effect_state_preserves_terminal_failure_and_excludes_nested_batches() {
+    let host = crate::PluginHost::empty();
+    let session = host
+        .isolated_registry()
+        .build_session(PluginSessionRequest::creation(
+            "effect-owner",
+            Default::default(),
+        ))
+        .unwrap();
+    let store = PluginStateStore::bind(&session.owner, "state", Arc::clone(&session.state));
+    let base = session.export_state();
+    let terminal =
+        crate::RuntimeEffectControllerError::new(crate::RuntimeErrorCode::Plugin, "refused");
+    let effect = super::effect::record_effect(
+        Arc::clone(&session),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn("effect-owner", "run"),
+            "terminal",
+        )
+        .unwrap(),
+        async {
+            store.set("accepted", Value::Bool(true)).unwrap();
+            Err(terminal.clone())
+        },
+    )
+    .await
+    .unwrap();
+    let after = session.export_state();
+    session.hydrate_state(&base).unwrap();
+    let result = session.restore_effect_state(effect).unwrap_err();
+    assert_eq!(result.code, terminal.code);
+    assert_eq!(result.message, terminal.message);
+    assert_eq!(session.export_state(), after);
+    let outer = super::effect::record_effect(
+        Arc::clone(&session),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        crate::EffectAddress::new(crate::ExecutionScope::turn("effect-owner", "run"), "outer")
+            .unwrap(),
+        async {
+            let inner = super::effect::record_effect(
+                Arc::clone(&session),
+                crate::RuntimeEffectKind::LanguageRuntimeValue,
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn("effect-owner", "run"),
+                    "inner",
+                )
+                .unwrap(),
+                async {
+                    store.set("nested", Value::Bool(true)).unwrap();
+                    Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+                },
+            )
+            .await
+            .unwrap();
+            session.restore_effect_state(inner).unwrap();
+            Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        outer,
+        crate::RuntimeEffectOutcome::LanguageRuntimeValue { .. }
+    ));
+}
+
+#[test]
+fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
+    #[derive(Clone)]
+    struct Converter {
+        id: &'static str,
+        refuse: bool,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl crate::PluginFactory for Converter {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn declaration(&self) -> crate::plugin::PluginDeclaration {
+            let mut declaration = crate::plugin::PluginDeclaration::initial(self.id);
+            declaration.format_version = crate::FormatVersion::new(2).unwrap();
+            declaration.writable_formats = vec![declaration.format_version];
+            declaration
+        }
+        fn migrate_format(
+            &self,
+            from: crate::FormatVersion,
+            namespace: crate::FormatNamespace,
+            mut value: Value,
+        ) -> Result<Value, crate::FormatRefusal> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.refuse {
+                return Err(crate::FormatRefusal {
+                    plugin: self.id.into(),
+                    namespace,
+                    stored: from,
+                    readable: self.declaration().format_version,
+                });
+            }
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("converted".into(), Value::Bool(true));
+            Ok(value)
+        }
+        fn build(
+            &self,
+            _: &crate::PluginSessionContext,
+        ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+            panic!("transition cannot materialize a factory")
+        }
+    }
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let host = crate::PluginHost::new(vec![
+        Arc::new(Converter {
+            id: "first",
+            refuse: false,
+            calls: Arc::clone(&calls),
+        }),
+        Arc::new(Converter {
+            id: "second",
+            refuse: true,
+            calls: Arc::clone(&calls),
+        }),
+    ]);
+    let base = PluginState {
+        plugins: ["first", "second", "inactive"]
+            .into_iter()
+            .map(|id| (id.into(), PluginNamespaceState::default()))
+            .collect(),
+    };
+    let request = crate::plugin::PluginTransitionRequest {
+        id: crate::plugin::PluginTransitionId(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("transition-owner", "run"),
+                "plugin-transition",
+            )
+            .unwrap(),
+        ),
+        owner: crate::RuntimeOwner::Session("transition-owner".into()),
+        base: crate::store::SessionHeadRef {
+            generation: 0,
+            revision: 7,
+            leaf: None,
+            checkpoint: Some(super::state_ref(&base)),
+        },
+        target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+            host.factories()
+                .iter()
+                .map(|factory| crate::store::plugin_writers::AdmittedPlugin {
+                    plugin: factory.id().into(),
+                    behavior_revision: factory.declaration().behavior_revision,
+                    writer: factory.declaration().format_version,
+                })
+                .collect(),
+        ),
+    };
+    let record = host.transition_plugins(request, &base, &crate::PluginConfig::default());
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(
+        record.namespaces["first"]
+            .as_ref()
+            .unwrap()
+            .values
+            .contains_key("converted")
+    );
+    assert_eq!(
+        record.namespaces["inactive"].as_ref().unwrap(),
+        &base.plugins["inactive"]
+    );
+    let record: crate::plugin::PluginTransitionRecord =
+        rmp_serde::from_slice(&rmp_serde::to_vec_named(&record).unwrap()).unwrap();
+    assert!(
+        matches!(record.candidate(), Err(crate::PluginError::Format(ref refusal)) if refusal.plugin == "second")
+    );
+    let session = crate::PluginHost::empty()
+        .build_session(PluginSessionRequest::rematerialization(
+            "transition-owner",
+            &base,
+            Default::default(),
+        ))
+        .unwrap();
+    let before = session.export_state();
+    assert!(session.adopt_plugin_transition(&record).is_err());
+    assert_eq!(session.export_state(), before);
+    assert!(session.plugin_admission().is_none());
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "replaying refusal calls no converter"
+    );
+}
+
+#[tokio::test]
+async fn abandoned_effect_state_drops_accepted_tail_and_invalidates_guards() {
+    let session = crate::PluginHost::empty()
+        .build_session(PluginSessionRequest::creation(
+            "effect-owner",
+            Default::default(),
+        ))
+        .unwrap();
+    let store = PluginStateStore::bind(&session.owner, "state", Arc::clone(&session.state));
+    let base = session.export_state();
+    let address = || {
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn("effect-owner", "run"),
+            "abandoned",
+        )
+        .unwrap()
+    };
+    let result = super::effect::record_effect(
+        Arc::clone(&session),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        address(),
+        async {
+            store.set("tail", Value::Bool(true)).unwrap();
+            Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::PluginSessionManager,
+                "lost owner",
+            )
+            .retryable_uncommitted_derivation())
+        },
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(session.export_state(), base);
+    assert!(store.generation() > 0);
+    let (written, receiver) = tokio::sync::oneshot::channel();
+    let mut body = Box::pin(super::effect::record_effect(
+        Arc::clone(&session),
+        crate::RuntimeEffectKind::LanguageRuntimeValue,
+        address(),
+        async {
+            store.set("tail", Value::Bool(true)).unwrap();
+            written.send(()).unwrap();
+            std::future::pending().await
+        },
+    ));
+    tokio::select! { _ = &mut body => panic!("body must suspend"), _ = receiver => {} }
+    drop(body);
+    assert_eq!(session.export_state(), base);
+    assert!(matches!(
+        store.apply_guarded(0, vec![]),
+        Err(PluginStateError::GenerationConflict { .. })
+    ));
+}

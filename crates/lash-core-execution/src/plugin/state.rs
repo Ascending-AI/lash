@@ -1,4 +1,7 @@
 //! Host-mediated plugin state and its deterministic checkpoint representation.
+mod effect;
+pub(crate) use effect::record_effect;
+pub use effect::{PluginStateEffect, PluginStateMutation};
 pub use lash_core_store::plugin_state::{PluginNamespaceState, PluginState};
 
 use lash_sansio::sync::MutexExt;
@@ -44,6 +47,10 @@ pub enum KeyRejection {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginStateError {
+    #[error("recorded plugin state belongs to another runtime owner")]
+    EffectOwnerMismatch,
+    #[error("plugin `{plugin}` does not match the recorded effect's state base")]
+    EffectReplayMismatch { plugin: String },
     #[error("invalid key `{key}`: {reason}")]
     InvalidKey { key: String, reason: KeyRejection },
     #[error("value `{key}` is {bytes} bytes, limit {limit}")]
@@ -65,6 +72,12 @@ pub enum PluginStateError {
 impl From<PluginStateError> for super::PluginError {
     fn from(error: PluginStateError) -> Self {
         Self::State(error)
+    }
+}
+
+impl From<PluginStateError> for crate::RuntimeEffectControllerError {
+    fn from(error: PluginStateError) -> Self {
+        super::PluginError::State(error).into()
     }
 }
 
@@ -191,6 +204,7 @@ impl PluginStateStore {
             .plugins
             .get_mut(self.plugin_id())
             .expect("bound namespace");
+        let before = namespace.clone();
         let removed = namespace.values.contains_key(key);
         if removed {
             let generation = accepted_generation
@@ -205,6 +219,7 @@ impl PluginStateStore {
             accepted_generation
         };
         if removed {
+            effect::record_accepted(&self.state, self.plugin_id(), &before, namespace);
             state
                 .acceptance_generations
                 .insert(self.plugin_id().into(), generation);
@@ -255,6 +270,7 @@ impl PluginStateStore {
             .plugins
             .get_mut(self.plugin_id())
             .expect("bound namespace");
+        let before = namespace.clone();
         let mut values = namespace.values.clone();
         for edit in edits {
             match edit {
@@ -291,6 +307,7 @@ impl PluginStateStore {
             .expect("plugin generation exhausted");
         namespace.values = values;
         namespace.generation = generation;
+        effect::record_accepted(&self.state, self.plugin_id(), &before, namespace);
         state
             .acceptance_generations
             .insert(self.plugin_id().into(), generation);
@@ -364,7 +381,8 @@ enum StatePhase {
 pub(super) struct PluginStateRegistry {
     pub(super) data: PluginState,
     phase: StatePhase,
-    source: Option<crate::BlobRef>,
+    applied_effects: std::collections::HashSet<crate::EffectAddress>,
+    pub(super) source: Option<crate::BlobRef>,
     /// Resident guards outlive checkpoint adoption. Checkpoint generations
     /// describe restored data; these tokens must never authorize another value.
     acceptance_generations: BTreeMap<String, u64>,
@@ -376,6 +394,7 @@ impl Default for PluginStateRegistry {
             phase: StatePhase::Registering(Vec::new()),
             source: None,
             acceptance_generations: BTreeMap::new(),
+            applied_effects: Default::default(),
         }
     }
 }
@@ -412,6 +431,7 @@ impl PluginStateRegistry {
                 phase: StatePhase::Ready(Vec::new()),
                 source: None,
                 acceptance_generations: BTreeMap::new(),
+                applied_effects: Default::default(),
             }));
             {
                 let mut candidate = candidate.lock_recover();
@@ -546,6 +566,7 @@ impl PluginStateRegistry {
                 .insert(id.clone(), generation.max(recorded.generation));
         }
         self.data = hydrated;
+        self.applied_effects.clear();
         self.source = Some(state_ref(snapshot));
     }
 }
@@ -553,6 +574,6 @@ impl PluginStateRegistry {
     clippy::expect_used,
     reason = "`PluginState` is a map of strings to `serde_json::Value`, which MessagePack encodes without a failing case"
 )]
-fn state_ref(state: &PluginState) -> crate::BlobRef {
+pub(super) fn state_ref(state: &PluginState) -> crate::BlobRef {
     crate::BlobRef::for_content(&rmp_serde::to_vec_named(state).expect("plugin state encodes"))
 }

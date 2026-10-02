@@ -414,6 +414,9 @@ pub enum SleepSpec {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectCommand {
+    TransitionPlugins {
+        request: Box<crate::plugin::PluginTransitionRequest>,
+    },
     /// Record the protocol's decision before the paired model call.
     BeforeLlmCall {
         request: Box<CoreLlmRequest>,
@@ -711,6 +714,7 @@ impl RuntimeEffectCommand {
 
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
+            Self::TransitionPlugins { .. } => RuntimeEffectKind::TransitionPlugins,
             Self::BeforeLlmCall { .. } => RuntimeEffectKind::BeforeLlmCall,
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
@@ -1284,6 +1288,16 @@ pub struct CompactionBase {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectOutcome {
+    TransitionPlugins {
+        record: Box<crate::plugin::PluginTransitionRecord>,
+    },
+    /// Accepted namespace mutations and the result of the same callback body.
+    /// Replay restores the mutations before serving the result.
+    PluginState {
+        kind: RuntimeEffectKind,
+        state: Box<crate::plugin::PluginStateEffect>,
+        result: Box<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
+    },
     BeforeLlmCall {
         decision: Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError>,
     },
@@ -1835,6 +1849,8 @@ impl RuntimeEffectOutcome {
     /// Exposes kind to effect-host implementors while executing or replaying a runtime effect.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
+            Self::PluginState { kind, .. } => *kind,
+            Self::TransitionPlugins { .. } => RuntimeEffectKind::TransitionPlugins,
             Self::BeforeLlmCall { .. } => RuntimeEffectKind::BeforeLlmCall,
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,

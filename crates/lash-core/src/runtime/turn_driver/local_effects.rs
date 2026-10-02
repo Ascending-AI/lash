@@ -12,6 +12,10 @@ struct LocalTurnEffectRunner {
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
+    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+        Some(Arc::clone(self.driver.session.plugins()))
+    }
+
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
         matches!(
             command,

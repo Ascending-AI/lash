@@ -1431,6 +1431,8 @@ impl RuntimeError {
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
+            | RuntimeErrorCause::PluginStateEffectOwnerMismatch
+            | RuntimeErrorCause::PluginStateEffectReplayMismatch { .. }
             | RuntimeErrorCause::PluginFormat { .. }
             | RuntimeErrorCause::ProcessParentEnded { .. }
             | RuntimeErrorCause::ProcessStartKeyConflict { .. }
@@ -1689,6 +1691,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AdmitShift
                 | RuntimeEffectKind::SealShiftAdmission
                 | RuntimeEffectKind::AdmitRun
+                | RuntimeEffectKind::TransitionPlugins
                 | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::ObserveDrainMark
                 | RuntimeEffectKind::RecoverFollowOn

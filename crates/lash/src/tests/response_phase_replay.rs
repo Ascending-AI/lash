@@ -51,17 +51,18 @@ enum HookChange {
     Removed,
     /// The first attempt ran with no response hook; the replay has one.
     Added,
+    StateRetained,
 }
 
 impl HookChange {
     fn first_has_hook(self) -> bool {
-        self == Self::Removed
+        self != Self::Added
     }
 
     /// The response the run serves: what its first attempt recorded.
     fn served(self) -> &'static str {
         match self {
-            Self::Removed => DERIVED,
+            Self::Removed | Self::StateRetained => DERIVED,
             Self::Added => RAW,
         }
     }
@@ -69,7 +70,7 @@ impl HookChange {
     /// The response the run must never serve.
     fn not_served(self) -> &'static str {
         match self {
-            Self::Removed => RAW,
+            Self::Removed | Self::StateRetained => RAW,
             Self::Added => DERIVED,
         }
     }
@@ -356,12 +357,70 @@ fn deriving_plugin(calls: &Arc<AtomicUsize>) -> StaticPluginFactory {
     )
 }
 
+#[derive(Clone)]
+struct StateDeriver(Arc<AtomicUsize>);
+
+impl lash_core::plugin::PluginFactory for StateDeriver {
+    fn id(&self) -> &'static str {
+        "state-replay-deriver"
+    }
+
+    fn declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        lash_core::plugin::PluginDeclaration::initial(self.id())
+    }
+
+    fn build(
+        &self,
+        _: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl lash_core::plugin::SessionPlugin for StateDeriver {
+    fn id(&self) -> &'static str {
+        "state-replay-deriver"
+    }
+
+    fn register(
+        &self,
+        registrar: &mut lash_core::plugin::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        let state = registrar.state();
+        let calls = Arc::clone(&self.0);
+        registrar.output().response(Arc::new(move |context| {
+            let state = state.clone();
+            let calls = Arc::clone(&calls);
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                state.set("accepted", serde_json::json!(17))?;
+                let before = state.generation();
+                assert!(state.set("invalid key", serde_json::json!(1)).is_err());
+                assert_eq!(state.generation(), before);
+                state.set("second", serde_json::json!(23))?;
+                let mut response = context.response;
+                response.parts = vec![LlmOutputPart::Text {
+                    text: DERIVED.to_owned(),
+                    response_meta: None,
+                }];
+                Ok(lash_core::facade_support::AssistantResponseTransform {
+                    response,
+                    events: Vec::new(),
+                })
+            })
+        }));
+        Ok(())
+    }
+}
+
 /// A core over `engine` whose provider answers [`RAW`], counting its calls
 /// in `provider_calls`, with the deriving response hook installed when
 /// `with_hook`. Building it installs its `SessionShifts` on the engine, once no other core holds that installation.
 fn core_over(
     engine: &Engine,
     with_hook: bool,
+    stateful: bool,
     provider_calls: &Arc<AtomicUsize>,
     hook_calls: &Arc<AtomicUsize>,
 ) -> LashCore {
@@ -378,7 +437,9 @@ fn core_over(
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .serve_test_llm_profile(provider, mock_llm_profile_spec());
-    if with_hook {
+    if stateful {
+        builder = builder.plugin(Arc::new(StateDeriver(Arc::clone(hook_calls))));
+    } else if with_hook {
         builder = builder.plugin(Arc::new(deriving_plugin(hook_calls)));
     }
     builder
@@ -463,6 +524,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     let core = core_over(
         &engine,
         change.first_has_hook(),
+        change == HookChange::StateRetained,
         &provider_calls,
         &hook_calls,
     );
@@ -543,6 +605,7 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
     let second = core_over(
         &engine,
         !change.first_has_hook(),
+        change == HookChange::StateRetained,
         &provider_calls,
         &hook_calls,
     );
@@ -616,6 +679,23 @@ async fn a_changed_response_hook_set_does_not_change_the_served_response(
         hook_calls_before_replay,
         "the replay runs no response hook: the first attempt recorded the phase plan: {evidence}"
     );
+    if change == HookChange::StateRetained {
+        let loaded = lash_core::store::load_session_window_state(
+            &store,
+            lash_core::store::WindowSelector::Current,
+        )
+        .await?
+        .expect("the replay committed a head");
+        let namespace =
+            &loaded.state.plugin_state().expect("plugin state").plugins["state-replay-deriver"];
+        assert_eq!(
+            namespace.values.get("accepted"),
+            Some(&serde_json::json!(17))
+        );
+        assert_eq!(namespace.values.get("second"), Some(&serde_json::json!(23)));
+        assert_eq!(namespace.generation, 2, "each accepted edit appears once");
+        assert!(!namespace.values.contains_key("invalid key"));
+    }
     drop(second);
     Ok(())
 }
@@ -637,6 +717,8 @@ macro_rules! response_phase_replay_laws {
 }
 
 response_phase_replay_laws! {
+    completed_callback_state_survives_cold_replay_sqlite_memory: HookChange::StateRetained, Storage::SqliteMemory, false;
+    completed_callback_state_survives_cold_replay_sqlite_file: HookChange::StateRetained, Storage::SqliteFile, false;
     removed_hook_sqlite_memory: HookChange::Removed, Storage::SqliteMemory, false;
     removed_hook_sqlite_file: HookChange::Removed, Storage::SqliteFile, false;
     #[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]

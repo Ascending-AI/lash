@@ -633,6 +633,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             command @ (RuntimeEffectCommand::BeforeLlmCall { .. }
             | RuntimeEffectCommand::SyncExecutionEnvironment
             | RuntimeEffectCommand::AcceptTurnInput { .. }
+            | RuntimeEffectCommand::TransitionPlugins { .. }
             | RuntimeEffectCommand::AdmitRun { .. }
             | RuntimeEffectCommand::InspectAdmittedHead { .. }
             | RuntimeEffectCommand::ObserveDrainMark { .. }

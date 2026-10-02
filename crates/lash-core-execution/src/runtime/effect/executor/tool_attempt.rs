@@ -5,6 +5,10 @@ use super::*;
 
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
+    fn plugin_state_session(&self) -> Option<Arc<crate::PluginSession>> {
+        Some(Arc::clone(&self.dispatch.plugins))
+    }
+
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
         matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }

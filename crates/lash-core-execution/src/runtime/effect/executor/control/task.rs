@@ -107,7 +107,14 @@ impl EffectControllerTaskRequest {
                         ),
                     ))
                 } else {
-                    controller.execute_effect(*envelope, *local_executor).await
+                    let plugins = local_executor.plugin_state_session();
+                    let result = controller.execute_effect(*envelope, *local_executor).await;
+                    match plugins {
+                        Some(plugins) => {
+                            result.and_then(|outcome| plugins.restore_effect_state(outcome))
+                        }
+                        None => result,
+                    }
                 };
                 let _ = response.send(result);
             }),

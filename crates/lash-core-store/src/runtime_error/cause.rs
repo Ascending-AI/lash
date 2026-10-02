@@ -14,6 +14,12 @@ use crate::SessionId;
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// A recorded callback's accepted state belongs to another owner.
+    PluginStateEffectOwnerMismatch,
+    /// Replay cannot install an accepted batch over a different namespace.
+    PluginStateEffectReplayMismatch {
+        plugin: String,
+    },
     /// A typed worker failure retained through protocol and host errors.
     VmWorker {
         outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
