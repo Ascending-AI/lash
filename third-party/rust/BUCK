@@ -4,13 +4,14 @@ load("@prelude//rust:cargo_package.bzl", "cargo")
 load(
     "@root//tools/buck2:third_party.bzl",
     "third_party_buildscript_run",
+    "third_party_http_archive",
     "third_party_rust_binary",
     "third_party_rust_cxx_library",
     "third_party_rust_library",
     "third_party_rust_prebuilt_cxx_library",
 )
 
-http_archive(
+third_party_http_archive(
     name = "addr2line-0.25.1.crate",
     sha256 = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b",
     strip_prefix = "addr2line-0.25.1",
@@ -54,7 +55,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "adler2-2.0.1.crate",
     sha256 = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa",
     strip_prefix = "adler2-2.0.1",
@@ -97,7 +98,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ahash-0.8.12.crate",
     sha256 = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75",
     strip_prefix = "ahash-0.8.12",
@@ -224,7 +225,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "aho-corasick-1.1.4.crate",
     sha256 = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301",
     strip_prefix = "aho-corasick-1.1.4",
@@ -272,7 +273,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "allocator-api2-0.2.21.crate",
     sha256 = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923",
     strip_prefix = "allocator-api2-0.2.21",
@@ -316,7 +317,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "android_system_properties-0.1.5.crate",
     sha256 = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311",
     strip_prefix = "android_system_properties-0.1.5",
@@ -360,7 +361,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anes-0.1.6.crate",
     sha256 = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299",
     strip_prefix = "anes-0.1.6",
@@ -404,7 +405,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anstream-1.0.0.crate",
     sha256 = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d",
     strip_prefix = "anstream-1.0.0",
@@ -460,7 +461,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anstyle-1.0.14.crate",
     sha256 = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000",
     strip_prefix = "anstyle-1.0.14",
@@ -507,7 +508,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anstyle-parse-1.0.0.crate",
     sha256 = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e",
     strip_prefix = "anstyle-parse-1.0.0",
@@ -555,7 +556,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anstyle-query-1.1.5.crate",
     sha256 = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc",
     strip_prefix = "anstyle-query-1.1.5",
@@ -598,7 +599,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anstyle-wincon-3.0.11.crate",
     sha256 = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d",
     strip_prefix = "anstyle-wincon-3.0.11",
@@ -642,7 +643,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "anyhow-1.0.103.crate",
     sha256 = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3",
     strip_prefix = "anyhow-1.0.103",
@@ -752,7 +753,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "arc-swap-1.9.2.crate",
     sha256 = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b",
     strip_prefix = "arc-swap-1.9.2",
@@ -796,7 +797,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "arrayvec-0.7.8.crate",
     sha256 = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56",
     strip_prefix = "arrayvec-0.7.8",
@@ -839,7 +840,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ast_node-6.1.0.crate",
     sha256 = "b127110e8724bd19447ac72f31a66a9c06ac6b2b1372d81b6f5f0a2bddc6d1bb",
     strip_prefix = "ast_node-6.1.0",
@@ -888,7 +889,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "async-trait-0.1.89.crate",
     sha256 = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb",
     strip_prefix = "async-trait-0.1.89",
@@ -937,7 +938,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "atoi-2.0.0.crate",
     sha256 = "f28d99ec8bfea296261ca1af174f24225171fea9664ba9003cbebee704810528",
     strip_prefix = "atoi-2.0.0",
@@ -985,7 +986,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "atomic-waker-1.1.2.crate",
     sha256 = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0",
     strip_prefix = "atomic-waker-1.1.2",
@@ -1028,7 +1029,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "autocfg-1.5.1.crate",
     sha256 = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53",
     strip_prefix = "autocfg-1.5.1",
@@ -1071,7 +1072,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "aws-lc-rs-1.18.1.crate",
     sha256 = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e",
     strip_prefix = "aws-lc-rs-1.18.1",
@@ -1187,7 +1188,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "aws-lc-sys-0.45.0.crate",
     sha256 = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27",
     strip_prefix = "aws-lc-sys-0.45.0",
@@ -1297,7 +1298,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "axum-0.8.9.crate",
     sha256 = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90",
     strip_prefix = "axum-0.8.9",
@@ -1379,7 +1380,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "axum-core-0.5.6.crate",
     sha256 = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1",
     strip_prefix = "axum-core-0.5.6",
@@ -1430,7 +1431,7 @@ third_party_rust_library(
     ],
 )
 
-http_archive(
+third_party_http_archive(
     name = "backtrace-0.3.76.crate",
     sha256 = "bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6",
     strip_prefix = "backtrace-0.3.76",
@@ -1485,7 +1486,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "base64-0.22.1.crate",
     sha256 = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
     strip_prefix = "base64-0.22.1",
@@ -1533,7 +1534,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "base64-0.23.1.crate",
     sha256 = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5",
     strip_prefix = "base64-0.23.1",
@@ -1580,7 +1581,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "better_scoped_tls-1.0.1.crate",
     sha256 = "7cd228125315b132eed175bf47619ac79b945b26e56b848ba203ae4ea8603609",
     strip_prefix = "better_scoped_tls-1.0.1",
@@ -1624,7 +1625,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bit-set-0.8.0.crate",
     sha256 = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3",
     strip_prefix = "bit-set-0.8.0",
@@ -1672,7 +1673,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bit-vec-0.8.0.crate",
     sha256 = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7",
     strip_prefix = "bit-vec-0.8.0",
@@ -1719,7 +1720,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bitflags-1.3.2.crate",
     sha256 = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a",
     strip_prefix = "bitflags-1.3.2",
@@ -1763,7 +1764,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bitflags-2.13.0.crate",
     sha256 = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8",
     strip_prefix = "bitflags-2.13.0",
@@ -1807,7 +1808,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "blake3-1.8.7.crate",
     sha256 = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae",
     strip_prefix = "blake3-1.8.7",
@@ -1924,7 +1925,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "block-buffer-0.10.4.crate",
     sha256 = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71",
     strip_prefix = "block-buffer-0.10.4",
@@ -1968,7 +1969,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "block-buffer-0.12.1.crate",
     sha256 = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa",
     strip_prefix = "block-buffer-0.12.1",
@@ -2012,7 +2013,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "borrow-or-share-0.2.4.crate",
     sha256 = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c",
     strip_prefix = "borrow-or-share-0.2.4",
@@ -2056,7 +2057,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bs58-0.5.1.crate",
     sha256 = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4",
     strip_prefix = "bs58-0.5.1",
@@ -2104,7 +2105,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bumpalo-3.20.3.crate",
     sha256 = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649",
     strip_prefix = "bumpalo-3.20.3",
@@ -2148,7 +2149,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bytecount-0.6.9.crate",
     sha256 = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e",
     strip_prefix = "bytecount-0.6.9",
@@ -2192,7 +2193,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "byteorder-1.5.0.crate",
     sha256 = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b",
     strip_prefix = "byteorder-1.5.0",
@@ -2236,7 +2237,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bytes-1.12.1.crate",
     sha256 = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04",
     strip_prefix = "bytes-1.12.1",
@@ -2283,7 +2284,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bytes-str-0.2.8.crate",
     sha256 = "577d2bf5650f8554d5a372af5ac93535110a0fc75b3e702bb853369febf227c2",
     strip_prefix = "bytes-str-0.2.8",
@@ -2331,7 +2332,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "bytes-utils-0.1.4.crate",
     sha256 = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35",
     strip_prefix = "bytes-utils-0.1.4",
@@ -2382,7 +2383,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cast-0.3.0.crate",
     sha256 = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5",
     strip_prefix = "cast-0.3.0",
@@ -2425,7 +2426,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "castaway-0.2.4.crate",
     sha256 = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a",
     strip_prefix = "castaway-0.2.4",
@@ -2474,7 +2475,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cc-1.2.67.crate",
     sha256 = "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38",
     strip_prefix = "cc-1.2.67",
@@ -2524,7 +2525,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cfg-if-1.0.4.crate",
     sha256 = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801",
     strip_prefix = "cfg-if-1.0.4",
@@ -2567,7 +2568,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cfg_aliases-0.2.1.crate",
     sha256 = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724",
     strip_prefix = "cfg_aliases-0.2.1",
@@ -2610,7 +2611,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "chacha20-0.10.2.crate",
     sha256 = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06",
     strip_prefix = "chacha20-0.10.2",
@@ -2659,7 +2660,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "chrono-0.4.45.crate",
     sha256 = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327",
     strip_prefix = "chrono-0.4.45",
@@ -2722,7 +2723,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "chrono-tz-0.10.4.crate",
     sha256 = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3",
     strip_prefix = "chrono-tz-0.10.4",
@@ -2836,7 +2837,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ciborium-0.2.2.crate",
     sha256 = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e",
     strip_prefix = "ciborium-0.2.2",
@@ -2888,7 +2889,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ciborium-io-0.2.2.crate",
     sha256 = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757",
     strip_prefix = "ciborium-io-0.2.2",
@@ -2935,7 +2936,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ciborium-ll-0.2.2.crate",
     sha256 = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9",
     strip_prefix = "ciborium-ll-0.2.2",
@@ -2982,7 +2983,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "clap-4.6.1.crate",
     sha256 = "1ddb117e43bbf7dacf0a4190fef4d345b9bad68dfc649cb349e7d17d28428e51",
     strip_prefix = "clap-4.6.1",
@@ -3040,7 +3041,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "clap_builder-4.6.0.crate",
     sha256 = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f",
     strip_prefix = "clap_builder-4.6.0",
@@ -3098,7 +3099,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "clap_derive-4.6.1.crate",
     sha256 = "f2ce8604710f6733aa641a2b3731eaa1e8b3d9973d5e3565da11800813f997a9",
     strip_prefix = "clap_derive-4.6.1",
@@ -3149,7 +3150,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "clap_lex-1.1.0.crate",
     sha256 = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9",
     strip_prefix = "clap_lex-1.1.0",
@@ -3192,7 +3193,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cmake-0.1.58.crate",
     sha256 = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678",
     strip_prefix = "cmake-0.1.58",
@@ -3236,7 +3237,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "colorchoice-1.0.5.crate",
     sha256 = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570",
     strip_prefix = "colorchoice-1.0.5",
@@ -3279,7 +3280,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "combine-4.6.7.crate",
     sha256 = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd",
     strip_prefix = "combine-4.6.7",
@@ -3332,7 +3333,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "compact_str-0.7.1.crate",
     sha256 = "f86b9c4c00838774a6d902ef931eff7470720c51d90c2e32cfe15dc304737b3f",
     strip_prefix = "compact_str-0.7.1",
@@ -3382,7 +3383,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "compact_str-0.9.1.crate",
     sha256 = "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab",
     strip_prefix = "compact_str-0.9.1",
@@ -3439,7 +3440,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "concurrent-queue-2.5.0.crate",
     sha256 = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973",
     strip_prefix = "concurrent-queue-2.5.0",
@@ -3484,7 +3485,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "console-0.16.4.crate",
     sha256 = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c",
     strip_prefix = "console-0.16.4",
@@ -3532,7 +3533,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "const-oid-0.10.2.crate",
     sha256 = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c",
     strip_prefix = "const-oid-0.10.2",
@@ -3575,7 +3576,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "constant_time_eq-0.4.2.crate",
     sha256 = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b",
     strip_prefix = "constant_time_eq-0.4.2",
@@ -3619,7 +3620,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "core-foundation-0.10.1.crate",
     sha256 = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6",
     strip_prefix = "core-foundation-0.10.1",
@@ -3670,7 +3671,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "core-foundation-sys-0.8.7.crate",
     sha256 = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b",
     strip_prefix = "core-foundation-sys-0.8.7",
@@ -3717,7 +3718,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cpufeatures-0.2.17.crate",
     sha256 = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280",
     strip_prefix = "cpufeatures-0.2.17",
@@ -3760,7 +3761,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "cpufeatures-0.3.0.crate",
     sha256 = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201",
     strip_prefix = "cpufeatures-0.3.0",
@@ -3803,7 +3804,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crc-3.4.0.crate",
     sha256 = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d",
     strip_prefix = "crc-3.4.0",
@@ -3847,7 +3848,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crc-catalog-2.5.0.crate",
     sha256 = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853",
     strip_prefix = "crc-catalog-2.5.0",
@@ -3890,7 +3891,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crc-fast-1.10.0.crate",
     sha256 = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5",
     strip_prefix = "crc-fast-1.10.0",
@@ -3947,7 +3948,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crc32fast-1.5.0.crate",
     sha256 = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511",
     strip_prefix = "crc32fast-1.5.0",
@@ -4058,7 +4059,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "criterion-0.5.1.crate",
     sha256 = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f",
     strip_prefix = "criterion-0.5.1",
@@ -4133,7 +4134,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "criterion-plot-0.5.0.crate",
     sha256 = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1",
     strip_prefix = "criterion-plot-0.5.0",
@@ -4180,7 +4181,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "croner-3.0.1.crate",
     sha256 = "4aa42bcd3d846ebf66e15bd528d1087f75d1c6c1c66ebff626178a106353c576",
     strip_prefix = "croner-3.0.1",
@@ -4228,7 +4229,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crossbeam-channel-0.5.16.crate",
     sha256 = "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e",
     strip_prefix = "crossbeam-channel-0.5.16",
@@ -4276,7 +4277,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crossbeam-deque-0.8.7.crate",
     sha256 = "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb",
     strip_prefix = "crossbeam-deque-0.8.7",
@@ -4390,7 +4391,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crossbeam-epoch-0.9.20.crate",
     sha256 = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f",
     strip_prefix = "crossbeam-epoch-0.9.20",
@@ -4501,7 +4502,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crossbeam-queue-0.3.13.crate",
     sha256 = "803d13fb3b09d88be9f4dbc29062c66b19bf7170867ceb746d2a8689bf6c7a26",
     strip_prefix = "crossbeam-queue-0.3.13",
@@ -4550,7 +4551,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crossbeam-utils-0.8.22.crate",
     sha256 = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17",
     strip_prefix = "crossbeam-utils-0.8.22",
@@ -4660,7 +4661,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crunchy-0.2.4.crate",
     sha256 = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5",
     strip_prefix = "crunchy-0.2.4",
@@ -4770,7 +4771,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crypto-common-0.1.7.crate",
     sha256 = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a",
     strip_prefix = "crypto-common-0.1.7",
@@ -4818,7 +4819,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "crypto-common-0.2.2.crate",
     sha256 = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453",
     strip_prefix = "crypto-common-0.2.2",
@@ -4862,7 +4863,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "darling-0.20.11.crate",
     sha256 = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee",
     strip_prefix = "darling-0.20.11",
@@ -4913,7 +4914,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "darling-0.23.0.crate",
     sha256 = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d",
     strip_prefix = "darling-0.23.0",
@@ -4964,7 +4965,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "darling_core-0.20.11.crate",
     sha256 = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e",
     strip_prefix = "darling_core-0.20.11",
@@ -5019,7 +5020,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "darling_core-0.23.0.crate",
     sha256 = "9865a50f7c335f53564bb694ef660825eb8610e0a53d3e11bf1b0d3df31e03b0",
     strip_prefix = "darling_core-0.23.0",
@@ -5073,7 +5074,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "darling_macro-0.20.11.crate",
     sha256 = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead",
     strip_prefix = "darling_macro-0.20.11",
@@ -5122,7 +5123,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "darling_macro-0.23.0.crate",
     sha256 = "ac3984ec7bd6cfa798e62b4a642426a5be0e68f9401cfc2a01e3fa9ea2fcdb8d",
     strip_prefix = "darling_macro-0.23.0",
@@ -5171,7 +5172,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "data-encoding-2.11.0.crate",
     sha256 = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8",
     strip_prefix = "data-encoding-2.11.0",
@@ -5219,7 +5220,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "defmt-1.1.1.crate",
     sha256 = "e2953bfe4f93bbd20cc71198842756f77d161884c99ebbabc41d80231ded88d1",
     strip_prefix = "defmt-1.1.1",
@@ -5325,7 +5326,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "defmt-macros-1.1.1.crate",
     sha256 = "bad9c72e7ca2137e0dc3813245a0d282fd6daad32fd800af018306a9169b5fe8",
     strip_prefix = "defmt-macros-1.1.1",
@@ -5430,7 +5431,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "defmt-parser-1.0.0.crate",
     sha256 = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e",
     strip_prefix = "defmt-parser-1.0.0",
@@ -5474,7 +5475,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "derive_builder-0.20.2.crate",
     sha256 = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947",
     strip_prefix = "derive_builder-0.20.2",
@@ -5522,7 +5523,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "derive_builder_core-0.20.2.crate",
     sha256 = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8",
     strip_prefix = "derive_builder_core-0.20.2",
@@ -5572,7 +5573,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "derive_builder_macro-0.20.2.crate",
     sha256 = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c",
     strip_prefix = "derive_builder_macro-0.20.2",
@@ -5621,7 +5622,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "dhat-0.3.3.crate",
     sha256 = "98cd11d84628e233de0ce467de10b8633f4ddaecafadefc86e13b84b8739b827",
     strip_prefix = "dhat-0.3.3",
@@ -5674,7 +5675,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "diff-0.1.13.crate",
     sha256 = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8",
     strip_prefix = "diff-0.1.13",
@@ -5717,7 +5718,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "digest-0.10.7.crate",
     sha256 = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292",
     strip_prefix = "digest-0.10.7",
@@ -5774,7 +5775,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "digest-0.11.3.crate",
     sha256 = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2",
     strip_prefix = "digest-0.11.3",
@@ -5830,7 +5831,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "displaydoc-0.2.6.crate",
     sha256 = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f",
     strip_prefix = "displaydoc-0.2.6",
@@ -5879,7 +5880,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "dotenvy-0.15.7.crate",
     sha256 = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b",
     strip_prefix = "dotenvy-0.15.7",
@@ -5922,7 +5923,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "dunce-1.0.5.crate",
     sha256 = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813",
     strip_prefix = "dunce-1.0.5",
@@ -5965,7 +5966,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "dyn-clone-1.0.20.crate",
     sha256 = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555",
     strip_prefix = "dyn-clone-1.0.20",
@@ -6008,7 +6009,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "either-1.16.0.crate",
     sha256 = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e",
     strip_prefix = "either-1.16.0",
@@ -6058,7 +6059,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "email_address-0.2.9.crate",
     sha256 = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449",
     strip_prefix = "email_address-0.2.9",
@@ -6107,7 +6108,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "encode_unicode-1.0.0.crate",
     sha256 = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0",
     strip_prefix = "encode_unicode-1.0.0",
@@ -6154,7 +6155,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "equivalent-1.0.2.crate",
     sha256 = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f",
     strip_prefix = "equivalent-1.0.2",
@@ -6197,7 +6198,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "errno-0.3.14.crate",
     sha256 = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb",
     strip_prefix = "errno-0.3.14",
@@ -6245,7 +6246,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "etcetera-0.8.0.crate",
     sha256 = "136d1b5283a1ab77bd9257427ffd09d8667ced0570b6f938942bc7568ed5b943",
     strip_prefix = "etcetera-0.8.0",
@@ -6292,7 +6293,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "event-listener-5.4.1.crate",
     sha256 = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab",
     strip_prefix = "event-listener-5.4.1",
@@ -6345,7 +6346,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fallible-iterator-0.3.0.crate",
     sha256 = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649",
     strip_prefix = "fallible-iterator-0.3.0",
@@ -6392,7 +6393,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fallible-streaming-iterator-0.1.9.crate",
     sha256 = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a",
     strip_prefix = "fallible-streaming-iterator-0.1.9",
@@ -6435,7 +6436,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fancy-regex-0.19.2.crate",
     sha256 = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912",
     strip_prefix = "fancy-regex-0.19.2",
@@ -6490,7 +6491,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fastrand-2.4.1.crate",
     sha256 = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6",
     strip_prefix = "fastrand-2.4.1",
@@ -6538,7 +6539,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "find-msvc-tools-0.1.9.crate",
     sha256 = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582",
     strip_prefix = "find-msvc-tools-0.1.9",
@@ -6581,7 +6582,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "flate2-1.1.9.crate",
     sha256 = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c",
     strip_prefix = "flate2-1.1.9",
@@ -6634,7 +6635,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fluent-uri-0.4.1.crate",
     sha256 = "bc74ac4d8359ae70623506d512209619e5cf8f347124910440dbc221714b328e",
     strip_prefix = "fluent-uri-0.4.1",
@@ -6689,7 +6690,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fnv-1.0.7.crate",
     sha256 = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1",
     strip_prefix = "fnv-1.0.7",
@@ -6736,7 +6737,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "foldhash-0.1.5.crate",
     sha256 = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2",
     strip_prefix = "foldhash-0.1.5",
@@ -6779,7 +6780,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "foldhash-0.2.0.crate",
     sha256 = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb",
     strip_prefix = "foldhash-0.2.0",
@@ -6822,7 +6823,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "form_urlencoded-1.2.2.crate",
     sha256 = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",
     strip_prefix = "form_urlencoded-1.2.2",
@@ -6871,7 +6872,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fraction-0.17.0.crate",
     sha256 = "e246562084dde8ebbcc943b261c406ce4f68e5032ec28029a251a47d6a295500",
     strip_prefix = "fraction-0.17.0",
@@ -6922,7 +6923,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "from_variant-3.0.0.crate",
     sha256 = "e5ff35a391aef949120a0340d690269b3d9f63460a6106e99bd07b961f345ea9",
     strip_prefix = "from_variant-3.0.0",
@@ -6970,7 +6971,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "fs_extra-1.3.0.crate",
     sha256 = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c",
     strip_prefix = "fs_extra-1.3.0",
@@ -7013,7 +7014,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-0.3.32.crate",
     sha256 = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d",
     strip_prefix = "futures-0.3.32",
@@ -7073,7 +7074,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-channel-0.3.32.crate",
     sha256 = "07bbe89c50d7a535e539b8c17bc0b49bdb77747034daa8087407d655f3f7cc1d",
     strip_prefix = "futures-channel-0.3.32",
@@ -7127,7 +7128,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-core-0.3.32.crate",
     sha256 = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d",
     strip_prefix = "futures-core-0.3.32",
@@ -7175,7 +7176,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-executor-0.3.32.crate",
     sha256 = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d",
     strip_prefix = "futures-executor-0.3.32",
@@ -7227,7 +7228,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-intrusive-0.5.0.crate",
     sha256 = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f",
     strip_prefix = "futures-intrusive-0.5.0",
@@ -7281,7 +7282,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-io-0.3.32.crate",
     sha256 = "cecba35d7ad927e23624b22ad55235f2239cfa44fd10428eecbeba6d6a717718",
     strip_prefix = "futures-io-0.3.32",
@@ -7328,7 +7329,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-macro-0.3.32.crate",
     sha256 = "e835b70203e41293343137df5c0664546da5745f82ec9b84d40be8336958447b",
     strip_prefix = "futures-macro-0.3.32",
@@ -7377,7 +7378,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-sink-0.3.32.crate",
     sha256 = "c39754e157331b013978ec91992bde1ac089843443c49cbc7f46150b0fad0893",
     strip_prefix = "futures-sink-0.3.32",
@@ -7425,7 +7426,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-task-0.3.32.crate",
     sha256 = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393",
     strip_prefix = "futures-task-0.3.32",
@@ -7472,7 +7473,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "futures-util-0.3.32.crate",
     sha256 = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6",
     strip_prefix = "futures-util-0.3.32",
@@ -7542,7 +7543,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "generic-array-0.14.7.crate",
     sha256 = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a",
     strip_prefix = "generic-array-0.14.7",
@@ -7645,7 +7646,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "getrandom-0.2.17.crate",
     sha256 = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0",
     strip_prefix = "getrandom-0.2.17",
@@ -7698,7 +7699,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "getrandom-0.3.4.crate",
     sha256 = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd",
     strip_prefix = "getrandom-0.3.4",
@@ -7812,7 +7813,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "getrandom-0.4.3.crate",
     sha256 = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099",
     strip_prefix = "getrandom-0.4.3",
@@ -7924,7 +7925,7 @@ third_party_buildscript_run(
     version = "0.4.3",
 )
 
-http_archive(
+third_party_http_archive(
     name = "gimli-0.32.3.crate",
     sha256 = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7",
     strip_prefix = "gimli-0.32.3",
@@ -7971,7 +7972,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "glob-0.3.3.crate",
     sha256 = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280",
     strip_prefix = "glob-0.3.3",
@@ -8014,7 +8015,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "h2-0.4.15.crate",
     sha256 = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155",
     strip_prefix = "h2-0.4.15",
@@ -8070,7 +8071,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "half-2.7.1.crate",
     sha256 = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b",
     strip_prefix = "half-2.7.1",
@@ -8117,7 +8118,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hashbrown-0.14.5.crate",
     sha256 = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1",
     strip_prefix = "hashbrown-0.14.5",
@@ -8170,7 +8171,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hashbrown-0.15.5.crate",
     sha256 = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1",
     strip_prefix = "hashbrown-0.15.5",
@@ -8226,7 +8227,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hashbrown-0.16.1.crate",
     sha256 = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100",
     strip_prefix = "hashbrown-0.16.1",
@@ -8282,7 +8283,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hashbrown-0.17.1.crate",
     sha256 = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a",
     strip_prefix = "hashbrown-0.17.1",
@@ -8338,7 +8339,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hashlink-0.10.0.crate",
     sha256 = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1",
     strip_prefix = "hashlink-0.10.0",
@@ -8382,7 +8383,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "heck-0.5.0.crate",
     sha256 = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea",
     strip_prefix = "heck-0.5.0",
@@ -8425,7 +8426,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hermit-abi-0.5.2.crate",
     sha256 = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c",
     strip_prefix = "hermit-abi-0.5.2",
@@ -8469,7 +8470,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hex-0.4.3.crate",
     sha256 = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70",
     strip_prefix = "hex-0.4.3",
@@ -8517,7 +8518,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hkdf-0.12.4.crate",
     sha256 = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7",
     strip_prefix = "hkdf-0.12.4",
@@ -8561,7 +8562,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hmac-0.12.1.crate",
     sha256 = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e",
     strip_prefix = "hmac-0.12.1",
@@ -8606,7 +8607,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "home-0.5.12.crate",
     sha256 = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d",
     strip_prefix = "home-0.5.12",
@@ -8649,7 +8650,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hstr-4.0.1.crate",
     sha256 = "23efb2e58d2f27a96edfa907c26016deb120b7ac8c66a19d2748f0e9c145f3cb",
     strip_prefix = "hstr-4.0.1",
@@ -8701,7 +8702,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "http-1.4.2.crate",
     sha256 = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425",
     strip_prefix = "http-1.4.2",
@@ -8752,7 +8753,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "http-body-1.0.1.crate",
     sha256 = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184",
     strip_prefix = "http-body-1.0.1",
@@ -8799,7 +8800,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "http-body-util-0.1.3.crate",
     sha256 = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a",
     strip_prefix = "http-body-util-0.1.3",
@@ -8854,7 +8855,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "httparse-1.10.1.crate",
     sha256 = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87",
     strip_prefix = "httparse-1.10.1",
@@ -8964,7 +8965,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "httpdate-1.0.3.crate",
     sha256 = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9",
     strip_prefix = "httpdate-1.0.3",
@@ -9007,7 +9008,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "humantime-2.4.0.crate",
     sha256 = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15",
     strip_prefix = "humantime-2.4.0",
@@ -9050,7 +9051,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hybrid-array-0.4.13.crate",
     sha256 = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c",
     strip_prefix = "hybrid-array-0.4.13",
@@ -9094,7 +9095,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hyper-1.10.1.crate",
     sha256 = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498",
     strip_prefix = "hyper-1.10.1",
@@ -9160,7 +9161,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hyper-rustls-0.27.9.crate",
     sha256 = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f",
     strip_prefix = "hyper-rustls-0.27.9",
@@ -9218,7 +9219,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "hyper-util-0.1.20.crate",
     sha256 = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0",
     strip_prefix = "hyper-util-0.1.20",
@@ -9290,7 +9291,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "iana-time-zone-0.1.65.crate",
     sha256 = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470",
     strip_prefix = "iana-time-zone-0.1.65",
@@ -9334,7 +9335,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "iana-time-zone-haiku-0.1.2.crate",
     sha256 = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f",
     strip_prefix = "iana-time-zone-haiku-0.1.2",
@@ -9433,7 +9434,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_collections-2.2.0.crate",
     sha256 = "2984d1cd16c883d7935b9e07e44071dca8d917fd52ecc02c04d5fa0b5a3f191c",
     strip_prefix = "icu_collections-2.2.0",
@@ -9484,7 +9485,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_locale_core-2.2.0.crate",
     sha256 = "92219b62b3e2b4d88ac5119f8904c10f8f61bf7e95b640d25ba3075e6cac2c29",
     strip_prefix = "icu_locale_core-2.2.0",
@@ -9535,7 +9536,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_normalizer-2.2.0.crate",
     sha256 = "c56e5ee99d6e3d33bd91c5d85458b6005a22140021cc324cea84dd0e72cff3b4",
     strip_prefix = "icu_normalizer-2.2.0",
@@ -9586,7 +9587,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_normalizer_data-2.2.0.crate",
     sha256 = "da3be0ae77ea334f4da67c12f149704f19f81d1adf7c51cf482943e84a2bad38",
     strip_prefix = "icu_normalizer_data-2.2.0",
@@ -9684,7 +9685,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_properties-2.2.0.crate",
     sha256 = "bee3b67d0ea5c2cca5003417989af8996f8604e34fb9ddf96208a033901e70de",
     strip_prefix = "icu_properties-2.2.0",
@@ -9736,7 +9737,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_properties_data-2.2.0.crate",
     sha256 = "8e2bbb201e0c04f7b4b3e14382af113e17ba4f63e2c9d2ee626b720cbce54a14",
     strip_prefix = "icu_properties_data-2.2.0",
@@ -9834,7 +9835,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "icu_provider-2.2.0.crate",
     sha256 = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421",
     strip_prefix = "icu_provider-2.2.0",
@@ -9887,7 +9888,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ident_case-1.0.1.crate",
     sha256 = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39",
     strip_prefix = "ident_case-1.0.1",
@@ -9930,7 +9931,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "idna-1.1.0.crate",
     sha256 = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de",
     strip_prefix = "idna-1.1.0",
@@ -9984,7 +9985,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "idna_adapter-1.2.2.crate",
     sha256 = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714",
     strip_prefix = "idna_adapter-1.2.2",
@@ -10032,7 +10033,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "indexmap-2.14.0.crate",
     sha256 = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9",
     strip_prefix = "indexmap-2.14.0",
@@ -10083,7 +10084,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "insta-1.48.0.crate",
     sha256 = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82",
     strip_prefix = "insta-1.48.0",
@@ -10137,7 +10138,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ipnet-2.12.0.crate",
     sha256 = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2",
     strip_prefix = "ipnet-2.12.0",
@@ -10184,7 +10185,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "is-macro-0.3.7.crate",
     sha256 = "1d57a3e447e24c22647738e4607f1df1e0ec6f72e16182c4cd199f647cdfb0e4",
     strip_prefix = "is-macro-0.3.7",
@@ -10234,7 +10235,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "is-terminal-0.4.17.crate",
     sha256 = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46",
     strip_prefix = "is-terminal-0.4.17",
@@ -10278,7 +10279,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "is_terminal_polyfill-1.70.2.crate",
     sha256 = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695",
     strip_prefix = "is_terminal_polyfill-1.70.2",
@@ -10322,7 +10323,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "itertools-0.10.5.crate",
     sha256 = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473",
     strip_prefix = "itertools-0.10.5",
@@ -10371,7 +10372,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "itertools-0.14.0.crate",
     sha256 = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285",
     strip_prefix = "itertools-0.14.0",
@@ -10420,7 +10421,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "itertools-0.15.0.crate",
     sha256 = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc",
     strip_prefix = "itertools-0.15.0",
@@ -10469,7 +10470,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "itoa-1.0.18.crate",
     sha256 = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
     strip_prefix = "itoa-1.0.18",
@@ -10512,7 +10513,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jiff-0.2.35.crate",
     sha256 = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc",
     strip_prefix = "jiff-0.2.35",
@@ -10562,7 +10563,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jiff-core-0.1.0.crate",
     sha256 = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09",
     strip_prefix = "jiff-core-0.1.0",
@@ -10611,7 +10612,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jiff-static-0.2.35.crate",
     sha256 = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204",
     strip_prefix = "jiff-static-0.2.35",
@@ -10664,7 +10665,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jni-0.22.4.crate",
     sha256 = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498",
     strip_prefix = "jni-0.22.4",
@@ -10772,7 +10773,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jni-macros-0.22.4.crate",
     sha256 = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3",
     strip_prefix = "jni-macros-0.22.4",
@@ -10878,7 +10879,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jni-sys-0.4.1.crate",
     sha256 = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2",
     strip_prefix = "jni-sys-0.4.1",
@@ -10922,7 +10923,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jni-sys-macros-0.4.1.crate",
     sha256 = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264",
     strip_prefix = "jni-sys-macros-0.4.1",
@@ -10970,7 +10971,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jobserver-0.1.35.crate",
     sha256 = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3",
     strip_prefix = "jobserver-0.1.35",
@@ -11014,7 +11015,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "js-sys-0.3.103.crate",
     sha256 = "53b44bfcdb3f8d5837a46dae1ca9660a837176eee74a28b229bc626816589102",
     strip_prefix = "js-sys-0.3.103",
@@ -11067,7 +11068,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jsonptr-0.7.1.crate",
     sha256 = "a5a3cc660ba5d72bce0b3bb295bf20847ccbb40fd423f3f05b61273672e561fe",
     strip_prefix = "jsonptr-0.7.1",
@@ -11123,7 +11124,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jsonschema-0.58.3.crate",
     sha256 = "905edfa6eee835291d6efe33f733f7fcb40c2a24be93b78b74df95e56aef8611",
     strip_prefix = "jsonschema-0.58.3",
@@ -11189,7 +11190,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jsonschema-regex-0.58.3.crate",
     sha256 = "023cf6b6c38655c1e9cedf72b9c534fd361bd35d20ac06e074f2c93b7dd0836c",
     strip_prefix = "jsonschema-regex-0.58.3",
@@ -11233,7 +11234,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jsonschema-value-0.58.3.crate",
     sha256 = "43519639b8e32075ef90a9b6b19136e516a3236b7943c3fe6b1622dafdced8ea",
     strip_prefix = "jsonschema-value-0.58.3",
@@ -11352,7 +11353,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "jsonwebtoken-10.4.0.crate",
     sha256 = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc",
     strip_prefix = "jsonwebtoken-10.4.0",
@@ -11402,7 +11403,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "lazy_static-1.5.0.crate",
     sha256 = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe",
     strip_prefix = "lazy_static-1.5.0",
@@ -11445,7 +11446,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "libc-0.2.186.crate",
     sha256 = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66",
     strip_prefix = "libc-0.2.186",
@@ -11558,7 +11559,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "libredox-0.1.18.crate",
     sha256 = "c943259e342f1e06ff2da7a83eabdfe7f92ce10262688dbf1895ff0b3e6e4652",
     strip_prefix = "libredox-0.1.18",
@@ -11618,7 +11619,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "libsqlite3-sys-0.35.0.crate",
     sha256 = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f",
     strip_prefix = "libsqlite3-sys-0.35.0",
@@ -11749,7 +11750,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "linux-raw-sys-0.12.1.crate",
     sha256 = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53",
     strip_prefix = "linux-raw-sys-0.12.1",
@@ -11800,7 +11801,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "litemap-0.8.2.crate",
     sha256 = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0",
     strip_prefix = "litemap-0.8.2",
@@ -11843,7 +11844,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "lock_api-0.4.14.crate",
     sha256 = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965",
     strip_prefix = "lock_api-0.4.14",
@@ -11891,7 +11892,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "log-0.4.33.crate",
     sha256 = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad",
     strip_prefix = "log-0.4.33",
@@ -11935,7 +11936,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "lru-slab-0.1.2.crate",
     sha256 = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154",
     strip_prefix = "lru-slab-0.1.2",
@@ -11978,7 +11979,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "matchers-0.2.0.crate",
     sha256 = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9",
     strip_prefix = "matchers-0.2.0",
@@ -12022,7 +12023,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "matchit-0.8.4.crate",
     sha256 = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3",
     strip_prefix = "matchit-0.8.4",
@@ -12066,7 +12067,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "md-5-0.10.6.crate",
     sha256 = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf",
     strip_prefix = "md-5-0.10.6",
@@ -12113,7 +12114,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "md-5-0.11.0.crate",
     sha256 = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98",
     strip_prefix = "md-5-0.11.0",
@@ -12160,7 +12161,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "memchr-2.8.3.crate",
     sha256 = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98",
     strip_prefix = "memchr-2.8.3",
@@ -12208,7 +12209,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "micromap-0.3.0.crate",
     sha256 = "c2a86d3146ed3995b5913c414f6664344b9617457320782e64f0bb44afd49d74",
     strip_prefix = "micromap-0.3.0",
@@ -12252,7 +12253,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "mime-0.3.17.crate",
     sha256 = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a",
     strip_prefix = "mime-0.3.17",
@@ -12295,7 +12296,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "miniz_oxide-0.8.9.crate",
     sha256 = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316",
     strip_prefix = "miniz_oxide-0.8.9",
@@ -12341,7 +12342,7 @@ third_party_rust_library(
     ],
 )
 
-http_archive(
+third_party_http_archive(
     name = "mintex-0.1.4.crate",
     sha256 = "c505b3e17ed6b70a7ed2e67fbb2c560ee327353556120d6e72f5232b6880d536",
     strip_prefix = "mintex-0.1.4",
@@ -12384,7 +12385,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "mio-1.2.1.crate",
     sha256 = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda",
     strip_prefix = "mio-1.2.1",
@@ -12433,7 +12434,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "mutants-0.0.4.crate",
     sha256 = "add0ac067452ff1aca8c5002111bd6b1c895baee6e45fcbc44e0193aea17be56",
     strip_prefix = "mutants-0.0.4",
@@ -12477,7 +12478,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "new_debug_unreachable-1.0.6.crate",
     sha256 = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086",
     strip_prefix = "new_debug_unreachable-1.0.6",
@@ -12520,7 +12521,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "nix-0.31.3.crate",
     sha256 = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d",
     strip_prefix = "nix-0.31.3",
@@ -12642,7 +12643,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "nu-ansi-term-0.50.3.crate",
     sha256 = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5",
     strip_prefix = "nu-ansi-term-0.50.3",
@@ -12689,7 +12690,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-0.4.3.crate",
     sha256 = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23",
     strip_prefix = "num-0.4.3",
@@ -12744,7 +12745,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-bigint-0.4.8.crate",
     sha256 = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367",
     strip_prefix = "num-bigint-0.4.8",
@@ -12797,7 +12798,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-cmp-0.1.0.crate",
     sha256 = "63335b2e2c34fae2fb0aa2cecfd9f0832a1e24b3b32ecec612c3426d46dc8aaa",
     strip_prefix = "num-cmp-0.1.0",
@@ -12840,7 +12841,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-complex-0.4.6.crate",
     sha256 = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495",
     strip_prefix = "num-complex-0.4.6",
@@ -12885,7 +12886,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-integer-0.1.46.crate",
     sha256 = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f",
     strip_prefix = "num-integer-0.1.46",
@@ -12933,7 +12934,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-iter-0.1.46.crate",
     sha256 = "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b",
     strip_prefix = "num-iter-0.1.46",
@@ -12984,7 +12985,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-rational-0.4.2.crate",
     sha256 = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824",
     strip_prefix = "num-rational-0.4.2",
@@ -13037,7 +13038,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "num-traits-0.2.19.crate",
     sha256 = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
     strip_prefix = "num-traits-0.2.19",
@@ -13145,7 +13146,7 @@ third_party_buildscript_run(
     version = "0.2.19",
 )
 
-http_archive(
+third_party_http_archive(
     name = "object-0.37.3.crate",
     sha256 = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe",
     strip_prefix = "object-0.37.3",
@@ -13274,7 +13275,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "object_store-0.14.2.crate",
     sha256 = "f1796bc93603f78c5760a69f2d58badc9618d22adade0a95385bb2adbae4eb94",
     strip_prefix = "object_store-0.14.2",
@@ -13367,7 +13368,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "once_cell-1.21.4.crate",
     sha256 = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50",
     strip_prefix = "once_cell-1.21.4",
@@ -13416,7 +13417,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "once_cell_polyfill-1.70.2.crate",
     sha256 = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe",
     strip_prefix = "once_cell_polyfill-1.70.2",
@@ -13460,7 +13461,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "oorandom-11.1.5.crate",
     sha256 = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e",
     strip_prefix = "oorandom-11.1.5",
@@ -13503,7 +13504,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "openssl-probe-0.2.1.crate",
     sha256 = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe",
     strip_prefix = "openssl-probe-0.2.1",
@@ -13546,7 +13547,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "opentelemetry-0.31.0.crate",
     sha256 = "b84bcd6ae87133e903af7ef497404dda70c60d0ea14895fc8a5e6722754fc2a0",
     strip_prefix = "opentelemetry-0.31.0",
@@ -13609,7 +13610,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "opentelemetry_sdk-0.31.0.crate",
     sha256 = "e14ae4f5991976fd48df6d843de219ca6d31b01daaab2dad5af2badeded372bd",
     strip_prefix = "opentelemetry_sdk-0.31.0",
@@ -13678,7 +13679,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "outref-0.5.2.crate",
     sha256 = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e",
     strip_prefix = "outref-0.5.2",
@@ -13721,7 +13722,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "parking-2.2.1.crate",
     sha256 = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba",
     strip_prefix = "parking-2.2.1",
@@ -13764,7 +13765,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "parking_lot-0.12.5.crate",
     sha256 = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a",
     strip_prefix = "parking_lot-0.12.5",
@@ -13812,7 +13813,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "parking_lot_core-0.9.12.crate",
     sha256 = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1",
     strip_prefix = "parking_lot_core-0.9.12",
@@ -13915,7 +13916,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "pastey-0.2.3.crate",
     sha256 = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4",
     strip_prefix = "pastey-0.2.3",
@@ -13959,7 +13960,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "percent-encoding-2.3.2.crate",
     sha256 = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220",
     strip_prefix = "percent-encoding-2.3.2",
@@ -14007,7 +14008,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "phf-0.11.3.crate",
     sha256 = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078",
     strip_prefix = "phf-0.11.3",
@@ -14060,7 +14061,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "phf-0.12.1.crate",
     sha256 = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7",
     strip_prefix = "phf-0.12.1",
@@ -14104,7 +14105,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "phf_generator-0.11.3.crate",
     sha256 = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d",
     strip_prefix = "phf_generator-0.11.3",
@@ -14151,7 +14152,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "phf_macros-0.11.3.crate",
     sha256 = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216",
     strip_prefix = "phf_macros-0.11.3",
@@ -14202,7 +14203,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "phf_shared-0.11.3.crate",
     sha256 = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5",
     strip_prefix = "phf_shared-0.11.3",
@@ -14247,7 +14248,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "phf_shared-0.12.1.crate",
     sha256 = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981",
     strip_prefix = "phf_shared-0.12.1",
@@ -14291,7 +14292,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "pin-project-lite-0.2.17.crate",
     sha256 = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd",
     strip_prefix = "pin-project-lite-0.2.17",
@@ -14334,7 +14335,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "pkg-config-0.3.33.crate",
     sha256 = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e",
     strip_prefix = "pkg-config-0.3.33",
@@ -14377,7 +14378,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "plain-0.2.3.crate",
     sha256 = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6",
     strip_prefix = "plain-0.2.3",
@@ -14420,7 +14421,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "plotters-0.3.7.crate",
     sha256 = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747",
     strip_prefix = "plotters-0.3.7",
@@ -14474,7 +14475,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "plotters-backend-0.3.7.crate",
     sha256 = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a",
     strip_prefix = "plotters-backend-0.3.7",
@@ -14517,7 +14518,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "plotters-svg-0.3.7.crate",
     sha256 = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670",
     strip_prefix = "plotters-svg-0.3.7",
@@ -14561,7 +14562,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "portable-atomic-1.15.0.crate",
     sha256 = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85",
     strip_prefix = "portable-atomic-1.15.0",
@@ -14662,7 +14663,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "portable-atomic-util-0.2.7.crate",
     sha256 = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618",
     strip_prefix = "portable-atomic-util-0.2.7",
@@ -14764,7 +14765,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "potential_utf-0.1.5.crate",
     sha256 = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564",
     strip_prefix = "potential_utf-0.1.5",
@@ -14809,7 +14810,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ppv-lite86-0.2.21.crate",
     sha256 = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9",
     strip_prefix = "ppv-lite86-0.2.21",
@@ -14857,7 +14858,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "pretty_assertions-1.4.1.crate",
     sha256 = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d",
     strip_prefix = "pretty_assertions-1.4.1",
@@ -14908,7 +14909,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "prettyplease-0.2.37.crate",
     sha256 = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b",
     strip_prefix = "prettyplease-0.2.37",
@@ -15011,7 +15012,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "proc-macro2-1.0.106.crate",
     sha256 = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
     strip_prefix = "proc-macro2-1.0.106",
@@ -15122,7 +15123,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "process-wrap-9.1.0.crate",
     sha256 = "2e842efad9119158434d193c6682e2ebee4b44d6ad801d7b349623b3f57cdf55",
     strip_prefix = "process-wrap-9.1.0",
@@ -15182,7 +15183,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "proptest-1.11.0.crate",
     sha256 = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744",
     strip_prefix = "proptest-1.11.0",
@@ -15248,7 +15249,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "prost-0.14.4.crate",
     sha256 = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1",
     strip_prefix = "prost-0.14.4",
@@ -15300,7 +15301,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "prost-derive-0.14.4.crate",
     sha256 = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf",
     strip_prefix = "prost-derive-0.14.4",
@@ -15351,7 +15352,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "quick-error-1.2.3.crate",
     sha256 = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0",
     strip_prefix = "quick-error-1.2.3",
@@ -15394,7 +15395,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "quick-xml-0.41.0.crate",
     sha256 = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1",
     strip_prefix = "quick-xml-0.41.0",
@@ -15447,7 +15448,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "quinn-0.11.11.crate",
     sha256 = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8",
     strip_prefix = "quinn-0.11.11",
@@ -15575,7 +15576,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "quinn-proto-0.11.16.crate",
     sha256 = "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560",
     strip_prefix = "quinn-proto-0.11.16",
@@ -15635,7 +15636,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "quinn-udp-0.5.15.crate",
     sha256 = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694",
     strip_prefix = "quinn-udp-0.5.15",
@@ -15742,7 +15743,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "quote-1.0.46.crate",
     sha256 = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368",
     strip_prefix = "quote-1.0.46",
@@ -15853,7 +15854,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "r-efi-5.3.0.crate",
     sha256 = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
     strip_prefix = "r-efi-5.3.0",
@@ -15896,7 +15897,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "r-efi-6.0.0.crate",
     sha256 = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
     strip_prefix = "r-efi-6.0.0",
@@ -15939,7 +15940,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand-0.8.7.crate",
     sha256 = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a",
     strip_prefix = "rand-0.8.7",
@@ -15996,7 +15997,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand-0.9.5.crate",
     sha256 = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41",
     strip_prefix = "rand-0.9.5",
@@ -16052,7 +16053,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand-0.10.2.crate",
     sha256 = "c7f5fa3a058cd35567ef9bfa5e75732bee0f9e4c55fa90477bef2dfcdbc4be80",
     strip_prefix = "rand-0.10.2",
@@ -16108,7 +16109,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_chacha-0.3.1.crate",
     sha256 = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88",
     strip_prefix = "rand_chacha-0.3.1",
@@ -16156,7 +16157,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_chacha-0.9.0.crate",
     sha256 = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb",
     strip_prefix = "rand_chacha-0.9.0",
@@ -16207,7 +16208,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_core-0.6.4.crate",
     sha256 = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c",
     strip_prefix = "rand_core-0.6.4",
@@ -16256,7 +16257,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_core-0.9.5.crate",
     sha256 = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c",
     strip_prefix = "rand_core-0.9.5",
@@ -16304,7 +16305,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_core-0.10.1.crate",
     sha256 = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69",
     strip_prefix = "rand_core-0.10.1",
@@ -16347,7 +16348,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_pcg-0.10.2.crate",
     sha256 = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a",
     strip_prefix = "rand_pcg-0.10.2",
@@ -16391,7 +16392,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rand_xorshift-0.4.0.crate",
     sha256 = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a",
     strip_prefix = "rand_xorshift-0.4.0",
@@ -16435,7 +16436,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rayon-1.12.0.crate",
     sha256 = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d",
     strip_prefix = "rayon-1.12.0",
@@ -16482,7 +16483,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rayon-core-1.13.0.crate",
     sha256 = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91",
     strip_prefix = "rayon-core-1.13.0",
@@ -16585,7 +16586,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "redox_syscall-0.5.18.crate",
     sha256 = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d",
     strip_prefix = "redox_syscall-0.5.18",
@@ -16633,7 +16634,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "redox_syscall-0.9.0.crate",
     sha256 = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759",
     strip_prefix = "redox_syscall-0.9.0",
@@ -16681,7 +16682,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ref-cast-1.0.26.crate",
     sha256 = "216e8f773d7923bcba9ceb86a86c93cabb3903a11872fc3f138c49630e50b96d",
     strip_prefix = "ref-cast-1.0.26",
@@ -16780,7 +16781,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ref-cast-impl-1.0.26.crate",
     sha256 = "2c9283685feec7d69af75fb0e858d5e7378f33fe4fc699383b2916ab9273e03c",
     strip_prefix = "ref-cast-impl-1.0.26",
@@ -16829,7 +16830,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "referencing-0.58.3.crate",
     sha256 = "ead446bbb5527785ff232eb96625ac03daa627945470374c553db8f13090e30f",
     strip_prefix = "referencing-0.58.3",
@@ -16883,7 +16884,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "regex-1.13.0.crate",
     sha256 = "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2",
     strip_prefix = "regex-1.13.0",
@@ -16951,7 +16952,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "regex-automata-0.4.18.crate",
     sha256 = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2",
     strip_prefix = "regex-automata-0.4.18",
@@ -17027,7 +17028,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "regex-syntax-0.8.11.crate",
     sha256 = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4",
     strip_prefix = "regex-syntax-0.8.11",
@@ -17082,7 +17083,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "regress-0.10.5.crate",
     sha256 = "2057b2325e68a893284d1538021ab90279adac1139957ca2a74426c6f118fb48",
     strip_prefix = "regress-0.10.5",
@@ -17134,7 +17135,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "regress-0.11.1.crate",
     sha256 = "158a764437582235e3501f683b93a0a6f8d825d04a789dbe5ed30b8799b8908a",
     strip_prefix = "regress-0.11.1",
@@ -17186,7 +17187,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "reqwest-0.13.4.crate",
     sha256 = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3",
     strip_prefix = "reqwest-0.13.4",
@@ -17270,7 +17271,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "restate-sdk-0.11.1.crate",
     sha256 = "1a900d7d9d250d727034f68b16bdfc5314c64ee8a7e5b78e8f37106e3a98bf88",
     strip_prefix = "restate-sdk-0.11.1",
@@ -17411,7 +17412,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "restate-sdk-macros-0.11.1.crate",
     sha256 = "393a519e55cb4572e916d2023aa778e59864f6e7d6e7c28017d7ad8dfc983272",
     strip_prefix = "restate-sdk-macros-0.11.1",
@@ -17461,7 +17462,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "restate-sdk-shared-core-7.0.3.crate",
     sha256 = "c4a8731358ce185d1c9663d3ac97414acf7c0d642e5724864ade03fcccb85134",
     strip_prefix = "restate-sdk-shared-core-7.0.3",
@@ -17525,7 +17526,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ring-0.17.14.crate",
     sha256 = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7",
     strip_prefix = "ring-0.17.14",
@@ -17648,7 +17649,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rmcp-1.8.0.crate",
     sha256 = "1d1f571c72940a19d9532fe52dbea8bc9912bf1d766c2970bb824056b86f3f59",
     strip_prefix = "rmcp-1.8.0",
@@ -17833,7 +17834,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rmcp-macros-1.8.0.crate",
     sha256 = "1aad0035b69380782d78ea95b508327e6deaa2235909053e596eea8f27b5e1d5",
     strip_prefix = "rmcp-macros-1.8.0",
@@ -17884,7 +17885,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rmp-0.8.15.crate",
     sha256 = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c",
     strip_prefix = "rmp-0.8.15",
@@ -17932,7 +17933,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rmp-serde-1.3.1.crate",
     sha256 = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155",
     strip_prefix = "rmp-serde-1.3.1",
@@ -17979,7 +17980,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rusqlite-0.37.0.crate",
     sha256 = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f",
     strip_prefix = "rusqlite-0.37.0",
@@ -18029,7 +18030,7 @@ third_party_rust_library(
     ],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustc-demangle-0.1.28.crate",
     sha256 = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb",
     strip_prefix = "rustc-demangle-0.1.28",
@@ -18066,7 +18067,7 @@ third_party_rust_library(
     visibility = [],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustc-hash-1.1.0.crate",
     sha256 = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2",
     strip_prefix = "rustc-hash-1.1.0",
@@ -18113,7 +18114,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustc-hash-2.1.3.crate",
     sha256 = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d",
     strip_prefix = "rustc-hash-2.1.3",
@@ -18160,7 +18161,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustc_version-0.4.1.crate",
     sha256 = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92",
     strip_prefix = "rustc_version-0.4.1",
@@ -18204,7 +18205,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustix-1.1.4.crate",
     sha256 = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190",
     strip_prefix = "rustix-1.1.4",
@@ -18324,7 +18325,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustls-0.23.45.crate",
     sha256 = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
     strip_prefix = "rustls-0.23.45",
@@ -18455,7 +18456,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustls-native-certs-0.8.4.crate",
     sha256 = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d",
     strip_prefix = "rustls-native-certs-0.8.4",
@@ -18502,7 +18503,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustls-pki-types-1.15.0.crate",
     sha256 = "764899a24af3980067ee14bc143654f297b22eaebfe3c7b6b211920a5a59b046",
     strip_prefix = "rustls-pki-types-1.15.0",
@@ -18553,7 +18554,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustls-platform-verifier-0.7.0.crate",
     sha256 = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0",
     strip_prefix = "rustls-platform-verifier-0.7.0",
@@ -18602,7 +18603,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustls-platform-verifier-android-0.1.1.crate",
     sha256 = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f",
     strip_prefix = "rustls-platform-verifier-android-0.1.1",
@@ -18645,7 +18646,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustls-webpki-0.103.15.crate",
     sha256 = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2",
     strip_prefix = "rustls-webpki-0.103.15",
@@ -18702,7 +18703,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rustversion-1.0.23.crate",
     sha256 = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
     strip_prefix = "rustversion-1.0.23",
@@ -18801,7 +18802,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "rusty-fork-0.3.1.crate",
     sha256 = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2",
     strip_prefix = "rusty-fork-0.3.1",
@@ -18854,7 +18855,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ryu-1.0.23.crate",
     sha256 = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f",
     strip_prefix = "ryu-1.0.23",
@@ -18897,7 +18898,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "ryu-js-1.0.3.crate",
     sha256 = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714",
     strip_prefix = "ryu-js-1.0.3",
@@ -18940,7 +18941,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "same-file-1.0.6.crate",
     sha256 = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502",
     strip_prefix = "same-file-1.0.6",
@@ -18983,7 +18984,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "schannel-0.1.29.crate",
     sha256 = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939",
     strip_prefix = "schannel-0.1.29",
@@ -19027,7 +19028,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "schemars-0.8.22.crate",
     sha256 = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615",
     strip_prefix = "schemars-0.8.22",
@@ -19146,7 +19147,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "schemars-1.2.2.crate",
     sha256 = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a",
     strip_prefix = "schemars-1.2.2",
@@ -19206,7 +19207,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "schemars_derive-0.8.22.crate",
     sha256 = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d",
     strip_prefix = "schemars_derive-0.8.22",
@@ -19256,7 +19257,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "schemars_derive-1.2.2.crate",
     sha256 = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba",
     strip_prefix = "schemars_derive-1.2.2",
@@ -19306,7 +19307,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "scoped-tls-1.0.1.crate",
     sha256 = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294",
     strip_prefix = "scoped-tls-1.0.1",
@@ -19349,7 +19350,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "scopeguard-1.2.0.crate",
     sha256 = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49",
     strip_prefix = "scopeguard-1.2.0",
@@ -19392,7 +19393,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "security-framework-3.7.0.crate",
     sha256 = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d",
     strip_prefix = "security-framework-3.7.0",
@@ -19448,7 +19449,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "security-framework-sys-2.17.0.crate",
     sha256 = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3",
     strip_prefix = "security-framework-sys-2.17.0",
@@ -19499,7 +19500,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "semver-1.0.28.crate",
     sha256 = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd",
     strip_prefix = "semver-1.0.28",
@@ -19550,7 +19551,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "seq-macro-0.3.6.crate",
     sha256 = "1bc711410fbe7399f390ca1c3b60ad0f53f80e95c5eb935e52268a0e2cd49acc",
     strip_prefix = "seq-macro-0.3.6",
@@ -19594,7 +19595,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde-1.0.228.crate",
     sha256 = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
     strip_prefix = "serde-1.0.228",
@@ -19720,7 +19721,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_bytes-0.11.19.crate",
     sha256 = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8",
     strip_prefix = "serde_bytes-0.11.19",
@@ -19768,7 +19769,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_core-1.0.228.crate",
     sha256 = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
     strip_prefix = "serde_core-1.0.228",
@@ -19887,7 +19888,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_derive-1.0.228.crate",
     sha256 = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
     strip_prefix = "serde_derive-1.0.228",
@@ -19937,7 +19938,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_derive_internals-0.29.1.crate",
     sha256 = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711",
     strip_prefix = "serde_derive_internals-0.29.1",
@@ -19985,7 +19986,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_derive_internals-0.30.0.crate",
     sha256 = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd",
     strip_prefix = "serde_derive_internals-0.30.0",
@@ -20033,7 +20034,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_ignored-0.1.14.crate",
     sha256 = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798",
     strip_prefix = "serde_ignored-0.1.14",
@@ -20077,7 +20078,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_json-1.0.150.crate",
     sha256 = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9",
     strip_prefix = "serde_json-1.0.150",
@@ -20202,7 +20203,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_path_to_error-0.1.20.crate",
     sha256 = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457",
     strip_prefix = "serde_path_to_error-0.1.20",
@@ -20249,7 +20250,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_spanned-1.1.1.crate",
     sha256 = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26",
     strip_prefix = "serde_spanned-1.1.1",
@@ -20298,7 +20299,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_tokenstream-0.2.3.crate",
     sha256 = "d7c49585c52c01f13c5c2ebb333f14f6885d76daa768d8a037d28017ec538c69",
     strip_prefix = "serde_tokenstream-0.2.3",
@@ -20347,7 +20348,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_urlencoded-0.7.1.crate",
     sha256 = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd",
     strip_prefix = "serde_urlencoded-0.7.1",
@@ -20396,7 +20397,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "serde_yaml-0.9.34+deprecated.crate",
     sha256 = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47",
     strip_prefix = "serde_yaml-0.9.34+deprecated",
@@ -20446,7 +20447,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sha1-0.10.7.crate",
     sha256 = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8",
     strip_prefix = "sha1-0.10.7",
@@ -20498,7 +20499,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sha2-0.10.9.crate",
     sha256 = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283",
     strip_prefix = "sha2-0.10.9",
@@ -20550,7 +20551,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sha2-0.11.0.crate",
     sha256 = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4",
     strip_prefix = "sha2-0.11.0",
@@ -20603,7 +20604,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sharded-slab-0.1.7.crate",
     sha256 = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6",
     strip_prefix = "sharded-slab-0.1.7",
@@ -20647,7 +20648,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "shlex-2.0.1.crate",
     sha256 = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba",
     strip_prefix = "shlex-2.0.1",
@@ -20694,7 +20695,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "signal-hook-registry-1.4.8.crate",
     sha256 = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b",
     strip_prefix = "signal-hook-registry-1.4.8",
@@ -20741,7 +20742,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "signature-2.2.0.crate",
     sha256 = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de",
     strip_prefix = "signature-2.2.0",
@@ -20788,7 +20789,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "simd-adler32-0.3.9.crate",
     sha256 = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214",
     strip_prefix = "simd-adler32-0.3.9",
@@ -20831,7 +20832,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "simd_cesu8-1.1.1.crate",
     sha256 = "94f90157bb87cddf702797c5dadfa0be7d266cdf49e22da2fcaa32eff75b2c33",
     strip_prefix = "simd_cesu8-1.1.1",
@@ -20879,7 +20880,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "simdutf8-0.1.5.crate",
     sha256 = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e",
     strip_prefix = "simdutf8-0.1.5",
@@ -20923,7 +20924,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "similar-2.7.0.crate",
     sha256 = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa",
     strip_prefix = "similar-2.7.0",
@@ -20971,7 +20972,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "siphasher-0.3.11.crate",
     sha256 = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d",
     strip_prefix = "siphasher-0.3.11",
@@ -21018,7 +21019,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "siphasher-1.0.3.crate",
     sha256 = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649",
     strip_prefix = "siphasher-1.0.3",
@@ -21065,7 +21066,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "slab-0.4.12.crate",
     sha256 = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5",
     strip_prefix = "slab-0.4.12",
@@ -21112,7 +21113,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "smallvec-1.15.2.crate",
     sha256 = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90",
     strip_prefix = "smallvec-1.15.2",
@@ -21161,7 +21162,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "socket2-0.6.4.crate",
     sha256 = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51",
     strip_prefix = "socket2-0.6.4",
@@ -21206,7 +21207,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "spin-0.10.1.crate",
     sha256 = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3",
     strip_prefix = "spin-0.10.1",
@@ -21255,7 +21256,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sqlx-0.8.6.crate",
     sha256 = "1fefb893899429669dcdd979aff487bd78f4064e5e7907e4269081e0ef7d97dc",
     strip_prefix = "sqlx-0.8.6",
@@ -21311,7 +21312,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sqlx-core-0.8.6.crate",
     sha256 = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6",
     strip_prefix = "sqlx-core-0.8.6",
@@ -21402,7 +21403,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sqlx-macros-0.8.6.crate",
     sha256 = "a2d452988ccaacfbf5e0bdbc348fb91d7c8af5bee192173ac3636b5fb6e6715d",
     strip_prefix = "sqlx-macros-0.8.6",
@@ -21459,7 +21460,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sqlx-macros-core-0.8.6.crate",
     sha256 = "19a9c1841124ac5a61741f96e1d9e2ec77424bf323962dd894bdb93f37d5219b",
     strip_prefix = "sqlx-macros-core-0.8.6",
@@ -21527,7 +21528,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sqlx-postgres-0.8.6.crate",
     sha256 = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46",
     strip_prefix = "sqlx-postgres-0.8.6",
@@ -21604,7 +21605,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sse-stream-0.2.4.crate",
     sha256 = "39f24a9b78c40b90817bbcd1821c74ddfd74916aadd29403d001532a9195532d",
     strip_prefix = "sse-stream-0.2.4",
@@ -21655,7 +21656,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "stable_deref_trait-1.2.1.crate",
     sha256 = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596",
     strip_prefix = "stable_deref_trait-1.2.1",
@@ -21698,7 +21699,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "static_assertions-1.1.0.crate",
     sha256 = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f",
     strip_prefix = "static_assertions-1.1.0",
@@ -21741,7 +21742,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "stats_alloc-0.1.10.crate",
     sha256 = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec",
     strip_prefix = "stats_alloc-0.1.10",
@@ -21785,7 +21786,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "string_enum-1.0.2.crate",
     sha256 = "ae36a4951ca7bd1cfd991c241584a9824a70f6aff1e7d4f693fb3f2465e4030e",
     strip_prefix = "string_enum-1.0.2",
@@ -21834,7 +21835,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "stringprep-0.1.5.crate",
     sha256 = "7b4df3d392d81bd458a8a621b8bffbd2302a12ffe288a9d931670948749463b1",
     strip_prefix = "stringprep-0.1.5",
@@ -21882,7 +21883,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "strsim-0.11.1.crate",
     sha256 = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f",
     strip_prefix = "strsim-0.11.1",
@@ -21925,7 +21926,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "strum-0.27.2.crate",
     sha256 = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf",
     strip_prefix = "strum-0.27.2",
@@ -21975,7 +21976,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "strum-0.28.0.crate",
     sha256 = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd",
     strip_prefix = "strum-0.28.0",
@@ -22025,7 +22026,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "strum_macros-0.27.2.crate",
     sha256 = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7",
     strip_prefix = "strum_macros-0.27.2",
@@ -22075,7 +22076,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "strum_macros-0.28.0.crate",
     sha256 = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664",
     strip_prefix = "strum_macros-0.28.0",
@@ -22125,7 +22126,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "subtle-2.6.1.crate",
     sha256 = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292",
     strip_prefix = "subtle-2.6.1",
@@ -22168,7 +22169,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_atoms-10.0.0.crate",
     sha256 = "c70a493080ceb12dabddb96905a3ddac679fbe9c71ddc81a2a769126e8cde7c4",
     strip_prefix = "swc_atoms-10.0.0",
@@ -22216,7 +22217,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_common-25.0.0.crate",
     sha256 = "872e3beee92f0d63a7948ac03266c72a91cabf4c54d660ce992d448135ab5aec",
     strip_prefix = "swc_common-25.0.0",
@@ -22279,7 +22280,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_ecma_ast-28.0.0.crate",
     sha256 = "08b25e2e91491e0e82f932c7a5a07f5c90bd227dbde0c34aeb231d5b3a5e5107",
     strip_prefix = "swc_ecma_ast-28.0.0",
@@ -22336,7 +22337,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_ecma_parser-44.0.0.crate",
     sha256 = "53c83ff3be8652d2caf9f074853f8c33a4a05b17079c1586f195eec17d3ec553",
     strip_prefix = "swc_ecma_parser-44.0.0",
@@ -22394,7 +22395,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_eq_ignore_macros-1.0.1.crate",
     sha256 = "c16ce73424a6316e95e09065ba6a207eba7765496fed113702278b7711d4b632",
     strip_prefix = "swc_eq_ignore_macros-1.0.1",
@@ -22443,7 +22444,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_macros_common-1.0.1.crate",
     sha256 = "aae1efbaa74943dc5ad2a2fb16cbd78b77d7e4d63188f3c5b4df2b4dcd2faaae",
     strip_prefix = "swc_macros_common-1.0.1",
@@ -22491,7 +22492,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "swc_visit-2.0.1.crate",
     sha256 = "62fb71484b486c185e34d2172f0eabe7f4722742aad700f426a494bb2de232a2",
     strip_prefix = "swc_visit-2.0.1",
@@ -22538,7 +22539,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "syn-2.0.118.crate",
     sha256 = "1b9ae57f904213ebb649ce6895b8a66c66f0203b9319718f69a5612a065b1422",
     strip_prefix = "syn-2.0.118",
@@ -22599,7 +22600,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "syn-3.0.3.crate",
     sha256 = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3",
     strip_prefix = "syn-3.0.3",
@@ -22655,7 +22656,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "sync_wrapper-1.0.2.crate",
     sha256 = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263",
     strip_prefix = "sync_wrapper-1.0.2",
@@ -22703,7 +22704,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "synstructure-0.13.2.crate",
     sha256 = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2",
     strip_prefix = "synstructure-0.13.2",
@@ -22755,7 +22756,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "target-triple-1.0.0.crate",
     sha256 = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b",
     strip_prefix = "target-triple-1.0.0",
@@ -22853,7 +22854,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tempfile-3.27.0.crate",
     sha256 = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd",
     strip_prefix = "tempfile-3.27.0",
@@ -22906,7 +22907,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "termcolor-1.4.1.crate",
     sha256 = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755",
     strip_prefix = "termcolor-1.4.1",
@@ -22949,7 +22950,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "thiserror-2.0.18.crate",
     sha256 = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4",
     strip_prefix = "thiserror-2.0.18",
@@ -23060,7 +23061,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "thiserror-impl-2.0.18.crate",
     sha256 = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5",
     strip_prefix = "thiserror-impl-2.0.18",
@@ -23103,7 +23104,7 @@ third_party_rust_library(
     ],
 )
 
-http_archive(
+third_party_http_archive(
     name = "thousands-0.2.0.crate",
     sha256 = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820",
     strip_prefix = "thousands-0.2.0",
@@ -23146,7 +23147,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "thread_local-1.1.10.crate",
     sha256 = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070",
     strip_prefix = "thread_local-1.1.10",
@@ -23190,7 +23191,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tinystr-0.8.3.crate",
     sha256 = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d",
     strip_prefix = "tinystr-0.8.3",
@@ -23238,7 +23239,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tinytemplate-1.2.1.crate",
     sha256 = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc",
     strip_prefix = "tinytemplate-1.2.1",
@@ -23285,7 +23286,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tinyvec-1.12.0.crate",
     sha256 = "bb4ebadaa0af04fab11ae01eb5f9fdb5f9c5b875506e210e71c07873528baa7f",
     strip_prefix = "tinyvec-1.12.0",
@@ -23336,7 +23337,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tinyvec_macros-0.1.1.crate",
     sha256 = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20",
     strip_prefix = "tinyvec_macros-0.1.1",
@@ -23379,7 +23380,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-1.52.3.crate",
     sha256 = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe",
     strip_prefix = "tokio-1.52.3",
@@ -23453,7 +23454,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-macros-2.7.0.crate",
     sha256 = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496",
     strip_prefix = "tokio-macros-2.7.0",
@@ -23502,7 +23503,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-rusqlite-0.7.0.crate",
     sha256 = "302563ae4a2127f3d2c105f4f2f0bd7cae3609371755600ebc148e0ccd8510d6",
     strip_prefix = "tokio-rusqlite-0.7.0",
@@ -23554,7 +23555,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-rustls-0.26.4.crate",
     sha256 = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61",
     strip_prefix = "tokio-rustls-0.26.4",
@@ -23606,7 +23607,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-stream-0.1.18.crate",
     sha256 = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70",
     strip_prefix = "tokio-stream-0.1.18",
@@ -23662,7 +23663,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-tungstenite-0.29.0.crate",
     sha256 = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c",
     strip_prefix = "tokio-tungstenite-0.29.0",
@@ -23726,7 +23727,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tokio-util-0.7.18.crate",
     sha256 = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098",
     strip_prefix = "tokio-util-0.7.18",
@@ -23784,7 +23785,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "toml-1.1.2+spec-1.1.0.crate",
     sha256 = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee",
     strip_prefix = "toml-1.1.2+spec-1.1.0",
@@ -23842,7 +23843,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "toml_datetime-1.1.1+spec-1.1.0.crate",
     sha256 = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7",
     strip_prefix = "toml_datetime-1.1.1+spec-1.1.0",
@@ -23891,7 +23892,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "toml_parser-1.1.2+spec-1.1.0.crate",
     sha256 = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526",
     strip_prefix = "toml_parser-1.1.2+spec-1.1.0",
@@ -23939,7 +23940,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "toml_writer-1.1.1+spec-1.1.0.crate",
     sha256 = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db",
     strip_prefix = "toml_writer-1.1.1+spec-1.1.0",
@@ -23986,7 +23987,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tower-0.5.3.crate",
     sha256 = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4",
     strip_prefix = "tower-0.5.3",
@@ -24052,7 +24053,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tower-http-0.6.11.crate",
     sha256 = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840",
     strip_prefix = "tower-http-0.6.11",
@@ -24112,7 +24113,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tower-layer-0.3.3.crate",
     sha256 = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e",
     strip_prefix = "tower-layer-0.3.3",
@@ -24155,7 +24156,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tower-service-0.3.3.crate",
     sha256 = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3",
     strip_prefix = "tower-service-0.3.3",
@@ -24198,7 +24199,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tracing-0.1.44.crate",
     sha256 = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100",
     strip_prefix = "tracing-0.1.44",
@@ -24254,7 +24255,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tracing-attributes-0.1.31.crate",
     sha256 = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da",
     strip_prefix = "tracing-attributes-0.1.31",
@@ -24303,7 +24304,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tracing-core-0.1.36.crate",
     sha256 = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
     strip_prefix = "tracing-core-0.1.36",
@@ -24352,7 +24353,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tracing-log-0.2.0.crate",
     sha256 = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3",
     strip_prefix = "tracing-log-0.2.0",
@@ -24404,7 +24405,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tracing-subscriber-0.3.23.crate",
     sha256 = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319",
     strip_prefix = "tracing-subscriber-0.3.23",
@@ -24476,7 +24477,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "triomphe-0.1.16.crate",
     sha256 = "b40688ea6389c8171614b25491f71d4a27946e0c7ce2da1c6de27e25abf1a0ae",
     strip_prefix = "triomphe-0.1.16",
@@ -24529,7 +24530,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "try-lock-0.2.5.crate",
     sha256 = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b",
     strip_prefix = "try-lock-0.2.5",
@@ -24572,7 +24573,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "trybuild-1.0.118.crate",
     sha256 = "06649c6f63d86604ba0c8950d5a1829fc9a17afd70fc6629f481d75b6a624c78",
     strip_prefix = "trybuild-1.0.118",
@@ -24624,7 +24625,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "tungstenite-0.29.0.crate",
     sha256 = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8",
     strip_prefix = "tungstenite-0.29.0",
@@ -24689,7 +24690,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "typenum-1.20.1.crate",
     sha256 = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20",
     strip_prefix = "typenum-1.20.1",
@@ -24733,7 +24734,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "typify-0.6.2.crate",
     sha256 = "bc0b89f47309feaeb23c4509c15c9a04234f7deccef6f96c3bfe95319819a304",
     strip_prefix = "typify-0.6.2",
@@ -24785,7 +24786,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "typify-impl-0.6.2.crate",
     sha256 = "fa7b026f540b148b81043c720889dbb942b08659aa8a43f624ac4f04dbfc1861",
     strip_prefix = "typify-impl-0.6.2",
@@ -24842,7 +24843,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "typify-macro-0.6.2.crate",
     sha256 = "39ed96c57f06ae0839416b986921a98f18b220da63bbb243a8570a00c8492183",
     strip_prefix = "typify-macro-0.6.2",
@@ -24897,7 +24898,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unarray-0.1.4.crate",
     sha256 = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94",
     strip_prefix = "unarray-0.1.4",
@@ -24940,7 +24941,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-bidi-0.3.18.crate",
     sha256 = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5",
     strip_prefix = "unicode-bidi-0.3.18",
@@ -24988,7 +24989,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-general-category-1.1.0.crate",
     sha256 = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f",
     strip_prefix = "unicode-general-category-1.1.0",
@@ -25086,7 +25087,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-id-start-1.4.0.crate",
     sha256 = "81b79ad29b5e19de4260020f8919b443b2ef0277d242ce532ec7b7a2cc8b6007",
     strip_prefix = "unicode-id-start-1.4.0",
@@ -25129,7 +25130,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-ident-1.0.24.crate",
     sha256 = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75",
     strip_prefix = "unicode-ident-1.0.24",
@@ -25172,7 +25173,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-normalization-0.1.25.crate",
     sha256 = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8",
     strip_prefix = "unicode-normalization-0.1.25",
@@ -25220,7 +25221,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-properties-0.1.4.crate",
     sha256 = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d",
     strip_prefix = "unicode-properties-0.1.4",
@@ -25268,7 +25269,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unicode-width-0.2.2.crate",
     sha256 = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254",
     strip_prefix = "unicode-width-0.2.2",
@@ -25315,7 +25316,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "unsafe-libyaml-0.2.11.crate",
     sha256 = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861",
     strip_prefix = "unsafe-libyaml-0.2.11",
@@ -25358,7 +25359,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "untrusted-0.9.0.crate",
     sha256 = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1",
     strip_prefix = "untrusted-0.9.0",
@@ -25401,7 +25402,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "url-2.5.8.crate",
     sha256 = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed",
     strip_prefix = "url-2.5.8",
@@ -25453,7 +25454,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "utf8_iter-1.0.4.crate",
     sha256 = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be",
     strip_prefix = "utf8_iter-1.0.4",
@@ -25496,7 +25497,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "utf8parse-0.2.2.crate",
     sha256 = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821",
     strip_prefix = "utf8parse-0.2.2",
@@ -25540,7 +25541,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "uuid-1.23.5.crate",
     sha256 = "ea5fab0d6c3c01ae70085a09cb03d4c7a1d6314e2b3e075392783396d724ca0a",
     strip_prefix = "uuid-1.23.5",
@@ -25591,7 +25592,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "uuid-simd-0.8.0.crate",
     sha256 = "23b082222b4f6619906941c17eb2297fff4c2fb96cb60164170522942a200bd8",
     strip_prefix = "uuid-simd-0.8.0",
@@ -25643,7 +25644,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "valuable-0.1.1.crate",
     sha256 = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65",
     strip_prefix = "valuable-0.1.1",
@@ -25753,7 +25754,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "vcpkg-0.2.15.crate",
     sha256 = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426",
     strip_prefix = "vcpkg-0.2.15",
@@ -25796,7 +25797,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "version_check-0.9.5.crate",
     sha256 = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a",
     strip_prefix = "version_check-0.9.5",
@@ -25839,7 +25840,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "vsimd-0.8.0.crate",
     sha256 = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64",
     strip_prefix = "vsimd-0.8.0",
@@ -25887,7 +25888,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wait-timeout-0.2.1.crate",
     sha256 = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11",
     strip_prefix = "wait-timeout-0.2.1",
@@ -25931,7 +25932,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "walkdir-2.5.0.crate",
     sha256 = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b",
     strip_prefix = "walkdir-2.5.0",
@@ -25975,7 +25976,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "want-0.3.1.crate",
     sha256 = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e",
     strip_prefix = "want-0.3.1",
@@ -26019,7 +26020,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasi-0.11.1+wasi-snapshot-preview1.crate",
     sha256 = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b",
     strip_prefix = "wasi-0.11.1+wasi-snapshot-preview1",
@@ -26066,7 +26067,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasip2-1.0.4+wasi-0.2.12.crate",
     sha256 = "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487",
     strip_prefix = "wasip2-1.0.4+wasi-0.2.12",
@@ -26110,7 +26111,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasite-0.1.0.crate",
     sha256 = "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b",
     strip_prefix = "wasite-0.1.0",
@@ -26153,7 +26154,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasm-bindgen-0.2.126.crate",
     sha256 = "4b067c0c11094aef6b7a801c1e34a26affafdf3d051dba08456b868789aaf9a4",
     strip_prefix = "wasm-bindgen-0.2.126",
@@ -26273,7 +26274,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasm-bindgen-futures-0.4.76.crate",
     sha256 = "c62df1340f32221cb9c54d6a27b030e3dba64361d4a95bed55f9aacb44da291d",
     strip_prefix = "wasm-bindgen-futures-0.4.76",
@@ -26324,7 +26325,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasm-bindgen-macro-0.2.126.crate",
     sha256 = "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1",
     strip_prefix = "wasm-bindgen-macro-0.2.126",
@@ -26372,7 +26373,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasm-bindgen-macro-support-0.2.126.crate",
     sha256 = "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e",
     strip_prefix = "wasm-bindgen-macro-support-0.2.126",
@@ -26422,7 +26423,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasm-bindgen-shared-0.2.126.crate",
     sha256 = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24",
     strip_prefix = "wasm-bindgen-shared-0.2.126",
@@ -26522,7 +26523,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wasm-streams-0.5.0.crate",
     sha256 = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb",
     strip_prefix = "wasm-streams-0.5.0",
@@ -26574,7 +26575,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "web-sys-0.3.103.crate",
     sha256 = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141",
     strip_prefix = "web-sys-0.3.103",
@@ -26671,7 +26672,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "web-time-1.1.0.crate",
     sha256 = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb",
     strip_prefix = "web-time-1.1.0",
@@ -26714,7 +26715,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "webpki-root-certs-1.0.8.crate",
     sha256 = "0d46a5a140e6f7afeccd8eae97eff335163939eac8b929834875168b29b3d267",
     strip_prefix = "webpki-root-certs-1.0.8",
@@ -26760,7 +26761,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "webpki-roots-0.26.11.crate",
     sha256 = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9",
     strip_prefix = "webpki-roots-0.26.11",
@@ -26806,7 +26807,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "webpki-roots-1.0.8.crate",
     sha256 = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf",
     strip_prefix = "webpki-roots-1.0.8",
@@ -26852,7 +26853,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "whoami-1.6.1.crate",
     sha256 = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d",
     strip_prefix = "whoami-1.6.1",
@@ -26895,7 +26896,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "winapi-util-0.1.11.crate",
     sha256 = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22",
     strip_prefix = "winapi-util-0.1.11",
@@ -26938,7 +26939,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-0.62.2.crate",
     sha256 = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580",
     strip_prefix = "windows-0.62.2",
@@ -27000,7 +27001,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-collections-0.3.2.crate",
     sha256 = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610",
     strip_prefix = "windows-collections-0.3.2",
@@ -27045,7 +27046,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-core-0.62.2.crate",
     sha256 = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb",
     strip_prefix = "windows-core-0.62.2",
@@ -27099,7 +27100,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-future-0.3.2.crate",
     sha256 = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb",
     strip_prefix = "windows-future-0.3.2",
@@ -27148,7 +27149,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-implement-0.60.2.crate",
     sha256 = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf",
     strip_prefix = "windows-implement-0.60.2",
@@ -27197,7 +27198,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-interface-0.59.3.crate",
     sha256 = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358",
     strip_prefix = "windows-interface-0.59.3",
@@ -27246,7 +27247,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-link-0.2.1.crate",
     sha256 = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
     strip_prefix = "windows-link-0.2.1",
@@ -27289,7 +27290,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-numerics-0.3.1.crate",
     sha256 = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26",
     strip_prefix = "windows-numerics-0.3.1",
@@ -27337,7 +27338,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-result-0.4.1.crate",
     sha256 = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5",
     strip_prefix = "windows-result-0.4.1",
@@ -27382,7 +27383,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-strings-0.5.1.crate",
     sha256 = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091",
     strip_prefix = "windows-strings-0.5.1",
@@ -27427,7 +27428,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-sys-0.48.0.crate",
     sha256 = "677d2418bec65e3338edb076e806bc1ec15693c5d0104683f2efe857f61056a9",
     strip_prefix = "windows-sys-0.48.0",
@@ -27478,7 +27479,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-sys-0.52.0.crate",
     sha256 = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d",
     strip_prefix = "windows-sys-0.52.0",
@@ -27529,7 +27530,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-sys-0.61.2.crate",
     sha256 = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
     strip_prefix = "windows-sys-0.61.2",
@@ -27610,7 +27611,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-targets-0.48.5.crate",
     sha256 = "9a2fa6e2155d7247be68c096456083145c183cbbbc2764150dda45a87197940c",
     strip_prefix = "windows-targets-0.48.5",
@@ -27654,7 +27655,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-targets-0.52.6.crate",
     sha256 = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973",
     strip_prefix = "windows-targets-0.52.6",
@@ -27698,7 +27699,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows-threading-0.2.1.crate",
     sha256 = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37",
     strip_prefix = "windows-threading-0.2.1",
@@ -27742,7 +27743,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_aarch64_gnullvm-0.48.5.crate",
     sha256 = "2b38e32f0abccf9987a4e3079dfb67dcd799fb61361e53e2882c3cbaf0d905d8",
     strip_prefix = "windows_aarch64_gnullvm-0.48.5",
@@ -27840,7 +27841,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_aarch64_gnullvm-0.52.6.crate",
     sha256 = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3",
     strip_prefix = "windows_aarch64_gnullvm-0.52.6",
@@ -27938,7 +27939,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_aarch64_msvc-0.48.5.crate",
     sha256 = "dc35310971f3b2dbbf3f0690a219f40e2d9afcf64f9ab7cc1be722937c26b4bc",
     strip_prefix = "windows_aarch64_msvc-0.48.5",
@@ -28036,7 +28037,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_aarch64_msvc-0.52.6.crate",
     sha256 = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469",
     strip_prefix = "windows_aarch64_msvc-0.52.6",
@@ -28134,7 +28135,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_i686_gnu-0.48.5.crate",
     sha256 = "a75915e7def60c94dcef72200b9a8e58e5091744960da64ec734a6c6e9b3743e",
     strip_prefix = "windows_i686_gnu-0.48.5",
@@ -28232,7 +28233,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_i686_gnu-0.52.6.crate",
     sha256 = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b",
     strip_prefix = "windows_i686_gnu-0.52.6",
@@ -28330,7 +28331,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_i686_gnullvm-0.52.6.crate",
     sha256 = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66",
     strip_prefix = "windows_i686_gnullvm-0.52.6",
@@ -28428,7 +28429,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_i686_msvc-0.48.5.crate",
     sha256 = "8f55c233f70c4b27f66c523580f78f1004e8b5a8b659e05a4eb49d4166cca406",
     strip_prefix = "windows_i686_msvc-0.48.5",
@@ -28526,7 +28527,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_i686_msvc-0.52.6.crate",
     sha256 = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66",
     strip_prefix = "windows_i686_msvc-0.52.6",
@@ -28624,7 +28625,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_x86_64_gnu-0.48.5.crate",
     sha256 = "53d40abd2583d23e4718fddf1ebec84dbff8381c07cae67ff7768bbf19c6718e",
     strip_prefix = "windows_x86_64_gnu-0.48.5",
@@ -28722,7 +28723,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_x86_64_gnu-0.52.6.crate",
     sha256 = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78",
     strip_prefix = "windows_x86_64_gnu-0.52.6",
@@ -28820,7 +28821,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_x86_64_gnullvm-0.48.5.crate",
     sha256 = "0b7b52767868a23d5bab768e390dc5f5c55825b6d30b86c844ff2dc7414044cc",
     strip_prefix = "windows_x86_64_gnullvm-0.48.5",
@@ -28918,7 +28919,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_x86_64_gnullvm-0.52.6.crate",
     sha256 = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d",
     strip_prefix = "windows_x86_64_gnullvm-0.52.6",
@@ -29016,7 +29017,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_x86_64_msvc-0.48.5.crate",
     sha256 = "ed94fce61571a4006852b7389a063ab983c02eb1bb37b47f8272ce92d06d9538",
     strip_prefix = "windows_x86_64_msvc-0.48.5",
@@ -29114,7 +29115,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "windows_x86_64_msvc-0.52.6.crate",
     sha256 = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec",
     strip_prefix = "windows_x86_64_msvc-0.52.6",
@@ -29212,7 +29213,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "winnow-1.0.3.crate",
     sha256 = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1",
     strip_prefix = "winnow-1.0.3",
@@ -29255,7 +29256,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "wit-bindgen-0.57.1.crate",
     sha256 = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e",
     strip_prefix = "wit-bindgen-0.57.1",
@@ -29353,7 +29354,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "writeable-0.6.3.crate",
     sha256 = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4",
     strip_prefix = "writeable-0.6.3",
@@ -29396,7 +29397,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "yansi-1.0.1.crate",
     sha256 = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049",
     strip_prefix = "yansi-1.0.1",
@@ -29444,7 +29445,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "yoke-0.8.3.crate",
     sha256 = "709fe23a0424b6a435d82152b1bd3fdfb0833487d5fa90d05d42762a9891fef5",
     strip_prefix = "yoke-0.8.3",
@@ -29496,7 +29497,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "yoke-derive-0.8.2.crate",
     sha256 = "de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e",
     strip_prefix = "yoke-derive-0.8.2",
@@ -29546,7 +29547,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerocopy-0.8.54.crate",
     sha256 = "b7cbbc0a705a0fd05cc3676525980d2bf5a9bc4adac6d6475209a7887cf59d19",
     strip_prefix = "zerocopy-0.8.54",
@@ -29660,7 +29661,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerocopy-derive-0.8.54.crate",
     sha256 = "e2e817b7b52d0c7358d3246da9d69935ebb18116b2b102b4230dac079b4862f5",
     strip_prefix = "zerocopy-derive-0.8.54",
@@ -29709,7 +29710,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerofrom-0.1.8.crate",
     sha256 = "0ec05a11813ea801ff6d75110ad09cd0824ddba17dfe17128ea0d5f68e6c5272",
     strip_prefix = "zerofrom-0.1.8",
@@ -29754,7 +29755,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerofrom-derive-0.1.7.crate",
     sha256 = "11532158c46691caf0f2593ea8358fed6bbf68a0315e80aae9bd41fbade684a1",
     strip_prefix = "zerofrom-derive-0.1.7",
@@ -29804,7 +29805,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zeroize-1.9.0.crate",
     sha256 = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e",
     strip_prefix = "zeroize-1.9.0",
@@ -29854,7 +29855,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zeroize_derive-1.5.0.crate",
     sha256 = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328",
     strip_prefix = "zeroize_derive-1.5.0",
@@ -29903,7 +29904,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerotrie-0.2.4.crate",
     sha256 = "0f9152d31db0792fa83f70fb2f83148effb5c1f5b8c7686c3459e361d9bc20bf",
     strip_prefix = "zerotrie-0.2.4",
@@ -29955,7 +29956,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerovec-0.11.6.crate",
     sha256 = "90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239",
     strip_prefix = "zerovec-0.11.6",
@@ -30007,7 +30008,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zerovec-derive-0.11.3.crate",
     sha256 = "625dc425cab0dca6dc3c3319506e6593dcb08a9f387ea3b284dbd52a92c40555",
     strip_prefix = "zerovec-derive-0.11.3",
@@ -30056,7 +30057,7 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-http_archive(
+third_party_http_archive(
     name = "zmij-1.0.23.crate",
     sha256 = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b",
     strip_prefix = "zmij-1.0.23",

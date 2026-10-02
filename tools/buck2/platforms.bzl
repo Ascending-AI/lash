@@ -14,6 +14,11 @@ def pool_constraint(cpu, memory_kb):
     return "//tools/buck2:{}".format(pool_budget_name(cpu, memory_kb))
 
 
+# Selects the platform that runs a tiny, deterministic helper action on the
+# invoking host instead of queuing it on the pool.
+LOCAL_HELPER_CONSTRAINT = "//tools/buck2:local_helper"
+
+
 def pool_properties(cpu = "1", memory = "1572864"):
     runtime = read_root_config("kiln", "executor_runtime")
     mode = read_root_config("kiln", "execution_mode", "remote")
@@ -61,6 +66,24 @@ def _platforms(ctx):
                 remote_output_paths = "output_paths",
             ),
         ))
+
+    # The one platform that runs on the invoking host. It is registered last
+    # and carries its own value of the budget setting, so only a target that
+    # names `LOCAL_HELPER_CONSTRAINT` resolves to it: a compile, link or
+    # archive can never land there.
+    helper = ctx.attrs.local_helper
+    platforms.append(ExecutionPlatformInfo(
+        label = helper.label.raw_target(),
+        configuration = ConfigurationInfo(
+            constraints = constraints | helper[ConfigurationInfo].constraints,
+            values = {},
+        ),
+        executor_config = CommandExecutorConfig(
+            local_enabled = True,
+            remote_enabled = False,
+            remote_cache_enabled = False,
+        ),
+    ))
     return [DefaultInfo(), ExecutionPlatformRegistrationInfo(platforms = platforms)]
 
 platforms = rule(
@@ -71,6 +94,7 @@ platforms = rule(
             attrs.dep(providers = [ConfigurationInfo]),
         ),
         "constraints": attrs.list(attrs.dep(providers = [ConfigurationInfo])),
+        "local_helper": attrs.dep(providers = [ConfigurationInfo]),
     },
 )
 
@@ -96,7 +120,8 @@ def declare_pool_platforms(name, constraints):
         native.constraint_value(name = alias, constraint_setting = ":budget")
         budgets["{}|{}|{}".format(alias, cpu, memory_kb)] = ":" + alias
 
-    platforms(name = name, budgets = budgets, constraints = constraints)
+    native.constraint_value(name = "local_helper", constraint_setting = ":budget")
+    platforms(name = name, budgets = budgets, constraints = constraints, local_helper = ":local_helper")
 
 def _probe(ctx):
     out = ctx.actions.declare_output("runtime.json")

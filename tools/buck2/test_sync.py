@@ -341,8 +341,9 @@ def check_action_categories() -> None:
     import action_sizes_from_log as sizes
 
     sized = model.ACTION_CATEGORY_SIZES
-    assert set(sized.values()) <= {"clippy", "compile", "daemon", "default", "helper", "probe", "unsized"}
+    assert set(sized.values()) <= {"clippy", "compile", "daemon", "default", "helper", "local", "probe", "unsized"}
     assert sized["clippy"] == "clippy" and sized["deps"] == "daemon"
+    assert [category for category, source in sized.items() if source == "local"] == ["http_archive"]
     assert model.UNSIZED_ACTION_BUDGET == (1, 524288)
     assert (model.DEFAULT_CPU_COUNT, model.DEFAULT_MEMORY_KB) in model.FIXED_POOL_BUDGETS
     assert model.HELPER_ACTION_BUDGET in model.FIXED_POOL_BUDGETS
@@ -390,6 +391,8 @@ def check_action_categories() -> None:
         "daemon": model.DEFAULT_MEMORY_KB,
         "default": model.DEFAULT_MEMORY_KB,
         "helper": model.HELPER_ACTION_BUDGET[1],
+        # What the pool recorded before the category left it.
+        "local": model.UNSIZED_ACTION_BUDGET[1],
         "probe": model.DEFAULT_MEMORY_KB,
         "unsized": model.UNSIZED_ACTION_BUDGET[1],
     }
@@ -626,6 +629,28 @@ def check_failure_filter_runs_in_daemon() -> None:
     platforms = (HERE / "platforms.bzl").read_text(encoding="utf-8")
     assert "local_enabled = local,\n                remote_enabled = not local," in platforms
     assert "use_limited_hybrid" not in platforms
+    # One more platform runs on the invoking host, with no remote half. Only a
+    # target that names its constraint resolves to it, and only the crate
+    # archive unpack does: every archive of the third-party graph goes through
+    # the macro, and nothing else names the constraint.
+    assert platforms.count("local_enabled = True,\n            remote_enabled = False,") == 1
+    assert platforms.count("ExecutionPlatformInfo(") == 2
+    named = [
+        path.name
+        for path in sorted(HERE.glob("*.bzl"))
+        if re.search(r"\bLOCAL_HELPER_CONSTRAINT\b|:local_helper\b", path.read_text(encoding="utf-8"))
+    ]
+    assert named == ["platforms.bzl", "third_party.bzl"], named
+    third_party = (HERE / "third_party.bzl").read_text(encoding="utf-8")
+    assert third_party.count("LOCAL_HELPER_CONSTRAINT") == 2
+    assert "native.http_archive(\n        name = name,\n        exec_compatible_with = [LOCAL_HELPER_CONSTRAINT]," in third_party
+    generated = (ROOT / "third-party/rust/BUCK").read_text(encoding="utf-8")
+    assert "\nthird_party_http_archive(\n" in generated
+    assert not re.search(r"^http_archive\(", generated, re.M)
+    for path in sorted(ROOT.rglob("BUCK")):
+        if ".buck2" in path.parts or "vendor" in path.parts or "buck-out" in path.parts:
+            continue
+        assert "local_helper" not in path.read_text(encoding="utf-8"), path
 
 
 def check_measurement_filter() -> None:

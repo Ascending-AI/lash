@@ -35,12 +35,14 @@ rust_binary = "third_party_rust_binary"
 cxx_library = "third_party_rust_cxx_library"
 prebuilt_cxx_library = "third_party_rust_prebuilt_cxx_library"
 buildscript_genrule = "third_party_buildscript_run"
+http_archive = "third_party_http_archive"
 
 buckfile_imports = """
 load("@prelude//rust:cargo_package.bzl", "cargo")
 load(
     "@root//tools/buck2:third_party.bzl",
     "third_party_buildscript_run",
+    "third_party_http_archive",
     "third_party_rust_binary",
     "third_party_rust_cxx_library",
     "third_party_rust_library",

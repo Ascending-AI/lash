@@ -4,7 +4,7 @@ load("@prelude//rust:cargo_buildscript.bzl", _prelude_buildscript_run = "buildsc
 load("@prelude//rust:cargo_package.bzl", "cargo", "get_reindeer_platforms")
 load("@prelude//utils:selects.bzl", "selects")
 load(":exec_sizes.bzl", "HELPER_BUDGET")
-load(":platforms.bzl", "pool_constraint")
+load(":platforms.bzl", "LOCAL_HELPER_CONSTRAINT", "pool_constraint")
 load(":profile.bzl", "THIRD_PARTY_OPT_LEVELS")
 
 _DEFAULT_CPU = "1"
@@ -44,6 +44,19 @@ def _profile_kwargs(kwargs):
     })
     result["rustc_flags"] = flags
     return result
+
+
+def third_party_http_archive(name, **kwargs):
+    # Unpacking a crate archive is a tenth of a second of `tar` over a file
+    # the daemon has just downloaded. It runs on the invoking host: on the
+    # pool it waited for a scheduler slot and a worker's set-up for longer
+    # than it ran. The unpacked tree is the same either way, so the compiles
+    # that read it keep their action digests.
+    native.http_archive(
+        name = name,
+        exec_compatible_with = [LOCAL_HELPER_CONSTRAINT],
+        **kwargs
+    )
 
 
 def _target_constraints(platforms, kwargs):

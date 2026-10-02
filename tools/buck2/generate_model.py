@@ -91,8 +91,8 @@ SERVICE_FLOOR = PACKAGE_POLICY["test_runs"]["service_floor"]
 PINNED_TEST_RUNS = PACKAGE_POLICY["test_runs"].get("pinned", {})
 # The execution platforms every graph registers whatever the tables say, as
 # (cpu_count, memory_kb). The first is the platform Buck2 resolves for a
-# target that names no budget -- `http_archive`, `rustc_cfg` and the other
-# prelude helpers -- so it is the smallest request the pool prices. Then the
+# target that names no budget -- `rustc_cfg` and the other prelude helpers --
+# so it is the smallest request the pool prices. Then the
 # default compile request (third-party crates, build scripts, schema actions)
 # and `//tools/buck2:runtime_probe_large`. `exec_sizes.bzl` adds one platform
 # per distinct compile request; test runs and batches state their request to
@@ -130,6 +130,11 @@ FIXED_POOL_BUDGETS = [
 #             (`deps`, the dependency directories; see `prelude_overlay.py`).
 #             The pool still records it until those logs age out, and no rule
 #             may declare it again.
+#   local     no remote action either: the target names the local helper
+#             platform (`LOCAL_HELPER_CONSTRAINT` in `platforms.bzl`) and its
+#             action runs on the invoking host. `http_archive` unpacks a
+#             crate archive the daemon downloaded: 0.09 s of `tar` over 30 kB
+#             at the median, against 2.5 s for the round trip to a worker.
 #   probe     the request `runtime_probe` is given.
 #   unsized   a prelude helper target that names no budget and resolves to
 #             `UNSIZED_ACTION_BUDGET`.
@@ -147,7 +152,7 @@ ACTION_CATEGORY_SIZES = {
     "deps": "daemon",
     "failure_filter": "compile",
     "find_profdata": "compile",
-    "http_archive": "unsized",
+    "http_archive": "local",
     "named_deps": "compile",
     "process_exclusions": "compile",
     "run_crox": "compile",

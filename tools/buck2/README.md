@@ -91,7 +91,10 @@ for the rule and the refresh. The checksum-pinned Starlark
 prelude overlay attaches this environment through the documented action API;
 it does not modify or rebuild the Buck2 executable.
 
-All actions stay remote: the shared platforms are remote-only. The overlay
+Compiles, lints, links and build scripts stay remote: the shared platforms are
+remote-only. Only the crate archive unpack (`http_archive`) runs on the
+invoking host, through a separate local-only platform that
+`third_party_http_archive` names. The overlay
 replaces the prelude's remote `failure_filter` round trip with a daemon-side
 decision read from the compile's build status. A passing compile's output is a
 declared copy; a failing compile still runs the stock remote action and reports

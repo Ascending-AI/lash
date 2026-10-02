@@ -448,7 +448,16 @@ Every compiler, lint, documentation, build-script and helper action runs on the
 pool; the shared execution platforms are remote-only, so an action's
 `prefer_local` is ignored and `local_only` is refused. Do not make them hybrid:
 the stock C++ toolchain prefers local binary links and archives, which would
-then run on the developer host. The one step that leaves the pool is the
+then run on the developer host. Unpacking a crate archive (`http_archive`) is
+the one action that runs on the invoking host: about 0.09 s of `tar` over a
+file the daemon has just downloaded, which on the pool waited for a slot and a
+worker's set-up for longer than it ran. `third_party_http_archive` names
+`LOCAL_HELPER_CONSTRAINT`, the value of the budget setting carried by a
+separate local-only platform registered last, so no target reaches that
+platform by omission and the graph contracts allow no other user. The unpacked
+tree is the same, so the compiles that read it keep their action digests. The
+host needs `/bin/sh` and `tar`. The one step that leaves the pool without
+running anywhere else is the
 prelude's `failure_filter`, which follows each metadata compile whose
 diagnostics must not fail dependents. The overlay decides it in the daemon from
 the compile's build status: a passing compile's output is re-exposed by a
