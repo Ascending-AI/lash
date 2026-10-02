@@ -112,7 +112,8 @@ async fn run_fixture(
         .await
         .map_err(|error| format!("{error:#}"))?;
     let operation = async {
-        let session_id = lash::SessionId::from(format!("valid-empty-{}", uuid::Uuid::new_v4()));
+        let session_id = lash::SessionId::try_from(format!("valid-empty-{}", uuid::Uuid::new_v4()))
+            .expect("a formatted id is never blank");
         core.session(session_id.clone())
             .create(lash::SessionCreation::root(session_spec))
             .await

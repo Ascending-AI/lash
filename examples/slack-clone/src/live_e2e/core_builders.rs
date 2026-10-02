@@ -362,9 +362,9 @@ pub(super) async fn rlm_core(
 /// (FIG-4112).
 pub(super) async fn create_or_open(
     core: &LiveCore,
-    id: impl Into<lash::SessionId>,
+    id: impl Into<String>,
 ) -> lash::Result<lash::LashSession> {
-    let id = id.into();
+    let id = lash::SessionId::try_from(id.into()).expect("live E2E session ids are never blank");
     match core
         .session(id.clone())
         .create(lash::SessionCreation::root(core.session_spec.clone()))

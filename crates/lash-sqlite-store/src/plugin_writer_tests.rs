@@ -707,7 +707,8 @@ async fn admit_run(
     use lash_core_execution::testing::store_fixtures::{
         admit_root_request_for_test, seal_drive_fence_for_test,
     };
-    let session_id = SessionId::from(session);
+    let session_id =
+        SessionId::try_from(session.to_owned()).expect("a law session id is never blank");
     let fence = seal_drive_fence_for_test(store, &session_id, "plugin-admission-law").await;
     let head = store
         .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
@@ -719,7 +720,8 @@ async fn admit_run(
         .expect("enqueue the Run's head");
     let mut request = admit_root_request_for_test(
         &fence,
-        &lash_core_execution::TurnId::from(format!("{session}-run")),
+        &lash_core_execution::TurnId::try_from(format!("{session}-run"))
+            .expect("a formatted id is never blank"),
         lash_core_execution::store::AdmittedHead::Input(head.input_id),
     );
     request.plugins = plugins.clone();
