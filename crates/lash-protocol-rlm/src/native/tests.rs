@@ -339,6 +339,7 @@ fn run(
 }
 fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
     lash_core::ExecResponse {
+        output_archive: None,
         observations: Vec::new(),
         calls: Vec::new(),
         printed_images: Vec::new(),
@@ -1631,5 +1632,29 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
                 .any(|effect| matches!(effect, Effect::LlmCall { .. } | Effect::ExecCode { .. }))
         );
         assert!(!machine.events().iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
+    }
+}
+
+#[test]
+fn a_step_archive_survives_both_driver_checkpoint_paths() {
+    let archive = lash_core::RetainedOutput {
+        reference: lash_core::AttachmentRef {
+            id: "aggregate-prints".parse().expect("attachment id"),
+            media_type: "application/json".parse().expect("media type"),
+            byte_len: 100_000,
+            type_metadata: None,
+            label: None,
+        },
+        witness: "bounded preview".into(),
+    };
+    for native in [false, true] {
+        let mut exec = response(Some(serde_json::json!(1)));
+        exec.output_archive = Some(archive.clone());
+        let (_, steps) = run(native, RlmTermination::Natural, None, Some(Ok(exec)));
+        let [step] = steps.as_slice() else {
+            panic!("one trajectory step: {steps:?}");
+        };
+        assert!(step.output.is_empty());
+        assert_eq!(step.output_archive.as_deref(), Some(&archive));
     }
 }

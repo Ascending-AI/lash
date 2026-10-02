@@ -890,12 +890,18 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                     id: "durable-tool-trajectory".to_string(),
                     protocol_iteration: 1,
                     code: "durable.tool_projection()".to_string(),
-                    output: vec![lash_rlm_types::RlmPrint {
-                        text: "durable projection".to_string(),
-                        value: lash::attachments::OutputValue::Inline(serde_json::json!(
-                            "durable projection"
-                        )),
-                    }],
+                    output_archive: Some(Box::new(lash::attachments::RetainedOutput {
+                        reference: lash::attachments::AttachmentRef {
+                            id: "sha256:durable-print-archive"
+                                .parse()
+                                .expect("attachment id"),
+                            media_type: "application/json".parse().expect("media type"),
+                            byte_len: 90_000,
+                            type_metadata: None,
+                            label: None,
+                        },
+                        witness: "durable projection".to_string(),
+                    })),
                     calls: vec![
                         lash::persistence::ExecutedCallRecord {
                             operation: "durable.success".to_string(),
@@ -937,6 +943,11 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     let Json(durable_tool_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
         .await
         .expect("reload and project committed durable tool trajectory");
+    assert!(durable_tool_state.transcript.iter().any(|row| matches!(
+        row,
+        TranscriptRow::CodeBlock { id, output, .. }
+            if id == "durable-tool-trajectory" && output == "durable projection"
+    )));
 
     let node = std::env::var_os("LASH_WORKBENCH_TEST_NODE").unwrap_or_else(|| "node".into());
     let output = std::process::Command::new(node)

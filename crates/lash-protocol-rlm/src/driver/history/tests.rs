@@ -52,6 +52,7 @@ fn assistant_reasoning_event(
 fn step_event(code: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            output_archive: None,
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
             code: code.to_string(),
@@ -104,6 +105,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     let entry = lash_rlm_types::RlmTrajectoryEntry {
+        output_archive: None,
         id: "lashlang_step_image".to_string(),
         protocol_iteration: 0,
         code: "print chart".to_string(),
@@ -200,6 +202,7 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
 fn failed_observation_lists_executed_calls_and_frames_retry() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            output_archive: None,
             id: "lashlang_step_failed".to_string(),
             protocol_iteration: 0,
             code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
@@ -247,6 +250,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
 fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            output_archive: None,
             id: "lashlang_step_success".to_string(),
             protocol_iteration: 0,
             code: "value = module.ok()".to_string(),
@@ -274,6 +278,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
 fn a_trajectory_failure_message_renders_verbatim() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            output_archive: None,
             id: "lashlang_step_legacy".to_string(),
             protocol_iteration: 0,
             code: "value = read()".to_string(),
@@ -303,6 +308,7 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
 fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            output_archive: None,
             id: id.to_string(),
             protocol_iteration: 0,
             code: code.to_string(),
@@ -633,6 +639,7 @@ fn the_declared_history_item_names_every_key_a_step_serializes() {
     );
     let declaration = dialect.history_item_definition(true);
     let entry = |outcome| lash_rlm_types::RlmTrajectoryEntry {
+        output_archive: None,
         id: "lashlang_step_0".to_string(),
         protocol_iteration: 0,
         code: "print(rows)".to_string(),

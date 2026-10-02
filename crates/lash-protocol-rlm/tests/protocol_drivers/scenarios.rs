@@ -631,6 +631,7 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
             "x = await tools.read_file({ path: \"foo\" })?",
         ))])
         .exec_result(lash_sansio::ExecResponse {
+            output_archive: None,
             observations: Vec::new(),
             calls: vec![lash_core::ExecutedCall {
                 operation: "tools.read_file".to_string(),
@@ -676,6 +677,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
             "x = await tools.custom_frame_switch({})?",
         ))])
         .exec_result(lash_sansio::ExecResponse {
+            output_archive: None,
             observations: Vec::new(),
             calls: vec![lash_core::ExecutedCall {
                 operation: "tools.custom_frame_switch".to_string(),
@@ -732,6 +734,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
             "x = await tools.custom_fail({})?",
         ))])
         .exec_result(lash_sansio::ExecResponse {
+            output_archive: None,
             observations: Vec::new(),
             calls: vec![lash_core::ExecutedCall {
                 operation: "tools.custom_fail".to_string(),

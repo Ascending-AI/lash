@@ -366,11 +366,12 @@ pub(crate) fn exec_response(
     final_output: Option<serde_json::Value>,
 ) -> lash_sansio::ExecResponse {
     lash_sansio::ExecResponse {
+        output_archive: None,
         observations: output
             .iter()
             .map(|item| lash_sansio::Observation {
                 text: (*item).to_string(),
-                value: lash_sansio::OutputValue::Inline(serde_json::json!(*item)),
+                value: serde_json::json!(*item),
                 projection: Default::default(),
             })
             .collect(),

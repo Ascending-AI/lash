@@ -294,8 +294,11 @@ finish({ rows });"#,
         serde_json::to_string(&value).expect("encode the final value")
     );
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&stored_text(&backend, &print.reference).await)
-            .expect("the retained print is JSON"),
+        serde_json::from_str::<Vec<lash_core::Observation>>(
+            &stored_text(&backend, &print.reference).await
+        )
+        .expect("the retained archive is JSON")[0]
+            .value,
         value["rows"]
     );
     for retained in [print, finished] {
@@ -304,7 +307,7 @@ finish({ rows });"#,
     Ok(())
 }
 
-/// Every retained print (`retained`) and final value (`final_output_retained`)
+/// Every step archive (`output_archive`) and final value (`final_output_retained`)
 /// anywhere in `value`, the committed frame.
 #[cfg(feature = "rlm")]
 fn collect_retained(
@@ -320,7 +323,7 @@ fn collect_retained(
                         .expect("a retained output decodes")
                 };
                 match key.as_str() {
-                    "retained" if entries.contains_key("text") => prints.push(decoded()),
+                    "output_archive" => prints.push(decoded()),
                     "final_output_retained" => finals.push(decoded()),
                     _ => collect_retained(entry, prints, finals),
                 }
@@ -377,4 +380,298 @@ async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_hist
         return Ok(());
     };
     oversized_rlm_print_and_final_value_are_retained_before_they_enter_history(backend).await
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn many_subcap_prints_in_one_step_land_one_bounded_archive_on_sqlite() -> Result<()> {
+    let backend = double_backend().await;
+    let core = explicit_ephemeral_facets(super::rlm_core_builder_over(backend.clone()))
+        .output_retention(POLICY)
+        .serve_test_llm_profile(
+            super::queued_text_provider(vec![
+                super::typescript_block(
+                    r#"
+for (let i = 0; i < 200; i++) {
+  print({ index: i, text: "small printed value é🙂" });
+}
+"#,
+                ),
+                super::typescript_block("finish(200);"),
+            ]),
+            mock_llm_profile_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("aggregate-prints")
+        .created()
+        .await
+        .open()
+        .await?;
+    session
+        .send(TurnInput::text("print the batch"))
+        .output()
+        .await?;
+    let (resident, window) = committed_frame(&backend, "aggregate-prints").await;
+    let frame = serde_json::to_value(&window.window).expect("frame");
+    fn archives(value: &serde_json::Value, found: &mut Vec<serde_json::Value>) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    if key == "output_archive" && !value.is_null() {
+                        found.push(value.clone());
+                    } else {
+                        archives(value, found);
+                    }
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    archives(value, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    archives(&frame, &mut found);
+    assert_eq!(
+        found.len(),
+        1,
+        "one aggregate archive, even though every print is below the cap"
+    );
+    assert!(
+        resident <= 16 * 1024,
+        "aggregate history grew to {resident} bytes"
+    );
+    let retained: lash_core::RetainedOutput =
+        serde_json::from_value(found.pop().unwrap()).expect("archive");
+    assert!(retained.witness.len() <= POLICY.witness_bytes as usize);
+    sweep_without_grace(&backend).await;
+    let observations: Vec<lash_core::Observation> =
+        serde_json::from_str(&stored_text(&backend, &retained.reference).await)
+            .expect("full observations");
+    assert_eq!(observations.len(), 200);
+    for (i, observation) in observations.iter().enumerate() {
+        let serialized = serde_json::to_value(observation).expect("observation");
+        assert_eq!(
+            serialized["value"],
+            serde_json::json!({"index": i, "text": "small printed value é🙂"})
+        );
+    }
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+fn archive_reader_cell() -> &'static str {
+    r#"
+for (let i = 0; i < history.length; i++) {
+  const step = history[i];
+  if (step.kind === "lashlang_step" && step.output_archive) {
+    finish(await control.read_output({ archive: step.output_archive.attachment }));
+  }
+}
+finish("missing archive");
+"#
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite() -> Result<()>
+{
+    let backend = double_backend().await;
+    let expected: Vec<serde_json::Value> = (0..200)
+        .map(|i| {
+            serde_json::json!({
+                "index": i, "text": "exact é🙂\nvalue", "null": null, "nested": [i, false],
+            })
+        })
+        .collect();
+    let core = explicit_ephemeral_facets(super::rlm_core_builder_over(backend.clone()))
+        .output_retention(POLICY)
+        .serve_test_llm_profile(super::queued_text_provider(vec![
+            super::typescript_block(r#"for (let i = 0; i < 200; i++) { print({index: i, text: "exact é🙂\nvalue", null: null, nested: [i, false]}); } finish(200);"#),
+        ]), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("archive-history")
+        .created()
+        .await
+        .open()
+        .await?;
+    let output = session
+        .send(TurnInput::text("archive the prints"))
+        .output()
+        .await?;
+    assert_eq!(output.final_value(), Some(&serde_json::json!(200)));
+    let (_, window) = committed_frame(&backend, "archive-history").await;
+    let mut archives = Vec::new();
+    collect_retained(
+        &serde_json::to_value(window.window).expect("window"),
+        &mut archives,
+        &mut Vec::new(),
+    );
+    let [archive] = archives.as_slice() else {
+        panic!("one step archive");
+    };
+    let archive = archive.clone();
+    let edges = backend
+        .session_store_factory()
+        .attachment_referrers(&archive.reference.id)
+        .await
+        .expect("exact referrers");
+    assert!(edges.iter().any(|edge| matches!(edge, lash_core::ArtifactReferrer::Session(id) if id.as_str() == "archive-history")), "commit rooted the archive: {edges:?}");
+    let revision = session
+        .revisions()
+        .await?
+        .into_iter()
+        .find(|revision| revision.head)
+        .expect("head")
+        .head_revision;
+    session.close().await.expect("release resident executor");
+    drop(core);
+
+    let core = explicit_ephemeral_facets(super::rlm_core_builder_over(backend.clone()))
+        .output_retention(POLICY)
+        .serve_test_llm_profile(super::queued_text_provider(vec![
+            super::typescript_block(archive_reader_cell()),
+            super::typescript_block(archive_reader_cell()),
+            super::typescript_block(r#"
+for (let i = 0; i < history.length; i++) {
+  const step = history[i];
+  if (step.kind === "lashlang_step" && step.output_archive) {
+    await control.continue_as({ task: "read shared archive in fresh frame", seed: { archive: step.output_archive.attachment } });
+  }
+}
+"#),
+            super::typescript_block("finish(await control.read_output({ archive }));"),
+        ]), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    sweep_without_grace(&backend).await;
+    let session = core.session("archive-history").open().await?;
+    let cold = session
+        .send(TurnInput::text("read after cold reopen"))
+        .output()
+        .await?;
+    assert_eq!(cold.final_value(), Some(&serde_json::json!(expected)));
+    core.fork_at(
+        &SessionId::fixture("archive-history"),
+        lash_core::Target::Revision(revision),
+        crate::ForkRequest {
+            session_id: SessionId::fixture("archive-branch"),
+            relation: lash_core::SessionRelation::Fork {
+                source_session_id: SessionId::fixture("archive-history"),
+                source_node_id: None,
+            },
+            observed_processes: Vec::new(),
+        },
+    )
+    .await?;
+    let branch = core.session("archive-branch").open().await?;
+    let branched = branch
+        .send(TurnInput::text("read shared history on a branch"))
+        .output()
+        .await?;
+    assert_eq!(branched.final_value(), Some(&serde_json::json!(expected)));
+    branch.close().await.expect("close branch runtime");
+    let continued = session
+        .send(TurnInput::text("switch frames then read"))
+        .output()
+        .await?;
+    assert_eq!(continued.final_value(), Some(&serde_json::json!(expected)));
+    sweep_without_grace(&backend).await;
+    let observations: Vec<lash_core::Observation> =
+        serde_json::from_str(&stored_text(&backend, &archive.reference).await)
+            .expect("archive survives frame switch");
+    assert_eq!(
+        observations
+            .into_iter()
+            .map(|observation| observation.value)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    session.close().await.expect("close fresh frame");
+    delete_bound_session(&core, "archive-history").await?;
+    let factory = backend.session_store_factory();
+    let source = SessionId::fixture("archive-history");
+    assert_eq!(
+        factory.session_referrer_state(&source).await?,
+        lash_core::store::SessionReferrerState::DeletedRetained,
+        "a surviving branch protects the source-owned archive edge"
+    );
+    sweep_without_grace(&backend).await;
+    let shared: Vec<lash_core::Observation> =
+        serde_json::from_str(&stored_text(&backend, &archive.reference).await)
+            .expect("branch-protected archive");
+    assert_eq!(
+        shared
+            .into_iter()
+            .map(|print| print.value)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    delete_bound_session(&core, "archive-branch").await?;
+    assert_eq!(
+        factory.session_referrer_state(&source).await?,
+        lash_core::store::SessionReferrerState::DeletedRetired,
+        "the last shared-history reader has retired"
+    );
+    // Retirement alone does not delete bytes: the host explicitly releases
+    // the source hold, prunes settled execution evidence, and sweeps bytes.
+    stored_text(&backend, &archive.reference).await;
+    factory
+        .end_attachment_referrer(&lash_core::ArtifactReferrer::Session(source))
+        .await?;
+    factory
+        .reclaim_retained_evidence(lash_core::RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+        })
+        .await
+        .expect("host prunes settled execution evidence");
+    // The host's cleanup relay also ends producer holds after its journal
+    // retirement verdict. Evidence pruning alone cannot release those holds.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            if factory
+                .attachment_referrers(&archive.reference.id)
+                .await
+                .expect("remaining archive holds")
+                .is_empty()
+            {
+                break;
+            }
+            core._session_shifts
+                .reconcile(
+                    &lash_core::engine::ReconcileCursor::default(),
+                    std::num::NonZeroUsize::MIN.saturating_add(63),
+                )
+                .await
+                .expect("host delivers artifact cleanup");
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("retired journals release the archive producer holds");
+    let reclaimed = lash_core::facade_support::reclaim_unreferenced_attachments(
+        factory.as_ref(),
+        backend.attachment_store().as_ref(),
+        lash_core::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await
+    .expect("the host authorizes attachment reclamation");
+    assert!(reclaimed.reclaimed_count > 0, "{reclaimed:?}");
+    assert!(
+        matches!(
+            backend
+                .attachment_store()
+                .get(&archive.reference.id, 32 * 1024 * 1024)
+                .await,
+            Err(lash_core::AttachmentStoreError::NotFound(_))
+        ),
+        "the explicit retention lever reclaims the archive"
+    );
+    Ok(())
 }

@@ -177,7 +177,7 @@ terminal output needs the row anyway.
   nothing. The committed ids are every stored attachment the committed
   history names: tool outputs, omitted calls, message parts, and each
   retained output. A tool result's retained block is read from
-  its message part. A code cell's retained prints and finish value live in
+  its message part. A code cell's aggregate print archive and retained finish value live in
   protocol records the commit cannot read, so the turn driver notes them
   from the cell's recorded response, and a replay notes the same ones.
 

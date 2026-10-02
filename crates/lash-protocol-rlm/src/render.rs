@@ -91,11 +91,8 @@ pub(crate) fn rendered_print(
     history_index: usize,
     print_index: usize,
     typed: serde_json::Value,
-) -> Option<lash_sansio::Observation> {
+) -> lash_sansio::Observation {
     let rendered = truncate_chars(renderer.print(value, params), params.max_chars);
-    if rendered.body.is_empty() {
-        return None;
-    }
     let projected_chars = rendered.body.chars().count();
     let projection = lash_sansio::TextProjectionMetadata {
         truncated: !rendered.cuts.is_empty(),
@@ -119,11 +116,11 @@ pub(crate) fn rendered_print(
             rendered.cuts.original_chars, params.max_chars, counts, rendered.body
         )
     };
-    Some(lash_sansio::Observation {
+    lash_sansio::Observation {
         text,
-        value: lash_sansio::OutputValue::Inline(typed),
+        value: typed,
         projection,
-    })
+    }
 }
 
 fn cut_name(kind: CutKind) -> &'static str {
@@ -155,12 +152,8 @@ mod tests {
             4,
             2,
             serde_json::json!("abcdef"),
-        )
-        .expect("nonempty print");
-        assert_eq!(
-            observation.value,
-            lash_sansio::OutputValue::Inline(serde_json::json!("abcdef"))
         );
+        assert_eq!(observation.value, serde_json::json!("abcdef"));
         assert_eq!(
             observation.text,
             "[cut: 6 chars rendered within 3; chars 1; narrow with history[4].output[2].<path>]\nabc\n...[truncated 3 chars]"

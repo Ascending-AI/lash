@@ -1,7 +1,7 @@
 //! Output kept out of history (FIG-1643).
 //!
 //! A producer about to put an oversized output into session history — a tool
-//! presentation, an RLM print or final value — retains its complete bytes as a
+//! presentation, an RLM step's print array or final value — retains its complete bytes as a
 //! session attachment first and puts a [`RetainedOutput`] in its place: a
 //! bounded witness and the attachment's typed reference. The decision is made
 //! once, inside a journaled step, under an [`OutputRetentionPolicy`] the step

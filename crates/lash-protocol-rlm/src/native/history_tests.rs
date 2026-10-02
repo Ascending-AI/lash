@@ -5,6 +5,7 @@ use lash_sansio::TurnId;
 
 fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
     RlmTrajectoryEntry {
+        output_archive: None,
         id: id.to_string(),
         protocol_iteration: 0,
         code: "finish 1".to_string(),

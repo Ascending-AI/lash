@@ -829,11 +829,12 @@ fn rlm_exec_response(
     terminal_finish: Option<Value>,
 ) -> lash_core::ExecResponse {
     lash_core::ExecResponse {
+        output_archive: None,
         observations: output
             .iter()
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
-                value: lash_core::OutputValue::Inline(serde_json::json!(value)),
+                value: serde_json::json!(value),
                 projection: Default::default(),
             })
             .collect(),
@@ -868,11 +869,12 @@ fn rlm_exec_response_with_tool_calls(
         })
         .collect();
     lash_core::ExecResponse {
+        output_archive: None,
         observations: output
             .iter()
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
-                value: lash_core::OutputValue::Inline(serde_json::json!(value)),
+                value: serde_json::json!(value),
                 projection: Default::default(),
             })
             .collect(),

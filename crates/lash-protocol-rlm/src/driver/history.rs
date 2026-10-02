@@ -18,7 +18,8 @@
 //!   followed by a committed assistant transcript message in the same turn,
 //!   the transcript is canonical for assistant prose. Assistant-content events,
 //!   the terminal emission cell, and its never-observed output echo are
-//!   omitted; intermediate trajectory entries remain available. This is
+//!   omitted unless it holds a print archive; those values remain addressable.
+//!   Intermediate trajectory entries remain available. This is
 //!   derived from event/turn ordering, never message content. Without a
 //!   committed transcript, the trajectory renders unchanged.
 //! - **Repaired-failure scrub.** A failed cell stays in the transcript for the
@@ -36,11 +37,10 @@
 //!   input and the volatile `=== CURRENT ITERATION ===` tail — iteration number,
 //!   turn events, bound variables, finalization, required-output schema, context
 //!   budget — are appended uncached.
-//! - **Re-fetch handle.** A lossy-projected step output is tagged
-//!   `full: history[N].output[M]` on its user message; the `history` projected
-//!   binding (`projection/context.rs`) carries the full untruncated value, keyed
-//!   by the step's `entry.index`, so the model can recover it by re-printing the
-//!   reference. Proven by
+//! - **Re-fetch handle.** Inline `history[N].output[M]` is the complete value.
+//!   Archived steps expose `history[N].output_archive.attachment`; an explicit
+//!   `control.read_output` reads all of the step's typed values in order.
+//!   Rendering never reads archive bytes. Proven by
 //!   `projection::context::tests::history_step_output_resolves_full_untruncated_value`.
 //!   `history[N]` uses compact canonical semantic indices, so omitted internal
 //!   entries consume no index and rendered re-fetch handles use the remap.
@@ -570,6 +570,13 @@ pub(crate) fn step_output_text(
             out,
             "history[{index}].output[{output_index}]:\n{}",
             item.text
+        );
+    }
+    if let Some(archive) = &entry.output_archive {
+        let _ = write!(
+            out,
+            "{}\nFull outputs: await control.read_output({{ archive: history[{index}].output_archive.attachment }})",
+            archive.witness,
         );
     }
     if !entry.images.is_empty() {

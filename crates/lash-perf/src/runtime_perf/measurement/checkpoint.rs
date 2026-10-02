@@ -661,11 +661,12 @@ fn checkpoint_pending_exec(
     restored.handle_response(Response::ExecResult {
         id,
         result: Ok(ExecResponse {
+            output_archive: None,
             observations: vec![lash_core::Observation {
                 text: "checkpoint observation: resumed after ExecCode effect boundary".to_string(),
-                value: lash_core::OutputValue::Inline(serde_json::json!(
+                value: serde_json::json!(
                     "checkpoint observation: resumed after ExecCode effect boundary"
-                )),
+                ),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

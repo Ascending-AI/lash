@@ -716,6 +716,7 @@ where
                     };
                     Ok(RuntimeEffectOutcome::ExecCode {
                         result: Box::new(Ok(crate::ExecResponse {
+                            output_archive: None,
                             observations: Vec::new(),
                             calls: Vec::new(),
                             printed_images: Vec::new(),

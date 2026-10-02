@@ -671,6 +671,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             }
             RuntimeEffectCommand::ExecCode { .. } => Ok(RuntimeEffectOutcome::ExecCode {
                 result: Box::new(Ok(lash_core::ExecResponse {
+                    output_archive: None,
                     observations: Vec::new(),
                     calls: Vec::new(),
                     printed_images: Vec::new(),

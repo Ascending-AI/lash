@@ -26,6 +26,7 @@ pub(super) struct RlmDriverState {
     /// concatenated `combined_output: String` and a sibling
     /// `observations: Vec<String>` — the two carried the same content.
     pub(super) output: Vec<lash_rlm_types::RlmPrint>,
+    pub(super) output_archive: Option<lash_core::RetainedOutput>,
     /// The tagged outcome preserves null terminal values. Ambiguous parked
     /// states with the old optional pair must be recreated before 1.0.
     pub(super) outcome: CellOutcome<lash_core::CellFailure>,

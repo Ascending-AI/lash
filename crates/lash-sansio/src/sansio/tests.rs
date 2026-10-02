@@ -276,6 +276,7 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
 
 fn empty_exec_response() -> crate::ExecResponse {
     crate::ExecResponse {
+        output_archive: None,
         observations: Vec::new(),
         calls: Vec::new(),
         printed_images: Vec::new(),

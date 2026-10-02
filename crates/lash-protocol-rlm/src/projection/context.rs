@@ -122,7 +122,9 @@ impl RlmHistoryProjection {
 /// Content is never compared.
 /// Intermediate trajectory entries remain available, while their prose is represented by the
 /// canonical transcript.
-/// A terminal step with no committed message remains unchanged.
+/// A terminal step with an archive stays addressable; its printed values
+/// are independent of the canonical assistant answer. Without a committed
+/// message, every terminal step remains unchanged.
 fn completed_turn_internal_indices(
     entries: &[lash_core::facade_support::ChronologicalEntry],
 ) -> BTreeSet<usize> {
@@ -158,7 +160,8 @@ fn completed_turn_internal_indices(
                         .outcome
                         .terminal_value()
                         .is_some()
-                        .then_some(entry.index);
+                        .then_some(entry.index)
+                        .filter(|_| step.output_archive.is_none());
                 }
                 _ => {}
             },
@@ -475,6 +478,7 @@ mod tests {
 
     fn step_projection(output: &str) -> lash_core::facade_support::ChronologicalProjection {
         let entry = RlmTrajectoryEntry {
+            output_archive: None,
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
             code: "print big".to_string(),
@@ -506,29 +510,69 @@ mod tests {
     // hands back the FULL, untruncated value the prompt only previewed.
     #[tokio::test]
     async fn history_step_output_resolves_full_untruncated_value() {
-        let full = "X".repeat(50_000);
-        let projection = step_projection(&full);
+        let full = "Xé🙂".repeat(50_000);
+        let double = lash_restate_test::backend(0x1188_0001, Default::default())
+            .await
+            .expect("double");
+        let attachments = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
+            double.lash_backend().attachment_store(),
+        );
+        let observations = vec![lash_core::Observation {
+            text: "bounded preview".to_string(),
+            value: serde_json::json!(full),
+            projection: Default::default(),
+        }];
+        let bytes = serde_json::to_vec(&observations).expect("encode archive");
+        let reference = attachments
+            .put(
+                bytes.clone(),
+                lash_core::AttachmentCreateMeta::new(
+                    "application/json".parse().expect("media type"),
+                    None,
+                    Some("step archive".to_string()),
+                ),
+            )
+            .await
+            .expect("store archive");
+        let entry = RlmTrajectoryEntry {
+            id: "archived-step".to_string(),
+            output_archive: Some(Box::new(lash_core::RetainedOutput {
+                reference: reference.clone(),
+                witness: "bounded preview".to_string(),
+            })),
+            ..Default::default()
+        };
+        let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+            &[lash_core::SessionHistoryRecord::Protocol(
+                rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(entry)),
+            )],
+            &Default::default(),
+        );
         let value = HistoryProjectedValue {
             projection: Arc::new(rlm_history_projection(&projection)),
         };
-
-        // history[0] -> the serialized lashlang execution record.
         let FlowValue::Record(step) = read_index(&value, 0).await else {
-            panic!("history[0] should be a record");
+            panic!("history step");
         };
-        // history[0].output -> the list of per-print outputs.
-        let Some(FlowValue::List(outputs)) = step.get("output") else {
-            panic!("step record should carry an `output` list, got {step:?}");
+        let projected = step
+            .get("output_archive")
+            .expect("history exposes the archive");
+        let record = crate::projection::flow_to_json_value(projected);
+        let adopted: lash_core::ToolValue =
+            serde_json::from_value(record["attachment"].clone()).expect("typed attachment");
+        let lash_core::ToolValue::Attachment(AttachmentSource::Stored { attachment_ref }) = adopted
+        else {
+            panic!("stored reference");
         };
-        // history[0].output[0] -> the full untruncated string.
-        let Some(FlowValue::String(text)) = outputs.first() else {
-            panic!("output[0] should be a string");
-        };
-        assert_eq!(
-            text.as_str(),
-            full.as_str(),
-            "re-fetched value must be the full untruncated output"
-        );
+        assert_eq!(attachment_ref, reference);
+        let fetched = attachments
+            .get(&attachment_ref.id)
+            .await
+            .expect("explicit fetch")
+            .bytes;
+        assert_eq!(fetched, bytes);
+        let outputs = crate::control_tools::decode_output_archive(&fetched).expect("exact values");
+        assert_eq!(outputs, vec![serde_json::json!(full)]);
     }
 
     /// A host whose only ability is finishing, so a cell's `finish(...)` is the
@@ -723,6 +767,7 @@ mod tests {
     #[test]
     fn completed_turn_projection_keeps_only_transcript_and_compacts_indices() {
         let terminal = RlmTrajectoryEntry {
+            output_archive: None,
             id: "terminal".to_string(),
             protocol_iteration: 1,
             code: "finish { answer: 42 }".to_string(),
@@ -735,6 +780,7 @@ mod tests {
             ),
         };
         let retained = RlmTrajectoryEntry {
+            output_archive: None,
             id: "retained".to_string(),
             protocol_iteration: 0,
             code: "print \"next\"".to_string(),
@@ -804,6 +850,7 @@ mod tests {
     #[test]
     fn completed_turn_projection_keeps_intermediate_steps_without_duplicate_prose() {
         let intermediate = RlmTrajectoryEntry {
+            output_archive: None,
             id: "intermediate".to_string(),
             protocol_iteration: 0,
             code: "missing_name".to_string(),
@@ -817,6 +864,7 @@ mod tests {
             )),
         };
         let terminal = RlmTrajectoryEntry {
+            output_archive: None,
             id: "terminal".to_string(),
             protocol_iteration: 1,
             code: "finish \"done\"".to_string(),

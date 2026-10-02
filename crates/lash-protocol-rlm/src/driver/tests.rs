@@ -27,6 +27,7 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
 fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(
         RlmTrajectoryEntry {
+            output_archive: None,
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
@@ -52,6 +53,7 @@ fn terminal_step_event(
 ) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(
         RlmTrajectoryEntry {
+            output_archive: None,
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
@@ -722,6 +724,7 @@ fn printed_images_render_as_llm_image_blocks() {
     let projector = projector(1000);
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         RlmProtocolEvent::RlmTrajectoryEntry(RlmTrajectoryEntry {
+            output_archive: None,
             id: "lashlang_step_1".to_string(),
             protocol_iteration: 1,
             code: "print img".to_string(),

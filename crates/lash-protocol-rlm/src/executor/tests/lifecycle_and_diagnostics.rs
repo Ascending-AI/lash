@@ -1706,6 +1706,19 @@ pub(super) async fn execute_with_host_environment(
     abilities: lashlang::LashlangAbilities,
     resources: lashlang::LashlangHostCatalog,
 ) -> ExecResponse {
+    execute_with_host_environment_and_archives(code, abilities, resources)
+        .await
+        .0
+}
+
+pub(super) async fn execute_with_host_environment_and_archives(
+    code: &str,
+    abilities: lashlang::LashlangAbilities,
+    resources: lashlang::LashlangHostCatalog,
+) -> (
+    ExecResponse,
+    Arc<lash_core::facade_support::RuntimeAttachmentStore>,
+) {
     let mut state = RlmExecutionState::new();
     // Triggers are catalogue presence rather than an ability now (FIG-2999), so
     // the harness always supplies the store: a program that never registers one
@@ -1729,6 +1742,7 @@ pub(super) async fn execute_with_host_environment(
         lashlang::LashlangLanguageFeatures::default(),
         resources,
     );
+    let attachments = ctx.attachment_store();
     let response = execute_code_with_bounds_test_render(
         &mut state,
         ctx,
@@ -1747,7 +1761,7 @@ pub(super) async fn execute_with_host_environment(
     )
     .await;
     handler.close().await.expect("close the cell's handler");
-    response
+    (response, attachments)
 }
 
 #[test]

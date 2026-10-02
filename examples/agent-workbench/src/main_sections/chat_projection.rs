@@ -428,12 +428,15 @@ pub(crate) fn transcript_rows_from_committed(
                     Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step))
                         if !step.code.trim().is_empty() =>
                     {
-                        let mut output = step
-                            .output
-                            .iter()
-                            .map(|print| print.text.as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n");
+                        let mut output = match &step.output_archive {
+                            Some(archive) => archive.witness.clone(),
+                            None => step
+                                .output
+                                .iter()
+                                .map(|print| print.text.as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        };
                         if let Some(final_output) = step.outcome.terminal_value() {
                             let final_output = match final_output {
                                 lash::attachments::OutputValue::Inline(value) => {

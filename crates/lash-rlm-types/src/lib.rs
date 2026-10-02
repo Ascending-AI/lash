@@ -187,12 +187,11 @@ pub struct RlmTrajectoryEntry {
     pub id: String,
     pub protocol_iteration: usize,
     pub code: String,
-    /// One entry per `print` (and any raw stdout-style emission from the
-    /// lashlang executor). Replaces the old split between a combined
-    /// `output: String` and `observations: Vec<String>` — those carried
-    /// the same content twice, wasting tokens on every history-bearing
-    /// iteration.
+    /// Complete inline prints below the aggregate retention limit.
     pub output: Vec<RlmPrint>,
+    /// One archive for all prints in this step; `output` is empty when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_archive: Option<Box<RetainedOutput>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -209,81 +208,20 @@ pub struct RlmTrajectoryEntry {
 
 pub type RlmExecutedCall = lash_sansio::ExecutedCallRecord;
 
-/// One printed value: the rendered text the model reads, and the typed value
-/// a cell reads back through `history` — inline, or retained out of history
-/// when its encoding was too long (FIG-1643).
-///
-/// Serialized as `{text, value}` for an inline value and `{text, retained}`
-/// for a retained one; decoding refuses a record with both, with neither, or
-/// with any other field.
-#[derive(Clone, Debug, PartialEq)]
+/// One inline print. Oversized steps retain the complete array in one archive.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RlmPrint {
     pub text: String,
-    pub value: OutputValue,
+    pub value: serde_json::Value,
 }
 
 impl From<String> for RlmPrint {
     fn from(text: String) -> Self {
         Self {
-            value: OutputValue::Inline(serde_json::Value::String(text.clone())),
+            value: serde_json::Value::String(text.clone()),
             text,
         }
-    }
-}
-
-impl serde::Serialize for RlmPrint {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        #[derive(serde::Serialize)]
-        struct Fields<'a> {
-            text: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            value: Option<&'a serde_json::Value>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            retained: Option<&'a RetainedOutput>,
-        }
-        Fields {
-            text: &self.text,
-            value: self.value.inline(),
-            retained: self.value.retained(),
-        }
-        .serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for RlmPrint {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        /// A present `value` of `null` is the printed `null`, not an absent
-        /// value.
-        fn present<'de, D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Option<serde_json::Value>, D::Error> {
-            <serde_json::Value as serde::Deserialize>::deserialize(deserializer).map(Some)
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(expecting = "struct RlmPrint", deny_unknown_fields)]
-        struct Fields {
-            text: String,
-            #[serde(default, deserialize_with = "present")]
-            value: Option<serde_json::Value>,
-            #[serde(default)]
-            retained: Option<RetainedOutput>,
-        }
-        let Fields {
-            text,
-            value,
-            retained,
-        } = Fields::deserialize(deserializer)?;
-        let value = match (value, retained) {
-            (Some(value), None) => OutputValue::Inline(value),
-            (None, Some(retained)) => OutputValue::Retained(retained),
-            (Some(_), Some(_)) => {
-                return Err(serde::de::Error::custom(
-                    "a print cannot carry both `value` and `retained`",
-                ));
-            }
-            (None, None) => return Err(serde::de::Error::missing_field("value")),
-        };
-        Ok(Self { text, value })
     }
 }
 pub type RlmExecutedCallOutcome = lash_sansio::ExecutedCallOutcome;
@@ -397,15 +335,21 @@ impl From<&OutputValue> for HistoryValue {
     fn from(value: &OutputValue) -> Self {
         match value {
             OutputValue::Inline(value) => Self::Inline(value.clone()),
-            OutputValue::Retained(retained) => Self::Retained(RetainedHistoryValue {
-                tag: HistoryValueTag::Retained,
-                witness: retained.witness.clone(),
-                byte_len: retained.reference.byte_len,
-                attachment: lash_sansio::ToolValue::Attachment(
-                    lash_sansio::llm::types::AttachmentSource::stored(retained.reference.clone()),
-                )
-                .to_json_value(),
-            }),
+            OutputValue::Retained(retained) => Self::Retained(retained.into()),
+        }
+    }
+}
+
+impl From<&RetainedOutput> for RetainedHistoryValue {
+    fn from(retained: &RetainedOutput) -> Self {
+        Self {
+            tag: HistoryValueTag::Retained,
+            witness: retained.witness.clone(),
+            byte_len: retained.reference.byte_len,
+            attachment: lash_sansio::ToolValue::Attachment(
+                lash_sansio::llm::types::AttachmentSource::stored(retained.reference.clone()),
+            )
+            .to_json_value(),
         }
     }
 }
@@ -479,7 +423,9 @@ pub enum RlmHistoryItem {
         id: String,
         protocol_iteration: usize,
         code: String,
-        output: Vec<HistoryValue>,
+        output: Vec<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_archive: Option<RetainedHistoryValue>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         images: Vec<RlmImageRef>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -506,8 +452,12 @@ impl RlmHistoryItem {
             output: entry
                 .output
                 .iter()
-                .map(|print| HistoryValue::from(&print.value))
+                .map(|print| print.value.clone())
                 .collect(),
+            output_archive: entry
+                .output_archive
+                .as_deref()
+                .map(RetainedHistoryValue::from),
             images: entry
                 .images
                 .iter()
@@ -556,6 +506,7 @@ mod rlm_step_serde_tests {
 
     fn populated_entry() -> RlmTrajectoryEntry {
         RlmTrajectoryEntry {
+            output_archive: None,
             id: "step-1".to_string(),
             protocol_iteration: 3,
             code: "print('hello')".to_string(),
@@ -604,40 +555,43 @@ mod rlm_step_serde_tests {
     }
 
     #[test]
-    fn a_retained_print_and_final_value_round_trip_in_their_own_keys() {
+    fn a_step_archive_and_final_value_round_trip_in_their_own_keys() {
         let entry = RlmTrajectoryEntry {
-            output: vec![super::RlmPrint {
-                text: "[cut]".to_string(),
-                value: super::OutputValue::Retained(retained("{\"rows\":[")),
-            }],
+            output_archive: Some(Box::new(retained("[{\"value\": {\"rows\":["))),
+            output: Vec::new(),
             outcome: CellOutcome::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
             ..populated_entry()
         };
         let encoded = serde_json::to_value(&entry).expect("encode");
-        assert!(encoded["output"][0].get("value").is_none());
-        assert_eq!(encoded["output"][0]["retained"]["witness"], "{\"rows\":[");
+        assert_eq!(encoded["output"], serde_json::json!([]));
+        assert_eq!(
+            encoded["output_archive"]["witness"],
+            "[{\"value\": {\"rows\":["
+        );
         assert!(encoded.get("final_output").is_none());
         assert_eq!(encoded["final_output_retained"]["witness"], "{\"answer\"");
         let decoded: RlmTrajectoryEntry = serde_json::from_value(encoded).expect("decode");
         assert_eq!(decoded, entry);
     }
 
-    /// A retained value has one cell-visible spelling (FIG-4658 F66): a print
+    /// A retained value has one cell-visible spelling (FIG-4658 F66): an archive
     /// and a final value read back as the same reserved-tag record, whose
     /// `attachment` is a value a tool that reads attachments accepts.
     #[test]
-    fn a_retained_print_and_a_retained_final_value_read_back_as_one_record() {
+    fn a_step_archive_and_retained_final_value_share_the_attachment_record() {
         let entry = RlmTrajectoryEntry {
-            output: vec![super::RlmPrint {
-                text: "[cut]".to_string(),
-                value: super::OutputValue::Retained(retained("{\"rows\":[")),
-            }],
+            output_archive: Some(Box::new(retained("[{\"value\": {\"rows\":["))),
+            output: Vec::new(),
             outcome: CellOutcome::Finished(super::OutputValue::Retained(retained("{\"rows\":["))),
             ..populated_entry()
         };
         let item = history(&entry);
 
-        assert_eq!(item["output"][0], item["final_output"]);
+        assert_eq!(item["output"], serde_json::json!([]));
+        assert_eq!(
+            item["output_archive"]["attachment"],
+            item["final_output"]["attachment"]
+        );
         assert!(item.get("final_output_retained").is_none());
         let record = &item["final_output"];
         assert_eq!(record[super::HISTORY_VALUE_TAG_KEY], "retained");
@@ -663,10 +617,7 @@ mod rlm_step_serde_tests {
         let null: super::RlmPrint =
             serde_json::from_value(serde_json::json!({"text": "null", "value": null}))
                 .expect("decode");
-        assert_eq!(
-            null.value,
-            super::OutputValue::Inline(serde_json::Value::Null)
-        );
+        assert_eq!(null.value, serde_json::Value::Null);
     }
 
     /// A durable trajectory entry keeps its cell failure typed (FIG-4658
@@ -683,6 +634,7 @@ mod rlm_step_serde_tests {
             )),
         ] {
             let entry = RlmTrajectoryEntry {
+                output_archive: None,
                 outcome: CellOutcome::Failed(failure.clone()),
                 ..populated_entry()
             };
@@ -701,6 +653,7 @@ mod rlm_step_serde_tests {
     #[test]
     fn an_exec_failure_keeps_its_closed_reason_in_the_trajectory() {
         let entry = RlmTrajectoryEntry {
+            output_archive: None,
             outcome: CellOutcome::Failed(CellFailure::from(lash_sansio::ExecCodeFailure::new(
                 lash_sansio::ExecCodeFailureReason::ExecutorUnavailable,
                 "code execution is not available in this session",
@@ -722,6 +675,7 @@ mod rlm_step_serde_tests {
     #[test]
     fn a_failed_step_reads_back_as_kind_and_message() {
         let item = history(&RlmTrajectoryEntry {
+            output_archive: None,
             outcome: CellOutcome::Failed(program_failure()),
             ..populated_entry()
         });
@@ -777,6 +731,7 @@ mod rlm_step_serde_tests {
             serde_json::json!({"error": "boom\n\nNext: fix the cause named above."}),
         ] {
             let mut entry = serde_json::to_value(RlmTrajectoryEntry {
+                output_archive: None,
                 outcome: CellOutcome::Running,
                 ..populated_entry()
             })
@@ -832,7 +787,9 @@ mod rlm_step_serde_tests {
         let mut items = vec![
             serde_json::to_value(message).expect("message encodes"),
             serde_json::to_value(bare_message).expect("message encodes"),
+            history(&populated_entry()),
             history(&RlmTrajectoryEntry {
+                output_archive: None,
                 id: "step-0".to_string(),
                 code: "1".to_string(),
                 ..RlmTrajectoryEntry::default()
@@ -845,6 +802,8 @@ mod rlm_step_serde_tests {
             CellOutcome::Running,
         ] {
             items.push(history(&RlmTrajectoryEntry {
+                output_archive: Some(Box::new(retained("ordered step observations"))),
+                output: Vec::new(),
                 outcome,
                 ..populated_entry()
             }));

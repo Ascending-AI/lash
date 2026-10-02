@@ -1872,28 +1872,32 @@ pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata()
             "{{ output: {}, status: \"failed\", error: \"boom\", exit_code: 2, stderr: \"short\" }}",
             serde_json::to_string(&large).expect("string literal")
         );
-        let response = execute_with_abilities(
-            &format!("print({record});"),
-            lashlang::LashlangAbilities::default(),
-        )
-        .await;
+        let (response, attachments) =
+            super::lifecycle_and_diagnostics::execute_with_host_environment_and_archives(
+                &format!("print({record});"),
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangHostCatalog::new(),
+            )
+            .await;
 
         assert!(response.error.is_none(), "{:?}", response.error);
-        assert_eq!(response.observations.len(), 1);
-        assert_eq!(
-            response.observations[0]
-                .value
-                .inline()
-                .expect("a value within the history limit stays inline")["output"],
-            large
-        );
-        assert!(response.observations[0].text.starts_with("[cut: "));
-        assert!(
-            response.observations[0]
-                .text
-                .contains("narrow with history[")
-        );
-        let metadata = &response.observations[0].projection;
+        assert!(response.observations.is_empty());
+        let archive = response
+            .output_archive
+            .as_ref()
+            .expect("aggregate is archived");
+        let bytes = attachments
+            .get(&archive.reference.id)
+            .await
+            .expect("exact archive")
+            .bytes;
+        let observations: Vec<lash_core::Observation> =
+            serde_json::from_slice(&bytes).expect("observations");
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].value["output"], large);
+        assert!(observations[0].text.starts_with("[cut: "));
+        assert!(observations[0].text.contains("narrow with history["));
+        let metadata = &observations[0].projection;
         assert!(metadata.truncated, "{metadata:?}");
         assert!(metadata.original_chars > 60_000);
         assert!(metadata.projected_chars < metadata.original_chars);
@@ -1910,10 +1914,23 @@ pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
             "console.log({{ output: {}, status: \"failed\" }});",
             serde_json::to_string(&large).expect("string literal")
         );
-        let response = execute_with_abilities(&code, lashlang::LashlangAbilities::default()).await;
-
+        let (response, attachments) =
+            super::lifecycle_and_diagnostics::execute_with_host_environment_and_archives(
+                &code,
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangHostCatalog::new(),
+            )
+            .await;
         assert!(response.error.is_none(), "{:?}", response.error);
-        let metadata = &response.observations[0].projection;
+        let archive = response.output_archive.as_ref().expect("archive");
+        let bytes = attachments
+            .get(&archive.reference.id)
+            .await
+            .expect("archive bytes")
+            .bytes;
+        let observations: Vec<lash_core::Observation> =
+            serde_json::from_slice(&bytes).expect("observations");
+        let metadata = &observations[0].projection;
         assert!(metadata.truncated, "{metadata:?}");
         assert!(
             metadata.projected_chars < metadata.original_chars,
@@ -2279,4 +2296,30 @@ async fn execute_typescript_with_capturing_trigger_effects(
     .await;
     handler.close().await.expect("close the cell's handler");
     response
+}
+
+#[test]
+pub(super) fn subcap_prints_stay_fully_inline_including_empty_and_null_values() {
+    block_on(async {
+        let response = execute_with_host_environment(
+            "print(\"\"); print(null); print({text: \"é🙂\", nested: [1, false]});",
+            lashlang::LashlangAbilities::default(),
+            lashlang::LashlangHostCatalog::new(),
+        )
+        .await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(response.output_archive.is_none());
+        assert_eq!(
+            response
+                .observations
+                .iter()
+                .map(|print| print.value.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                serde_json::json!(""),
+                serde_json::Value::Null,
+                serde_json::json!({"text": "é🙂", "nested": [1, false]})
+            ]
+        );
+    });
 }

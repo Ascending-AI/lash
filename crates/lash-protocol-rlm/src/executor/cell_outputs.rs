@@ -1,29 +1,29 @@
-//! What a cell put into history: its rendered prints and the retention of
-//! every output too long for it (FIG-1643).
+//! A cell records its complete print array inline or as one attachment archive.
 
 use super::*;
 
 /// The journaled record of what a cell put into history (FIG-1643): its
-/// rendered prints, and for each print or the terminal value too long for
-/// history, the retention that stands in its place — under the retention
+/// inline prints or one archive for their aggregate, and a retained terminal
+/// value when needed, under the retention
 /// policy the step read, which it records too.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordedCellOutputs {
     policy: lash_core::OutputRetentionPolicy,
     observations: Vec<lash_core::Observation>,
+    output_archive: Option<lash_core::RetainedOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     terminal_finish_retained: Option<lash_core::RetainedOutput>,
 }
 
-/// Renders the cell's prints and retains every output too long for history,
+/// Renders the cell's prints and retains their aggregate when too long for history,
 /// once, inside one journaled step keyed under the cell (`{cell}:outputs`).
 ///
 /// The step runs for every cell that printed or finished — never on whether
 /// something is oversized — so a replay under a changed policy issues the
 /// same step and is served the recorded observations, witnesses and
 /// references verbatim. A retention that fails is the step's typed
-/// typed attachment-store error: the cell stops, and the outputs never
+/// attachment-store error: the cell stops, and the outputs never
 /// enter history in its place.
 pub(super) async fn record_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
@@ -85,19 +85,27 @@ pub(super) async fn record_cell_outputs(
                             observations.len(),
                             flow_to_json_value(&value),
                         );
-                        let Some(mut observation) = observation else {
-                            continue;
-                        };
-                        if let lash_core::OutputValue::Inline(value) = &observation.value {
-                            let label = format!("{key}:print:{}", observations.len());
-                            if let Some(retained) =
-                                retain_oversized_value(&attachments, policy, value, &label).await?
-                            {
-                                observation.value = lash_core::OutputValue::Retained(retained);
-                            }
-                        }
                         observations.push(observation);
                     }
+                }
+                let output_archive = if observations.is_empty() {
+                    None
+                } else {
+                    retain_oversized_value(
+                        &attachments,
+                        policy,
+                        &serde_json::to_value(&observations).map_err(|error| {
+                            lash_core::RuntimeEffectControllerError::new(
+                                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                                error.to_string(),
+                            )
+                        })?,
+                        &format!("{key}:prints"),
+                    )
+                    .await?
+                };
+                if output_archive.is_some() {
+                    observations.clear();
                 }
                 let terminal_finish_retained = match &terminal_finish {
                     Some(value) => {
@@ -109,6 +117,7 @@ pub(super) async fn record_cell_outputs(
                 serde_json::to_value(RecordedCellOutputs {
                     policy,
                     observations,
+                    output_archive,
                     terminal_finish_retained,
                 })
                 .map_err(|error| {
@@ -124,6 +133,7 @@ pub(super) async fn record_cell_outputs(
         Ok(value) => match serde_json::from_value::<RecordedCellOutputs>(value) {
             Ok(recorded) => {
                 response.observations = recorded.observations;
+                response.output_archive = recorded.output_archive;
                 response.terminal_finish_retained = recorded.terminal_finish_retained;
             }
             Err(error) => {

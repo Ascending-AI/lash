@@ -8,6 +8,15 @@ pub struct ToolAttachmentClient {
 }
 
 impl ToolAttachmentClient {
+    /// Read stored bytes explicitly, subject to the host's attachment read policy.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability to resolve retained history values.
+    pub async fn get(&self, id: &crate::AttachmentId) -> Result<Vec<u8>, AttachmentStoreError> {
+        self.store.get(id).await.map(|stored| stored.bytes)
+    }
+
     /// # Integrator class
     ///
     /// Tool implementors use this capability to publish attachment bytes and

@@ -70,9 +70,9 @@ impl RecordedTurnAssembly {
     pub fn note_code_outputs(&mut self, response: &crate::ExecResponse) {
         self.retained_outputs.extend(
             response
-                .observations
-                .iter()
-                .filter_map(|observation| observation.value.retained())
+                .output_archive
+                .as_ref()
+                .into_iter()
                 .chain(response.terminal_finish_retained.as_ref())
                 .cloned(),
         );

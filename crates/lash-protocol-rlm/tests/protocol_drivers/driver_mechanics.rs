@@ -795,9 +795,10 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     restored.handle_response(Response::ExecResult {
         id: restored_exec_id,
         result: Ok(lash_sansio::ExecResponse {
+            output_archive: None,
             observations: vec![lash_sansio::Observation {
                 text: "hi\n".to_string(),
-                value: lash_sansio::OutputValue::Inline(serde_json::json!("hi\n")),
+                value: serde_json::json!("hi\n"),
                 projection: Default::default(),
             }],
             calls: vec![lash_core::ExecutedCall {
@@ -861,10 +862,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     assert_eq!(entry.code, "print(\"hi\");");
     assert_eq!(assistant_visible_texts(&restored), vec!["Reason first."]);
     assert_eq!(entry.output[0].text, "hi\n");
-    assert_eq!(
-        entry.output[0].value,
-        lash_sansio::OutputValue::Inline(serde_json::json!("hi\n"))
-    );
+    assert_eq!(entry.output[0].value, serde_json::json!("hi\n"));
     let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
 }
@@ -1152,9 +1150,10 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     machine.handle_response(Response::ExecResult {
         id: exec_id,
         result: Ok(lash_sansio::ExecResponse {
+            output_archive: None,
             observations: vec![lash_sansio::Observation {
                 text: "fanout done".to_string(),
-                value: lash_sansio::OutputValue::Inline(serde_json::json!("fanout done")),
+                value: serde_json::json!("fanout done"),
                 projection: Default::default(),
             }],
             calls: vec![
@@ -1252,10 +1251,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             .is_none()
     );
     assert_eq!(entry.output[0].text, "fanout done");
-    assert_eq!(
-        entry.output[0].value,
-        lash_sansio::OutputValue::Inline(serde_json::json!("fanout done"))
-    );
+    assert_eq!(entry.output[0].value, serde_json::json!("fanout done"));
     assert_eq!(
         entry.calls,
         vec![

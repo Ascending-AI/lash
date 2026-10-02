@@ -84,6 +84,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
                 ));
             }
             return Ok(lash_core::ExecResponse {
+                output_archive: None,
                 observations: Vec::new(),
                 calls: Vec::new(),
                 printed_images: Vec::new(),
@@ -98,9 +99,10 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
             });
         }
         Ok(lash_core::ExecResponse {
+            output_archive: None,
             observations: vec![lash_core::Observation {
                 text: "next cell executed".to_string(),
-                value: lash_core::OutputValue::Inline(serde_json::json!("next cell executed")),
+                value: serde_json::json!("next cell executed"),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

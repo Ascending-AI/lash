@@ -129,9 +129,10 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
         _request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, lash_core::SessionError> {
         Ok(lash_core::ExecResponse {
+            output_archive: None,
             observations: vec![lash_core::Observation {
                 text: "exec output".to_string(),
-                value: lash_core::OutputValue::Inline(serde_json::json!("exec output")),
+                value: serde_json::json!("exec output"),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

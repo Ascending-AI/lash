@@ -969,6 +969,7 @@ async fn execute_code_in_worker_scope(
             .await;
             return match captured {
                 Ok(()) => ExecResponse {
+                    output_archive: None,
                     suspended: true,
                     ..exec_response_from(host.into_collected(), None, None)
                 },
@@ -1248,6 +1249,7 @@ fn lashlang_runtime_feedback_kind(
 
 fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
     ExecResponse {
+        output_archive: None,
         observations: Vec::new(),
         calls: Vec::new(),
         printed_images: Vec::new(),
@@ -1346,6 +1348,7 @@ fn exec_response_from(
     terminal_finish: Option<serde_json::Value>,
 ) -> ExecResponse {
     ExecResponse {
+        output_archive: None,
         observations: collected.observations,
         calls: collected.calls,
         printed_images: collected.printed_images,

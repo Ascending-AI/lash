@@ -39,11 +39,27 @@ print(rows);
 finish({ rows });
 "#;
 
+struct CountedRenderer(Arc<AtomicUsize>);
+impl crate::render::CodeRenderer for CountedRenderer {
+    fn id(&self) -> &str {
+        "lash.ax.v1"
+    }
+    fn print(
+        &self,
+        value: &lashlang::Value,
+        params: &lash_render::RenderParams,
+    ) -> lash_render::Rendered<String> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        crate::render::CodeRenderer::print(&crate::render::BuiltinCodeRenderer, value, params)
+    }
+}
+
 fn attempt(
     backend: lash_core::Backend,
     policy: lash_core::OutputRetentionPolicy,
     crash: bool,
     responses: Arc<Mutex<Vec<RecordedAttempt>>>,
+    renders: Arc<AtomicUsize>,
 ) -> lash_restate_test::HandlerAttempt {
     let invocation = lash_core::testing::exec_code_invocation(
         SESSION,
@@ -57,6 +73,7 @@ fn attempt(
         let backend = backend.clone();
         let invocation = invocation.clone();
         let responses = Arc::clone(&responses);
+        let renders = Arc::clone(&renders);
         Box::pin(async move {
             let attachments = Arc::new(
                 lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
@@ -74,7 +91,7 @@ fn attempt(
             let workers = lash_vm_client::service::Service::default().with_worker_receipts();
             let mut state =
                 RlmExecutionState::for_engine_with_workers("typescript", workers.clone());
-            let response = execute_code_unbounded_with_test_render(
+            let response = execute_code_with_trigger_test_render(
                 &mut state,
                 ctx,
                 ExecRequest {
@@ -83,8 +100,12 @@ fn attempt(
                 crate::testing::fresh_sqlite_memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
+                None,
                 RlmProjectedBindings::default(),
                 None,
+                lashlang::ExecutionBounds::unbounded(),
+                crate::plugin::RlmChannel::Cell,
+                crate::render::CodeRendererSlot(Arc::new(CountedRenderer(renders))),
             )
             .await;
             responses
@@ -105,22 +126,35 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let backend = double.lash_backend();
         let responses = Arc::new(Mutex::new(Vec::new()));
+        let renders = Arc::new(AtomicUsize::new(0));
         double
             .run_crashed_then_redriven(
                 lash_core::AdmittedScope::turn(
                     lash_core::SessionId::from(SESSION),
                     lash_core::TurnId::from(TURN),
                 ),
-                attempt(backend.clone(), LIVE_POLICY, true, Arc::clone(&responses)),
+                attempt(
+                    backend.clone(),
+                    LIVE_POLICY,
+                    true,
+                    Arc::clone(&responses),
+                    Arc::clone(&renders),
+                ),
                 attempt(
                     backend.clone(),
                     REDRIVE_POLICY,
                     false,
                     Arc::clone(&responses),
+                    Arc::clone(&renders),
                 ),
             )
             .await
             .expect("the live pass crashes and its redrive completes");
+        assert_eq!(
+            renders.load(Ordering::SeqCst),
+            1,
+            "redrive serves the archived output step without re-rendering or re-putting prints"
+        );
         let responses = responses.lock_recover().clone();
         let [(live, live_workers), (redriven, replay_workers)] = responses.as_slice() else {
             panic!("one crashed pass and one redrive ran the cell: {responses:?}");
@@ -137,12 +171,11 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
         }
 
         // The live pass retained both outputs under its policy.
-        let [observation] = live.observations.as_slice() else {
-            panic!("the cell printed once: {:?}", live.observations);
-        };
-        let lash_core::OutputValue::Retained(print) = &observation.value else {
-            panic!("the oversized print is retained: {:?}", observation.value);
-        };
+        assert!(
+            live.observations.is_empty(),
+            "only a witness enters history"
+        );
+        let print = live.output_archive.as_ref().expect("one step archive");
         let finish = live
             .terminal_finish_retained
             .as_ref()
@@ -159,6 +192,7 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
         // The redrive, under a policy that would keep both inline, is served
         // the recorded decision verbatim.
         assert_eq!(redriven.observations, live.observations);
+        assert_eq!(redriven.output_archive, live.output_archive);
         assert_eq!(
             redriven.terminal_finish_retained,
             live.terminal_finish_retained
@@ -188,7 +222,9 @@ pub(super) fn a_cells_retained_outputs_replay_verbatim_under_a_changed_policy() 
             .expect("the retained print is stored");
         assert!(!REDRIVE_POLICY.retains(printed.bytes.len()));
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&printed.bytes).expect("a JSON print"),
+            serde_json::from_slice::<Vec<lash_core::Observation>>(&printed.bytes)
+                .expect("an observation archive")[0]
+                .value,
             value["rows"]
         );
     });

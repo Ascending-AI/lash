@@ -18,21 +18,94 @@ pub(crate) struct RlmControlToolsProvider {
 #[async_trait]
 impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![continue_as_tool_definition_for(self.vocabulary).manifest()]
+        vec![
+            continue_as_tool_definition_for(self.vocabulary).manifest(),
+            read_output_tool_definition().manifest(),
+        ]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (name == "continue_as")
-            .then(|| Arc::new(continue_as_tool_definition_for(self.vocabulary).contract()))
+        match name {
+            "continue_as" => Some(Arc::new(
+                continue_as_tool_definition_for(self.vocabulary).contract(),
+            )),
+            "read_output" => Some(Arc::new(read_output_tool_definition().contract())),
+            _ => None,
+        }
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == "read_output" {
+            return read_output(call).await;
+        }
         let result = match call.name() {
             "continue_as" => continue_as_switch_frame(call.args, call.context),
             _ => return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
         };
         finalise_tool_result(result).into()
     }
+}
+
+#[expect(clippy::expect_used, reason = "the tool declares fixed valid schemas")]
+fn read_output_tool_definition() -> ToolDefinition {
+    ToolDefinition::raw(
+        "tool:read_output",
+        "read_output",
+        "Read a step's complete ordered print values. Pass history[N].output_archive.attachment as archive; inline steps already have their full values in history[N].output. Reads are explicit and never expand the prompt automatically.",
+        json!({
+            "type": "object",
+            "properties": {"archive": {"type": "object"}},
+            "required": ["archive"],
+            "additionalProperties": false,
+        }),
+        json!({"type": "array", "items": {}}),
+    ).expect("valid schemas")
+    .with_tool_binding(ToolBinding::new(["control"], "read_output"))
+}
+
+async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    let source = call.args.get("archive").cloned().unwrap_or(Value::Null);
+    let Ok(lash_core::ToolValue::Attachment(lash_core::AttachmentSource::Stored {
+        attachment_ref,
+    })) = serde_json::from_value::<lash_core::ToolValue>(source)
+    else {
+        return ToolOutcome::failure(lash_core::ToolFailure::invalid_request(
+            "invalid_output_archive",
+            "archive must be a stored history attachment",
+        ))
+        .into();
+    };
+    let bytes = match call.context.attachments().get(&attachment_ref.id).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return lash_core::ToolAttemptOutcome::host_failed(
+                lash_core::RuntimeEffectControllerError::output_retention_failed(&error),
+            );
+        }
+    };
+    match decode_output_archive(&bytes) {
+        Ok(values) => ToolOutcome::ok(Value::Array(values)).into(),
+        Err(error) => lash_core::ToolAttemptOutcome::host_failed(error),
+    }
+}
+
+pub(crate) fn decode_output_archive(
+    bytes: &[u8],
+) -> Result<Vec<Value>, lash_core::RuntimeEffectControllerError> {
+    serde_json::from_slice::<Vec<lash_core::Observation>>(bytes)
+        .map(|observations| {
+            observations
+                .into_iter()
+                .map(|observation| observation.value)
+                .collect()
+        })
+        .map_err(|error| {
+            lash_core::RuntimeEffectControllerError::output_retention_failed(
+                &lash_core::AttachmentStoreError::Contract(format!(
+                    "the step output archive is corrupt: {error}"
+                )),
+            )
+        })
 }
 
 /// The `continue_as` control tool as a session in `dialect` advertises it.

@@ -427,13 +427,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
                 (state.calls, state.calls_omitted) = executed_call_ledger(&response.calls);
                 state.images.extend(response.printed_images);
+                state.output_archive = response.output_archive;
                 for observation in response.observations {
-                    if !observation.text.is_empty() {
-                        state.output.push(lash_rlm_types::RlmPrint {
-                            text: observation.text,
-                            value: observation.value,
-                        });
-                    }
+                    state.output.push(lash_rlm_types::RlmPrint {
+                        text: observation.text,
+                        value: observation.value,
+                    });
                 }
                 match outcome {
                     CellOutcome::Running => {}
@@ -821,6 +820,7 @@ fn trajectory_entry(
         protocol_iteration,
         code: state.code.clone(),
         output: state.output.clone(),
+        output_archive: state.output_archive.clone().map(Box::new),
         images: state.images.clone(),
         calls: state.calls.clone(),
         calls_omitted: state.calls_omitted,
