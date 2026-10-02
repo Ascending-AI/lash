@@ -301,7 +301,7 @@ enum LocalTarget {
     Process(ProcessLocalExecution),
     Definition(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
-    TurnAcceptance(Arc<dyn crate::TurnInputStore>),
+    TurnAcceptance(Arc<dyn crate::TurnInputStore>, u64),
     /// The recorded presentation boundary's local work (ADR 0099 §6,
     /// FIG-3420): run the session's ordered presentation steps once over the
     /// journaled `PresentToolResult` input.
@@ -779,15 +779,15 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Binds a turn-input store for effect-host implementors executing the
-    /// durable turn-acceptance effect (ADR 0069 §6) natively.
+    /// Binds a turn-input store, and the `ttl` in milliseconds of the ingress
+    /// claim the acceptor holds, for the turn-acceptance effect (ADR 0069 §6).
     ///
     /// The acceptance write is the one store call a replaying engine must not
     /// repeat, so it crosses the runtime-effect envelope like every other
     /// journaled effect rather than being issued directly against the store.
-    pub fn turn_acceptance(store: Arc<dyn crate::TurnInputStore>) -> Self {
+    pub fn turn_acceptance(store: Arc<dyn crate::TurnInputStore>, ttl: u64) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)),
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store, ttl)),
             replay_trace: None,
             served_only: None,
         }
@@ -1113,7 +1113,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             RuntimeEffectLocalExecutorState::Target(LocalTarget::ExecutionEnvLoad(execution)) => {
                 execution.execute(envelope).await
             }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store, ttl)) => {
                 let RuntimeEffectCommand::AcceptTurnInput { draft } = envelope.command else {
                     return Err(RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -1123,19 +1123,20 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         ),
                     ));
                 };
-                let accepted = store
-                    .enqueue_pending_turn_input(*draft)
-                    .await
-                    .map_err(|err| {
-                        let error =
+                let accepted =
+                    store
+                        .accept_pending_turn_input(*draft, ttl)
+                        .await
+                        .map_err(|err| {
+                            let error =
                             lash_core_store::runtime_error::runtime_error_from_turn_input_admission(
                                 err,
                             );
-                        RuntimeEffectControllerError::new(
-                            error.code,
-                            format!("turn acceptance commit failed: {}", error.message),
-                        )
-                    })?;
+                            RuntimeEffectControllerError::new(
+                                error.code,
+                                format!("turn acceptance commit failed: {}", error.message),
+                            )
+                        })?;
                 Ok(RuntimeEffectOutcome::AcceptTurnInput {
                     accepted: Box::new(accepted),
                 })

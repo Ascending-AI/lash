@@ -111,6 +111,13 @@ before the body runs and its source key is the turn id. If the body commits but
 the journal has not recorded its result, retry adopts the same row. Engine
 replay returns the recorded acceptance rather than minting another one.
 
+The acceptor drives the accepted row itself, inline in the parent's execution.
+That drive is the ask the row's ingress obligation owes, so the acceptance
+takes the obligation's claim in the transaction that admits the row, held for
+the relay's claim TTL. A relay pass asks the session for the row only once the
+claim has lapsed, which presumes the acceptor lost; until then no second drive
+runs the same root beside its acceptor.
+
 The root then issues journaled `AdmitRoot`, keyed by the root rather than by a
 particular drive attempt. Its stored admission includes the exact inputs and
 queued work, base head, turn index and executable generation. The store binds

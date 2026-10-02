@@ -196,8 +196,13 @@ impl LashRuntime {
                         ),
                     },
                 ),
+                // This call's own drive, below, is the ask the accepted
+                // row's ingress obligation owes: the acceptance holds the
+                // row's claim, so no relay pass asks the session for a second
+                // drive of it before this one admits it (FIG-4728).
                 crate::RuntimeEffectLocalExecutor::turn_acceptance(
-                    Arc::clone(store.store()) as Arc<dyn crate::TurnInputStore>
+                    Arc::clone(store.store()) as Arc<dyn crate::TurnInputStore>,
+                    self.ingress_relay().claim_ttl_ms(),
                 ),
             )
             .await

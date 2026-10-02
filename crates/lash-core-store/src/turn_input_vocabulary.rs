@@ -461,6 +461,9 @@ impl PendingTurnInputDraft {
 pub struct PendingTurnInputBatch {
     session_id: SessionId,
     drafts: Vec<PendingTurnInputDraft>,
+    /// How long the acceptor holds the ingress claim of the rows it admits,
+    /// when it drives them itself ([`Self::held_by_acceptor`]).
+    acceptor_claim_ttl_ms: Option<u64>,
 }
 
 impl PendingTurnInputBatch {
@@ -493,7 +496,11 @@ impl PendingTurnInputBatch {
                 }
             }
         }
-        Ok(Self { session_id, drafts })
+        Ok(Self {
+            session_id,
+            drafts,
+            acceptor_claim_ttl_ms: None,
+        })
     }
 
     /// A batch of one draft: what a single enqueue admits.
@@ -501,7 +508,28 @@ impl PendingTurnInputBatch {
         Self {
             session_id: draft.session_id.clone(),
             drafts: vec![draft],
+            acceptor_claim_ttl_ms: None,
         }
+    }
+
+    /// The same batch, accepted by an execution that drives its rows itself
+    /// (a child session's turn inside its parent's execution, ADR 0069 §6).
+    /// That inline drive is the ask each row's ingress obligation owes, so
+    /// the store takes every still-due obligation's claim in the transaction
+    /// that admits the rows, held for `claim_ttl_ms`. No relay pass asks the
+    /// session for a second drive of a row its acceptor is about to admit;
+    /// a claim that lapses because the acceptor was lost is the relay's to
+    /// retake (ADR 0109 §3).
+    #[must_use]
+    pub fn held_by_acceptor(mut self, claim_ttl_ms: u64) -> Self {
+        self.acceptor_claim_ttl_ms = Some(claim_ttl_ms);
+        self
+    }
+
+    /// The claim TTL of [`Self::held_by_acceptor`], when the acceptor drives
+    /// the batch's rows itself.
+    pub fn acceptor_claim_ttl_ms(&self) -> Option<u64> {
+        self.acceptor_claim_ttl_ms
     }
 
     pub fn session_id(&self) -> &SessionId {

@@ -1339,6 +1339,13 @@ pub trait TurnInputStore: Send + Sync {
     ///
     /// Any refusal refuses the whole batch: nothing is stored, spec rows
     /// included.
+    ///
+    /// Every new row is armed as its session's ingress obligation in the
+    /// same transaction (ADR 0109 §3). A batch
+    /// [`held_by_acceptor`](crate::PendingTurnInputBatch::held_by_acceptor)
+    /// also takes each row's still-due claim there, held for the batch's
+    /// TTL: its acceptor drives the rows itself, and no relay pass may find
+    /// them due before that drive admits them.
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: crate::PendingTurnInputBatch,
@@ -1461,6 +1468,21 @@ pub trait TurnInputStore: Send + Sync {
         session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError>;
+}
+
+impl dyn TurnInputStore {
+    /// Persist the one draft a child session's turn accepts before its
+    /// acceptor drives it inline (ADR 0069 §6): a batch of one
+    /// [`held_by_acceptor`](crate::PendingTurnInputBatch::held_by_acceptor)
+    /// for `claim_ttl_ms`, the relay's claim TTL.
+    pub async fn accept_pending_turn_input(
+        &self,
+        input: crate::PendingTurnInputDraft,
+        claim_ttl_ms: u64,
+    ) -> Result<crate::PendingTurnInput, StoreError> {
+        let batch = crate::PendingTurnInputBatch::one(input).held_by_acceptor(claim_ttl_ms);
+        crate::PendingTurnInputBatch::only(self.enqueue_pending_turn_inputs(batch).await?)
+    }
 }
 
 /// Durable queued work (ADR 0101, `queued_work_batches`): process wakes and

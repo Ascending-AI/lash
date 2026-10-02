@@ -605,6 +605,20 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                     })?,
             );
         }
+        // An acceptor that drives its rows itself holds their ingress claims
+        // from this commit (FIG-4728): its inline drive is the ask, so no
+        // relay pass finds the rows due before the acceptor's own admission.
+        if let Some(claim_ttl_ms) = batch.acceptor_claim_ttl_ms() {
+            let until_ms = now.saturating_add(claim_ttl_ms);
+            for row in &admitted {
+                crate::ingress_obligation::claim_turn_input_tx(
+                    &mut tx,
+                    row.input_id.as_str(),
+                    until_ms,
+                )
+                .await?;
+            }
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(admitted)
     }

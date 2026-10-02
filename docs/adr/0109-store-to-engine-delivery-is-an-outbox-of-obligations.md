@@ -233,7 +233,9 @@ records execution; it is not another ingress authority.
 Ingress composes the two tables' oldest due rows. Its id is
 `ingress:{item_id}` and its drive request is `{obligation_id}:{attempt}`.
 The engine accepting the ask holds the claim; root admission settles it
-regardless of the relay state. A waiter follows later claimed attempts if
+regardless of the relay state. A child-session acceptance takes its row's
+claim in the acceptance transaction, because its acceptor's inline drive is
+the ask ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6). A waiter follows later claimed attempts if
 the earlier drive ends without admitting the item. An ingress retry uses a
 minted token and cannot send another ask while a prior claim remains held.
 

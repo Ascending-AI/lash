@@ -60,6 +60,26 @@ pub(crate) async fn arm_turn_input_tx(
     arm_tx(conn, turn_input_sql().0, session_id, input_id, now_ms).await
 }
 
+/// Claim the still-due ingress obligation of turn input `input_id` under a
+/// minted token, held until `until_ms`, inside the transaction that admitted
+/// the row: an acceptor that drives the row itself holds its claim from the
+/// admission's commit (FIG-4728). An obligation that is claimed, delivered or
+/// stalled is left as it stands.
+pub(crate) async fn claim_turn_input_tx(
+    conn: &mut sqlx::PgConnection,
+    input_id: &str,
+    until_ms: u64,
+) -> Result<(), StoreError> {
+    sqlx::query(turn_input_sql().0.claim.sql())
+        .bind(ingress_obligation_id(input_id).as_str())
+        .bind(lash_core_execution::store::ClaimToken::mint().as_str())
+        .bind(i64::try_from(until_ms).unwrap_or(i64::MAX))
+        .execute(conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
 /// Arm the queued batch `batch_id` of `session_id` as its ingress obligation,
 /// due at `now_ms`, inside its admission transaction.
 pub(crate) async fn arm_queued_batch_tx(

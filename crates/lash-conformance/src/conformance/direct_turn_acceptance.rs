@@ -1124,6 +1124,102 @@ pub async fn drive_effect_refusal_is_journaled(
     assert!(pending_input_ids(&store).await.is_empty());
 }
 
+/// A child session's turn is driven by its acceptor, inline in the parent's
+/// execution, so the acceptance holds the accepted row's ingress claim from
+/// the commit that admits the row (FIG-4728). Between that commit and the
+/// root's admission a relay pass finds nothing due and asks the session for
+/// no second drive of the row, which would run the same root beside its
+/// acceptor. The obligation stays the row's: a claim that lapses because the
+/// acceptor was lost is the relay's to retake, and the root's admission
+/// delivers it whoever holds the claim (ADR 0109 §3).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn an_accepted_direct_input_is_held_for_its_acceptors_drive(
+    prefix: &str,
+    backend: crate::Backend,
+    store: Arc<dyn crate::RuntimeStore>,
+) {
+    use lash_core::store::{
+        ObligationKind, ObligationState, ingress_obligation::ingress_obligation_id,
+    };
+    let turn_id = TurnId::from(format!("{prefix}-held-for-its-acceptor"));
+    let journal = Journal::new(&backend);
+    let (provider, requests) = recording_provider("answered by the acceptor's drive");
+    // The acceptor dies between its acceptance and its root's admission.
+    journal
+        .controller
+        .crash_at_next(crate::RuntimeEffectKind::AdmitRoot);
+    journal
+        .run(&store, provider.clone(), &turn_id, "the accepted words")
+        .await
+        .expect_err("the acceptor died before it admitted its root");
+    let accepted = pending_input_ids(&store).await;
+    let [input_id] = accepted.as_slice() else {
+        panic!("the acceptance left its one row open: {accepted:?}");
+    };
+    let obligation = ingress_obligation_id(input_id.as_str());
+
+    let ingress = backend.obligation_ledger(ObligationKind::Ingress);
+    let ttl_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    let page = std::num::NonZeroUsize::new(64).expect("non-zero");
+    let now = backend.clock().timestamp_ms();
+    assert_eq!(
+        ingress
+            .state(&obligation)
+            .await
+            .expect("read the obligation"),
+        Some(ObligationState::Claimed),
+        "the acceptance holds its row's ingress claim"
+    );
+    let due = ingress
+        .claim_due(now, ttl_ms, page)
+        .await
+        .expect("a relay pass reads the ledger");
+    assert!(
+        due.iter().all(|claimed| claimed.id != obligation),
+        "a relay pass before the acceptor's admission asks no drive for its row: {due:?}"
+    );
+    assert!(
+        requests.lock().expect("request lock").is_empty(),
+        "nothing ran the accepted input yet"
+    );
+
+    // The acceptor never came back: once its claim lapsed, the row is the
+    // relay's to ask the session's drive for.
+    let lapsed = ingress
+        .claim_due(now.saturating_add(ttl_ms), ttl_ms, page)
+        .await
+        .expect("a later relay pass reads the ledger");
+    assert!(
+        lapsed.iter().any(|claimed| claimed.id == obligation),
+        "the lost acceptor's lapsed claim is retaken: {lapsed:?}"
+    );
+
+    // The acceptor's redrive admits its root; the admission delivers the
+    // obligation whatever claim it stood under.
+    let turn = journal
+        .run(&store, provider, &turn_id, "the accepted words")
+        .await
+        .expect("the redrive runs the accepted input");
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "{:?}",
+        turn.outcome
+    );
+    assert_eq!(
+        ingress
+            .state(&obligation)
+            .await
+            .expect("read the obligation"),
+        Some(ObligationState::Delivered),
+        "the root's admission delivers the row's obligation"
+    );
+    assert_eq!(requests.lock().expect("request lock").len(), 1);
+    assert!(pending_input_ids(&store).await.is_empty());
+}
+
 /// Withdraws the session's open next-turn row right before the first admission.
 struct WithdrawBeforeAdmission {
     inner: Arc<dyn crate::RuntimeStore>,

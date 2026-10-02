@@ -21,6 +21,7 @@ macro_rules! direct_turn_acceptance_tests {
             (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
             (direct_turn_behind_earlier_admissions_runs_after_them, "direct-turn-queued-input"),
             (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
+            (an_accepted_direct_input_is_held_for_its_acceptors_drive, "direct-turn-held-for-acceptor"),
         ]);
     };
     (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

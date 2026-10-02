@@ -1056,7 +1056,43 @@ fn enqueue_pending_turn_inputs_conn(
             })?,
         );
     }
+    // An acceptor that drives its rows itself holds their ingress claims
+    // from this commit (FIG-4728): its inline drive is the ask, so no relay
+    // pass finds the rows due before the acceptor's own admission.
+    if let Some(claim_ttl_ms) = batch.acceptor_claim_ttl_ms() {
+        claim_due_ingress_conn(tx, &admitted, now.saturating_add(claim_ttl_ms))?;
+    }
     Ok(admitted)
+}
+
+/// Claim the still-due ingress obligation of each of `rows` under one minted
+/// token, held until `until_ms`, inside the transaction that admitted them.
+/// A row whose obligation is claimed, delivered or stalled is left as it
+/// stands, as the relay's own claim would answer `NotDue`.
+fn claim_due_ingress_conn(
+    tx: &Connection,
+    rows: &[lash_core_execution::PendingTurnInput],
+    until_ms: u64,
+) -> Result<Vec<lash_core_execution::store::ClaimedObligation>, StoreError> {
+    let token = lash_core_execution::store::ClaimToken::mint();
+    let sql = crate::ingress_obligation::turn_input_sql();
+    let mut claims = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id = lash_core_execution::store::ingress_obligation::ingress_obligation_id(
+            row.input_id.as_str(),
+        );
+        if let Some(claimed) = crate::obligation_ledger::claim_obligation_tx(
+            tx,
+            sql,
+            lash_core_execution::store::ObligationKind::Ingress,
+            &id,
+            &token,
+            until_ms,
+        )? {
+            claims.push(claimed);
+        }
+    }
+    Ok(claims)
 }
 
 /// What session `session_id` records about turn `turn_id`, read under the
@@ -1109,25 +1145,8 @@ fn admit_pending_turn_inputs_conn(
     // Claim only the obligations still `due`: a row a resend answered whose
     // obligation is claimed, delivered or stalled is not the producer's ask
     // to make — the relay's own claim would have answered `NotDue` the same.
-    let token = lash_core_execution::store::ClaimToken::mint();
-    let until_ms = now.saturating_add(ingress_claim_ttl_ms);
-    let sql = crate::ingress_obligation::turn_input_sql();
-    let mut ingress_claims = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let id = lash_core_execution::store::ingress_obligation::ingress_obligation_id(
-            row.input_id.as_str(),
-        );
-        if let Some(claimed) = crate::obligation_ledger::claim_obligation_tx(
-            tx,
-            sql,
-            lash_core_execution::store::ObligationKind::Ingress,
-            &id,
-            &token,
-            until_ms,
-        )? {
-            ingress_claims.push(claimed);
-        }
-    }
+    let ingress_claims =
+        claim_due_ingress_conn(tx, &rows, now.saturating_add(ingress_claim_ttl_ms))?;
     let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet)?;
     Ok(lash_core_execution::TurnInputAdmission::Fused {
         rows,
