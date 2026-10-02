@@ -29,7 +29,7 @@ async fn runtime_pool_failures_observe_the_injected_store_instruments() {
     pool.close().await;
     assert!(acquire_runtime_connection(&pool, &observer).await.is_err());
     assert_eq!(
-        observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+        observed.histogram_count("lash.store.pool.acquire_wait.duration"),
         1
     );
     assert!(
@@ -38,7 +38,7 @@ async fn runtime_pool_failures_observe_the_injected_store_instruments() {
             .is_err()
     );
     assert_eq!(
-        observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+        observed.histogram_count("lash.store.pool.acquire_wait.duration"),
         1
     );
 }

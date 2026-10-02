@@ -62,7 +62,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.provider.retry.kind` | String |
 | `lash.session_execution_lane.wait.outcome` | String |
 | `lash.session_execution_lane.give_up` | String |
-| `lash.postgres.pool.acquire.outcome` | String |
+| `lash.store.pool.acquire.outcome` | String |
 | `lash.runtime_commit.budget.outcome` | String |
 | `lash.parked_work.kind` | String |
 | `lash.parked_work.reason` | String |
@@ -79,7 +79,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.session_execution_lane.contention_wait.duration` | Histogram | `ms` | Live |
 | `lash.session_execution_lane.give_ups` | Counter | `` | Live |
 | `lash.queued_work.wake_retries` | Counter | `` | Live |
-| `lash.postgres.pool.acquire_wait.duration` | Histogram | `ms` | Physical |
+| `lash.store.pool.acquire_wait.duration` | Histogram | `ms` | Physical |
 | `lash.runtime_commit.budgeted_size` | Histogram | `By` | Live |
 | `lash.parked_work.parks` | Counter | `` | Transition |
 | `lash.parked_work.count` | Gauge | `` | Gauge |

@@ -288,7 +288,7 @@ fn emitted_domain_shape_matches_registry() {
     adapter
         .metrics
         .runtime_tuning
-        .record_postgres_pool_acquire_wait(Duration::from_millis(2), "success");
+        .record_pool_acquire_wait(Duration::from_millis(2), "success");
     adapter
         .metrics
         .runtime_tuning

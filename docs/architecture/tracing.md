@@ -73,5 +73,5 @@ The six tracing rulings and laws P1-P8 define acceptance. Passing a registry
 or compile check cannot close these producer gaps.
 
 The review also found backend-specific physical pool metric names in the
-shared registry and instruments. Those names and methods violate the
-seam-neutral rule and remain open for a separate follow-up.
+shared registry and instruments; FIG-4843 renamed them to the neutral
+`lash.store.pool.*` contract this document links.

@@ -35,7 +35,7 @@ impl StoreObserver {
 
     pub fn pool_acquire_wait(&self, wait: Duration, outcome: &'static str) {
         if let Some(metrics) = &self.metrics {
-            record_postgres_pool_acquire_wait(metrics, wait, outcome);
+            record_pool_acquire_wait(metrics, wait, outcome);
         }
     }
 
@@ -124,17 +124,13 @@ pub fn record_queued_work_wake_retry(metrics: &TelemetryMetrics, permit: Option<
     metrics.runtime_tuning.record_queued_work_wake_retry();
 }
 
-/// Physical resource observation for `lash.postgres.pool.acquire_wait.duration`.
-pub fn record_postgres_pool_acquire_wait(
-    metrics: &TelemetryMetrics,
-    wait: Duration,
-    outcome: &'static str,
-) {
+/// Physical resource observation for `lash.store.pool.acquire_wait.duration`.
+pub fn record_pool_acquire_wait(metrics: &TelemetryMetrics, wait: Duration, outcome: &'static str) {
     #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.postgres.pool.acquire_wait.duration");
+    observe_test_metric("lash.store.pool.acquire_wait.duration");
     metrics
         .runtime_tuning
-        .record_postgres_pool_acquire_wait(wait, outcome);
+        .record_pool_acquire_wait(wait, outcome);
 }
 
 /// Transition observation for `lash.parked_work.parks`.
@@ -368,7 +364,7 @@ mod tests {
         disabled.pool_acquire_wait(Duration::from_millis(1), "success");
         disabled.recovery_leadership("recovery:fixture", false, 0);
         assert_eq!(
-            observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+            observed.histogram_count("lash.store.pool.acquire_wait.duration"),
             0
         );
         assert_eq!(observed.counter_value("lash.recovery_leader"), 0);
@@ -378,7 +374,7 @@ mod tests {
         observer.recovery_leadership("recovery:fixture", true, 1);
         observer.recovery_leadership("recovery:fixture", false, 0);
         assert_eq!(
-            observed.histogram_count("lash.postgres.pool.acquire_wait.duration"),
+            observed.histogram_count("lash.store.pool.acquire_wait.duration"),
             2
         );
         assert_eq!(observed.counter_value("lash.recovery_leader"), 2);

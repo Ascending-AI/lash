@@ -16,8 +16,7 @@ mod enabled {
     const SESSION_LANE_WAIT_OUTCOME_ATTRIBUTE: &str =
         AttributeKey::LaneWaitOutcome.definition().key;
     const SESSION_LANE_GIVE_UP_ATTRIBUTE: &str = AttributeKey::LaneGiveUp.definition().key;
-    const POSTGRES_POOL_ACQUIRE_OUTCOME_ATTRIBUTE: &str =
-        AttributeKey::PoolAcquireOutcome.definition().key;
+    const POOL_ACQUIRE_OUTCOME_ATTRIBUTE: &str = AttributeKey::PoolAcquireOutcome.definition().key;
     const RUNTIME_COMMIT_BUDGET_OUTCOME_ATTRIBUTE: &str =
         AttributeKey::CommitBudgetOutcome.definition().key;
     const PARKED_WORK_KIND_ATTRIBUTE: &str = AttributeKey::ParkKind.definition().key;
@@ -37,7 +36,7 @@ mod enabled {
         session_lane_contention_wait_duration: Histogram<u64>,
         session_lane_give_ups: Counter<u64>,
         queued_work_wake_retries: Counter<u64>,
-        postgres_pool_acquire_wait_duration: Histogram<u64>,
+        pool_acquire_wait_duration: Histogram<u64>,
         runtime_commit_budgeted_size: Histogram<u64>,
     }
 
@@ -52,7 +51,7 @@ mod enabled {
                 ),
                 session_lane_give_ups: counter(&meter, Metric::LaneGiveUps),
                 queued_work_wake_retries: counter(&meter, Metric::WakeRetries),
-                postgres_pool_acquire_wait_duration: histogram(&meter, Metric::PoolAcquireWait),
+                pool_acquire_wait_duration: histogram(&meter, Metric::PoolAcquireWait),
                 runtime_commit_budgeted_size: histogram(&meter, Metric::CommitBudgetedSize),
             }
         }
@@ -94,17 +93,10 @@ mod enabled {
             self.queued_work_wake_retries.add(1, &[]);
         }
 
-        pub fn record_postgres_pool_acquire_wait(
-            &self,
-            wait: std::time::Duration,
-            outcome: &'static str,
-        ) {
-            self.postgres_pool_acquire_wait_duration.record(
+        pub fn record_pool_acquire_wait(&self, wait: std::time::Duration, outcome: &'static str) {
+            self.pool_acquire_wait_duration.record(
                 duration_millis(wait),
-                &[KeyValue::new(
-                    POSTGRES_POOL_ACQUIRE_OUTCOME_ATTRIBUTE,
-                    outcome,
-                )],
+                &[KeyValue::new(POOL_ACQUIRE_OUTCOME_ATTRIBUTE, outcome)],
             );
         }
 
@@ -267,8 +259,7 @@ mod enabled {
             );
             metrics.record_session_lane_give_up("holder_is_alive");
             metrics.record_queued_work_wake_retry();
-            metrics
-                .record_postgres_pool_acquire_wait(std::time::Duration::from_millis(30), "success");
+            metrics.record_pool_acquire_wait(std::time::Duration::from_millis(30), "success");
             metrics.record_runtime_commit_budgeted_size(40, "admitted");
             provider.force_flush().expect("flush in-memory metrics");
 
@@ -293,11 +284,6 @@ mod enabled {
             assert_eq!(
                 instruments,
                 [
-                    (
-                        "lash.postgres.pool.acquire_wait.duration",
-                        "histogram",
-                        "ms"
-                    ),
                     ("lash.provider.retries", "counter", ""),
                     ("lash.provider.throttle_wait.duration", "histogram", "ms"),
                     ("lash.queued_work.wake_retries", "counter", ""),
@@ -308,6 +294,7 @@ mod enabled {
                         "ms"
                     ),
                     ("lash.session_execution_lane.give_ups", "counter", ""),
+                    ("lash.store.pool.acquire_wait.duration", "histogram", "ms"),
                 ]
             );
         }
@@ -424,11 +411,7 @@ mod disabled {
             let _ = (reason,);
         }
         pub fn record_queued_work_wake_retry(&self) {}
-        pub fn record_postgres_pool_acquire_wait(
-            &self,
-            wait: std::time::Duration,
-            outcome: &'static str,
-        ) {
+        pub fn record_pool_acquire_wait(&self, wait: std::time::Duration, outcome: &'static str) {
             let _ = (wait, outcome);
         }
         pub fn record_runtime_commit_budgeted_size(&self, bytes: usize, outcome: &'static str) {
@@ -582,7 +565,7 @@ mod tests {
         metrics.runtime_tuning.record_queued_work_wake_retry();
         metrics
             .runtime_tuning
-            .record_postgres_pool_acquire_wait(wait, "success");
+            .record_pool_acquire_wait(wait, "success");
         metrics
             .runtime_tuning
             .record_runtime_commit_budgeted_size(42, "admitted");
